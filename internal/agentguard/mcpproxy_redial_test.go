@@ -303,11 +303,23 @@ func TestMCPProxyDialBoundedBlackHole(t *testing.T) {
 	t.Cleanup(g.Close)
 	// LIFO: release the hung handler BEFORE Close waits on it. The abandoned
 	// dial's POST is not bound to the test context.
-	t.Cleanup(func() { close(released) })
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(released) }) })
 
 	store := proxyTestStore(t, g.URL)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	// The abandoned handshake keeps running after dialBounded returns and
+	// can still write session state, so the store's directory goes only
+	// after that dial has ended.
+	dialDone := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		release.Do(func() { close(released) })
+		select {
+		case <-dialDone:
+		case <-time.After(5 * time.Second):
+		}
+	})
 	client := NewClient(g.URL)
 	if _, err := ensureSession(ctx, store, client, "claude-code"); err != nil {
 		t.Fatalf("ensureSession: %v", err)
@@ -315,7 +327,12 @@ func TestMCPProxyDialBoundedBlackHole(t *testing.T) {
 	p := newMCPProxy(mcp.NewServer(&mcp.Implementation{Name: "straza", Version: "test"}, nil))
 	p.ctx = ctx
 	p.redialTimeout = 100 * time.Millisecond
-	p.dial = newGatewayDialer(p, store, client, "claude-code", gatewayEndpoint(g.URL, ""))
+	dial := newGatewayDialer(p, store, client, "claude-code", gatewayEndpoint(g.URL, ""))
+	var once sync.Once
+	p.dial = func(c context.Context) (*mcp.ClientSession, error) {
+		defer once.Do(func() { close(dialDone) })
+		return dial(c)
+	}
 
 	start := time.Now()
 	_, err := p.dialBounded(ctx)

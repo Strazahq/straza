@@ -600,6 +600,9 @@ func TestAuditSpoolBatchOutageHonoursBackpressure(t *testing.T) {
 				if n := failedBatches.Load(); n != 1 {
 					t.Fatalf("failed batch writes = %d, want 1: a failed batch is not tried again as a batch", n)
 				}
+				// The spool counts the loss before it writes the line, so wait for
+				// the line rather than read the log the moment the count moves.
+				waitFor(t, "the Error record about ce-A", func() bool { return len(errorRecords(buf)) > 0 })
 				var lines []string
 				for _, l := range errorRecords(buf) {
 					if strings.Contains(l, tc.wantLine) && strings.Contains(l, "id=ce-A") {
