@@ -12,7 +12,7 @@ toolchain go1.26.6
 require (
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/fxamacker/cbor/v2 v2.9.2
-	github.com/golang-migrate/migrate/v4 v4.19.1
+	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
