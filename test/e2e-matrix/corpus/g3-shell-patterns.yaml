@@ -1,0 +1,190 @@
+# The shell.exec pattern language on every dialect: an anchored glob deny,
+# a prefix glob allow, a deny that overrides an allow inside one rule, a
+# regular expression, a token-level match, and a command no rule matches
+# that falls to the standalone default. The cases mirror the published
+# decision table so a red row points at the engine, not the scenario.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+# The chain assertion after nine back-to-back decisions proves the client
+# retries ingest backpressure: the per-session ingest limiter refuses the
+# drains past the fifth, and the client retries them on a bounded backoff
+# until every record is on the chain [live].
+id: g3-shell-patterns
+group: G3
+title: Allow, deny and prefix patterns on shell.exec decide the way the published table says
+provenance: >-
+  doc spec/policyset/SPEC.md §2 items 2 and 4, §3 items 1 and 3, §4
+  (globs, re: prefix, argv and token matching);
+  spec/conformance/decisions/shell-standalone.yaml (the cases mirrored
+  here); spec/policyset/policyset.schema.json (rule shape);
+  spec/scim-profile/SPEC.md §3 §4 and conformance/scim users-lifecycle,
+  groups-roles; website/content/reference/api.md sections Roles and
+  PolicySets.
+  suspect: the success status codes and the activate body field are
+  assumed.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  heidi: {kind: human, password: "Walk-2026!"}
+steps:
+  - name: the IdM provisions heidi over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g3-heidi
+        userName: heidi
+        displayName: Heidi Shell
+        active: true
+    want: {status: 201}
+    save: {heidiId: id}
+  - name: the admin sets heidi's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${heidiId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the admin creates the application role the policy names
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g3-shell, kind: application, description: "Shell pattern scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g3-shell"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: heidi becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${heidiId}"}]
+    want: {status: 200}
+  - name: the admin applies the pattern policy
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g3-shell
+            description: Shell pattern scenario for role g3-shell
+          spec:
+            priority: 100
+            match:
+              roles: [g3-shell]
+            rules:
+              - id: block-destructive
+                tools: [shell.exec]
+                command:
+                  denyPatterns:
+                    - "rm -rf *"
+                    - "git push --force*"
+                    - "re:.*\\bmkfs\\b.*"
+                    - "dd"
+                effect: deny
+                reason: "G3-SHELL: destructive commands are refused for role g3-shell"
+              - id: allow-git
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["git *"]
+                effect: allow
+                reason: "G3-SHELL: git commands are allowed for role g3-shell"
+    want: {status: 201}
+  - name: the admin activates the policy
+    admin:
+      method: POST
+      path: /v1/admin/policies/g3-shell/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: heidi enrolls
+    enroll: {as: heidi}
+  - name: heidi starts a session
+    hook:
+      as: heidi
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: an anchored glob deny refuses a recursive delete
+    hook:
+      as: heidi
+      event: {kind: tool.pre, tool: shell.exec, command: "rm -rf /tmp/x"}
+    want: {decision: deny, reasonContains: "destructive commands are refused"}
+  - name: the same deny fires through extra whitespace because argv is re-joined
+    hook:
+      as: heidi
+      event: {kind: tool.pre, tool: shell.exec, command: "rm    -rf     /"}
+    want: {decision: deny, reasonContains: "destructive commands are refused"}
+  - name: a prefix glob allows git status by rule
+    hook:
+      as: heidi
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: a deny pattern overrides the prefix allow inside the same event
+    hook:
+      as: heidi
+      event: {kind: tool.pre, tool: shell.exec, command: "git push --force origin main"}
+    want: {decision: deny, reasonContains: "destructive commands are refused"}
+  - name: a normal push stays allowed by the prefix
+    hook:
+      as: heidi
+      event: {kind: tool.pre, tool: shell.exec, command: "git push origin main"}
+    want: {decision: allow}
+  - name: a regular expression catches mkfs behind sudo
+    hook:
+      as: heidi
+      event: {kind: tool.pre, tool: shell.exec, command: "sudo mkfs.ext4 /dev/sda1"}
+    want: {decision: deny, reasonContains: "destructive commands are refused"}
+  - name: a bare token pattern catches dd at the argv level
+    hook:
+      as: heidi
+      event: {kind: tool.pre, tool: shell.exec, command: "dd if=/dev/zero of=/dev/null"}
+    want: {decision: deny, reasonContains: "destructive commands are refused"}
+  - name: the token pattern is not a substring match, so echo ddd falls to the standalone default allow
+    hook:
+      as: heidi
+      event: {kind: tool.pre, tool: shell.exec, command: "echo ddd"}
+    want: {decision: allow}
+  - name: patterns are case-sensitive, so an upper-case rm falls to the default allow
+    hook:
+      as: heidi
+      event: {kind: tool.pre, tool: shell.exec, command: "RM -RF /"}
+    want: {decision: allow}
+  - name: the five refusals are on the chain, one record per refused decision
+    audit: {subject: heidi, kind: tool.pre, decision: deny, reasonContains: "destructive commands are refused", count: 5}
+  - name: the two rule allows are on the chain with the allow rule's reason
+    audit: {subject: heidi, kind: tool.pre, decision: allow, reasonContains: "git commands are allowed", count: 2}
+  - name: the admin deactivates the policy
+    admin:
+      method: POST
+      path: /v1/admin/policies/g3-shell/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft policy is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g3-shell
+    want: {status: 204}
+  - name: the admin deletes the role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates heidi
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${heidiId}
+    want: {status: 204}

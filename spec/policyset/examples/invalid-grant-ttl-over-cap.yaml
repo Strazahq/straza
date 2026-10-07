@@ -1,0 +1,16 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: bad-grant-ttl
+spec:
+  rules:
+    - id: r1
+      tools: [mcp.call]
+      apps: [vault]
+      toolNames:
+        allow: ["rotate_root_key"]
+      effect: allow
+      mode: approve
+      approve:
+        class: ticket
+        grantTTLSeconds: 99999

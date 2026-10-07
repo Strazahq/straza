@@ -1,0 +1,9 @@
+{{- /* The rendered inner Markdown of a block shortcode, called with a dict
+of the shortcode's Page and Inner. The shortcode passes .Inner itself, so
+Hugo sees that it takes inner content. Content nests shortcodes written as
+{{< >}}, and the outer one renders the inner one's HTML as Markdown, where a
+blank line ends an HTML block. Each blank line, such as one inside a code
+sample, becomes a newline character reference: a pre still shows the empty
+line, copying still yields it, and the HTML block stays whole. */ -}}
+{{- $html := .Page.RenderString (dict "display" "block") .Inner -}}
+{{- strings.TrimRight "\n" $html | replaceRE `\n[ \t]*\n` "\n&#10;" | safeHTML -}}

@@ -1,0 +1,132 @@
+# The differences between the standalone and the enterprise profile, one row
+# each, rendered by the compare shortcode on
+# reference/standalone-and-enterprise.md. Each area has id, title and rows,
+# and each row has id, what, knob (left out when no setting changes it),
+# standalone and enterprise. The row id is the anchor a guide links to, so
+# keep ids stable. The comment above each row names the code that makes it
+# true at the commit the page was written against.
+
+- id: signin
+  title: Sign-in and users
+  rows:
+    # internal/server/api_identity.go 32-56 (handleIdPDiscovery); internal/authn/issuer.go 92-113
+    - id: sign-in
+      what: Who signs people in
+      knob: oidc.issuer
+      standalone: Straza's own sign-in page, with a password and a one-time code. Clients use it even when `oidc.issuer` is set.
+      enterprise: Your identity provider, named in `oidc.issuer`. Until you set it, strazad still starts and every sign-in fails with `no login issuer configured`.
+    # internal/server/admin_bootstrap.go 22-74 (both profiles); internal/server/server.go 497-499 (LoginOnly); internal/authn/issuer.go 167
+    - id: break-glass
+      what: The break-glass admin
+      standalone: Created at the first start, with its password printed once in the log. It signs in on the same page as everyone.
+      enterprise: Created at the first start in the same way. Straza's own page signs in this account and no other, under the title Emergency sign-in to Straza.
+    # internal/server/build.go 200-215; internal/server/admin_bootstrap.go 263-299, 351-404; internal/server/api_identity_login.go 37-47
+    - id: first-admin
+      what: The first admin
+      knob: oidc.bootstrapAdmin
+      standalone: "`admin`, created on an empty database at the first start. Its password is printed once in the log."
+      enterprise: The user named in `oidc.bootstrapAdmin`, at their first sign-in through your identity provider, while no other person holds `straza-admin`. No password.
+    # internal/config/config.go 91, 120; internal/config/knobs.go 116; internal/authn/oidc_client.go 39, 194
+    - id: new-users
+      what: A person your identity provider signs in who has no user in Straza yet
+      knob: oidc.jitProvision
+      standalone: Gets a user at that sign-in.
+      enterprise: Is refused. Your identity manager creates the user over SCIM first.
+    # internal/agentguard/headless.go 20-35, 103-125; internal/server/api_identity.go 39-50; internal/server/server.go 454-463
+    - id: agent-sign-in
+      what: How an AI agent signs in
+      standalone: With a key of its own that an admin registers, checked by Straza's own sign-in.
+      enterprise: With its own client at your identity provider, from `STRAZA_CLIENT_ID` and `STRAZA_CLIENT_SECRET`, or with a registered key of its own.
+    # internal/server/server.go 501-513; internal/server/hardening.go 91-122; internal/config/knobs.go 92
+    - id: token-limit
+      what: The rate limit on the token endpoint where AI agents sign in
+      knob: server.loginPerIPRPS
+      standalone: None. The limit covers the password form only.
+      enterprise: The same limit as the password form, 2 requests per second for each client address by default.
+
+- id: decide
+  title: Decisions
+  rows:
+    # internal/config/config.go 94, 123; internal/config/knobs.go 127; internal/policy/eval.go 598-637
+    - id: no-rule
+      what: A local tool call that no rule matches
+      knob: governance.localToolDefault
+      standalone: <span class="chip allow">allow</span>
+      enterprise: <span class="chip deny">deny</span>
+    # internal/server/build.go 200-215; internal/server/admin_bootstrap.go 301-349
+    - id: starter-policy
+      what: A policy on a new install
+      standalone: "`standalone-starter`, seeded on an empty database. It denies recursive force-delete, such as `rm -rf`."
+      enterprise: None. You write the first policy.
+    # internal/config/config.go 93, 122; internal/config/knobs.go 126; internal/agentguard/localpdp.go 129-156
+    - id: offline
+      what: A client that cannot reach strazad
+      knob: governance.offlineGraceTTL
+      standalone: Keeps deciding from its last signed policy until 15 minutes after its session token expired.
+      enterprise: Denies every governed call as soon as its session token expires.
+    # internal/config/config.go 96, 125; internal/config/knobs.go 129
+    - id: attestation
+      what: The lowest install a session accepts
+      knob: governance.minAttestation
+      standalone: "`none`: any install."
+      enterprise: "`managed`: an install whose files match the hashes you registered."
+    # internal/config/config.go 95, 124; internal/config/knobs.go 128; internal/server/pdp_state.go 282-296
+    - id: backpressure
+      what: Audit records while the database is down
+      knob: governance.auditBackpressure
+      standalone: "`drop-with-counter`: decisions go on, and a record the database cannot take is dropped and counted."
+      enterprise: "`block`: once 4,096 records wait, each new server decision waits up to 25 seconds for room and is then refused, so nothing runs without its record."
+
+- id: net
+  title: Network and servers
+  rows:
+    # internal/config/config.go 85, 118; internal/config/knobs.go 85
+    - id: listener
+      what: Main listener
+      knob: server.listen
+      standalone: "`127.0.0.1:8420`, this machine only."
+      enterprise: "`:8420`, every interface."
+    # internal/config/config.go 78-87; internal/config/knobs.go 97
+    - id: approver
+      what: Phone approver listener
+      knob: server.approverTLS.autoMint
+      standalone: On at the first start on port 8443, every interface, with a self-signed certificate it creates in the data directory.
+      enterprise: Off until you configure it.
+    # internal/server/run.go 54-59
+    - id: plaintext
+      what: Plain HTTP on the main listener
+      knob: server.tls.certFile
+      standalone: Served with no warning.
+      enterprise: Served, with a warning in the log at every start.
+    # internal/server/api_policy.go 510-526
+    - id: snapshot
+      what: The signed policy at `/v1/snapshot`
+      standalone: Served to anyone who reaches the listener, with no token.
+      enterprise: Served only to a checked-in session.
+    # internal/config/config.go 107-109; internal/config/knobs.go 179
+    - id: loopback
+      what: An MCP server at a loopback address such as `127.0.0.1`
+      knob: apps.allowLoopbackUpstreams
+      standalone: Allowed.
+      enterprise: Refused until you set the key.
+    # internal/server/build.go 461; internal/server/drafts_world.go 270; internal/manager/manager.go 140-180
+    - id: command
+      what: An MCP server that runs as a command
+      standalone: Runs as a child process of strazad.
+      enterprise: Refused, with no setting to allow it. Run the server as its own service and add it over HTTP.
+
+- id: data
+  title: Data
+  rows:
+    # internal/config/config.go 89, 119; internal/config/knobs.go 104-105
+    - id: store
+      what: Database
+      knob: store.driver
+      standalone: SQLite, in the data directory.
+      enterprise: Postgres, at the address in `store.dsn`.
+    # internal/config/capture.go 38-58; internal/config/knobs.go 195
+    - id: bodies
+      what: Transcript bodies in an S3 bucket
+      knob: capture.bodyStore.type
+      standalone: Refused at start. Bodies stay in the database.
+      enterprise: "Accepted with `type: s3`."

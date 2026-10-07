@@ -1,0 +1,264 @@
+{
+  "name": "groups-roles",
+  "steps": [
+    {
+      "note": "revision 12: the wire-group surface renders EXPORTED Straza roles (id = role id, displayName = role name). The IdM discovers them by the displayName filter, exactly how group linking works in the wild.",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"scim-dev\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "totalResults": 1,
+          "Resources": [
+            {
+              "displayName": "scim-dev"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "creating access is Straza's act, never the IdM's: POST answers 501 (RFC 7644 unsupported operation; NOT 403, which IdM runbooks read as broken credentials), with the doctrine spoken in detail.",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Groups",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ],
+          "displayName": "idm-born-team"
+        }
+      },
+      "expect": {
+        "status": 501,
+        "subset": {
+          "detail": "roles are born in Straza, so the IdM cannot create or delete one over SCIM. Create the role in Straza, import it as a group, and assign membership from the IdM"
+        }
+      }
+    },
+    {
+      "note": "a user to hold the role",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "wanda"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "userName": "wanda"
+        }
+      },
+      "capture": {
+        "uid": "id"
+      }
+    },
+    {
+      "note": "membership IS role assignment: a members add creates the direct scim-origin assignment and the render reflects it",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"scim-dev\""
+      },
+      "expect": {
+        "status": 200
+      },
+      "capture": {
+        "gid": "Resources.0.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Groups/{gid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "add",
+              "path": "members",
+              "value": [
+                {
+                  "value": "{uid}"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "members": [
+            {
+              "value": "{uid}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "renaming access is Straza's act too: displayName is readOnly and an explicit PATCH answers the mutability error",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Groups/{gid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "displayName",
+              "value": "renamed"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 400,
+        "subset": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:Error"
+          ],
+          "scimType": "mutability"
+        }
+      }
+    },
+    {
+      "note": "PUT is a TOLERANT members replace: the name fields in the body are ignored (Okta sends the full document, displayName included, on every membership update) and the response re-renders server truth",
+      "request": {
+        "method": "PUT",
+        "path": "/scim/v2/Groups/{gid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+          ],
+          "displayName": "Okta Developers",
+          "members": [
+            {
+              "value": "{uid}"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "displayName": "scim-dev",
+          "members": [
+            {
+              "value": "{uid}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "value-filter remove converges membership off again",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Groups/{gid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "remove",
+              "path": "members[value eq \"{uid}\"]"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "displayName": "scim-dev"
+        }
+      }
+    },
+    {
+      "note": "deleting access is Straza's act: DELETE answers 501 like create",
+      "request": {
+        "method": "DELETE",
+        "path": "/scim/v2/Groups/{gid}"
+      },
+      "expect": {
+        "status": 501,
+        "subset": {
+          "detail": "roles are born in Straza, so the IdM cannot create or delete one over SCIM. Create the role in Straza, import it as a group, and assign membership from the IdM"
+        }
+      }
+    },
+    {
+      "note": "revision 19: a server-owned role is a wire-group like any other, found by the displayName filter and carrying the owning server under server; the reference server's seed created scim-tools-readers on scim-tools [doc: derived from the reference server's TestSCIMGroupProjectionServer, not captured from a live wire]",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"scim-tools-readers\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "totalResults": 1,
+          "Resources": [
+            {
+              "displayName": "scim-tools-readers",
+              "urn:straza:params:scim:schemas:extension:2.0:Group": {
+                "server": "scim-tools"
+              }
+            }
+          ]
+        }
+      },
+      "capture": {
+        "sgid": "Resources.0.id"
+      }
+    },
+    {
+      "note": "revision 19: membership on a server-owned wire-group is the identity manager's as on every other, so a members add creates the direct scim-origin assignment and the render keeps naming the owning server",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Groups/{sgid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "add",
+              "path": "members",
+              "value": [
+                {
+                  "value": "{uid}"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "displayName": "scim-tools-readers",
+          "members": [
+            {
+              "value": "{uid}"
+            }
+          ],
+          "urn:straza:params:scim:schemas:extension:2.0:Group": {
+            "server": "scim-tools"
+          }
+        }
+      }
+    }
+  ]
+}

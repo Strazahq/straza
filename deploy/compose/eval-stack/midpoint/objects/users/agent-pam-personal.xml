@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  pam-personal-agent: sample PERSONAL agent identity (personal-agent
+  archetype assigned directly). Owned by carol; born with no role
+  assignments, like nina: nothing is provisioned until someone assigns it
+  a role.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c49">
+    <name>pam-personal-agent</name>
+    <description>Personal agent owned by carol. Ownership HAS a typed place:
+        ext:strazaSponsorRef (a user reference, the editable truth) from
+        which the agent template derives ext:strazaSponsor,
+        outbound-mapped to the Straza `sponsor` typology attribute (scim-profile
+        revision 5), so provisioning pam carries the accountable human. Assign
+        it a role to walk the personal-agent governance lane.</description>
+    <extension>
+        <!-- carol = ...1c40 -->
+        <ext:strazaSponsorRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c40" type="UserType"/>
+    </extension>
+    <fullName>Pam (Carol's personal agent)</fullName>
+    <assignment>
+        <!-- persona archetype, assigned directly (personal-agent) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c23" type="ArchetypeType"/>
+    </assignment>
+</user>

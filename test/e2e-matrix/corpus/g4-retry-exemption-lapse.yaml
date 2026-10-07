@@ -1,0 +1,218 @@
+# The hook lane's retry exemption is a window, not a standing permission.
+# An approval mints a single-use exemption that lasts retryTTLSeconds, and
+# g4-hold-outcomes proves the retry inside that window. This scenario lets
+# the window close instead: the rule sets a five second exemption, the step
+# after the approval waits past it, and the identical call opens a fresh
+# request rather than running.
+#
+# The wait is a sleep and not a within, because a lapse has nothing to poll
+# for. Polling would fire the held command again and again, and the first
+# attempt inside the window would consume the exemption the scenario is
+# trying to let expire. The proof is the call after the sleep, plus the
+# chain, which never carries an allow for the command.
+#
+# Shapes the binary forced on the corpus, each with how it was verified: the
+# approvals list is an object with an approvals array, the activate body is
+# {status: active|draft}, a policy delete answers 204 and role deletes answer
+# 200, all recorded on j0-golden-path [live]. The pending sentence
+# is the transcript of the hold how-to guide [doc]. The steps marked
+# "suspect" below assert a value the published sources leave open; each is
+# listed in the lane report.
+id: g4-retry-exemption-lapse
+group: G4
+title: An approved hold whose retry window closes unused makes the identical call ask again
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (fail closed with an actionable reason);
+  spec/policyset/SPEC.md §2 item 8 (the hook lane answers deny with a
+  retry-after-approval reference and, once a human approves, honors a
+  single-use exemption keyed session, rule and argv hash with a TTL of
+  retryTTLSeconds, and nothing beyond that one retry; retryTTLSeconds
+  default 60, range 1..600; timeoutSeconds bounds the decision window and
+  defaults to 90);
+  spec/events/SPEC.md §2.2 (one straza.audit.approval record when the
+  request opens and one when it resolves, and since revision 38 one more
+  only when a call uses a hold's approval, so an approval left unused
+  writes none) and revision 31 (the hook
+  lane's straza.audit.tool record for a hold carries the sentence the model
+  read as its reason);
+  pkg/api/openapi.yaml GET /v1/admin/approvals (the state filter) and the
+  Approval schema (state, lane, rule);
+  website/content/concepts/approvals-model.md section A hold on the
+  gateway and in a hook (the server mints a single-use exemption keyed to the session, the
+  rule and a fingerprint of the call, valid for 60 seconds by default, and
+  the agent's next identical call passes with the approver's name; one
+  retry and nothing more, so an approval never becomes a standing
+  permission by accident);
+  website/content/guides/write-policy/hold-for-a-human.md (a second run of
+  the same command raises a new request; the pending sentence).
+  suspect: the success status codes of the admin routes and the
+  approvals.0 path into a one-record list; that the call after the lapsed
+  exemption opens a fresh request rather than answering something of its
+  own, which follows from a second run of the same command raising a new
+  request while no page states the lapsed case; the record counts on the
+  chain, which add one request per record and one resolution per decided
+  record.
+harnesses: [claude-code]
+identities:
+  uma: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: one human in the matched role, one rule with a five second exemption.
+  - name: the admin creates the application role the policy will match
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-retry, kind: application, description: "Retry exemption lapse scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM provisions uma over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-uma
+        userName: uma
+        displayName: Uma Retry
+        active: true
+    want: {status: 201}
+    save: {umaId: id}
+  - name: the admin sets uma's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${umaId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g4-retry"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: uma becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${umaId}"}]
+    want: {status: 200}
+  - name: the admin applies a PolicySet whose hold grants a five second retry window
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-retry
+            description: Retry exemption lapse scenario for role g4-retry
+          spec:
+            match:
+              roles: [g4-retry]
+            rules:
+              - id: hold-deploy
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [straza-admin]
+                  timeoutSeconds: 900
+                  retryTTLSeconds: 5
+                reason: "G4-RETRY: deploy is held, and the approval is good for five seconds"
+    want: {status: 201}
+  - name: the admin activates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-retry/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: uma enrolls
+    enroll: {as: uma}
+  - name: uma starts a session
+    hook:
+      as: uma
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # 1. The held call opens a record and the admin approves it.
+  - name: the held command is denied with the pending sentence
+    hook:
+      as: uma
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval requested"}
+  - name: the one pending record is the hold the command opened
+    # suspect: approvals.0 is the one record of a one-record list
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.lane: hook, approvals.0.rule: hold-deploy, approvals.1: null}
+    save: {holdId: approvals.0.id}
+  - name: the admin approves the hold, which mints the five second exemption
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${holdId}/approve
+    want:
+      status: 200
+      body: {approval.state: approved}
+
+  # 2. Nobody retries inside the window, and the window closes.
+  - name: the session waits out the five second retry window without calling
+    wait: 8s
+
+  # 3. The identical call asks again instead of running.
+  - name: the identical call after the lapse is denied and raises a fresh request
+    # suspect: no page states the lapsed case; a second run of the same command raising a new request is the reading
+    hook:
+      as: uma
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval requested"}
+  - name: the command was never allowed, so the chain carries no allow record for it
+    audit: {subject: uma, kind: tool.pre, decision: allow, count: 0}
+  - name: the approved record is still the only approved one, so the fresh request is a second record
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=approved
+    want:
+      status: 200
+      body: {approvals.0.state: approved, approvals.1: null}
+  - name: the fresh request is the only pending record and it names the same rule
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.rule: hold-deploy, approvals.1: null}
+  - name: two requests and one resolution are on the chain, three approval records, and no use of the lapsed approval
+    audit: {subject: uma, kind: straza.audit.approval, count: 3}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-retry/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft PolicySet is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g4-retry
+    want: {status: 204}
+  - name: the admin deletes the role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates uma
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${umaId}
+    want: {status: 204}

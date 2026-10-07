@@ -1,0 +1,344 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture overview · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+.controls .cap{font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;
+  padding:0 4px 0 6px;font-weight:600}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 10px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);
+  color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:96px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:84ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:15px;font-weight:600}
+.s{font-size:12px;font-weight:600}
+.d{font-size:10.5px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+.mono{font-family:var(--font-mono);font-size:10px;fill:var(--muted)}
+.tx{fill:var(--text)}
+.elabel{font-size:10.5px;fill:var(--muted)}
+.node{cursor:pointer;outline:none}
+.node .box{fill:var(--surface);stroke:var(--border);stroke-width:1.25;
+  transition:stroke .2s,stroke-width .2s,fill .2s,filter .2s,opacity .2s}
+.chip{fill:var(--surface-2);stroke:var(--border);stroke-width:1.25}
+.chips{pointer-events:none}
+.node.cont .box{fill:var(--bg)}
+.node:hover .box,.node:focus .box,.node.hl .box,
+.node:hover .chip,.node:focus .chip,.node.hl .chip{stroke:var(--accent);stroke-width:2;
+  fill:var(--accent-bg);filter:drop-shadow(0 0 5px var(--accent))}
+.node.cont:hover .box,.node.cont:focus .box,.node.cont.hl .box{fill:var(--bg);
+  stroke:var(--accent);stroke-width:2;filter:drop-shadow(0 0 5px var(--accent))}
+.node:focus-visible .box{outline:none}
+.node,.edge,.elabel{transition:opacity .25s}
+.node.dim{opacity:.42}
+.edge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ar)}
+.edge.async{stroke-dasharray:5 4}
+.edge.hl{stroke:var(--accent);stroke-width:2.4;marker-end:url(#arA);filter:drop-shadow(0 0 3px var(--accent))}
+.edge.dim{opacity:.28}
+.edge.off,.elabel.off{opacity:.1}
+.mk{fill:var(--muted)}.mkA{fill:var(--accent)}
+.lf{display:inline}.ls{display:none}
+@media (max-width:640px){.lf{display:none}.ls{display:inline}}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ architecture overview</span></h1>
+  <div class="controls" role="group" aria-label="Overlay plane filters">
+    <span class="cap">planes</span>
+    <button class="ctl" id="pl-id"  aria-pressed="false">identity</button>
+    <button class="ctl" id="pl-po"  aria-pressed="false">policy</button>
+    <button class="ctl" id="pl-ap"  aria-pressed="false">approval</button>
+    <button class="ctl" id="pl-au"  aria-pressed="false">audit</button>
+    <button class="ctl" id="pl-mcp" aria-pressed="false">MCP</button>
+  </div>
+</header>
+
+<div class="stage">
+<svg viewBox="0 0 1124 600" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
+<title id="svgT">Straza system architecture</title>
+<desc id="svgD">Agent harnesses feed straza, the client PEP kit, which talks to strazad. strazad holds the policy engine and inline classifier, the two-tier MCP gateway with its native straza app, session tokens, SCIM, the credential broker, the admin API, the approval service with its mobile approver API and push delivery, the audit sentinel, and the event spine, backed by Postgres or SQLite and NATS. Externally: midPoint over SCIM, an OIDC IdP, upstream MCP servers behind the gateway, and a phone running the mobile approver. Hover a node to light its data paths; toggle a plane to filter.</desc>
+<defs>
+  <marker id="ar"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
+  <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mkA"/></marker>
+</defs>
+
+
+<g id="edges"> <path id="e-h1" class="edge pl-po" d="M162 85 L204 85"/> <path id="e-h2" class="edge pl-po" d="M162 121 L204 121"/> <path id="e-h3" class="edge pl-po" d="M162 157 L204 157"/> <path id="e-h4" class="edge pl-po" d="M162 193 L204 193"/> <path id="e-h5" class="edge pl-po" d="M162 229 L204 229"/> <path id="e-snap"    class="edge async pl-po" d="M470 108 L378 108"/> <path id="e-checkin" class="edge pl-id"       d="M376 150 L468 150"/> <path id="e-mcpx"    class="edge pl-mcp"      d="M376 192 L468 192"/> <path id="e-audit"   class="edge async pl-au" d="M376 234 L468 234"/> <path id="e-enroll" class="edge pl-id"       d="M300 294 V468 H120 V484"/> <path id="e-verify" class="edge async pl-id" d="M150 486 V330 H468"/> <path id="e-up"      class="edge pl-mcp"       d="M898 113 L998 113"/> <path id="e-scim"    class="edge pl-id"        d="M1000 170 L913 170"/> <path id="e-changes" class="edge async pl-id"  d="M913 192 L1000 192"/> <path id="e-class"   class="edge pl-po" d="M614 112 L626 112"/> <path id="e-gwap"    class="edge pl-ap" d="M834 224 V270 H553 V304"/> <path id="e-pdpap"   class="edge pl-ap" d="M486 120 H478 V320 H488"/> <path id="e-appush"  class="edge pl-ap" d="M616 334 L626 334"/> <path id="e-apapi"   class="edge pl-ap" d="M553 362 V370 H832 V364"/> <path id="e-apiph"   class="edge pl-ap" d="M898 333 L998 333"/> <path id="e-pushph"  class="edge async pl-ap" d="M710 362 V374 H982 V345 H998"/> <path id="e-apaudit" class="edge async pl-au" d="M520 362 V382"/> <path id="e-outbox"  class="edge pl-au"       d="M550 426 V440"/> <path id="e-nats"    class="edge pl-au"       d="M692 426 V440"/> <path id="e-consume" class="edge async pl-au" d="M756 467 L768 467"/> <path id="e-sent"    class="edge async pl-au" d="M666 492 V506"/> <path id="e-sentemit" class="edge pl-au"      d="M850 506 V494"/> <path id="e-killpush" class="edge async pl-id" d="M470 500 H340 V296"/> </g>
+
+
+<g id="elabels"> <text class="elabel pl-po"  x="423" y="100" text-anchor="middle">snapshot pull</text> <text class="elabel pl-id"  x="423" y="142" text-anchor="middle">checkin → token</text> <text class="elabel pl-mcp" x="423" y="184" text-anchor="middle">/mcp</text> <text class="elabel pl-au"  x="423" y="226" text-anchor="middle">audit batch</text> <text class="elabel pl-id"  x="300" y="322" text-anchor="middle">OIDC device flow · JWKS</text> <text class="elabel pl-mcp" x="948" y="106" text-anchor="middle">creds injected</text> <text class="elabel pl-id"  x="955" y="163" text-anchor="middle">SCIM 2.0</text> <text class="elabel pl-id"  x="955" y="208" text-anchor="middle">changes</text> <text class="elabel pl-ap"  x="690" y="264" text-anchor="middle">approve gate</text> <text class="elabel pl-ap"  x="955" y="326" text-anchor="middle">/v1/approver/*</text> <text class="elabel pl-au"  x="556" y="437">outbox</text> <text class="elabel pl-au"  x="700" y="437">publish</text> <text class="elabel pl-id"  x="405" y="493" text-anchor="middle">kill switch · /v1/push</text> </g>
+
+
+<text class="cap" x="12"  y="56">AGENT HARNESSES</text>
+<text class="cap" x="1112" y="72" text-anchor="end">UPSTREAM · IGA · PHONE</text>
+
+
+<g class="node cont" id="n-ag" tabindex="0" role="button" aria-label="straza client PEP kit"> <rect class="box" x="206" y="64" width="170" height="230" rx="6"/> <text class="t" x="220" y="90">straza</text> <text class="d" x="220" y="105">client PEP kit</text> <text class="d" x="220" y="258">local PDP · fail closed</text> <text class="mono tx" x="220" y="274">~/.straza</text> </g>
+<g class="node cont" id="n-strazad" tabindex="0" role="button" aria-label="strazad server"> <rect class="box" x="470" y="40" width="440" height="530" rx="6"/> <text class="t" x="484" y="60">strazad</text> <text class="d" x="484" y="75">control + data plane · one static binary</text> </g>
+<g class="node cont" id="n-appcluster" tabindex="0" role="button" aria-label="Approval subsystem"> <rect class="box" x="480" y="278" width="424" height="96" rx="6"/> <text class="cap" x="492" y="296">APPROVAL · mode: approve</text> </g>
+
+
+<g class="chips" aria-hidden="true"> <rect class="chip" x="220" y="120" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="137">hook · normalize + decide</text> <rect class="chip" x="220" y="152" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="169">mcp · stdio → gateway</text> <rect class="chip" x="220" y="184" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="201">exec · Tier-3 shim</text> <rect class="chip" x="220" y="216" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="233">daemon · push + tick</text> </g>
+
+
+<g class="node" id="n-claude" tabindex="0" role="button" aria-label="Claude Code harness"> <rect class="box" x="12" y="70" width="150" height="30" rx="6"/><text class="s" x="22" y="89">Claude Code</text></g>
+<g class="node" id="n-codex" tabindex="0" role="button" aria-label="Codex CLI harness"> <rect class="box" x="12" y="106" width="150" height="30" rx="6"/><text class="s" x="22" y="125">Codex CLI</text></g>
+<g class="node" id="n-gemini" tabindex="0" role="button" aria-label="Gemini harness"> <rect class="box" x="12" y="142" width="150" height="30" rx="6"/><text class="s" x="22" y="161"><tspan class="lf">Gemini / Antigravity</tspan><tspan class="ls">Gemini CLI</tspan></text></g>
+<g class="node" id="n-pysdk" tabindex="0" role="button" aria-label="python agentkit"> <rect class="box" x="12" y="178" width="150" height="30" rx="6"/><text class="s" x="22" y="197">python agentkit</text></g>
+<g class="node" id="n-exec" tabindex="0" role="button" aria-label="hookless exec"> <rect class="box" x="12" y="214" width="150" height="30" rx="6"/><text class="s" x="22" y="233"><tspan class="lf">hookless CLI · exec</tspan><tspan class="ls">exec CLI</tspan></text></g>
+<g class="node" id="n-idp" tabindex="0" role="button" aria-label="enterprise IdP"> <rect class="box" x="12" y="486" width="210" height="54" rx="6"/> <text class="s" x="22" y="506">enterprise IdP</text> <text class="d" x="22" y="522">OIDC device flow · JWKS</text></g>
+
+
+<g class="node" id="n-policy" tabindex="0" role="button" aria-label="Policy engine"> <rect class="box" x="486" y="86" width="128" height="52" rx="6"/> <text class="s" x="496" y="105">policy engine</text> <text class="d" x="496" y="120">PolicySet → snapshot</text> <text class="d" x="496" y="133">ed25519 · deny-overrides</text></g>
+<g class="node" id="n-classifier" tabindex="0" role="button" aria-label="classifier"> <rect class="box" x="628" y="86" width="128" height="52" rx="6"/> <text class="s" x="638" y="105">classifier</text> <text class="d" x="638" y="120">indirection scan</text> <text class="d" x="638" y="133">no model · deny on signal</text></g>
+<g class="node" id="n-gateway" tabindex="0" role="button" aria-label="MCP gateway"> <rect class="box" x="770" y="86" width="128" height="86" rx="6"/> <text class="s" x="780" y="105">MCP gateway /mcp</text> <text class="d" x="780" y="120">server PEP · rps limit</text> <text class="d" x="780" y="134">two-tier catalog</text> <text class="d" x="780" y="148">PDP per tools/call</text> <text class="mono tx" x="780" y="163">/mcp/&lt;server&gt;</text></g>
+<g class="node" id="n-tokens" tabindex="0" role="button" aria-label="session tokens"> <rect class="box" x="486" y="150" width="128" height="52" rx="6"/> <text class="s" x="496" y="169">session tokens</text> <text class="d" x="496" y="184">ed25519 · 300 s TTL</text> <text class="d" x="496" y="197">attestation gate</text></g>
+<g class="node" id="n-scim" tabindex="0" role="button" aria-label="SCIM 2.0 server"> <rect class="box" x="628" y="150" width="128" height="52" rx="6"/> <text class="s" x="638" y="169">SCIM 2.0 server</text> <text class="d" x="638" y="184">users · roles (Groups)</text> <text class="d" x="638" y="197">active:false ⇒ revoke</text></g>
+<g class="node" id="n-native" tabindex="0" role="button" aria-label="native straza app"> <rect class="chip" x="770" y="186" width="128" height="38" rx="6"/> <text class="s" x="780" y="203">native: straza app</text> <text class="d" x="780" y="217">approval_request …</text></g>
+<g class="node" id="n-broker" tabindex="0" role="button" aria-label="Credential broker"> <rect class="box" x="486" y="214" width="128" height="52" rx="6"/> <text class="s" x="496" y="233">credential broker</text> <text class="d" x="496" y="248">sealed secrets · OAuth</text> <text class="d" x="496" y="261">inject-only</text></g>
+<g class="node" id="n-admin" tabindex="0" role="button" aria-label="Admin API and console"> <rect class="box" x="628" y="214" width="128" height="52" rx="6"/> <text class="s" x="638" y="233">admin API · console</text> <text class="d" x="638" y="248">/v1/admin CRUD</text> <text class="d" x="638" y="261">changes feed · enroll</text></g>
+
+
+<g class="node" id="n-approval" tabindex="0" role="button" aria-label="Approval service"> <rect class="box" x="490" y="306" width="126" height="56" rx="6"/> <text class="s" x="500" y="325">approval service</text> <text class="d" x="500" y="340">pending · exemptions</text> <text class="d" x="500" y="354">grants · console · Slack</text></g>
+<g class="node" id="n-push" tabindex="0" role="button" aria-label="Push delivery"> <rect class="box" x="628" y="306" width="126" height="56" rx="6"/> <text class="s" x="638" y="325">push delivery</text> <text class="d" x="638" y="340">relay · FCM · APNs · …</text> <text class="d" x="638" y="354">content-free {v,ref,kind}</text></g>
+<g class="node" id="n-approver" tabindex="0" role="button" aria-label="Mobile approver API"> <rect class="box" x="766" y="306" width="132" height="56" rx="6"/> <text class="s" x="776" y="325">approver API</text> <text class="d" x="776" y="340">/v1/approver/*</text> <text class="d" x="776" y="354">enroll · pending · decide</text></g>
+
+
+<g class="node" id="n-spine" tabindex="0" role="button" aria-label="Event spine"> <rect class="box" x="486" y="384" width="412" height="42" rx="6"/> <text class="s" x="496" y="403">event spine</text> <text class="d" x="496" y="418">outbox → JetStream relay · CloudEvents 1.0</text></g>
+<g class="node" id="n-pg" tabindex="0" role="button" aria-label="Store: Postgres or SQLite"> <rect class="box" x="486" y="442" width="128" height="50" rx="6"/> <text class="s" x="496" y="461">store</text> <text class="d" x="496" y="476">Postgres · SQLite</text> <text class="d" x="496" y="488">no request-path reads</text></g>
+<g class="node" id="n-nats" tabindex="0" role="button" aria-label="NATS JetStream"> <rect class="box" x="628" y="442" width="128" height="50" rx="6"/> <text class="s" x="638" y="461">NATS JetStream</text> <text class="d" x="638" y="476">audit · events</text> <text class="d" x="638" y="488">push subjects</text></g>
+<g class="node" id="n-chain" tabindex="0" role="button" aria-label="Audit hash chain"> <rect class="box" x="770" y="442" width="128" height="50" rx="6"/> <text class="s" x="780" y="461">audit hash chain</text> <text class="mono tx" x="780" y="477">sha256(prev‖\n‖ce)</text> <text class="d" x="780" y="489">verify</text></g>
+<g class="node" id="n-sentinel" tabindex="0" role="button" aria-label="sentinel"> <rect class="box" x="628" y="508" width="270" height="46" rx="6"/> <text class="s" x="638" y="527">sentinel</text> <text class="d" x="638" y="542">durable consumer · judges sessions · alert-only</text></g>
+
+
+<g class="node" id="n-up" tabindex="0" role="button" aria-label="Upstream MCP servers"> <rect class="box" x="1000" y="86" width="112" height="54" rx="6"/> <text class="s" x="1010" y="105">MCP servers</text> <text class="d" x="1010" y="120">upstream apps</text> <text class="d" x="1010" y="133">oci·command·remote</text></g>
+<g class="node" id="n-mid" tabindex="0" role="button" aria-label="midPoint IGA"> <rect class="box" x="1000" y="150" width="112" height="54" rx="6"/> <text class="s" x="1010" y="169">midPoint / IGA</text> <text class="d" x="1010" y="184">SCIM out → Straza</text> <text class="d" x="1010" y="197">LiveSync in ← feed</text></g>
+<g class="node" id="n-phone" tabindex="0" role="button" aria-label="mobile approver phone"> <rect class="box" x="1000" y="300" width="112" height="66" rx="6"/> <text class="s" x="1010" y="320">mobile approver</text> <text class="d" x="1010" y="335">the phone</text> <text class="d" x="1010" y="348">push + decide</text> <text class="d" x="1010" y="360">ECDSA P-256</text></g>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">Hover or tab a component to light its data paths and read a fact. Toggle a plane (top right) to filter edges: identity, policy, approval, audit, MCP. Dashed arrows are asynchronous.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>Agent harnesses funnel through <strong>straza</strong>, the client PEP kit: its local PDP decides
+  every tool call against an ed25519-signed snapshot, no server and no database on the path. Its mcp mode
+  proxies to the <strong>strazad</strong> MCP gateway, where a <strong>two-tier catalog</strong> (a shared
+  role catalog refined by a per-session policy overlay) hides tools the subject could never call and the
+  built-in <strong>native straza app</strong> serves approval_request / status / await for tickets. The
+  inline <strong>classifier</strong> scans classify-gated calls. The <strong>approval
+  service</strong> drives mode:approve across console, Slack, and the mobile <strong>approver API</strong>
+  (/v1/approver/*), which sends each request to the approver's phone as a content-free
+  <strong>push notification</strong> (the hosted relay, FCM, APNs, WebPush or UnifiedPush). Identity arrives over SCIM 2.0 and an OIDC IdP; changes flow back to the IGA over
+  the cursored changes feed. Every decision is audited asynchronously into a SHA-256 hash chain; the
+  <strong>sentinel</strong> judges whole sessions off the same stream, failing open with an
+  alarm. Kill-switch revocations push in under 2 seconds; credentials inject upstream, never reaching the
+  agent.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var $=function(s){return document.querySelector(s);};
+var $$=function(s){return Array.prototype.slice.call(document.querySelectorAll(s));};
+
+ 
+var ENDS={
+ 'e-h1':['n-claude','n-ag'],'e-h2':['n-codex','n-ag'],'e-h3':['n-gemini','n-ag'],
+ 'e-h4':['n-pysdk','n-ag'],'e-h5':['n-exec','n-ag'],
+ 'e-snap':['n-policy','n-ag'],'e-checkin':['n-ag','n-tokens'],
+ 'e-mcpx':['n-ag','n-gateway'],'e-audit':['n-ag','n-spine'],
+ 'e-enroll':['n-ag','n-idp'],'e-verify':['n-idp','n-tokens'],
+ 'e-up':['n-gateway','n-up'],'e-scim':['n-mid','n-scim'],'e-changes':['n-admin','n-mid'],
+ 'e-class':['n-policy','n-classifier'],
+ 'e-gwap':['n-gateway','n-approval'],'e-pdpap':['n-policy','n-approval'],
+ 'e-appush':['n-approval','n-push'],'e-apapi':['n-approval','n-approver'],
+ 'e-apiph':['n-approver','n-phone'],'e-pushph':['n-push','n-phone'],
+ 'e-apaudit':['n-approval','n-spine'],
+ 'e-outbox':['n-spine','n-pg'],'e-nats':['n-spine','n-nats'],'e-consume':['n-nats','n-chain'],
+ 'e-sent':['n-nats','n-sentinel'],'e-sentemit':['n-sentinel','n-chain'],
+ 'e-killpush':['n-strazad','n-ag']
+};
+var ADJ={};
+Object.keys(ENDS).forEach(function(e){ENDS[e].forEach(function(n){(ADJ[n]=ADJ[n]||[]).push(e);});});
+ADJ['n-broker']=['e-up'];                           
+ADJ['n-native']=['e-mcpx','e-gwap'];                
+ADJ['n-appcluster']=['e-gwap','e-pdpap','e-appush','e-apapi','e-apiph','e-pushph','e-apaudit'];
+ADJ['n-strazad']=['e-snap','e-checkin','e-mcpx','e-audit','e-verify','e-up','e-scim','e-changes',
+ 'e-class','e-gwap','e-pdpap','e-appush','e-apapi','e-apiph','e-pushph','e-apaudit',
+ 'e-outbox','e-nats','e-consume','e-sent','e-sentemit'];
+
+var FACTS={
+ 'n-claude':{t:'Claude Code',b:'Tier-1 harness: hooks govern locally; <code>straza install</code> also adds the <code>straza</code> MCP entry.'},
+ 'n-codex':{t:'Codex CLI',b:'Tier-1 harness: the Claude Code hook contract cloned (env-compatible); MCP registered by install as a straza-managed block in config.toml.'},
+ 'n-gemini':{t:'Gemini / Antigravity',b:'Tier-1 harness: renamed hook events, absorbed by the versioned adapter tables.'},
+ 'n-pysdk':{t:'python agentkit',b:'stdlib-only check/@guard/capture that spawn <code>straza hook</code> under the python-sdk dialect.'},
+ 'n-exec':{t:'hookless CLI (Tier 3)',b:'<code>straza exec</code>: argv → canonical tool.pre → local PDP. Boundary-grade only in the sandbox.'},
+ 'n-ag':{t:'straza',b:'Client PEP kit: normalize, verify the snapshot signature, decide in-process, fail closed. The daemon holds the kill-switch stream, <code>/v1/push</code> on strazad, and the refresh tick. No client ever reaches NATS.'},
+ 'n-strazad':{t:'strazad',b:'Control + data plane in one static binary. Standalone: SQLite + embedded NATS. Enterprise: Postgres + one shared NATS server, so replicas keep no state of their own.'},
+ 'n-policy':{t:'policy engine',b:'PolicySets compile to a signed CBOR snapshot. Deny-overrides; the <code>/v1/decide</code> PDP shares it and drives serverCheck / classify / approve.'},
+ 'n-classifier':{t:'classifier',b:'Heuristic: an interpreter-aware shell.exec indirection scan (pipe-to-shell, encoded-exec, nested eval). No model; deny on a clear signal.'},
+ 'n-gateway':{t:'MCP gateway',b:'Server PEP on <code>/mcp</code>, and on <code>/mcp/&lt;server&gt;</code> for one server under its own tool names: token verify, denylist, two-tier catalog, a rate limit per session and server from the manifest, PDP on every tools/call (classify + a blocking approve).'},
+ 'n-native':{t:'native straza app',b:'Built-in virtual app on /mcp: approval_request / status / await, and draft_submit / draft_status for config drafts. No app row, no binding: visible only when policy authorizes it.'},
+ 'n-tokens':{t:'session tokens',b:'ed25519 session JWTs, 300 s TTL, verified locally via JWKS. Attestation is checked at checkin.'},
+ 'n-scim':{t:'SCIM 2.0 server',b:'IdM provisioning: Users, plus exported roles rendered as Groups (a <code>members</code> write IS the role assignment); <code>active:false</code>/DELETE ⇒ revoke + denylist + push.'},
+ 'n-broker':{t:'credential broker',b:'Role-bound secrets + per-user OAuth, sealed with a secretbox KEK. Injected upstream; never reach the agent.'},
+ 'n-admin':{t:'admin API + console',b:'/v1 admin CRUD + console. Mints approver enroll-tokens (project {id,name}); <code>/v1/admin/changes</code> is the CDC feed.'},
+ 'n-approval':{t:'approval service',b:'The mode:approve engine, with the console always on as a channel: pending off /v1/decide, core-NATS resolution, exemptions (hold) + DB grants (ticket). NHI deciders blocked.'},
+ 'n-push':{t:'push delivery',b:'Content-free <code>{v,ref,kind}</code>: the hosted relay, FCM, APNs, WebPush and UnifiedPush/ntfy behind allowedPushHosts. Exactly-once across pods.'},
+ 'n-approver':{t:'mobile approver API',b:'<code>/v1/approver/*</code>: enroll (one-time token), <code>pending?scope=decidable</code> (+ challenge), decide (ECDSA P-256), push, history.'},
+ 'n-spine':{t:'event spine',b:'Transactional outbox in the store → JetStream relay; CloudEvents 1.0. Audit is async; only a full enterprise queue can delay a call.'},
+ 'n-pg':{t:'store: Postgres / SQLite',b:'Control-plane store (incl. approver tables): Postgres in enterprise, SQLite in standalone. No DB reads on any request path.'},
+ 'n-nats':{t:'NATS JetStream',b:'JetStream audit + events streams plus core-NATS push subjects straza.push.{user,session,device} and straza.push.policy.'},
+ 'n-chain':{t:'audit hash chain',b:'Durable consumer links every audit CE: <code>sha256(prev ‖ "\\n" ‖ ce)</code>; sentinel verdicts rejoin. <code>audit verify</code> walks it.'},
+ 'n-sentinel':{t:'sentinel',b:'Judges whole SESSIONS via detectors (denyBurst, denyThenVariant, writeThenExecute, captureContent, toolMixAnomaly). Fails open-with-alarm; alert-only.'},
+ 'n-up':{t:'upstream MCP servers',b:'MCP apps from app.yaml (server.json + straza: extensions); runtimes oci | command | remote; drift shrinks the catalog.'},
+ 'n-mid':{t:'midPoint / IGA',b:'Provisions users and role membership over SCIM; pulls catalog changes back over the changes feed (LiveSync).'},
+ 'n-phone':{t:'mobile approver (phone)',b:'Gets a content-free push, then calls <code>/v1/approver/*</code> to fetch decidable requests and sign a decision (ECDSA P-256).'},
+ 'n-idp':{t:'enterprise IdP',b:'OIDC device-code flow is the primary user factor. Standalone runs a built-in issuer; enterprise delegates.'},
+ 'n-appcluster':{t:'approval subsystem',b:'<code>mode: approve</code> end-to-end: the approval service, mobile approver API (/v1/approver/*), and content-free push. Console always on; Slack + mobile opt-in.'}
+};
+
+var nodes=$$('.node'),edges=$$('.edge'),labels=$$('.elabel');
+var nar=$('#nar');
+var DEF='Hover or tab a component to light its data paths and read a fact. Toggle a plane (top right) to filter edges: identity, policy, approval, audit, MCP. Dashed arrows are asynchronous.';
+var pinned=null;
+
+function fact(id){
+  var f=FACTS[id];
+  if(!f)return DEF;
+  return '<span><strong>'+f.t+'</strong>: '+f.b+'</span>';
+}
+function apply(id){
+  nodes.forEach(function(n){n.classList.remove('hl','dim');});
+  edges.forEach(function(e){e.classList.remove('hl','dim');});
+  if(!id){nar.innerHTML=DEF;return;}
+  var adj=ADJ[id]||[],peers={};
+  peers[id]=true;
+  adj.forEach(function(e){(ENDS[e]||[]).forEach(function(n){peers[n]=true;});});
+  nodes.forEach(function(n){
+    if(n.id===id)n.classList.add('hl');
+    else if(!peers[n.id])n.classList.add('dim');
+  });
+  edges.forEach(function(e){
+    if(adj.indexOf(e.id)>=0)e.classList.add('hl');else e.classList.add('dim');
+  });
+  nar.innerHTML=fact(id);
+}
+function pin(id){
+  pinned=id;
+  nodes.forEach(function(n){n.setAttribute('aria-pressed',String(n.id===pinned));});
+  apply(id);
+}
+nodes.forEach(function(n){
+  n.addEventListener('mouseenter',function(){if(!pinned)apply(n.id);});
+  n.addEventListener('mouseleave',function(){if(!pinned)apply(null);});
+  n.addEventListener('focus',function(){if(!pinned)apply(n.id);});
+  n.addEventListener('blur',function(){if(!pinned)apply(null);});
+  n.addEventListener('click',function(ev){ev.stopPropagation();pin(pinned===n.id?null:n.id);});
+  n.addEventListener('keydown',function(ev){
+    if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();pin(pinned===n.id?null:n.id);}
+  });
+});
+document.querySelector('svg').addEventListener('click',function(){pin(null);});
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape')pin(null);});
+
+ 
+var planeBtns=['pl-id','pl-po','pl-ap','pl-au','pl-mcp'];
+var active={};
+function applyPlanes(){
+  var any=planeBtns.some(function(k){return active[k];});
+  edges.concat(labels).forEach(function(el){
+    var keep=!any;
+    if(any){for(var i=0;i<planeBtns.length;i++){if(active[planeBtns[i]]&&el.classList.contains(planeBtns[i])){keep=true;break;}}}
+    el.classList.toggle('off',!keep);
+  });
+}
+planeBtns.forEach(function(k){
+  var btn=document.getElementById(k);
+  btn.addEventListener('click',function(){
+    active[k]=!active[k];
+    btn.setAttribute('aria-pressed',String(!!active[k]));
+    applyPlanes();
+  });
+});
+})();
+</script>
+</body>
+</html>

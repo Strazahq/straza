@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Metarole: approval by manager. A SELF-SERVICE request for a role that
+  wears this metarole opens a midPoint approval case, and its work items go
+  to the requestee's manager(s): the users that hold org:manager on an org
+  the requestee is a plain member of. On eval the dev-ops members joe +
+  carol are managed by alice + frank. The metarole is attached with an
+  assignment on the role, the way the Straza role metarole rides the
+  imported roles: the access-package template (role-br-straza-access.xml.tmpl)
+  carries it, and so does Finance Team. The roles glob in seed.sh imports
+  this file before role-finance-team.xml (alphabetical) and long before the
+  templated packages, so every reference resolves at import. The shape
+  follows midPoint's shipped "approval by manager" metarole.
+-->
+
+<!-- Design notes, from the midPoint 4.10 source: the inducement carries NO
+  <order>, because a metarole's order-1 policy rule is a TARGET rule of the
+  assignment of the role that wears it. approverRelation would resolve the
+  holders of the target role, not the requestee's manager, so approvers come
+  from midpoint.getManagersOidsExceptUser(object), where `object` is the
+  requestee. That function searches with the CURRENT principal's
+  authorizations, and End user reads only self, so runPrivileged adds #all
+  to this one expression. The action condition limits the rule to
+  self-service requests (the actor IS the focus), because midPoint gates
+  EVERY assignment add, the seed's own user imports included, and
+  administrators get no bypass. So a grant by the identity manager stays a
+  grant, and a request goes to the manager. outcomeIfNoApprovers reject
+  fails closed, and firstDecides lets either manager decide.
+-->
+
+<!--
+  Verified on midPoint 4.10.3: joe-java-developer-agent requested Finance
+  Team as himself through the MCP lane. midPoint answered 204 without adding
+  the assignment and opened a case with one work item each for alice and
+  frank, and rejecting alice's item closed it as rejected. An administrator
+  add of a user holding Finance Team assigned it directly and opened no
+  case.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c52">
+    <name>Metarole: approval by manager</name>
+    <description>Assigned to a role, it sends a self-service request for that
+        role to the requestee's manager(s), the org:manager holders of the
+        requestee's orgs, and either one decides. A grant by the identity
+        manager is not a request and is not gated. No manager means
+        rejected.</description>
+    <inducement>
+        <policyRule>
+            <name>approval-by-requestee-manager</name>
+            <policyConstraints>
+                <assignment>
+                    <operation>add</operation>
+                </assignment>
+            </policyConstraints>
+            <policyActions>
+                <approval>
+                    <name>requestee-manager-approval</name>
+                    <!-- self-service only: the acting principal is the requestee -->
+                    <condition>
+                        <script>
+                            <code><![CDATA[
+actor != null && object != null && actor.oid != null && actor.oid == object.oid
+]]></code>
+                        </script>
+                    </condition>
+                    <approvalSchema>
+                        <stage>
+                            <name>Requestee's manager</name>
+                            <approverExpression>
+                                <privileges>
+                                    <runPrivileged>true</runPrivileged>
+                                </privileges>
+                                <script>
+                                    <code>midpoint.getManagersOidsExceptUser(object)</code>
+                                </script>
+                            </approverExpression>
+                            <evaluationStrategy>firstDecides</evaluationStrategy>
+                            <outcomeIfNoApprovers>reject</outcomeIfNoApprovers>
+                        </stage>
+                    </approvalSchema>
+                </approval>
+            </policyActions>
+        </policyRule>
+    </inducement>
+</role>

@@ -1,0 +1,15 @@
+{{- if .Values.apps.manifests }}
+# Declarative app registrations (GitOps apps dir): mounted at /etc/straza/apps,
+# where each file proposes a draft a person publishes, one per revision
+# across replicas. Bindings stay API-side.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "straza.fullname" . }}-apps
+  labels: {{- include "straza.labels" . | nindent 4 }}
+data:
+  {{- range $name, $manifest := .Values.apps.manifests }}
+  {{ $name }}: |
+{{ $manifest | indent 4 }}
+  {{- end }}
+{{- end }}

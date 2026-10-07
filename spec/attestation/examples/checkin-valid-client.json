@@ -1,0 +1,6 @@
+{
+  "id_token": "${ID_TOKEN}",
+  "harness": { "name": "claude-code", "version": "2.1.0" },
+  "attestation": { "managed": false, "hashes": {} },
+  "client": { "version": "v1.0.0-1080-ga49eca3f", "commit": "a49eca3f" }
+}

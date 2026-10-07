@@ -1,0 +1,5 @@
+{
+  "id_token": "${ID_TOKEN}",
+  "harness": { "name": "codex", "version": "0.120.0" },
+  "attestation": { "managed": false, "hashes": {} }
+}

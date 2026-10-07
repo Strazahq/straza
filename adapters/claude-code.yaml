@@ -1,0 +1,148 @@
+# Claude Code hook dialect → Straza canonical event model (spec/hook-profile).
+# Claude Code originated the hook contract; Codex clones it (see codex.yaml).
+harness: claude-code
+# Hook event name (JSON field "hook_event_name") → canonical event kind.
+events:
+  SessionStart: session.start
+  UserPromptSubmit: prompt.submit
+  PreToolUse: tool.pre
+  PostToolUse: tool.post
+  PermissionRequest: permission.request
+  SubagentStart: subagent.start
+  SubagentStop: subagent.stop
+  Stop: session.end
+  SessionEnd: session.end
+  PreCompact: compact.pre
+# Where to read common fields from the payload. prompt/transcriptPath are
+# the conversation-capture inputs (UserPromptSubmit carries `prompt`; every
+# event carries `transcript_path`, vendor-documented and re-verified).
+fields:
+  sessionId: session_id
+  workspace: cwd
+  toolName: tool_name
+  toolInput: tool_input
+  prompt: prompt
+  transcriptPath: transcript_path
+  # Delegation keys, verified against a live harness:
+  # SubagentStop carries the delegate's OWN transcript in agent_transcript_path,
+  # plus last_assistant_message and agent_id/agent_type. transcript_path stays
+  # the PARENT's on every subagent payload, and SubagentStart carries no child
+  # path at all, so the child path comes only from agent_transcript_path.
+  # Delegated PreToolUse also carries agent_id/agent_type, and audit
+  # attribution uses them.
+  agentTranscriptPath: agent_transcript_path
+  agentReply: last_assistant_message
+  agentId: agent_id
+  agentType: agent_type
+# tool_name → canonical tool taxonomy. Prefix "mcp__" is handled in code,
+# including the gateway re-split: mcp__straza__<app>__<tool> re-attributes
+# to the real app (splitGatewayTool in internal/agentguard/normalize.go).
+#
+# The inventory is audited against the current harness build. An unmapped
+# built-in normalizes to "other", which the enterprise profile denies by
+# default, so a harness auto-update must not break governed sessions.
+# Assignment rule: the kind is the tool's side effect outside the
+# conversation. Lane companions, which read or stop what the lane started,
+# take their lane's kind so one grant keeps the lane coherent. Pure
+# conversation and UI built-ins, with no side effect beyond the session,
+# take the read kind until the taxonomy gains a dedicated meta kind, which
+# needs a spec enum revision. Unknown names still degrade to "other", so
+# what cannot be classified is denied.
+tools:
+  Bash: shell.exec
+  PowerShell: shell.exec
+  Shell: shell.exec
+  BashOutput: shell.exec    # shell-lane companions: read/kill a background
+  KillShell: shell.exec     # shell carry no command payload; command
+  KillBash: shell.exec      # matchers simply never fire on them
+  Edit: file.edit
+  MultiEdit: file.edit
+  NotebookEdit: file.edit
+  Write: file.write
+  EnterWorktree: file.write # worktree isolation creates/removes repo trees
+  ExitWorktree: file.write
+  Read: file.read
+  Glob: file.read
+  Grep: file.read
+  LS: file.read
+  NotebookRead: file.read
+  SendUserFile: file.read   # reads local files to present them to the user
+  ToolSearch: file.read     # reads tool-catalog metadata (deferred schemas)
+  Skill: file.read          # loads skill instructions from disk
+  SlashCommand: file.read
+  ListMcpResources: file.read
+  ReadMcpResource: file.read
+  AskUserQuestion: file.read # pure-UI set (see header note)
+  TodoWrite: file.read
+  EnterPlanMode: file.read
+  ExitPlanMode: file.read
+  ReportFindings: file.read
+  WebFetch: net.fetch
+  WebSearch: net.fetch
+  Artifact: net.fetch          # publishes a page to claude.ai (egress)
+  PushNotification: net.fetch  # sends a push beyond the machine
+  DesignSync: net.fetch
+  Task: task.spawn
+  Agent: task.spawn
+  Workflow: task.spawn      # orchestrates subagent fleets
+  SendMessage: task.spawn   # continues a spawned agent
+  Monitor: task.spawn       # task/agent-lane lifecycle from here down
+  TaskCreate: task.spawn
+  TaskGet: task.spawn
+  TaskList: task.spawn
+  TaskOutput: task.spawn
+  TaskStop: task.spawn
+  TaskUpdate: task.spawn
+  ScheduleWakeup: task.spawn
+  CronCreate: task.spawn    # schedules future agent runs
+  CronDelete: task.spawn
+  CronList: task.spawn
+  RemoteTrigger: task.spawn # launches a remote agent run
+  EndConversation: task.spawn
+# Per-canonical-tool: which tool_input keys hold the command / paths.
+toolInputs:
+  shell.exec: { command: [command] }
+  # Delegation target: Task/Agent carry subagent_type. Surfacing it as the
+  # command makes "deny delegation to agent X" rule-matchable on the CLI
+  # lane, symmetric with the python-sdk dialect.
+  task.spawn: { command: [subagent_type] }
+  file.write: { paths: [file_path, path] }
+  file.edit: { paths: [file_path, path, notebook_path] }
+  file.read: { paths: [file_path, path, notebook_path, files] }
+  net.fetch: { paths: [url] }
+
+# MCP registration: user-scope MCP servers live in ~/.claude.json
+# ($CLAUDE_CONFIG_DIR/.claude.json when set) under mcpServers, NOT in
+# .claude/settings.json. `straza install` writes the "straza" stdio entry
+# there. Vendor-documented. Re-verify on each harness release.
+#
+# Managed analog: `straza install --managed` writes the same "straza"
+# entry, with the managed binary as its command, into managed-mcp.json,
+# which uses the same mcpServers schema as a project .mcp.json. The install
+# code (internal/agentguard/installmcp.go) mirrors the managedMcp table
+# below. CAUTION: a deployed managed-mcp.json is exclusive control:
+# claude-code loads ONLY the servers in that file, and users cannot add
+# their own. On Windows the vendor pins C:\Program Files\ClaudeCode for this
+# file. Vendor-documented at code.claude.com/docs/en/managed-mcp. Re-verify
+# on each harness release.
+managedMcp:
+  linux: /etc/claude-code/managed-mcp.json
+  darwin: /Library/Application Support/ClaudeCode/managed-mcp.json
+  windows: C:\Program Files\ClaudeCode\managed-mcp.json
+
+# Managed/system settings layer: `straza install --managed` writes the
+# Straza hook wiring here. It is measured as artifact "hooks.claude-code"
+# and verified by the platform at check-in. Vendor-documented locations.
+# Re-verify on each harness release. The install code
+# (internal/agentguard/install.go) mirrors this table.
+# claude-code v2.1.75 declared the older Windows path C:\ProgramData\ClaudeCode\
+# unsupported, and the harness never reads wiring left there. Re-running
+# `install --managed` writes the current path AND removes a stale file that
+# straza wrote at the old path (LegacyManagedSettingsPath), leaving foreign
+# files alone. Doctor's wiring check warns about such a file, and uninstall
+# removes it. The hooks.claude-code hash is content-addressed, so the
+# registry needs no change, and a re-install re-registers the same hash.
+managedSettings:
+  linux: /etc/claude-code/managed-settings.json
+  darwin: /Library/Application Support/ClaudeCode/managed-settings.json
+  windows: C:\Program Files\ClaudeCode\managed-settings.json

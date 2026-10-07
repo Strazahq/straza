@@ -1,0 +1,183 @@
+{
+  "name": "group-enrichment",
+  "steps": [
+    {
+      "note": "revision 12: every exported role's wire-group render carries the read-only access projection (revision 9 block, now simply the role's own data): identity plus what membership effectively grants.",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"scim-dev\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "Resources": [
+            {
+              "displayName": "scim-dev",
+              "schemas": [
+                "urn:ietf:params:scim:schemas:core:2.0:Group",
+                "urn:straza:params:scim:schemas:extension:2.0:Group"
+              ],
+              "urn:straza:params:scim:schemas:extension:2.0:Group": {
+                "role": "scim-dev",
+                "roleKind": "business",
+                "plane": "access",
+                "description": "Developer access (conformance)"
+              }
+            }
+          ]
+        }
+      },
+      "capture": {
+        "gid": "Resources.0.id"
+      }
+    },
+    {
+      "note": "revision 13: an approver-kind role (decide authority only, spec/policyset revision 15) renders like any access-plane role, roleKind approver, so the IdM imports and certifies who may approve agent actions as its own class",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"scim-approvers\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "Resources": [
+            {
+              "displayName": "scim-approvers",
+              "urn:straza:params:scim:schemas:extension:2.0:Group": {
+                "role": "scim-approvers",
+                "roleKind": "approver",
+                "plane": "access",
+                "description": "Approval deciders (conformance)"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "revision 14: control-plane roles render on this wire like every other role (the exposeControlPlaneRoles knob is retired), roleKind straza (the renamed control-plane spelling; console before revision 14), plane control. straza-admin exists on every store via bootstrap, so its render IS the exposure pin.",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"straza-admin\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "Resources": [
+            {
+              "displayName": "straza-admin",
+              "urn:straza:params:scim:schemas:extension:2.0:Group": {
+                "role": "straza-admin",
+                "roleKind": "straza",
+                "plane": "control"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "revision 18: a server's minted admin role renders with the server it administers under administers, sorted server names, computed over the implication closure like apps; the reference server's seed registered scim-tools and the store minted mcp-admin-scim-tools for it [doc: derived from the reference server's TestSCIMGroupProjectionAdministers, not captured from a live wire]",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"mcp-admin-scim-tools\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "Resources": [
+            {
+              "displayName": "mcp-admin-scim-tools",
+              "urn:straza:params:scim:schemas:extension:2.0:Group": {
+                "role": "mcp-admin-scim-tools",
+                "roleKind": "straza",
+                "plane": "control",
+                "administers": ["scim-tools"]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "the projection is read-only evidence: any write against it answers scimType mutability (mirrors the §3.1 lock block)",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Groups/{gid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "urn:straza:params:scim:schemas:extension:2.0:Group:role",
+              "value": "straza-admin"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 400,
+        "subset": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:Error"
+          ],
+          "scimType": "mutability"
+        }
+      }
+    },
+    {
+      "note": "revision 19: server is read-only like the rest of the projection, because which server owns a role is Straza's fact, so a PATCH against it answers scimType mutability [doc: derived from the reference server's TestGroupProjectionWriteRefusals, not captured from a live wire]",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Groups/{gid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "urn:straza:params:scim:schemas:extension:2.0:Group:server",
+              "value": "other-tools"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 400,
+        "subset": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:Error"
+          ],
+          "scimType": "mutability"
+        }
+      }
+    },
+    {
+      "note": "revision 19: a server-owned role renders the server that owns it under server, the server's name as the admin API spells it, on an application role named <server>-<suffix>; the reference server's seed created scim-tools-readers on scim-tools with one tool, so apps carries the binding evidence and tools stays absent while the server is not live [doc: derived from the reference server's TestSCIMGroupProjectionServer, not captured from a live wire]",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"scim-tools-readers\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "Resources": [
+            {
+              "displayName": "scim-tools-readers",
+              "urn:straza:params:scim:schemas:extension:2.0:Group": {
+                "role": "scim-tools-readers",
+                "roleKind": "application",
+                "plane": "access",
+                "server": "scim-tools",
+                "apps": ["scim-tools"]
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Straza eval stack</title>
+<meta name="description" content="Addresses, accounts and walkthroughs of the Straza demo stack running on this machine.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23f6b63c' d='M7.4 5H24.6A1.4 1.4 0 0 1 26 6.4V15.2C26 22.1 21.7 26.9 16 29.1C10.3 26.9 6 22.1 6 15.2V6.4A1.4 1.4 0 0 1 7.4 5Z'/%3E%3Cpath fill='%230b0d12' d='M16 6.9L18.4 12.9L24.4 15.3L18.4 17.7L16 23.7L13.6 17.7L7.6 15.3L13.6 12.9Z'/%3E%3C/svg%3E">
+<script>
+// The theme the reader picked on this page or in the docs (same origin, same
+// key) wins over the system theme. Storage can be absent, so every access is
+// guarded and the page renders with the system theme without it.
+try { var t = localStorage.getItem("straza-theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+</script>
+<style>
+/* The docs' typefaces, served by the docs site on this host. Absent files
+   fall back to the system fonts below. */
+@font-face { font-family: "Atkinson Hyperlegible Next"; src: url("/docs/assets/fonts/atkinson-hyperlegible-next-latin.woff2") format("woff2"); font-weight: 200 800; font-style: normal; font-display: swap; }
+@font-face { font-family: "Atkinson Hyperlegible Mono"; src: url("/docs/assets/fonts/atkinson-hyperlegible-mono-latin.woff2") format("woff2"); font-weight: 200 800; font-style: normal; font-display: swap; }
+
+/* The console's color tokens, dark first. Green,
+   amber, red and violet mean trust states only, never decoration. */
+:root {
+  --bg: #0d1117; --surface: #161b22; --surface-2: #1c2129;
+  --control-border: #778392; --border: #30363d;
+  --text: #e6edf3; --text-2: #c9d1d9; --muted: #9aa4af;
+  --accent: #58a6ff; --accent-hover: #79b8ff; --accent-bg: rgba(88, 166, 255, .15);
+  --teal: #39c5cf; --teal-bg: rgba(57, 197, 207, .15);
+  --ok: #3fb950; --warn: #d29922; --danger: #ff7b72; --unknown: #bc8cff;
+  --ok-bg: rgba(63, 185, 80, .15); --warn-bg: rgba(210, 153, 34, .15);
+  --danger-bg: rgba(248, 81, 73, .15); --unknown-bg: rgba(188, 140, 255, .15);
+  --font: "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, Menlo, "Cascadia Mono", Consolas, monospace;
+  --fs-small: .8125rem; --fs-ui: .9375rem; --fs-body: 1.0625rem; --fs-h3: 1.1875rem; --fs-h2: 1.5rem; --fs-h1: 2.25rem;
+  --radius: 6px;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #ffffff; --surface: #f6f8fa; --surface-2: #eef1f4;
+    --control-border: #808b98; --border: #d0d7de;
+    --text: #1f2328; --text-2: #424a53; --muted: #56616e;
+    --accent: #075bbb; --accent-hover: #0550ae; --accent-bg: rgba(9, 105, 218, .12);
+    --teal: #146c75; --teal-bg: rgba(27, 124, 133, .12);
+    --ok: #126d2b; --warn: #825600; --danger: #b91c2b; --unknown: #7040c0;
+    --ok-bg: rgba(26, 127, 55, .12); --warn-bg: rgba(154, 103, 0, .12);
+    --danger-bg: rgba(207, 34, 46, .12); --unknown-bg: rgba(130, 80, 223, .12);
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #ffffff; --surface: #f6f8fa; --surface-2: #eef1f4;
+  --control-border: #808b98; --border: #d0d7de;
+  --text: #1f2328; --text-2: #424a53; --muted: #56616e;
+  --accent: #075bbb; --accent-hover: #0550ae; --accent-bg: rgba(9, 105, 218, .12);
+  --teal: #146c75; --teal-bg: rgba(27, 124, 133, .12);
+  --ok: #126d2b; --warn: #825600; --danger: #b91c2b; --unknown: #7040c0;
+  --ok-bg: rgba(26, 127, 55, .12); --warn-bg: rgba(154, 103, 0, .12);
+  --danger-bg: rgba(207, 34, 46, .12); --unknown-bg: rgba(130, 80, 223, .12);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 16px; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--fs-body); line-height: 1.6; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: var(--accent-hover); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+h1, h2, h3 { margin: 0; line-height: 1.25; text-wrap: balance; }
+h1 { font-size: var(--fs-h1); font-weight: 800; letter-spacing: -.02em; }
+h2 { font-size: var(--fs-h2); font-weight: 700; letter-spacing: -.01em; }
+p { margin: 0; }
+button { font: inherit; color: inherit; }
+code { font-family: var(--mono); }
+p code, li code, td code, .creds code, .meta code { font-size: .88em; background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: .05em .35em; overflow-wrap: anywhere; }
+.small { font-size: var(--fs-small); }
+.muted { color: var(--muted); }
+.t2 { color: var(--text-2); }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* header */
+.lhead { display: flex; align-items: center; gap: 10px 14px; padding: 14px 24px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .08em; font-size: var(--fs-ui); color: var(--text); text-decoration: none; }
+.brand svg { width: 24px; height: 24px; flex: none; }
+.lhead .env { font-size: var(--fs-small); color: var(--muted); border-left: 1px solid var(--border); padding-left: 14px; }
+.lhead nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: var(--fs-ui); }
+.theme { background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px; cursor: pointer; color: var(--text-2); font-size: var(--fs-small); white-space: nowrap; }
+.theme svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 6px; }
+.theme:hover { border-color: var(--control-border); color: var(--text); }
+
+/* page */
+.lwrap { max-width: 1120px; margin: 0 auto; padding: 32px 24px 64px; display: grid; gap: 44px; }
+.lwrap > section { display: grid; gap: 14px; min-width: 0; }
+.lintro { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+.lintro .words { display: grid; gap: 14px; }
+.lead { font-size: 1.125rem; color: var(--text-2); max-width: 62ch; }
+.ready { display: grid; gap: 8px; font-size: var(--fs-ui); color: var(--text-2); max-width: 62ch; }
+.startbox { border: 1px solid var(--control-border); border-radius: var(--radius); padding: 20px; display: grid; gap: 14px; background: var(--surface); }
+.startbox h2 { font-size: var(--fs-h3); }
+.creds { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px 12px; align-items: center; font-size: var(--fs-ui); }
+.creds .k { color: var(--muted); }
+.creds b { font-weight: 700; }
+.copy { background: transparent; border: 1px solid var(--border); border-radius: 5px; padding: 1px 9px; cursor: pointer; color: var(--text-2); font-size: var(--fs-small); white-space: nowrap; }
+.copy:hover { border-color: var(--control-border); color: var(--text); }
+.copy.done, .cc.done { border-color: var(--ok); color: var(--ok); }
+.btn { display: inline-flex; align-items: center; gap: 8px; background: var(--accent); color: #ffffff; border-radius: var(--radius); padding: 9px 16px; font-weight: 700; text-decoration: none; justify-self: start; }
+.btn:hover { background: var(--accent-hover); color: #ffffff; }
+:root:not([data-theme="light"]) .btn, :root:not([data-theme="light"]) .btn:hover { color: #0d1117; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .btn, :root:not([data-theme="dark"]) .btn:hover { color: #ffffff; } }
+.note { font-size: var(--fs-small); color: var(--muted); }
+
+/* command lines: the copy button copies the text shown, exactly */
+.cmd { display: flex; align-items: flex-start; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px 8px 12px; max-width: 100%; }
+.cmd code { flex: 1; min-width: 0; font-size: .875rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
+.cmd .copy { flex: none; }
+.cmds { display: grid; gap: 8px; }
+
+/* walkthroughs */
+.walks { border-top: 1px solid var(--border); }
+.walk { border-bottom: 1px solid var(--border); }
+.walk > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 20px; padding: 16px 6px; align-items: center; }
+.walk > summary::-webkit-details-marker { display: none; }
+.walk > summary:hover { background: var(--surface); }
+.walk .wt { font-weight: 700; font-size: 1.125rem; }
+.walk .meta { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: var(--fs-small); color: var(--text-2); grid-column: 1; }
+.walk .meta b { color: var(--muted); font-weight: 500; margin-right: 4px; }
+.walk .open { grid-row: 1 / span 2; grid-column: 2; color: var(--accent); font-size: var(--fs-small); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.walk .open svg { width: 14px; height: 14px; transition: transform .15s; }
+.walk[open] .open svg { transform: rotate(180deg); }
+.walk[open] .open .o1, .walk:not([open]) .open .o2 { display: none; }
+.walk .body { padding: 0 6px 24px; display: grid; gap: 14px; max-width: 76ch; }
+.walk ol { margin: 0; padding-left: 1.3rem; display: grid; gap: 10px; }
+.walk ol li > .cmd { margin-top: 8px; }
+.needs { font-size: var(--fs-ui); color: var(--text); border-left: 3px solid var(--warn); background: var(--warn-bg); padding: 8px 12px; border-radius: 0 var(--radius) var(--radius) 0; }
+.aside { font-size: var(--fs-ui); color: var(--text-2); }
+
+/* screenshot: one crop per theme, the target ringed */
+.shot { margin: 0; display: grid; gap: 8px; }
+.shot .frame { position: relative; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); width: fit-content; max-width: min(100%, 760px); }
+.shot img { display: block; width: auto; max-width: 100%; height: auto; }
+.shot .sl { display: none; }
+.shot .ring { position: absolute; border: 2.5px solid var(--accent); border-radius: 7px; box-shadow: 0 0 0 4px var(--accent-bg); pointer-events: none; }
+.shot figcaption { font-size: var(--fs-small); color: var(--text-2); max-width: 760px; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .shot .sd { display: none; } :root:not([data-theme="dark"]) .shot .sl { display: block; } }
+:root[data-theme="light"] .shot .sd { display: none; }
+:root[data-theme="light"] .shot .sl { display: block; }
+
+/* tables */
+.tbl { border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: var(--fs-ui); }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+th { font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); background: var(--surface); font-weight: 700; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.who { font-weight: 700; white-space: nowrap; }
+td .na { color: var(--muted); }
+.cc { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px 1px 7px; cursor: pointer; color: var(--text); font-family: var(--mono); font-size: .84rem; line-height: 1.5; text-align: left; max-width: 100%; }
+.cc span { white-space: nowrap; }
+td code { white-space: nowrap; overflow-wrap: normal; }
+.cc svg { width: 12px; height: 12px; flex: none; color: var(--muted); }
+.cc:hover { border-color: var(--control-border); }
+.cc:hover svg { color: var(--text); }
+.section-lede { color: var(--text-2); font-size: var(--fs-ui); max-width: 72ch; }
+
+/* lab shortcuts */
+.labbox { border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: var(--warn-bg); border-radius: var(--radius); padding: 18px 20px; display: grid; gap: 10px; }
+.labbox h2 { font-size: var(--fs-h3); }
+.labbox ul { margin: 0; padding-left: 1.2rem; display: grid; gap: 6px; font-size: var(--fs-ui); }
+
+.lfoot { border-top: 1px solid var(--border); padding: 18px 24px 28px; font-size: var(--fs-small); color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center; }
+
+@media (max-width: 880px) {
+  .lintro { grid-template-columns: minmax(0, 1fr); }
+  h1 { font-size: 1.875rem; }
+}
+@media (max-width: 720px) {
+  .lhead { padding: 12px 16px; }
+  .lhead nav { margin-left: 0; order: 3; flex: 1 1 auto; gap: 4px 14px; }
+  .theme { order: 4; }
+  .theme .tl { display: none; }
+  .lwrap { padding: 24px 16px 48px; gap: 36px; }
+  .walk .open .o1, .walk .open .o2 { display: none !important; }
+}
+@media (min-width: 961px) {
+  td[data-label="Address"], td[data-label="User"], td[data-label="Password"] { white-space: nowrap; }
+}
+@media (max-width: 960px) {
+  /* Tables become one card per row, each cell labelled, so nothing scrolls sideways. */
+  .tbl { border: 0; border-radius: 0; overflow: visible; }
+  table, tbody, tr, td { display: block; width: 100%; }
+  thead { display: none; }
+  tr { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 0; margin-bottom: 10px; background: var(--bg); }
+  td { border: 0; padding: 4px 14px 4px calc(14px + 7.5rem); position: relative; overflow-wrap: anywhere; }
+  td::before { content: attr(data-label); position: absolute; left: 14px; top: 6px; width: 7rem; color: var(--muted); font-size: var(--fs-small); font-weight: 400; text-transform: uppercase; letter-spacing: .06em; }
+  td.who { white-space: normal; padding-left: 14px; font-size: 1.0625rem; }
+  td.who::before { content: none; }
+  .cc span, td code { white-space: normal; overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<header class="lhead">
+  <a class="brand" href="/"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path fill="#f6b63c" d="M7.4 5H24.6A1.4 1.4 0 0 1 26 6.4V15.2C26 22.1 21.7 26.9 16 29.1C10.3 26.9 6 22.1 6 15.2V6.4A1.4 1.4 0 0 1 7.4 5Z"/><path fill="#0b0d12" d="M16 6.9L18.4 12.9L24.4 15.3L18.4 17.7L16 23.7L13.6 17.7L7.6 15.3L13.6 12.9Z"/></svg>STRAZA</a>
+  <span class="env">Demo stack on this machine</span>
+  <nav aria-label="On this page"><a href="#walkthroughs">Walkthroughs</a><a href="#accounts">Accounts</a><a href="#services">Services</a><a href="/docs/">Docs</a></nav>
+  <button class="theme" type="button" id="theme"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 2a6 6 0 0 1 0 12Z" fill="currentColor"/></svg><span class="tl">Theme: </span><span id="theme-now">system</span></button>
+</header>
+
+<main class="lwrap">
+  <div class="lintro">
+    <div class="words">
+      <h1>Your demo stack is running</h1>
+      <p class="lead">Straza decides every tool call an AI agent makes. It allows the call, denies it with a reason, or holds it until a person says yes, and it records each decision in a hash-chained audit trail.</p>
+      <p class="t2">This stack runs Straza with midPoint as the identity manager, Keycloak for sign-in, three MCP servers, and sam, an AI agent that works on its own. midPoint created the people and agents you will meet and provisioned them into Straza over SCIM.</p>
+      <p class="t2">Start as alice in the console. Then pick a walkthrough below. The quickest is <a href="#deny">See an agent's rm -rf denied</a>: sam already tried <code>rm -rf</code> here, and Straza refused it.</p>
+      <div class="ready">
+        <p>On a first start the seeder may still be at work. Its log says <code>EVAL STACK READY</code> once the people, agents and roles are in place.</p>
+        <div class="cmd"><code>docker compose -p straza-eval logs -f eval-seed</code><button class="copy" type="button" data-copy="docker compose -p straza-eval logs -f eval-seed">Copy</button></div>
+      </div>
+    </div>
+    <section class="startbox" aria-labelledby="start-h">
+      <h2 id="start-h">Start in the console</h2>
+      <div class="creds">
+        <span class="k">Address</span><code>http://localhost:8420/console/</code><button class="copy" type="button" data-copy="http://localhost:8420/console/">Copy</button>
+        <span class="k">Sign in</span><span>Press <b>Sign in with a code</b>, then <b>Open the sign-in page</b></span><span></span>
+        <span class="k">User</span><code>alice</code><button class="copy" type="button" data-copy="alice">Copy</button>
+        <span class="k">Password</span><code>alice</code><button class="copy" type="button" data-copy="alice">Copy</button>
+      </div>
+      <a class="btn" href="http://localhost:8420/console/">Open the console →</a>
+      <p class="note">Use <code>localhost</code>, not 127.0.0.1. Keycloak ties its sign-in cookie to that name.</p>
+    </section>
+  </div>
+
+  <section id="walkthroughs" aria-labelledby="walk-h">
+    <h2 id="walk-h">Walkthroughs</h2>
+    <p class="section-lede">Each one says who you act as, what it needs and what you will see. Open one for its steps.</p>
+    <div class="walks">
+
+      <details class="walk" id="look-around">
+        <summary><span class="wt">Look around as alice</span><span class="meta"><span><b>You act as</b>alice, the admin</span><span><b>Needs</b>only this stack</span><span><b>You see</b>health, activity and audit records checked in your browser</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <ol>
+            <li>Sign in to the console as alice.</li>
+            <li>Open Overview. It shows the deployment's health and recent activity, and it re-hashes up to 25 of the latest audit records in your browser to check the chain.</li>
+            <li>Open Users, MCP servers and Audit.</li>
+          </ol>
+          <p class="aside">midPoint made alice an admin through the business role BR:Straza-admin-access, an assignment an access review can certify. She also sponsors joe and sam, so their held calls come to her.</p>
+        </div>
+      </details>
+
+      <details class="walk" id="role-access">
+        <summary><span class="wt">Give a role access to demo-tools</span><span class="meta"><span><b>You act as</b>alice</span><span><b>Needs</b>only this stack</span><span><b>You see</b>a new role that reaches the tools you ticked</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <ol>
+            <li>In the console open Roles, press New role and pick Application role.</li>
+            <li>Pick the server demo-tools and type the rest of the name after its <code>demo-tools-</code> prefix. The console shows the name the role will have here and in midPoint.</li>
+            <li>Press Next, tick <code>echo</code> and <code>get-sum</code>, press Next again, then Save and publish.</li>
+          </ol>
+          <figure class="shot">
+            <div class="frame"><img class="sd" src="shots/new-role-1-dark.png" width="960" height="620" alt="Step 1 of New role: Application role picked, the server demo-tools picked, and the name demo-tools-docs-example marked available" loading="lazy"><img class="sl" src="shots/new-role-1-light.png" width="960" height="620" alt="Step 1 of New role: Application role picked, the server demo-tools picked, and the name demo-tools-docs-example marked available" loading="lazy"><span class="ring" style="left:1.88%;top:53.06%;width:24.27%;height:8.06%"></span></div>
+            <figcaption>Step 1 of New role on this stack, with the server demo-tools picked. Every new application role belongs to the one server it reaches.</figcaption>
+          </figure>
+          <p class="aside">Those tools now run for whoever holds the role, unless a policy gates them. The guide is <a href="/docs/guides/serve-mcp-apps/catalogs-per-role/">Access per role</a>.</p>
+          <p class="aside">From a terminal with strazactl instead, sign in, then create the role:</p>
+          <div class="cmds">
+            <div class="cmd"><code>strazactl login --server http://localhost:8420</code><button class="copy" type="button" data-copy="strazactl login --server http://localhost:8420">Copy</button></div>
+            <div class="cmd"><code>strazactl roles create demo-tools-sandbox-readers --app demo-tools --tools echo,get-sum</code><button class="copy" type="button" data-copy="strazactl roles create demo-tools-sandbox-readers --app demo-tools --tools echo,get-sum">Copy</button></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="walk" id="deny">
+        <summary><span class="wt">See an agent's rm -rf denied</span><span class="meta"><span><b>You act as</b>alice</span><span><b>Needs</b>only this stack</span><span><b>You see</b>sam's denied command and the reason Straza gave</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <ol>
+            <li>In the console open Policies, then agent-guardrails. Its rule <code>no-rm-rf</code> denies <code>rm -rf</code> and two other destructive commands, each with a reason.</li>
+            <li>Open Audit and set the effect filter to deny. sam ran <code>rm -rf /tmp/probe</code> when it started, to prove the rule holds. Its record carries the reason <code>Straza: destructive command denied by the agent guardrails</code>.</li>
+            <li>To write a deny of your own, follow <a href="/docs/guides/write-policy/first-deny/">Your first deny</a>. It needs a role, a person who holds it and a machine enrolled as that person.</li>
+          </ol>
+        </div>
+      </details>
+
+      <details class="walk" id="kill-switch">
+        <summary><span class="wt">Pull the kill switch from midPoint</span><span class="meta"><span><b>You act as</b>the midPoint administrator</span><span><b>Needs</b>up to 10 minutes of waiting</span><span><b>You see</b>sam's container turn unhealthy</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <ol>
+            <li>Sign in to midPoint at <a href="http://localhost:8087/midpoint">localhost:8087/midpoint</a> as <code>administrator</code> with the password <code>StrazaEval5ecr3t!</code>.</li>
+            <li>Open Users, then sam-sre-agent, and disable it.</li>
+            <li>sam makes a governed call every 10 minutes. Straza refuses the first one after the disable, and seconds later this command shows sam's container as unhealthy:
+              <div class="cmd"><code>docker compose -p straza-eval ps agent-sam</code><button class="copy" type="button" data-copy="docker compose -p straza-eval ps agent-sam">Copy</button></div></li>
+            <li>Enable sam again. It enrolls again on its own, and its old sessions stay revoked.</li>
+          </ol>
+          <p class="aside">sam's log names each refused call:</p>
+          <div class="cmd"><code>docker compose -p straza-eval logs -f agent-sam</code><button class="copy" type="button" data-copy="docker compose -p straza-eval logs -f agent-sam">Copy</button></div>
+          <p class="aside">One change in the identity manager stops a working agent everywhere. The guide is <a href="/docs/guides/operate/kill-switch-runbook/">Kill-switch runbook</a>.</p>
+        </div>
+      </details>
+
+      <details class="walk" id="ticket">
+        <summary><span class="wt">Decide an agent's deploy ticket</span><span class="meta"><span><b>You act as</b>alice or ivan</span><span><b>Needs</b>only this stack</span><span><b>You see</b>a refused deploy, your approval, then one run</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <ol>
+            <li>Have sam try a deploy:
+              <div class="cmd"><code>docker exec straza-sam sh /opt/sam/raise-ticket.sh</code><button class="copy" type="button" data-copy="docker exec straza-sam sh /opt/sam/raise-ticket.sh">Copy</button></div>
+              The deploy does not run. A ticket waits for sam's sponsor, alice, and for the holders of sec-approvers, alice and ivan. Whoever answers first decides.</li>
+            <li>As alice, open Approvals in the console and approve the request. ivan can approve it on the self-service page instead, once he signs in and enables his browser under This browser.</li>
+            <li>Run the command again within the hour. The deploy runs once, and the run after it raises a new ticket.</li>
+          </ol>
+          <p class="aside">sam works on its own, so it can never approve its own request. The guide is <a href="/docs/guides/write-policy/tickets/">Tickets</a>.</p>
+        </div>
+      </details>
+
+      <details class="walk" id="hold">
+        <summary><span class="wt">Hold an agent's call for a person</span><span class="meta"><span><b>You act as</b>alice, deciding</span><span><b>Needs</b>the demo overlay, built from a private repository</span><span><b>You see</b>a held call, your decision, then the retry run</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <p class="needs">This needs joe, who runs in the straza-harness container of the demo overlay, <code>compose.demo.yaml</code>. That overlay also builds the chat demo from the straza-agents-demo repository, which is not public.</p>
+          <ol>
+            <li>Ask joe to add 2 and 3 with demo-tools. Straza holds the call to <code>get-sum</code> for up to 2 minutes.</li>
+            <li>The hold goes to joe's sponsor, alice. Decide it in the console under Approvals, or on her phone or enabled browser.</li>
+            <li>joe's retry with the same numbers runs. A different sum is a new hold.</li>
+          </ol>
+          <p class="aside">Without the demo overlay, <a href="#ticket">Decide an agent's deploy ticket</a> gives you a request of sam's to decide on this stack. The guide is <a href="/docs/guides/write-policy/hold-for-a-human/">Hold a call for a person</a>.</p>
+        </div>
+      </details>
+
+      <details class="walk" id="delegate">
+        <summary><span class="wt">Delegate one server</span><span class="meta"><span><b>You act as</b>carol, then dave</span><span><b>Needs</b>a private browser window</span><span><b>You see</b>an admin who runs one server and nothing else</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <p class="needs">Open the console in a private browser window for each person, so Keycloak asks for their password instead of reusing alice's sign-in.</p>
+          <ol>
+            <li>Sign in to the console as carol. midPoint gave her the admin role of demo-tools and nothing more.</li>
+            <li>Open MCP servers. The list holds demo-tools alone, and carol may change it. Removing it stays with a global admin.</li>
+            <li>Sign in as dave, who administers every MCP server, and compare.</li>
+          </ol>
+          <p class="aside">The guide is <a href="/docs/guides/operate/delegate-one-server/">Delegate one MCP server</a>.</p>
+        </div>
+      </details>
+
+      <details class="walk" id="nina">
+        <summary><span class="wt">Watch an AI agent arrive from midPoint</span><span class="meta"><span><b>You act as</b>the midPoint administrator</span><span><b>Needs</b>only this stack</span><span><b>You see</b>nina appear in Straza with her role</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <ol>
+            <li>In midPoint, open Users, then nina-data-analyst-agent.</li>
+            <li>Assign her the role BR:Straza-analyst-access and save.</li>
+            <li>In the Straza console, open Users. nina-data-analyst-agent is there with the analyst role, which composes demo-tools-readers and midpoint-self-service.</li>
+          </ol>
+          <p class="aside">nina gets no Keycloak login, because the access package gives one to people only. The guide is <a href="/docs/guides/connect-identity/nhi-provisioning/">AI agents as identities</a>.</p>
+        </div>
+      </details>
+
+      <details class="walk" id="midpoint-request">
+        <summary><span class="wt">Ask midPoint for a role through an agent</span><span class="meta"><span><b>You act as</b>alice</span><span><b>Needs</b>an MCP client signed in as alice</span><span><b>You see</b>your request held until you confirm it</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <p class="needs">This needs an MCP client connected to Straza's gateway as alice, as <a href="/docs/guides/govern-an-agent/any-mcp-client/">Any MCP client</a> shows, and a phone or browser enrolled to alice.</p>
+          <ol>
+            <li>On the self-service page, open Credentials and press Sign in with keycloak on the midpoint row. midPoint's tools then run as you.</li>
+            <li>Ask your agent to call midPoint's <code>whoami</code>. It answers as alice.</li>
+            <li>Ask it to list the requestable roles and request BR:Straza-developer-access. Straza holds the request until you confirm it on your own phone or enabled browser.</li>
+            <li>Open Audit. The request and your decision are both there.</li>
+          </ol>
+          <p class="aside">The guide is <a href="/docs/guides/connect-identity/midpoint/">midPoint</a>.</p>
+        </div>
+      </details>
+
+      <details class="walk" id="phone">
+        <summary><span class="wt">Pair a real phone</span><span class="meta"><span><b>You act as</b>alice</span><span><b>Needs</b>the stack started with up.sh</span><span><b>You see</b>the next request arrive on the phone</span></span><span class="open"><span class="o1">Show steps</span><span class="o2">Hide steps</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span></summary>
+        <div class="body">
+          <p class="needs">Start the stack with <code>up.sh</code>, or <code>up.ps1</code> on Windows, so the QR code carries an address your phone can reach on port 8443.</p>
+          <ol>
+            <li>Install the Straza Approver app from the <a href="https://apps.apple.com/app/straza-approver/id6798735074">App Store</a> or <a href="https://play.google.com/store/apps/details?id=ai.straza.approver">Google Play</a>.</li>
+            <li>Open <a href="http://localhost:8420/self-service/">self-service</a> as alice, open the This browser tab and press Add a phone. alice already holds the role that lets a person add their own phone, so nobody needs to assign it.</li>
+            <li>Scan the QR code with the app.</li>
+            <li>Straza sends alice's next request to the phone as a notification. Tap it to decide.</li>
+          </ol>
+          <p class="aside">An admin can add a phone for any person in the console, under Approvals, then Approver devices. The guide is <a href="/docs/guides/approve/phone/">Approve on a phone</a>.</p>
+        </div>
+      </details>
+
+    </div>
+  </section>
+
+  <section id="accounts" aria-labelledby="acc-h">
+    <h2 id="acc-h">Accounts</h2>
+    <p class="section-lede">These are lab accounts. Their passwords are committed to the repository.</p>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Who</th><th>Their part in the story</th><th>Signs in at</th><th>User</th><th>Password</th></tr></thead>
+        <tbody>
+          <tr><td class="who" data-label="Who">alice</td><td data-label="Part">An admin, made one by midPoint. She sponsors joe and sam, so their held calls come to her.</td><td data-label="Signs in at">Console, self-service</td><td data-label="User"><span><button class="cc" type="button" data-copy="alice"><span>alice</span><span class="vh">Copy</span></button></span></td><td data-label="Password"><span><button class="cc" type="button" data-copy="alice"><span>alice</span><span class="vh">Copy</span></button></span></td></tr>
+          <tr><td class="who" data-label="Who">ivan</td><td data-label="Part">Decides approvals through the sec-approvers role. He reaches no MCP tools.</td><td data-label="Signs in at">Self-service</td><td data-label="User"><span><button class="cc" type="button" data-copy="ivan"><span>ivan</span><span class="vh">Copy</span></button></span></td><td data-label="Password"><span><button class="cc" type="button" data-copy="Ev4l-St4ck!26"><span>Ev4l-St4ck!26</span><span class="vh">Copy</span></button></span></td></tr>
+          <tr><td class="who" data-label="Who">carol</td><td data-label="Part">Administers the demo-tools server and nothing else.</td><td data-label="Signs in at">Console</td><td data-label="User"><span><button class="cc" type="button" data-copy="carol"><span>carol</span><span class="vh">Copy</span></button></span></td><td data-label="Password"><span><button class="cc" type="button" data-copy="Ev4l-St4ck!26"><span>Ev4l-St4ck!26</span><span class="vh">Copy</span></button></span></td></tr>
+          <tr><td class="who" data-label="Who">dave</td><td data-label="Part">Administers every MCP server.</td><td data-label="Signs in at">Console</td><td data-label="User"><span><button class="cc" type="button" data-copy="dave"><span>dave</span><span class="vh">Copy</span></button></span></td><td data-label="Password"><span><button class="cc" type="button" data-copy="Ev4l-St4ck!26"><span>Ev4l-St4ck!26</span><span class="vh">Copy</span></button></span></td></tr>
+          <tr><td class="who" data-label="Who">grace</td><td data-label="Part">An employee who exists only in midPoint. She holds no role, so Straza has no account for her.</td><td data-label="Signs in at"><span class="na">Nowhere in this demo</span></td><td data-label="User"><code>grace</code></td><td data-label="Password"><span class="na">not used</span></td></tr>
+          <tr><td class="who" data-label="Who">sam</td><td data-label="Part">An SRE agent that runs all the time on its own, sponsored by alice.</td><td data-label="Signs in at"><span class="na">No sign-in. It uses its own key.</span></td><td data-label="User"><code>sam-sre-agent</code></td><td data-label="Password"><span class="na">none</span></td></tr>
+          <tr><td class="who" data-label="Who">joe</td><td data-label="Part">A supervised Java developer agent, sponsored by alice. Runs only with the demo overlay.</td><td data-label="Signs in at">Chat demo</td><td data-label="User"><span><button class="cc" type="button" data-copy="joe-java-developer-agent"><span>joe-java-developer-agent</span><span class="vh">Copy</span></button></span></td><td data-label="Password"><span><button class="cc" type="button" data-copy="Ev4l-St4ck!26"><span>Ev4l-St4ck!26</span><span class="vh">Copy</span></button></span></td></tr>
+          <tr><td class="who" data-label="Who">nina</td><td data-label="Part">An analyst agent that reaches Straza only after midPoint assigns her the analyst role.</td><td data-label="Signs in at"><span class="na">No sign-in</span></td><td data-label="User"><code>nina-data-analyst-agent</code></td><td data-label="Password"><span class="na">none</span></td></tr>
+          <tr><td class="who" data-label="Who">midPoint admin</td><td data-label="Part">Runs the identity manager.</td><td data-label="Signs in at">midPoint</td><td data-label="User"><span><button class="cc" type="button" data-copy="administrator"><span>administrator</span><span class="vh">Copy</span></button></span></td><td data-label="Password"><span><button class="cc" type="button" data-copy="StrazaEval5ecr3t!"><span>StrazaEval5ecr3t!</span><span class="vh">Copy</span></button></span></td></tr>
+          <tr><td class="who" data-label="Who">Keycloak admin</td><td data-label="Part">Runs Keycloak, whose realm <code>straza</code> signs everyone in.</td><td data-label="Signs in at">Keycloak</td><td data-label="User"><span><button class="cc" type="button" data-copy="admin"><span>admin</span><span class="vh">Copy</span></button></span></td><td data-label="Password"><span><button class="cc" type="button" data-copy="admin"><span>admin</span><span class="vh">Copy</span></button></span></td></tr>
+          <tr><td class="who" data-label="Who">Kibana</td><td data-label="Part">Reads the audit events. Needs the SIEM overlay.</td><td data-label="Signs in at">Kibana</td><td data-label="User"><span><button class="cc" type="button" data-copy="elastic"><span>elastic</span><span class="vh">Copy</span></button></span></td><td data-label="Password"><span><button class="cc" type="button" data-copy="strazasiem"><span>strazasiem</span><span class="vh">Copy</span></button></span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="services" aria-labelledby="svc-h">
+    <h2 id="svc-h">Services</h2>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Service</th><th>Address</th><th>What it is</th><th>Runs with</th></tr></thead>
+        <tbody>
+          <tr><td class="who" data-label="Service">Straza console</td><td data-label="Address"><a href="http://localhost:8420/console/">localhost:8420/console/</a></td><td data-label="What it is">Users, roles, MCP servers, policies, approvals and audit</td><td data-label="Runs with">always</td></tr>
+          <tr><td class="who" data-label="Service">Self-service</td><td data-label="Address"><a href="http://localhost:8420/self-service/">localhost:8420/self-service/</a></td><td data-label="What it is">Your approval requests, server credentials and approval devices</td><td data-label="Runs with">always</td></tr>
+          <tr><td class="who" data-label="Service">Docs</td><td data-label="Address"><a href="/docs/">localhost:8400/docs/</a></td><td data-label="What it is">The Straza documentation, built from this checkout when the stack starts</td><td data-label="Runs with">always</td></tr>
+          <tr><td class="who" data-label="Service">midPoint</td><td data-label="Address"><a href="http://localhost:8087/midpoint">localhost:8087/midpoint</a></td><td data-label="What it is">The identity manager</td><td data-label="Runs with">always</td></tr>
+          <tr><td class="who" data-label="Service">Keycloak</td><td data-label="Address"><a href="http://localhost:8480/">localhost:8480</a></td><td data-label="What it is">The sign-in provider</td><td data-label="Runs with">always</td></tr>
+          <tr><td class="who" data-label="Service">Phone approver</td><td data-label="Address"><code>https://&lt;your address&gt;:8443</code></td><td data-label="What it is">Where a paired phone decides. The QR code carries the address and the certificate pin.</td><td data-label="Runs with">always</td></tr>
+          <tr><td class="who" data-label="Service">Kibana, Elasticsearch</td><td data-label="Address"><span><a href="http://localhost:5601/">localhost:5601</a>, <code>127.0.0.1:9200</code></span></td><td data-label="What it is">Search and alerts over the audit events</td><td data-label="Runs with">the SIEM overlay, <code>compose.siem.yaml</code></td></tr>
+          <tr><td class="who" data-label="Service">Chat demo</td><td data-label="Address"><a href="http://localhost:8477/">localhost:8477</a></td><td data-label="What it is">joe's chat window</td><td data-label="Runs with">the demo overlay, <code>compose.demo.yaml</code>, which builds from a private repository</td></tr>
+          <tr><td class="who" data-label="Service">demo-tools, views-demo, midPoint MCP</td><td data-label="Address"><span class="na">no address</span></td><td data-label="What it is">MCP servers, reached only through Straza's gateway. midPoint's tools run as the person signed in.</td><td data-label="Runs with">always</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-lede">An overlay is an extra compose file you start together with the stack. <a href="/docs/get-started/enterprise-demo-stack/">The demo stack</a> page shows the commands, and how to reach a stack on another machine over SSH.</p>
+  </section>
+
+  <section class="labbox" id="lab" aria-labelledby="lab-h">
+    <h2 id="lab-h">Lab shortcuts in this stack</h2>
+    <p class="t2">These make the demo quick. None of them is how you run Straza for real.</p>
+    <ul>
+      <li>Every password on this page is committed to the repository. So are the Postgres logins <code>straza</code> and <code>midpoint</code>, each with its own name as the password, the midPoint service account, the seed-bootstrap account the seeder disables when it is done, the Keycloak client secret, the Kibana system password and the three Kibana encryption keys.</li>
+      <li>Plain HTTP everywhere except the phone approver on port 8443, whose certificate strazad makes itself. <a href="/docs/guides/operate/tls-and-exposure/">TLS and exposure</a> covers a real deployment.</li>
+      <li>The ports 8400, 8420, 8443, 8480 and 8087 listen on every interface, and Docker's rules run before a host firewall. The loopback overlay, <code>compose.loopback.yaml</code>, keeps them on this machine.</li>
+      <li>Attestation is relaxed, so any install of the client gets a session.</li>
+      <li>Keycloak lets the seeder and the chat demo sign in with a password, and midPoint's Keycloak connector signs in as Keycloak's master admin.</li>
+      <li>The push relay is on, and ntfy.sh and the browser push services are allowed as push targets. A push carries a reference to the request, never its content.</li>
+    </ul>
+    <p class="t2 small">A production layout is on <a href="/docs/guides/operate/enterprise-shape/">The enterprise shape</a>.</p>
+  </section>
+</main>
+
+<footer class="lfoot">
+  <span>Straza demo stack</span>
+  <a href="/docs/">Documentation</a>
+  <a href="/docs/get-started/enterprise-demo-stack/">The demo stack</a>
+  <a href="/docs/guides/audit/sinks-and-siem/">Sinks and SIEM</a>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var COPY_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 10.5V3.5A1 1 0 0 1 4 2.5h6.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
+  var cells = document.querySelectorAll(".cc");
+  for (var i = 0; i < cells.length; i++) { cells[i].insertAdjacentHTML("beforeend", COPY_ICON); cells[i].title = "Copy"; }
+
+  // Copy puts data-copy on the clipboard, which always equals the text shown.
+  // The clipboard API needs a secure context, so a page opened over a LAN
+  // address falls back to a selected text area.
+  function fallbackCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+  function flash(btn, ok) {
+    var label = btn.classList.contains("copy");
+    if (label) { btn.dataset.label = btn.dataset.label || btn.textContent; btn.textContent = ok ? "Copied" : "Select it"; }
+    btn.classList.add("done");
+    clearTimeout(btn._t);
+    btn._t = setTimeout(function () { btn.classList.remove("done"); if (label) btn.textContent = btn.dataset.label; }, 1200);
+  }
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest("[data-copy]") : null;
+    if (!btn) return;
+    var text = btn.getAttribute("data-copy");
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { flash(btn, true); }, function () { flash(btn, fallbackCopy(text)); });
+    } else {
+      flash(btn, fallbackCopy(text));
+    }
+  });
+
+  // Theme: system until the reader picks one. The key is the docs' own, so a
+  // choice made here holds on /docs/ and back.
+  var root = document.documentElement, KEY = "straza-theme", btn = document.getElementById("theme");
+  var ORDER = ["system", "light", "dark"];
+  function current() { return root.getAttribute("data-theme") || "system"; }
+  function show() { document.getElementById("theme-now").textContent = current(); btn.setAttribute("aria-label", "Color theme: " + current() + ". Press to change."); }
+  btn.addEventListener("click", function () {
+    var next = ORDER[(ORDER.indexOf(current()) + 1) % ORDER.length];
+    if (next === "system") { root.removeAttribute("data-theme"); try { localStorage.removeItem(KEY); } catch (e) {} }
+    else { root.setAttribute("data-theme", next); try { localStorage.setItem(KEY, next); } catch (e) {} }
+    show();
+  });
+  show();
+
+  // A link to #<walkthrough> opens it.
+  function openFromHash() {
+    var id = location.hash.slice(1);
+    var el = id && document.getElementById(id);
+    if (el && el.tagName === "DETAILS") el.open = true;
+  }
+  window.addEventListener("hashchange", openFromHash);
+  openFromHash();
+})();
+</script>
+</body>
+</html>

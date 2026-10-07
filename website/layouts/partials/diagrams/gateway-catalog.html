@@ -1,0 +1,15 @@
+<svg class="dg" viewBox="0 0 900 330" role="img" aria-labelledby="dg-gateway-catalog-t" data-say='["How the gateway decides which tools a session sees. Press a step to follow it.", "1. Three lists go in: the tools the server lists now, the manifest&#39;s exposure, and the access rows of the session&#39;s roles.", "2. Only a tool in all three becomes a candidate.", "3. Policy runs for the session. A tool a rule denies is hidden. A tool that needs a person stays and asks for a reason.", "4. What is left is the tools list the agent sees. A hidden tool and an unknown tool give the same error.", "5. When the agent calls a tool, the gateway adds the stored credential. The agent never sees it."]'>
+<title id="dg-gateway-catalog-t">The server's tools, the manifest's exposure and the role's access rows meet. Tools in all three are candidates. Policy hides denied tools. What is left is the tools list. At call time the gateway adds the credential, which the agent never sees.</title>
+<defs><marker id="ah-gateway-catalog" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0 0 10 5 0 10z"/></marker></defs>
+<g data-s="1"><rect class="box" x="10" y="10" width="230" height="62" rx="6"/><text class="t" x="26" y="36">The server's tools</text><text class="s" x="26" y="58">what it lists now</text><rect class="box" x="10" y="86" width="230" height="62" rx="6"/><text class="t" x="26" y="112">Its exposure</text><text class="s" x="26" y="134">the manifest's upper bound</text><rect class="box" x="10" y="162" width="230" height="62" rx="6"/><text class="t" x="26" y="188">The role's access row</text><text class="s" x="26" y="210">tools the role may reach</text></g>
+<g data-s="2"><rect class="box" x="300" y="86" width="170" height="62" rx="6"/><text class="t" x="316" y="112">Candidates</text><text class="s" x="316" y="134">tools in all three</text></g>
+<g data-s="3"><rect class="box" x="530" y="76" width="170" height="82" rx="6"/><text class="t" x="546" y="104">Policy</text><text class="s" x="546" y="126">hides denied tools,</text><text class="s" x="546" y="146">marks gated ones</text></g>
+<g data-s="4"><rect class="box okbg ok" x="760" y="86" width="130" height="62" rx="6"/><text class="t" x="776" y="112">Tools list</text><text class="s" x="776" y="134">what it sees</text></g>
+<path class="ln" d="M242 41 L295 104" marker-end="url(#ah-gateway-catalog)"/>
+<path class="ln" d="M242 117 H295" marker-end="url(#ah-gateway-catalog)"/>
+<path class="ln" d="M242 193 L295 130" marker-end="url(#ah-gateway-catalog)"/>
+<path class="ln" d="M472 117 H525" marker-end="url(#ah-gateway-catalog)"/>
+<path class="ln" d="M702 117 H755" marker-end="url(#ah-gateway-catalog)"/>
+<g data-s="5"><rect class="box soft" x="300" y="256" width="590" height="56" rx="6"/><text class="t" x="318" y="282">At call time the gateway adds the stored credential.</text><text class="s" x="318" y="302">The agent never sees it.</text></g>
+<path class="ln dash" d="M825 150 V251" marker-end="url(#ah-gateway-catalog)"/>
+</svg>

@@ -1,0 +1,13 @@
+{
+  "specversion": "1.0",
+  "id": "0197fa3e-aa01-7c22-a9d4-1b2c3d4e5f99",
+  "type": "straza.audit.identity",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-07-28T14:12:03Z",
+  "data": {
+    "action": "user.lift.blocked",
+    "user": "0197fa3d-3333-7abc-9def-000000000003",
+    "origin": "scim",
+    "heldBy": ["admin"]
+  }
+}

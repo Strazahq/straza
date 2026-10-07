@@ -1,0 +1,26 @@
+{{- /* The search index site.js loads on the first focus of the search box.
+One entry per page plus one per h2 and h3: p page path from the site root,
+pt page title, a heading id, t heading text, k keywords and description.
+The generated CLI pages repeat the same section headings on every command,
+so those headings are not indexed there: a hit on Options would list 118
+pages that all say the same thing. The body text leaves out inline SVG,
+whose box labels would run together into nonsense words, so a diagram is
+found by its caption. */ -}}
+{{- $generic := slice "Options" "Options inherited from parent commands" "See also" "Synopsis" -}}
+{{- $entries := slice -}}
+{{- range site.Pages -}}
+  {{- $p := strings.TrimPrefix site.Home.RelPermalink .RelPermalink -}}
+  {{- $pt := .Title -}}
+  {{- $kw := "" -}}
+  {{- with .Keywords }}{{ $kw = delimit . " " }}{{ end -}}
+  {{- $k := printf "%s %s" $kw .Description | lower | strings.TrimSpace -}}
+  {{- $body := .Content | replaceRE `(?s)<svg\b.*?</svg>` " " | plainify | htmlUnescape | replaceRE `\s+` " " | strings.TrimSpace -}}
+  {{- $entries = $entries | append (dict "p" $p "pt" $pt "a" "" "t" $pt "k" $k "b" $body) -}}
+  {{- $cli := strings.HasPrefix $p "reference/cli/" -}}
+  {{- range $id, $h := .Fragments.HeadingsMap -}}
+    {{- if and (or (eq $h.Level 2) (eq $h.Level 3)) (not (and $cli (in $generic $h.Title))) -}}
+      {{- $entries = $entries | append (dict "p" $p "pt" $pt "a" $h.ID "t" ($h.Title | plainify | htmlUnescape) "k" $k) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{ $entries | jsonify }}

@@ -1,0 +1,350 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kill switch · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+.controls .cap{font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;
+  padding:0 4px 0 6px;font-weight:600}
+.legend{display:flex;gap:var(--s3);align-items:center;font-size:11px;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:5px 10px}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.legend .ok{background:var(--ok-bg);border:1px solid var(--ok)}
+.legend .warn{background:var(--warn-bg);border:1px solid var(--warn)}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 11px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);
+  color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.ctl.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+button.ctl.primary[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);
+  color:var(--on-accent);box-shadow:none}
+button.ctl.deny[aria-pressed="true"]{background:var(--danger-bg);border-color:var(--danger);
+  color:var(--danger);box-shadow:inset 0 0 0 1px var(--danger)}
+button.ctl.kill{color:var(--danger);border-color:var(--danger);background:var(--danger-bg)}
+button.ctl.kill:hover{background:var(--danger-bg);border-color:var(--danger);
+  box-shadow:inset 0 0 0 1px var(--danger)}
+button.ctl:disabled{opacity:.4;cursor:default}
+button.ctl:disabled:hover{background:transparent;border-color:transparent}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:78px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:80ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:15px;font-weight:600}
+.s{font-size:12.5px;font-weight:600}
+.d{font-size:11px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+.mono{font-family:var(--font-mono);font-size:10.5px;fill:var(--muted)}
+.box{fill:var(--surface);stroke:var(--border);stroke-width:1.25}
+.chip{fill:var(--surface-2);stroke:var(--border);stroke-width:1.25}
+.box,.chip{transition:stroke .2s,stroke-width .2s,fill .25s,filter .2s,opacity .25s}
+.edge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ar)}
+.edge.async{stroke-dasharray:5 4}
+.edge.plain{marker-end:none}
+.mk{fill:var(--muted)}.mkA{fill:var(--accent)}.mkG{fill:var(--ok)}.mkR{fill:var(--danger)}
+ 
+.node{cursor:pointer;outline:none}
+.node:hover .box,.node:focus .box,.node.hl .box,.node.sel .box,
+.node:hover .chip,.node:focus .chip{stroke:var(--accent);stroke-width:2;
+  fill:var(--accent-bg);filter:drop-shadow(0 0 5px var(--accent))}
+.node.cont .box,.node .cbox{fill:var(--bg)}
+.node.cont:hover .box,.node.cont:focus .box,.node.cont.hl .box,
+.node:hover .cbox,.node:focus .cbox{fill:var(--bg);stroke:var(--accent);
+  stroke-width:2;filter:drop-shadow(0 0 5px var(--accent))}
+
+ 
+.dead .box,.dead .chip{stroke:var(--danger);stroke-width:2;fill:var(--danger-bg)}
+.pulse{fill:var(--danger);filter:drop-shadow(0 0 3px var(--danger))}
+.tlabel{font-size:11px;font-weight:700;fill:var(--danger);opacity:0;transition:opacity .3s}
+.tlabel.show{opacity:1}
+#trace{opacity:.55;transition:opacity .3s}
+#trace.on{opacity:1}
+#trace.on .chip{stroke:var(--accent);stroke-width:1.6;fill:var(--accent-bg)}
+.lf{display:inline}.ls{display:none}
+@media (max-width:600px){.lf{display:none}.ls{display:inline}}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ kill switch</span></h1>
+  <div class="controls">
+    <button class="ctl kill" id="btnKill">disable user</button>
+    <button class="ctl" id="btnReset">reset</button>
+  </div>
+</header>
+
+<div class="stage">
+<svg id="dia" viewBox="0 0 960 500" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
+<title id="svgT">Kill-switch propagation race</title>
+<desc id="svgD">Disabling a user in the identity system sends a SCIM deactivate to strazad, which writes a revocation, updates the denylist, revokes sessions, and fans the event out: a push relayed over each daemon's SSE stream reaches connected daemons in under two seconds, JetStream replay converges every gateway pod, and without a daemon the 300-second token TTL bounds the session's death. The kill itself is hash-chained.</desc>
+<defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
+</defs>
+
+
+<g class="node" id="n1" tabindex="0" aria-label="Identity system disables the user">
+  <rect class="box" x="20" y="56" width="170" height="60" rx="6"/>
+  <text class="s" x="30" y="78">midPoint / IdM</text>
+  <text class="d" x="30" y="94">user disabled</text>
+</g>
+<path id="e1" class="edge" d="M190 86 L260 86"/>
+<text class="elbl d" x="225" y="78" text-anchor="middle">SCIM</text>
+<g class="node" id="n2" tabindex="0" aria-label="strazad SCIM server receives the deactivation">
+  <rect class="box" x="260" y="56" width="180" height="60" rx="6"/>
+  <text class="s" x="270" y="78">strazad SCIM</text>
+  <text class="mono" x="270" y="94">active:false &#183; DELETE</text>
+</g>
+<path id="e2" class="edge" d="M440 86 L500 86"/>
+<g class="node" id="n3" tabindex="0" aria-label="revokeUserCtx: revocation row, denylist, sessions revoked">
+  <rect class="box" x="500" y="50" width="200" height="72" rx="6"/>
+  <text class="s" x="510" y="70">revokeUserCtx</text>
+  <text class="d" x="510" y="86">revocation row &#183; denylist</text>
+  <text class="d" x="510" y="100">session rows revoked</text>
+</g>
+<path id="e3" class="edge async" d="M700 86 L740 86"/>
+<g class="node" id="trace" tabindex="0" aria-label="The kill is recorded in the hash-chained audit log">
+  <rect class="chip" x="740" y="60" width="204" height="52" rx="5"/>
+  <text class="mono" x="750" y="80" style="fill:var(--text)">straza.audit.identity</text>
+  <text class="d" x="750" y="96">user.killed &#8594; hash chain</text>
+</g>
+
+
+<path class="edge plain" d="M600 122 V146 H225 V392"/>
+<path class="edge" d="M225 212 H250"/>
+<path class="edge" d="M225 302 H250"/>
+<path class="edge" d="M225 392 H250"/>
+
+
+<g class="node" id="la" tabindex="0" aria-label="Push lane: strazad publishes, the daemon's SSE stream relays, under two seconds">
+  <rect class="chip" x="250" y="190" width="220" height="44" rx="5"/>
+  <text class="s" x="260" y="208" style="font-size:11.5px">push relay: NATS &#8594; SSE</text>
+  <text class="mono" x="260" y="224">straza.push.user.&lt;id&gt;</text>
+</g>
+<path id="pa" class="edge plain" d="M470 212 L710 212"/>
+<text id="ta" class="tlabel" x="590" y="202" text-anchor="middle">p99 &lt; 2 s</text>
+<g class="node laneEnd" id="ea" tabindex="0" aria-label="straza daemon drops session state on the SSE revocation event">
+  <rect class="box" x="710" y="186" width="234" height="52" rx="6"/>
+  <text class="s" x="720" y="206">straza daemon</text>
+  <text class="d" x="720" y="222">SSE /v1/push &#183; state dropped</text>
+</g>
+
+
+<g class="node" id="lb" tabindex="0" aria-label="JetStream replay converges every gateway pod">
+  <rect class="chip" x="250" y="280" width="220" height="44" rx="5"/>
+  <text class="s" x="260" y="298" style="font-size:11.5px">JetStream replay</text>
+  <text class="mono" x="260" y="314">straza.revocation.user</text>
+</g>
+<path id="pb" class="edge plain" d="M470 302 L710 302"/>
+<text id="tb" class="tlabel" x="590" y="292" text-anchor="middle">every pod</text>
+<g class="node laneEnd" id="eb" tabindex="0" aria-label="Every gateway pod's denylist updated">
+  <rect class="box" x="710" y="276" width="234" height="52" rx="6"/>
+  <text class="s" x="720" y="296">gateway denylists</text>
+  <text class="d" x="720" y="312">next /mcp or /v1 call denied</text>
+</g>
+
+
+<g class="node" id="lc" tabindex="0" aria-label="Without push: poll refresh, bounded by the token TTL">
+  <rect class="chip" x="250" y="370" width="220" height="44" rx="5"/>
+  <text class="s" x="260" y="388" style="font-size:11.5px">no daemon &#183; poll-refresh</text>
+  <text class="mono" x="260" y="404">next checkin &#8594; 401</text>
+</g>
+<path id="pc" class="edge plain" d="M470 392 L710 392"/>
+<text id="tc" class="tlabel" x="590" y="382" text-anchor="middle">&#8804; 300 s (token TTL)</text>
+<g class="node laneEnd" id="ec" tabindex="0" aria-label="Session token expires and can never refresh">
+  <rect class="box" x="710" y="366" width="234" height="52" rx="6"/>
+  <text class="s" x="720" y="386">session token dies</text>
+  <text class="d" x="720" y="402">300 s TTL &#183; refresh refused</text>
+</g>
+
+<text class="d" x="250" y="448">reactivation is explicit: <tspan class="mono">straza.revocation.lift</tspan> deletes the row, lifts denylists, converges pods and replays</text>
+<text class="d" x="250" y="466">daemon crash changes nothing: hooks re-verify token + snapshot on every call and fail closed</text>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">Press &#8220;disable user&#8221; to race the revocation across all three propagation lanes. Hover any element for its facts.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>The kill switch, end to end. Deactivating an identity in the IdM (or via admin API) reaches
+  strazad as a SCIM <code>active:false</code> or DELETE. <code>revokeUserCtx</code> writes the
+  revocation row, updates the in-memory denylist, revokes the user's session rows, and emits the
+  events. Propagation races on three lanes: (1) a target-scoped push: strazad publishes
+  <code>straza.push.user.&lt;id&gt;</code> on core NATS (pod-internal), the pod holding that
+  daemon's SSE stream relays a <code>revocation</code> event over <code>GET /v1/push</code>, and
+  the daemon drops session state with a p99 under 2 seconds (the CI-gated budget at 100k
+  simulated clients); this works in every profile, standalone included, because no broker
+  is client-reachable; (2) JetStream replay of <code>straza.revocation.user</code> that converges every
+  gateway pod's denylist (boot also seeds from the revocations table, fail-closed on read
+  error); (3) without a running daemon (or with its stream down), the next
+  checkin 401s and the 300-second token TTL is the hard bound on the session's life. The kill
+  itself is tamper-evident: <code>straza.audit.identity</code> (user.killed) enters the hash
+  chain. Reactivation is an explicit lift event, never implicit.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+var svg=document.getElementById('dia');
+var nar=document.getElementById('nar');
+var DEF='Press &#8220;disable user&#8221; to race the revocation across all three propagation lanes. Hover any element for its facts.';
+var FACTS={
+ n1:'<strong>midPoint / IdM</strong>: the identity system is the source of truth; deactivation there is the governance action. Admin API deactivation takes the same path.',
+ n2:'<strong>strazad SCIM</strong>: <code>active:false</code> or DELETE on /scim/v2 Users means deactivate (the profile&#8217;s revocation semantics).',
+ n3:'<strong>revokeUserCtx</strong>: revocation row + in-memory denylist + session rows revoked + CE <code>straza.revocation.user</code> + core-NATS push publish (relayed to the daemon over SSE), in one server-side action.',
+ trace:'<strong>hash-chained trace</strong>: <code>straza.audit.identity</code> (user.killed / user.reactivated) is the kill switch&#8217;s tamper-evident record; revocation events converge enforcement but only straza.audit.&gt; enters the chain.',
+ la:'<strong>push relay</strong>: strazad publishes the target-scoped subjects <code>straza.push.{user,session,device}.&lt;id&gt;</code> on core NATS (pod-internal); the pod holding the daemon&#8217;s SSE stream (<code>GET /v1/push</code>, session-token auth) forwards only the subjects derived from that token&#8217;s own claims (no cross-principal visibility). Works in every profile, standalone included: no broker is client-reachable.',
+ ea:'<strong>straza daemon</strong>: a <code>revocation</code> event on its SSE stream drops session state; budget p99 &lt; 2 s at 100k simulated clients. Hooks fail closed even if the daemon crashes.',
+ lb:'<strong>JetStream replay</strong>: every pod runs an ephemeral DeliverAll consumer on <code>straza.revocation.&gt;</code> and rebuilds its denylist; the data plane stays stateless.',
+ eb:'<strong>gateway denylists</strong>: user/session/device/jti checks are in-memory on every call; no per-call DB lookups.',
+ lc:'<strong>poll-refresh fallback</strong>: with no daemon running (or its stream down), a revoked session&#8217;s next /v1/checkin 401s and state is dropped.',
+ ec:'<strong>token death</strong>: session tokens live 300 s and refresh is refused after revocation, so the TTL is the hard bound without push.'
+};
+Object.keys(FACTS).forEach(function(id){
+  var el=document.getElementById(id);
+  el.addEventListener('mouseenter',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('focus',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('mouseleave',function(){nar.innerHTML=DEF;});
+  el.addEventListener('blur',function(){nar.innerHTML=DEF;});
+});
+
+var running=false,rafs=[],dots=[];
+function slide(pathId,dur,done){
+  var path=document.getElementById(pathId);
+  if(RM){if(done)done();return;}
+  var len=path.getTotalLength();
+  var dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  dot.setAttribute('r','4');dot.setAttribute('class','pulse');
+  svg.appendChild(dot);dots.push(dot);
+  var t0=null;
+  function frame(ts){
+    if(t0===null)t0=ts;
+    var k=Math.min((ts-t0)/dur,1);
+    var pt=path.getPointAtLength(len*k);
+    dot.setAttribute('cx',pt.x);dot.setAttribute('cy',pt.y);
+    if(k<1){rafs.push(requestAnimationFrame(frame));}
+    else{if(dot.parentNode)svg.removeChild(dot);if(done)done();}
+  }
+  rafs.push(requestAnimationFrame(frame));
+}
+function mark(id,on){document.getElementById(id).classList.toggle('dead',on);}
+function label(id,on){document.getElementById(id).classList.toggle('show',on);}
+function reset(){
+  rafs.forEach(cancelAnimationFrame);rafs=[];
+  dots.forEach(function(d){if(d.parentNode)d.parentNode.removeChild(d);});dots=[];
+  running=false;
+  ['n1','n3','ea','eb','ec'].forEach(function(id){mark(id,false);});
+  ['ta','tb','tc'].forEach(function(id){label(id,false);});
+  document.getElementById('trace').classList.remove('on');
+  nar.innerHTML=DEF;
+}
+function kill(){
+  if(running)return;
+  reset();running=true;
+  mark('n1',true);
+  nar.innerHTML='The IdM deactivates the user: SCIM carries <code>active:false</code> (or DELETE) to strazad.';
+  if(RM){  
+    mark('n3',true);document.getElementById('trace').classList.add('on');
+    ['ea','eb','ec'].forEach(function(id){mark(id,true);});
+    ['ta','tb','tc'].forEach(function(id){label(id,true);});
+    nar.innerHTML='Everything is dark: daemon dropped state (&lt; 2 s), every pod denies, and the token can never refresh (&#8804; 300 s). The kill is hash-chained.';
+    running=false;return;
+  }
+  slide('e1',450,function(){
+    slide('e2',450,function(){
+      mark('n3',true);
+      nar.innerHTML='<code>revokeUserCtx</code>: revocation row + in-memory denylist + session rows revoked; CE emitted and push sent.';
+      slide('e3',350,function(){document.getElementById('trace').classList.add('on');});
+       
+      slide('pa',1100,function(){
+        mark('ea',true);label('ta',true);
+        nar.innerHTML='<strong style="color:var(--danger)">&lt; 2 s</strong>: the target-scoped push is relayed over the daemon&#8217;s SSE stream and session state is dropped (p99 &lt; 2 s @ 100k clients).';
+      });
+      slide('pb',1500,function(){
+        mark('eb',true);label('tb',true);
+      });
+      slide('pc',3600,function(){
+        mark('ec',true);label('tc',true);
+        nar.innerHTML='Without a daemon (no push stream), poll-refresh 401s at the next checkin: the 300 s token TTL is the hard bound. User is dark everywhere; reactivation is an explicit <code>straza.revocation.lift</code>.';
+        running=false;
+      });
+    });
+  });
+}
+document.getElementById('btnKill').addEventListener('click',kill);
+document.getElementById('btnReset').addEventListener('click',reset);
+})();
+</script>
+</body>
+</html>

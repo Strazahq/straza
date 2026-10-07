@@ -1,0 +1,33 @@
+universal-rest-connector.jar
+
+This JAR is universal-rest-connector, a ConnId connector bundle that midPoint
+loads in the Straza evaluation stack to read the Straza catalog. It is a separate
+program, and Straza's licenses do not cover it.
+
+Copyright Patrik Rovňak.
+License: Apache License, Version 2.0 (Apache-2.0), whose full text is in the file
+universal-rest-connector.LICENSE.txt beside this one. SynapTech s. r. o.
+redistributes the JAR here under that license.
+Source: https://github.com/Strazahq/universal-rest-connector, release v0.1.0, commit
+b4e31a5cedc3c110777f1fcca013abc84f3dfc5c. The JAR is that release's asset
+universal-rest-connector-0.1.0.jar, built by the project's release workflow on
+2026-10-07.
+SHA-256 of the JAR: 99b8bd5f3558381f7f097dde4770cca83bd20589dad93868682803d4d231a805,
+also pinned in the file SHA256SUMS beside it. The evaluation stack refuses to start
+midPoint with a JAR that does not match the pin.
+
+The file deploy/compose/eval-stack/midpoint/objects/tasks/livesync-tasks.xml is
+adapted from a sample file of this connector. The adaptation is part of Straza and is
+licensed with it, and the sample it was adapted from stays available under the
+connector's license, Apache-2.0.
+
+The JAR bundles these third-party libraries under lib/, unchanged:
+
+- jackson-databind and jackson-core, version 2.22.3, and jackson-annotations,
+  version 2.22, by FasterXML, under the Apache License, Version 2.0. Each carries its
+  own license and notice files inside its JAR. jackson-core includes a shaded copy of
+  FastDoubleParser by Werner Randelshofer, under the MIT License.
+- connector-common, version 1.5.2.0, by Evolveum, from the Polygon project, under the
+  Apache License, Version 2.0. Its JAR carries no license file. The license text is at
+  https://www.apache.org/licenses/LICENSE-2.0 and in the file LICENSE-APACHE at the
+  root of this repository.

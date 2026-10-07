@@ -1,0 +1,46 @@
+{{- /* The left navigation is a plain list: the section's own pages first,
+then one titled group per subsection, such as the guide groups, in their
+weights. A group's own subsections are links that open their pages only
+while the reader is inside them. On a phone the same element is the menu
+panel, with the header's sections at its top. */ -}}
+{{- $current := . -}}
+{{- $section := .FirstSection -}}
+<nav class="lnav" id="lnav" aria-label="Documentation">
+  <div class="lnav-sections">
+    <h2 class="lnav-h">Sections</h2>
+    <ul>
+      {{- range where site.Home.Sections.ByWeight "Section" "ne" "project" }}
+      <li><a href="{{ .RelPermalink }}"{{ if eq $section . }} aria-current="true"{{ end }}>{{ .LinkTitle }}</a></li>
+      {{- end }}
+    </ul>
+  </div>
+  {{- if not $section.IsHome }}
+  <h2 class="lnav-h"><a href="{{ $section.RelPermalink }}">{{ $section.LinkTitle }}</a></h2>
+  <ul>
+    <li><a href="{{ $section.RelPermalink }}"{{ if eq $current $section }} aria-current="page"{{ end }}>Overview</a></li>
+    {{- range $section.RegularPages.ByWeight }}
+    <li><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
+    {{- end }}
+  </ul>
+  {{- range $section.Sections.ByWeight }}
+  <h3 class="lnav-h"><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></h3>
+  <ul>
+    {{- range .RegularPages.ByWeight }}
+    <li><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
+    {{- end }}
+    {{- range .Sections.ByWeight }}
+    <li>
+      <a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a>
+      {{- if or (eq $current .) (.IsAncestor $current) }}
+      <ul>
+        {{- range .Pages.ByWeight }}
+        <li><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
+        {{- end }}
+      </ul>
+      {{- end }}
+    </li>
+    {{- end }}
+  </ul>
+  {{- end }}
+  {{- end }}
+</nav>

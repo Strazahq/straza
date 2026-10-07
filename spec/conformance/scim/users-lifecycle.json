@@ -1,0 +1,157 @@
+{
+  "name": "users-lifecycle",
+  "steps": [
+    {
+      "note": "provision a user (midPoint/Okta create)",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "externalId": "idm-4711",
+          "userName": "grace.hopper",
+          "displayName": "Grace Hopper",
+          "emails": [{ "value": "grace@example.com", "primary": true }],
+          "active": true
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "grace.hopper",
+          "externalId": "idm-4711",
+          "displayName": "Grace Hopper",
+          "active": true,
+          "meta": { "resourceType": "User" }
+        }
+      },
+      "capture": { "uid": "id" }
+    },
+    {
+      "note": "read back by server id; the Straza-born facts (revision 11) ride every render: URN-less create = kind human, SCIM lane = origin scim",
+      "request": { "method": "GET", "path": "/scim/v2/Users/{uid}" },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "id": "{uid}",
+          "userName": "grace.hopper",
+          "urn:straza:params:scim:schemas:extension:2.0:User": { "kind": "human", "origin": "scim" }
+        }
+      }
+    },
+    {
+      "note": "filter by userName (the only supported Users filters are eq on userName/externalId)",
+      "request": { "method": "GET", "path": "/scim/v2/Users?filter=userName eq \"grace.hopper\"" },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+          "totalResults": 1,
+          "Resources": [{ "userName": "grace.hopper" }]
+        }
+      }
+    },
+    {
+      "note": "duplicate userName is a uniqueness conflict",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "grace.hopper"
+        }
+      },
+      "expect": { "status": 409, "subset": { "scimType": "uniqueness" } }
+    },
+    {
+      "note": "PUT replaces mapped attributes",
+      "request": {
+        "method": "PUT",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "grace.hopper",
+          "displayName": "RADM Grace Hopper",
+          "active": true
+        }
+      },
+      "expect": { "status": 200, "subset": { "displayName": "RADM Grace Hopper" } }
+    },
+    {
+      "note": "deactivate via PATCH (kill-switch path; Azure-style string boolean accepted)",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [{ "op": "Replace", "path": "active", "value": "False" }]
+        }
+      },
+      "expect": { "status": 200, "subset": { "active": false } }
+    },
+    {
+      "note": "re-activate (sessions stay revoked; the user re-enrolls)",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [{ "op": "replace", "value": { "active": true } }]
+        }
+      },
+      "expect": { "status": 200, "subset": { "active": true } }
+    },
+    {
+      "note": "DELETE deactivates, never hard-deletes",
+      "request": { "method": "DELETE", "path": "/scim/v2/Users/{uid}" },
+      "expect": { "status": 204 }
+    },
+    {
+      "note": "the deactivated user is still addressable",
+      "request": { "method": "GET", "path": "/scim/v2/Users/{uid}" },
+      "expect": { "status": 200, "subset": { "active": false } }
+    },
+    {
+      "note": "re-provisioning the same userName after DELETE revives the row in place (revision 6): 201 with the SAME id, never a 409 dead end",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "externalId": "idm-4712",
+          "userName": "grace.hopper",
+          "displayName": "Grace Hopper (rehired)",
+          "active": true
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "id": "{uid}",
+          "userName": "grace.hopper",
+          "externalId": "idm-4712",
+          "displayName": "Grace Hopper (rehired)",
+          "active": true
+        }
+      }
+    },
+    {
+      "note": "the revived user is the same resource, updated; a create against the now-ACTIVE username conflicts again",
+      "request": { "method": "GET", "path": "/scim/v2/Users/{uid}" },
+      "expect": { "status": 200, "subset": { "externalId": "idm-4712", "active": true } }
+    },
+    {
+      "note": "uniqueness still guards the living: duplicate create over the revived ACTIVE user is a 409",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "grace.hopper"
+        }
+      },
+      "expect": { "status": 409, "subset": { "scimType": "uniqueness" } }
+    }
+  ]
+}

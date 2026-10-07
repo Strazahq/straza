@@ -1,0 +1,24 @@
+# A command-runtime app from an npm registry package, no credential, with the
+# manager-level exposure cap narrowing which tools exist at all.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: filesystem
+  namespace: io.github.domdomegg
+server:
+  name: io.github.domdomegg/filesystem-mcp
+  description: Read, create, and edit files.
+  title: Filesystem
+  repository:
+    url: https://github.com/domdomegg/filesystem-mcp.git
+    source: github
+  version: "1.2.0"
+  websiteUrl: https://github.com/domdomegg/filesystem-mcp#readme
+straza:
+  runtime:
+    kind: command
+    command:
+      exec: npx
+      args: ["-y", "filesystem-mcp@1.2.0"]
+  exposure:
+    tools: ["read_*", "list_*", "search_*"]

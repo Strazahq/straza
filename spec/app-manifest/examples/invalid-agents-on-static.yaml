@@ -1,0 +1,22 @@
+# INVALID: credential.agents says what an agent without a row of its own
+# uses on a caller-kind app, so it is only valid with kind oauth or token
+# (revision 4). A static app has one shared credential for every caller.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: badagents
+server:
+  name: example/badagents
+  version: "1.0.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://example.com/mcp
+  credential:
+    kind: static
+    agents: shared
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"

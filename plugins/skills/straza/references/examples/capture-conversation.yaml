@@ -1,0 +1,18 @@
+# Record the prompts and replies of every dev-tools session, with recognizable credential shapes masked before upload.
+# Both profiles: a set needs one rule, so the local-tools allow rides along; on standalone it changes nothing.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: capture-conversation
+  description: Record the prompts and replies of every dev-tools session, with credentials masked
+spec:
+  match:
+    roles: [dev-tools]
+  capture:
+    conversations: true
+    mode: redact
+  rules:
+    - id: local-tools
+      events: [tool.pre]
+      tools: [shell.exec, file.read, file.write, file.edit]
+      effect: allow

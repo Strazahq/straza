@@ -1,0 +1,34 @@
+Straza
+
+Copyright 2026 Patrik Rovňak and the Straza contributors.
+Published by SynapTech s. r. o. under an exclusive license from Patrik Rovňak.
+
+Straza is licensed under the GNU Affero General Public License version 3 only
+(AGPL-3.0-only, the file LICENSE), except the parts that the License section of
+README.md lists under the Apache License, Version 2.0 (Apache-2.0, the file
+LICENSE-APACHE). Each part is licensed under that one license only, and no later
+version of the GNU Affero General Public License applies. SynapTech s. r. o. grants
+these licenses in its own name and on behalf of the author, Patrik Rovňak.
+
+Under section 7(e) of the GNU Affero General Public License, SynapTech s. r. o.
+declines to grant rights under trademark law in the name Straza and in the Straza
+logo. The Apache License grants no such rights either, under its section 6.
+TRADEMARKS.md says how the name may be used.
+
+This product includes third-party software under its own licenses. The copyright
+notices and license texts of that software, including the attribution notices from
+the NOTICE files of its Apache-2.0 components, are in THIRD_PARTY_NOTICES.txt. That
+file ships in every release archive and in the container image under /licenses/,
+and the console serves its own part at /console/THIRD_PARTY_NOTICES.txt. The source
+tree also carries third-party source files, among them the QR encoder by Project
+Nayuki and the interface components generated from shadcn/ui, with their license
+notices in or beside them.
+
+The container image also carries the CA certificate bundle of Debian's
+ca-certificates package, whose certificate data comes from Mozilla under the
+Mozilla Public License 2.0. The package's copyright and license terms are in
+/licenses/ca-certificates.copyright in the image, and its source is the Debian
+source package ca-certificates at https://sources.debian.org/src/ca-certificates/.
+
+Contributions are licensed to SynapTech s. r. o. under the Straza Contributor
+License Agreement in CLA.md.

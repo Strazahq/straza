@@ -1,0 +1,492 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Straza / mobile approver</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;--border-strong:#33405a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);--beacon-ground:#070a11;
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;--radius-lg:14px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;--border-strong:#aeb9cc;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);--beacon-ground:#070a11;color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;--border-strong:#aeb9cc;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);--beacon-ground:#070a11;color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;--border-strong:#33405a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);--beacon-ground:#070a11;color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased;overflow:hidden}
+
+.rbar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.rbar h1{font-size:13px;font-weight:600;margin-right:auto;white-space:nowrap;letter-spacing:.02em}
+.rbar h1 .k{color:var(--muted);font-weight:400}
+.rcontrols{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 11px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.ctl.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+
+ 
+.stage{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;
+  overflow:hidden;padding:16px}
+.stage::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(46% 40% at 50% 30%,var(--accent-bg),transparent 70%);opacity:.7}
+
+ 
+.phone{position:relative;z-index:1;height:560px;max-height:100%;aspect-ratio:151/310;
+  padding:9px;border-radius:46px;
+  background:linear-gradient(155deg,var(--border-strong),var(--border) 60%,var(--border-strong));
+  box-shadow:0 26px 60px -22px rgba(0,0,0,.7), inset 0 0 0 1px var(--hairline,rgba(255,255,255,.04))}
+.phone-screen{position:relative;height:100%;width:100%;border-radius:38px;overflow:hidden;
+  background:var(--bg);display:flex;flex-direction:column}
+.island{position:absolute;top:11px;left:50%;transform:translateX(-50%);
+  width:34%;height:19px;border-radius:11px;background:var(--beacon-ground);z-index:8;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
+
+ 
+.statusbar{display:flex;align-items:center;justify-content:space-between;
+  padding:9px 22px 3px;font-size:11px;font-weight:600;color:var(--text);z-index:6}
+.sb-r{display:inline-flex;align-items:center;gap:5px}
+.sb-r svg{display:block;color:var(--text)}
+
+ 
+.screen-wrap{position:relative;flex:1;min-height:0}
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;
+  transition:opacity .45s ease, transform .45s ease}
+.phone[data-screen="lock"] .screen-app{opacity:0;visibility:hidden;transform:scale(.985)}
+.phone[data-screen="app"]  .screen-lock{opacity:0;visibility:hidden;transform:scale(1.01)}
+@media (prefers-reduced-motion:reduce){.screen{transition:none}}
+
+ 
+.reveal{opacity:0;transform:translateY(7px);transition:opacity .42s ease, transform .42s ease}
+.reveal.shown{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{transition:none}
+  .reveal.shown{opacity:1;transform:none}}
+
+ 
+.screen-lock{padding:0 14px 18px;align-items:stretch}
+.lock-clock{text-align:center;margin-top:34px}
+.lock-day{font-size:13px;color:var(--text);opacity:.85;font-weight:500;letter-spacing:.02em}
+.lock-time{font-size:56px;font-weight:300;line-height:1.05;letter-spacing:-.01em}
+.lock-notif{margin-top:auto;border:1px solid var(--border);border-radius:20px;padding:12px 13px;
+  background:color-mix(in srgb,var(--surface) 86%,transparent);box-shadow:0 8px 22px -14px rgba(0,0,0,.6);
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);cursor:pointer}
+.notif-head{display:flex;align-items:center;gap:8px}
+.brandtile{flex:none;width:20px;height:20px;border-radius:6px;background:var(--accent);
+  display:grid;place-items:center}
+.brandtile svg{width:13px;height:13px;display:block}
+.notif-app{font-size:12px;font-weight:700;letter-spacing:.02em}
+.notif-when{margin-left:auto;font-size:11px;color:var(--muted)}
+.notif-title{margin-top:7px;font-size:13.5px;font-weight:600}
+.notif-sub{margin-top:2px;font-size:12px;color:var(--muted)}
+
+ 
+.screen-app{background:var(--bg)}
+.app-top{display:flex;align-items:center;gap:9px;padding:12px 15px;border-bottom:1px solid var(--border)}
+.app-top .brandtile{width:22px;height:22px}
+.app-top .brandtile svg{width:14px;height:14px}
+.app-title{font-size:13px;font-weight:700;letter-spacing:.02em}
+.app-title small{display:block;font-size:10.5px;font-weight:500;color:var(--muted);letter-spacing:.03em}
+
+.app-fetch{position:absolute;inset:0;top:47px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:12px;color:var(--muted);font-size:12.5px}
+.spinner{width:26px;height:26px;border-radius:50%;border:2.5px solid var(--border);
+  border-top-color:var(--accent);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none;border-top-color:var(--accent)}}
+
+.app-card{flex:1;min-height:0;overflow:auto;padding:14px 15px 15px;display:flex;flex-direction:column;gap:12px}
+.card-pill{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;
+  font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--accent);background:var(--accent-bg);
+  border:1px solid color-mix(in srgb,var(--accent) 34%,transparent);
+  border-radius:999px;padding:4px 10px}
+.card-pill i{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+
+.fields{display:flex;flex-direction:column;gap:11px}
+.field{display:flex;flex-direction:column;gap:2px}
+.k{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.v{font-size:13px;color:var(--text);overflow-wrap:break-word;word-break:break-word}
+.v.mono{font-family:var(--font-mono);font-size:12.5px}
+.v .who{font-weight:600}
+.tag{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;letter-spacing:.04em;
+  color:var(--unknown);background:var(--unknown-bg);border-radius:5px;padding:1px 6px;vertical-align:1px}
+
+.reason{border-left:2px solid var(--warn);padding-left:11px}
+.reason-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chip-warn{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--warn);background:var(--warn-bg);border-radius:5px;padding:2px 7px}
+.reason .v{margin-top:5px;color:var(--text);font-size:12.5px;line-height:1.5}
+
+.expiry{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+.expiry svg{color:var(--warn)}
+.cd{font-family:var(--font-mono);font-weight:700;color:var(--warn);font-size:13px}
+
+.card-actions{display:flex;gap:10px;margin-top:auto;padding-top:2px}
+.act{flex:1;border-radius:11px;padding:11px 0;font:700 13px var(--font-ui);cursor:pointer;
+  border:1px solid var(--border-strong);text-align:center;transition:transform .12s ease, filter .12s ease}
+.btn-deny{background:var(--surface-2);color:var(--text)}
+.btn-approve{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.act.pressed{transform:scale(.965);filter:brightness(.94)}
+
+ 
+.overlay{position:absolute;inset:0;z-index:9;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:15px;padding:22px;text-align:center;
+  background:color-mix(in srgb,var(--bg) 80%,transparent);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.overlay.reveal{transform:none}
+.overlay.reveal:not(.shown){visibility:hidden}
+.faceid{width:52px;height:52px;border-radius:14px;position:relative;color:var(--accent);
+  border:2px solid currentColor;animation:pulse 1.1s ease-in-out infinite}
+.faceid::before,.faceid::after{content:"";position:absolute;width:8px;height:8px;border-radius:50%;
+  background:currentColor;top:16px}
+.faceid::before{left:13px}.faceid::after{right:13px}
+.faceid i{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);
+  width:16px;height:8px;border:2px solid currentColor;border-top:0;border-radius:0 0 9px 9px}
+@keyframes pulse{0%,100%{opacity:.55;transform:scale(.97)}50%{opacity:1;transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.faceid{animation:none;opacity:1}}
+.sign-line{font-size:13px;color:var(--text);font-weight:500;max-width:15rem;line-height:1.5}
+
+.check{width:60px;height:60px;border-radius:50%;background:var(--ok-bg);
+  border:2px solid var(--ok);display:grid;place-items:center;color:var(--ok)}
+.check svg{width:30px;height:30px}
+.confirm-title{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.confirm-sub{font-size:12.5px;color:var(--muted);max-width:15rem;line-height:1.5}
+
+ 
+.ripple{position:absolute;z-index:20;width:10px;height:10px;border-radius:50%;
+  background:var(--accent);opacity:.5;transform:translate(-50%,-50%);pointer-events:none;
+  animation:ripx .52s ease-out forwards}
+@keyframes ripx{to{transform:translate(-50%,-50%) scale(9);opacity:0}}
+
+ 
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:10px var(--s4) 10px calc(var(--s4) + 8px);font-size:12.5px;min-height:44px;
+  display:flex;align-items:center;line-height:1.45;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.transcript{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+.transcript summary{cursor:pointer;font-weight:600;color:var(--text)}
+.transcript summary:hover{color:var(--accent)}
+.transcript pre{margin:var(--s2) 0 0;max-height:150px;overflow:auto;white-space:pre-wrap;
+  font-family:var(--font-mono);font-size:11px;line-height:1.6;color:var(--text)}
+.transcript .pv{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header class="rbar">
+  <h1>Straza <span class="k">/ mobile approver</span></h1>
+  <div class="rcontrols" id="rcontrols"></div>
+</header>
+
+
+<div class="stage" id="stage" aria-hidden="true">
+  <div class="phone" id="phone" data-screen="lock">
+    <div class="phone-screen" id="screen">
+      <div class="island"></div>
+      <div class="statusbar">
+        <span class="sb-l">9:41</span>
+        <span class="sb-r">
+          
+          <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1" opacity=".4"/></svg>
+          <svg width="15" height="11" viewBox="0 0 15 11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M1 3.4A9 9 0 0 1 14 3.4"/><path d="M3.4 5.9A5.5 5.5 0 0 1 11.6 5.9"/><path d="M5.8 8.3A2 2 0 0 1 9.2 8.3"/></svg>
+          <svg width="24" height="12" viewBox="0 0 24 12" fill="none" aria-hidden="true"><rect x="1" y="1" width="19" height="10" rx="2.5" stroke="currentColor" stroke-width="1.2" opacity=".5"/><rect x="3" y="3" width="13" height="6" rx="1.2" fill="currentColor"/><rect x="21" y="4" width="2" height="4" rx="1" fill="currentColor" opacity=".5"/></svg>
+        </span>
+      </div>
+
+      <div class="screen-wrap">
+        
+        <div class="screen screen-lock">
+          <div class="lock-clock">
+            <div class="lock-day">Tuesday, July 21</div>
+            <div class="lock-time">9:41</div>
+          </div>
+          <div class="lock-notif reveal" id="notif">
+            <div class="notif-head">
+              <span class="brandtile" aria-hidden="true">
+                <svg viewBox="0 0 32 32"><path d="M7.4 5H24.6A1.4 1.4 0 0 1 26 6.4V15.2C26 22.1 21.7 26.9 16 29.1 10.3 26.9 6 22.1 6 15.2V6.4A1.4 1.4 0 0 1 7.4 5Z" fill="var(--on-accent)"/><path d="M16 9.2 17.7 13.6 22.1 15.3 17.7 17 16 21.4 14.3 17 9.9 15.3 14.3 13.6Z" fill="var(--accent)"/></svg>
+              </span>
+              <span class="notif-app">Straza</span>
+              <span class="notif-when">now</span>
+            </div>
+            <div class="notif-title">Approval requested</div>
+            <div class="notif-sub">Tap to review a gated action.</div>
+          </div>
+        </div>
+
+        
+        <div class="screen screen-app">
+          <div class="app-top">
+            <span class="brandtile" aria-hidden="true">
+              <svg viewBox="0 0 32 32"><path d="M7.4 5H24.6A1.4 1.4 0 0 1 26 6.4V15.2C26 22.1 21.7 26.9 16 29.1 10.3 26.9 6 22.1 6 15.2V6.4A1.4 1.4 0 0 1 7.4 5Z" fill="var(--on-accent)"/><path d="M16 9.2 17.7 13.6 22.1 15.3 17.7 17 16 21.4 14.3 17 9.9 15.3 14.3 13.6Z" fill="var(--accent)"/></svg>
+            </span>
+            <span class="app-title">Straza<small>Approvals</small></span>
+          </div>
+
+          <div class="app-fetch reveal" id="fetch">
+            <span class="spinner" aria-hidden="true"></span>
+            <span>Fetching the request over the pinned channel.</span>
+          </div>
+
+          <div class="app-card reveal" id="card">
+            <span class="card-pill"><i></i> Approval requested</span>
+            <div class="fields">
+              <div class="field reveal" id="f-action">
+                <span class="k">Requested action</span>
+                <span class="v mono">mcp.call midpoint:disable_user</span>
+              </div>
+              <div class="field reveal" id="f-requester">
+                <span class="k">Requester</span>
+                <span class="v"><span class="who">nova</span><span class="tag">agent</span></span>
+              </div>
+              <div class="field reveal" id="f-role">
+                <span class="k">Approver role</span>
+                <span class="v mono">sec-approvers</span>
+              </div>
+              <div class="reason reveal" id="f-reason">
+                <div class="reason-head">
+                  <span class="k">Agent's stated reason</span>
+                  <span class="chip-warn">model-generated · unverified</span>
+                </div>
+                <div class="v">Offboarding contractor c-8842 per ticket OPS-5521; access end-dated today.</div>
+              </div>
+            </div>
+            <div class="expiry reveal" id="expiry">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>
+              <span>Expires in <span class="cd">2:00</span>. A timeout is a deny.</span>
+            </div>
+            <div class="card-actions reveal" id="actions">
+              <button class="act btn-deny" type="button">Deny</button>
+              <button class="act btn-approve" type="button">Approve</button>
+            </div>
+          </div>
+
+          
+          <div class="overlay reveal" id="sign">
+            <span class="faceid" aria-hidden="true"><i></i></span>
+            <span class="sign-line">Signing in the Secure Enclave with your device key.</span>
+          </div>
+
+          
+          <div class="overlay reveal" id="confirm">
+            <span class="check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+            <span class="confirm-title">Approved</span>
+            <span class="confirm-sub">The held call completed.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="narration"><span id="nar" aria-live="polite"></span></div>
+
+<details class="transcript">
+  <summary>Transcript &amp; sources</summary>
+  <pre id="scriptdump">Lock screen: a push arrives. Straza, Approval requested. Tap to review.
+   [V] push is content-free: only {v,ref,kind}; the app fetches before rendering. APP-CONTRACT, Principles
+Tap: the app fetches the request over the pinned channel before showing actions.
+   [V] fetch before showing actions. APP-CONTRACT, Error contract
+Approval card:
+  Requested action   mcp.call midpoint:disable_user   [V] shape summary {tool,app,tool_name}; the values are [I]. APP-CONTRACT, Authenticated surface
+  Requester          nova · agent                     [V] shape requester {username, kind:nhi}; "nova" is [I]. same row
+  Approver role      sec-approvers                     [I] approve.roles, illustrative.
+  Agent's stated reason (model-generated · unverified) [V] justification is labeled unverified.
+    Offboarding contractor c-8842 per ticket OPS-5521; access end-dated today.  [I] illustrative
+  Expires in 2:00. A timeout is a deny.                [V] bounded wait, timeout = deny; the 2:00 value is [I].
+  [ Deny ]   [ Approve ]
+Approve: signed in the Secure Enclave with the device key; the key never leaves the phone.
+   [V] ECDSA-P256/SHA-256, hardware signing, non-exportable key. APP-CONTRACT, decide + Enrollment
+Approved. The held call completed.                     [V] decide returns state:approved; the held gateway call releases.
+</pre>
+</details>
+
+<script>
+'use strict';
+ 
+(function(){
+   
+  function applyTheme(t){ if(t==="light"||t==="dark") document.documentElement.setAttribute("data-theme",t); }
+  var qp=new URLSearchParams(location.search).get("theme");
+  if(qp){ applyTheme(qp); } else { try{ applyTheme(localStorage.getItem("straza-theme")); }catch(e){} }
+  window.addEventListener("storage",function(e){ if(e.key==="straza-theme"&&e.newValue) applyTheme(e.newValue); });
+
+  var RM = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var nar = document.getElementById("nar");
+  var phone = document.getElementById("phone");
+  var screenEl = document.getElementById("screen");
+  var cd = document.querySelector(".cd");
+
+   
+  var IDLE = "Press Play: a push arrives, an approver reviews the request, signs on-device, and the held call completes.";
+  var BEATS = [
+    { t:"screen", v:"lock", ms:900,  nar:"A locked phone. Straza routes the approval to the person who holds the role." },
+    { t:"reveal", id:"notif", ms:1250, nar:"A push arrives. It carries only an opaque reference, never the command or its arguments." },
+    { t:"tap", sel:".lock-notif", ms:720, nar:"Tap to review." },
+    { t:"screen", v:"app", ms:260 },
+    { t:"reveal", id:"fetch", ms:980, nar:"The app fetches the request over the pinned channel before it shows anything." },
+    { t:"reveal", id:"card", hide:"fetch", ms:480, nar:"The approval card." },
+    { t:"reveal", id:"f-action", ms:600, nar:"Requested action: mcp.call, midpoint, disable_user." },
+    { t:"reveal", id:"f-requester", ms:560, nar:"Requester: the agent nova." },
+    { t:"reveal", id:"f-role", ms:560, nar:"You can decide it because you hold the approver role." },
+    { t:"reveal", id:"f-reason", ms:760, nar:"The agent's stated reason, labeled model-generated and unverified." },
+    { t:"count", ms:700, poster:true, nar:"A bounded expiry of 120 seconds. A timeout is a deny." },
+    { t:"reveal", id:"actions", ms:820, poster:true, nar:"Deny, or approve." },
+    { t:"tap", sel:".btn-approve", ms:720, nar:"Approve." },
+    { t:"sign", ms:1550, nar:"The decision is signed inside the Secure Enclave with the device key. The key never leaves the phone." },
+    { t:"confirm", ms:1900, nar:"Approved. The held call completed." },
+    { t:"wait", ms:2800, nar:"" }
+  ];
+
+  var idx=0, playing=false, finished=false, runId=0;
+  var countVal=120, countTimer=null, frozen=false;
+
+  function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
+  function narrate(s){ if(nar) nar.textContent=s; }
+  function fmt(s){ var m=Math.floor(s/60), ss=s%60; return m+":"+(ss<10?"0":"")+ss; }
+  function reveal(id){ var e=document.getElementById(id); if(e) e.classList.add("shown"); }
+  function hide(id){ var e=document.getElementById(id); if(e) e.classList.remove("shown"); }
+
+  function startCount(){
+    reveal("expiry");
+    if(countTimer) return;
+    countTimer = setInterval(function(){
+      if(frozen || !playing) return;
+      if(countVal>0){ countVal--; if(cd) cd.textContent=fmt(countVal); }
+    }, 1000);
+  }
+  function stopCount(){ if(countTimer){ clearInterval(countTimer); countTimer=null; } }
+
+  function removeRipples(){ screenEl.querySelectorAll(".ripple").forEach(function(r){ r.remove(); }); }
+  function ripple(sel){
+    if(RM) return;
+    var el = document.querySelector(sel); if(!el) return;
+    el.classList.add("pressed"); setTimeout(function(){ el.classList.remove("pressed"); }, 240);
+    var r=el.getBoundingClientRect(), s=screenEl.getBoundingClientRect();
+    var rip=document.createElement("span"); rip.className="ripple";
+    rip.style.left=(r.left - s.left + r.width/2)+"px";
+    rip.style.top =(r.top  - s.top  + r.height/2)+"px";
+    screenEl.appendChild(rip);
+    setTimeout(function(){ if(rip.parentNode) rip.remove(); }, 540);
+  }
+
+  function reset(){
+    stopCount(); frozen=false; countVal=120; if(cd) cd.textContent="2:00";
+    phone.setAttribute("data-screen","lock");
+    document.querySelectorAll(".reveal").forEach(function(e){ e.classList.remove("shown"); });
+    document.querySelectorAll(".pressed").forEach(function(e){ e.classList.remove("pressed"); });
+    removeRipples();
+  }
+
+  async function doBeat(b){
+    if(b.t==="screen"){ phone.setAttribute("data-screen",b.v); if(b.nar) narrate(b.nar); }
+    else if(b.t==="reveal"){ if(b.hide) hide(b.hide); reveal(b.id); if(b.nar) narrate(b.nar); }
+    else if(b.t==="tap"){ if(b.nar) narrate(b.nar); ripple(b.sel); }
+    else if(b.t==="count"){ startCount(); if(b.nar) narrate(b.nar); }
+    else if(b.t==="sign"){ if(b.nar) narrate(b.nar); reveal("sign"); }
+    else if(b.t==="confirm"){ frozen=true; hide("sign"); reveal("confirm"); if(b.nar) narrate(b.nar); }
+    else if(b.t==="wait"){ if(b.nar!=null) narrate(b.nar); }
+    await sleep(b.ms!=null ? b.ms : 700);
+  }
+
+  var btnPlay=null;
+  function setBtn(){
+    if(!btnPlay) return;
+    btnPlay.textContent = playing ? "Pause" : (finished ? "Replay" : "Play");
+    btnPlay.setAttribute("aria-pressed", String(playing));
+  }
+
+  async function runFrom(start){
+    var my=++runId;
+    for(var i=start;i<BEATS.length;i++){
+      if(my!==runId) return;
+      idx=i;
+      await doBeat(BEATS[i]);
+    }
+    if(my!==runId) return;
+    playing=false; finished=true; idx=0; setBtn();
+    narrate("Replay finished. Open the transcript for the full text and sources.");
+  }
+
+  function play(){
+    if(RM){ poster(); return; }
+    if(playing){ pause(); return; }
+    if(finished){ reset(); idx=0; finished=false; }
+    if(idx===0) reset();
+    playing=true; setBtn();
+    runFrom(idx);
+  }
+  function pause(){
+    runId++; stopCount(); playing=false; setBtn();
+    idx=Math.min(idx+1, BEATS.length);
+  }
+  function replay(){
+    runId++; reset(); idx=0; finished=false; playing=true; setBtn(); runFrom(0);
+  }
+
+   
+  function poster(){
+    reset();
+    phone.setAttribute("data-screen","app");
+    ["card","f-action","f-requester","f-role","f-reason","expiry","actions"].forEach(reveal);
+    if(cd) cd.textContent="2:00";
+    narrate("Static preview: the approval card. Full transcript below.");
+    finished=true; playing=false; setBtn();
+  }
+
+  function buildControls(){
+    var host=document.getElementById("rcontrols"); if(!host) return;
+    btnPlay=document.createElement("button"); btnPlay.className="ctl primary"; btnPlay.type="button";
+    btnPlay.addEventListener("click", play); host.appendChild(btnPlay);
+    var r=document.createElement("button"); r.className="ctl"; r.type="button"; r.textContent="Replay";
+    r.addEventListener("click", replay); host.appendChild(r);
+    setBtn();
+  }
+
+  buildControls();
+   
+  if(RM){ poster(); }
+  else { narrate(IDLE); }
+})();
+</script>
+</body>
+</html>

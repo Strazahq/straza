@@ -1,0 +1,94 @@
+# Governed-agents demo overlay: runs the straza-agents-demo showcase against
+# this stack. It needs a checkout of the straza-agents-demo repository beside
+# this one, and that repository is not public.
+#
+#   docker compose -f compose.yaml -f compose.loopback.yaml \
+#     -f compose.siem.yaml -f compose.demo.yaml up -d --build
+#
+# LOUD-FAIL: the demo service builds from that checkout via an additional
+# build context, so a missing checkout fails `build` at context preparation
+# with a clear error, never a quiet skip.
+
+# Network shape: network_mode host, chosen over the conventional
+# compose-network shape because the demo's midPoint client allowlists exactly
+# 127.0.0.1/localhost (demo/midpoint.py), so a host.docker.internal midPoint
+# URL would be refused and scenario A dies on the compose network. Host
+# networking keeps every demo default AND lands the chat face
+# (127.0.0.1:8477, loopback by construction, no widen flag) on the eval
+# host's loopback: the same exposure as the loopback overlay, reached through
+# an SSH tunnel. Caveat: Linux native, and Docker Desktop needs 4.34+ with
+# host networking enabled.
+
+services:
+  demo:
+    build:
+      context: ./demo
+      additional_contexts:
+        straza: ../../..
+        demo-src: ../../../../straza-agents-demo
+      args:
+        VERSION: ${STRAZA_BUILD_VERSION:-dev}
+        COMMIT: ${STRAZA_BUILD_COMMIT:-none}
+    network_mode: host
+    depends_on:
+      strazad:
+        condition: service_started
+    environment:
+      STRAZA_DEMO_SERVER: http://127.0.0.1:8420
+      # KC is published on loopback by the loopback overlay. The token's iss
+      # claim is localhost:8480 (KC_HOSTNAME) whatever address minted it:
+      # strazad checks the claim against its own issuer config.
+      STRAZA_DEMO_KEYCLOAK: http://127.0.0.1:8480
+      STRAZA_DEMO_MIDPOINT: http://127.0.0.1:8087/midpoint
+      STRAZA_DEMO_AGENT_USER: ${STRAZA_DEMO_AGENT_USER:-joe-java-developer-agent}
+      # Deliberately-public lab creds, same convention as MP_ADMIN_PASSWORD
+      # in compose.yaml (the loopback overlay keeps the stack tunnel-only).
+      # Override in .env if rotated.
+      STRAZA_DEMO_AGENT_PASSWORD: ${STRAZA_DEMO_AGENT_PASSWORD:-Ev4l-St4ck!26}
+      STRAZA_DEMO_MP_ADMIN_PASSWORD: ${STRAZA_DEMO_MP_ADMIN_PASSWORD:-StrazaEval5ecr3t!}
+      STRAZA_DEMO_APPROVER_PASSWORD: ${STRAZA_DEMO_APPROVER_PASSWORD:-}
+      # Live-lane model key: env passthrough ONLY, never written here or in
+      # the image; empty = replay/booth lanes only.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    # One-time hook-lane enrollment persists here (OIDC device flow:
+    # docker exec -it straza-eval-demo-1 straza enroll --server
+    # http://127.0.0.1:8420). The gateway lane needs no enrollment (KC
+    # password grant per run), but the hook-lane scenarios and the
+    # eval-lane tests do; unenrolled they say so loudly, by design.
+    volumes:
+      - demo_home:/home/demo
+    # First-boot ordering: strazad may be up while Keycloak still imports;
+    # the demo's first password grant then fails and the process exits.
+    # restart covers that window, same pattern as strazad itself.
+    restart: unless-stopped
+
+  straza-harness:
+    build:
+      context: ./demo
+      dockerfile: Dockerfile.harness
+      additional_contexts:
+        straza: ../../..
+      args:
+        CLAUDE_VERSION: ${CLAUDE_PINNED:-2.1.220}
+        VERSION: ${STRAZA_BUILD_VERSION:-dev}
+        COMMIT: ${STRAZA_BUILD_COMMIT:-none}
+    # Fixed name, so the docker exec commands harness-entry.sh prints work as shown.
+    container_name: straza-harness
+    network_mode: host
+    depends_on:
+      strazad:
+        condition: service_started
+      agent-keys-init:
+        condition: service_completed_successfully
+    environment:
+      STRAZA_SERVER: http://127.0.0.1:8420
+    volumes:
+      - harness_home:/home/node
+      # public-key handoff (declared in compose.yaml): the entry script
+      # publishes joe's Ed25519 public half here; the seeder registers it
+      - agent_keys:/keys
+    restart: unless-stopped
+
+volumes:
+  harness_home:
+  demo_home:

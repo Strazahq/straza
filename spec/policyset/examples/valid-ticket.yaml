@@ -1,0 +1,35 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: ticket-change-window
+  description: "Long-running approval (revision 6): a prod change window approved as a day-scale ticket, consumable by a later (possibly fresh) session"
+spec:
+  match:
+    roles: [change-approvers]
+  rules:
+    - id: prod-deploy-ticket
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        allowPatterns: ["deploy-prod*"]
+      effect: allow
+      mode: approve
+      approve:
+        class: ticket             # default hold; ticket = day-scale request + a later-consumable grant
+        roles: [change-approvers] # who may decide (IGA-fed; midPoint-assignable)
+        ticketTTLSeconds: 86400   # 24h decision window (request expiry); cap 30d
+        grantTTLSeconds: 3600     # 1h post-approval consume window; cap 24h
+        bind: fingerprint         # fingerprint (default, exactly this call); predicate is reserved and behaves the same
+      reason: "prod deploys need a human change-approval ticket"
+    - id: rotate-key-ticket-defaults
+      # class: ticket with all knobs defaulted (ticketTTL 24h, grantTTL 1h,
+      # bind fingerprint); empty roles ⇒ straza-admin may approve.
+      tools: [mcp.call]
+      apps: [vault]
+      toolNames:
+        allow: ["rotate_root_key"]
+      effect: allow
+      mode: approve
+      approve:
+        class: ticket
+      reason: "root key rotation needs a human ticket"

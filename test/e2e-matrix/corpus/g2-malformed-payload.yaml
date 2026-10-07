@@ -1,0 +1,84 @@
+# An enrolled identity with a live session receives a payload its dialect
+# cannot parse. The refusal is the payload's, not the session's, so a
+# benign command is allowed before and after it. The raw documents are the
+# ones the Tier-1 conformance suite pins per dialect.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+id: g2-malformed-payload
+group: G2
+title: A malformed payload is blocked on every dialect while the session stays usable
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (every decision fails closed); spec/hook-profile/SPEC.md §Conformance
+  (malformed input fails closed); spec/conformance/tier1/cases.yaml
+  cases claude-malformed-payload-fails-closed,
+  codex-malformed-payload-fails-closed,
+  gemini-malformed-payload-fails-closed and
+  python-sdk-malformed-payload-fails-closed (the raw documents);
+  spec/scim-profile/SPEC.md §3 and conformance/scim users-lifecycle.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  frank: {kind: human, password: "Walk-2026!"}
+steps:
+  - name: the IdM provisions frank over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g2-frank
+        userName: frank
+        displayName: Frank Fuzz
+        active: true
+    want: {status: 201}
+    save: {frankId: id}
+  - name: the admin sets frank's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${frankId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: frank enrolls
+    enroll: {as: frank}
+  - name: frank starts a session
+    hook:
+      as: frank
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: a benign command is allowed before the malformed payload
+    hook:
+      as: frank
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: a truncated or non-JSON payload is blocked on every dialect
+    hook:
+      as: frank
+      payload:
+        claude-code: '{"hook_event_name": "PreToolUse", "tool_name":'
+        codex: 'not json at all'
+        gemini: '[1, 2'
+        python-sdk: '{"hook_event_name":'
+    want: {decision: block}
+  - name: an empty payload is blocked as well
+    hook:
+      as: frank
+      payload:
+        claude-code: ''
+        codex: ''
+        gemini: ''
+        python-sdk: ''
+    want: {decision: block}
+  - name: the session is still usable after the malformed payloads
+    hook:
+      as: frank
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: the IdM deactivates frank
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${frankId}
+    want: {status: 204}

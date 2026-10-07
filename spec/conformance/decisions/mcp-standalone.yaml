@@ -1,0 +1,66 @@
+# Decision-table fixtures: mcp.call tool-name matching, apps, serverCheck,
+# and the mcp default-deny.
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: github-access }
+    spec:
+      match: { roles: [dev] }
+      rules:
+        - id: github-readmostly
+          tools: [mcp.call]
+          apps: [github]
+          toolNames:
+            allow: ["get_*", "list_*", "search_*", "create_issue"]
+            deny: ["*delete*"]
+          effect: allow
+        - id: jira-servercheck
+          tools: [mcp.call]
+          apps: [jira]
+          mode: serverCheck
+          effect: allow
+          require: { attestation: advisory }
+          reason: "Jira calls require an attested session and online check"
+cases:
+  - name: github-get-allowed
+    subject: { user: kim, roles: [dev], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: get_repository }
+    want: { effect: allow, ruleId: github-readmostly }
+  - name: github-create-issue-allowed
+    subject: { user: kim, roles: [dev], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: create_issue }
+    want: { effect: allow, ruleId: github-readmostly }
+  - name: github-unlisted-tool-default-deny
+    subject: { user: kim, roles: [dev], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: push_commit }
+    want: { effect: deny, default: true }
+  - name: github-delete-denied
+    subject: { user: kim, roles: [dev], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: delete_repository }
+    want: { effect: deny, ruleId: github-readmostly }
+  - name: deny-side-beats-allow-side-within-rule
+    subject: { user: kim, roles: [dev], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: get_delete_candidates }
+    want: { effect: deny, ruleId: github-readmostly }
+  - name: unknown-app-default-deny
+    subject: { user: kim, roles: [dev], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: slack, toolName: post_message }
+    want: { effect: deny, default: true }
+  - name: wrong-role-mcp-default-deny
+    subject: { user: mallory, roles: [intern], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: get_repository }
+    want: { effect: deny, default: true }
+  - name: servercheck-flag-set-on-allow
+    subject: { user: kim, roles: [dev], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: jira, toolName: create_ticket }
+    want: { effect: allow, ruleId: jira-servercheck, serverCheck: true }
+  - name: servercheck-require-fails-plain-deny
+    subject: { user: kim, roles: [dev], attestation: none }
+    event: { kind: tool.pre, tool: mcp.call, app: jira, toolName: create_ticket }
+    want: { effect: deny, ruleId: jira-servercheck }
+  - name: managed-satisfies-advisory-minimum
+    subject: { user: kim, roles: [dev], attestation: managed }
+    event: { kind: tool.pre, tool: mcp.call, app: jira, toolName: create_ticket }
+    want: { effect: allow, ruleId: jira-servercheck, serverCheck: true }

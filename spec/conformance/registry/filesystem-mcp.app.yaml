@@ -1,0 +1,43 @@
+# Golden import of filesystem-mcp.server.json (SPEC.md §5): no remotes[]; the
+# first stdio package (npm) wins → command runtime via npx. The second package
+# (streamable-http) is not a remote and is ignored for runtime selection.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: filesystem-mcp
+  namespace: io.github.domdomegg
+server:
+  $schema: https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json
+  name: io.github.domdomegg/filesystem-mcp
+  description: Read, create, and edit files.
+  title: Filesystem
+  repository:
+    url: https://github.com/domdomegg/filesystem-mcp.git
+    source: github
+  version: "1.2.0"
+  websiteUrl: https://github.com/domdomegg/filesystem-mcp#readme
+  packages:
+    - registryType: npm
+      identifier: filesystem-mcp
+      version: "1.2.0"
+      runtimeHint: npx
+      transport:
+        type: stdio
+    - registryType: npm
+      identifier: filesystem-mcp
+      version: "1.2.0"
+      runtimeHint: npx
+      transport:
+        type: streamable-http
+        url: http://localhost:3000/mcp
+      environmentVariables:
+        - description: Transport type.
+          isRequired: true
+          value: http
+          name: MCP_TRANSPORT
+straza:
+  runtime:
+    kind: command
+    command:
+      exec: npx
+      args: ["-y", "filesystem-mcp@1.2.0"]

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Straza role metarole. Every imported Straza role (the wire-group class
+  materializes them as RoleType foci) is ASSIGNED this metarole by an
+  inbound mapping on the resource's group objectType. The order-2 inducement
+  below therefore rides a plain assignment chain, user -> imported role ->
+  metarole, which midPoint evaluates in EVERY flow (assign deltas,
+  recompute, reconcile). An archetype inducement would deliver the
+  construction only on assign-time deltas and skip it on recompute/reconcile,
+  so a re-assign after a revoke would never re-add membership. That is why
+  this is a metarole.
+-->
+
+<!--
+  The construction makes holding an imported role a real grant: it writes
+  the account's ri:strazaGroups association with the role's own wire-group
+  shadow (associationFromLink resolves the focus's linked projection); the
+  connector turns that into a SCIM members PATCH, and the server records
+  THE (user, role) assignment row. Assigning the imported role IS the
+  grant. Association membership is the only outbound traffic.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+      xmlns:s="http://midpoint.evolveum.com/xml/ns/public/model/scripting-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0a">
+    <name>Straza role metarole</name>
+    <description>Held by every imported Straza role. Assigning an imported
+        role to a user provisions the governed Straza account with wire-group
+        membership, which IS the Straza role assignment (revision 12).</description>
+    <!-- Replay trigger for the first-boot association gap (root-caused in
+         midPoint source): a member whose projection was computed BEFORE the
+         imported role got its wire-group shadow link holds a silently-empty
+         associationFromLink result, and no stock lane ever replays it
+         (zero-set values apply only on projection ADD;
+         reconciliation alone can repair, but nothing triggers it). This rule
+         closes the gap the midPoint-native way: whenever an imported role is
+         created or modified (the birth-and-link moment included), recompute
+         its members WITH reconcile, asynchronously. Reconcile loads the
+         simulated association truthfully, which the vendored
+         universal-rest-connector supports, and midPoint's own provisioning
+         emits any missing membership PATCH. Idempotent when nothing is
+         missing, and midPoint stays the single writer here. -->
+    <inducement>
+        <policyRule>
+            <name>replay-membership-on-imported-role-change</name>
+            <policyConstraints>
+                <modification>
+                    <operation>add</operation>
+                    <operation>modify</operation>
+                </modification>
+            </policyConstraints>
+            <policyActions>
+                <scriptExecution>
+                    <object>
+                        <linkSource/>
+                    </object>
+                    <executeScript>
+                        <s:recompute>
+                            <s:executeOptions>
+                                <reconcile>true</reconcile>
+                            </s:executeOptions>
+                        </s:recompute>
+                    </executeScript>
+                    <asynchronousExecution>
+                        <executionMode>iterative</executionMode>
+                    </asynchronousExecution>
+                </scriptExecution>
+            </policyActions>
+        </policyRule>
+    </inducement>
+    <inducement>
+        <focusType>UserType</focusType>
+        <order>2</order>
+        <construction>
+            <resourceRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01" type="ResourceType"/>
+            <kind>account</kind>
+            <intent>default</intent>
+            <association>
+                <ref>ri:strazaGroups</ref>
+                <outbound>
+                    <expression>
+                        <!-- No projectionDiscriminator on purpose: the
+                             evaluator derives its matching from the
+                             association definition, which names the one role
+                             object type of the Straza resource, so a
+                             membership of any kind of role provisions the
+                             same way. -->
+                        <associationFromLink/>
+                    </expression>
+                </outbound>
+            </association>
+        </construction>
+    </inducement>
+</role>

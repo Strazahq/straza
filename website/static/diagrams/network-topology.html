@@ -1,0 +1,395 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The network surface · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+.legend{display:flex;gap:var(--s3);align-items:center;font-size:11px;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:5px 10px}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.legend .ok{background:var(--ok-bg);border:1px solid var(--ok)}
+.legend .danger{background:var(--danger-bg);border:1px solid var(--danger)}
+.legend .dash{display:inline-block;width:16px;height:0;border-top:2px dashed var(--muted);margin-right:4px;vertical-align:3px}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 11px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);
+  color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:116px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:80ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:15px;font-weight:600}
+.s{font-size:12.5px;font-weight:600}
+.d{font-size:11px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+.mono{font-family:var(--font-mono);font-size:10.5px;fill:var(--muted)}
+.box{fill:var(--surface);stroke:var(--border);stroke-width:1.25;
+  transition:stroke .2s,stroke-width .2s,fill .2s,filter .2s,opacity .25s}
+.cbox{fill:var(--bg);stroke:var(--border);stroke-width:1.25;stroke-dasharray:none}
+.node{cursor:pointer;outline:none;transition:opacity .25s}
+.node:hover .box,.node:focus .box,.node.sel .box{stroke:var(--accent);stroke-width:2;
+  fill:var(--accent-bg);filter:drop-shadow(0 0 5px var(--accent))}
+.cont:hover .cbox,.cont:focus .cbox{stroke:var(--accent);stroke-width:2;
+  filter:drop-shadow(0 0 5px var(--accent))}
+.node.dim,.cont.dim,.edge.dim{opacity:.42}
+.edge.dim{opacity:.28}
+.elabel.dim{opacity:.35}
+ 
+.node.expose-ok .box{stroke:var(--ok);stroke-width:2;fill:var(--ok-bg)}
+.node.expose-no .box{stroke:var(--danger);stroke-width:2;fill:var(--danger-bg)}
+.node.expose-cond .box{stroke:var(--warn);stroke-width:2;fill:var(--warn-bg)}
+.chipok{fill:var(--ok-bg);stroke:var(--ok);stroke-width:1.25}
+.chipdanger{fill:var(--danger-bg);stroke:var(--danger);stroke-width:1.25}
+.chipneutral{fill:var(--surface-2);stroke:var(--border);stroke-width:1}
+.chiptok{font-size:10.5px;font-weight:600;fill:var(--ok)}
+.chiptdanger{font-size:10.5px;font-weight:600;fill:var(--danger)}
+.edge{fill:none;stroke:var(--muted);stroke-width:1.6;marker-end:url(#arM);
+  transition:stroke .2s,opacity .25s}
+.edge.async{stroke-dasharray:5 4}
+.edge.warnE{stroke:var(--warn);marker-end:url(#arW)}
+.edge.hl{stroke:var(--accent);stroke-width:2.4;marker-end:url(#arA);
+  filter:drop-shadow(0 0 3px var(--accent))}
+.edge.okE{stroke:var(--ok);stroke-width:2.4;marker-end:url(#arO)}
+.elabel{font-size:10.5px;fill:var(--muted);transition:opacity .25s}
+marker path{fill:var(--muted)}
+marker.mA path{fill:var(--accent)}
+marker.mW path{fill:var(--warn)}
+marker.mO path{fill:var(--ok)}
+.lf{display:inline}.ls{display:none}
+@media (max-width:600px){.lf{display:none}.ls{display:inline}}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ the network surface</span></h1>
+  <div class="controls">
+    <button class="ctl" id="lens" aria-pressed="false">Internet exposure lens</button>
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span><span class="sw ok"></span>safe to expose</span>
+    <span><span class="sw danger"></span>keep private</span>
+    <span><span class="dash"></span>async / optional</span>
+  </div>
+</header>
+
+<div class="stage">
+<svg id="dia" viewBox="0 0 980 620" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
+<title id="svgT">Straza network topology: who dials whom, and what may face the internet</title>
+<desc id="svgD">Agent machines, operators and identity systems dial the main strazad listener on port 8420 inside a private network. The approver TLS listener on port 8443, auto-minted by default on the standalone profile, serves only the mobile approver surface and is the one listener designed for internet exposure. Backends (Postgres, NATS, MCP servers and SIEM sinks) are never published. Push to phones and Slack notifications leave strazad outbound only.</desc>
+
+<defs>
+  <marker id="arM" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z"/></marker>
+  <marker id="arA" class="mA" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z"/></marker>
+  <marker id="arW" class="mW" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z"/></marker>
+  <marker id="arO" class="mO" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z"/></marker>
+</defs>
+
+
+<g class="cont" id="z-agents">
+  <rect class="cbox" x="16" y="48" width="200" height="150" rx="8"/>
+  <text class="cap" x="28" y="68">AGENT MACHINES</text>
+</g>
+<g class="cont" id="z-org">
+  <rect class="cbox" x="16" y="228" width="200" height="230" rx="8"/>
+  <text class="cap" x="28" y="248">ORG NETWORK (PRIVATE)</text>
+</g>
+<g class="cont" id="z-strazad">
+  <rect class="cbox" x="300" y="48" width="300" height="410" rx="8"/>
+  <text class="cap" x="316" y="68">STRAZAD: ONE PROCESS, TWO LISTENERS</text>
+  <text class="d" x="316" y="444">either listener dies &#8594; process exits (fail closed)</text>
+</g>
+<g class="cont" id="z-inet">
+  <rect class="cbox" x="700" y="48" width="264" height="254" rx="8"/>
+  <text class="cap" x="712" y="68">INTERNET</text>
+</g>
+<g class="cont" id="z-backend">
+  <rect class="cbox" x="300" y="488" width="664" height="118" rx="8"/>
+  <text class="cap" x="316" y="508">BACKENDS: NEVER PUBLISHED</text>
+</g>
+
+
+<path class="edge" id="e-agents" d="M216 132 H260 V250 H310"/>
+<text class="elabel" id="el-agents" x="224" y="124">agent lane</text>
+<path class="edge" id="e-console" d="M204 289 H244 V282 H310"/>
+<path class="edge" id="e-idm" d="M204 353 H262 V314 H310"/>
+<text class="elabel" id="el-idm" x="208" y="346">/scim/v2</text>
+<path class="edge" id="e-idp" d="M316 356 H282 V417 H210"/>
+<text class="elabel" id="el-idp" x="222" y="410">OIDC discovery + JWKS</text>
+<path class="edge okE" id="e-phone" d="M710 119 H590"/>
+<text class="elabel" id="el-phone" x="608" y="100">outbound HTTPS</text>
+<text class="elabel" id="el-phone2" x="608" y="112">SPKI-pinned</text>
+<path class="edge async" id="e-push" d="M600 197 H706"/>
+<text class="elabel" id="el-push" x="598" y="189">wake-up {v,ref,kind}</text>
+<path class="edge async" id="e-brphone" d="M832 168 V160"/>
+<path class="edge async" id="e-slackout" d="M600 250 H706"/>
+<text class="elabel" id="el-slackout" x="618" y="243">chat.postMessage</text>
+<path class="edge warnE" id="e-slackcb" d="M710 278 H590"/>
+<text class="elabel" id="el-slackcb" x="602" y="294">buttons callback</text>
+<path class="edge" id="e-pg" d="M390 458 V518"/>
+<path class="edge async" id="e-nats" d="M557 458 V518"/>
+<path class="edge async" id="e-daemon" d="M216 160 H258 V478 H520 V462"/>
+<text class="elabel" id="el-daemon" x="264" y="474">/v1/push (SSE)</text>
+<path class="edge" id="e-mcp" d="M600 430 H728 V516"/>
+<text class="elabel" id="el-mcp" x="620" y="423">creds injected</text>
+<path class="edge async" id="e-siem" d="M581 458 V472 H881 V516"/>
+
+
+<g class="node" id="agents" tabindex="0" aria-label="Harness plus straza client: outbound only, zero open ports">
+  <rect class="box" x="28" y="84" width="176" height="96" rx="6"/>
+  <text class="s" x="40" y="106">harness + straza</text>
+  <text class="d" x="40" y="124"><tspan class="lf">Claude Code &#183; Codex &#183; Gemini</tspan><tspan class="ls">3 harnesses</tspan></text>
+  <text class="d" x="40" y="140">hooks &#183; daemon &#183; mcp proxy</text>
+  <rect class="chipneutral" x="40" y="150" width="118" height="20" rx="10"/>
+  <text class="mono" x="50" y="164">zero inbound ports</text>
+</g>
+
+
+<g class="node" id="console" tabindex="0" aria-label="Admin console and strazactl">
+  <rect class="box" x="28" y="262" width="176" height="54" rx="6"/>
+  <text class="s" x="40" y="282">console &#183; strazactl</text>
+  <text class="mono" x="40" y="300">/console + /v1/admin</text>
+</g>
+<g class="node" id="idm" tabindex="0" aria-label="Identity management system pushing SCIM">
+  <rect class="box" x="28" y="326" width="176" height="54" rx="6"/>
+  <text class="s" x="40" y="346">IdM (SCIM)</text>
+  <text class="d" x="40" y="364">midPoint &#183; Okta &#183; Entra</text>
+</g>
+<g class="node" id="idp" tabindex="0" aria-label="OIDC identity provider">
+  <rect class="box" x="28" y="390" width="176" height="54" rx="6"/>
+  <text class="s" x="40" y="410">OIDC IdP</text>
+  <text class="d" x="40" y="428">Keycloak &#183; any IdP</text>
+</g>
+
+
+<g class="node" id="l8443" tabindex="0" aria-label="Approver TLS listener, port 8443, serves only the approver surface">
+  <rect class="box" x="316" y="82" width="268" height="112" rx="6"/>
+  <text class="cap" x="328" y="100">APPROVER LISTENER &#183; AUTO-MINTED</text>
+  <text class="s" x="328" y="118">:8443 <tspan class="mono">server.approverTLS</tspan></text>
+  <text class="d" x="328" y="136">/v1/approver/* + /readyz, all else 404</text>
+  <text class="d" x="328" y="152">https-only &#183; the enroll QR pins this cert</text>
+  <rect class="chipok" x="328" y="162" width="158" height="20" rx="10"/>
+  <text class="chiptok" x="338" y="176">designed for the internet</text>
+</g>
+<g class="node" id="l8420" tabindex="0" aria-label="Main listener, port 8420, the whole surface">
+  <rect class="box" x="316" y="218" width="268" height="180" rx="6"/>
+  <text class="cap" x="328" y="236">MAIN LISTENER</text>
+  <text class="s" x="328" y="254">:8420 <tspan class="mono">server.listen</tspan></text>
+  <text class="d" x="328" y="272">/v1 agents: enroll &#183; checkin &#183; decide &#183; audit</text>
+  <text class="d" x="328" y="288">/v1/admin &#183; /console: operators</text>
+  <text class="d" x="328" y="304">/mcp gateway &#183; /scim/v2 &#183; /oidc (standalone)</text>
+  <text class="d" x="328" y="320">/metrics: unauthenticated</text>
+  <text class="d" x="328" y="340">plaintext or server.tls (enterprise)</text>
+  <text class="d" x="328" y="354">warns loudly on plaintext</text>
+  <rect class="chipdanger" x="328" y="364" width="140" height="20" rx="10"/>
+  <text class="chiptdanger" x="338" y="378">keep off the internet</text>
+</g>
+
+
+<g class="node" id="phone" tabindex="0" aria-label="Mobile approver app">
+  <rect class="box" x="712" y="84" width="240" height="70" rx="6"/>
+  <text class="s" x="724" y="104">approver phone app</text>
+  <text class="d" x="724" y="122">all data rides its own dial-in</text>
+  <text class="d" x="724" y="138">no reachability in time &#8594; deny</text>
+</g>
+<g class="node" id="broker" tabindex="0" aria-label="Push broker, FCM, APNs or self-hosted ntfy">
+  <rect class="box" x="712" y="170" width="240" height="54" rx="6"/>
+  <text class="s" x="724" y="190">push broker (FCM/APNs/ntfy)</text>
+  <text class="d" x="724" y="208">a wake-up only, never content</text>
+</g>
+<g class="node" id="slack" tabindex="0" aria-label="Slack, optional approval channel">
+  <rect class="box" x="712" y="236" width="240" height="54" rx="6"/>
+  <text class="s" x="724" y="256">Slack (optional)</text>
+  <text class="d" x="724" y="274">buttons need a public HTTPS path</text>
+</g>
+
+
+<g class="node" id="pg" tabindex="0" aria-label="Postgres store">
+  <rect class="box" x="316" y="522" width="140" height="66" rx="6"/>
+  <text class="s" x="328" y="542">Postgres</text>
+  <text class="mono" x="328" y="558">:5432</text>
+  <text class="d" x="328" y="574">store (enterprise)</text>
+</g>
+<g class="node" id="nats" tabindex="0" aria-label="NATS JetStream event spine">
+  <rect class="box" x="472" y="522" width="170" height="66" rx="6"/>
+  <text class="s" x="484" y="542">NATS JetStream</text>
+  <text class="mono" x="484" y="558">:4222</text>
+  <text class="d" x="484" y="574">embedded = no socket</text>
+</g>
+<g class="node" id="mcpup" tabindex="0" aria-label="Upstream MCP servers">
+  <rect class="box" x="658" y="522" width="140" height="66" rx="6"/>
+  <text class="s" x="670" y="542">MCP servers</text>
+  <text class="d" x="670" y="558">oci &#183; command &#183; remote</text>
+  <text class="d" x="670" y="574">gateway-only</text>
+</g>
+<g class="node" id="siem" tabindex="0" aria-label="SIEM webhook sink">
+  <rect class="box" x="814" y="522" width="134" height="66" rx="6"/>
+  <text class="s" x="826" y="542">SIEM sink</text>
+  <text class="d" x="826" y="558">outbound webhook</text>
+  <text class="d" x="826" y="574">HMAC-signed</text>
+</g>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">Hover or tab any element for its story. Toggle the <strong>Internet exposure lens</strong> to see exactly what may face a hostile network, and what must never.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>Every connection in a Straza deployment, drawn with its direction. Agent machines,
+  operators, the IdM and the IdP all dial the main listener (:8420) inside a private network;
+  agent machines open no inbound port at all. The approver listener (:8443,
+  <code>server.approverTLS</code>, auto-minted by default on standalone and opt-in on
+  enterprise) serves only <code>/v1/approver/*</code> plus
+  <code>/readyz</code> and answers 404 to everything else. It is the one surface designed
+  to face the internet, because the phone app is https-only and pins the listener&#8217;s
+  certificate from the enroll QR. Approval pushes and Slack notifications leave strazad
+  outbound-only; the only inbound internet path besides the approver surface is Slack&#8217;s
+  interactive-button callback, which needs a deliberately published HTTPS path (the demo stack
+  uses a one-route proxy). Postgres, NATS, upstream MCP servers and SIEM receivers are backends:
+  strazad dials them, nothing else should.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var nar=document.getElementById('nar');
+var DEF='Hover or tab any element for its story. Toggle the <strong>Internet exposure lens</strong> to see exactly what may face a hostile network, and what must never.';
+var LENS='<strong>The exposure verdict:</strong> only the approver listener (:8443) is designed for hostile networks: https-only, SPKI-pinned, allowlist-guarded to two path shapes. <code>:8420</code> carries admin, console, gateway, SCIM and an unauthenticated <code>/metrics</code> on one port: keep it on a private network, VPN, or tunnel. Slack buttons are the conditional case (publish one callback path, never the whole listener).';
+var FACTS={
+ agents:'<strong>Agent machines run nothing inbound.</strong> straza (hooks, daemon, mcp proxy) only dials out: <code>/v1/enroll&#8228;checkin&#8228;decide&#8228;audit/batch&#8228;snapshot</code> and <code>/mcp</code> on strazad, plus one long-lived SSE stream on <code>/v1/push</code> for the daemon. No <code>net.Listen</code> exists in the client outside tests: a fleet needs zero firewall openings toward developer machines.',
+ console:'<strong>Console and strazactl</strong> ride the same origin: <code>/console/</code> serves the embedded UI, which calls <code>/v1/admin</code> same-origin; there is deliberately no CORS, so the console cannot be split onto a different host.',
+ idm:'<strong>The IdM pushes SCIM</strong> to <code>/scim/v2/*</code> with a <code>wat_</code> admin API token that carries the scim scopes (SHA-256 at rest), and the pull connector reads <code>/v1/admin/*</code> with a <code>wat_</code> token too. Both live on :8420; SCIM cannot be split onto its own listener today.',
+ idp:'<strong>strazad dials the IdP</strong>, not the reverse: OIDC discovery + JWKS at boot (unreachable IdP fails boot), token verification after. Browsers and straza also reach the IdP directly for the device-code login.',
+ l8420:'<strong>:8420 is the whole surface on one port</strong>: agent lanes, admin API, console, MCP gateway, SCIM, the standalone OIDC issuer, and an unauthenticated <code>/metrics</code>. Default bind is loopback (standalone) or all interfaces (enterprise); enterprise warns loudly when serving plaintext. There is no per-route listener split except the approver surface.',
+ l8443:'<strong>The approver listener is allowlist-guarded:</strong> only <code>/v1/approver/*</code> and <code>/readyz</code> pass; admin, console, gateway and OIDC all 404 here, pinned by a table test. On standalone it needs no config at all: <code>autoMint</code> defaults on, so a virgin boot mints a self-signed pair under <code>&lt;dataDir&gt;/approver-tls</code>, binds <code>:8443</code> and autodetects a LAN <code>publicUrl</code>; enterprise opts in. Fields you set explicitly always win (all four together is still required while <code>autoMint</code> is off, and <code>publicUrl</code> must be https). The enroll QR carries this listener&#8217;s URL and SPKI pin, so a self-signed cert is the intended posture, and re-minting rotates that pin, so every enrolled device re-enrolls.',
+ phone:'<strong>Arrow 1 is the only data channel:</strong> every byte (pending approvals, reasons, signed decisions) rides outbound HTTPS from the phone to the pinned server. Push only wakes the app; without reachability the app polls, and if the phone cannot reach the server in time the approval times out and the call is <strong>denied</strong>. Fail closed.',
+ broker:'<strong>The broker never carries data.</strong> strazad POSTs a content-free <code>{v,ref,kind}</code> nudge (no tool name, no reason, no token) to FCM, Apple&#8217;s APNs, or a self-hosted ntfy/UnifiedPush host, and on the keyed WebPush lane even that nudge travels as RFC&nbsp;8291 ciphertext. Non-FCM/APNs hosts must be on <code>approval.push.allowedPushHosts</code>, re-checked at every delivery; an empty allowlist refuses registration.',
+ slack:'<strong>Slack notifications are outbound-only</strong> (<code>chat.postMessage</code> works from a loopback-bound stack). Only the interactive <em>buttons</em> need an inbound path: <code>/v1/approval/callbacks/slack</code>, signature-verified. Publish that one path (the demo stack uses a one-route proxy plus a quick tunnel), never the whole listener.',
+ pg:'<strong>Postgres is strazad&#8217;s dial-out only.</strong> No other component connects to it, and no request path reads it: decisions run on in-memory compiled snapshots. Standalone uses embedded SQLite instead.',
+ nats:'<strong>Embedded NATS opens no socket at all</strong> (<code>DontListen: true</code>, in-process). External NATS (<code>events.url</code>) is for scale-out between pods: JetStream replay and the <code>straza.push.&gt;</code> fan-out stay pod-internal. No broker is client-reachable in any profile; daemons hold one SSE stream to strazad instead (<code>/v1/push</code>), with poll-refresh as the fallback, bounded by the 300 s token TTL.',
+ mcpup:'<strong>Upstream MCP servers are reached only by the gateway</strong>: spawned (oci/command) or dialed (remote), with credentials injected server-side so they never reach the agent. The demo compose deliberately publishes none of them.',
+ siem:'<strong>SIEM sinks are outbound webhooks</strong> (or local JSONL files): HMAC-signed CloudEvents from durable JetStream consumers, at-least-once; a receiver outage delays events, never loses them.',
+ 'z-strazad':'<strong>One process, two listeners, fail closed:</strong> if either listener&#8217;s serve loop dies, strazad shuts the sibling and exits; a half-alive server never keeps answering.',
+ 'z-backend':'<strong>Backends are strazad&#8217;s private dial-outs.</strong> Compose publishes neither Postgres nor NATS: nothing on a client machine dials the broker; MCP servers stay gateway-only by design.',
+ 'z-inet':'<strong>Three arrows, nothing in the middle of the data path:</strong> phone &#8594; server (all data), server &#8594; broker (wake-up), broker &#8594; phone (the phone&#8217;s own socket). The server never dials the phone.',
+ 'z-agents':'<strong>Agent machines:</strong> outbound to :8420 only (the daemon&#8217;s push stream rides the same origin). Zero inbound.',
+ 'z-org':'<strong>The org network</strong> holds everything that must reach :8420: operators, the IdM&#8217;s SCIM push, and the IdP exchange. On tunnel/VPN stacks this is the tailnet.',
+ 'e-agents':'<strong>The agent lane:</strong> enroll once, then checkin (300 s session tokens), decide (serverCheck), audit/batch (async spool drain), snapshot pulls, and /mcp for governed tools.',
+ 'e-phone':'<strong>Outbound HTTPS from the phone</strong> to <code>approverTLS.publicUrl</code> (the URL the QR named). Auto-mint guesses that URL from the host&#8217;s LAN IPv4, which is right on the same Wi-Fi and wrong everywhere else: reachability stays the admin&#8217;s one decision: same Wi-Fi, WireGuard/Tailscale profile, tunnel hostname, or a real public edge, set explicitly.',
+ 'e-push':'<strong>The wake-up:</strong> outbound POST, content-free. A compromised broker can at worst send a false wake-up; the follow-up fetch still goes only to the pinned server.',
+ 'e-slackcb':'<strong>The one conditional inbound path:</strong> Slack&#8217;s signed button callback. Needs public HTTPS: publish exactly this route via proxy/tunnel, never the whole :8420.',
+ 'e-daemon':'<strong>The push lane:</strong> the daemon holds one SSE stream on <code>GET /v1/push</code> (session-token auth, strazad&#8217;s own origin); the pod relays its own <code>straza.push.&gt;</code> subscription into it, so a kill-switch revocation lands in under 2 s in every profile, standalone included. No broker is client-reachable. Stream down or no daemon: revocation still lands via poll-refresh within the 300 s token TTL.',
+ 'e-idp':'<strong>Outbound to the IdP:</strong> discovery + JWKS at boot, then local verification: token checks never call out per request.'
+};
+var nodes=Array.prototype.slice.call(document.querySelectorAll('.node,.cont'));
+var edges=Array.prototype.slice.call(document.querySelectorAll('.edge'));
+var labels=Array.prototype.slice.call(document.querySelectorAll('.elabel'));
+nodes.forEach(function(n){
+  n.setAttribute('tabindex','0');
+  n.addEventListener('mouseenter',function(){nar.innerHTML=FACTS[n.id]||DEF;});
+  n.addEventListener('focus',function(){nar.innerHTML=FACTS[n.id]||DEF;});
+  n.addEventListener('mouseleave',function(){reset();});
+  n.addEventListener('blur',function(){reset();});
+});
+edges.forEach(function(e){
+  e.addEventListener('mouseenter',function(){if(FACTS[e.id])nar.innerHTML=FACTS[e.id];});
+  e.addEventListener('mouseleave',function(){reset();});
+});
+var lensBtn=document.getElementById('lens'),lensOn=false;
+ 
+var LIT={phone:1,broker:1,slack:1,l8443:1,'z-inet':1};
+var LITEDGE={'e-phone':1,'e-push':1,'e-brphone':1,'e-slackout':1,'e-slackcb':1};
+var LITLBL={'el-phone':1,'el-phone2':1,'el-push':1,'el-slackout':1,'el-slackcb':1};
+function applyLens(){
+  nodes.forEach(function(n){
+    n.classList.remove('dim','expose-ok','expose-no','expose-cond');
+    if(!lensOn)return;
+    if(n.id==='l8443'){n.classList.add('expose-ok');}
+    else if(n.id==='l8420'){n.classList.add('expose-no');}
+    else if(n.id==='slack'){n.classList.add('expose-cond');}
+    else if(!LIT[n.id]){n.classList.add('dim');}
+  });
+  edges.forEach(function(e){e.classList.toggle('dim',lensOn&&!LITEDGE[e.id]);});
+  labels.forEach(function(l){l.classList.toggle('dim',lensOn&&!LITLBL[l.id]);});
+  lensBtn.setAttribute('aria-pressed',String(lensOn));
+  nar.innerHTML=lensOn?LENS:DEF;
+}
+function reset(){nar.innerHTML=lensOn?LENS:DEF;}
+lensBtn.addEventListener('click',function(){lensOn=!lensOn;applyLens();});
+document.addEventListener('keydown',function(ev){
+  if(ev.key==='Escape'&&lensOn){lensOn=false;applyLens();}
+});
+})();
+</script>
+</body>
+</html>

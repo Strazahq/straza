@@ -1,0 +1,10 @@
+# INVALID: "database.query" is not in the canonical tool taxonomy.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: unknown-tool
+spec:
+  rules:
+    - id: rule-one
+      tools: [database.query]
+      effect: deny

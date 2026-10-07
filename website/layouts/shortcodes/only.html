@@ -1,0 +1,6 @@
+{{- /* A step that has one form only says which and why, in both modes:
+{{< only form="cli" >}}A server starts from a terminal.{{< /only >}} */ -}}
+{{- $form := .Get "form" -}}
+{{- $label := index (dict "cli" "CLI only" "console" "Console only") $form -}}
+{{- if not $label }}{{ errorf "%s: only takes form=\"cli\" or form=\"console\", and got %q." .Position $form }}{{ end -}}
+<div class="only"><span class="chip plain">{{ $label }}</span><div class="only-why">{{ partial "inner.html" (dict "Page" .Page "Inner" .Inner) }}</div></div>

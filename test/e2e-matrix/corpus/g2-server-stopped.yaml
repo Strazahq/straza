@@ -1,0 +1,180 @@
+# The server is stopped under a live session. The published offline rule
+# for the standalone profile is a grace window: while the pinned snapshot
+# is valid and the session token has not expired past the grace bound, a
+# locally computable decision stands, so a benign command still allows and
+# a matched deny still denies with its reason. A serverCheck escalation
+# needs the server and is a deny while it is unreachable. After the
+# restart the same calls resolve as before and the spooled records drain
+# onto the chain.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+id: g2-server-stopped
+group: G2
+title: A hook after the server stops follows the offline-grace rule and a serverCheck fails closed
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (every decision fails closed, the offline grace is 15
+  min standalone and 0 enterprise, and the offline deny names what it
+  observed);
+  spec/snapshot/SPEC.md §Envelope (maxAgeSecs, the offline grace bound);
+  spec/policyset/SPEC.md §2 item 6 (serverCheck: unreachable platform is
+  a deny regardless of grace, a local deny is final);
+  website/content/reference/configuration.md §Governance
+  (governance.offlineGraceTTL is a profile decision, no env face);
+  website/content/guides/operate/kill-switch-runbook.md (enterprise grace
+  0 stated as the contrast);
+  spec/scim-profile/SPEC.md §3 and conformance/scim users-lifecycle.
+  suspect: the wording of the offline serverCheck deny is not quoted
+  verbatim anywhere published, so that step asserts the deny alone; the
+  success status codes and the activate body field are assumed.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  gina: {kind: human, password: "Walk-2026!"}
+steps:
+  - name: the IdM provisions gina over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g2-gina
+        userName: gina
+        displayName: Gina Grace
+        active: true
+    want: {status: 201}
+    save: {ginaId: id}
+  - name: the admin sets gina's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${ginaId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the admin creates the application role the policy names
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g2-grace, kind: application, description: "Offline grace scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g2-grace"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: gina becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${ginaId}"}]
+    want: {status: 200}
+  - name: the admin applies a policy with a local deny and a serverCheck allow
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g2-grace
+            description: Offline grace scenario for role g2-grace
+          spec:
+            match:
+              roles: [g2-grace]
+            rules:
+              - id: no-recursive-delete
+                tools: [shell.exec]
+                command:
+                  denyPatterns: ["rm -rf *", "rm -fr *"]
+                effect: deny
+                reason: "G2-GRACE: recursive delete is refused for role g2-grace"
+              - id: deploy-needs-the-server
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy-check *"]
+                effect: allow
+                mode: serverCheck
+                reason: "G2-GRACE: deploy-check is allowed only after the server confirms it"
+    want: {status: 201}
+  - name: the admin activates the policy
+    admin:
+      method: POST
+      path: /v1/admin/policies/g2-grace/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: gina enrolls
+    enroll: {as: gina}
+  - name: gina starts a session, which pins the snapshot on her machine
+    hook:
+      as: gina
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: a benign command is allowed while the server is up
+    hook:
+      as: gina
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: a serverCheck command is allowed while the server is up
+    hook:
+      as: gina
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-check staging"}
+    want: {decision: allow}
+  - name: the server is stopped under the live session
+    server: {action: stop}
+  - name: a benign command is still allowed inside the grace window
+    hook:
+      as: gina
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: a matched deny is still refused with its reason inside the grace window
+    hook:
+      as: gina
+      event: {kind: tool.pre, tool: shell.exec, command: "rm -rf /work/scratch"}
+    want: {decision: deny, reasonContains: "recursive delete is refused"}
+  - name: a serverCheck command is refused while the server is unreachable
+    hook:
+      as: gina
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-check staging"}
+    want: {decision: deny}
+  - name: the server is started again on the same port and data directory
+    server: {action: start}
+  - name: the serverCheck command is allowed again once the server answers
+    hook:
+      as: gina
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-check staging"}
+    want: {decision: allow}
+    within: 30s
+  - name: the offline refusal drained onto the chain exactly once
+    audit: {subject: gina, kind: tool.pre, decision: deny, reasonContains: "recursive delete is refused", count: 1}
+    within: 30s
+  - name: the admin deactivates and deletes the policy
+    admin:
+      method: POST
+      path: /v1/admin/policies/g2-grace/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft policy is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g2-grace
+    want: {status: 204}
+  - name: the admin deletes the role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates gina
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${ginaId}
+    want: {status: 204}

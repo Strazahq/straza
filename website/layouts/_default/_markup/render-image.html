@@ -1,0 +1,14 @@
+{{- /* A PNG under a diagrams or replays directory is the GitHub fallback for
+a self-contained HTML page of the same name; the built site embeds the live
+page. The src is root-absolute so relativeURLs rewrites it per page, and
+site.js appends the theme parameter. */ -}}
+{{- $dest := .Destination -}}
+{{- $src := replaceRE `^.*(/(?:diagrams|replays)/[^/]+)\.png$` "$1.html" $dest -}}
+{{- if ne $src $dest }}
+<figure class="diagram">
+  <iframe src="{{ $src }}" loading="lazy" title="{{ .PlainText }}"></iframe>
+  <figcaption>{{ .PlainText }} <a href="{{ $src }}" target="_blank" rel="noopener">Open the full-size page</a>.</figcaption>
+</figure>
+{{- else }}
+<img src="{{ $dest | safeURL }}" alt="{{ .PlainText }}"{{ with .Title }} title="{{ . }}"{{ end }}>
+{{- end }}

@@ -1,0 +1,67 @@
+{{- if .Values.demoTools.enabled }}
+# The eval stack's demo MCP upstream (protocol reference server, upstream
+# package "server-everything"), so a fresh install has something to
+# register, police, and approve against.
+# ClusterIP ONLY and no ingress, ever: the single road to it is strazad's
+# governed /mcp gateway (no ungoverned surfaces). Register it by hand from the
+# console, or declaratively via apps.manifests pointing at
+# http://{{ include "straza.fullname" . }}-demo-tools:3001/mcp.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "straza.fullname" . }}-demo-tools
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "straza.name" . }}-demo-tools
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports: [{ port: 3001 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "straza.fullname" . }}-demo-tools
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "straza.name" . }}-demo-tools
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "straza.name" . }}-demo-tools
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: server
+          image: {{ .Values.demoTools.image }}
+          # npx fetches the pinned package at pod start (the node needs npm
+          # egress; restarts are rare and cheap). HOME/npm_config_cache point
+          # into the tmp emptyDir because the root filesystem is read-only.
+          command: ["npx", "-y", {{ .Values.demoTools.package | quote }}, "streamableHttp"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: npm_config_cache
+              value: /tmp/.npm
+          ports:
+            - name: mcp
+              containerPort: 3001
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "500m", memory: 512Mi }
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

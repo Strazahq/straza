@@ -1,0 +1,85 @@
+# Published mapping table: Claude Code 2.x → Straza canonical events
+# (spec/hook-profile). This is the spec-side, versioned copy of the embedded
+# adapter (adapters/claude-code.yaml); a conforming third-party hook
+# implementation maps identically. Pin a new file per breaking harness change.
+harness: claude-code
+events:
+  SessionStart: session.start
+  UserPromptSubmit: prompt.submit
+  PreToolUse: tool.pre
+  PostToolUse: tool.post
+  PermissionRequest: permission.request
+  SubagentStart: subagent.start
+  SubagentStop: subagent.stop
+  Stop: session.end
+  SessionEnd: session.end
+  PreCompact: compact.pre
+# The modern built-in roster classifies into the taxonomy instead of falling
+# to "other": the enterprise profile denies "other", so an unmapped built-in
+# would lock governed sessions out. Assignment rule: kind = the tool's side
+# effect outside the conversation; lane companions ride their lane's kind;
+# pure conversation/UI built-ins ride the read lane pending a dedicated meta
+# kind. Unknown names still degrade to "other". TestAdapterSpecMappingDrift
+# pins this table to the embedded adapter (adapters/claude-code.yaml).
+tools:
+  Bash: shell.exec
+  PowerShell: shell.exec
+  Shell: shell.exec
+  BashOutput: shell.exec
+  KillShell: shell.exec
+  KillBash: shell.exec
+  Edit: file.edit
+  MultiEdit: file.edit
+  NotebookEdit: file.edit
+  Write: file.write
+  EnterWorktree: file.write
+  ExitWorktree: file.write
+  Read: file.read
+  Glob: file.read
+  Grep: file.read
+  LS: file.read
+  NotebookRead: file.read
+  SendUserFile: file.read
+  ToolSearch: file.read
+  Skill: file.read
+  SlashCommand: file.read
+  ListMcpResources: file.read
+  ReadMcpResource: file.read
+  AskUserQuestion: file.read
+  TodoWrite: file.read
+  EnterPlanMode: file.read
+  ExitPlanMode: file.read
+  ReportFindings: file.read
+  WebFetch: net.fetch
+  WebSearch: net.fetch
+  Artifact: net.fetch
+  PushNotification: net.fetch
+  DesignSync: net.fetch
+  Task: task.spawn
+  Agent: task.spawn
+  Workflow: task.spawn
+  SendMessage: task.spawn
+  Monitor: task.spawn
+  TaskCreate: task.spawn
+  TaskGet: task.spawn
+  TaskList: task.spawn
+  TaskOutput: task.spawn
+  TaskStop: task.spawn
+  TaskUpdate: task.spawn
+  ScheduleWakeup: task.spawn
+  CronCreate: task.spawn
+  CronDelete: task.spawn
+  CronList: task.spawn
+  RemoteTrigger: task.spawn
+  EndConversation: task.spawn
+  # mcp__<app>__<tool> → mcp.call (app/tool parsed from the name).
+  # Gateway re-split (revision 2026-07-20): when <app> is the Straza
+  # gateway registration ("straza") and <tool> is itself namespaced
+  # <realapp>__<realtool>, the event re-attributes to the real app,
+  # exact, because app names cannot contain underscores (app-manifest
+  # name pattern). Un-namespaced gateway tools keep app "straza"
+  # (defer-to-gateway posture; SPEC.md §1.2).
+notes: |
+  Decision encoding: hookSpecificOutput.permissionDecision ("allow"|"deny")
+  with permissionDecisionReason; a deny additionally exits 2 (hard block).
+  Only tool.pre / permission.request are enforceable.

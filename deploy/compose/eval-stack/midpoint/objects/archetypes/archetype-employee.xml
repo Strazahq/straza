@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  User archetype: employee. Assigned directly (seed XML or GUI); holding it
+  types the user human via the induced weak mapping below (the focus subtype
+  is retired). The sample population is seeded with it.
+-->
+<archetype xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+           xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+           oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20">
+    <name>employee</name>
+    <description>Human workforce identity: a person on the payroll, governed by the
+        standard joiner/mover/leaver flows. The default persona for typed users in the
+        Straza eval stack.</description>
+    <archetypePolicy>
+        <display>
+            <label>Employee</label>
+            <pluralLabel>Employees</pluralLabel>
+            <icon>
+                <cssClass>fa fa-user</cssClass>
+                <color>#2185d0</color>
+            </icon>
+        </display>
+    </archetypePolicy>
+    <assignment>
+        <assignmentRelation>
+            <holderType>UserType</holderType>
+        </assignmentRelation>
+    </assignment>
+    <inducement>
+        <focusMappings>
+            <mapping>
+                <name>employee-types-user</name>
+                <strength>weak</strength>
+                <expression><value>human</value></expression>
+                <target><path>extension/ext:strazaUserType</path></target>
+            </mapping>
+        </focusMappings>
+    </inducement>
+    <inducement>
+        <!-- Withdraw own requests (objects/roles/role-withdraw-own-requests.xml) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c03" type="RoleType"/>
+    </inducement>
+</archetype>

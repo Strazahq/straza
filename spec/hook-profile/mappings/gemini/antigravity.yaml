@@ -1,0 +1,28 @@
+# Published mapping table: Gemini CLI / Antigravity → Straza canonical events.
+# Reimplements the contract with renamed events and a strict-JSON-stdout rule.
+harness: gemini
+events:
+  SessionStart: session.start
+  BeforeAgent: prompt.submit
+  BeforeTool: tool.pre
+  AfterTool: tool.post
+  AfterAgent: session.end
+  SessionEnd: session.end
+# Revision 2026-07-20 (drift-guard sync): +Shell; the embedded adapter
+# carries the bare `Shell` legacy/Antigravity spelling for older builds; it
+# belongs on this legacy table. TestAdapterSpecMappingDrift pins adapter ==
+# union(gemini tables).
+tools:
+  run_shell_command: shell.exec
+  Shell: shell.exec
+  write_file: file.write
+  replace: file.edit
+  edit_file: file.edit
+  read_file: file.read
+  read_many_files: file.read
+  web_fetch: net.fetch
+  google_web_search: net.fetch
+  run_subagent: task.spawn
+notes: |
+  Decision encoding: strict JSON on stdout ({"decision":"allow"|"deny"});
+  ALL diagnostics go to stderr. No exit-2 block convention.

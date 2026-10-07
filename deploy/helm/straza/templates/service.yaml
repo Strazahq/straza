@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "straza.fullname" . }}
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "straza.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+    {{- if .Values.approverTLS.enabled }}
+    # The dedicated approver listener gets its own Service port so the edge
+    # can publish the phone's surface WITHOUT publishing the console/admin
+    # one; route this port, not http, at the public approver host.
+    - name: approver
+      port: {{ .Values.approverTLS.port }}
+      targetPort: approver
+    {{- end }}

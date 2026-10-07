@@ -1,0 +1,15 @@
+# Rejected: match.identity.userType vocabulary is spec-fixed
+# (human/agent/service); a typo must fail loudly, not silently match nothing.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: bad-identity-usertype
+spec:
+  match:
+    identity:
+      userType: [robot]
+  rules:
+    - id: r1
+      tools: [shell.exec]
+      effect: deny
+      reason: "never parses"

@@ -1,0 +1,32 @@
+# A command MCP server that Straza starts as a child process over stdio, credentialed through an environment variable.
+# Standalone profile only: the enterprise profile refuses a command server, so there it runs as its own service or pod and joins as a remote server.
+# The child runs as strazad's user and gets PATH, HOME, LANG, the env entries below and the injected secret, and nothing else.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: ticket-tools
+  description: Example ticketing MCP server started with npx and restarted with backoff
+server:
+  name: example/ticket-mcp
+  version: "1.4.0"
+straza:
+  runtime:
+    kind: command
+    command:
+      exec: npx
+      args: ["-y", "@example/ticket-mcp@1.4.0"]
+      env:
+        - name: TICKET_BASE_URL
+          value: https://tickets.example.internal
+      workdir: /var/lib/straza/apps/ticket-tools
+  credential:
+    kind: static
+    inject:
+      as: env
+      name: TICKET_API_TOKEN
+      template: "{{secret}}"
+  exposure:
+    tools: ["search_*", "get_*", "create_*"]
+  limits:
+    rps: 5
+    timeoutSeconds: 20

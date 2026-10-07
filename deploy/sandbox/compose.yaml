@@ -1,0 +1,77 @@
+# Straza Tier-3 sandbox profile: runnable demo.
+#
+# Points a governed agent container at an EXISTING strazad (it does not embed
+# one, so bring up deploy/compose/ or `strazad serve` yourself):
+#
+#   export STRAZA_SERVER_URL=http://host.docker.internal:8420   # your strazad
+#   export STRAZA_ENROLL_DIR=./enroll                           # see the Hookless processes guide
+#   docker compose -f deploy/sandbox/compose.yaml up
+
+# The IMAGE removes the ungoverned exec routes; the FLAGS below remove the
+# rest. Every one of them is load-bearing; this file is the reference for
+# what "the documented sandbox profile" means at runtime:
+#
+#   read_only            nothing on the rootfs is writable, so the hardening
+#                        sweep's file modes cannot be undone from inside and
+#                        no new executable can land outside the tmpfs mounts
+#   tmpfs ... noexec     the ONLY writable places cannot execve anything, so
+#                        write+chmod+run is dead (nosuid/nodev for hygiene)
+#   cap_drop ALL         no capability tricks (chown/dac_override/ptrace...)
+#   no-new-privileges    setuid/file-caps can never raise privileges (the
+#                        image strips setuid bits anyway; belt and braces)
+#   pids_limit 256       fork-bomb ceiling, mirrors the oci runtime sandbox
+#                        defaults in internal/manager (the house posture)
+
+# Egress lockdown is deliberately NOT expressible as an image property and
+# only partially in vanilla compose: the boundary-grade setup is an
+# `internal: true` network that contains ONLY this agent and your strazad
+# (attach strazad with `docker network connect sandbox_straza-only strazad`).
+# When strazad runs on the host instead, restrict egress with the host
+# firewall (e.g. a DOCKER-USER iptables rule allowing only the strazad
+# address:port from this container's subnet). See
+# https://docs.straza.ai/guides/govern-an-agent/hookless-processes/.
+
+services:
+  agent:
+    build:
+      context: ../..                     # repo root: the shim builds from source
+      dockerfile: deploy/sandbox/Dockerfile
+      # args:
+      #   BASE_IMAGE: python:3.12-slim   # parameterize the agent runtime here
+    image: straza/sandbox-agent:dev
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    tmpfs:
+      # the straza home: session/snapshot/audit-spool state (staged by the
+      # entrypoint from the ro enroll mount). uid 65532 owns it; noexec always.
+      - /run/straza:mode=0700,uid=65532,gid=65532,noexec,nosuid,nodev,size=16m
+      - /home/agent:mode=0700,uid=65532,gid=65532,noexec,nosuid,nodev,size=64m
+      - /tmp:mode=1777,noexec,nosuid,nodev,size=64m
+    volumes:
+      # enrollment material from an operator workstation, READ-ONLY:
+      #   $STRAZA_ENROLL_DIR/config.yaml + $STRAZA_ENROLL_DIR/state/identity.json
+      - ${STRAZA_ENROLL_DIR:-./enroll}:/straza/enroll:ro
+    environment:
+      # cross-checked by the entrypoint against the enrolled serverUrl (the
+      # enrollment is the trust anchor and is never rewritten; a mismatch
+      # fails loudly instead of silently re-pointing enforcement)
+      STRAZA_SERVER_URL: ${STRAZA_SERVER_URL:-http://host.docker.internal:8420}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach a host-local strazad
+    networks: [straza-only]
+    stdin_open: true
+    tty: true
+    # Replace with your agent process; the default drops into a governed
+    # Python REPL where every exec route is a Straza decision.
+    command: ["python3"]
+
+networks:
+  straza-only:
+    driver: bridge
+    # Boundary-grade egress: flip to `internal: true` and attach your strazad
+    # container to this network, and then the agent can reach strazad and
+    # NOTHING else. Left routable by default so the host-gateway demo works.
+    # internal: true

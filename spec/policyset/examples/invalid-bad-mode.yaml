@@ -1,0 +1,11 @@
+# INVALID: mode must be serverCheck|classify.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: bad-mode
+spec:
+  rules:
+    - id: rule-one
+      tools: [shell.exec]
+      mode: bogus
+      effect: allow

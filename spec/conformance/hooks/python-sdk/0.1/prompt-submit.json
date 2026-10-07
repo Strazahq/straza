@@ -1,0 +1,1 @@
+{"provenance":"doc python-sdk mapping table 2026-07-16 (our own dialect; the kit emitter is exercised by kits/python tests)","harness":"python-sdk","payload":{"hook_event_name":"UserPromptSubmit","session_id":"py-4f2c9a1b7d3e","cwd":"/work/proj","harness_version":"0.1.0","prompt":"list the users"},"expect":{"kind":"prompt.submit","workspace":"/work/proj"}}

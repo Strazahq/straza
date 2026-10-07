@@ -1,0 +1,14 @@
+# INVALID: spec.kind is required in a bundle, as every export writes it, and
+# a draft never picks a kind for a role. The bundle reader refuses this Role
+# with role.kind-missing. Provenance: derived from this spec's revision 5
+# note and section 2, not captured from a live wire. TestBundleFixtures
+# reads it.
+---
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+    name: dev
+spec:
+    description: Developer seat
+    implies:
+        - reader

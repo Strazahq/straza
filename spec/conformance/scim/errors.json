@@ -1,0 +1,53 @@
+{
+  "name": "errors",
+  "steps": [
+    {
+      "note": "unknown user id",
+      "request": { "method": "GET", "path": "/scim/v2/Users/00000000-0000-0000-0000-000000000000" },
+      "expect": {
+        "status": 404,
+        "subset": { "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"], "status": "404" }
+      }
+    },
+    {
+      "note": "only eq filters on the documented attributes are supported",
+      "request": { "method": "GET", "path": "/scim/v2/Users?filter=userName co \"grace\"" },
+      "expect": { "status": 400, "subset": { "scimType": "invalidFilter" } }
+    },
+    {
+      "note": "bulk is rejected loudly",
+      "request": { "method": "POST", "path": "/scim/v2/Bulk", "body": { "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"] } },
+      "expect": { "status": 501, "subset": { "status": "501" } }
+    },
+    {
+      "note": "user create requires userName",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": { "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"] }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "invalidValue" } }
+    },
+    {
+      "note": "unknown PATCH op",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": { "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "err.case" }
+      },
+      "expect": { "status": 201 },
+      "capture": { "uid": "id" }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [{ "op": "increment", "path": "active" }]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "invalidValue" } }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# Both repo-root build contexts (deploy/Dockerfile, deploy/sandbox/Dockerfile)
+# `COPY . .` and need only Go sources + in-repo deploy scripts. Everything
+# below is local machine state that bloats the context.
+.git
+.claude
+bin
+**/node_modules
+# gitignored tool caches (ollama model blobs alone are ~4.5 GB; a context
+# that copies them can fill a small host's disk before the compile starts)
+**/.tools
+build

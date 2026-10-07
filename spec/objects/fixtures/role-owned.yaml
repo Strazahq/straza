@@ -1,0 +1,13 @@
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+    name: demo-tools-readers
+spec:
+    kind: application
+    description: Read-only tools of demo-tools for analysts
+    server: demo-tools
+    bindings:
+        - app: demo-tools
+          tools:
+            - add
+            - echo

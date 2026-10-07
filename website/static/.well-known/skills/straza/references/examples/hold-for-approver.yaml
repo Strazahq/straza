@@ -1,0 +1,25 @@
+# Hold kubectl apply until a holder of the approver role release-approvers decides, with a five-minute wait.
+# Both profiles; on enterprise the role also needs a rule that allows the shell, such as deny-with-reason.yaml.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: hold-for-approver
+  description: Hold a cluster change until a release-approvers holder decides
+spec:
+  priority: 10
+  match:
+    roles: [dev-tools]
+  rules:
+    - id: hold-kubectl-apply
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        allowPatterns: ["kubectl apply *"]
+      effect: allow
+      mode: approve
+      approve:
+        # release-approvers must be a role of kind approver; the server checks that at activation.
+        roles: [release-approvers]
+        timeoutSeconds: 300
+        retryTTLSeconds: 300
+      reason: "Straza: kubectl apply is held for a human decision"

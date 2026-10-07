@@ -1,0 +1,11 @@
+# A bundle of revision 5 that removes one MCP server. Publishing it removes
+# the server's access rows, its stored secrets, every person's connection,
+# the roles it owns and its admin role. Provenance: derived from this spec's
+# section 5, not captured from a live wire. TestBundleFixtures reads it.
+---
+apiVersion: straza.dev/v1beta1
+kind: Removal
+metadata:
+    name: old-tools
+spec:
+    kind: App

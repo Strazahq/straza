@@ -1,0 +1,81 @@
+{{- if include "straza.postgresBundled" . }}
+{{- /* Password stability across upgrades: re-read this release's own secret
+       if it exists (helm lookup), generate only on first install. During
+       `helm template` (no cluster) lookup is empty, so offline renders get a
+       fresh random each time; set postgres.passwordSecret for deterministic
+       renders. randAlphaNum keeps the value DSN-safe. */}}
+{{- if not .Values.postgres.passwordSecret }}
+{{- $secretName := printf "%s-postgres" (include "straza.fullname" .) }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  labels: {{- include "straza.labels" . | nindent 4 }}
+type: Opaque
+data:
+  {{- if $existing }}
+  password: {{ index $existing.data "password" }}
+  {{- else }}
+  password: {{ randAlphaNum 32 | b64enc }}
+  {{- end }}
+---
+{{- end }}
+# Bundled single-node in-cluster Postgres, simpler to run than an operator
+# such as CNPG at small scale; bring-your-own via postgres.dsn /
+# postgres.existingSecret suppresses all of this.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "straza.fullname" . }}-postgres
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "straza.name" . }}-postgres
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports: [{ port: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "straza.fullname" . }}-postgres
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "straza.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "straza.name" . }}-postgres
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "straza.name" . }}-postgres
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          env:
+            - name: POSTGRES_USER
+              value: straza
+            - name: POSTGRES_DB
+              value: straza
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "straza.pgSecretName" . }}, key: password }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: {{ .Values.postgres.storage }} } }
+{{- end }}

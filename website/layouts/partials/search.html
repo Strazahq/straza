@@ -1,0 +1,17 @@
+<dialog id="search-dialog" class="search-dialog" aria-labelledby="search-heading">
+  <h2 id="search-heading" class="sr-only">Search documentation</h2>
+  <div class="search-heading">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+    <input id="site-search" type="search" aria-label="Search documentation" placeholder="Search commands, topics, or problems…" autocomplete="off" spellcheck="false">
+    <button id="search-close" type="button" aria-label="Close search">Esc</button>
+  </div>
+  <div class="search-filters" role="group" aria-label="Filter by section">
+    <button type="button" data-search-section="" aria-pressed="true">All docs</button>
+    {{- range site.Home.Sections.ByWeight }}
+    <button type="button" data-search-section="{{ .Section }}" aria-pressed="false">{{ .Title }}</button>
+    {{- end }}
+  </div>
+  <p id="search-status" role="status" aria-live="polite">Search page titles, commands, and article text.</p>
+  <div id="search-results" class="search-results" role="region" aria-label="Search results"></div>
+  <div class="search-help"><span><kbd>↑ ↓</kbd> Choose result</span><span><kbd>Enter</kbd> Open</span><span><kbd>Esc</kbd> Close</span></div>
+</dialog>

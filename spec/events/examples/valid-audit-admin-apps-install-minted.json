@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "01a0a3f2-7b1c-7d4e-8f90-1a2b3c4d5e6f",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-09-17T14:22:08Z",
+  "data": {
+    "action": "apps.install",
+    "actor": "alice",
+    "actorId": "0197fa3d-1111-7abc-9def-000000000001",
+    "actorVia": "session",
+    "app": "finance/jira",
+    "runtime": "remote",
+    "update": false,
+    "adminRole": "mcp-admin-finance-jira"
+  }
+}

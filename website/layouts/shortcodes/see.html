@@ -1,0 +1,6 @@
+{{- /* What the reader should see after a command or a click, set right under
+it: {{< see >}}The log says `strazad serving`.{{< /see >}} */ -}}
+<div class="see">
+  <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m6 10.2 2.6 2.6L14 7.4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+  <div class="box-body"><p class="box-label">You should see</p>{{ partial "inner.html" (dict "Page" .Page "Inner" .Inner) }}</div>
+</div>

@@ -1,0 +1,58 @@
+# A hook event arrives before the identity ever enrolled, so no session
+# exists and no snapshot is pinned. Every dialect must refuse, a benign
+# command included, because unknown state is a deny.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+id: g2-hook-before-enrol
+group: G2
+title: A hook event before any session exists is refused on every dialect
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (every decision fails closed); spec/hook-profile/SPEC.md §Decision
+  semantics and §Conformance (fail-closed behavior is scored);
+  spec/conformance/tier1/cases.yaml header (decision block is any
+  refusal); website/content/reference/client-environment.md §State and
+  server (an unusable client state denies with a reason and a hint);
+  spec/scim-profile/SPEC.md §3 and conformance/scim users-lifecycle.
+  suspect: the wording of the refusal before enrolment is not published,
+  so the steps assert the refusal alone.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  erin: {kind: human, password: "Walk-2026!"}
+steps:
+  - name: the IdM provisions erin, who never enrolls in this scenario
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g2-erin
+        userName: erin
+        displayName: Erin Unenrolled
+        active: true
+    want: {status: 201}
+    save: {erinId: id}
+  - name: a benign command is refused because no session exists
+    hook:
+      as: erin
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: block}
+  - name: a destructive command is refused the same way
+    hook:
+      as: erin
+      event: {kind: tool.pre, tool: shell.exec, command: "rm -rf /work/scratch"}
+    want: {decision: block}
+  - name: a gateway-bound mcp call is refused on the hook lane as well
+    hook:
+      as: erin
+      event: {kind: tool.pre, tool: mcp.call, app: nowhere, toolName: echo, args: {}}
+    want: {decision: block}
+  - name: the IdM deactivates erin
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${erinId}
+    want: {status: 204}

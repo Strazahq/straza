@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dev-ops: the demo team, seeded with a fixed OID so options=overwrite
+  converges instead of colliding on the name. Child of midPoint's BUILT-IN
+  org root "Teams" and carrying the built-in "Team" archetype - both ship as
+  initial objects with fixed OIDs on every install
+  (doc/config/initial-objects/org/390-org-teams.xml), which is why no root org
+  is seeded here.
+
+  Membership lives on the USER objects, not here: joe + carol are members,
+  frank + alice are managers (relation org:manager). This is what the MCP
+  server's team tools (list_my_team / list_my_managers) resolve under
+  impersonation.
+-->
+<org xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+     oid="d23c0d53-1410-4b63-bf9a-b18142bb3336">
+    <name>dev-ops</name>
+    <description>Demo team under Teams: joe + carol (members), frank + alice (managers).</description>
+    <assignment>
+        <!-- parent org: built-in root "Teams" -->
+        <targetRef oid="2328b6ae-f30b-4701-a1d7-92fb617c9e59" type="OrgType"/>
+    </assignment>
+    <assignment>
+        <!-- built-in "Team" archetype (the Teams root's assignmentRelation expects it) -->
+        <targetRef oid="3cc72762-030e-4161-bd9a-5fa9cb4fd935" type="ArchetypeType"/>
+    </assignment>
+</org>

@@ -1,0 +1,14 @@
+{
+  "id_token": "${ID_TOKEN}",
+  "device_id": "${DEVICE_ID}",
+  "harness": { "name": "claude-code", "version": "2.1.0" },
+  "attestation": {
+    "managed": true,
+    "platform": "linux/amd64",
+    "hashes": {
+      "self": "sha256:4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a",
+      "config": "sha256:dbc1b4c900ffe48d575b5da5c638040125f65db0fe3e24494b76ea986457d986",
+      "hooks.claude-code": "sha256:084fed08b978af4d7d196a7446a86b58009e636b611db16211b65a9aadff29c5"
+    }
+  }
+}

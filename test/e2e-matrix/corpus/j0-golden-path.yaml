@@ -1,0 +1,506 @@
+# The golden path an enterprise operator walks. The admin creates the app
+# and the role it owns, the IdM provisions the people and the agent over
+# SCIM, the policy governs a session on every hook dialect and on the
+# gateway, one call is held for a human, the policy changes and the change
+# is measured, the person is deprovisioned and the measurement repeats, and
+# the teardown leaves the store as it found it.
+#
+# The hermetic upstream serves echo, get-sum and get-env, which README.md
+# next to this package documents. The steps marked "suspect" below name a
+# request field, a status code or a response path the published sources do
+# not give; each is listed in the lane report.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+# The daemon starts after the first session.start of its identity: the
+# daemon keeps a session fresh and holds its push stream, so it refuses to
+# run before one exists [live].
+id: j0-golden-path
+group: J0
+title: A provisioned human and an enrolled agent work through policy, approval and deprovisioning
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs; website/content/concepts/how-straza-works.md;
+  website/content/concepts/mcp-apps-and-the-gateway.md;
+  website/content/concepts/approvals-model.md;
+  website/content/guides/operate/kill-switch-runbook.md;
+  spec/scim-profile/SPEC.md §1 §3 §3.2 §4 §5 and conformance/scim
+  users-lifecycle, groups-roles, agent-user, user-typology;
+  spec/policyset/SPEC.md §1 §2 items 2 and 8, §3, §4;
+  spec/app-manifest/SPEC.md §1 §2 §4;
+  spec/events/SPEC.md §2 revisions 24 and 31;
+  website/content/reference/api.md sections Users and devices, Roles,
+  PolicySets, Apps, Approvals; docs/quickstart-standalone.md §5 §6.
+  suspect: the upstream tool results as the steps read them (echo, get-sum,
+  get-env),
+  the success status codes of the admin routes, the field names of the
+  role, pack, binding and activate bodies, the yaml body on the app
+  install, the 0.id path into the approvals list, the justification
+  argument on the held call, and the wording of the gateway refusal
+  after deactivation.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  alice: {kind: human, password: "Walk-2026!"}
+  agent-1: {kind: nhi}
+steps:
+  # Setup: the admin creates the app, then what the IdM will import and the
+  # policy will name.
+  - name: the admin registers the MCP server app whose manifest points at the hermetic upstream
+    # suspect: the manifest is sent as application/yaml like a PolicySet, and 201 is assumed for a first install
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: e2e-tools
+            namespace: dev.e2e
+            description: The hermetic upstream of the e2e-matrix lane
+          server:
+            name: dev.e2e/e2e-tools
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+            exposure:
+              tools: ["*"]
+    want: {status: 201}
+    save: {appId: id}
+  - name: the admin creates the role the app owns, over every tool of the app, which the policy will name
+    # suspect: the field names name, server, tools and description mirror the strazactl flags; 201 is assumed
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: e2e-tools-dev, server: e2e-tools, tools: ["*"], description: "Golden path role: tool reach on e2e-tools"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the admin creates a knowledge pack that names the role, so the session start has context to inject
+    # suspect: the field names name, version and content mirror the strazactl flags; 201 is assumed
+    admin:
+      method: POST
+      path: /v1/admin/packs
+      body:
+        name: e2e-dev-brief
+        version: "1"
+        content: "Knowledge pack for role e2e-tools-dev. The e2e-guardrails policy refuses recursive deletes and holds get-sum for an admin."
+    want: {status: 201}
+    save: {packId: id}
+  - name: the admin binds the pack to the role
+    # suspect: the binding body field is assumed to be role by name; 201 is assumed
+    admin:
+      method: POST
+      path: /v1/admin/packs/${packId}/bindings
+      body: {role_id: "${roleId}"}
+    want: {status: 201}
+  - name: the IdM provisions alice over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-e2e-alice
+        userName: alice
+        displayName: Alice Walker
+        emails: [{value: alice@e2e.example, primary: true}]
+        active: true
+    want:
+      status: 201
+      body: {userName: alice, active: true}
+    save: {aliceId: id}
+  - name: the admin sets the password the built-in issuer will accept, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${aliceId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM discovers the role as a wire group by its display name
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "e2e-tools-dev"'
+    want:
+      status: 200
+      body: {totalResults: 1}
+    save: {gid: Resources.0.id}
+  - name: the IdM assigns alice to the role by adding her to the wire group
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${aliceId}"}]
+    want: {status: 200}
+  - name: the IdM provisions the agent as an NHI with alice as its sponsor
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas:
+          - "urn:ietf:params:scim:schemas:core:2.0:User"
+          - "urn:ietf:params:scim:schemas:extension:agent:2.0:Agent"
+          - "urn:straza:params:scim:schemas:extension:2.0:User"
+        externalId: idm-e2e-agent-1
+        userName: agent-1
+        displayName: Golden path agent
+        userType: agent
+        active: true
+        "urn:straza:params:scim:schemas:extension:2.0:User":
+          agencyMode: supervised
+          sponsor: alice
+    want:
+      status: 201
+      body: {userName: agent-1, userType: agent}
+    save: {agentId: id}
+  - name: the IdM assigns the agent to the same role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${agentId}"}]
+    want: {status: 200}
+  - name: the admin applies the guardrail PolicySet as a draft
+    # suspect: 200 is assumed for the upsert
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: e2e-guardrails
+            description: Golden path guardrails for role e2e-tools-dev
+          spec:
+            match:
+              roles: [e2e-tools-dev]
+            rules:
+              - id: no-recursive-delete
+                tools: [shell.exec]
+                command:
+                  denyPatterns: ["rm -rf *", "rm -fr *"]
+                effect: deny
+                reason: "E2E-GUARDRAILS: recursive delete is refused for role e2e-tools-dev"
+              - id: allow-git-status
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["git status", "git status *"]
+                effect: allow
+                reason: "E2E-GUARDRAILS: git status is allowed for role e2e-tools-dev"
+              - id: no-env-dump
+                tools: [mcp.call]
+                apps: [e2e-tools]
+                toolNames:
+                  deny: ["get-env"]
+                effect: deny
+                reason: "E2E-GUARDRAILS: get-env is refused because it exposes the upstream environment"
+              - id: sum-needs-admin
+                tools: [mcp.call]
+                apps: [e2e-tools]
+                toolNames:
+                  allow: ["get-sum"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [straza-admin]
+                  timeoutSeconds: 900
+                reason: "E2E-GUARDRAILS: get-sum runs only after a straza-admin approves"
+    want: {status: 201}
+  - name: the admin activates the PolicySet, which compiles and distributes the snapshot
+    # suspect: the body field active mirrors the route summary "Set a PolicySet active/draft"; 200 is assumed
+    admin:
+      method: POST
+      path: /v1/admin/policies/e2e-guardrails/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: alice enrolls her laptop
+    enroll: {as: alice}
+  - name: the agent enrolls headless on its local key
+    enroll: {as: agent-1}
+
+  # The governed part on every hook dialect and on the gateway.
+  - name: alice starts a session and the pack bound to her role arrives as context
+    hook:
+      as: alice
+      event: {kind: session.start}
+    want: {decision: allow, contextContains: "role e2e-tools-dev"}
+  - name: alice starts her daemon so pushes reach her kit
+    daemon: {as: alice, action: start}
+  - name: a recursive delete is refused with the policy reason
+    hook:
+      as: alice
+      event: {kind: tool.pre, tool: shell.exec, command: "rm -rf /work/scratch"}
+    want: {decision: deny, reasonContains: "recursive delete is refused"}
+  - name: the refusal is on the chain exactly once
+    audit: {subject: alice, kind: tool.pre, decision: deny, reasonContains: "recursive delete is refused", count: 1}
+  - name: the benign command is allowed by the allow rule
+    hook:
+      as: alice
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: the allow is on the chain exactly once with the rule's reason
+    audit: {subject: alice, kind: tool.pre, decision: allow, reasonContains: "git status is allowed", count: 1}
+  - name: the agent starts a session and gets the same pack
+    hook:
+      as: agent-1
+      event: {kind: session.start}
+    want: {decision: allow, contextContains: "role e2e-tools-dev"}
+  - name: the agent's recursive delete is refused too
+    hook:
+      as: agent-1
+      event: {kind: tool.pre, tool: shell.exec, command: "rm -rf /work/scratch"}
+    want: {decision: deny, reasonContains: "recursive delete is refused"}
+  - name: the agent's refusal is on the chain exactly once
+    audit: {subject: agent-1, kind: tool.pre, decision: deny, reasonContains: "recursive delete is refused", count: 1}
+  - name: the hook lane refuses the agent's call of the denied upstream tool by its name
+    hook:
+      as: agent-1
+      event: {kind: tool.pre, tool: mcp.call, app: e2e-tools, toolName: get-env, args: {}}
+    want: {decision: deny, reasonContains: "get-env is refused"}
+  - name: the hook-lane mcp refusal is on the chain exactly once
+    audit: {subject: agent-1, kind: tool.pre, decision: deny, reasonContains: "get-env is refused", count: 1}
+  - name: alice's gateway list shows the bound tools under the app namespace
+    # suspect: the tool names come from the eval quickstart's demo-tools, not from the README
+    mcp:
+      as: alice
+      list: true
+    want:
+      tools: [e2e-tools__echo, e2e-tools__get-sum]
+  - name: the benign upstream tool runs on the access grant alone
+    # suspect: the argument name and the echoed result are assumed for the hermetic upstream
+    mcp:
+      as: alice
+      tool: e2e-tools__echo
+      args: {text: hello-from-alice}
+    want: {result: hello-from-alice}
+  - name: the grant-only allow is on the chain exactly once with the default reason
+    audit: {subject: alice, kind: tool.pre, decision: allow, reasonContains: "allowed by role access", count: 1}
+  - name: the gateway refuses the denied tool and the reason names it
+    # the catalog overlay may hide the tool, in which case the client reads "unknown tool"; the tool name is in either sentence
+    mcp:
+      as: alice
+      tool: e2e-tools__get-env
+      args: {}
+    want: {refused: true, reasonContains: "get-env"}
+  - name: the gateway refusal carries the rule's reason on the chain exactly once
+    audit: {subject: alice, kind: tool.pre, decision: deny, reasonContains: "get-env is refused", count: 1}
+  - name: the approve-mode tool is held and the caller learns the hold is pending
+    # suspect: the justification argument mirrors the schema injection the eval quickstart describes; the wait is bounded by approval.gatewayHoldSeconds
+    mcp:
+      as: alice
+      tool: e2e-tools__get-sum
+      args: {a: 2, b: 3, _straza_justification: "the golden path needs the sum"}
+    want: {refused: true, reasonContains: "approval pending"}
+  - name: the pending hold is on the chain exactly once as a deny with the pending sentence
+    audit: {subject: alice, kind: tool.pre, decision: deny, reasonContains: "approval pending", count: 1}
+  - name: the admin reads the pending approvals and keeps the id of the hold
+    # suspect: the list is read as a bare array, so 0.id is the first record's id
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want: {status: 200}
+    save: {holdId: approvals.0.id}
+  - name: the admin approves the hold with the login token, because an API token cannot decide
+    # suspect: 200 is assumed and no body is sent
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${holdId}/approve
+    want: {status: 200}
+  - name: the retried call is allowed by the single-use exemption
+    # suspect: the sum result is assumed for the hermetic upstream
+    mcp:
+      as: alice
+      tool: e2e-tools__get-sum
+      args: {a: 2, b: 3, _straza_justification: "the golden path needs the sum"}
+    want: {result: "5"}
+    within: 30s
+    timer: approval-retry
+  - name: the approved call is on the chain exactly once as an allow with the rule's reason
+    audit: {subject: alice, kind: tool.pre, decision: allow, reasonContains: "runs only after a straza-admin approves", count: 1}
+
+  # Change and propagation.
+  - name: the admin applies a second revision that refuses the benign command and the echo tool
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: e2e-guardrails
+            description: Golden path guardrails for role e2e-tools-dev, second revision
+          spec:
+            match:
+              roles: [e2e-tools-dev]
+            rules:
+              - id: no-recursive-delete
+                tools: [shell.exec]
+                command:
+                  denyPatterns: ["rm -rf *", "rm -fr *"]
+                effect: deny
+                reason: "E2E-GUARDRAILS: recursive delete is refused for role e2e-tools-dev"
+              - id: no-git-status
+                tools: [shell.exec]
+                command:
+                  denyPatterns: ["git status", "git status *"]
+                effect: deny
+                reason: "E2E-GUARDRAILS-R2: git status is refused after the second revision"
+              - id: no-echo
+                tools: [mcp.call]
+                apps: [e2e-tools]
+                toolNames:
+                  deny: ["echo"]
+                effect: deny
+                reason: "E2E-GUARDRAILS-R2: echo is refused after the second revision"
+              - id: no-env-dump
+                tools: [mcp.call]
+                apps: [e2e-tools]
+                toolNames:
+                  deny: ["get-env"]
+                effect: deny
+                reason: "E2E-GUARDRAILS: get-env is refused because it exposes the upstream environment"
+              - id: sum-needs-admin
+                tools: [mcp.call]
+                apps: [e2e-tools]
+                toolNames:
+                  allow: ["get-sum"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [straza-admin]
+                  timeoutSeconds: 900
+                reason: "E2E-GUARDRAILS: get-sum runs only after a straza-admin approves"
+    want: {status: 200}
+  - name: the admin activates the second revision
+    admin:
+      method: POST
+      path: /v1/admin/policies/e2e-guardrails/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: the gateway decides the next echo call under the new snapshot
+    mcp:
+      as: alice
+      tool: e2e-tools__echo
+      args: {text: hello-again}
+    want: {refused: true, reasonContains: "echo"}
+    within: 10s
+    timer: policy-gateway
+  - name: the new gateway refusal is on the chain exactly once with the second revision's reason
+    audit: {subject: alice, kind: tool.pre, decision: deny, reasonContains: "R2: echo is refused", count: 1}
+  - name: the hook lane, daemon connected, decides the benign command under the new snapshot
+    hook:
+      as: alice
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: deny, reasonContains: "R2: git status is refused"}
+    within: 10s
+    timer: policy-hook
+  - name: the new hook refusal is on the chain exactly once
+    audit: {subject: alice, kind: tool.pre, decision: deny, reasonContains: "R2: git status is refused", count: 1}
+  - name: the IdM removes alice from the role by removing her from the wire group
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: remove
+            path: 'members[value eq "${aliceId}"]'
+    want: {status: 200}
+  - name: the tools disappear from alice's gateway list once her session re-resolves its roles
+    mcp:
+      as: alice
+      list: true
+    want:
+      notTools: [e2e-tools__echo, e2e-tools__get-sum]
+    within: 90s
+    timer: catalog-unbind
+  - name: the IdM deactivates alice
+    scim:
+      method: PATCH
+      path: /scim/v2/Users/${aliceId}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - {op: replace, path: active, value: false}
+    want:
+      status: 200
+      body: {active: false}
+  - name: the gateway refuses alice's next call
+    # suspect: no published sentence names the gateway refusal after a deactivation, so only the refusal is asserted
+    mcp:
+      as: alice
+      tool: e2e-tools__get-sum
+      args: {a: 1, b: 1, _straza_justification: "a call after deactivation"}
+    want: {refused: true}
+    within: 10s
+    timer: kill-switch-gateway
+  - name: the hook lane refuses alice's next decision, daemon connected
+    hook:
+      as: alice
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: deny, reasonContains: "revoked"}
+    within: 10s
+    timer: kill-switch-hook
+  - name: alice is still addressable over SCIM and reads as inactive
+    scim:
+      method: GET
+      path: /scim/v2/Users/${aliceId}
+    want:
+      status: 200
+      body: {active: false}
+
+  # Teardown leaves nothing behind.
+  - name: alice's daemon is stopped
+    daemon: {as: alice, action: stop}
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/e2e-guardrails/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the admin deletes the draft PolicySet
+    # suspect: 204 is assumed
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/e2e-guardrails
+    want: {status: 204}
+  - name: the admin deletes the role before its server, which would take it along, and its assignments and access row go with it
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the admin removes the app
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${appId}
+    want: {status: 200}
+  - name: the IdM deactivates the agent
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${agentId}
+    want: {status: 204}
+  - name: the role no longer renders on the SCIM wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "e2e-tools-dev"'
+    want:
+      status: 200
+      body: {totalResults: 0}
+  - name: the PolicySet is gone
+    admin:
+      method: GET
+      path: /v1/admin/policies/e2e-guardrails
+    want: {status: 404}

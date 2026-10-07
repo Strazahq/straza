@@ -1,0 +1,1 @@
+import{c1 as i}from"./config-words.js";import{n as o}from"./notify.js";function f(a,r){const t=typeof navigator>"u"?void 0:navigator.clipboard;if(!t){o.failed(i);return}try{t.writeText(a).then(()=>o.ok(r),()=>o.failed(i))}catch{o.failed(i)}}export{f as c};

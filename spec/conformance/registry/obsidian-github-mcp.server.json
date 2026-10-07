@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "ai.smithery/Hint-Services-obsidian-github-mcp",
+  "description": "Connect AI assistants to your GitHub-hosted Obsidian vault to seamlessly access, search, and analyze your knowledge base.",
+  "repository": {
+    "url": "https://github.com/Hint-Services/obsidian-github-mcp",
+    "source": "github"
+  },
+  "version": "0.4.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://server.smithery.ai/@Hint-Services/obsidian-github-mcp/mcp",
+      "headers": [
+        {
+          "description": "Bearer token for Smithery authentication",
+          "isRequired": true,
+          "value": "Bearer {smithery_api_key}",
+          "isSecret": true,
+          "name": "Authorization"
+        }
+      ]
+    }
+  ]
+}

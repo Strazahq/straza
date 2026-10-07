@@ -1,0 +1,63 @@
+{
+  "name": "service-discovery",
+  "steps": [
+    {
+      "note": "ServiceProviderConfig advertises the strict subset",
+      "request": { "method": "GET", "path": "/scim/v2/ServiceProviderConfig" },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
+          "patch": { "supported": true },
+          "bulk": { "supported": false },
+          "filter": { "supported": true },
+          "sort": { "supported": false },
+          "etag": { "supported": false },
+          "changePassword": { "supported": false }
+        }
+      }
+    },
+    {
+      "note": "ResourceTypes lists Users and Groups, each declaring its Straza extension (revision 9 pins the Group access projection)",
+      "request": { "method": "GET", "path": "/scim/v2/ResourceTypes" },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "totalResults": 2,
+          "Resources": [
+            {
+              "id": "User",
+              "endpoint": "/Users",
+              "schemaExtensions": [
+                { "schema": "urn:straza:params:scim:schemas:extension:2.0:User", "required": false }
+              ]
+            },
+            {
+              "id": "Group",
+              "endpoint": "/Groups",
+              "schemaExtensions": [
+                { "schema": "urn:straza:params:scim:schemas:extension:2.0:Group", "required": false }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "Schemas serves the core User schema",
+      "request": { "method": "GET", "path": "/scim/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:User" },
+      "expect": {
+        "status": 200,
+        "subset": { "id": "urn:ietf:params:scim:schemas:core:2.0:User" }
+      }
+    },
+    {
+      "note": "Schemas serves the Group access-projection extension (revision 9)",
+      "request": { "method": "GET", "path": "/scim/v2/Schemas/urn:straza:params:scim:schemas:extension:2.0:Group" },
+      "expect": {
+        "status": 200,
+        "subset": { "id": "urn:straza:params:scim:schemas:extension:2.0:Group" }
+      }
+    }
+  ]
+}

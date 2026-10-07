@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  heidi: sample EXTERNAL identity (contractor). The directly assigned
+  external archetype types her (orange user-secret icon in the GUI). No role
+  assignments; midPoint only.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c45">
+    <name>heidi</name>
+    <fullName>Heidi Brandt</fullName>
+    <givenName>Heidi</givenName>
+    <familyName>Brandt</familyName>
+    <emailAddress>heidi.brandt@northwind-consulting.example.com</emailAddress>
+    <organization>Northwind Consulting</organization>
+    <organizationalUnit>Quality Assurance</organizationalUnit>
+    <title>QA Engineer (contractor)</title>
+    <assignment>
+        <!-- persona archetype, assigned directly (external) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c21" type="ArchetypeType"/>
+    </assignment>
+</user>

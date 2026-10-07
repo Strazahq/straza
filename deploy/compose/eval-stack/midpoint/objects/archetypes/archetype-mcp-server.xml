@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Service archetype: mcp-server. Every Straza app (a governed MCP server)
+  materializes as a ServiceType focus with this archetype: the universal-rest
+  resource's app objectType declares focus type ServiceType plus this
+  archetypeRef, and its synchronization reactions addFocus/link the pulled
+  shadows. Services display by name; runtime/status/source/version live in the
+  extension items, because displayName mappings proved unstable on 4.10.3.
+-->
+<archetype xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+           oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c24">
+    <name>mcp-server</name>
+    <description>A governed MCP server from the Straza catalog (read-only mirror).
+        Named "MCS:app" - the MCS code marks Straza-catalog origin. Lineage
+        lives in extension items strazaRuntime/strazaStatus/strazaSource/
+        strazaVersion; strazaStatus tracks the live manager state via LiveSync.</description>
+    <archetypePolicy>
+        <display>
+            <label>MCP server</label>
+            <pluralLabel>MCP servers</pluralLabel>
+            <icon>
+                <cssClass>fa fa-server</cssClass>
+                <color>#21ba45</color>
+            </icon>
+        </display>
+    </archetypePolicy>
+    <assignment>
+        <assignmentRelation>
+            <holderType>ServiceType</holderType>
+        </assignmentRelation>
+    </assignment>
+</archetype>

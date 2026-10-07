@@ -1,0 +1,17 @@
+# INVALID: mode confirm may not set approve.selfApproval (revision 11).
+# Confirm IS requester-decides; the flag is meaningless under it and a set
+# flag is rejected rather than ignored.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: confirm-with-self-approval
+spec:
+  rules:
+    - id: r1
+      tools: [shell.exec]
+      command:
+        allowPatterns: ["deploy-stage*"]
+      effect: allow
+      mode: confirm
+      approve:
+        selfApproval: true

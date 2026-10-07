@@ -1,0 +1,385 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The integration loop · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 11px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.ctl.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+button.ctl.kill{color:var(--danger);border-color:var(--danger);background:var(--danger-bg)}
+button.ctl.kill:hover{background:var(--danger-bg);border-color:var(--danger);
+  box-shadow:inset 0 0 0 1px var(--danger)}
+button.ctl:disabled{opacity:.4;cursor:default}
+button.ctl:disabled:hover{background:transparent;border-color:transparent;box-shadow:none}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:98px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:80ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:15px;font-weight:600}
+.s{font-size:12.5px;font-weight:600}
+.d{font-size:11px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+.mono{font-family:var(--font-mono);font-size:10.5px;fill:var(--muted)}
+.box{fill:var(--surface);stroke:var(--border);stroke-width:1.25}
+.chip{fill:var(--surface-2);stroke:var(--border);stroke-width:1.25}
+.box,.chip{transition:stroke .3s,stroke-width .3s,fill .3s,filter .2s,opacity .25s}
+.edge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ar)}
+.edge.async{stroke-dasharray:5 4}
+.mk{fill:var(--muted)}
+.pulse{fill:var(--accent);filter:drop-shadow(0 0 3px var(--accent))}
+.node{cursor:pointer;outline:none}
+.node .cbox{fill:var(--bg)}
+.node:hover .box,.node:focus .box,.node:hover .chip,.node:focus .chip{stroke:var(--accent);
+  stroke-width:2;fill:var(--accent-bg);filter:drop-shadow(0 0 5px var(--accent))}
+.node:hover .cbox,.node:focus .cbox{fill:var(--bg);stroke:var(--accent);
+  stroke-width:2;filter:drop-shadow(0 0 5px var(--accent))}
+ 
+.gchip{opacity:0;transition:opacity .35s}
+.gchip.show{opacity:1}
+.gchip.gone .chip{stroke:var(--danger);stroke-width:2;fill:var(--danger-bg)}
+.gchip.dead .chip{stroke:var(--unknown);stroke-width:1.6;fill:var(--unknown-bg);stroke-dasharray:4 3}
+.gchip.dead text{fill:var(--muted)}
+.deadlbl{opacity:0;fill:var(--unknown);font-size:10px;font-weight:700;transition:opacity .3s}
+.gchip.dead .deadlbl,.gchip.gone .deadlbl{opacity:1}
+.evid .chip,.evid .box{stroke:var(--ok);stroke-width:2;fill:var(--ok-bg)}
+.hot .box,.hot .chip{stroke:var(--accent);stroke-width:2;fill:var(--accent-bg)}
+.rolbl{font-size:10px;font-weight:700;fill:var(--unknown)}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ the integration loop &#183; who vs. what</span></h1>
+  <div class="controls">
+    <button class="ctl primary" id="btnGrant">grant access</button>
+    <button class="ctl" id="btnCert" disabled>run a certification</button>
+    <button class="ctl kill" id="btnRevoke" disabled>revoke the grant</button>
+    <button class="ctl" id="btnReset">reset</button>
+  </div>
+</header>
+
+<div class="stage">
+<svg id="dia" viewBox="0 0 980 560" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
+<title id="svgT">The integration loop between an IdM and Straza</title>
+<desc id="svgD">The IdM decides who holds a role: a business role assignment flows over SCIM as wire-group membership, which is the role assignment in Straza. Straza decides what the role means at runtime: bindings, policy and admin areas are authored in Straza and keyed by the role name. The pull direction imports Straza's roles and mirrors its apps and tools into the IdM as evidence for certification campaigns, which certify the source grant, never an app or tool mirror. Grant, certify and revoke can be animated through the loop.</desc>
+<defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
+</defs>
+
+
+<g class="node" id="mp" tabindex="0" aria-label="Your IdM, midPoint in the worked example: decides who">
+  <rect class="box cbox" x="20" y="56" width="300" height="424" rx="6"/>
+  <text class="t" x="32" y="80">your IdM</text>
+  <text class="d" x="32" y="95">midPoint here &#183; decides WHO</text>
+</g>
+<g class="node" id="br" tabindex="0" aria-label="The business role, the assignable grant">
+  <rect class="box" x="36" y="106" width="268" height="46" rx="6"/>
+  <text class="s" x="46" y="124">BR:Straza-dev-access</text>
+  <text class="d" x="46" y="139">business role &#183; requestable &#183; JML machinery</text>
+</g>
+<g class="gchip" id="grant">
+  <rect class="chip" x="36" y="160" width="268" height="40" rx="5"/>
+  <text class="d" x="46" y="176" style="fill:var(--text)">bob &#9656; holds BR:Straza-dev-access</text>
+  <text class="mono" x="46" y="192">the SOURCE grant</text>
+  <text class="deadlbl" x="240" y="184">revoked</text>
+</g>
+<g class="node" id="cert" tabindex="0" aria-label="The certification campaign: its target is the source grant">
+  <rect class="box" x="36" y="210" width="268" height="50" rx="6"/>
+  <text class="s" x="46" y="228">certification campaign</text>
+  <text class="d" x="46" y="243">target: the SOURCE grant, never the mirror</text>
+  <text class="mono" x="46" y="255">revoke &#8658; SCIM &#8658; access dies</text>
+</g>
+<text class="cap" x="36" y="292">IMPORTED ROLE + EVIDENCE MIRROR</text>
+<g class="node" id="air" tabindex="0" aria-label="The imported AI role object: assignable, with its access projection as evidence">
+  <rect class="chip" x="36" y="302" width="268" height="46" rx="5"/>
+  <text class="d" x="46" y="318" style="fill:var(--text)">AI:dev (Role &#183; ai-role)</text>
+  <text class="mono" x="46" y="333">reaches MCS:demo-tools &#183; its MCT: tools</text>
+  <text class="rolbl" x="252" y="322">imported</text>
+</g>
+<text class="d" x="36" y="374">the app and tool mirrors are evidence only;</text>
+<text class="d" x="36" y="389">assigning the imported role grants for real</text>
+<g class="node" id="drift" tabindex="0" aria-label="The drift tripwire">
+  <rect class="chip" x="36" y="406" width="268" height="40" rx="5"/>
+  <text class="d" x="46" y="422" style="fill:var(--text)">drift tripwire</text>
+  <text class="mono" x="46" y="438">straza grant with no IdM match &#8658; flagged</text>
+</g>
+
+
+<g class="node" id="wd" tabindex="0" aria-label="Straza: decides what the role means and enforces it">
+  <rect class="box cbox" x="660" y="56" width="300" height="424" rx="6"/>
+  <text class="t" x="672" y="80">Straza</text>
+  <text class="d" x="672" y="95">decides WHAT, and enforces it</text>
+</g>
+<text class="cap" x="676" y="118">ROLE + MEANING (AUTHORED HERE)</text>
+<g class="node" id="role" tabindex="0" aria-label="The Straza role dev">
+  <rect class="box" x="676" y="126" width="268" height="40" rx="6"/>
+  <text class="s" x="686" y="142">role dev</text>
+  <text class="d" x="686" y="157">a name carries no power until meaning binds it</text>
+</g>
+<g class="node" id="bind" tabindex="0" aria-label="Bindings: what the role can see">
+  <rect class="chip" x="676" y="174" width="268" height="38" rx="5"/>
+  <text class="d" x="686" y="189" style="fill:var(--text)">bindings &#183; what dev&#8217;s sessions see</text>
+  <text class="mono" x="686" y="203">role &#8594; app/tools &#183; grant-only</text>
+</g>
+<g class="node" id="pol" tabindex="0" aria-label="Policy: allow, deny, needs a human">
+  <rect class="chip" x="676" y="220" width="268" height="38" rx="5"/>
+  <text class="d" x="686" y="235" style="fill:var(--text)">policy &#183; allow / deny / needs-a-human</text>
+  <text class="mono" x="686" y="249">match.roles: [dev] &#183; never in the IdM</text>
+</g>
+<g class="node" id="areas" tabindex="0" aria-label="Admin role areas: what the role may administer">
+  <rect class="chip" x="676" y="266" width="268" height="38" rx="5"/>
+  <text class="d" x="686" y="281" style="fill:var(--text)">admin.roleAreas &#183; what dev may administer</text>
+  <text class="mono" x="686" y="295">area:verb grants &#183; the wat_ vocabulary</text>
+</g>
+<g class="gchip" id="run">
+  <rect class="chip" x="676" y="330" width="268" height="52" rx="5"/>
+  <text class="d" x="686" y="348" style="fill:var(--text)">bob&#8217;s agent session</text>
+  <text class="mono" x="686" y="362">catalog &#183; policy &#183; audit, per call</text>
+  <text class="mono" x="686" y="376">membership picked up at checkin</text>
+  <text class="deadlbl" x="892" y="348">revoked</text>
+</g>
+<text class="d" x="676" y="410">an assignment written here directly is</text>
+<text class="d" x="676" y="425">origin: admin &#183; visible, and tripwired</text>
+<g class="node" id="feedref" tabindex="0" aria-label="The changes feed serving the pull">
+  <rect class="box" x="676" y="438" width="268" height="34" rx="6"/>
+  <text class="d" x="686" y="452" style="fill:var(--text)">changes feed &#8594; the pull lane</text>
+  <text class="mono" x="686" y="464">GET /v1/admin/changes &#183; scoped wat_</text>
+</g>
+
+
+<path id="lane-scim" class="edge" d="M320 140 L660 140"/>
+<text class="s" x="490" y="122" text-anchor="middle" style="font-size:11.5px">SCIM = CONTROL</text>
+<text class="d" x="490" y="158" text-anchor="middle">members add on wire-group dev &#8658; assignment &#183; origin: scim</text>
+
+<path id="lane-pull" class="edge async" d="M660 452 L320 452"/>
+<text class="s" x="490" y="436" text-anchor="middle" style="font-size:11.5px">PULL = EVIDENCE</text>
+<text class="d" x="490" y="470" text-anchor="middle">read-only pull: AI: &#183; MCS: &#183; MCT: (writes go over SCIM)</text>
+
+
+<g class="node" id="streets" tabindex="0" aria-label="Two one-way streets, on purpose">
+  <rect class="box" x="350" y="200" width="280" height="150" rx="6"/>
+  <text class="cap" x="490" y="224" text-anchor="middle">TWO ONE-WAY STREETS, ON PURPOSE</text>
+  <text class="d" x="366" y="250" style="fill:var(--text)">control flows in &#183; evidence flows out</text>
+  <text class="d" x="366" y="274">two-way sync would mean two masters</text>
+  <text class="d" x="366" y="289">for the same fact</text>
+  <text class="d" x="366" y="315" style="fill:var(--text)">roles + meaning: authored in Straza;</text>
+  <text class="d" x="366" y="330">the IdM discovers them, masters WHO</text>
+</g>
+
+<text class="d" x="490" y="520" text-anchor="middle">membership is IdM-mastered &#183; meaning is Straza-mastered &#183; the pull closes the audit loop</text>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">The IdM decides WHO, Straza decides WHAT, the pull closes the audit loop. Press &#8220;grant access&#8221; to follow a membership from business role to running session.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>The whole identity model in one loop. A person or agent gets access by holding a business
+  role in the IdM: the SOURCE grant, requested and revoked by the joiner/mover/leaver
+  machinery the enterprise already trusts. That assignment flows over SCIM as membership of the
+  wire-group rendering role dev, and that membership IS the Straza role assignment. What the role
+  MEANS is authored on the Straza side only: bindings decide what its sessions can see, policy
+  decides allow/deny/needs-a-human, and admin.roleAreas decides what it may administer, so the IdM
+  can decide who is dev, but can never conjure what dev can do (nor create, rename or delete the
+  role: it is Straza-born). The pull direction imports Straza&#8217;s runtime truth into the IdM
+  (AI: roles, MCS: apps, MCT: tools) so a certification campaign over the source grant has real
+  evidence to read: the reviewer opens AI:dev and certifies a capability set, not a label. Certifying or revoking an app
+  or tool mirror would remediate nothing: what bites is the source grant, and under it the
+  imported role assignment that writes membership, which is exactly why the campaign targets the
+  grant. A Straza-side assignment with no matching IdM grant carries origin: admin and is the
+  drift tripwire&#8217;s business: legitimate for bootstrap, break-glass and IdM-less standalone
+  deployments, visible in every case, and reconciled away on the IdM&#8217;s next run, since SCIM
+  is the single writer for an exported role.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+var svg=document.getElementById('dia');
+var nar=document.getElementById('nar');
+var DEF='The IdM decides WHO, Straza decides WHAT, the pull closes the audit loop. Press &#8220;grant access&#8221; to follow a membership from business role to running session.';
+var FACTS={
+ mp:'<strong>your IdM</strong> (midPoint in the demo stack): people and agents are ordinary IdM identities, and &#8220;may use Straza, as role dev&#8221; is an ordinary entitlement there; no parallel admin universe. A leaver in the IdM is a dead session in Straza.',
+ br:'<strong>the business role</strong>: the assignable, requestable unit the IdM&#8217;s JML and access-request machinery already understands. In the demo stack BR:Straza-dev-access induces the imported role AI:dev plus the Keycloak login (the governed account rides AR:Straza:Account), and the Straza role metarole turns holding AI:dev into the wire-group membership association: assigning it IS provisioning.',
+ cert:'<strong>certification campaign</strong>: runs over the IdM-mastered source grant, because revoking that is the only act that actually removes access (revoke &#8658; SCIM &#8658; sessions die). Certifying the pulled mirror would be theater: revoking a read-only object remediates nothing.',
+ air:'<strong>AI:dev</strong>, the imported role focus: Straza-born, so the IdM can never create, rename or delete it, but it IS assignable, and assigning it writes membership over SCIM. Its second job is evidence: the reviewer opens it and sees what dev actually reaches (the MCS: app, its MCT: tools, runtime status), so they certify a capability set, not a label.',
+ drift:'<strong>drift tripwire</strong>: every Straza role assignment records its origin (scim or admin). In an IdM-connected deployment, origin&#8800;scim is either documented bootstrap/break-glass or an out-of-band grant; either way it is visible where auditors look, never silent.',
+ wd:'<strong>Straza</strong>: runtime security config keyed BY the IdM-delivered role names. AD decides who is a DBA; the database decides what DBAs can do. Policy has no representation in the IdM, in either direction.',
+ role:'<strong>role dev</strong>: Straza-born, created and configured here (console, strazactl, policy files) and exported to the wire as a group the IdM can import but never create, rename or delete. A role with no bindings, no policy match and no admin.roleAreas entry grants NOTHING: meaning is authored here, not in the name.',
+ bind:'<strong>bindings</strong>: grant-only rows deciding which MCP apps and tools a role&#8217;s sessions can even see. Administered in Straza (console/ctl/API), mirrored outward as evidence, never written by the IdM.',
+ pol:'<strong>policy</strong>: allow / deny / needs-a-human, matched per call against the session&#8217;s roles. Authored and activated in Straza only (YAML &#8594; validate &#8594; activate &#8594; signed snapshot); deliberately absent from the IdM.',
+ areas:'<strong>admin.roleAreas</strong> (delegated admin): maps ordinary IdM-delivered role names to per-area admin grants in the same area:verb vocabulary as API-token scopes. The IdM decides who is sec-ops; this map decides what sec-ops may administer. straza-admin stays the one root role.',
+ streets:'<strong>two one-way streets</strong>: SCIM carries control in, the pull carries evidence out. Two-way sync would make two systems master the same fact and disagree about it. Roles and their meaning are authored in Straza; the IdM discovers the catalog (the imported AI: roles it assigns, plus the pulled MCS:/MCT: evidence) and masters membership.',
+ feedref:'<strong>changes feed</strong>: the pull rides GET /v1/admin/changes (a cursored, at-least-once page over the events outbox) under a scoped wat_ token (identity:read, apps:read, changes:read, config:read; transcripts stay walled off).'
+};
+Object.keys(FACTS).forEach(function(id){
+  var el=document.getElementById(id);
+  el.addEventListener('mouseenter',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('focus',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('mouseleave',function(){nar.innerHTML=DEF;});
+  el.addEventListener('blur',function(){nar.innerHTML=DEF;});
+});
+
+var btnG=document.getElementById('btnGrant'),btnC=document.getElementById('btnCert'),
+    btnR=document.getElementById('btnRevoke');
+var timers=[],rafs=[],dots=[];
+function later(ms,fn){if(RM){fn();return;}timers.push(setTimeout(fn,ms));}
+function slide(pathId,dur,rev,done){
+  if(RM){if(done)done();return;}
+  var path=document.getElementById(pathId),len=path.getTotalLength();
+  var dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  dot.setAttribute('r','4');dot.setAttribute('class','pulse');
+  svg.appendChild(dot);dots.push(dot);
+  var t0=null;
+  function frame(ts){
+    if(t0===null)t0=ts;
+    var k=Math.min((ts-t0)/dur,1);
+    var pt=path.getPointAtLength(len*(rev?1-k:k));
+    dot.setAttribute('cx',pt.x);dot.setAttribute('cy',pt.y);
+    if(k<1){rafs.push(requestAnimationFrame(frame));}
+    else{if(dot.parentNode)svg.removeChild(dot);if(done)done();}
+  }
+  rafs.push(requestAnimationFrame(frame));
+}
+function cls(id){return document.getElementById(id).classList;}
+function stopAll(){
+  timers.forEach(clearTimeout);timers=[];
+  rafs.forEach(cancelAnimationFrame);rafs=[];
+  dots.forEach(function(d){if(d.parentNode)d.parentNode.removeChild(d);});dots=[];
+}
+function reset(){
+  stopAll();
+  ['grant','run'].forEach(function(id){cls(id).remove('show','gone','dead');});
+  ['cert','air','br'].forEach(function(id){cls(id).remove('evid','hot');});
+  btnG.disabled=false;btnC.disabled=true;btnR.disabled=true;
+  nar.innerHTML=DEF;
+}
+function doGrant(){
+  btnG.disabled=true;
+  cls('br').add('hot');
+  nar.innerHTML='1 &#183; bob requests (or a joiner flow assigns) <code>BR:Straza-dev-access</code>, an ordinary IdM approval, the machinery the enterprise already trusts.';
+  later(1300,function(){
+    cls('grant').add('show');
+    nar.innerHTML='2 &#183; The package&#8217;s inducements bring the imported role <code>AI:dev</code>, whose metarole construction writes the wire-group association on bob&#8217;s Straza account: the SOURCE grant now exists.';
+    later(1300,function(){
+      slide('lane-scim',1000,false,function(){
+        cls('br').remove('hot');
+        nar.innerHTML='3 &#183; SCIM delivers membership: a members add on the wire-group for role <code>dev</code>, recorded as the (user, role) assignment with <code>origin: scim</code>.';
+        later(1400,function(){
+          cls('run').add('show');
+          nar.innerHTML='4 &#183; bob&#8217;s next checkin picks the role up: his session&#8217;s catalog, policy matching and (if mapped) admin areas now follow whatever <em>dev</em> means in Straza today.';
+          btnC.disabled=false;btnR.disabled=false;btnG.disabled=true;
+        });
+      });
+    });
+  });
+}
+function doCert(){
+  btnC.disabled=true;btnR.disabled=true;
+  cls('cert').add('hot');
+  nar.innerHTML='1 &#183; The campaign runs over the IdM&#8217;s own assignments: the reviewer is asked about bob&#8217;s <strong>source grant</strong>, not about any Straza-side object.';
+  later(1500,function(){
+    cls('air').add('evid');
+    nar.innerHTML='2 &#183; For evidence the reviewer opens the imported <code>AI:dev</code>: role dev reaches app MCS:demo-tools with these MCT: tools, a capability set, not a label. The role itself is Straza-born: nothing they edit here rewrites it.';
+    later(2200,function(){
+      cls('cert').remove('hot');cls('air').remove('evid');
+      nar.innerHTML='3 &#183; Verdict lands on the grant. Keep = nothing moves. Revoke = press the red button and watch why the source grant is the only honest certification target.';
+      btnC.disabled=false;btnR.disabled=false;
+    });
+  });
+}
+function doRevoke(){
+  btnC.disabled=true;btnR.disabled=true;
+  cls('grant').add('gone');
+  nar.innerHTML='1 &#183; The grant is revoked in the IdM (a campaign verdict, a mover flow, or a leaver): the business-role assignment is gone.';
+  later(1300,function(){
+    slide('lane-scim',1000,false,function(){
+      nar.innerHTML='2 &#183; SCIM propagates: membership removal cascades scim-origin revocations. The deny direction is immediate, deliberately stronger than the grant direction.';
+      later(1300,function(){
+        cls('run').add('dead');
+        nar.innerHTML='3 &#183; bob&#8217;s session dies. <strong>This</strong> is why you certify the source grant: revoking it kills access; revoking the mirror would have changed nothing.';
+      });
+    });
+  });
+}
+document.getElementById('btnGrant').addEventListener('click',doGrant);
+document.getElementById('btnCert').addEventListener('click',doCert);
+document.getElementById('btnRevoke').addEventListener('click',doRevoke);
+document.getElementById('btnReset').addEventListener('click',reset);
+})();
+</script>
+</body>
+</html>

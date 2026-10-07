@@ -1,0 +1,308 @@
+# The gateway after a hold that did not end in an approval. A held call
+# that a person denied stays denied on its record, and the same call run
+# again is a new request that is held afresh, because a hold's denial is
+# final for that request and nothing more; only a ticket stays denied for
+# its window. A one-second window runs out inside the socket wait and the
+# call is refused with the expiry sentence, and the same call run again is
+# held afresh and expires the same way. Every refusal is on the chain as a
+# deny that carries the sentence the model read.
+#
+# What this runner cannot show: the sentence "Straza: approval denied by
+# NAME (ref ID)" is what the model reads when the denial lands while the
+# socket is still held, and the runner has no step that decides during
+# another step's wait. The retried call is held afresh with a new
+# reference and a fresh window [live], which is the how-to guide's reading,
+# so the step asserts the fresh hold.
+#
+# Shapes the binary forced on the corpus, each with how it was verified: the
+# approvals list is an object with an approvals array, the activate body is
+# {status: active|draft}, a policy delete answers 204 and role, app and
+# user deletes answer 200, all recorded on j0-golden-path [live].
+# The upstream tool names and the justification argument follow j0 as well.
+# The gateway hold in this runner is two seconds, so a held call under a
+# long window answers "approval pending" after two seconds (README). The
+# steps marked "suspect" below assert a wording the published sources leave
+# open; each is listed in the lane report.
+id: g4-gateway-refusals
+group: G4
+title: A denied gateway hold stays denied and the retried call is held afresh, and a one-second hold is refused with the expiry sentence
+provenance: >-
+  doc website/content/concepts/approvals-model.md (past the hold cap the
+  caller gets a retriable "approval pending" answer; an elapsed window keeps
+  the final fail-closed timeout wording; windows shorter than the cap are
+  unchanged); website/content/security/security-model.md section The
+  invariants and what each one costs;
+  spec/policyset/SPEC.md §2 item 8 (the gateway lane holds the upstream
+  call until the request resolves or timeoutSeconds elapses; an explicit
+  denial or a timeout is a deny; timeoutSeconds range 1..3600; a hold is
+  a bounded wait with expiry as deny, a ticket is the class whose
+  decision outlives the call);
+  spec/events/SPEC.md revision 31 (a hold that ran out of its decision
+  window is a straza.audit.mcp record with effect deny, the allowing
+  rule's ruleId and setName, and the sentence the model read as reason:
+  "Straza: approval request expired after Ns with no decision (ref ID)";
+  the pending sentence is recorded the same way) and §2.2 (one approval
+  record at request and one at resolution);
+  pkg/api/openapi.yaml GET /v1/admin/approvals (state filter), the decide
+  routes (the optional reason body), the Approval schema (state, lane,
+  rule, decidedReason);
+  website/content/guides/write-policy/hold-for-a-human.md (a second run
+  of the same command raises a new request; a deny is final for that
+  request);
+  website/content/concepts/approvals-model.md (the socket wait is the
+  smaller of the window and the hold cap; the waiting gateway call wakes
+  on the resolution broadcast or on its own timer and denies; an expired
+  approval is a deny; a ticket, not a hold, stays denied for the rest of
+  its window);
+  website/content/reference/events.md (when a rule allowed a call and
+  the hold ran out of time, the record is a deny with the allowing rule
+  and the refusal sentence as the reason).
+  suspect: the upstream tool names, the justification argument and the
+  success status codes, all taken from j0; that the same call run again
+  after a denied hold opens a fresh record rather than being refused,
+  which the how-to guide states for a second run of the same command
+  and the reference events page can be read against; that the same call
+  run again after an expired hold opens a fresh record that expires the
+  same way, which no page states.
+harnesses: [claude-code]
+identities:
+  eve: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: one app on the hermetic upstream, one role it owns, one human in it, two held tools.
+  - name: the admin registers the app on the hermetic upstream
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g4-gw-tools
+            namespace: dev.e2e
+          server:
+            name: dev.e2e/g4-gw-tools
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want: {status: 201}
+    save: {appId: id}
+  - name: the admin creates the role the app owns, over every tool of the app
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-gw-tools-callers, server: g4-gw-tools, tools: ["*"], description: "Gateway refusals scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM provisions eve over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-eve
+        userName: eve
+        displayName: Eve Gateway
+        active: true
+    want: {status: 201}
+    save: {eveId: id}
+  - name: the admin sets eve's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${eveId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g4-gw-tools-callers"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: eve becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${eveId}"}]
+    want: {status: 200}
+  - name: the admin applies a set that holds get-sum for fifteen minutes and echo for one second
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-gw
+            description: Gateway refusals scenario for role g4-gw-tools-callers
+          spec:
+            match:
+              roles: [g4-gw-tools-callers]
+            rules:
+              - id: sum-held
+                tools: [mcp.call]
+                apps: [g4-gw-tools]
+                toolNames:
+                  allow: ["get-sum"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [straza-admin]
+                  timeoutSeconds: 900
+                reason: "G4-GW: get-sum runs only after a straza-admin approves"
+              - id: echo-held-one-second
+                tools: [mcp.call]
+                apps: [g4-gw-tools]
+                toolNames:
+                  allow: ["echo"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [straza-admin]
+                  timeoutSeconds: 1
+                reason: "G4-GW: echo is held for one second and then refused"
+    want: {status: 201}
+  - name: the admin activates the set
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-gw/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: eve enrolls
+    enroll: {as: eve}
+  - name: eve starts a session
+    hook:
+      as: eve
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # A denied hold refuses the retried call.
+  - name: the held tool answers approval pending once the two-second gateway hold passes
+    mcp:
+      as: eve
+      tool: g4-gw-tools__get-sum
+      args: {a: 1, b: 2, _straza_justification: "the refusals scenario needs the sum"}
+    want: {refused: true, reasonContains: "approval pending"}
+  - name: the pending answer is on the chain once as a deny with the pending sentence
+    audit: {subject: eve, kind: tool.pre, decision: deny, reasonContains: "approval pending", count: 1}
+  - name: exactly one record is pending, on the gateway lane, under the rule that held the call
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.lane: gateway, approvals.0.rule: sum-held, approvals.1: null}
+    save: {sumHold: approvals.0.id}
+  - name: the admin denies the hold with a reason and the record carries the words
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${sumHold}/deny
+      body: {reason: "G4-GW: not now"}
+    want:
+      status: 200
+      body: {approval.state: denied, approval.decidedReason: "G4-GW: not now"}
+  - name: the same call run again after the denial is a new request and is held afresh
+    # suspect: the how-to guide says a second run of the same command raises a new request, and the binary answers so [live]
+    mcp:
+      as: eve
+      tool: g4-gw-tools__get-sum
+      args: {a: 1, b: 2, _straza_justification: "the refusals scenario needs the sum"}
+    want: {refused: true, reasonContains: "approval pending"}
+  - name: the second pending answer is on the chain, two denies with the pending sentence
+    audit: {subject: eve, kind: tool.pre, decision: deny, reasonContains: "approval pending", count: 2}
+  - name: the fresh request is the only pending record
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.rule: sum-held, approvals.1: null}
+  - name: the denied record stayed denied
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${sumHold}
+    want:
+      status: 200
+      body: {approval.state: denied}
+
+  # A one-second window runs out inside the socket wait, and the same call run again is held afresh and expires the same way.
+  - name: the one-second hold runs out inside the socket wait and the call is refused with the expiry sentence
+    mcp:
+      as: eve
+      tool: g4-gw-tools__echo
+      args: {text: hello-from-eve, _straza_justification: "the refusals scenario needs an echo"}
+    want: {refused: true, reasonContains: "expired"}
+  - name: the expiry refusal is on the chain once as a deny with the expiry sentence
+    audit: {subject: eve, kind: tool.pre, decision: deny, reasonContains: "expired", count: 1}
+  - name: the record reads expired within one sweep
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=expired
+    want:
+      status: 200
+      body: {approvals.0.state: expired, approvals.0.rule: echo-held-one-second, approvals.1: null}
+    save: {echoHold: approvals.0.id}
+    within: 30s
+  - name: the same call run again after the expiry is held afresh and refused with the expiry sentence again
+    # suspect: no page states what the gateway answers to a second run after an expired hold; a fresh one-second hold that expires is the reading
+    mcp:
+      as: eve
+      tool: g4-gw-tools__echo
+      args: {text: hello-from-eve, _straza_justification: "the refusals scenario needs an echo"}
+    want: {refused: true, reasonContains: "expired"}
+  - name: both expiry refusals are on the chain as denies with the expiry sentence
+    audit: {subject: eve, kind: tool.pre, decision: deny, reasonContains: "expired", count: 2}
+  - name: the second echo request expired as its own record, so two records read expired
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=expired
+    want:
+      status: 200
+      body: {approvals.0.state: expired, approvals.1.state: expired, approvals.2: null}
+    within: 30s
+  - name: the denied filter lists the one denied record
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=denied
+    want:
+      status: 200
+      body: {approvals.0.state: denied, approvals.1: null}
+  - name: four records opened and three resolved, seven approval records on the chain
+    # suspect: one request per record and one resolution per decided or expired record gives 2+1+2+2
+    audit: {subject: eve, kind: straza.audit.approval, count: 7}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the set
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-gw/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft set is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g4-gw
+    want: {status: 204}
+  - name: the admin deletes the role before its server, which would take it along
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the admin removes the app
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${appId}
+    want: {status: 200}
+  - name: the IdM deactivates eve
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${eveId}
+    want: {status: 204}

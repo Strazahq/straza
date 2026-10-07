@@ -1,0 +1,108 @@
+# Straza release pipeline. It runs from .github/workflows/release.yml on v*
+# tags. Static binaries only (CGO off), SBOMs via syft, and checksums signed
+# with keyless cosign (GitHub OIDC → Fulcio). The Rekor transparency-log
+# entry is public and includes the repository identity, which is intended:
+# the project is open source (AGPL-3.0-only core and an Apache-2.0
+# integration surface).
+version: 2
+
+project_name: straza
+
+env:
+  - CGO_ENABLED=0
+
+before:
+  hooks:
+    # The notices of the console bundle and of every Go module the binaries
+    # link, generated from the module graph of the tagged tree.
+    - go run ./tools/notices -release -version {{ .Version }} -o build/notices/THIRD_PARTY_NOTICES.txt
+
+builds:
+  - id: strazad
+    main: ./cmd/strazad
+    binary: strazad
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+        -X github.com/strazahq/straza/internal/version.Version={{ .Version }}
+        -X github.com/strazahq/straza/internal/version.Commit={{ .ShortCommit }}
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+  - id: strazactl
+    main: ./cmd/strazactl
+    binary: strazactl
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+        -X github.com/strazahq/straza/internal/version.Version={{ .Version }}
+        -X github.com/strazahq/straza/internal/version.Commit={{ .ShortCommit }}
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+  - id: straza
+    main: ./cmd/straza
+    binary: straza
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+        -X github.com/strazahq/straza/internal/version.Version={{ .Version }}
+        -X github.com/strazahq/straza/internal/version.Commit={{ .ShortCommit }}
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    # One archive per platform with all three binaries: strazad for servers,
+    # strazactl + straza for admin/developer machines.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - LICENSE-APACHE
+      - NOTICE
+      - TRADEMARKS.md
+      - README.md
+      - docs/quickstart-standalone.md
+      - src: build/notices/THIRD_PARTY_NOTICES.txt
+        strip_parent: true
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    output: true
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+
+changelog:
+  # The release notes are written by hand.
+  disable: true
+
+release:
+  # The tag lands as a draft with every artifact attached. The maintainer
+  # writes the notes on the draft and publishes it, so the releases page is
+  # the record of what changed in each version.
+  draft: true
+  prerelease: auto
+  header: |
+    Static binaries for linux/windows/darwin (amd64/arm64). Verify with:
+    ```sh
+    cosign verify-blob --signature checksums.txt.sig --certificate checksums.txt.pem \
+      --certificate-identity-regexp '^https://github\.com/Strazahq/straza/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+    sha256sum -c checksums.txt --ignore-missing
+    ```
+    Container image: `ghcr.io/strazahq/straza:{{ .Version }}` (cosign-signed).
+    Quickstart: [docs/quickstart-standalone.md](https://github.com/strazahq/straza/blob/main/docs/quickstart-standalone.md).

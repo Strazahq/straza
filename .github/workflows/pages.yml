@@ -1,0 +1,83 @@
+# Builds the docs site from website/ with a pinned Hugo release, runs
+# tools/site-publish.py over the output and deploys the published tree to
+# GitHub Pages. Pages serves it as docs.straza.ai, the name in
+# website/static/CNAME, once the repository's Pages source is set to
+# "GitHub Actions". Every job is gated on the public repository name, so the
+# workflow does nothing in a fork or a copy.
+name: docs-site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - website/**
+      - tools/site-publish.py
+      - tools/docs-search.test.cjs
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  # The same release the eval stack builds with (deploy/compose/eval-stack).
+  DOCS_HUGO_VERSION: 0.165.0
+  DOCS_HUGO_SHA256: 5c3a37a5450b3e386e5b75a87a790fea2d04a796d75e171216c80ef48a32b432
+
+jobs:
+  build:
+    if: github.repository == 'strazahq/straza'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: install hugo (release tarball, checksum verified)
+        run: |
+          curl -sSfL -o hugo.tar.gz "https://github.com/gohugoio/hugo/releases/download/v${DOCS_HUGO_VERSION}/hugo_${DOCS_HUGO_VERSION}_linux-amd64.tar.gz"
+          echo "${DOCS_HUGO_SHA256}  hugo.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/hugo"
+          tar -xzf hugo.tar.gz -C "$RUNNER_TEMP/hugo" hugo
+      - name: build the site without drafts
+        run: >-
+          "$RUNNER_TEMP/hugo/hugo" --source website
+          --destination "$GITHUB_WORKSPACE/build/site" --noBuildLock
+      - name: publish (strip comments, scan for tells)
+        run: python3 tools/site-publish.py --src build/site --out build/site-public
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: check documentation search and published scripts
+        env:
+          DOCS_SITE_DIR: build/site-public
+        run: |
+          node --test tools/docs-search.test.cjs
+          node --check build/site-public/assets/site.js
+          node --check build/site-public/assets/docs-search.js
+      - name: refuse external resource loads
+        run: |
+          if grep -rEn --include='*.html' --include='*.js' --include='*.css' \
+              -e '<script[^>]*src="https?:' -e '<link[^>]*href="https?:' \
+              -e '@import[^;]*https?:' -e "fetch\([^)]*['\"]https?:" build/site-public; then
+            echo "PAGES GATE FAILED: a page loads a script, stylesheet, import or fetch from another host. The docs site must be self-contained, so remove that external load and push again."
+            exit 1
+          fi
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with:
+          path: build/site-public
+
+  deploy:
+    if: github.repository == 'strazahq/straza'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

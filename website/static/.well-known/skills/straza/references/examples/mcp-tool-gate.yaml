@@ -1,0 +1,32 @@
+# Gate two tools of the MCP server scout-tools for the application role scout-tools-readers: get-sum needs approval, get-env is denied.
+# Both profiles. Access comes from the role's access row, made with the role by strazactl roles create scout-tools-readers --app scout-tools --tools ..., and this set only gates what that row already gives.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: mcp-tool-gate
+  description: Gates for the scout-tools tools that scout-tools-readers has access to
+spec:
+  priority: 50
+  match:
+    roles: [scout-tools-readers]
+  rules:
+    - id: scout-tools-get-sum-approve
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [scout-tools]
+      toolNames:
+        allow: ["get-sum"]
+      effect: allow
+      mode: approve
+      approve:
+        # No roles and no deciders, so the request routes to the requester's sponsor.
+        timeoutSeconds: 90
+      reason: "Straza: get-sum needs your sponsor's approval"
+    - id: block-get-env
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [scout-tools]
+      toolNames:
+        deny: ["get-env"]
+      effect: deny
+      reason: "Straza: get-env is denied for scout-tools-readers because it dumps the server environment. Ask an admin if a task needs it"

@@ -1,0 +1,24 @@
+{{- /* A command block labelled with the place it runs and its purpose:
+{{< command terminal="Terminal 2" purpose="administration" >}}. The older
+single label "Terminal 2 · administration" still works: without purpose the
+part after the middle dot becomes the purpose. site.js adds the copy button
+to the bar. */ -}}
+{{- $terminal := .Get "terminal" -}}
+{{- $purpose := .Get "purpose" -}}
+{{- if and (not $purpose) (strings.Contains $terminal " · ") -}}
+  {{- $parts := split $terminal " · " -}}
+  {{- $terminal = index $parts 0 -}}
+  {{- $purpose = delimit (after 1 $parts) " · " -}}
+{{- end -}}
+<div class="cmd">
+  <div class="cmd-bar">
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m4 6 2.5 2L4 10M8 10h4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    {{- with $terminal }}
+    <span class="who">{{ . }}</span>
+    {{- end }}
+    {{- with $purpose }}
+    <span class="where">{{ . }}</span>
+    {{- end }}
+  </div>
+  {{ partial "inner.html" (dict "Page" .Page "Inner" .Inner) }}
+</div>

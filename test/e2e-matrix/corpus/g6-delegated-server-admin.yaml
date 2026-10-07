@@ -1,0 +1,383 @@
+# Delegated MCP administration: a server names one admin role, that role
+# lives as long as the server, and the people who hold it administer that one
+# server and nothing else. The operator registers two servers, each carrying
+# an admin role the registration minted. Dana holds the role of the first
+# server directly. Tess holds a business role that implies the same minted
+# role, which is how a team reaches a server, and she reads the same filtered
+# list. Dana is refused when she registers a new name and when she disables
+# the server she does not administer, and she disables and enables her own.
+# Deleting the role while the server exists is refused, because the role
+# lives as long as the server. Removing the server is not hers to do, the
+# operator does it, and the minted role and its memberships go with it. The
+# chain read at the end carries both of her changes and the membership that
+# ended under her own name, and the removal under the operator's. Defining
+# the roles her own server owns is not in this scenario:
+# g7-server-owned-roles proves it.
+#
+# A server has one admin role and it is never repointed, so this scenario
+# never calls an admin-role route, and a team reaches a server through an
+# implication edge from a business role to the minted role. A server delete
+# is not refused while its admin role has holders: the delete takes the
+# minted role and its assignments with it, one roles.unassign record per
+# holder.
+#
+# A server admin creates, describes and deletes the roles their own server
+# owns. Registration, removal, the reach of the roles a server does not own
+# and global policy stay with the global admin, and those are what this
+# scenario asserts. The team role it creates is named team-g6-alpha and not
+# g6-alpha-team because a server's prefix is exclusive, so a global create
+# of a name beginning with g6-alpha- is refused.
+#
+# The field admin_role, the row flag may_change, the filtered list, the 403 a
+# server admin who oversteps reads, and the removal that takes the minted
+# role and its memberships with it are in pkg/api/openapi.yaml 0.104.0 and
+# spec/events/SPEC.md revision 32, and the sources block below cites both.
+# The App fields are spelled admin_role, admin_role_id and may_change since
+# openapi 0.127.0. What no
+# document carries yet is marked suspect below and listed in the lane
+# report: the wording of the two refusal sentences, the 409 on deleting a
+# role a server names, the implication closure a team reaches a server
+# through, and the audit actions for a pause and a resume. A red row here
+# means the wire landed differently, and the fix is in this file or in the
+# product, never a bent assertion.
+#
+# The two servers are named so that both readings of the minting rule give
+# the same role name: metadata.name g6-alpha with no namespace reads
+# mcp-admin-g6-alpha, and the registry name g6/alpha reads mcp-admin-g6-alpha
+# as well. The scenario therefore proves the delegation without depending on
+# which of the two the mint takes the namespace from.
+#
+# Shapes read from the published contract, so they are not suspect:
+# installApp answers 201 with the app row, listApps is a bare array,
+# disableApp answers 200 with paused true and enableApp clears that marker
+# and restarts the app, removeApp answers 200, a role delete answers 200 and
+# an unknown role id answers 404, an implication edge is created with
+# implies_role_id and answers 201, an assignment create answers 201 and its
+# delete answers 200 (pkg/api/openapi.yaml, the Apps and the Roles sections).
+id: g6-delegated-server-admin
+group: G6
+title: A server admin changes the one server whose admin role she holds, directly or through her team's role, and is refused everywhere else
+provenance: >-
+  doc the delegated server administration model (every server carries one
+  adminRole field, never empty, minted at registration, never changed after
+  the mint, with no repoint route; a session administers a server when it
+  holds the role that server names, and a team reaches a server through a
+  business role that implies the minted role, the standing count and the
+  row flag being computed over that closure; a role delete is refused with
+  409 saying the role lives as long as the server and to remove the server
+  instead; connection and settings changes, secrets, enable and disable,
+  health and logs, test a call and delete are delegated, while
+  registration, removal, the reach of the roles a server does not own and
+  global policy stay global; a server delete takes the minted role and
+  every assignment of it with the server, one roles.unassign record per
+  holder);
+  pkg/api/openapi.yaml 0.104.0: listApps
+  (a session with no apps grant that holds the admin role of one or more
+  servers sees those servers only, every row says whether the caller may
+  change it, the server-scoped verbs are installApp for a change to a listed
+  server plus removeApp, appLogs, recheckApp, enableApp, disableApp and the
+  secrets routes, and a server admin posting a new name or naming a server
+  they do not administer is refused with 403 and the role they would need),
+  removeApp (the minted role goes with the server, memberships included, one
+  roles.unassign record per holder with the reason "server removed",
+  apps.remove naming the role, and the holder of that role may remove the
+  server themselves), the App schema fields admin_role, admin_role_id and
+  may_change under the names openapi 0.127.0 gave them, and the older
+  shapes this scenario leans on (installApp 201,
+  listApps as a bare array, disableApp 200 with paused true, enableApp,
+  removeApp 200, createRole 201, addRoleImplication 201, deleteRole 200 and
+  404, exportRole 404, createAssignment 201, deleteAssignment 200);
+  spec/events/SPEC.md revision 32
+  (apps.install and apps.remove gain adminRole, and every membership that
+  ends with a removed server chains one roles.unassign record with the
+  reason "server removed"), and section 2 table straza.audit.admin (a
+  mutation of an admin object carries the actor, the action and the target,
+  which is what the audit steps match on).
+  suspect: the minted name mcp-admin-g6-alpha for a manifest whose
+  metadata carries no namespace, because the published rule spells the name
+  mcp-admin-<namespace>-<name> and no published document states the
+  shorter form; the wording of both 403 refusals, of which the openapi
+  fixes the code and the fact that the answer names the role they would
+  need, while no published document carries the sentences; the 409 on
+  deleting a role a server names, which no published document carries yet,
+  so the step matches the idea; that an implication edge from a business
+  role to the control-plane minted role is accepted and that administration
+  and the row flag follow that closure, which the openapi leaves out; the
+  action names apps.disable and apps.enable, which
+  spec/events does not list today and which revision 32 does not add, so
+  these two steps say that a delegated admin's pause and resume must be on
+  the chain under her name and the lane report carries the question.
+harnesses: [claude-code]
+identities:
+  dana: {kind: human, password: "Walk-2026!"}
+  tess: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: two servers registered by the operator, one person who holds the
+  # admin role of the first one directly, and one who holds it through her
+  # team's business role.
+  - name: the operator registers the first server and the answer carries the admin role the registration minted
+    # suspect: the minted name, because the published rule spells a namespace into it
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g6-alpha
+            description: The server dana and her team administer in this scenario
+          server:
+            name: g6/alpha
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want:
+      status: 201
+      body: {name: g6-alpha, admin_role: mcp-admin-g6-alpha}
+    save: {alphaId: id, alphaRoleId: admin_role_id}
+  - name: the operator registers the second server, which dana will never administer
+    # suspect: the minted name, because the published rule spells a namespace into it
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g6-beta
+            description: The server dana is refused on in this scenario
+          server:
+            name: g6/beta
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want:
+      status: 201
+      body: {name: g6-beta, admin_role: mcp-admin-g6-beta}
+    save: {betaId: id}
+  - name: the IdM provisions dana over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g6-dana
+        userName: dana
+        displayName: Dana Server Admin
+        active: true
+    want: {status: 201}
+    save: {danaId: id}
+  - name: the operator sets dana's password, since SCIM carries none and she signs in to act
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${danaId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the operator gives dana the admin role of the first server and nothing else
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${danaId}", role_id: "${alphaRoleId}"}
+    want: {status: 201}
+
+  # 1. The list a server admin reads is filtered, and the row says she may
+  # change it.
+  - name: the operator sees both servers, which is the control for the filtered list that follows
+    admin:
+      method: GET
+      path: /v1/admin/apps
+    want: {status: 200, body: {"2": null}, bodyContains: '"g6-beta"'}
+  - name: dana sees exactly the server whose admin role she holds and the row says she may change it
+    admin:
+      method: GET
+      path: /v1/admin/apps
+      as: dana
+    want: {status: 200, body: {0.name: g6-alpha, 0.may_change: true, "1": null}}
+
+  # 2. The team model: a business role implies the minted role, and its
+  # holder administers the server without ever being named on the server.
+  - name: the operator creates the team's business role
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: team-g6-alpha, kind: business, description: "Delegated administration scenario, the team whose members administer g6-alpha"}
+    want: {status: 201}
+    save: {teamRoleId: id}
+  - name: the operator makes the team role imply the server's minted admin role
+    # suspect: that a business role may imply the control-plane minted role
+    admin:
+      method: POST
+      path: /v1/admin/roles/${teamRoleId}/implications
+      body: {implies_role_id: "${alphaRoleId}"}
+    want: {status: 201}
+  - name: the IdM provisions tess, who will hold the team role and never the minted one
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g6-tess
+        userName: tess
+        displayName: Tess Team Member
+        active: true
+    want: {status: 201}
+    save: {tessId: id}
+  - name: the operator sets tess's password, since SCIM carries none and she signs in to read her list
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${tessId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the operator gives tess the team role alone
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${tessId}", role_id: "${teamRoleId}"}
+    want: {status: 201}
+    save: {tessAssignment: id}
+  - name: tess reaches the same one server through the implication and her row says she may change it
+    # suspect: that administration and the row flag are computed over the implication closure
+    admin:
+      method: GET
+      path: /v1/admin/apps
+      as: tess
+    want: {status: 200, body: {0.name: g6-alpha, 0.may_change: true, "1": null}}
+
+  # 3. Registering a new name is not a server-admin verb, because there is no
+  # server to own yet.
+  - name: dana registering a new name is refused and told which grant or role a registration needs
+    # suspect: the sentence, which no published document carries yet
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      as: dana
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g6-gamma
+            description: The server a delegated admin may not register
+          server:
+            name: g6/gamma
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want: {status: 403, bodyContains: "registering a new server needs the scope apps:write"}
+  - name: the refused registration created nothing, so the operator still sees two servers
+    admin:
+      method: GET
+      path: /v1/admin/apps
+    want: {status: 200, body: {"2": null}}
+
+  # 4. A server she does not administer is refused, and her own server is
+  # hers to stop and start.
+  - name: dana disabling the server she does not administer is refused and told whose role that server names
+    # suspect: the sentence, which no published document carries yet
+    admin:
+      method: POST
+      path: /v1/admin/apps/${betaId}/disable
+      as: dana
+    want: {status: 403, bodyContains: "which you do not hold"}
+  - name: dana disables her own server, which only shrinks reach
+    admin:
+      method: POST
+      path: /v1/admin/apps/${alphaId}/disable
+      as: dana
+    want: {status: 200, body: {name: g6-alpha, paused: true}}
+  - name: dana enables her own server again
+    admin:
+      method: POST
+      path: /v1/admin/apps/${alphaId}/enable
+      as: dana
+    want: {status: 200, body: {name: g6-alpha}}
+  - name: her server is running again on her own filtered list, so the pause marker is cleared
+    admin:
+      method: GET
+      path: /v1/admin/apps
+      as: dana
+    want: {status: 200, body: {0.name: g6-alpha, 0.status: running}}
+    within: 20s
+
+  # 5. The role a server names lives as long as that server.
+  - name: deleting the role the server names is refused, because that role lives as long as the server
+    # suspect: the 409 and the wording, which no published document carries yet, so the step matches the idea
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${alphaRoleId}
+    want: {status: 409, bodyContains: "as long as the server"}
+
+  # 6. Removal stays with the operator: a server admin may pause her server
+  # and never remove it, because removal also deletes the office. When the
+  # operator removes it, the minted role goes with it.
+  - name: dana is refused when she removes her own server, because removal needs an apps grant
+    # suspect: the sentence, which no published document carries yet
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${alphaId}
+      as: dana
+    want: {status: 403, bodyContains: "requires role straza-admin"}
+  - name: the operator removes the server, and the minted role and dana's membership go with it
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${alphaId}
+    want: {status: 200}
+  - name: the minted role went with its server, so the roles surface no longer serves it
+    # The corpus vocabulary has no assertion for a name absent from a bare
+    # array, so the absence is read by the role's own id: its export answers
+    # 404 exactly when no such role remains on the list.
+    admin:
+      method: GET
+      path: /v1/admin/roles/${alphaRoleId}/export
+    want: {status: 404}
+
+  # 7. The chain read at the end carries her two changes, the membership
+  # that ended with the server, and the removal itself.
+  - name: dana's disable is on the chain exactly once under her own name
+    # suspect: the action name apps.disable, which spec/events does not list today
+    audit: {subject: dana, kind: straza.audit.admin, action: apps.disable, count: 1}
+  - name: dana's enable is on the chain exactly once under her own name
+    # suspect: the action name apps.enable, which spec/events does not list today
+    audit: {subject: dana, kind: straza.audit.admin, action: apps.enable, count: 1}
+  - name: her membership of the minted role ended with the server, one unassign record for the one holder
+    audit: {subject: dana, kind: straza.audit.admin, action: roles.unassign, reasonContains: "server removed", count: 1}
+  - name: the removal of the server is on the chain exactly once under the operator's name
+    audit: {subject: admin, kind: straza.audit.admin, action: apps.remove, count: 1}
+
+  # Teardown leaves nothing behind, minted roles included.
+  - name: the operator takes the team role away from tess
+    admin:
+      method: DELETE
+      path: /v1/admin/assignments/${tessAssignment}
+    want: {status: 200}
+  - name: the team role is deleted, which takes its implication edge with it
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${teamRoleId}
+    want: {status: 200}
+  - name: the operator removes the second server, whose minted role goes with it
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${betaId}
+    want: {status: 200}
+  - name: the IdM deactivates tess
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${tessId}
+    want: {status: 204}
+  - name: the IdM deactivates dana
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${danaId}
+    want: {status: 204}

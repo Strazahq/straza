@@ -1,0 +1,11 @@
+# INVALID: effect must be allow|deny.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: bad-effect
+spec:
+  rules:
+    - id: rule-one
+      tools: [shell.exec]
+      effect: maybe
+      reason: "nope"

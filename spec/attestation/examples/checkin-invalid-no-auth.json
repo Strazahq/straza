@@ -1,0 +1,4 @@
+{
+  "harness": { "name": "claude-code", "version": "2.1.0" },
+  "attestation": { "managed": true, "hashes": { "self": "sha256:abc" } }
+}

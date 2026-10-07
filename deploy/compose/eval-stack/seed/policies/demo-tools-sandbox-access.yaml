@@ -1,0 +1,52 @@
+# demo-tools-sandbox-access: the gates for the application role
+# demo-tools-sandbox, which reaches every tool of the demo-tools server. This
+# is the set the role page reads and writes: named after the role plus
+# -access, priority 100, matching this one role. The developer business role
+# composes demo-tools-sandbox, so joe's calls land here. A tool with no rule
+# runs, because access comes from the access row. Two tools are gated for
+# the demo:
+#
+#   - get-sum needs a person's approval within two minutes, the 2-minute
+#     MCP showcase. The hold routes to the agent's sponsor, alice, who
+#     decides on her phone, in the console or on /approvals/.
+#   - get-env comes back as a day-scale ticket, the plausibly sensitive
+#     read. The sponsor decides within a day and the same call within the
+#     hour consumes the single-use grant.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: demo-tools-sandbox-access
+  description: Gates for the role demo-tools-sandbox, written from the role page
+spec:
+  priority: 100
+  match:
+    roles: [demo-tools-sandbox]
+  rules:
+    - id: demo-tools-get-sum-approve
+      # binding call: the approval covers these exact arguments, so a
+      # changed sum is a new hold and a retry of the same one runs.
+      tools: [mcp.call]
+      apps: [demo-tools]
+      toolNames:
+        allow: ["get-sum"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        timeoutSeconds: 120
+        retryTTLSeconds: 120
+        binding: call
+      reason: "Straza: get-sum needs approval, the 2-minute MCP showcase (the person behind this agent decides, on their phone or on /self-service/)"
+    - id: demo-tools-get-env-approve
+      tools: [mcp.call]
+      apps: [demo-tools]
+      toolNames:
+        allow: ["get-env"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        class: ticket
+        ticketTTLSeconds: 86400
+        grantTTLSeconds: 3600
+      reason: "Straza: reading the server environment needs a day-scale approval ticket. Request it (this call raised it), the person behind this agent decides, call again within the hour to consume the grant"

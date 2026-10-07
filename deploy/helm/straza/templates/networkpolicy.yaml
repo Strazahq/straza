@@ -1,0 +1,49 @@
+{{- if and .Values.networkPolicy.enabled (include "straza.natsBundled" .) }}
+# Default-on ingress lockdown for the bundled backends: they are
+# cluster-internal and effectively unauthenticated (NATS has no auth at all,
+# and any message on a revocation subject is a revocation; Postgres is one
+# shared password), so without a policy ANY pod in the cluster can dial
+# them. These narrow that to the strazad pods only (straza.selectorLabels,
+# same namespace, one service port each). Enforcement is the CNI's job:
+# stock k3s enforces via its embedded controller, while flannel-only
+# clusters accept the objects and silently ignore them. Bring-your-own
+# backends (nats.url / postgres.dsn|existingSecret, or the bundles
+# disabled) live outside the cluster, so no policy renders for them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "straza.fullname" . }}-nats
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "straza.name" . }}-nats
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "straza.selectorLabels" . | nindent 14 }}
+      ports: [{ protocol: TCP, port: 4222 }]
+{{- end }}
+{{- if and .Values.networkPolicy.enabled (include "straza.postgresBundled" .) }}
+---
+# Same rationale and CNI caveat as the NATS policy above: only strazad pods
+# may dial the bundled Postgres.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "straza.fullname" . }}-postgres
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "straza.name" . }}-postgres
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "straza.selectorLabels" . | nindent 14 }}
+      ports: [{ protocol: TCP, port: 5432 }]
+{{- end }}

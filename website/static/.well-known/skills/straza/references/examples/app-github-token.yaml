@@ -1,0 +1,22 @@
+# A remote MCP server where each person uses their own token: the gateway sends the caller's token as a bearer, and an agent runs on its sponsor's connection once the sponsor allowed it.
+# Both profiles; after install each person runs straza connect github in their own terminal and pastes the token at the hidden prompt. The shape follows spec/app-manifest/examples/valid-github-remote-token.yaml.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: github
+  description: GitHub MCP server, each caller's own token injected gateway-side
+server:
+  name: io.github.github/github-mcp-server
+  version: "0.17.1"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://api.githubcopilot.com/mcp/
+  credential:
+    kind: token
+    agents: sponsor
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"

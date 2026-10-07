@@ -1,0 +1,301 @@
+{{- /* Refuse to render shapes that boot healthy and misbehave silently. */}}
+{{- $maxReplicas := int (include "straza.maxReplicas" .) }}
+{{- if and (ne .Values.profile "enterprise") (gt $maxReplicas 1) }}
+{{- fail "straza: profile=standalone cannot scale past one replica: each pod would run its own sqlite store and embedded events. Set replicaCount=1 (and autoscaling ceilings), or use profile=enterprise." }}
+{{- end }}
+{{- if and (eq .Values.profile "enterprise") (gt $maxReplicas 1) (not (include "straza.eventsShared" .)) }}
+{{- fail "straza: replicas>1 with per-pod EMBEDDED events silently split-brains approvals, kill-switch and console fan-out while every probe stays green. Keep nats.enabled=true (bundled broker), set nats.url, or run one replica." }}
+{{- end }}
+{{- if and .Values.pushRelay.enabled .Values.apns.existingSecret }}
+{{- fail "straza: pushRelay.enabled (the default) and apns.existingSecret both send to iOS phones, and strazad refuses two senders for one platform at boot. Set pushRelay.enabled=false to keep the direct APNs key, or drop apns.existingSecret to send through the relay." }}
+{{- end }}
+{{- if .Values.approverTLS.enabled }}
+{{- /* strazad refuses a half-configured approverTLS block at boot (listen,
+       certFile, keyFile and publicUrl together, all-or-none), so refuse it at
+       render instead, where the message can name the chart value. The chart
+       supplies listen and the cert pair; only the operator can know the URL
+       the phone dials, and nothing derivable in-cluster is reachable from a
+       phone. autoMint is not a chart knob (values.yaml explains: emptyDir
+       data dir = a new SPKI pin per pod and per restart). */}}
+{{- if not .Values.approverTLS.existingSecret }}
+{{- fail "straza: approverTLS.enabled needs approverTLS.existingSecret: a kubernetes.io/tls secret (keys tls.crt/tls.key) for the listener to serve. There is no auto-mint lane in the chart: the pod data dir is an emptyDir, so a minted pair would be a different SPKI pin per pod and per restart, stranding every enrolled phone." }}
+{{- end }}
+{{- if not .Values.approverTLS.publicUrl }}
+{{- fail "straza: approverTLS.enabled needs approverTLS.publicUrl: the https URL the PHONE dials, copied verbatim into the enroll QR. No in-cluster default is reachable from a device, and strazad refuses the incomplete block at boot." }}
+{{- end }}
+{{- /* Mirror of strazad's checkBaseURL(httpsOnly, allowRoot) for this field:
+       https only (the approver app is https+pin only), scheme case-
+       insensitive, no path/query/fragment/embedded credentials/whitespace,
+       except the bare trailing slash, which the enroll QR builder trims. */}}
+{{- if not (regexMatch "^(?i:https)://[^/?#@\\s]+/?$" .Values.approverTLS.publicUrl) }}
+{{- fail (printf "straza: approverTLS.publicUrl is the base URL the phone dials, consumed verbatim by the enroll QR: https and a host only, with no path, query, fragment, or embedded credentials (user:pass@); a bare trailing slash is fine. Got %q." .Values.approverTLS.publicUrl) }}
+{{- end }}
+{{- if eq (int .Values.approverTLS.port) (int .Values.service.port) }}
+{{- fail "straza: approverTLS.port collides with service.port: the approver listener is a SECOND socket in the same pod; give it its own port (default 8443)." }}
+{{- end }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "straza.fullname" . }}
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "straza.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "straza.selectorLabels" . | nindent 8 }}
+      {{- if or .Values.configYaml .Values.apps.manifests }}
+      annotations:
+        # Config/manifest changes roll the pods; without this an edit
+        # would sit unapplied until the next unrelated rollout.
+        {{- if .Values.configYaml }}
+        checksum/config: {{ .Values.configYaml | sha256sum }}
+        {{- end }}
+        {{- if .Values.apps.manifests }}
+        checksum/apps: {{ .Values.apps.manifests | toYaml | sha256sum }}
+        {{- end }}
+      {{- end }}
+    spec:
+      # strazad's stop waits up to 10 s for requests, then up to 5 s to write
+      # the decision records still in memory (5 s more on SQLite behind a
+      # lock). A shorter grace kills it first and loses those records.
+      terminationGracePeriodSeconds: 30
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: strazad
+          image: {{ include "straza.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve", "--profile", {{ .Values.profile | quote }}, "--listen", "0.0.0.0:{{ .Values.service.port }}"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+            {{- if .Values.approverTLS.enabled }}
+            # Second socket, https-only, serving ONLY /v1/approver/* +
+            # /readyz, the phone's surface, separable from the main listener
+            # at the Service and at the edge.
+            - name: approver
+              containerPort: {{ .Values.approverTLS.port }}
+            {{- end }}
+          env:
+            - name: STRAZA_PROFILE
+              value: {{ .Values.profile | quote }}
+            {{- if or .Values.publicUrl (not (include "straza.filePublicUrl" .)) }}
+            # The session-token issuer + base of every link strazad hands
+            # out. Never loopback in k8s: explicit value, else derived
+            # (ingress host, else in-cluster Service DNS). Suppressed when
+            # configYaml carries server.publicUrl and no chart value
+            # overrides it: env beats file, so injecting would clobber it.
+            - name: STRAZA_PUBLIC_URL
+              value: {{ include "straza.publicUrl" . | quote }}
+            {{- end }}
+            {{- if .Values.configYaml }}
+            # Config-file lane for the knobs with no env face (sinks,
+            # approval.push allowlist, governance tuning). Layering keeps
+            # env vars and the chart's --profile flag winning over the file.
+            - name: STRAZA_CONFIG
+              value: /etc/straza/straza.yaml
+            {{- end }}
+            {{- if .Values.postgres.existingSecret }}
+            - name: STRAZA_STORE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: STRAZA_STORE_DSN
+            {{- else if .Values.postgres.dsn }}
+            - name: STRAZA_STORE_DSN
+              value: {{ .Values.postgres.dsn | quote }}
+            {{- else if include "straza.postgresBundled" . }}
+            - name: STRAZA_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "straza.pgSecretName" . }}
+                  key: password
+            # Dependent expansion: the kubelet resolves $(STRAZA_PG_PASSWORD)
+            # from the entry above, so the password never lands in a rendered
+            # manifest, only in the secret.
+            - name: STRAZA_STORE_DSN
+              value: postgres://straza:$(STRAZA_PG_PASSWORD)@{{ include "straza.fullname" . }}-postgres:5432/straza?sslmode=disable
+            {{- end }}
+            {{- if eq .Values.profile "enterprise" }}
+            - name: STRAZA_STORE_DRIVER
+              value: postgres
+            {{- end }}
+            {{- if include "straza.eventsShared" . }}
+            - name: STRAZA_EVENTS_URL
+              value: {{ include "straza.natsURL" . | quote }}
+            {{- end }}
+            {{- if .Values.oidc.issuer }}
+            - name: STRAZA_OIDC_ISSUER
+              value: {{ .Values.oidc.issuer | quote }}
+            - name: STRAZA_OIDC_CLIENT_ID
+              value: {{ .Values.oidc.clientId | quote }}
+            {{- end }}
+            {{- if .Values.apps.manifests }}
+            - name: STRAZA_APPS_DIR
+              value: /etc/straza/apps
+            {{- end }}
+            {{- if .Values.secrets.kekExistingSecret }}
+            - name: STRAZA_SECRETS_KEK_FILE
+              value: /etc/straza/secret.key
+            {{- end }}
+            {{- if .Values.tls.existingSecret }}
+            - name: STRAZA_TLS_CERT_FILE
+              value: /etc/straza/tls/tls.crt
+            - name: STRAZA_TLS_KEY_FILE
+              value: /etc/straza/tls/tls.key
+            {{- end }}
+            {{- if .Values.approverTLS.enabled }}
+            # All four together or strazad fails boot (all-or-none). Three of
+            # them are the chart's own facts (the port it publishes and the
+            # paths it mounts), so only publicUrl is the operator's, and the
+            # render guard above already refused an empty or mis-shaped one.
+            - name: STRAZA_APPROVER_TLS_LISTEN
+              value: "0.0.0.0:{{ .Values.approverTLS.port }}"
+            - name: STRAZA_APPROVER_TLS_CERT_FILE
+              value: /etc/straza/approver-tls/tls.crt
+            - name: STRAZA_APPROVER_TLS_KEY_FILE
+              value: /etc/straza/approver-tls/tls.key
+            - name: STRAZA_APPROVER_TLS_PUBLIC_URL
+              value: {{ .Values.approverTLS.publicUrl | quote }}
+            {{- end }}
+            {{- if .Values.webpush.existingSecret }}
+            # The mounted VAPID key is only USED when strazad's config points
+            # at it. Left to configYaml, the mount would render while webpush
+            # silently stayed off, the boot-healthy-misbehave-silently shape
+            # this template's header refuses. Wired like kek/tls: the mount
+            # IS the operator's explicit act, and the value is the chart's
+            # own mount path.
+            - name: STRAZA_APPROVAL_PUSH_WEBPUSH_VAPID_KEY_FILE
+              value: /etc/straza/webpush/vapid.pem
+            {{- end }}
+            {{- if .Values.apns.existingSecret }}
+            # Same rule as the VAPID block above: the mount IS the operator's
+            # explicit act, so the chart wires the config at it (a mounted
+            # key strazad never reads is the apns lane silently off). The
+            # companion identifiers (keyId/teamId/topic) ride configYaml and
+            # strazad fails boot naming them if this file is set without them.
+            - name: STRAZA_APPROVAL_PUSH_APNS_KEY_FILE
+              value: /etc/straza/apns/apns.p8
+            {{- end }}
+            {{- if .Values.pushRelay.enabled }}
+            # On by default and visible here. Off renders nothing, so a relay
+            # block in configYaml is never clobbered by an env face. The token
+            # lives in the emptyDir data dir, so every pod start mints one
+            # (values.yaml names the relay's per-address registration limit).
+            - name: STRAZA_APPROVAL_PUSH_RELAY_ENABLED
+              value: "true"
+            {{- if .Values.pushRelay.url }}
+            - name: STRAZA_APPROVAL_PUSH_RELAY_URL
+              value: {{ .Values.pushRelay.url | quote }}
+            {{- end }}
+            - name: STRAZA_APPROVAL_PUSH_RELAY_TOKEN_FILE
+              value: /var/lib/straza/push-relay-token
+            {{- end }}
+          volumeMounts:
+            # Writable data dir (rootfs is read-only): apps dir, and the
+            # generated KEK when secrets.kekExistingSecret is unset (that
+            # per-pod key is ephemeral; set kekExistingSecret in production).
+            - name: data
+              mountPath: /var/lib/straza
+            {{- if .Values.configYaml }}
+            - name: config
+              mountPath: /etc/straza/straza.yaml
+              subPath: straza.yaml
+              readOnly: true
+            {{- end }}
+            {{- if .Values.apps.manifests }}
+            # Whole-dir mount (no subPath): ConfigMap updates propagate to
+            # the mounted files, so the apps watcher sees edits even between
+            # the checksum-annotation rollouts.
+            - name: apps
+              mountPath: /etc/straza/apps
+              readOnly: true
+            {{- end }}
+            {{- if .Values.secrets.kekExistingSecret }}
+            - name: kek
+              mountPath: /etc/straza/secret.key
+              subPath: kek
+              readOnly: true
+            {{- end }}
+            {{- if .Values.tls.existingSecret }}
+            - name: tls
+              mountPath: /etc/straza/tls
+              readOnly: true
+            {{- end }}
+            {{- if .Values.approverTLS.enabled }}
+            # Its own mount even when it is the same certificate as tls
+            # above: the two listeners rotate on different schedules (a new
+            # approver pair re-enrolls every phone; a new main pair does not).
+            - name: approver-tls
+              mountPath: /etc/straza/approver-tls
+              readOnly: true
+            {{- end }}
+            {{- if .Values.webpush.existingSecret }}
+            # VAPID key = the deployment's push identity; a Secret, never the
+            # emptyDir data dir (auto-mint there would rotate it every restart).
+            - name: webpush
+              mountPath: /etc/straza/webpush
+              readOnly: true
+            {{- end }}
+            {{- if .Values.apns.existingSecret }}
+            # Apple-minted signing credential (revocable in the portal, not
+            # an identity); a Secret, never an image layer or the data dir.
+            - name: apns
+              mountPath: /etc/straza/apns
+              readOnly: true
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http{{ if .Values.tls.existingSecret }}, scheme: HTTPS{{ end }} }
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http{{ if .Values.tls.existingSecret }}, scheme: HTTPS{{ end }} }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: data
+          emptyDir: {}
+        {{- if .Values.configYaml }}
+        - name: config
+          configMap:
+            name: {{ include "straza.fullname" . }}-config
+        {{- end }}
+        {{- if .Values.apps.manifests }}
+        - name: apps
+          configMap:
+            name: {{ include "straza.fullname" . }}-apps
+        {{- end }}
+        {{- if .Values.secrets.kekExistingSecret }}
+        - name: kek
+          secret:
+            secretName: {{ .Values.secrets.kekExistingSecret }}
+        {{- end }}
+        {{- if .Values.tls.existingSecret }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.existingSecret }}
+        {{- end }}
+        {{- if .Values.approverTLS.enabled }}
+        - name: approver-tls
+          secret:
+            secretName: {{ .Values.approverTLS.existingSecret }}
+        {{- end }}
+        {{- if .Values.webpush.existingSecret }}
+        - name: webpush
+          secret:
+            secretName: {{ .Values.webpush.existingSecret }}
+        {{- end }}
+        {{- if .Values.apns.existingSecret }}
+        - name: apns
+          secret:
+            secretName: {{ .Values.apns.existingSecret }}
+        {{- end }}

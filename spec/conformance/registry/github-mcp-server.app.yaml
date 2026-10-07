@@ -1,0 +1,60 @@
+# Golden import of github-mcp-server.server.json (SPEC.md §5): no usable
+# remote → first stdio package in oci>npm>pypi order → oci runtime; the
+# isSecret env var becomes a static credential injected as env.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: github-mcp-server
+  namespace: io.github.github
+server:
+  $schema: https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json
+  name: io.github.github/github-mcp-server
+  description: Connect AI assistants to GitHub - manage repos, issues, PRs, and workflows through natural language.
+  repository:
+    url: https://github.com/github/github-mcp-server
+    source: github
+  version: "0.17.1"
+  packages:
+    - registryType: oci
+      identifier: ghcr.io/github/github-mcp-server:0.17.1
+      transport:
+        type: stdio
+      runtimeArguments:
+        - description: The runtime command to execute
+          value: run
+          type: positional
+        - description: Run container in interactive mode
+          type: named
+          name: "-i"
+        - description: Automatically remove the container when it exits
+          type: named
+          name: "--rm"
+        - description: Set an environment variable in the runtime
+          type: named
+          name: "-e"
+        - description: Environment variable name
+          value: GITHUB_PERSONAL_ACCESS_TOKEN
+          type: positional
+          valueHint: env_var_name
+        - description: The container image to run
+          value: ghcr.io/github/github-mcp-server
+          type: positional
+          valueHint: image_name
+      environmentVariables:
+        - description: Your GitHub personal access token with appropriate scopes.
+          isRequired: true
+          format: string
+          isSecret: true
+          name: GITHUB_PERSONAL_ACCESS_TOKEN
+straza:
+  runtime:
+    kind: oci
+    oci:
+      image: ghcr.io/github/github-mcp-server:0.17.1
+      sandbox: default
+  credential:
+    kind: static
+    inject:
+      as: env
+      name: GITHUB_PERSONAL_ACCESS_TOKEN
+      template: "{{secret}}"

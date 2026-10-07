@@ -1,0 +1,85 @@
+# harness-matrix: weekly live-fire of REAL harness binaries against the hook
+# wiring straza's installer actually writes (test/harness-matrix/). Deliberately
+# NOT part of ci.yml: the per-commit checks must stay fast and
+# vendor-independent.
+#
+# Lanes × channels, same gates:
+#   <lane>-pinned  the versions.env release. Red here is OUR bug.
+#   <lane>-latest  whatever the vendor shipped. Red here is vendor drift: it
+#                  files evidence (drift report artifact + step summary) and
+#                  must never be read as a straza regression or block
+#                  unrelated work. It catches a breaking harness release the
+#                  week it ships.
+
+# The codex lane's live-model gates (g3-live/g4-e2e) additionally need a local
+# ollama + the versions.env CODEX_OSS_MODEL; the runner installs the pinned
+# tarball and caches the model store. Without them those gates skip loudly,
+# the lane stays green on its key-free gates either way.
+#
+# The python-kit lane fires no harness binary: its vendor surface is the
+# python frameworks kits/python governs (pip-resolved, versions.env pins),
+# same pinned/latest semantics.
+name: harness
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"  # weekly, Monday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+  # CI-only fallback for boxes without unprivileged user namespaces: lets
+  # run.sh sudo-write the managed /etc dirs on the DISPOSABLE runner (it
+  # refuses any dir that already exists, and cleans up on exit).
+  HARNESS_MATRIX_ALLOW_SUDO_ETC: "1"
+
+jobs:
+  matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [codex, gemini, claude-code, python-kit]
+        channel: [pinned, latest]
+    name: ${{ matrix.lane }}-${{ matrix.channel }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: ollama model cache (codex live-model gates)
+        if: matrix.lane == 'codex'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: test/harness-matrix/.tools/ollama-models
+          key: ollama-models-${{ hashFiles('test/harness-matrix/versions.env') }}
+      - name: install ollama (codex live-model gates)
+        if: matrix.lane == 'codex'
+        run: |
+          . test/harness-matrix/versions.env
+          mkdir -p "test/harness-matrix/.tools/ollama-$OLLAMA_PINNED"
+          curl -sL "https://github.com/ollama/ollama/releases/download/v$OLLAMA_PINNED/ollama-linux-amd64.tar.zst" \
+            | tar --zstd -x -C "test/harness-matrix/.tools/ollama-$OLLAMA_PINNED"
+      - name: run lane (pinned)
+        if: matrix.channel == 'pinned'
+        run: HARNESS_MATRIX_LANES=${{ matrix.lane }} bash test/harness-matrix/run.sh
+      - name: run lane (latest, where red is vendor drift, not a straza bug)
+        if: matrix.channel == 'latest'
+        run: HARNESS_MATRIX_LANES=${{ matrix.lane }} bash test/harness-matrix/run.sh
+        env:
+          CODEX_VERSION: latest
+          GEMINI_VERSION: latest
+          CLAUDE_VERSION: latest
+          PYTHON_KIT_VERSION: latest
+      - name: drift report
+        if: always()
+        run: cat test/harness-matrix/.work/drift-report.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: drift-report-${{ matrix.lane }}-${{ matrix.channel }}
+          path: test/harness-matrix/.work/drift-report.md
+          if-no-files-found: ignore

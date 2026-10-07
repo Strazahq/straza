@@ -1,0 +1,164 @@
+# Decision-table fixtures: cross-set combining, deny-overrides, priority for
+# reason selection, subject selectors, require predicates.
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: base-tests }
+    spec:
+      priority: 10
+      match: { roles: [dev] }
+      rules:
+        - id: allow-tests
+          tools: [shell.exec]
+          command: { allowPatterns: ["go test *"] }
+          effect: allow
+          reason: "tests are fine"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: kim-restrictions }
+    spec:
+      priority: 100
+      match: { users: [kim] }
+      rules:
+        - id: kim-no-integration
+          tools: [shell.exec]
+          command: { denyPatterns: ["go test *integration*"] }
+          effect: deny
+          reason: "kim may not run integration tests"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: contractor-rules }
+    spec:
+      priority: 50
+      match: { roles: [contractors] }
+      rules:
+        - id: ctr-no-net
+          tools: [net.fetch]
+          effect: deny
+          reason: "no network fetches for contractors"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: global-attestation }
+    spec:
+      rules:
+        - id: spawn-needs-attestation
+          tools: [task.spawn]
+          effect: allow
+          require: { attestation: advisory }
+          reason: "subagents require an attested session"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: kim-dev-combo }
+    spec:
+      match: { roles: [dev], users: [kim] }
+      rules:
+        - id: combo-read-ban
+          tools: [file.read]
+          effect: deny
+          reason: "kim-as-dev read ban (selector AND test)"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: go-blanket }
+    spec:
+      priority: 200
+      match: { roles: [dev] }
+      rules:
+        - id: go-anything
+          tools: [shell.exec]
+          command: { allowPatterns: ["go *"] }
+          effect: allow
+          reason: "go toolchain is fine"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: harness-gates }
+    spec:
+      match: { users: [kim, solo] }
+      rules:
+        - id: modern-harness-only
+          tools: [other]
+          effect: allow
+          require: { harness: ["claude-code>=2.1"] }
+          reason: "unmapped tools need a modern harness"
+        - id: cert-bound-fetch
+          events: [tool.pre]
+          tools: [net.fetch]
+          effect: allow
+          require: { deviceCert: true }
+          reason: "fetch requires a device-bound session"
+cases:
+  - name: go-test-allowed-highest-priority-reason
+    subject: { user: lee, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "go test ./..." }
+    want: { effect: allow, ruleId: go-anything, setName: go-blanket }
+  - name: deny-overrides-allow-across-sets
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "go test ./integration/..." }
+    want: { effect: deny, ruleId: kim-no-integration }
+  - name: user-selector-does-not-hit-others
+    subject: { user: lee, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "go test ./integration/..." }
+    want: { effect: allow, ruleId: go-anything }
+  - name: contractor-role-selector-denies
+    subject: { user: bob, roles: [contractors] }
+    event: { kind: tool.pre, tool: net.fetch }
+    want: { effect: deny, ruleId: ctr-no-net }
+  - name: roleless-subject-falls-to-default
+    subject: { user: bob, roles: [] }
+    event: { kind: tool.pre, tool: net.fetch }
+    want: { effect: allow, default: true }
+  - name: empty-match-applies-to-everyone-attested
+    subject: { user: anyone, roles: [], attestation: advisory }
+    event: { kind: tool.pre, tool: task.spawn }
+    want: { effect: allow, ruleId: spawn-needs-attestation }
+  - name: empty-match-require-fails-unattested
+    subject: { user: anyone, roles: [], attestation: none }
+    event: { kind: tool.pre, tool: task.spawn }
+    want: { effect: deny, ruleId: spawn-needs-attestation }
+  - name: and-across-selectors-both-hit
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.read, paths: [/x] }
+    want: { effect: deny, ruleId: combo-read-ban }
+  - name: and-across-selectors-role-only-misses
+    subject: { user: lee, roles: [dev] }
+    event: { kind: tool.pre, tool: file.read, paths: [/x] }
+    want: { effect: allow, default: true }
+  - name: and-across-selectors-user-only-misses
+    subject: { user: kim, roles: [intern] }
+    event: { kind: tool.pre, tool: file.read, paths: [/x] }
+    want: { effect: allow, default: true }
+  - name: harness-version-satisfied
+    subject: { user: kim, roles: [], harness: claude-code/2.1.0 }
+    event: { kind: tool.pre, tool: other }
+    want: { effect: allow, ruleId: modern-harness-only }
+  - name: harness-version-too-old
+    subject: { user: kim, roles: [], harness: claude-code/2.0.9 }
+    event: { kind: tool.pre, tool: other }
+    want: { effect: deny, ruleId: modern-harness-only }
+  - name: harness-name-mismatch
+    subject: { user: kim, roles: [], harness: codex/9.9.9 }
+    event: { kind: tool.pre, tool: other }
+    want: { effect: deny, ruleId: modern-harness-only }
+  - name: devicecert-required-missing
+    subject: { user: solo, roles: [], deviceCert: false, attestation: advisory }
+    event: { kind: tool.pre, tool: net.fetch }
+    want: { effect: deny, ruleId: cert-bound-fetch }
+  - name: devicecert-required-present
+    subject: { user: solo, roles: [], deviceCert: true, attestation: advisory }
+    event: { kind: tool.pre, tool: net.fetch }
+    want: { effect: allow, ruleId: cert-bound-fetch }
+  - name: session-start-defaults-allow
+    subject: { user: kim, roles: [dev] }
+    event: { kind: session.start }
+    want: { effect: allow, default: true }
+  - name: prompt-submit-defaults-allow
+    subject: { user: kim, roles: [dev] }
+    event: { kind: prompt.submit }
+    want: { effect: allow, default: true }

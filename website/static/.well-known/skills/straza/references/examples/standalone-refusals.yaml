@@ -1,0 +1,30 @@
+# Deny destructive shell commands and secret-file writes for every identity on one host.
+# Standalone profile: no match block and no allow rule, because the standalone default allows what no rule matches.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: standalone-refusals
+  description: Deny destructive commands and secret-file writes for every session on this host
+spec:
+  rules:
+    - id: no-rm-rf
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["rm -rf *", "rm -r -f *"]
+      effect: deny
+      reason: "Straza: recursive force-delete is denied on this host. Delete the files one by one, or edit the standalone-refusals policy"
+    - id: no-curl-pipe-shell
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["curl * | *sh*", "wget * | *sh*"]
+      effect: deny
+      reason: "Straza: piping a download into a shell is denied on this host. Download the script to a file, read it, then run it"
+    - id: protect-secrets
+      events: [tool.pre]
+      tools: [file.write, file.edit]
+      paths:
+        deny: ["**/.env*", "**/id_rsa*", "**/credentials.json"]
+      effect: deny
+      reason: "Straza: writes to env files, SSH private keys and credential stores are denied on this host. Ask the user to edit them by hand"

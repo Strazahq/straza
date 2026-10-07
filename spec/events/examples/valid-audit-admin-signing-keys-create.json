@@ -1,0 +1,15 @@
+{
+  "specversion": "1.0",
+  "id": "0199b2c4-1a2b-7c3d-8e4f-5a6b7c8d9e01",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-09-21T09:14:02.118Z",
+  "data": {
+    "action": "signing-keys.create",
+    "actor": "alice",
+    "actorId": "0197fa3d-9999-7abc-9def-000000000001",
+    "actorVia": "session",
+    "purpose": "client_assertion",
+    "kid": "6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10"
+  }
+}

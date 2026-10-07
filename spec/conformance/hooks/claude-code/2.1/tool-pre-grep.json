@@ -1,0 +1,1 @@
+{"provenance":"doc claude-code 2.1 hooks reference + source pins 2026-07 (hand-authored)","harness":"claude-code","payload":{"hook_event_name":"PreToolUse","session_id":"abc","cwd":"/work/proj","tool_name":"Grep","tool_input":{"pattern":"TODO","path":"/work/proj/src"}},"expect":{"kind":"tool.pre","tool":"file.read","paths":["/work/proj/src"],"workspace":"/work/proj"}}

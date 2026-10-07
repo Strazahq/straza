@@ -1,0 +1,160 @@
+# Identity-typology match fixtures (spec/policyset revision 9):
+# match.identity {userType, agencyMode, swarmId}: OR within a list, AND
+# across lists and with roles/users; an UNSET subject field matches
+# no listed value (unclassified identities fall outside identity-scoped
+# sets, so restrictive postures are written deny-unless-<type>). Plus the
+# revision-9 ENGINE INVARIANT: a winning approve for an agencyMode:
+# autonomous subject never carries selfApproval, whatever the rule says.
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: agent-guardrails }
+    spec:
+      priority: 100
+      match:
+        identity: { userType: [agent] }
+      rules:
+        - id: agents-no-shell
+          tools: [shell.exec]
+          effect: deny
+          reason: "Straza: agent identities do not get raw shell"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: autonomous-tightening }
+    spec:
+      priority: 200
+      match:
+        identity: { userType: [agent], agencyMode: [autonomous] }
+      rules:
+        - id: autonomous-no-net
+          tools: [net.fetch]
+          effect: deny
+          reason: "Straza: autonomous agents fetch nothing directly"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: scan-fleet }
+    spec:
+      priority: 50
+      match:
+        identity: { swarmId: [scan-fleet-1] }
+      rules:
+        - id: fleet-no-writes
+          tools: [file.write, file.edit]
+          effect: deny
+          reason: "Straza: the scan fleet is read-only"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: dev-agents-only }
+    spec:
+      match:
+        roles: [dev]
+        identity: { userType: [agent] }
+      rules:
+        - id: dev-agent-spawn-ban
+          tools: [task.spawn]
+          effect: deny
+          reason: "Straza: dev-role agents may not delegate"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: humans-only-deploy }
+    spec:
+      priority: 150
+      rules:
+        - id: deploy-unless-human
+          tools: [shell.exec]
+          command: { denyPatterns: ["deploy *"] }
+          effect: deny
+          reason: "Straza: deploys are human-initiated (unclassified identities included)"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: human-deploy-lane }
+    spec:
+      priority: 150
+      match:
+        identity: { userType: [human] }
+      rules:
+        - id: human-deploy-approve
+          tools: [shell.exec]
+          command: { allowPatterns: ["deploy *"] }
+          mode: approve
+          effect: allow
+          approve: { selfApproval: true, timeoutSeconds: 120 }
+          reason: "a human may deploy with a second pair of eyes"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: agent-mcp-approve }
+    spec:
+      match:
+        identity: { userType: [agent] }
+      rules:
+        - id: agent-mcp-gate
+          tools: [mcp.call]
+          mode: approve
+          effect: allow
+          approve: { selfApproval: true, timeoutSeconds: 90 }
+          reason: "agent MCP writes are gated; the rule ASKS for selfApproval"
+cases:
+  - name: agent-usertype-matches-and-denies
+    subject: { user: atlas, roles: [dev], userType: agent }
+    event: { kind: tool.pre, tool: shell.exec, command: "ls -la" }
+    want: { effect: deny, ruleId: agents-no-shell, setName: agent-guardrails }
+  - name: human-usertype-does-not-hit-agent-set
+    subject: { user: kim, roles: [dev], userType: human }
+    event: { kind: tool.pre, tool: shell.exec, command: "ls -la" }
+    want: { effect: allow, default: true }
+  - name: unset-usertype-matches-nothing
+    subject: { user: legacy, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "ls -la" }
+    want: { effect: allow, default: true }
+  - name: agencymode-ands-with-usertype
+    subject: { user: atlas, userType: agent, agencyMode: autonomous }
+    event: { kind: tool.pre, tool: net.fetch }
+    want: { effect: deny, ruleId: autonomous-no-net, setName: autonomous-tightening }
+  - name: interactive-agent-misses-autonomous-set
+    subject: { user: sage, userType: agent, agencyMode: interactive }
+    event: { kind: tool.pre, tool: net.fetch }
+    want: { effect: allow, default: true }
+  - name: swarm-membership-matches
+    subject: { user: scanner-7, userType: agent, swarmId: scan-fleet-1 }
+    event: { kind: tool.pre, tool: file.write, paths: ["/tmp/out"] }
+    want: { effect: deny, ruleId: fleet-no-writes, setName: scan-fleet }
+  - name: other-swarm-does-not-match
+    subject: { user: scanner-9, userType: agent, swarmId: scan-fleet-2 }
+    event: { kind: tool.pre, tool: file.write, paths: ["/tmp/out"] }
+    want: { effect: allow, default: true }
+  - name: identity-ands-with-roles
+    subject: { user: atlas, roles: [ops], userType: agent }
+    event: { kind: tool.pre, tool: task.spawn }
+    want: { effect: allow, default: true }
+  - name: identity-and-roles-both-hit
+    subject: { user: atlas, roles: [dev], userType: agent }
+    event: { kind: tool.pre, tool: task.spawn }
+    want: { effect: deny, ruleId: dev-agent-spawn-ban, setName: dev-agents-only }
+  - name: deny-unless-human-catches-unclassified
+    subject: { user: legacy, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "deploy prod" }
+    want: { effect: deny, ruleId: deploy-unless-human, setName: humans-only-deploy }
+  - name: deny-unless-human-lets-human-through-gated
+    subject: { user: kim, userType: human }
+    event: { kind: tool.pre, tool: shell.exec, command: "deploy prod" }
+    want: { effect: deny, ruleId: deploy-unless-human }
+  - name: interactive-agent-keeps-rule-selfapproval
+    subject: { user: sage, userType: agent, agencyMode: interactive }
+    event: { kind: tool.pre, tool: mcp.call, app: midpoint, toolName: request_role }
+    want: { effect: allow, ruleId: agent-mcp-gate, approve: true, approveSelfApproval: true }
+  - name: autonomous-agent-selfapproval-clamped
+    subject: { user: atlas, userType: agent, agencyMode: autonomous }
+    event: { kind: tool.pre, tool: mcp.call, app: midpoint, toolName: request_role }
+    want: { effect: allow, ruleId: agent-mcp-gate, approve: true, approveSelfApproval: false }
+  - name: human-approve-selfapproval-untouched
+    subject: { user: kim, userType: human }
+    event: { kind: tool.pre, tool: shell.exec, command: "deploy staging" }
+    want: { effect: deny, ruleId: deploy-unless-human }

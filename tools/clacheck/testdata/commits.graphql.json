@@ -1,0 +1,21 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "commits": {
+          "pageInfo": {"hasNextPage": false, "endCursor": "Mg"},
+          "nodes": [
+            {"commit": {
+              "oid": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+              "message": "Fix the retry delay in the audit sink\n\nThe sink doubled the delay.",
+              "authors": {"nodes": [
+                {"name": "Alice Example", "email": "1001+alice@users.noreply.github.com", "user": {"databaseId": 1001, "login": "alice"}},
+                {"name": "Claude", "email": "noreply@anthropic.com", "user": null}
+              ]}
+            }}
+          ]
+        }
+      }
+    }
+  }
+}

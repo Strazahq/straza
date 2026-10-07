@@ -1,0 +1,16 @@
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+    name: dev
+spec:
+    kind: application
+    description: 'Developer seat: governed demo-tools access'
+    implies:
+        - reader
+    bindings:
+        - app: demo-tools
+          tools:
+            - add
+            - echo
+    packs:
+        - golang-style

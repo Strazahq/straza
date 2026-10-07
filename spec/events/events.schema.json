@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://straza.dev/spec/events/v1beta1/events.schema.json",
+  "title": "StrazaEvent",
+  "description": "Straza CloudEvents 1.0 profile: the envelope every event on the spine conforms to. Per-subject data payloads are documented in SPEC.md; the envelope is the interoperability contract.",
+  "type": "object",
+  "required": ["specversion", "id", "type", "source", "time", "data"],
+  "additionalProperties": true,
+  "properties": {
+    "specversion": { "const": "1.0" },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique per event; the at-least-once dedupe key for every consumer."
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^straza\\.(audit\\.(tool|mcp|admin|authn|identity|prompt|reply|sentinel|approval)|policy\\.updated|revocation\\.(user|sessions|session|device|lift)|apps\\.(deployed|removed|drift|updated)|identity\\.(created|updated|deactivated))$",
+      "description": "The subject taxonomy. NATS subject == CE type."
+    },
+    "source": { "type": "string", "minLength": 1 },
+    "time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC."
+    },
+    "data": { "type": "object" }
+  }
+}

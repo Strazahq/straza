@@ -1,0 +1,25 @@
+{{- /* The walk record at the foot of a page: the walk from the tested
+front matter, then the builds the page's screenshots show, which the shot
+shortcode stores while the content renders. A platform that starts with a
+lowercase word, such as "in a Linux container", reads inside the sentence.
+Any other platform follows as its own sentence. Call this after the content,
+so the shots are known. */ -}}
+{{- $line := slice -}}
+{{- with .Params.tested -}}
+  {{- if and .version .date -}}
+    {{- $date := .date | time.Format "2006-01-02" -}}
+    {{- $platform := strings.TrimRight ". " (.platform | default "") -}}
+    {{- if findRE `^[a-z]` $platform -}}
+      {{- $line = $line | append (printf "Walked on %s %s on %s." .version $platform $date) -}}
+    {{- else -}}
+      {{- $line = $line | append (printf "Walked on %s on %s." .version $date) -}}
+      {{- with $platform }}{{ $line = $line | append (printf "%s." .) }}{{ end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- with .Store.Get "shotbuilds" -}}
+  {{- $line = $line | append (printf "Console screenshots show %s." (delimit . ", " " and ")) -}}
+{{- end -}}
+{{- with $line }}
+<p class="walk-record">{{ delimit . " " }}</p>
+{{- end -}}

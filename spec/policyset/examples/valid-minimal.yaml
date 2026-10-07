@@ -1,0 +1,10 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: deny-everything
+spec:
+  rules:
+    - id: lockdown
+      tools: [shell.exec, file.write, file.edit, net.fetch, mcp.call, task.spawn, other]
+      effect: deny
+      reason: "Lockdown in effect. Contact security"

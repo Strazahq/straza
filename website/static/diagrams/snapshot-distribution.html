@@ -1,0 +1,371 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snapshot distribution · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+.controls .cap{font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;
+  padding:0 4px 0 6px;font-weight:600}
+.legend{display:flex;gap:var(--s3);align-items:center;font-size:11px;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:5px 10px}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.legend .ok{background:var(--ok-bg);border:1px solid var(--ok)}
+.legend .warn{background:var(--warn-bg);border:1px solid var(--warn)}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 11px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);
+  color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.ctl.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+button.ctl.primary[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);
+  color:var(--on-accent);box-shadow:none}
+button.ctl.deny[aria-pressed="true"]{background:var(--danger-bg);border-color:var(--danger);
+  color:var(--danger);box-shadow:inset 0 0 0 1px var(--danger)}
+button.ctl.kill{color:var(--danger);border-color:var(--danger);background:var(--danger-bg)}
+button.ctl.kill:hover{background:var(--danger-bg);border-color:var(--danger);
+  box-shadow:inset 0 0 0 1px var(--danger)}
+button.ctl:disabled{opacity:.4;cursor:default}
+button.ctl:disabled:hover{background:transparent;border-color:transparent}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:78px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:80ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:15px;font-weight:600}
+.s{font-size:12.5px;font-weight:600}
+.d{font-size:11px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+.mono{font-family:var(--font-mono);font-size:10.5px;fill:var(--muted)}
+.box{fill:var(--surface);stroke:var(--border);stroke-width:1.25}
+.chip{fill:var(--surface-2);stroke:var(--border);stroke-width:1.25}
+.box,.chip{transition:stroke .2s,stroke-width .2s,fill .25s,filter .2s,opacity .25s}
+.edge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ar)}
+.edge.async{stroke-dasharray:5 4}
+.mk{fill:var(--muted)}.mkA{fill:var(--accent)}.mkG{fill:var(--ok)}.mkR{fill:var(--danger)}
+ 
+.node{cursor:pointer;outline:none}
+.node:hover .box,.node:focus .box,.node.hl .box,.node.sel .box,
+.node:hover .chip,.node:focus .chip{stroke:var(--accent);stroke-width:2;
+  fill:var(--accent-bg);filter:drop-shadow(0 0 5px var(--accent))}
+.node.cont .box,.node .cbox{fill:var(--bg)}
+.node.cont:hover .box,.node.cont:focus .box,.node.cont.hl .box,
+.node:hover .cbox,.node:focus .cbox{fill:var(--bg);stroke:var(--accent);
+  stroke-width:2;filter:drop-shadow(0 0 5px var(--accent))}
+
+ 
+.pstep.on .box{stroke:var(--accent);stroke-width:2;fill:var(--accent-bg);filter:drop-shadow(0 0 4px var(--accent))}
+
+ 
+.axis{stroke:var(--border);stroke-width:1}
+.tick{stroke:var(--border);stroke-width:1}
+.laneline{stroke:var(--border);stroke-width:1.5}
+.guide{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 4}
+.cursor{stroke:var(--accent);stroke-width:2;opacity:0;filter:drop-shadow(0 0 4px var(--accent))}
+.cursor.live{opacity:.9}
+.adot{fill:var(--ok);stroke:var(--bg);stroke-width:1.5;opacity:0;transition:opacity .25s}
+.acap{opacity:0;transition:opacity .25s}
+.lane.adopted .adot,.lane.adopted .acap{opacity:1}
+.idNew{display:none}
+.lane.adopted .idOld{display:none}
+.lane.adopted .idNew{display:inline}
+.lane.adopted .chip{stroke:var(--ok);stroke-width:1.6;fill:var(--ok-bg)}
+.gracebox{fill:var(--danger-bg);stroke:var(--danger);stroke-width:1.25;stroke-dasharray:6 4}
+.lf{display:inline}.ls{display:none}
+@media (max-width:600px){.lf{display:none}.ls{display:inline}}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ snapshot distribution</span></h1>
+  <div class="controls">
+    <button class="ctl primary" id="btnPlay" aria-pressed="false">activate a policy</button>
+    <button class="ctl" id="btnReset">reset</button>
+  </div>
+</header>
+
+<div class="stage">
+<svg id="dia" viewBox="0 0 960 540" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
+<title id="svgT">Policy snapshot distribution timeline</title>
+<desc id="svgD">Activating a PolicySet compiles and signs a content-addressed snapshot; live clients adopt it by pull within about 30 seconds over three lanes: the post-decision pulse, the daemon tick, and checkin. A fail-closed grace boundary denies everything governed if no valid signed snapshot is available.</desc>
+<defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
+</defs>
+
+
+<g class="pstep node" id="p1" tabindex="0" aria-label="Policy activated via admin API or CLI">
+  <rect class="box" x="20" y="52" width="150" height="56" rx="6"/>
+  <text class="s" x="30" y="72">activate</text>
+  <text class="d" x="30" y="88">admin API &#183; strazactl</text>
+</g>
+<path class="edge" d="M170 80 L210 80"/>
+<g class="pstep node" id="p2" tabindex="0" aria-label="Compile active PolicySets, under two seconds at ten thousand rules">
+  <rect class="box" x="210" y="52" width="150" height="56" rx="6"/>
+  <text class="s" x="220" y="72">compile</text>
+  <text class="d" x="220" y="88">&lt; 2 s @ 10k rules</text>
+</g>
+<path class="edge" d="M360 80 L400 80"/>
+<g class="pstep node" id="p3" tabindex="0" aria-label="Sign with the ed25519 snapshot key">
+  <rect class="box" x="400" y="52" width="150" height="56" rx="6"/>
+  <text class="s" x="410" y="72">sign</text>
+  <text class="d" x="410" y="88">ed25519</text>
+</g>
+<path class="edge" d="M550 80 L590 80"/>
+<g class="pstep node" id="p4" tabindex="0" aria-label="Content-addressed snapshot identifier over the CBOR blob">
+  <rect class="box" x="590" y="52" width="150" height="56" rx="6"/>
+  <text class="s" x="600" y="72">snapshot id</text>
+  <text class="mono" x="600" y="88">9f3a&#8230;c1 &#183; CBOR</text>
+</g>
+<path class="edge" d="M740 80 L780 80"/>
+<g class="pstep node" id="p5" tabindex="0" aria-label="Stored and served with an ETag for conditional fetches">
+  <rect class="box" x="780" y="52" width="160" height="56" rx="6"/>
+  <text class="s" x="790" y="72">store + serve</text>
+  <text class="d" x="790" y="88">GET /v1/snapshot &#183; ETag</text>
+</g>
+
+
+<text class="cap" x="20" y="180">CLIENT ADOPTION: PULL, &#8804; 30 s</text>
+<line class="axis" x1="140" y1="216" x2="880" y2="216"/>
+<g>
+  <line class="tick" x1="140" y1="212" x2="140" y2="220"/><text class="mono" x="140" y="234" text-anchor="middle">t=0</text>
+  <line class="tick" x1="351" y1="212" x2="351" y2="220"/><text class="mono" x="351" y="234" text-anchor="middle">10 s</text>
+  <line class="tick" x1="563" y1="212" x2="563" y2="220"/><text class="mono" x="563" y="234" text-anchor="middle">20 s</text>
+  <line class="tick" x1="774" y1="212" x2="774" y2="220"/><text class="mono" x="774" y="234" text-anchor="middle">30 s</text>
+</g>
+<line class="guide" x1="774" y1="244" x2="774" y2="400"/>
+<text class="cap" x="782" y="252">&#8804; 30 s</text>
+
+
+<line id="cursor" class="cursor" x1="140" y1="244" x2="140" y2="400"/>
+<text id="clock" class="mono" x="140" y="256" text-anchor="middle" style="opacity:0">t=0.0 s</text>
+
+
+<g class="lane node" id="l1" tabindex="0" aria-label="Busy session adopts via the detached post-decision pulse">
+  <text class="s" x="16" y="258" style="font-size:11.5px">busy session</text>
+  <text class="d" x="16" y="272"><tspan class="lf">post-decision pulse</tspan><tspan class="ls">pulse</tspan></text>
+  <line class="laneline" x1="140" y1="264" x2="880" y2="264"/>
+  <rect class="chip" x="150" y="252" width="112" height="24" rx="5"/>
+  <text class="mono" x="206" y="268" text-anchor="middle" style="fill:var(--text)">
+    <tspan class="idOld">snap 41d2&#8230;8c</tspan><tspan class="idNew">snap 9f3a&#8230;c1</tspan>
+  </text>
+  <circle class="adot" cx="520" cy="264" r="4.5"/>
+  <text class="acap d" x="520" y="286" text-anchor="middle">next decision after the throttle window</text>
+</g>
+
+
+<g class="lane node" id="l2" tabindex="0" aria-label="Idle session adopts at the next daemon tick, about 30 seconds, the fallback when no push nudge reached it">
+  <text class="s" x="16" y="318" style="font-size:11.5px">idle session</text>
+  <text class="d" x="16" y="332"><tspan class="lf">daemon tick ~30 s</tspan><tspan class="ls">daemon</tspan></text>
+  <line class="laneline" x1="140" y1="324" x2="880" y2="324"/>
+  <rect class="chip" x="150" y="312" width="112" height="24" rx="5"/>
+  <text class="mono" x="206" y="328" text-anchor="middle" style="fill:var(--text)">
+    <tspan class="idOld">snap 41d2&#8230;8c</tspan><tspan class="idNew">snap 9f3a&#8230;c1</tspan>
+  </text>
+  <circle class="adot" cx="711" cy="324" r="4.5"/>
+  <text class="acap d" x="711" y="346" text-anchor="middle">next daemon tick</text>
+</g>
+
+
+<g class="lane node" id="l3" tabindex="0" aria-label="New sessions fetch the snapshot at checkin">
+  <text class="s" x="16" y="378" style="font-size:11.5px">new session</text>
+  <text class="d" x="16" y="392"><tspan class="lf">checkin &#183; token refresh</tspan><tspan class="ls">checkin</tspan></text>
+  <line class="laneline" x1="140" y1="384" x2="880" y2="384"/>
+  <rect class="chip" x="150" y="372" width="112" height="24" rx="5"/>
+  <text class="mono" x="206" y="388" text-anchor="middle" style="fill:var(--text)">
+    <tspan class="idOld">(no snapshot)</tspan><tspan class="idNew">snap 9f3a&#8230;c1</tspan>
+  </text>
+  <circle class="adot" cx="309" cy="384" r="4.5"/>
+  <text class="acap d" x="309" y="406" text-anchor="middle">fetched at session start</text>
+</g>
+
+
+<g class="node" id="grace" tabindex="0" aria-label="Fail-closed grace boundary">
+  <rect class="gracebox" x="140" y="428" width="740" height="56" rx="6"/>
+  <text class="s" x="154" y="448" style="fill:var(--danger)">fail-closed boundary</text>
+  <text class="d" x="154" y="464">security layer unreachable + no valid signed snapshot within the grace TTL &#8658; <tspan style="fill:var(--danger);font-weight:600">deny everything governed</tspan></text>
+  <text class="mono" x="154" y="478">grace TTL: enterprise 0 &#183; standalone 15 min</text>
+</g>
+
+<text class="d" x="140" y="512">adoption is pull-based plus a push nudge: idle daemons adopt in &lt; 5 s, the tick is the fallback; the &lt; 2 s lever is the session kill switch</text>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">Press &#8220;activate a policy&#8221; to compile, sign and watch the three adoption lanes pick up the new snapshot. Hover any element for its facts.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>Activating a PolicySet compiles every active set into one snapshot (&lt; 2 s at 10k rules),
+  signs it with the ed25519 snapshot key, and stores it; the snapshot id is the content address
+  of the CBOR blob, served over GET /v1/snapshot with an ETag. Distribution is pull-based, with
+  a push nudge for idle sessions:
+  a busy session adopts it via the detached post-decision pulse (a conditional GET throttled by
+  the client's snapshotLagSeconds, default 30 s; a busy session lags at most one tool call plus
+  that); an idle-but-connected session gets the policy-update push nudge and adopts in under
+  5 s, with the daemon tick (~30 s) as the fallback when no push reached it; new sessions and
+  token refreshes fetch it at checkin. In every lane the blob is fetched and its signature
+  verified <em>before</em> the session's snapshot id advances. An id alone would brick hooks.
+  If the security layer is unreachable and no valid signed snapshot exists within the grace TTL
+  (enterprise default 0, standalone 15 min), the client fails closed and denies everything
+  governed. When a change must land in under 2 seconds, the lever is the session kill switch,
+  not policy distribution.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+var nar=document.getElementById('nar');
+var DEF='Press &#8220;activate a policy&#8221; to compile, sign and watch the three adoption lanes pick up the new snapshot. Hover any element for its facts.';
+var X0=140,PXPS=21.14,TMAX=35;            
+var LANES=[{id:'l1',t:18},{id:'l2',t:27},{id:'l3',t:8}];
+var MILES=[
+ {t:0, m:'t = 0, PolicySet activated: compile (&lt; 2 s at 10k rules), sign ed25519, store. The snapshot id is the content address of the CBOR blob.'},
+ {t:8, m:'t &#8776; 8 s: a new session checks in and fetches the current snapshot; refreshing tokens do the same. Verified before the id advances.'},
+ {t:18,m:'t &#8776; 18 s, the busy session&#8217;s next decision fires the detached pulse: a conditional GET throttled by snapshotLagSeconds (default 30 s). At most one tool call + the throttle behind.'},
+ {t:27,m:'t &#8776; 27 s: the idle session&#8217;s daemon tick (~30 s) adopts the snapshot, the fallback when no push nudge reached it. The policy-update push has idle daemons adopt in &lt; 5 s.'},
+ {t:TMAX,m:'All lanes adopted within &#8804; ~30 s, and every adoption verified the signature first. Faster than that is the kill switch&#8217;s job (&lt; 2 s).'}
+];
+var FACTS={
+ p1:'<strong>activate</strong>: policies live in the DB via admin API/CLI (optional GitOps import); snapshots are the only distribution format either way.',
+ p2:'<strong>compile</strong>: all active PolicySets compile into one snapshot; budget &lt; 2 s at 10k rules.',
+ p3:'<strong>sign</strong>: ed25519 snapshot signing; clients verify against pinned keys before use.',
+ p4:'<strong>snapshot id</strong>. Content-addressed CBOR: the id commits to the exact rule content. Ids shown here are illustrative.',
+ p5:'<strong>store + serve</strong>: atomic live-engine swap server-side; clients fetch with conditional GETs (ETag).',
+ l1:'<strong>busy session</strong>: after every governed decision a detached pulse checks for a newer snapshot (conditional GET, throttled by snapshotLagSeconds, default 30 s).',
+ l2:'<strong>idle session</strong>: the policy-update push nudges the straza daemon to adopt at once (&lt; 5 s); the tick (~30 s) is the fallback when no push reached it.',
+ l3:'<strong>new session</strong>: checkin returns the snapshot id and the client fetches + verifies the blob before using it.',
+ grace:'<strong>fail-closed boundary</strong>: unreachable platform + no valid signed snapshot within the grace TTL means deny everything governed, with an actionable reason. Grace: enterprise 0, standalone 15 min.'
+};
+Object.keys(FACTS).forEach(function(id){
+  var el=document.getElementById(id);
+  el.addEventListener('mouseenter',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('focus',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('mouseleave',function(){nar.innerHTML=DEF;});
+  el.addEventListener('blur',function(){nar.innerHTML=DEF;});
+});
+
+var cursor=document.getElementById('cursor'),clock=document.getElementById('clock');
+var raf=null,playing=false;
+function setLane(id,on){document.getElementById(id).classList.toggle('adopted',on);}
+function setPipe(n){  
+  for(var i=1;i<=5;i++)document.getElementById('p'+i).classList.toggle('on',i<=n);
+}
+function reset(){
+  if(raf)cancelAnimationFrame(raf);raf=null;playing=false;
+  setPipe(0);LANES.forEach(function(l){setLane(l.id,false);});
+  cursor.classList.remove('live');clock.style.opacity='0';
+  cursor.setAttribute('x1',X0);cursor.setAttribute('x2',X0);
+  document.getElementById('btnPlay').setAttribute('aria-pressed','false');
+  nar.innerHTML=DEF;
+}
+function finish(){
+  setPipe(5);LANES.forEach(function(l){setLane(l.id,true);});
+  cursor.classList.add('live');clock.style.opacity='1';
+  var xe=X0+TMAX*PXPS;
+  cursor.setAttribute('x1',xe);cursor.setAttribute('x2',xe);
+  clock.setAttribute('x',xe);clock.textContent='t=30+ s';
+  nar.innerHTML=MILES[MILES.length-1].m;
+  playing=false;
+  document.getElementById('btnPlay').setAttribute('aria-pressed','false');
+}
+function play(){
+  if(playing)return;
+  reset();playing=true;
+  document.getElementById('btnPlay').setAttribute('aria-pressed','true');
+  if(RM){finish();return;}           
+  var PIPE_MS=1100,SWEEP_MS=6500,t0=null,mi=0;
+  cursor.classList.add('live');clock.style.opacity='1';
+  function frame(ts){
+    if(t0===null)t0=ts;
+    var el=ts-t0;
+    if(el<PIPE_MS){
+      setPipe(1+Math.floor(el/(PIPE_MS/5)));
+      raf=requestAnimationFrame(frame);return;
+    }
+    setPipe(5);
+    var t=Math.min((el-PIPE_MS)/SWEEP_MS,1)*TMAX;
+    var x=X0+t*PXPS;
+    cursor.setAttribute('x1',x);cursor.setAttribute('x2',x);
+    clock.setAttribute('x',x);clock.textContent='t='+t.toFixed(1)+' s';
+    LANES.forEach(function(l){if(t>=l.t)setLane(l.id,true);});
+    while(mi<MILES.length-1&&t>=MILES[mi].t){nar.innerHTML=MILES[mi].m;mi++;}
+    if(t<TMAX){raf=requestAnimationFrame(frame);}
+    else finish();
+  }
+  raf=requestAnimationFrame(frame);
+}
+document.getElementById('btnPlay').addEventListener('click',play);
+document.getElementById('btnReset').addEventListener('click',reset);
+})();
+</script>
+</body>
+</html>

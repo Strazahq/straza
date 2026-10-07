@@ -1,0 +1,1 @@
+{"provenance":"doc gemini-cli v0.50.0 source pin 2026-07-16 (hand-authored)","harness":"gemini","payload":{"hook_event_name":"SessionStart","session_id":"abc","transcript_path":"/home/u/.gemini/tmp/abc/chat.json","cwd":"/work/proj","timestamp":"2026-07-16T12:00:00.000Z","source":"startup"},"expect":{"kind":"session.start","workspace":"/work/proj"}}

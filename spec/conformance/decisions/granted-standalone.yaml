@@ -1,0 +1,49 @@
+# Decision-table fixtures: the granted fact on mcp.call (revision 17).
+# An mcp.call carrying granted: true answers allow by default when no rule
+# fires; rules that fire still win, deny over allow, approve gating included;
+# an mcp.call without the fact keeps the default deny.
+# Provenance: derived from the reference engine and its lane tests, not
+# captured from a live wire [doc].
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: scout-role-access }
+    spec:
+      match: { roles: [scout-role] }
+      rules:
+        - id: scout-tools-get-env-deny
+          tools: [mcp.call]
+          apps: [scout-tools]
+          toolNames: { deny: ["get-env"] }
+          effect: deny
+          reason: "get-env dumps the environment"
+        - id: scout-tools-get-sum-approve
+          tools: [mcp.call]
+          apps: [scout-tools]
+          toolNames: { allow: ["get-sum"] }
+          effect: allow
+          mode: approve
+          approve: { deciders: [sponsor], timeoutSeconds: 90 }
+cases:
+  - name: granted-no-rule-allows-by-default
+    subject: { user: joe, roles: [scout-role], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: scout-tools, toolName: echo, granted: true }
+    want: { effect: allow, default: true }
+  - name: granted-deny-rule-still-refuses
+    subject: { user: joe, roles: [scout-role], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: scout-tools, toolName: get-env, granted: true }
+    want: { effect: deny, ruleId: scout-tools-get-env-deny, setName: scout-role-access }
+  - name: granted-approve-rule-still-gates
+    subject: { user: joe, roles: [scout-role], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: scout-tools, toolName: get-sum, granted: true }
+    want: { effect: allow, ruleId: scout-tools-get-sum-approve, approve: true, approveTimeout: 90 }
+  - name: ungranted-no-rule-stays-default-deny
+    subject: { user: joe, roles: [scout-role], attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: scout-tools, toolName: echo }
+    want: { effect: deny, default: true }
+  - name: granted-fact-does-not-reach-other-tools
+    subject: { user: joe, roles: [scout-role], attestation: advisory }
+    event: { kind: tool.pre, tool: shell.exec, command: "ls -la", granted: true }
+    want: { effect: allow, default: true }

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MCP service: the REST entry and the account's own reads for the
+  midpoint-mcp-server's technical account (user mcp-service, ...1c07). The stack
+  runs that server in shared (resource-server) mode, so every tool call runs as
+  the person behind the token through Switch-To-Principal, which "MCP proxy"
+  (...1c06) grants. This role adds only what midPoint still checks against the
+  account itself:
+  - the REST endpoint actions, because midPoint checks those against the
+    authenticated account even while it impersonates;
+  - read on the governable users' name and archetypeRef, because the server
+    finds the person a token belongs to by searching as itself;
+  - read on definitions, never a person's data: the assignment schema and its
+    lookup tables for the request fields, and the request rules of roles for
+    the Get access view. The server reads both as itself.
+  No write right, so the account's password alone changes nothing. Keep in
+  sync with examples/role-mcp-rs-service.xml in strazahq/midpoint-mcp-server,
+  which carries both halves in one role.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c08">
+    <name>MCP service</name>
+    <description>REST entry, correlation read and definition reads for the midpoint-mcp-server technical account in shared mode. No write right and no read of a person's data beyond finding the person behind a token.</description>
+
+    <!--
+      One action per endpoint the server calls. What a call may touch is decided
+      by the impersonated person's own authorizations.
+        getSelf, getObject, searchObjects   reads
+        addObject, modifyObject             create_user, enable and disable, assign,
+                                            unassign, request, recompute
+        completeWorkItem, claimWorkItem,    decide, claim and release a work item
+        releaseWorkItem
+        cancelCase                          withdraw a request; the person also needs
+                                            model-3#cancelCase on their own cases
+        getObjects, getExtensionSchema      the request fields, read at startup
+      Deliberately absent: deleteObject, executeScript, and task, log and resource
+      control (runTask, suspendTask, resumeTask, testResource).
+    -->
+    <authorization>
+        <name>rest-entry</name>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#getSelf</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#getObject</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#searchObjects</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#addObject</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#modifyObject</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#completeWorkItem</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#claimWorkItem</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#releaseWorkItem</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#cancelCase</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#getObjects</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#getExtensionSchema</action>
+    </authorization>
+
+    <!--
+      Correlation, limited to the archetypes "MCP proxy" may act for and to the
+      items the searches filter on. A person outside those archetypes is not
+      found, so the server answers that no midPoint user matches.
+    -->
+    <authorization>
+        <name>read-users-for-correlation</name>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-model-3#read</action>
+        <object>
+            <type>UserType</type>
+            <!-- archetype "employee" (objects/archetypes/archetype-employee.xml) -->
+            <archetypeRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20"/>
+            <!-- archetype "ai-agent" (objects/archetypes/archetype-ai-agent.xml) -->
+            <archetypeRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c22"/>
+        </object>
+        <item>name</item>
+        <item>archetypeRef</item>
+    </authorization>
+
+    <!--
+      Request fields: at startup the server reads the assignment extension
+      schema and the lookup tables its fields name. Without these three grants
+      it starts with a warning and requests carry no fields.
+    -->
+    <authorization>
+        <name>read-request-fields</name>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-model-3#read</action>
+        <object>
+            <type>SchemaType</type>
+        </object>
+        <object>
+            <type>LookupTableType</type>
+        </object>
+    </authorization>
+    <authorization>
+        <name>read-extension-schema-files</name>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-model-3#getExtensionSchema</action>
+    </authorization>
+
+    <!--
+      Request rules: the server reads the #assign authorizations of the roles a
+      person holds, so Get access offers what midPoint would let that person
+      request. Without it, Get access lists the roles flagged requestable.
+    -->
+    <authorization>
+        <name>read-request-rules</name>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-model-3#read</action>
+        <object>
+            <type>AbstractRoleType</type>
+        </object>
+        <item>name</item>
+        <item>displayName</item>
+        <item>authorization</item>
+        <item>lifecycleState</item>
+        <item>activation</item>
+        <item>delegable</item>
+    </authorization>
+</role>

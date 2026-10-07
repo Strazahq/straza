@@ -1,0 +1,23 @@
+{
+  "specversion": "1.0",
+  "id": "0198abcd-2222-7abc-9def-000000000042",
+  "type": "straza.audit.tool",
+  "source": "straza",
+  "time": "2026-07-16T08:30:11.532Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "file.write",
+    "app": "",
+    "command": "",
+    "paths": ["/work/proj/config/prod.yaml"],
+    "workspace": "/work/proj",
+    "effect": "deny",
+    "ruleId": "protect-prod-config",
+    "setName": "prod-guardrails",
+    "reason": "Straza: production config is change-managed. Open a PR instead",
+    "snapshot": "sha256:44f0be1c"
+  }
+}

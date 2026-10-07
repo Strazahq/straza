@@ -1,0 +1,394 @@
+# Server-owned roles, the second rung of delegated server governance: a server
+# admin defines the entitlements that reach her own server, and she still
+# assigns nobody. The operator registers two servers and gives dana the admin
+# role each registration minted. Dana creates a role her first server owns,
+# over two of that server's tools, and the create writes the role and its
+# binding in one step under her own name. Tess reaches those tools through a
+# business role the operator composes onto dana's role, which is how a team
+# reaches a server and why the identity manager stays in charge of membership.
+# Four refusals draw the bound of the office: dana may not give her server
+# reach to a role her server does not own, she may not point her own role at
+# the other server even though she administers that one too, she may not
+# assign anyone, and she may not delete a role somebody holds. The operator
+# removes the server at the end. The role goes with it, which is what ends
+# the reach tess had, and the chain carries that deletion beside the one
+# membership record the removal does write, the direct holder's.
+#
+# Dana holds the admin role of BOTH servers on purpose. The refusal that says
+# a server-owned role reaches no other server holds under any standing, so
+# giving her the second office is what makes the step read that refusal
+# instead of the standing refusal she would read as an outsider.
+#
+# The business role is named team-g7-alpha and not g7-alpha-team on purpose. A
+# server's prefix is exclusive, so a role whose name begins with an existing
+# server's folded name and a hyphen may only be created on that server, and a
+# global create of g7-alpha-team is refused. The same rule is why the role
+# dana creates is named g7-alpha-readers.
+#
+# The role create fields server and tools, the server field on every role
+# response, the four refusals and the records a server removal writes are in
+# pkg/api/openapi.yaml 0.106.0 and spec/events/SPEC.md revision 33, and the
+# sources block below cites both. What no published document carries yet is
+# marked suspect below and listed in the lane report: every refusal sentence,
+# the word a holder count takes when there is one holder, the words a role
+# deleted with its server carries, and how many role deletions a server
+# removal records. A red row here means the wire landed differently, and the
+# fix is in this file or in the product, never a bent assertion.
+#
+# The two servers are named so that both readings of the minting rule give the
+# same role name: metadata.name g7-alpha with no namespace reads
+# mcp-admin-g7-alpha, and the registry name g7/alpha reads mcp-admin-g7-alpha
+# as well, the same care g6-delegated-server-admin takes.
+#
+# Shapes read from the published contract, so they are not suspect: installApp
+# answers 201 with the app row, a role create answers 201 with the role row, a
+# bindings list is a bare array, an implication edge is created with
+# implies_role_id and answers 201, an assignment create answers 201 and its
+# delete answers 200, a role delete answers 200, removeApp answers 200
+# (pkg/api/openapi.yaml, the Apps and the Roles sections). The hermetic
+# upstream serves echo, get-sum and get-env, and a tool is served as
+# name__toolName, which README.md next to this file publishes.
+id: g7-server-owned-roles
+group: G7
+title: A server admin defines a role her own server owns, a team reaches it through a business role, and she may neither widen it nor hand it out
+provenance: >-
+  doc the server-owned role model (a server admin defines the roles that
+  reach their own server, assigning stays with the identity manager, and a
+  role may name an owning server; the owner is a stored column, the name
+  carries the server's folded name for the human, and no handler authorizes
+  on the name; the tool list is explicit and frozen once the role has
+  holders, a role nobody holds may be deleted, a server admin may not bind
+  an existing role, bind to another server, assign, imply or flip a kind,
+  and a business role may imply a server-owned role, which is how a team
+  reaches a server; the hyphen is the separator, a server's prefix is
+  exclusive, and the owning server is spelled server on the wire; the
+  identity manager's projection names the owning server and every
+  membership ends through the identity manager);
+  pkg/api/openapi.yaml 0.106.0 (role create
+  takes the optional server and tools fields, every role response carries
+  server when the role has an owner, and the binding routes answer a server
+  admin on the roles their server owns);
+  spec/events/SPEC.md revision 33 (the
+  straza.audit.admin action list gains roles.create and roles.delete), and
+  section 2 table straza.audit.admin (a mutation of an admin object carries
+  the actor, the action and the target, which is what the audit steps match
+  on);
+  README.md next to this package for the hermetic upstream's three tools and
+  the name__toolName rendering the mcp steps use.
+  suspect: every refusal sentence below, which no published document
+  carries, so each step matches the half of
+  the sentence that carries no name and no number, and the lane report
+  quotes the whole sentence it expected; the word a holder count takes when
+  the role has one holder, which no published document writes, so the
+  delete refusal matches its second sentence alone; the words a role deleted
+  with its server carries, because the audit step matches on a record's
+  reason and no document pins the reason the cascade writes, so the step
+  asserts that the server is named in it and a red row there is a
+  documentation gap first; how many roles.delete records a server removal
+  writes, because the minted admin role and the server-owned role both go
+  with the server and no published document pins either count, so the step asserts at
+  least one; that a server admin
+  who administers both servers reads the reach refusal rather than the
+  standing refusal when she points her own role at the other server, which
+  follows from that refusal holding under any standing, which nothing
+  published states; that the create forces the kind to application and
+  answers with it, which the openapi does not state.
+harnesses: [claude-code]
+identities:
+  dana: {kind: human, password: "Walk-2026!"}
+  tess: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: two servers, one server admin over both of them, and one team
+  # member who will reach the first server through her team's role.
+  - name: the operator registers the first server, whose roles dana will define
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g7-alpha
+            description: The server whose own roles this scenario is about
+          server:
+            name: g7/alpha
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want:
+      status: 201
+      body: {name: g7-alpha, admin_role: mcp-admin-g7-alpha}
+    save: {alphaId: id, alphaRoleId: admin_role_id}
+  - name: the operator registers the second server, which dana also administers
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g7-beta
+            description: The other server, which the first server's role never reaches
+          server:
+            name: g7/beta
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want:
+      status: 201
+      body: {name: g7-beta, admin_role: mcp-admin-g7-beta}
+    save: {betaId: id, betaRoleId: admin_role_id}
+  - name: the IdM provisions dana over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g7-dana
+        userName: dana
+        displayName: Dana Server Admin
+        active: true
+    want: {status: 201}
+    save: {danaId: id}
+  - name: the operator sets dana's password, since SCIM carries none and she signs in to act
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${danaId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the operator gives dana the admin role of the first server
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${danaId}", role_id: "${alphaRoleId}"}
+    want: {status: 201}
+  - name: the operator gives dana the admin role of the second server as well
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${danaId}", role_id: "${betaRoleId}"}
+    want: {status: 201}
+  - name: the IdM provisions tess, who will reach the first server through her team
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g7-tess
+        userName: tess
+        displayName: Tess Team Member
+        active: true
+    want: {status: 201}
+    save: {tessId: id}
+  - name: the operator sets tess's password, since SCIM carries none and she signs in to work
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${tessId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+
+  # 1. The server admin defines the entitlement of her own server, and the
+  # create writes the role and the binding that gives it reach.
+  - name: dana creates a role her server owns over two of its tools
+    # suspect: that the create forces the kind to application and answers with it
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      as: dana
+      body:
+        name: g7-alpha-readers
+        server: g7-alpha
+        tools: ["echo", "get-sum"]
+        description: "Server-owned roles scenario, the read-only reach into g7-alpha"
+    want:
+      status: 201
+      body: {name: g7-alpha-readers, server: g7-alpha, kind: application}
+    save: {readersRoleId: id}
+  - name: the create wrote the binding that gives the role its reach, and nothing else
+    admin:
+      method: GET
+      path: /v1/admin/bindings
+    want:
+      status: 200
+      body: {0.role: g7-alpha-readers, 0.app: g7-alpha, "1": null}
+      bodyContains: '"get-sum"'
+  - name: the create is on the chain exactly once under dana's own name
+    audit: {subject: dana, kind: straza.audit.admin, action: roles.create, count: 1}
+
+  # 2. A team reaches the server through a business role the operator
+  # composes onto dana's role, which is the only path membership takes.
+  - name: the operator creates the team's business role
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: team-g7-alpha, kind: business, description: "Server-owned roles scenario, the team that reaches g7-alpha"}
+    want: {status: 201}
+    save: {teamRoleId: id}
+  - name: the operator composes the team role onto the role the server owns
+    admin:
+      method: POST
+      path: /v1/admin/roles/${teamRoleId}/implications
+      body: {implies_role_id: "${readersRoleId}"}
+    want: {status: 201}
+  - name: the operator gives tess the team role alone
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${tessId}", role_id: "${teamRoleId}"}
+    want: {status: 201}
+    save: {tessAssignment: id}
+  - name: tess enrolls
+    enroll: {as: tess}
+  - name: tess starts a session
+    hook:
+      as: tess
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: tess reaches exactly the two tools the server's own role names
+    mcp:
+      as: tess
+      list: true
+    want:
+      tools: [g7-alpha__echo, g7-alpha__get-sum]
+      notTools: [g7-alpha__get-env]
+  - name: one of those tools runs for her
+    # suspect: the argument name and the echoed result are assumed, as in g3-catalog
+    mcp:
+      as: tess
+      tool: g7-alpha__echo
+      args: {text: hello-from-tess}
+    want: {result: hello-from-tess}
+
+  # 3. The bound of the office, in four refusals. Each one names what is not
+  # hers and who it belongs to.
+  - name: the operator creates a global role that no server owns
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g7-global-tools, kind: application, description: "Server-owned roles scenario, the global role a server admin may not bind"}
+    want: {status: 201}
+    save: {globalRoleId: id}
+  - name: dana giving her server's reach to a role her server does not own is refused
+    # suspect: the sentence, which no published document carries, so the step matches the half that carries no name
+    admin:
+      method: POST
+      path: /v1/admin/apps/${alphaId}/bindings
+      as: dana
+      body: {role: g7-global-tools, tools: ["get-env"]}
+    want: {status: 409, bodyContains: "A server admin gives access only to the roles their server owns"}
+  - name: dana pointing her own server's role at the other server is refused, though she administers both
+    # suspect: the sentence, and that she reads it rather than the standing refusal
+    admin:
+      method: POST
+      path: /v1/admin/apps/${betaId}/bindings
+      as: dana
+      body: {role: g7-alpha-readers, tools: ["echo"]}
+    want: {status: 409, bodyContains: "belongs to the server g7-alpha and reaches no other server"}
+  - name: dana handing her role to a person is refused, because membership is the identity manager's
+    # suspect: the area refusal's full sentence, so the step matches its opening
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      as: dana
+      body: {subject_kind: user, subject_id: "${tessId}", role_id: "${readersRoleId}"}
+    want: {status: 403, bodyContains: "requires role straza-admin"}
+  - name: dana deleting a role somebody holds is refused and told who removes the holders
+    # suspect: the count word for one holder, so the step matches the second sentence alone
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${readersRoleId}
+      as: dana
+    want: {status: 409, bodyContains: "The identity manager removes them first, then delete it"}
+  - name: the refused delete left the role standing, so tess still reaches its tools
+    mcp:
+      as: tess
+      list: true
+    want:
+      tools: [g7-alpha__echo, g7-alpha__get-sum]
+
+  # 4. The server goes, and everything it owned goes with it. The role is
+  # deleted, which is what ends the reach tess held through the closure,
+  # because she holds no assignment row of that role. The one roles.unassign
+  # the removal writes belongs to dana, who holds the minted role directly.
+  - name: the operator removes the server, which is not a server admin's verb
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${alphaId}
+    want: {status: 200}
+  - name: the role the server owned went with it, so the roles surface no longer serves it
+    # The corpus vocabulary has no assertion for a name absent from a bare
+    # array, so the absence is read by the role's own id, the way
+    # g6-delegated-server-admin reads the minted role's.
+    admin:
+      method: GET
+      path: /v1/admin/roles/${readersRoleId}/export
+    want: {status: 404}
+  # The publish that removed the server drops every cached session whose
+  # roles lost reach, so tess's next gateway call says to check in again,
+  # and the fresh session resolves her roles without the server.
+  - name: the reach tess held through the closure ended with the server, so the session that held it is dropped and her next call says to check in again
+    mcp:
+      as: tess
+      list: true
+    want:
+      refused: true
+      reasonContains: "check in again"
+    within: 20s
+  - name: tess checks in again
+    hook:
+      as: tess
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: her fresh catalog carries neither tool
+    mcp:
+      as: tess
+      list: true
+    want:
+      notTools: [g7-alpha__echo, g7-alpha__get-sum]
+  - name: the direct holder's membership of the minted role ended with the server, once, and the record says why
+    audit: {subject: dana, kind: straza.audit.admin, action: roles.unassign, reasonContains: "server removed", count: 1}
+  - name: the deletion of the role the server owned is on the chain under the operator's name and names the server
+    # suspect: the words a cascaded role deletion carries, because the audit
+    # step matches on a record's reason and no document pins that reason
+    audit: {subject: admin, kind: straza.audit.admin, action: roles.delete, reasonContains: "g7-alpha"}
+
+  # Teardown leaves nothing behind, the second server and its minted role
+  # included.
+  - name: the operator takes the team role away from tess
+    admin:
+      method: DELETE
+      path: /v1/admin/assignments/${tessAssignment}
+    want: {status: 200}
+  - name: the team role is deleted, and its implication edge went with the role it pointed at
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${teamRoleId}
+    want: {status: 200}
+  - name: the global role nobody bound is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${globalRoleId}
+    want: {status: 200}
+  - name: the operator removes the second server, whose minted role goes with it
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${betaId}
+    want: {status: 200}
+  - name: the IdM deactivates tess
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${tessId}
+    want: {status: 204}
+  - name: the IdM deactivates dana
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${danaId}
+    want: {status: 204}

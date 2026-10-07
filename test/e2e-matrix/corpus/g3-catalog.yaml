@@ -1,0 +1,222 @@
+# The gateway catalog: an access row grants, a policy refuses or gates, a
+# tool without an access row does not exist, and a role list on the SCIM
+# wire pages to an empty page. The binding names two tools, the policy
+# allows one by a prefix glob on its name and refuses the other by name,
+# and a third upstream tool is never bound.
+#
+# The hermetic upstream serves echo, get-sum and get-env, which README.md
+# next to this package documents.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+id: g3-catalog
+group: G3
+title: Bound tools are listed, a name-refused tool and an unbound tool are refused, and a list pages to empty
+provenance: >-
+  doc website/content/concepts/mcp-apps-and-the-gateway.md (an access row
+  admits a tool, policy gates it);
+  spec/policyset/SPEC.md §2 item 2 (toolNames deny-first), §3 item 3
+  (a granted mcp.call allows with no rule, an ungranted one denies), §4
+  (globs on toolName patterns); spec/app-manifest/SPEC.md §1 (tools
+  are served as name__toolName) and §4 (bindings narrow exposure);
+  spec/objects/SPEC.md §2 (a bindings tools list);
+  spec/events/SPEC.md revision 24 (the unbound-tool refusal sentence);
+  spec/scim-profile/SPEC.md §1 (startIndex and count paging) §4 and
+  conformance/scim groups-roles; RFC 7644 §3.4.2.4 (itemsPerPage);
+  website/content/reference/api.md sections Apps and Roles.
+  suspect: the upstream tool names and the echo result, the binding
+  body, the success status codes, and the itemsPerPage rendering on
+  the empty SCIM page, which the profile does not pin.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  ivy: {kind: human, password: "Walk-2026!"}
+steps:
+  - name: the IdM provisions ivy over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g3-ivy
+        userName: ivy
+        displayName: Ivy Catalog
+        active: true
+    want: {status: 201}
+    save: {ivyId: id}
+  - name: the admin sets ivy's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${ivyId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the admin registers the app on the hermetic upstream
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g3-cat-tools
+            namespace: dev.e2e
+          server:
+            name: dev.e2e/g3-cat-tools
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want: {status: 201}
+    save: {appId: id}
+  - name: the admin creates the role the app owns over two of the upstream tools, which leaves get-env unbound
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g3-cat-tools-readers, server: g3-cat-tools, tools: ["echo", "get-sum"], description: "Catalog scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g3-cat-tools-readers"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: ivy becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${ivyId}"}]
+    want: {status: 200}
+  - name: the admin applies a policy that allows names by prefix and refuses one name
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g3-cat
+            description: Catalog scenario for role g3-cat-tools-readers
+          spec:
+            match:
+              roles: [g3-cat-tools-readers]
+            rules:
+              - id: echo-family-allowed
+                tools: [mcp.call]
+                apps: [g3-cat-tools]
+                toolNames:
+                  allow: ["ec*"]
+                effect: allow
+                reason: "G3-CAT: tools named ec-something are allowed on g3-cat-tools"
+              - id: no-sum
+                tools: [mcp.call]
+                apps: [g3-cat-tools]
+                toolNames:
+                  deny: ["get-sum"]
+                effect: deny
+                reason: "G3-CAT: get-sum is refused by name on g3-cat-tools"
+    want: {status: 201}
+  - name: the admin activates the policy
+    admin:
+      method: POST
+      path: /v1/admin/policies/g3-cat/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: ivy enrolls
+    enroll: {as: ivy}
+  - name: ivy starts a session on every dialect
+    hook:
+      as: ivy
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: the list shows the bound and allowed tool and never the unbound one
+    # suspect: the tool names come from the eval quickstart's demo-tools; get-sum is not asserted either way because the catalog overlay may hide a policy-refused tool
+    mcp:
+      as: ivy
+      list: true
+    want:
+      tools: [g3-cat-tools__echo]
+      notTools: [g3-cat-tools__get-env]
+  - name: the prefix-allowed tool runs
+    # suspect: the argument name and the echoed result are assumed
+    mcp:
+      as: ivy
+      tool: g3-cat-tools__echo
+      args: {text: hello-from-ivy}
+    want: {result: hello-from-ivy}
+  - name: the rule allow is on the chain exactly once with its reason
+    audit: {subject: ivy, kind: tool.pre, decision: allow, reasonContains: "ec-something are allowed", count: 1}
+  - name: the name-refused tool is refused and the reason names it
+    # the catalog overlay may hide the tool, in which case the client reads "unknown tool"; the name is in either sentence
+    mcp:
+      as: ivy
+      tool: g3-cat-tools__get-sum
+      args: {a: 1, b: 2}
+    want: {refused: true, reasonContains: "get-sum"}
+  - name: the name refusal carries the rule's reason on the chain exactly once
+    audit: {subject: ivy, kind: tool.pre, decision: deny, reasonContains: "get-sum is refused by name", count: 1}
+  - name: the unbound tool does not exist for the role and the refusal says no access row admits it
+    mcp:
+      as: ivy
+      tool: g3-cat-tools__get-env
+      args: {}
+    want: {refused: true, reasonContains: "unknown tool"}
+  - name: the unbound refusal is on the chain exactly once with no rule and the access sentence
+    audit: {subject: ivy, kind: tool.pre, decision: deny, reasonContains: "unknown tool", count: 1}
+  - name: the hook lane refuses the name-refused tool with the same reason
+    hook:
+      as: ivy
+      event: {kind: tool.pre, tool: mcp.call, app: g3-cat-tools, toolName: get-sum, args: {a: 1, b: 2}}
+    want: {decision: deny, reasonContains: "get-sum is refused by name"}
+  - name: the first page of the role list on the SCIM wire carries one item
+    scim:
+      method: GET
+      path: /scim/v2/Groups?startIndex=1&count=1
+    want:
+      status: 200
+      body: {startIndex: 1, itemsPerPage: 1}
+  - name: a page past the end of the role list is empty
+    # suspect: the profile documents startIndex and count paging, the empty-page rendering comes from RFC 7644
+    scim:
+      method: GET
+      path: /scim/v2/Groups?startIndex=100000&count=1
+    want:
+      status: 200
+      body: {itemsPerPage: 0}
+  - name: the admin deactivates the policy
+    admin:
+      method: POST
+      path: /v1/admin/policies/g3-cat/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft policy is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g3-cat
+    want: {status: 204}
+  - name: the admin deletes the role before its server, which would take it along
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the admin removes the app
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${appId}
+    want: {status: 200}
+  - name: the IdM deactivates ivy
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${ivyId}
+    want: {status: 204}

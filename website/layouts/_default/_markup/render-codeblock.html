@@ -1,0 +1,4 @@
+{{- /* Plain pre and code, no syntax highlighter: inline highlight colours
+would fight the two themes, and site.css labels the block from the lang
+class and adds the copy button. */ -}}
+<pre><code{{ with .Type }} class="lang-{{ . }}"{{ end }}>{{ .Inner }}</code></pre>

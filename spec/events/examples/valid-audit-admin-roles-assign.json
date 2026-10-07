@@ -1,0 +1,18 @@
+{
+  "specversion": "1.0",
+  "id": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e01",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-09-07T09:12:04.318Z",
+  "data": {
+    "action": "roles.assign",
+    "actor": "midpoint-provisioning",
+    "actorId": "0197fa3d-4444-7abc-9def-000000000004",
+    "actorVia": "api-token",
+    "target": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e02",
+    "user": "0197fa3d-5555-7abc-9def-000000000005",
+    "role": "dev-tools",
+    "roleId": "0197fa3d-7777-7abc-9def-000000000007",
+    "origin": "scim"
+  }
+}

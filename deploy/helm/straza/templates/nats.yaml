@@ -1,0 +1,53 @@
+{{- if include "straza.natsBundled" . }}
+# Bundled in-cluster NATS + JetStream, cluster-internal only, deliberately
+# with no external exposure: the
+# push channel treats any message on a revocation subject as a revocation
+# (spec/events §5), so a public NATS would hand strangers the kill switch.
+# Daemons don't need it: they get sub-second push over the gateway-edge SSE
+# lane (/v1/push) on the HTTPS origin they already dial.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "straza.fullname" . }}-nats
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "straza.name" . }}-nats
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports: [{ port: 4222 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "straza.fullname" . }}-nats
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "straza.fullname" . }}-nats
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "straza.name" . }}-nats
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "straza.name" . }}-nats
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: nats
+          image: {{ .Values.nats.image }}
+          args: ["-js", "-sd", "/data"]
+          ports: [{ containerPort: 4222 }]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: {{ .Values.nats.storage }} } }
+{{- end }}

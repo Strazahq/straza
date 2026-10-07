@@ -1,0 +1,571 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://straza.dev/spec/app-manifest/v1beta1/app-manifest.schema.json",
+  "title": "App",
+  "description": "Straza MCP app manifest: a verbatim MCP-registry server.json under `server:` plus Straza deployment extensions under `straza:`.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "server",
+    "straza"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "straza.dev/v1beta1"
+    },
+    "kind": {
+      "const": "App"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+          "description": "Deployment-unique app name; the gateway tool-namespace prefix (`<name>__<tool>`) and the `apps:` selector in PolicySet rules."
+        },
+        "namespace": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Informational registry namespace (e.g. io.github.github)."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1024
+        }
+      }
+    },
+    "server": {
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "description": "Verbatim MCP registry server.json. Straza validates only name and version; everything else is preserved untouched."
+    },
+    "straza": {
+      "type": "object",
+      "required": [
+        "runtime"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "runtime": {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "command",
+                "remote",
+                "oci"
+              ]
+            },
+            "command": {
+              "type": "object",
+              "required": [
+                "exec"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "exec": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "env": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "workdir": {
+                  "type": "string"
+                }
+              }
+            },
+            "remote": {
+              "type": "object",
+              "required": [
+                "url"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "pattern": "^https?://"
+                },
+                "auth": {
+                  "enum": [
+                    "inject",
+                    "passthrough"
+                  ],
+                  "default": "inject"
+                }
+              }
+            },
+            "oci": {
+              "type": "object",
+              "required": [
+                "image"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "image": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sandbox": {
+                  "enum": [
+                    "default",
+                    "none"
+                  ],
+                  "default": "default"
+                },
+                "env": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "command"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "kind",
+                  "command"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "remote"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "oci"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "remote"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "kind",
+                  "remote"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "command"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "oci"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "oci"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "kind",
+                  "oci"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "command"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "remote"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "credential": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "none",
+                "static",
+                "oauth",
+                "token"
+              ],
+              "default": "none"
+            },
+            "agents": {
+              "enum": [
+                "own",
+                "sponsor",
+                "shared",
+                "client_credentials"
+              ],
+              "default": "own",
+              "description": "What an agent with no row of its own uses on a caller-kind app (oauth or token): nothing, its sponsor's row when the sponsor allowed agents on it, the server's shared static row, or (revision 5, kind oauth only) a token of the agent's own client at the provider named under oauth.provider, which the gateway gets with the client credentials grant. Valid only with kind oauth or token."
+            },
+            "oauth": {
+              "type": "object",
+              "required": [
+                "provider"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "inject": {
+              "type": "object",
+              "required": [
+                "as",
+                "name"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "as": {
+                  "enum": [
+                    "header",
+                    "env"
+                  ]
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "template": {
+                  "type": "string",
+                  "pattern": "\\{\\{secret\\}\\}",
+                  "default": "{{secret}}",
+                  "description": "Rendered gateway-side with {{secret}} replaced by the decrypted secret. The result never reaches any client (invariant 6.5)."
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "static",
+                      "oauth",
+                      "token"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "then": {
+                "required": [
+                  "inject"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "inject"
+                  ]
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "oauth"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "then": {
+                "required": [
+                  "oauth"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "oauth"
+                  ]
+                }
+              }
+            },
+            {
+              "$comment": "revision 4: agents is only valid on the two caller kinds; mirrors the parser rule.",
+              "if": {
+                "required": [
+                  "agents"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "oauth",
+                      "token"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            {
+              "$comment": "revision 5: agents client_credentials asks the oauth provider for each agent's token, so it needs kind oauth; mirrors the parser rule.",
+              "if": {
+                "properties": {
+                  "agents": {
+                    "const": "client_credentials"
+                  }
+                },
+                "required": [
+                  "agents"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "kind": {
+                    "const": "oauth"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          ]
+        },
+        "exposure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tools"
+          ],
+          "properties": {
+            "tools": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": [
+                "*"
+              ],
+              "description": "Manager-level cap (glob list) on which upstream tools exist at all; role tool_bindings narrow further."
+            },
+            "views": {
+              "type": "boolean",
+              "default": false,
+              "description": "Revision 6. When true, the platform tells the server that hosts can render MCP Apps views and serves the views its exposed tools link on the server's own gateway endpoint. When false or absent, no view is served and no tool carries a view link."
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "pattern": "^[0-9]+m?$"
+            },
+            "mem": {
+              "type": "string",
+              "pattern": "^[0-9]+(Ki|Mi|Gi)$"
+            },
+            "rps": {
+              "type": "number",
+              "minimum": 0
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "revision 3: inject.as header is only valid for remote runtimes (stdio/oci have no request headers); mirrors the parser rule that always enforced this platform-side.",
+          "if": {
+            "properties": {
+              "credential": {
+                "properties": {
+                  "inject": {
+                    "properties": {
+                      "as": {
+                        "const": "header"
+                      }
+                    },
+                    "required": [
+                      "as"
+                    ]
+                  }
+                },
+                "required": [
+                  "inject"
+                ]
+              }
+            },
+            "required": [
+              "credential"
+            ]
+          },
+          "then": {
+            "properties": {
+              "runtime": {
+                "properties": {
+                  "kind": {
+                    "const": "remote"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "revision 4: a caller kind (oauth or token) gives each caller their own credential, which only a remote runtime can take: a command or oci server is one process and one identity. Mirrors the parser rule.",
+          "if": {
+            "properties": {
+              "credential": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "oauth",
+                      "token"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "credential"
+            ]
+          },
+          "then": {
+            "properties": {
+              "runtime": {
+                "properties": {
+                  "kind": {
+                    "const": "remote"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  joe-java-developer-agent: the working SUPERVISED AI agent of the demo cast,
+  the Claude Code harness identity and the gateway chat face. Sponsored by
+  alice, who gets joe's gated calls on her phone. ai-agent archetype
+  assigned directly; the per-user agencyMode below overrides the
+  archetype's weak autonomous default (supervised keeps mode confirm
+  available, which autonomous subjects are denied by the engine).
+  Carries the developer role from the seed, BR:Straza-developer-access: a
+  first boot provisions joe into Straza, the born-in-midPoint-lands-everywhere
+  proof. The harness enrolls headless with an Ed25519 key (keygen in the
+  harness container, the seeder registers the public half).
+-->
+
+<!--
+  joe ALSO holds AR:Keycloak:Account explicitly: the access package's Keycloak
+  inducement is human-gated, but the gateway chat face authenticates joe
+  with a Keycloak password grant per run, so this one agent's login is a
+  deliberate, certifiable assignment from the identity manager instead of an
+  inline exception. The
+  givenName/familyName exist because Keycloak 26's default user profile
+  requires them for provisioning.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
+      xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c4e">
+    <name>joe-java-developer-agent</name>
+    <description>Supervised Java developer agent, sponsored by alice. The Claude
+        Code harness identity and the gateway chat face. Seeded WITH the
+        developer role, BR:Straza-developer-access, and an explicit Keycloak
+        login (AR:Keycloak:Account, the chat face's password grant); sessions
+        enroll on the Ed25519 key lane.</description>
+    <extension>
+        <!-- accountable human: alice sponsors the working agents.
+             alice = ...1c4a. -->
+        <ext:strazaSponsorRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c4a" type="UserType"/>
+        <!-- supervised, per-user: the archetype's weak autonomous default loses -->
+        <ext:strazaAgencyMode>supervised</ext:strazaAgencyMode>
+    </extension>
+    <fullName>Joe (Java developer agent)</fullName>
+    <givenName>Joe</givenName>
+    <familyName>Agent</familyName>
+    <emailAddress>joe@agents.example.com</emailAddress>
+    <organizationalUnit>Engineering</organizationalUnit>
+    <credentials>
+        <password>
+            <!-- must satisfy midPoint's default policy: >=8 chars, 3 unique, no username -->
+            <value><t:clearValue>Ev4l-St4ck!26</t:clearValue></value>
+        </password>
+    </credentials>
+    <assignment>
+        <!-- the governed Straza account (AR:Straza:Account owns the construction) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0b" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c02" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- AR:Keycloak:Account, explicit: the chat face's per-run password
+             grant needs a login the human-gated joiner no longer grants
+             agents. One certifiable grant, visible in any access review. -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0e" type="RoleType"/>
+    </assignment>
+    <!-- End user (built-in): authorization to act as himself when the MCP
+         server's on-behalf lane impersonates him (Switch-To-Principal) -->
+    <assignment>
+        <targetRef oid="00000000-0000-0000-0000-000000000008" type="RoleType"/>
+    </assignment>
+    <!-- Org team visibility (objects/roles/role-org-team-visibility.xml):
+         read fellow org members, so list_my_teammates answers under
+         impersonation (End user alone reads self only) -->
+    <assignment>
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c09" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- member of the dev-ops demo team (objects/orgs/team-dev-ops.xml) -->
+        <targetRef oid="d23c0d53-1410-4b63-bf9a-b18142bb3336" type="OrgType"/>
+    </assignment>
+    <assignment>
+        <!-- persona archetype, assigned directly (ai-agent) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c22" type="ArchetypeType"/>
+    </assignment>
+</user>

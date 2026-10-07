@@ -1,0 +1,198 @@
+# Codex CLI hook dialect. Codex cloned the Claude Code hook contract nearly
+# verbatim, including env-var compatibility, so the mapping mirrors
+# claude-code.yaml. Divergences are pinned here per Codex release.
+
+# Where codex reads hooks from. NO released codex binary reads
+# $CODEX_HOME/settings.json, so wiring there governs nothing. The files codex
+# reads:
+#   user scope : $CODEX_HOME/hooks.json  ← straza install writes this one
+#                $CODEX_HOME/config.toml [hooks] table (equivalent, user's own)
+#   repo scope : <repo>/.codex/hooks.json, <repo>/.codex/config.toml
+#   managed    : /etc/codex/requirements.toml (Unix INCLUDING macOS, since codex has
+#                no /Library/Application Support/Codex path) and
+#                %ProgramData%\OpenAI\Codex\requirements.toml (Windows)
+
+# Trust gate, the structural difference from claude-code. A hook from a
+# NON-MANAGED source, user or repo scope, is SKIPPED until the operator
+# reviews and trusts its exact definition in codex's `/hooks` UI. Trust is
+# recorded against the HASH of the hook definition, so any change to our
+# command gates it again. User-scope codex hooks therefore can NEVER be called
+# fail-closed: writing the file is necessary but not sufficient, and nothing
+# outside codex can prove the operator trusted it. Only managed sources
+# (system, MDM, cloud or requirements.toml) are trusted automatically and
+# cannot be disabled. `allow_managed_hooks_only = true` is valid only in
+# requirements.toml. `straza install codex` therefore prints the /hooks step,
+# and doctor refuses to report codex "governed" on file presence alone.
+
+# Version floors, from the codex release notes: hooks are GA since
+# rust-v0.124.0, and below that our wiring is inert, so codex>=0.124 is the
+# pinned floor. Hooks were re-enabled on Windows in 0.120.0, and hook-command
+# QUOTING was fixed only in rust-v0.145.0, so Windows operators want >=0.145
+# or a path with no spaces.
+harness: codex
+events:
+  SessionStart: session.start
+  UserPromptSubmit: prompt.submit
+  PreToolUse: tool.pre
+  PostToolUse: tool.post
+  PermissionRequest: permission.request
+  Stop: session.end
+  # Verified against the generated JSON schemas in openai/codex: the vendor
+  # ships SessionEnd, which fires on close or after 30 min idle and runs for
+  # the root only, not for subagents. It also ships the SubagentStart and
+  # SubagentStop pair, spelled as in claude-code. SubagentStop replaces Stop
+  # for thread-spawned children and carries agent_transcript_path and
+  # last_assistant_message, both nullable. Which transcript transcript_path
+  # names across the pair is read off the schemas only and is unverified
+  # until a live codex subagent turn is captured. The code does not depend
+  # on it: it reads the child's transcript ONLY from agent_transcript_path,
+  # never from transcript_path.
+  SessionEnd: session.end
+  SubagentStart: subagent.start
+  SubagentStop: subagent.stop
+  # UNMAPPED (deliberate): codex also emits PreCompact and PostCompact. The
+  # canonical model has compact.pre, but the installer wires neither and
+  # neither is mapped here, so both fall through as unknown events rather
+  # than being half-handled. Mapping them means adding the registration to
+  # install.go's event roster AND the published spec table
+  # (spec/hook-profile/mappings/codex/) in the same change. The drift guard
+  # (TestAdapterSpecMappingDrift) fails loudly if only one side moves.
+
+# Capture keys VERIFIED against the vendor docs
+# (learn.chatgpt.com/docs/hooks, formerly developers.openai.com/codex/hooks):
+# UserPromptSubmit carries `prompt`, and every event carries
+# `transcript_path`. That key is NULLABLE (string|null), and the vendor calls
+# the transcript format "not a stable interface". Sessions live at
+# ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl. The reply reader understands
+# the rollout line shape (response_item, payload.role=assistant,
+# content[].output_text) as a tolerant probe, so a vendor format change
+# degrades reply capture to a no-op, never an error. Re-verify per release.
+
+# Root reply capture is verified live against codex 0.146.0 by the g4-e2e
+# harness-matrix gate: codex flushes the assistant response_item to the
+# rollout about 30 to 40 ms BEFORE it fires Stop, so the transcript delta
+# captures the root turn, and straza.audit.reply lands server-side about 2 s
+# after the session.end drain. Not mapped on purpose:
+# `promptResponse: last_assistant_message`. Stop carries it, but Stop AND
+# SessionEnd both map to session.end, and a payload-first capture leaves the
+# watermark behind the reply's transcript bytes. The second session.end, or
+# the next prompt's late-recovery pin (pinTranscriptWatermark), would then
+# capture the same text again as a duplicate audit row. The delta lane needs
+# no dedupe and is MORE complete: it captures every assistant message of the
+# turn. last_assistant_message stays the SubagentStop fallback only
+# (agentReply).
+fields:
+  sessionId: session_id
+  workspace: cwd
+  toolName: tool_name
+  toolInput: tool_input
+  prompt: prompt
+  transcriptPath: transcript_path
+  # Delegation keys, from the openai/codex schemas: SubagentStop carries
+  # agent_transcript_path and last_assistant_message, both NULLABLE. The
+  # payload reply is the capture fallback when the child rollout is absent.
+  # The child path is read only from agent_transcript_path, because the
+  # transcript_path polarity across the subagent pair is unverified (see the
+  # events table above). agent_id/agent_type also flatten onto delegated
+  # tool.pre, tool.post and prompt.submit payloads, where they are optional.
+  agentTranscriptPath: agent_transcript_path
+  agentReply: last_assistant_message
+  agentId: agent_id
+  agentType: agent_type
+# Canonical hook payload tool_name values VERIFIED against the Codex source
+# at release tag rust-v0.144.6 (github.com/openai/codex,
+# codex-rs/core/src/tools/hook_names.rs and registry.rs):
+#   - shell, unified_exec and exec_command serialize tool_name `Bash`
+#     (HookToolName::bash()). The capitalized Edit/Write/Agent below are
+#     Codex's own matcher aliases (hook_names.rs), not payload names, kept
+#     for policy-config compatibility.
+#   - `apply_patch` is THE canonical serialized name for edits, and Write/Edit
+#     are only its aliases → file.edit.
+#   - `spawn_agent` is THE canonical serialized name for sub-agent spawns, and
+#     Agent is only its alias → task.spawn (registry.rs function_hook_tool_name).
+# The assignment rule is the one in the adapters/claude-code.yaml header.
+
+# MCP calls arrive as mcp__<server>__<tool> (handlers/mcp.rs ensure_mcp_prefix),
+# and classifyTool handles them. The parts are the sanitized model-facing
+# names, not the raw MCP names: sanitize_responses_api_tool_name
+# (codex-mcp/src/mcp/mod.rs, verified at rust-v0.146.0) keeps only
+# [A-Za-z0-9_] and rewrites every other character, hyphen included, to "_",
+# although MCP and OpenAI's own API pattern (^[a-zA-Z0-9_-]+$) both permit
+# hyphens. The raw name is nowhere in the hook payload
+# (PreToolUseCommandInput, deny_unknown_fields), so the change cannot be
+# undone client-side: gateway app `demo-tools` arrives as `demo_tools`.
+# Gateway-proxied calls therefore defer the whole decision to the gateway
+# PEP (LocalPDP.Decide), which sees the true names.
+
+# NON-gateway MCP servers have no PEP behind them, and policy matches their
+# sanitized names, so name their codex server keys and tools without hyphens
+# when hook-lane rules must target them precisely. Codex caps model-facing
+# names at 64 bytes, with a sha1 suffix past that. `mcp__straza__` spends 13,
+# so gateway `<app>__<tool>` names have a 51-byte budget before they hash and
+# stop parsing.
+tools:
+  Bash: shell.exec
+  Shell: shell.exec
+  LocalShell: shell.exec
+  Edit: file.edit
+  ApplyPatch: file.edit
+  apply_patch: file.edit
+  Write: file.write
+  Read: file.read
+  WebFetch: net.fetch
+  Task: task.spawn
+  spawn_agent: task.spawn
+toolInputs:
+  shell.exec: { command: [command] }
+  file.write: { paths: [file_path, path] }
+  file.edit: { paths: [file_path, path] }
+  file.read: { paths: [file_path, path] }
+  net.fetch: { paths: [url] }
+
+# Managed/system settings layer. Codex reads no managed-settings.json on any
+# platform, and there is no /Library/Application Support/Codex: codex reads
+# /etc even on darwin. The managed layer is a requirements.toml, verified
+# against learn.chatgpt.com/docs/hooks ("Managed hooks from
+# requirements.toml") and codex-rs/config/src/{loader/mod.rs,
+# config_requirements.rs,hook_config.rs}. Floor: rust-v0.124.0. Hooks went
+# GA in that release, which also added requirements.toml hook support, so an
+# older codex ignores this file entirely.
+
+# Hooks sourced from this file are MANAGED: auto-trusted (no /hooks step) and
+# not disableable from the user hook browser, the only codex lane straza can
+# honestly call enforcing. The block straza writes pins [features].hooks = true
+# so a user's own `hooks = false` cannot switch the fleet off. The lockdown
+# knob `allow_managed_hooks_only = true` (top-level, valid ONLY in
+# requirements.toml) makes codex ignore user, project, session and plugin
+# hooks entirely. straza prints it and never writes it, because disabling
+# hooks the user installed is the administrator's decision. Measured as
+# "hooks.codex". The USER-scope hooks.json is deliberately NOT measured: it
+# is user-writable, so every ordinary edit would read as tampering, and a
+# user-scope hook is trust-gated anyway, so a hash of it proves nothing about
+# enforcement.
+managedSettings:
+  linux: /etc/codex/requirements.toml
+  darwin: /etc/codex/requirements.toml
+  windows: C:\ProgramData\OpenAI\Codex\requirements.toml
+
+# User-scope hook wiring (what `straza install codex` writes). $CODEX_HOME
+# defaults to ~/.codex.
+userHooks: $CODEX_HOME/hooks.json
+# The retired user hooks file: older straza installs wrote it, and no codex
+# release reads it. Install and uninstall remove it, and doctor warns about it.
+retiredUserHooks: $CODEX_HOME/settings.json
+
+# MCP server registration. Unlike claude-code (~/.claude.json) and gemini
+# (settings.json), codex reads its MCP servers from $CODEX_HOME/config.toml:
+# TOML, in the same directory as the hook settings above, key
+# [mcp_servers.<name>] with command/args. VERIFIED against the vendor
+# docs; re-verify per release. There is NO vendor-documented system/managed
+# scope for it: the managed layer codex clones from claude-code covers hooks
+# only, so
+# `install --managed` writes the registration into the INVOKING user's
+# config.toml pointing at the managed binary (internal/agentguard:
+# CodexMCPConfigPathForInvoker), and it is deliberately not a measured
+# attestation artifact: the file is user-writable, so measuring it would read
+# every ordinary user edit as tampering. straza owns only a marker-delimited
+# block inside that file (# BEGIN/END straza-managed); everything else in it is
+# the user's and is preserved byte-for-byte.

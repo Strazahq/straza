@@ -1,0 +1,305 @@
+# Who may decide a hold and who is told, on the hook lane. A rule that
+# names an ordinary access role as a decider is stored as a draft and
+# refused at activation with the violation in the answer. A rule that
+# names nobody routes to the requester's sponsor, so an agent with no
+# sponsor is denied at request time with the cause in the reason and no
+# record is opened. Once the IdM sets the sponsor, the same call opens a
+# pending record that carries the sponsor's username.
+#
+# Shapes the binary forced on the corpus, each with how it was verified: the
+# approvals list is an object with an approvals array, the activate body is
+# {status: active|draft}, a policy delete answers 204 and role deletes
+# answer 200, all recorded on j0-golden-path [live]. The agent is
+# provisioned with the agentic extension URN, which is what makes the row
+# an NHI (scim-profile §5 and j0) [doc]. The steps marked "suspect" below
+# assert a status code or a wording the published sources leave open; each
+# is listed in the lane report.
+id: g4-hold-routing
+group: G4
+title: An access role cannot decide, a rule naming nobody routes to the sponsor, and an unsponsored agent is denied at request time
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (fail closed with an actionable reason);
+  spec/policyset/SPEC.md revision 15 (approve.roles must name approver
+  roles or straza-admin; an access role is refused at validate and at
+  activation with 400 listing every violation and its fix; drafts may
+  still be applied), revision 14 (a bare approve rule behaves as
+  deciders: [sponsor]; a request whose pool resolves empty is denied at
+  request time with the cause and the fix in the reason and no pending
+  record is created), revision 13 (the sponsor is resolved at request
+  time and persisted on the record as approver_users; a usable sponsor
+  is an active non-NHI user other than the requester);
+  spec/scim-profile/SPEC.md §3.2 (sponsor is a read-write extension
+  attribute whose value is the accountable human's username; PATCH by
+  the URN-qualified path) and §5 (a create carrying the agentic URN is
+  an NHI), conformance/scim user-typology and agent-user;
+  pkg/api/openapi.yaml POST /v1/admin/policies/{name}/activate (an
+  approve.roles entry that is not an approver role or straza-admin
+  answers 400 and the set stays draft), the PolicySet schema (status
+  draft or active), the Approval schema (approverUsers: the usernames
+  allowed to decide, resolved from the rule's deciders at request time,
+  today the requester's sponsor; approverRoles), the decide routes (403);
+  website/content/concepts/approvals-model.md (a rule that names nobody
+  routes to the sponsor; an empty pool is denied at request time with
+  the cause and the fix in the reason);
+  website/content/concepts/identities.md (a usable sponsor is an active
+  human other than the requester; an unsponsored agent is denied at once);
+  website/content/guides/govern-an-agent/any-mcp-client.md (the
+  sentence "Straza: approval cannot be routed: requester ... has no
+  sponsor, and rule ... names no approver roles").
+  suspect: the success status codes of the admin routes; that the apply
+  route stores the draft and only activation refuses the access role,
+  which revision 15 states as drafts may still be applied; the
+  unroutable sentence, which is published on a gateway transcript and
+  assumed identical on the hook lane; the 403 for the bootstrap admin on
+  a record whose pool is the sponsor alone, which revision 15 states as
+  a decider must hold one of the record's roles or sit in its
+  user-scoped pool while no page says whether an administrator may
+  decide every record.
+harnesses: [claude-code]
+identities:
+  dan: {kind: human, password: "Walk-2026!"}
+  bot-1: {kind: nhi}
+steps:
+  # 1. An access role in approve.roles is stored as a draft and refused at activation.
+  - name: the admin creates the application role the policies will match
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-route, kind: application, description: "Routing scenario, the matched role"}
+    want: {status: 201}
+    save: {routeRoleId: id}
+  - name: the admin creates an ordinary access role that a decider pool must never name
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-plain, kind: application, description: "Routing scenario, an access role that must not decide"}
+    want: {status: 201}
+    save: {plainRoleId: id}
+  - name: a set whose decider pool names the access role is stored as a draft
+    # suspect: revision 15 says drafts may still be applied and the gate runs at validate and activation
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-refused
+            description: Routing scenario, a pool that names an access role
+          spec:
+            match:
+              roles: [g4-route]
+            rules:
+              - id: held-by-access-role
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [g4-plain]
+                reason: "G4-REFUSED: an access role must never decide"
+    want: {status: 201}
+  - name: activating that set is refused with 400 and the answer names the offending role
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-refused/activate
+      body: {status: active}
+    want: {status: 400, bodyContains: "g4-plain"}
+  - name: the refused set stayed a draft
+    admin:
+      method: GET
+      path: /v1/admin/policies/g4-refused
+    want:
+      status: 200
+      body: {status: draft}
+
+  # 2. A rule that names nobody routes to the sponsor, and an agent without one is denied at request time.
+  - name: the IdM provisions dan, the human who will sponsor the agent
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-dan
+        userName: dan
+        displayName: Dan Sponsor
+        active: true
+    want: {status: 201}
+    save: {danId: id}
+  - name: the admin sets dan's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${danId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM provisions the agent as an NHI with no sponsor
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas:
+          - "urn:ietf:params:scim:schemas:core:2.0:User"
+          - "urn:ietf:params:scim:schemas:extension:agent:2.0:Agent"
+          - "urn:straza:params:scim:schemas:extension:2.0:User"
+        externalId: idm-g4-bot-1
+        userName: bot-1
+        displayName: Routing scenario agent
+        userType: agent
+        active: true
+        "urn:straza:params:scim:schemas:extension:2.0:User":
+          agencyMode: supervised
+    want:
+      status: 201
+      body: {userName: bot-1, userType: agent}
+    save: {botId: id}
+  - name: the IdM finds the matched role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g4-route"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: the agent becomes a member of the matched role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${botId}"}]
+    want: {status: 200}
+  - name: the admin applies a set whose hold names no roles and no deciders
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-route
+            description: Routing scenario, a bare approve that falls on the sponsor
+          spec:
+            match:
+              roles: [g4-route]
+            rules:
+              - id: bare-hold
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: approve
+                reason: "G4-ROUTE: deploy is held for the requester's sponsor"
+    want: {status: 201}
+  - name: the admin activates the bare-approve set
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-route/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: the agent enrolls headless on its local key
+    enroll: {as: bot-1}
+  - name: the agent starts a session
+    hook:
+      as: bot-1
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: the unsponsored agent's held call is denied at request time with the cause in the reason
+    # suspect: the sentence is published on a gateway transcript and assumed identical on the hook lane
+    hook:
+      as: bot-1
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval cannot be routed"}
+  - name: no pending record was opened for the unroutable request
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0: null}
+  - name: the unroutable deny is on the chain once as a tool record with the cause
+    audit: {subject: bot-1, kind: tool.pre, decision: deny, reasonContains: "cannot be routed", count: 1}
+
+  # 3. The IdM sets the sponsor and the same call opens a record routed to that person.
+  - name: the IdM sets dan as the agent's sponsor through the extension attribute
+    scim:
+      method: PATCH
+      path: /scim/v2/Users/${botId}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: replace
+            path: "urn:straza:params:scim:schemas:extension:2.0:User:sponsor"
+            value: dan
+    want: {status: 200}
+  - name: the same call now opens a request, routed to the sponsor
+    hook:
+      as: bot-1
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval requested"}
+    within: 10s
+  - name: the pending record carries the sponsor's username as its decider and no roles
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.lane: hook, approvals.0.rule: bare-hold, approvals.0.approverUsers.0: dan, approvals.1: null}
+    save: {routedId: approvals.0.id}
+  - name: the request phase of the routed hold is on the chain once
+    audit: {subject: bot-1, kind: straza.audit.approval, count: 1}
+  - name: the bootstrap admin is not in the record's pool and is refused when approving it
+    # suspect: revision 15 says a decider must hold one of the record's roles or sit in its user-scoped pool, and this record has the sponsor alone
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${routedId}/approve
+    want: {status: 403}
+  - name: the routed record is still pending after the refused decide
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${routedId}
+    want:
+      status: 200
+      body: {approval.state: pending}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the bare-approve set
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-route/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the bare-approve draft is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g4-route
+    want: {status: 204}
+  - name: the refused draft is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g4-refused
+    want: {status: 204}
+  - name: the admin deletes the matched role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${routeRoleId}
+    want: {status: 200}
+  - name: the admin deletes the access role that was refused as a decider
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${plainRoleId}
+    want: {status: 200}
+  - name: the IdM deactivates the agent
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${botId}
+    want: {status: 204}
+  - name: the IdM deactivates dan
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${danId}
+    want: {status: 204}

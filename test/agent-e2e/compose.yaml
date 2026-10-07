@@ -1,0 +1,63 @@
+# Agent-e2e lane: a self-contained, model-driven end-to-end
+# harness: standalone strazad + a small local LLM (ollama) + a runner image
+# carrying the repo's OWN straza binary and the stdlib python agentkit.
+# Real sessions, real prompts, real denies; zero API keys, zero contact with
+# the eval enterprise stack.
+#
+#   ./run.sh                 # fresh boot + full episode suite
+#   STRAZA_E2E_MODEL=qwen2.5:0.5b ./run.sh   # smaller model on tight RAM
+#
+# Strazad is standalone-profile (SQLite, built-in issuer, starter policy)
+# so the harness fully owns policy/identity state. Named volumes only, no
+# bind mounts, so no SELinux :z labels needed on RHEL-family hosts.
+name: straza-agent-e2e
+
+services:
+  straza-data-init:
+    # The scratch image runs as uid 65532 but Docker creates named volumes
+    # root-owned; hand the data dir over once (same pattern as the eval stack).
+    image: busybox:1.36
+    command: ["chown", "-R", "65532:65532", "/var/lib/straza"]
+    volumes:
+      - straza-data:/var/lib/straza
+
+  strazad:
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile
+    command: ["serve", "--profile", "standalone", "--listen", "0.0.0.0:8420"]
+    environment:
+      # The advertised base URL (session-token issuer + OIDC discovery). The
+      # default 127.0.0.1 would send the runner container dialing itself.
+      STRAZA_PUBLIC_URL: http://strazad:8420
+    depends_on:
+      straza-data-init:
+        condition: service_completed_successfully
+    volumes:
+      - straza-data:/var/lib/straza
+    ports:
+      - "127.0.0.1:8421:8420" # host-side debugging only; the lane talks in-network
+
+  ollama:
+    image: ollama/ollama:0.6.8
+    volumes:
+      - ollama-models:/root/.ollama # model cache survives runs
+
+  runner:
+    build:
+      context: ../..
+      dockerfile: test/agent-e2e/runner/Dockerfile
+    profiles: ["runner"] # started explicitly by run.sh via `compose run`
+    environment:
+      STRAZA_SERVER: http://strazad:8420
+      OLLAMA_URL: http://ollama:11434
+      E2E_MODEL: ${STRAZA_E2E_MODEL:-qwen2.5:1.5b}
+      STRAZA_ADMIN_PASSWORD: ${STRAZA_ADMIN_PASSWORD:-}
+      STRAZA_E2E_INTERACTIVE: ${STRAZA_E2E_INTERACTIVE:-}
+    depends_on:
+      - strazad
+      - ollama
+
+volumes:
+  straza-data: {}
+  ollama-models: {}

@@ -1,0 +1,18 @@
+{
+  "specversion": "1.0",
+  "id": "01a0b8d6-3b44-7c50-9d61-4e5f60718293",
+  "type": "straza.audit.admin",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-09-24T11:02:15.880Z",
+  "data": {
+    "action": "roles.implication.create",
+    "actor": "alice",
+    "actorId": "0197fa3d-1111-7abc-9def-000000000001",
+    "actorVia": "session",
+    "target": "0199a3b1-4c2d-7e5f-8a01-7b3c4d5e6f11",
+    "role": "developer",
+    "implies": "github-readers",
+    "impliesId": "01a0b8d4-1a23-7b30-8c41-3d4e5f607183",
+    "draft": "42"
+  }
+}

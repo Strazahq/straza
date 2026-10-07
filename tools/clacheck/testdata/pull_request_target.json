@@ -1,0 +1,21 @@
+{
+  "action": "opened",
+  "number": 123,
+  "pull_request": {
+    "url": "https://api.github.com/repos/strazahq/straza/pulls/123",
+    "id": 2890123456,
+    "number": 123,
+    "state": "open",
+    "locked": false,
+    "title": "Fix the retry delay in the audit sink",
+    "user": {"login": "alice", "id": 1001, "type": "User"},
+    "body": "The sink waited twice as long as configured before a retry.",
+    "head": {"label": "alice:retry-delay", "ref": "retry-delay", "sha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00"},
+    "base": {"label": "strazahq:main", "ref": "main", "sha": "0dd0dd000dd0dd000dd0dd000dd0dd000dd0dd00"},
+    "merged": false,
+    "commits": 1
+  },
+  "repository": {"id": 900, "name": "straza", "full_name": "strazahq/straza", "private": false, "default_branch": "main"},
+  "organization": {"login": "strazahq", "id": 200001},
+  "sender": {"login": "alice", "id": 1001, "type": "User"}
+}

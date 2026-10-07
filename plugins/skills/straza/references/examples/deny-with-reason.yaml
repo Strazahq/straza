@@ -1,0 +1,29 @@
+# Deny two destructive command families for the application role dev-tools, with one reason per family.
+# Enterprise profile: rule local-tools opens the lane the profile denies by default. Drop it on standalone.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: deny-with-reason
+  description: Open the local tools for dev-tools and deny recursive force-deletes and force-pushes with a reason
+spec:
+  match:
+    roles: [dev-tools]
+  rules:
+    - id: local-tools
+      events: [tool.pre]
+      tools: [shell.exec, file.read, file.write, file.edit]
+      effect: allow
+    - id: no-rm-rf
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["rm -rf *", "rm -r -f *"]
+      effect: deny
+      reason: "Straza: recursive force-delete is denied for this role. Delete the files one by one, or ask an admin to change the deny-with-reason policy"
+    - id: no-force-push
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["git push --force*", "git push -f *"]
+      effect: deny
+      reason: "Straza: force-push is denied for this role. Push a new branch and open a pull request, or ask an admin to change the deny-with-reason policy"

@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Keycloak as a midPoint resource (openstandia/connector-keycloak, built by the
+  kc-connector-build compose service). midPoint manages the LOGIN account side:
+  creating joe here gives him a Keycloak login in realm `straza`; disabling him
+  cuts authentication, the complement to the Straza SCIM resource's
+  authorization cut (a leaver flow triggers both).
+
+  Imported by eval-seed, which replaces __KC_NAMESPACE__ with the namespace the
+  loaded connector actually advertises (discovered via midPoint REST, never
+  guessed) and __KC_ADMIN_PASSWORD__ from the compose environment.
+  Eval-only shortcut: the connector authenticates as the master-realm
+  bootstrap admin via admin-cli; use a dedicated service account in production.
+-->
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
+          xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3"
+          xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3"
+          xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          xmlns:kc="__KC_NAMESPACE__"
+          oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c04">
+
+  <name>Keycloak (realm straza)</name>
+  <description>
+    Login accounts in the eval Keycloak realm. Auth cut: disable here stops new
+    logins; the Straza SCIM resource's active=false kills running sessions.
+  </description>
+
+  <connectorRef type="ConnectorType">
+    <filter>
+      <q:equal>
+        <q:path>connectorType</q:path>
+        <q:value>jp.openstandia.connector.keycloak.KeycloakConnector</q:value>
+      </q:equal>
+    </filter>
+  </connectorRef>
+
+  <connectorConfiguration>
+    <icfc:configurationProperties>
+      <kc:serverUrl>http://keycloak:8080</kc:serverUrl>
+      <kc:username>admin</kc:username>
+      <kc:password>
+        <clearValue>__KC_ADMIN_PASSWORD__</clearValue>
+      </kc:password>
+      <kc:clientId>admin-cli</kc:clientId>
+      <kc:realmName>master</kc:realmName>
+      <kc:targetRealmName>straza</kc:targetRealmName>
+    </icfc:configurationProperties>
+  </connectorConfiguration>
+
+  <schemaHandling>
+    <objectType>
+      <kind>account</kind>
+      <intent>default</intent>
+      <displayName>Keycloak login</displayName>
+      <default>true</default>
+      <!-- openstandia defines a CUSTOM object class named "user" (not the
+           ConnId __ACCOUNT__ alias), so the class is ri:user -->
+      <objectClass>ri:user</objectClass>
+      <attribute>
+        <!-- the connector declares __NAME__ with nativeName "username", and
+             midPoint 4.9+ surfaces NATIVE names: ri:username, not icfs:name -->
+        <ref>ri:username</ref> <!-- must equal SCIM userName (account linking) -->
+        <outbound>
+          <strength>strong</strength>
+          <source><path>$user/name</path></source>
+        </outbound>
+        <!-- correlation-only inbound: makes the account's username
+             available to the correlator below at correlation time, never
+             writing the focus during normal clockwork. -->
+        <inbound>
+          <name>kc-username-correlation</name>
+          <strength>weak</strength>
+          <evaluationPhases>
+            <include>beforeCorrelation</include>
+            <exclude>clockwork</exclude>
+          </evaluationPhases>
+          <target><path>name</path></target>
+        </inbound>
+      </attribute>
+      <attribute>
+        <ref>ri:email</ref>
+        <outbound>
+          <source><path>$user/emailAddress</path></source>
+        </outbound>
+      </attribute>
+      <attribute>
+        <!-- Keycloak 26's default user profile REQUIRES firstName/lastName;
+             without them logins fail with "Account is not fully set up" -->
+        <ref>ri:firstName</ref>
+        <outbound>
+          <source><path>$user/givenName</path></source>
+        </outbound>
+      </attribute>
+      <attribute>
+        <ref>ri:lastName</ref>
+        <outbound>
+          <source><path>$user/familyName</path></source>
+        </outbound>
+      </attribute>
+      <attribute>
+        <!-- IdM-provisioned users are trusted: mark email verified so Keycloak
+             doesn't block direct-grant logins with "Account is not fully set up" -->
+        <ref>ri:emailVerified</ref>
+        <outbound>
+          <strength>strong</strength>
+          <expression><value>true</value></expression>
+        </outbound>
+      </attribute>
+      <credentials>
+        <password>
+          <outbound/> <!-- asIs: pushes the midPoint-set password to Keycloak -->
+        </password>
+      </credentials>
+      <activation>
+        <existence><outbound/></existence>
+        <administrativeStatus><outbound/></administrativeStatus>
+      </activation>
+      <!-- Pinned realm-import accounts (alice, whose Keycloak id strazad's
+           external_id bindings depend on) pre-exist midPoint's create. This
+           correlation + the link reaction turn the connector's AlreadyExists
+           into discover-correlate-link instead of a 500 that would stop the
+           seed. -->
+      <correlation>
+        <correlators>
+          <items>
+            <item>
+              <ref>name</ref>
+            </item>
+          </items>
+        </correlators>
+      </correlation>
+      <synchronization>
+        <reaction>
+          <situation>unlinked</situation>
+          <actions><link/></actions>
+        </reaction>
+      </synchronization>
+    </objectType>
+  </schemaHandling>
+</resource>

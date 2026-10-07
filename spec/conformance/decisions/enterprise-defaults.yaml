@@ -1,0 +1,59 @@
+# Decision-table fixtures: enterprise profile defaults (local tools deny).
+profile: enterprise
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: ent-allowlist }
+    spec:
+      match: { roles: [dev] }
+      rules:
+        - id: allow-git-readonly
+          tools: [shell.exec]
+          command: { allowPatterns: ["git status*", "git log*", "git diff*"] }
+          effect: allow
+cases:
+  - name: unlisted-shell-denied-by-profile-default
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "ls -la" }
+    want: { effect: deny, default: true }
+  - name: explicit-allow-beats-enterprise-default
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "git status" }
+    want: { effect: allow, ruleId: allow-git-readonly }
+  - name: file-write-denied-by-default
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, paths: [/anywhere.txt] }
+    want: { effect: deny, default: true }
+  - name: other-tool-denied-by-default
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: other }
+    want: { effect: deny, default: true }
+  - name: mcp-default-deny-in-both-profiles
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: get_repo }
+    want: { effect: deny, default: true }
+  # Revision 17: the granted fact allows by default in the enterprise profile
+  # too; the profile default governs local tools only [doc].
+  - name: mcp-granted-allows-in-enterprise-profile
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: get_repo, granted: true }
+    want: { effect: allow, default: true }
+  - name: observational-events-still-allow
+    subject: { user: kim, roles: [dev] }
+    event: { kind: session.end }
+    want: { effect: allow, default: true }
+  # Revision 24: an unknown kind is denied before any rule is read, and an
+  # unknown tool or no tool takes the enterprise deny like other [doc].
+  - name: unknown-kind-denied
+    subject: { user: kim, roles: [dev] }
+    event: { kind: made-up.kind, tool: shell.exec, command: "git status" }
+    want: { effect: deny }
+  - name: unknown-tool-denied-by-profile-default
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: made-up-tool, command: "git status" }
+    want: { effect: deny, default: true }
+  - name: blocking-event-without-tool-denied-by-profile-default
+    subject: { user: kim, roles: [dev] }
+    event: { kind: permission.request }
+    want: { effect: deny, default: true }

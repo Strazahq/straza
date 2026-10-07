@@ -1,0 +1,224 @@
+{
+  "name": "user-typology",
+  "steps": [
+    {
+      "note": "create an agent identity: core userType + Straza extension typology (spec/scim-profile §3.2) accepted at POST",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:straza:params:scim:schemas:extension:2.0:User"
+          ],
+          "userName": "atlas-t",
+          "userType": "agent",
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "agencyMode": "autonomous",
+            "sponsor": "kim",
+            "swarmId": "scan-fleet-1",
+            "ephemeral": true
+          }
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "userName": "atlas-t",
+          "userType": "agent",
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "agencyMode": "autonomous",
+            "sponsor": "kim",
+            "swarmId": "scan-fleet-1",
+            "ephemeral": true,
+            "locked": false
+          }
+        }
+      },
+      "capture": { "uid": "id" }
+    },
+    {
+      "note": "PATCH by URN-qualified path reclassifies agencyMode (typology is read-WRITE; only the lock block is read-only)",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            { "op": "replace", "path": "urn:straza:params:scim:schemas:extension:2.0:User:agencyMode", "value": "supervised" }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": { "agencyMode": "supervised" }
+        }
+      }
+    },
+    {
+      "note": "PATCH by bare attribute name works too (case-insensitive paths, §3)",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [{ "op": "replace", "path": "userType", "value": "service" }]
+        }
+      },
+      "expect": { "status": 200, "subset": { "userType": "service" } }
+    },
+    {
+      "note": "vocabulary is enforced: an unknown userType is invalidValue, never stored",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [{ "op": "replace", "path": "userType", "value": "robot" }]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "invalidValue" } }
+    },
+    {
+      "note": "unknown agencyMode is refused the same way",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            { "op": "replace", "path": "urn:straza:params:scim:schemas:extension:2.0:User:agencyMode", "value": "yolo" }
+          ]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "invalidValue" } }
+    },
+    {
+      "note": "PUT without typology attributes leaves the classification UNTOUCHED (§3.2 deviation: an IdM that does not map the extension must not clobber it on recon)",
+      "request": {
+        "method": "PUT",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "atlas-t",
+          "displayName": "Atlas (renamed)"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "displayName": "Atlas (renamed)",
+          "userType": "service",
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "agencyMode": "supervised",
+            "sponsor": "kim",
+            "swarmId": "scan-fleet-1",
+            "ephemeral": true
+          }
+        }
+      }
+    },
+    {
+      "note": "PATCH remove clears a typology field",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            { "op": "remove", "path": "urn:straza:params:scim:schemas:extension:2.0:User:swarmId" }
+          ]
+        }
+      },
+      "expect": { "status": 200 }
+    },
+    {
+      "note": "the cleared field is gone from the render; the rest survives",
+      "request": { "method": "GET", "path": "/scim/v2/Users/{uid}" },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "agencyMode": "supervised",
+            "sponsor": "kim",
+            "locked": false
+          }
+        }
+      }
+    },
+    {
+      "note": "the lock block stays read-only even though its siblings are writable",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            { "op": "replace", "path": "urn:straza:params:scim:schemas:extension:2.0:User:locked", "value": false }
+          ]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "mutability" } }
+    },
+    {
+      "note": "Straza-born facts (revision 11): kind is server-mastered, a bare-path PATCH is refused",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            { "op": "replace", "path": "kind", "value": "nhi" }
+          ]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "mutability" } }
+    },
+    {
+      "note": "origin is refused on the URN-qualified path too",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            { "op": "replace", "path": "urn:straza:params:scim:schemas:extension:2.0:User:origin", "value": "local" }
+          ]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "mutability" } }
+    },
+    {
+      "note": "a whole-extension PATCH smuggling kind refuses the same way (writable siblings do not carry it through)",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            { "op": "replace", "path": "urn:straza:params:scim:schemas:extension:2.0:User", "value": { "sponsor": "carol", "kind": "nhi" } }
+          ]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "mutability" } }
+    },
+    {
+      "note": "nothing was stored: the render still carries the server-born facts (URN-less create = kind human, SCIM provisioning = origin scim) beside the surviving typology",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Users/{uid}"
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "kind": "human",
+            "origin": "scim",
+            "locked": false
+          }
+        }
+      }
+    }
+  ]
+}

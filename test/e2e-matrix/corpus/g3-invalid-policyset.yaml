@@ -1,0 +1,234 @@
+# Documents the published examples mark invalid are refused by the validate
+# route with a plain reason and are never stored, and the two semantic
+# rules that only the server can check (match.roles must name application
+# roles, approve.roles must name approver roles or straza-admin) refuse at
+# validate too. A valid document is the positive control.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+id: g3-invalid-policyset
+group: G3
+title: An invalid PolicySet is refused by validate with a plain reason and nothing is stored
+provenance: >-
+  doc spec/policyset/SPEC.md §2 items 3 and 4 (a vacuous rule and a
+  contradictory effect are rejected at validation), §1 revision 16
+  (match.roles refuses a business role at validate, 400), revision 15
+  (approve.roles refuses an access role at validate, 400), revision 18
+  (an obligations list is refused at validate, 400);
+  spec/policyset/examples/invalid-bad-effect.yaml,
+  invalid-no-rules.yaml, invalid-vacuous-rule.yaml,
+  invalid-unknown-tool.yaml, valid-minimal.yaml;
+  website/content/reference/api.md sections Errors (an error answer is a
+  JSON object whose error field is a sentence) and PolicySets.
+  suspect: the success status codes are assumed, and 404 for a
+  PolicySet that was never stored.
+harnesses: [claude-code]
+identities: {}
+steps:
+  - name: a valid document passes validate, the positive control
+    admin:
+      method: POST
+      path: /v1/admin/policies/validate
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: deny-everything
+          spec:
+            rules:
+              - id: lockdown
+                tools: [shell.exec, file.write, file.edit, net.fetch, mcp.call, task.spawn, other]
+                effect: deny
+                reason: "Lockdown in effect. Contact security"
+    want: {status: 200}
+  - name: an effect outside allow and deny is refused
+    admin:
+      method: POST
+      path: /v1/admin/policies/validate
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: bad-effect
+          spec:
+            rules:
+              - id: rule-one
+                tools: [shell.exec]
+                effect: maybe
+                reason: "nope"
+    want: {status: 400}
+  - name: a set with no rules is refused
+    admin:
+      method: POST
+      path: /v1/admin/policies/validate
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: empty-set
+          spec:
+            priority: 5
+            rules: []
+    want: {status: 400}
+  - name: a rule with no effect, no matcher and no require is refused as vacuous
+    admin:
+      method: POST
+      path: /v1/admin/policies/validate
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: vacuous
+          spec:
+            rules:
+              - id: does-nothing
+                events: [tool.pre]
+                tools: [shell.exec]
+    want: {status: 400}
+  - name: a tool outside the canonical taxonomy is refused
+    admin:
+      method: POST
+      path: /v1/admin/policies/validate
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: unknown-tool
+          spec:
+            rules:
+              - id: rule-one
+                tools: [database.query]
+                effect: deny
+    want: {status: 400}
+  - name: an allow effect beside only deny-side patterns is refused as contradictory
+    admin:
+      method: POST
+      path: /v1/admin/policies/validate
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: contradictory-effect
+          spec:
+            rules:
+              - id: says-allow-matches-deny
+                tools: [shell.exec]
+                command:
+                  denyPatterns: ["rm -rf *"]
+                effect: allow
+                reason: "G3-INVALID: this rule contradicts itself"
+    want: {status: 400}
+  - name: a retired obligations list is refused at validate
+    admin:
+      method: POST
+      path: /v1/admin/policies/validate
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: obligations-retired
+          spec:
+            rules:
+              - id: carries-obligations
+                tools: [shell.exec]
+                effect: deny
+                reason: "G3-INVALID: obligations never ran"
+                obligations: [notify]
+    want: {status: 400}
+  - name: the admin creates a business role to prove the match.roles kind rule
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g3-biz, kind: business, description: "A business role a policy must not match"}
+    want: {status: 201}
+    save: {bizRoleId: id}
+  - name: a set whose match.roles names a business role is refused at validate
+    admin:
+      method: POST
+      path: /v1/admin/policies/validate
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: matches-business-role
+          spec:
+            match:
+              roles: [g3-biz]
+            rules:
+              - id: deny-all
+                tools: [shell.exec]
+                effect: deny
+                reason: "G3-INVALID: a business role is not a matcher"
+    want: {status: 400}
+  - name: the admin creates an application role to prove the approve.roles kind rule
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g3-app, kind: application, description: "An application role a decider pool must not name"}
+    want: {status: 201}
+    save: {appRoleId: id}
+  - name: a decider pool naming an access role is refused at validate
+    admin:
+      method: POST
+      path: /v1/admin/policies/validate
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: access-role-decides
+          spec:
+            rules:
+              - id: held-by-access-role
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [g3-app]
+                reason: "G3-INVALID: an access role must never decide"
+    want: {status: 400}
+  - name: the upsert route refuses the same invalid document instead of storing a draft
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: bad-effect
+          spec:
+            rules:
+              - id: rule-one
+                tools: [shell.exec]
+                effect: maybe
+                reason: "nope"
+    want: {status: 400}
+  - name: nothing was stored under the refused name
+    admin:
+      method: GET
+      path: /v1/admin/policies/bad-effect
+    want: {status: 404}
+  - name: the admin deletes the business role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${bizRoleId}
+    want: {status: 200}
+  - name: the admin deletes the application role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${appRoleId}
+    want: {status: 200}

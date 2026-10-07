@@ -1,0 +1,26 @@
+# Golden scenario: declarative apps lane on top of turnkey; manifests render
+# into the -apps ConfigMap, mount at /etc/straza/apps, wire STRAZA_APPS_DIR,
+# and stamp a checksum annotation so edits roll the pods.
+oidc:
+  issuer: https://idp.example.com/realms/prod
+postgres:
+  passwordSecret: straza-db-password
+apps:
+  manifests:
+    demo-tools.yaml: |
+      apiVersion: straza.dev/v1beta1
+      kind: App
+      metadata:
+        name: demo-tools
+        namespace: io.modelcontextprotocol
+        description: MCP reference server via streamable HTTP
+      server:
+        name: io.modelcontextprotocol/server-everything
+        version: "2026.7.4"
+      straza:
+        runtime:
+          kind: remote
+          remote:
+            url: http://mcp-demo-tools:3001/mcp
+        exposure:
+          tools: ["*"]

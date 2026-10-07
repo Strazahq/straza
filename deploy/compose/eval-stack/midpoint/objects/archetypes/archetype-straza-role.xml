@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RoleType archetype: Straza role. Every Straza role imports as a RoleType focus
+  named "BR:<role>" for a business role and "AR:<role>" for every other
+  kind, and the resource's one role object type assigns the
+  archetype of the role's kind with an inbound mapping on ri:roleKind
+  (objects/resources/straza-resource.xml). A role's kind is fixed at create
+  in Straza, so the archetype is stamped once, when the focus is born.
+
+  The label carries the word Straza because midPoint ships stock archetypes
+  named "Business role" and "Application role". The console's headings for
+  the same four kinds are Business roles, Application roles, Approver roles
+  and Straza roles.
+
+  Display only: the membership construction lives in the "Straza role
+  metarole" (objects/roles/role-straza-metarole.xml), which every imported
+  role is assigned by an inbound mapping on the same object type.
+-->
+<archetype xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+           oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c28">
+    <name>straza-role</name>
+    <description>An imported Straza role (wire roleKind straza, the control plane): rights inside Straza itself, such as the console areas, the admin verbs, device enrollment and the admin role of an MCP server, never agent tools. The Administers column names the servers a server admin role administers. Imported read-only from Straza under its own name
+        behind midPoint's role-type code, BR: for a business role and AR: for
+        every other kind. Assigning it writes the membership, which is the
+        Straza role assignment.</description>
+    <archetypePolicy>
+        <display>
+            <label>Straza role</label>
+            <pluralLabel>Straza roles</pluralLabel>
+            <icon>
+                <cssClass>fa fa-shield-alt</cssClass>
+                <color>#db2828</color>
+            </icon>
+        </display>
+    </archetypePolicy>
+    <assignment>
+        <assignmentRelation>
+            <holderType>RoleType</holderType>
+        </assignmentRelation>
+    </assignment>
+</archetype>

@@ -1,0 +1,13 @@
+{{- define "line" }}- [{{ .Title }}]({{ .Permalink }}){{ with .Description }}: {{ . }}{{ end }}
+{{ end -}}
+# {{ site.Title }}
+
+> {{ site.Home.Description }}
+{{ range site.Home.Sections.ByWeight }}
+## {{ .Title }}
+
+{{ template "line" . }}
+{{- range .Pages.ByWeight }}{{ template "line" . }}
+{{- range .Pages.ByWeight }}{{ template "line" . }}
+{{- range .Pages.ByWeight }}{{ template "line" . }}
+{{- end }}{{ end }}{{ end }}{{ end }}

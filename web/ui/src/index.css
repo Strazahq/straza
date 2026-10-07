@@ -1,0 +1,79 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./tokens.css";
+@import "./console-layout.css";
+@import "./overview.css";
+@import "./overview-chart.css";
+
+/* Dark is the default, as in the console: the dark variant fires unless
+ * the system prefers light or data-theme says light, and always on an
+ * explicit data-theme="dark". shadcn's own convention is a toggled .dark
+ * class, so this block replaces its one-liner. */
+@custom-variant dark {
+  @media not (prefers-color-scheme: light) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+}
+
+/* shadcn's names read the console's tokens, imported above, which already
+ * carry both themes, so each name maps once and no hue is written here.
+ * Green, amber, red and violet stay reserved for trust states; ok, warn,
+ * danger and unknown carry them. */
+@theme inline {
+  --font-sans: var(--font-ui);
+  /* Tailwind's own name for the mono stack is the token's name, and a
+   * variable that reads itself is a cycle, so this one line repeats the
+   * stack of --font-mono in tokens.css. */
+  --font-mono: Menlo, ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--bg);
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--surface-2);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--danger);
+  --color-border: var(--border);
+  --color-input: var(--control-border);
+  --color-ring: var(--accent);
+  --color-text-2: var(--text-2);
+  --color-link: var(--accent);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-unknown: var(--unknown);
+  --color-teal: var(--teal);
+  --color-ok-bg: var(--ok-bg);
+  --color-warn-bg: var(--warn-bg);
+  --color-danger-bg: var(--danger-bg);
+  --color-unknown-bg: var(--unknown-bg);
+  --color-accent-bg: var(--accent-bg);
+  --color-teal-bg: var(--teal-bg);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* 14 px on data surfaces, the console's dense size (rules 7 and 20). */
+    font-size: 14px;
+  }
+}

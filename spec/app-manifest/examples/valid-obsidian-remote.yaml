@@ -1,0 +1,25 @@
+# A community remote app whose registry entry declares a secret Authorization
+# header ("Bearer {smithery_api_key}"), imported as an injection template.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: obsidian-github
+  namespace: ai.smithery
+server:
+  name: ai.smithery/Hint-Services-obsidian-github-mcp
+  description: Connect AI assistants to your GitHub-hosted Obsidian vault.
+  repository:
+    url: https://github.com/Hint-Services/obsidian-github-mcp
+    source: github
+  version: "0.4.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://server.smithery.ai/@Hint-Services/obsidian-github-mcp/mcp
+  credential:
+    kind: static
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"

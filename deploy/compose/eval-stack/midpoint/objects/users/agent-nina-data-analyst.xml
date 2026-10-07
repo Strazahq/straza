@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  nina-data-analyst-agent: the demo AUTONOMOUS AI agent identity. The
+  directly assigned ai-agent archetype types it (robot icon in the GUI).
+
+  Born with NO role assignments, so it exists in midPoint only: no Straza
+  account, nothing provisioned. The demo lane is to assign it
+  BR:Straza-analyst-access, the access package of the analyst role, in the
+  GUI and watch an AI agent get a governed Straza account (imported role
+  analyst: wire-group membership IS the assignment), and then disable it to
+  see the kill switch cut an AI agent specifically. The access package's
+  Keycloak inducement is human-gated, so materializing nina never grows a
+  Keycloak login.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c05">
+    <name>nina-data-analyst-agent</name>
+    <description>Autonomous data analyst agent (demo). Acts under its own
+        identity. Assign it the analyst role through BR:Straza-analyst-access
+        to provision it into the governed plane.</description>
+    <fullName>Nina (data analyst agent)</fullName>
+    <assignment>
+        <!-- persona archetype, assigned directly (ai-agent) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c22" type="ArchetypeType"/>
+    </assignment>
+</user>

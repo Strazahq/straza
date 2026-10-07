@@ -1,0 +1,36 @@
+{
+  "name": "agent-user",
+  "steps": [
+    {
+      "note": "an Agent-typed resource (IETF agentic-SCIM draft) is accepted and stored as an NHI user (D7; lifecycle activates v2)",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:ietf:params:scim:schemas:extension:agent:2.0:Agent"
+          ],
+          "externalId": "idm-agent-001",
+          "userName": "svc-ci-agent",
+          "displayName": "CI Agent",
+          "active": true
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "userName": "svc-ci-agent",
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:ietf:params:scim:schemas:extension:agent:2.0:Agent"
+          ],
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "kind": "nhi",
+            "origin": "scim"
+          }
+        }
+      }
+    }
+  ]
+}

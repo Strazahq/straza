@@ -1,0 +1,325 @@
+# The selfApproval flag, both ways, on one person. Pat holds the matched
+# role and the approver role, so she is an eligible decider on both rules of
+# the set. Under the rule that sets selfApproval true the record says so, and
+# her own login token is still refused on it with the sentence that says
+# where to decide it, because only her enrolled phone or browser can sign a
+# decision on her own request. Under the rule that leaves the flag at its
+# default she is refused with the other sentence, the self-exclusion. With
+# the straza-enroll-browser role her browser enrolls with a key the runner
+# makes for this run, she approves the self-approvable record on it, signed,
+# and her identical retry runs once while the peer-only record stays pending.
+#
+# The order matters. The approvals list is newest first, so the second
+# request is approvals.0 when its refusal is asserted and the first one,
+# still pending, is approvals.1.
+#
+# Shapes the binary forced on the corpus, each with how it was verified: the
+# approvals list is an object with an approvals array, the activate body is
+# {status: active|draft}, a policy delete answers 204 and role deletes answer
+# 200, all recorded on j0-golden-path [live]. The pending sentence
+# and the "approved by NAME" wording of an allowed retry are the transcripts
+# of the hold how-to guide [doc]. The steps marked "suspect" below assert a
+# status code or a field the published sources leave open; each is listed in
+# the lane report.
+id: g4-self-approval
+group: G4
+title: A rule that sets selfApproval marks the record, the requester's login token is refused on it, her enrolled browser decides it, and the default refuses with the self-exclusion
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (fail closed with an actionable reason);
+  spec/policyset/SPEC.md §2 item 8 (selfApproval, default false, governs
+  whether the requester may decide their own request; approve.roles names
+  the approver roles; the hook lane honors a single-use exemption keyed
+  session, rule and argv hash for retryTTLSeconds), §2 item 8a (approve
+  plus roles plus selfApproval true is the peer posture, the requester
+  included in the pool), revision 15 (an approve.roles entry must be an
+  approver-kind role or straza-admin, and a decider must freshly hold one
+  of the record's roles);
+  spec/events/SPEC.md §2.2 (one straza.audit.approval record when the
+  request opens and one when it resolves, the resolution carrying the
+  deciding user) and revision 38 (one more when a call uses a hold's
+  approval);
+  pkg/api/openapi.yaml POST /v1/admin/approvals/{id}/approve (security
+  userBearer, a person's session token or ID token; 200 and 403), the
+  Approval schema (state, rule, selfApproval, decidedByName), POST
+  /v1/admin/roles (kind approver) and POST /v1/admin/assignments, and the
+  approver-surface refusal that names requester self-exclusion as a bar on
+  self-approval;
+  pkg/api/openapi.yaml POST /v1/approvals/self/enroll-token (a person mints
+  an enroll token for their own browser or phone), POST /v1/approver/enroll
+  (201 with the approver credential), GET /v1/approver/pending (the
+  decidable rows, each with a single-use challenge) and POST
+  /v1/approver/decide (the signed decision, 200 with the final state);
+  website/content/guides/write-policy/hold-for-a-human.md (the requester
+  never decides their own request unless the rule says selfApproval true,
+  and an autonomous agent never gets that right whatever the rule says);
+  website/content/concepts/approvals-model.md section Who may answer;
+  website/content/reference/glossary.md (selfApproval is off by default and
+  is the personal lane where the human behind the agent confirms).
+  suspect: the success status codes of the admin routes and the
+  approvals.0 path into a one-record list; that decidedByName is the
+  deciding username, which no page states; the 403 for the self-excluded
+  requester, which the openapi lists as a code and the approver surface
+  describes as a sentence.
+harnesses: [claude-code]
+identities:
+  pat: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: one person who is both the requester and an eligible decider.
+  - name: the admin creates the application role the policy will match
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-self, kind: application, description: "Self-approval scenario, the matched role"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the admin creates the approver role that carries the decide authority
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-self-approve, kind: approver, description: "Self-approval scenario, the deciders"}
+    want: {status: 201}
+    save: {approverRoleId: id}
+  - name: the IdM provisions pat
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-pat
+        userName: pat
+        displayName: Pat Peer
+        active: true
+    want: {status: 201}
+    save: {patId: id}
+  - name: the admin sets pat's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${patId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM finds the matched role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g4-self"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: pat becomes a member of the matched role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${patId}"}]
+    want: {status: 200}
+  - name: the admin gives pat the approver role, so she is an eligible decider on both rules
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${patId}", role_id: "${approverRoleId}"}
+    want: {status: 201}
+  - name: the admin applies a PolicySet whose release rule allows self-approval and whose deploy rule does not
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-self
+            description: Self-approval scenario for role g4-self
+          spec:
+            match:
+              roles: [g4-self]
+            rules:
+              - id: self-allowed
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["release *"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [g4-self-approve]
+                  selfApproval: true
+                  timeoutSeconds: 900
+                  retryTTLSeconds: 300
+                reason: "G4-SELF: release is held, and the requester may decide it herself"
+              - id: peer-only
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [g4-self-approve]
+                  timeoutSeconds: 900
+                  retryTTLSeconds: 300
+                reason: "G4-SELF: deploy is held for someone other than the requester"
+    want: {status: 201}
+  - name: the admin activates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-self/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: pat enrolls
+    enroll: {as: pat}
+  - name: pat starts a session
+    hook:
+      as: pat
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # 1. Under selfApproval the requester decides her own request and the retry runs.
+  - name: the release command is held and denied with the pending sentence
+    hook:
+      as: pat
+      event: {kind: tool.pre, tool: shell.exec, command: "release app-one"}
+    want: {decision: deny, reasonContains: "approval requested"}
+  - name: the only pending record is the self-approval rule's, and it says so
+    # suspect: approvals.0 is the one record of a one-record list
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.rule: self-allowed, approvals.0.selfApproval: true, approvals.1: null}
+    save: {selfHold: approvals.0.id}
+  - name: pat's own login token is refused on her self-approvable record, and the answer says where to decide it
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${selfHold}/approve
+      as: pat
+      body: {reason: "G4-SELF: I meant this release"}
+    want: {status: 403, bodyContains: "your own request"}
+
+  # 2. Under the default the same person is refused on her own record.
+  - name: the deploy command is held under the rule that leaves selfApproval at its default
+    hook:
+      as: pat
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval requested"}
+  - name: the peer-only record is the newest pending one, above the self-approvable record nobody could sign
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.rule: peer-only, approvals.1.rule: self-allowed, approvals.2: null}
+    save: {peerHold: approvals.0.id}
+  - name: pat deciding this record is refused, although she holds the approver role that decided the other one
+    # suspect: the openapi lists 403 without a sentence, and the approver surface describes it as requester self-exclusion
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${peerHold}/approve
+      as: pat
+    want: {status: 403, bodyContains: "may not approve their own request"}
+  - name: the peer-only record is still pending after the refused decide
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${peerHold}
+    want:
+      status: 200
+      body: {approval.state: pending}
+  - name: two requests and no resolution are on the chain, two approval records
+    audit: {subject: pat, kind: straza.audit.approval, count: 2}
+
+  # 3. On her enrolled browser pat decides the record that allows it, and her retry runs once.
+  - name: the IdM finds the browser enrollment role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "straza-enroll-browser"'
+    want: {status: 200}
+    save: {enrollGid: Resources.0.id}
+  - name: pat becomes a member of the browser enrollment role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${enrollGid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${patId}"}]
+    want: {status: 200}
+  - name: pat mints an enroll token for her own browser
+    admin:
+      method: POST
+      path: /v1/approvals/self/enroll-token
+      as: pat
+      body: {channel: browser}
+    want: {status: 200}
+    save: {enrollToken: enroll_token}
+  - name: pat's browser enrolls with a key of its own
+    approver: {as: pat, action: enroll, token: "${enrollToken}"}
+    want: {status: 201}
+  - name: pat approves her self-approvable record on her enrolled browser, signed, in her own words
+    approver:
+      as: pat
+      action: decide
+      request: ${selfHold}
+      verdict: approve
+      reason: "G4-SELF: I meant this release"
+    want:
+      status: 200
+      body: {state: approved}
+  - name: the record says who decided it, from which surface and in which words
+    # suspect: decidedByName is assumed to be the deciding username
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${selfHold}
+    want:
+      status: 200
+      body:
+        approval.state: approved
+        approval.decidedByName: pat
+        approval.channel: browser
+        approval.decidedReason: "G4-SELF: I meant this release"
+  - name: pat's identical release retry is allowed by the single-use exemption
+    hook:
+      as: pat
+      event: {kind: tool.pre, tool: shell.exec, command: "release app-one"}
+    want: {decision: allow}
+  - name: the allowed retry is on the chain once and its reason names pat
+    audit: {subject: pat, kind: tool.pre, decision: allow, reasonContains: "approved by pat", count: 1}
+  - name: the peer-only record is still pending, because signing her own record decided nothing else
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${peerHold}
+    want:
+      status: 200
+      body: {approval.state: pending}
+  - name: two requests, one resolution and the retry's use are on the chain, four approval records
+    audit: {subject: pat, kind: straza.audit.approval, count: 4}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-self/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft PolicySet is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g4-self
+    want: {status: 204}
+  - name: the admin deletes the approver role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${approverRoleId}
+    want: {status: 200}
+  - name: the admin deletes the matched role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates pat
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${patId}
+    want: {status: 204}

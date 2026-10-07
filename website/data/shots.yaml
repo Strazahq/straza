@@ -1,0 +1,1276 @@
+# Console screenshots for the docs, written by tools/docs-shots/shots.py crop.
+# Do not edit by hand: change tools/docs-shots/shots.yaml and run the pipeline.
+# ring is the target's box in percent of the crop. width and height are the
+# crop's size in pixels. The comment above each entry is the click path.
+
+# Sign in with a code
+signin-code:
+  alt: "The console's sign-in card with a one-time code and the button Open the sign-in page"
+  dark: shots/signin-code-dark.png
+  light: shots/signin-code-light.png
+  full_dark: shots/full/signin-code-dark.png
+  full_light: shots/full/signin-code-light.png
+  ring: {left: 13.41, top: 64.5, width: 73.18, height: 11.0}
+  width: 440
+  height: 400
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Overview
+overview:
+  alt: "The console's Overview, Summary tab, with the counts of servers, sessions, users and policies and the tool decisions"
+  dark: shots/overview-dark.png
+  light: shots/overview-light.png
+  full_dark: shots/full/overview-dark.png
+  full_light: shots/full/overview-light.png
+  ring: {left: 40.79, top: 31.54, width: 37.89, height: 10.0}
+  width: 760
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Users > alice
+alice-assign:
+  alt: "alice's sheet in the console, with the role dev assigned and the Assign picker"
+  dark: shots/alice-assign-dark.png
+  light: shots/alice-assign-light.png
+  full_dark: shots/full/alice-assign-dark.png
+  full_light: shots/full/alice-assign-light.png
+  ring: {left: 1.81, top: 85.52, width: 34.44, height: 6.9}
+  width: 720
+  height: 580
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/users
+user-devices:
+  alt: "alice's sheet with the Devices section and her enrolled laptop"
+  dark: shots/user-devices-dark.png
+  light: shots/user-devices-light.png
+  full_dark: shots/full/alice-assign-dark.png
+  full_light: shots/full/alice-assign-light.png
+  ring: {left: 1.81, top: 15.62, width: 96.53, height: 68.75}
+  width: 720
+  height: 128
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Policies > standalone-starter
+starter-rules:
+  alt: "The standalone-starter policy page, Rules tab, with the shell patterns it denies"
+  dark: shots/starter-rules-dark.png
+  light: shots/starter-rules-light.png
+  full_dark: shots/full/starter-rules-dark.png
+  full_light: shots/full/starter-rules-light.png
+  ring: {left: 1.15, top: 46.79, width: 98.85, height: 17.86}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Test a call > Who: alice > Shell command > #pt-command: rm -rf /tmp/x
+test-filled:
+  alt: "The Test a call sheet with Who set to alice, Shell command picked and the command rm -rf /tmp/x"
+  dark: shots/test-filled-dark.png
+  light: shots/test-filled-light.png
+  full_dark: shots/full/test-filled-dark.png
+  full_light: shots/full/test-filled-light.png
+  ring: {left: 1.81, top: 79.29, width: 63.33, height: 10.48}
+  width: 720
+  height: 420
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Test
+test-answer:
+  alt: "Test a call answering Denied, decided by rule block-recursive-delete"
+  dark: shots/test-answer-dark.png
+  light: shots/test-answer-light.png
+  full_dark: shots/full/test-answer-dark.png
+  full_light: shots/full/test-answer-light.png
+  ring: {left: 1.81, top: 30.43, width: 96.53, height: 30.73}
+  width: 720
+  height: 654
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Audit
+audit-list:
+  alt: "The Audit page with Chain verified and the newest records, the deny of rm -rf among them"
+  dark: shots/audit-list-dark.png
+  light: shots/audit-list-light.png
+  full_dark: shots/full/audit-list-dark.png
+  full_light: shots/full/audit-list-light.png
+  ring: {left: 1.35, top: 70.71, width: 98.65, height: 18.75}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the row of alice's rm -rf
+audit-deny:
+  alt: "The audit record of alice's denied rm -rf, with the rule, the reason and the chain check"
+  dark: shots/audit-deny-dark.png
+  light: shots/audit-deny-light.png
+  full_dark: shots/full/audit-deny-dark.png
+  full_light: shots/full/audit-deny-light.png
+  ring: {left: 1.81, top: 20.2, width: 96.53, height: 48.57}
+  width: 720
+  height: 490
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/audit
+audit-test-this-call:
+  alt: "The same audit record further down, with the button Test this call"
+  dark: shots/audit-test-this-call-dark.png
+  light: shots/audit-test-this-call-light.png
+  full_dark: shots/full/audit-test-this-call-dark.png
+  full_light: shots/full/audit-test-this-call-light.png
+  ring: {left: 1.81, top: 88.7, width: 16.11, height: 8.7}
+  width: 720
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Test this call > Test
+audit-test-sheet:
+  alt: "Test a call opened from the audit record, with the recorded call filled in and answered"
+  dark: shots/audit-test-sheet-dark.png
+  light: shots/audit-test-sheet-light.png
+  full_dark: shots/full/audit-test-sheet-dark.png
+  full_light: shots/full/audit-test-sheet-light.png
+  ring: {left: 1.81, top: 30.43, width: 96.53, height: 30.73}
+  width: 720
+  height: 654
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Sessions > User: mara
+sessions-mara:
+  alt: "The Sessions page filtered to mara's active sessions"
+  dark: shots/sessions-mara-dark.png
+  light: shots/sessions-mara-light.png
+  full_dark: shots/full/sessions-mara-dark.png
+  full_light: shots/full/sessions-mara-light.png
+  ring: {left: 1.45, top: 61.09, width: 98.55, height: 10.87}
+  width: 760
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Select every shown row
+sessions-revoke-bar:
+  alt: "mara's sessions ticked, with the bar that offers to revoke them"
+  dark: shots/sessions-revoke-bar-dark.png
+  light: shots/sessions-revoke-bar-light.png
+  full_dark: shots/full/sessions-mara-dark.png
+  full_light: shots/full/sessions-mara-light.png
+  ring: {left: 81.88, top: 33.7, width: 17.92, height: 9.57}
+  width: 960
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Revoke sessions
+sessions-revoke-confirm:
+  alt: "The confirmation that revokes mara's sessions, with what a revoke does"
+  dark: shots/sessions-revoke-confirm-dark.png
+  light: shots/sessions-revoke-confirm-light.png
+  full_dark: shots/full/sessions-revoke-confirm-dark.png
+  full_light: shots/full/sessions-revoke-confirm-light.png
+  ring: {left: 4.49, top: 9.93, width: 91.03, height: 80.14}
+  width: 624
+  height: 282
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Users > mara
+user-mara:
+  alt: "mara's sheet in the console, with Lock user and Disable user at the top"
+  dark: shots/user-mara-dark.png
+  light: shots/user-mara-light.png
+  full_dark: shots/full/user-mara-dark.png
+  full_light: shots/full/user-mara-light.png
+  ring: {left: 80.28, top: 35.65, width: 16.25, height: 8.7}
+  width: 720
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Lock user > Reason, recorded on the audit chain: Laptop reported lost
+user-lock:
+  alt: "The Lock mara confirmation, with the reason that goes on the audit chain"
+  dark: shots/user-lock-dark.png
+  light: shots/user-lock-light.png
+  full_dark: shots/full/user-lock-dark.png
+  full_light: shots/full/user-lock-light.png
+  ring: {left: 4.49, top: 9.52, width: 91.03, height: 80.95}
+  width: 624
+  height: 294
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/users
+user-unlock:
+  alt: "mara's sheet after the lock, with the reason and the button Unlock user"
+  dark: shots/user-unlock-dark.png
+  light: shots/user-unlock-light.png
+  full_dark: shots/full/user-unlock-dark.png
+  full_light: shots/full/user-unlock-light.png
+  ring: {left: 80.83, top: 24.13, width: 15.69, height: 8.7}
+  width: 720
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Disable user
+user-disable:
+  alt: "The Disable mara confirmation, which says what a disable stops"
+  dark: shots/user-disable-dark.png
+  light: shots/user-disable-light.png
+  full_dark: shots/full/user-disable-dark.png
+  full_light: shots/full/user-disable-light.png
+  ring: {left: 4.49, top: 11.57, width: 91.03, height: 76.86}
+  width: 624
+  height: 242
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/users
+user-enable:
+  alt: "mara's sheet with the status disabled and the button Enable user"
+  dark: shots/user-enable-dark.png
+  light: shots/user-enable-light.png
+  full_dark: shots/full/user-enable-dark.png
+  full_light: shots/full/user-enable-light.png
+  ring: {left: 80.97, top: 35.65, width: 15.56, height: 8.7}
+  width: 720
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Revoke
+device-revoke:
+  alt: "The confirmation that revokes mara's laptop as a device"
+  dark: shots/device-revoke-dark.png
+  light: shots/device-revoke-light.png
+  full_dark: shots/full/device-revoke-dark.png
+  full_light: shots/full/device-revoke-light.png
+  ring: {left: 4.49, top: 11.57, width: 91.03, height: 76.86}
+  width: 624
+  height: 242
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Open the audit trail
+user-audit-trail:
+  alt: "The Audit page filtered to mara, opened from her sheet"
+  dark: shots/user-audit-trail-dark.png
+  light: shots/user-audit-trail-light.png
+  full_dark: shots/full/user-audit-trail-dark.png
+  full_light: shots/full/user-audit-trail-light.png
+  ring: {left: 1.45, top: 47.12, width: 98.55, height: 8.65}
+  width: 760
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Users > build-bot > Register key > #user-key: undefined
+agent-key-register:
+  alt: "The sheet of the AI agent build-bot with the Assertion key form open and its public key pasted"
+  dark: shots/agent-key-register-dark.png
+  light: shots/agent-key-register-light.png
+  full_dark: shots/full/agent-key-register-dark.png
+  full_light: shots/full/agent-key-register-light.png
+  ring: {left: 3.61, top: 45.02, width: 92.92, height: 15.12}
+  width: 720
+  height: 291
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/users
+user-agent-key:
+  alt: "build-bot's sheet with its assertion key registered, its fingerprint and Rotate key"
+  dark: shots/user-agent-key-dark.png
+  light: shots/user-agent-key-light.png
+  full_dark: shots/full/user-agent-key-dark.png
+  full_light: shots/full/user-agent-key-light.png
+  ring: {left: 1.81, top: 25.4, width: 96.53, height: 64.02}
+  width: 720
+  height: 189
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Roles > New role > Approver role > Name: release-approvers > #nr-description: Decides approval requests raised under local-tools
+role-new-approver:
+  alt: "New role with the kind Approver role and the name release-approvers"
+  dark: shots/role-new-approver-dark.png
+  light: shots/role-new-approver-light.png
+  full_dark: shots/full/role-new-approver-dark.png
+  full_light: shots/full/role-new-approver-light.png
+  ring: {left: 64.38, top: 24.0, width: 31.15, height: 19.83}
+  width: 960
+  height: 600
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Next
+role-new-approver-review:
+  alt: "The Review step of New role for release-approvers, with Save draft and Save and publish"
+  dark: shots/role-new-approver-review-dark.png
+  light: shots/role-new-approver-review-light.png
+  full_dark: shots/full/role-new-approver-review-dark.png
+  full_light: shots/full/role-new-approver-review-light.png
+  ring: {left: 11.05, top: 69.41, width: 29.87, height: 8.24}
+  width: 760
+  height: 340
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Roles > release-approvers > Assign to a user > User: lena
+role-assign-user:
+  alt: "The Assign release-approvers dialog on the role's page, with lena picked"
+  dark: shots/role-assign-user-dark.png
+  light: shots/role-assign-user-light.png
+  full_dark: shots/full/role-assign-user-dark.png
+  full_light: shots/full/role-assign-user-light.png
+  ring: {left: 4.49, top: 10.45, width: 91.03, height: 79.1}
+  width: 624
+  height: 268
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Policies > New policy > Needs approval
+policy-new-outcome:
+  alt: "New policy, first step, with Needs approval picked"
+  dark: shots/policy-new-outcome-dark.png
+  light: shots/policy-new-outcome-light.png
+  full_dark: shots/full/policy-new-outcome-dark.png
+  full_light: shots/full/policy-new-outcome-light.png
+  ring: {left: 1.15, top: 32.78, width: 31.15, height: 27.5}
+  width: 960
+  height: 360
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Next > A role > local-tools
+policy-new-who:
+  alt: "New policy, step Who, with the role local-tools picked"
+  dark: shots/policy-new-who-dark.png
+  light: shots/policy-new-who-light.png
+  full_dark: shots/full/policy-new-who-dark.png
+  full_light: shots/full/policy-new-who-light.png
+  ring: {left: 64.38, top: 63.06, width: 31.15, height: 21.94}
+  width: 960
+  height: 360
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Next > Shell command > Command patterns: kubectl apply * > Add
+policy-new-calls:
+  alt: "New policy, step Which calls, with Shell command and the pattern kubectl apply *"
+  dark: shots/policy-new-calls-dark.png
+  light: shots/policy-new-calls-light.png
+  full_dark: shots/full/policy-new-calls-dark.png
+  full_light: shots/full/policy-new-calls-light.png
+  ring: {left: 13.42, top: 32.5, width: 18.03, height: 11.11}
+  width: 760
+  height: 360
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Next > An approver role > An approver role: release-approvers > input[aria-label='A hold, up to']: 5 > #policy-reason: Straza: kubectl apply needs approval before it runs
+policy-new-how:
+  alt: "New policy, step How, with release-approvers deciding and a hold of up to 5 minutes"
+  dark: shots/policy-new-how-dark.png
+  light: shots/policy-new-how-light.png
+  full_dark: shots/full/policy-new-how-dark.png
+  full_light: shots/full/policy-new-how-light.png
+  ring: {left: 1.04, top: 26.67, width: 40.0, height: 22.86}
+  width: 960
+  height: 420
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Next > #policy-name: kubectl-apply-hold
+policy-new-review:
+  alt: "New policy, step Review, with the name kubectl-apply-hold and the policy as it will be stored"
+  dark: shots/policy-new-review-dark.png
+  light: shots/policy-new-review-light.png
+  full_dark: shots/full/policy-new-review-dark.png
+  full_light: shots/full/policy-new-review-light.png
+  ring: {left: 77.24, top: 88.7, width: 20.13, height: 9.57}
+  width: 760
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Save and publish
+policy-publish:
+  alt: "The confirmation that publishes kubectl-apply-hold, with what it adds"
+  dark: shots/policy-publish-dark.png
+  light: shots/policy-publish-light.png
+  full_dark: shots/full/policy-publish-dark.png
+  full_light: shots/full/policy-publish-light.png
+  ring: {left: 82.55, top: 80.0, width: 11.59, height: 9.89}
+  width: 768
+  height: 445
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Approvals
+approvals-waiting:
+  alt: "Approvals, Requests, with dana's kubectl apply waiting for a decision"
+  dark: shots/approvals-waiting-dark.png
+  light: shots/approvals-waiting-light.png
+  full_dark: shots/full/approvals-waiting-dark.png
+  full_light: shots/full/approvals-waiting-light.png
+  ring: {left: 0.5, top: 47.67, width: 99.5, height: 26.0}
+  width: 1000
+  height: 300
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the request
+approval-request:
+  alt: "The approval request sheet, with the call's parameters and who decides"
+  dark: shots/approval-request-dark.png
+  light: shots/approval-request-light.png
+  full_dark: shots/full/approval-request-dark.png
+  full_light: shots/full/approval-request-light.png
+  ring: {left: 1.05, top: 1.36, width: 97.91, height: 97.28}
+  width: 764
+  height: 588
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Approve > Reason, optional: The change window is open until 18:00
+approval-approve:
+  alt: "The Approve dialog with an optional reason and the button Approve request"
+  dark: shots/approval-approve-dark.png
+  light: shots/approval-approve-light.png
+  full_dark: shots/full/approval-approve-dark.png
+  full_light: shots/full/approval-approve-light.png
+  ring: {left: 4.49, top: 8.05, width: 91.03, height: 83.91}
+  width: 624
+  height: 348
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Overview > Approvals > the request > Deny > Reason, optional: No second apply in this window
+approval-deny:
+  alt: "The Deny dialog for a second kubectl apply, with the button Deny request"
+  dark: shots/approval-deny-dark.png
+  light: shots/approval-deny-light.png
+  full_dark: shots/full/approval-approve-dark.png
+  full_light: shots/full/approval-approve-light.png
+  ring: {left: 4.49, top: 8.05, width: 91.03, height: 83.91}
+  width: 624
+  height: 348
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Approvals > Decided
+approvals-decided:
+  alt: "Approvals, Requests, Decided, with the approved and the denied request"
+  dark: shots/approvals-decided-dark.png
+  light: shots/approvals-decided-light.png
+  full_dark: shots/full/approvals-decided-dark.png
+  full_light: shots/full/approvals-decided-light.png
+  ring: {left: 85.62, top: 31.74, width: 7.29, height: 7.17}
+  width: 960
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Audit > Lens: approvals
+audit-approvals:
+  alt: "The Audit page under the lens approvals, with the request and decision records"
+  dark: shots/audit-approvals-dark.png
+  light: shots/audit-approvals-light.png
+  full_dark: shots/full/audit-approvals-dark.png
+  full_light: shots/full/audit-approvals-light.png
+  ring: {left: 1.04, top: 30.38, width: 19.17, height: 7.69}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Policies > New policy > Needs approval > Next > A role > local-tools > Next > Shell command > Command patterns: terraform apply* > Add > Next > An approver role > An approver role: release-approvers > A ticket a person grants within > #policy-reason: Straza: terraform apply needs an approval ticket
+policy-new-ticket:
+  alt: "New policy, step How, with A ticket a person grants within 1 day picked"
+  dark: shots/policy-new-ticket-dark.png
+  light: shots/policy-new-ticket-light.png
+  full_dark: shots/full/policy-new-ticket-dark.png
+  full_light: shots/full/policy-new-ticket-light.png
+  ring: {left: 41.88, top: 31.43, width: 53.75, height: 42.38}
+  width: 960
+  height: 420
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Approvals
+approvals-ticket:
+  alt: "Approvals, Requests, with dana's terraform apply waiting as a ticket"
+  dark: shots/approvals-ticket-dark.png
+  light: shots/approvals-ticket-light.png
+  full_dark: shots/full/approvals-ticket-dark.png
+  full_light: shots/full/approvals-ticket-light.png
+  ring: {left: 0.5, top: 47.67, width: 99.5, height: 22.67}
+  width: 1000
+  height: 300
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Policies > kubectl-apply-hold > More > Turn off
+policy-turn-off:
+  alt: "The Turn off confirmation on the kubectl-apply-hold policy page"
+  dark: shots/policy-turn-off-dark.png
+  light: shots/policy-turn-off-light.png
+  full_dark: shots/full/policy-turn-off-dark.png
+  full_light: shots/full/policy-turn-off-light.png
+  ring: {left: 4.49, top: 8.64, width: 91.03, height: 82.72}
+  width: 624
+  height: 324
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Approvals > Channels
+channels-push:
+  alt: "Approvals, Channels, with the console, Slack and push channels and their status"
+  dark: shots/channels-push-dark.png
+  light: shots/channels-push-light.png
+  full_dark: shots/full/channels-push-dark.png
+  full_light: shots/full/channels-push-light.png
+  ring: {left: 1.15, top: 67.5, width: 98.85, height: 17.5}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/approvals/channels
+channels-push-test:
+  alt: "The push row of the Channels tab with its button Send a test"
+  dark: shots/channels-push-test-dark.png
+  light: shots/channels-push-test-light.png
+  full_dark: shots/full/channels-push-dark.png
+  full_light: shots/full/channels-push-light.png
+  ring: {left: 81.97, top: 43.33, width: 14.21, height: 13.33}
+  width: 760
+  height: 300
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Approvals > Approver devices > Add a phone > Person: lena
+approver-add-phone:
+  alt: "The Add a phone sheet with the person lena picked"
+  dark: shots/approver-add-phone-dark.png
+  light: shots/approver-add-phone-light.png
+  full_dark: shots/full/approver-add-phone-dark.png
+  full_light: shots/full/approver-add-phone-light.png
+  ring: {left: 1.81, top: 41.33, width: 96.53, height: 14.67}
+  width: 720
+  height: 300
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Create the QR code
+enroll-qr:
+  alt: "The enrollment QR code for lena, with the servers the phone tries and how it trusts them"
+  dark: shots/enroll-qr-dark.png
+  light: shots/enroll-qr-light.png
+  full_dark: shots/full/enroll-qr-dark.png
+  full_light: shots/full/enroll-qr-light.png
+  ring: {left: 1.81, top: 20.0, width: 42.78, height: 49.68}
+  width: 720
+  height: 620
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /self-service/
+selfservice-signin:
+  alt: "The self-service page before sign-in, with the button Sign in"
+  dark: shots/selfservice-signin-dark.png
+  light: shots/selfservice-signin-light.png
+  full_dark: shots/full/selfservice-signin-dark.png
+  full_light: shots/full/selfservice-signin-light.png
+  ring: {left: 89.69, top: 0.91, width: 8.23, height: 11.82}
+  width: 960
+  height: 440
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Sign in > This browser
+selfservice-browser:
+  alt: "lena's self-service page, tab This browser, with Enable this browser"
+  dark: shots/selfservice-browser-dark.png
+  light: shots/selfservice-browser-light.png
+  full_dark: shots/full/selfservice-browser-dark.png
+  full_light: shots/full/selfservice-browser-light.png
+  ring: {left: 78.33, top: 18.65, width: 19.58, height: 10.0}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Enable this browser > #device-name: lena-laptop browser
+selfservice-enable:
+  alt: "The Enable this browser sheet with the name this browser will carry"
+  dark: shots/selfservice-enable-dark.png
+  light: shots/selfservice-enable-light.png
+  full_dark: shots/full/selfservice-enable-dark.png
+  full_light: shots/full/selfservice-enable-light.png
+  ring: {left: 86.53, top: 92.89, width: 11.81, height: 5.78}
+  width: 720
+  height: 900
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Requests
+selfservice-requests:
+  alt: "lena's self-service Requests after enabling the browser, with dana's terraform apply ticket to decide"
+  dark: shots/selfservice-requests-dark.png
+  light: shots/selfservice-requests-light.png
+  full_dark: shots/full/selfservice-requests-dark.png
+  full_light: shots/full/selfservice-requests-light.png
+  ring: {left: 89.55, top: 56.67, width: 7.86, height: 17.33}
+  width: 1120
+  height: 300
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# This browser
+selfservice-browser-enrolled:
+  alt: "lena's self-service page, This browser, with the browser enrolled as her approval device"
+  dark: shots/selfservice-browser-enrolled-dark.png
+  light: shots/selfservice-browser-enrolled-light.png
+  full_dark: shots/full/selfservice-browser-enrolled-dark.png
+  full_light: shots/full/selfservice-browser-enrolled-light.png
+  ring: {left: 2.19, top: 64.23, width: 97.81, height: 18.46}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Approvals > Approver devices
+approver-devices:
+  alt: "Approvals, Approver devices, with lena's browser and its key posture"
+  dark: shots/approver-devices-dark.png
+  light: shots/approver-devices-light.png
+  full_dark: shots/full/approver-devices-dark.png
+  full_light: shots/full/approver-devices-light.png
+  ring: {left: 1.15, top: 64.57, width: 98.85, height: 20.87}
+  width: 960
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Revoke
+approver-revoke:
+  alt: "The confirmation that revokes lena's approver device"
+  dark: shots/approver-revoke-dark.png
+  light: shots/approver-revoke-light.png
+  full_dark: shots/full/approver-revoke-dark.png
+  full_light: shots/full/approver-revoke-light.png
+  ring: {left: 4.49, top: 10.69, width: 91.03, height: 78.63}
+  width: 624
+  height: 262
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# MCP servers > Add MCP server > #mw-name: scout-tools > #mw-desc: Copy of the demo MCP server, with a header credential > #mw-url: http://demo-tools:3001/mcp
+server-add-server:
+  alt: "Add MCP server, step Server, with the name scout-tools and the URL of a server you run over HTTP"
+  dark: shots/server-add-server-dark.png
+  light: shots/server-add-server-light.png
+  full_dark: shots/full/server-add-server-dark.png
+  full_light: shots/full/server-add-server-light.png
+  ring: {left: 1.45, top: 55.71, width: 77.24, height: 18.81}
+  width: 760
+  height: 420
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Next > Each caller's own token
+server-add-token:
+  alt: "Add MCP server, step Credential, with Each caller's own token and what an agent with no token of its own runs on"
+  dark: shots/server-add-token-dark.png
+  light: shots/server-add-token-light.png
+  full_dark: shots/full/server-add-token-dark.png
+  full_light: shots/full/server-add-token-light.png
+  ring: {left: 6.25, top: 71.79, width: 9.38, height: 5.18}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# One shared secret for this server > #mw-secret: scout-docs-demo-secret
+server-add-credential:
+  alt: "Add MCP server, step Credential, with One shared secret for this server and the secret box"
+  dark: shots/server-add-credential-dark.png
+  light: shots/server-add-credential-light.png
+  full_dark: shots/full/server-add-credential-dark.png
+  full_light: shots/full/server-add-credential-light.png
+  ring: {left: 66.46, top: 10.0, width: 24.06, height: 5.18}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Next
+server-add-review:
+  alt: "Add MCP server, step Review, with the manifest it writes and Save and publish"
+  dark: shots/server-add-review-dark.png
+  light: shots/server-add-review-light.png
+  full_dark: shots/full/server-add-review-dark.png
+  full_light: shots/full/server-add-review-light.png
+  ring: {left: 77.24, top: 88.7, width: 20.13, height: 9.57}
+  width: 760
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Save and publish > acknowledge each line
+draft-publish-typed:
+  alt: "The publish dialog of scout-tools, with the warning acknowledged by typing the host it names"
+  dark: shots/draft-publish-typed-dark.png
+  light: shots/draft-publish-typed-light.png
+  full_dark: shots/full/draft-publish-typed-dark.png
+  full_light: shots/full/draft-publish-typed-light.png
+  ring: {left: 7.4, top: 42.89, width: 85.2, height: 22.85}
+  width: 608
+  height: 499
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/servers/new
+server-add-check:
+  alt: "Add MCP server, step Check, with the connection result and Create a role for scout-tools"
+  dark: shots/server-add-check-dark.png
+  light: shots/server-add-check-light.png
+  full_dark: shots/full/server-add-check-dark.png
+  full_light: shots/full/server-add-check-light.png
+  ring: {left: 3.55, top: 56.43, width: 29.74, height: 7.86}
+  width: 760
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# MCP servers
+servers-list:
+  alt: "The MCP servers page with each server's health and tool count"
+  dark: shots/servers-list-dark.png
+  light: shots/servers-list-light.png
+  full_dark: shots/full/servers-list-dark.png
+  full_light: shots/full/servers-list-light.png
+  ring: {left: 1.15, top: 69.35, width: 98.85, height: 13.7}
+  width: 960
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# scout-tools
+server-overview:
+  alt: "The scout-tools server page, Overview tab, with the Server authentication card"
+  dark: shots/server-overview-dark.png
+  light: shots/server-overview-light.png
+  full_dark: shots/full/server-overview-dark.png
+  full_light: shots/full/server-overview-light.png
+  ring: {left: 1.04, top: 42.14, width: 61.04, height: 57.86}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Set it again
+server-secret-set:
+  alt: "The Server authentication card with the box that sets the shared secret again"
+  dark: shots/server-secret-set-dark.png
+  light: shots/server-secret-set-light.png
+  full_dark: shots/full/server-overview-dark.png
+  full_light: shots/full/server-overview-light.png
+  ring: {left: 74.75, top: 84.75, width: 13.29, height: 8.47}
+  width: 602
+  height: 472
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Tools
+server-tools:
+  alt: "The scout-tools server page, Tools tab, with each tool and its description"
+  dark: shots/server-tools-dark.png
+  light: shots/server-tools-light.png
+  full_dark: shots/full/server-tools-dark.png
+  full_light: shots/full/server-tools-light.png
+  ring: {left: 10.21, top: 34.81, width: 8.44, height: 7.12}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Roles > New role > Application role > scout-tools > role name suffix: readers > #nr-description: Tool access to the scout-tools server
+role-new-1:
+  alt: "New role, step 1: Application role, the server scout-tools and the name readers"
+  dark: shots/role-new-1-dark.png
+  light: shots/role-new-1-light.png
+  full_dark: shots/full/role-new-1-dark.png
+  full_light: shots/full/role-new-1-light.png
+  ring: {left: 48.23, top: 46.61, width: 23.85, height: 8.21}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Next > echo > get-sum
+role-new-2:
+  alt: "New role, step Access: Only the tools you tick, with echo and get-sum ticked"
+  dark: shots/role-new-2-dark.png
+  light: shots/role-new-2-light.png
+  full_dark: shots/full/role-new-2-dark.png
+  full_light: shots/full/role-new-2-light.png
+  ring: {left: 1.04, top: 17.68, width: 98.96, height: 5.0}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Next > Next
+role-new-3:
+  alt: "New role, step Review, with what holders reach and the same role as strazactl commands"
+  dark: shots/role-new-3-dark.png
+  light: shots/role-new-3-light.png
+  full_dark: shots/full/role-new-3-dark.png
+  full_light: shots/full/role-new-3-light.png
+  ring: {left: 1.15, top: 85.71, width: 98.85, height: 7.14}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Roles > scout-tools-readers
+role-access:
+  alt: "The scout-tools-readers role page, Access tab, with the server, the tools and the policy column"
+  dark: shots/role-access-dark.png
+  light: shots/role-access-light.png
+  full_dark: shots/full/role-access-dark.png
+  full_light: shots/full/role-access-light.png
+  ring: {left: 1.15, top: 51.73, width: 98.85, height: 9.42}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Edit access > Choose per tool > get-sum: require approval
+role-edit-access:
+  alt: "Edit access on scout-tools-readers, On a call set to Choose per tool, with get-sum requiring approval"
+  dark: shots/role-edit-access-dark.png
+  light: shots/role-edit-access-light.png
+  full_dark: shots/full/role-edit-access-dark.png
+  full_light: shots/full/role-edit-access-light.png
+  ring: {left: 55.49, top: 22.38, width: 26.83, height: 10.0}
+  width: 984
+  height: 420
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/roles/01a1131f-01d9-779d-a0f5-abafbb8a18a3
+role-edit-save:
+  alt: "The foot of Edit access with Save draft and Save and publish"
+  dark: shots/role-edit-save-dark.png
+  light: shots/role-edit-save-light.png
+  full_dark: shots/full/role-edit-access-dark.png
+  full_light: shots/full/role-edit-access-light.png
+  ring: {left: 63.82, top: 87.83, width: 14.47, height: 9.57}
+  width: 760
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# MCP servers > scout-tools > Add one for a role > [role=combobox]:has-text('Pick an application role'): scout-tools-readers > css=input[type=password] >> visible=true: scout-readers-docs-secret > Store it
+server-secret-role:
+  alt: "The Server authentication card of scout-tools with a secret for the role scout-tools-readers and the action Add one for a role"
+  dark: shots/server-secret-role-dark.png
+  light: shots/server-secret-role-light.png
+  full_dark: shots/full/server-secret-role-dark.png
+  full_light: shots/full/server-secret-role-light.png
+  ring: {left: 30.9, top: 80.82, width: 25.25, height: 8.63}
+  width: 602
+  height: 417
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Users > dana > [data-grant-pick]: scout-tools-readers > Assign role
+user-assign-confirm:
+  alt: "The confirmation that assigns scout-tools-readers to dana, from her sheet"
+  dark: shots/user-assign-confirm-dark.png
+  light: shots/user-assign-confirm-light.png
+  full_dark: shots/full/user-assign-confirm-dark.png
+  full_light: shots/full/user-assign-confirm-light.png
+  ring: {left: 4.49, top: 12.61, width: 91.03, height: 74.77}
+  width: 624
+  height: 222
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Roles > dev > Knowledge packs > Pick a pack: team-conventions
+role-packs:
+  alt: "The dev role page, tab Knowledge packs, with team-conventions picked and the button Bind pack"
+  dark: shots/role-packs-dark.png
+  light: shots/role-packs-light.png
+  full_dark: shots/full/role-packs-dark.png
+  full_light: shots/full/role-packs-light.png
+  ring: {left: 36.58, top: 62.39, width: 13.16, height: 8.7}
+  width: 760
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Drafts
+drafts-waiting:
+  alt: "The Drafts page, Waiting, with the draft that gates echo on scout-tools-readers"
+  dark: shots/drafts-waiting-dark.png
+  light: shots/drafts-waiting-light.png
+  full_dark: shots/full/drafts-waiting-dark.png
+  full_light: shots/full/drafts-waiting-light.png
+  ring: {left: 1.15, top: 61.09, width: 98.85, height: 13.48}
+  width: 960
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the draft
+draft-review:
+  alt: "The draft's page with What changes, Who gains what, the checks and Publish…"
+  dark: shots/draft-review-dark.png
+  light: shots/draft-review-light.png
+  full_dark: shots/full/draft-review-dark.png
+  full_light: shots/full/draft-review-light.png
+  ring: {left: 87.4, top: 91.94, width: 10.52, height: 7.1}
+  width: 960
+  height: 620
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Publish…
+draft-publish:
+  alt: "The Publish dialog of the draft, which records who publishes it"
+  dark: shots/draft-publish-dark.png
+  light: shots/draft-publish-light.png
+  full_dark: shots/full/draft-publish-dark.png
+  full_light: shots/full/draft-publish-light.png
+  ring: {left: 77.96, top: 67.27, width: 14.64, height: 16.0}
+  width: 608
+  height: 275
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Drafts > the gitops-tools draft
+draft-gitops:
+  alt: "The draft that the apps directory proposed for gitops-tools, with Contact it now"
+  dark: shots/draft-gitops-dark.png
+  light: shots/draft-gitops-light.png
+  full_dark: shots/full/draft-gitops-dark.png
+  full_light: shots/full/draft-gitops-light.png
+  ring: {left: 5.31, top: 46.43, width: 13.65, height: 7.14}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# MCP servers > demo-tools
+server-admin-card:
+  alt: "The demo-tools server page with the Server administration card, its admin role and holders"
+  dark: shots/server-admin-card-dark.png
+  light: shots/server-admin-card-light.png
+  full_dark: shots/full/server-admin-card-dark.png
+  full_light: shots/full/server-admin-card-light.png
+  ring: {left: 36.88, top: 48.21, width: 61.04, height: 51.79}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Server roles > Add role > role name suffix: probes > Description: Checks demo-tools is answering > echo > get-sum
+server-roles-add:
+  alt: "The Add a role of demo-tools sheet with the name probes, two tools ticked and the stored name"
+  dark: shots/server-roles-add-dark.png
+  light: shots/server-roles-add-light.png
+  full_dark: shots/full/server-roles-add-dark.png
+  full_light: shots/full/server-roles-add-light.png
+  ring: {left: 11.0, top: 22.14, width: 33.0, height: 7.86}
+  width: 1000
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/servers/01a1131a-6b55-7498-917e-18fd8d7a072a/roles
+server-roles-list:
+  alt: "The Server roles tab of demo-tools with demo-tools-probes and its Edit tools and Delete actions"
+  dark: shots/server-roles-list-dark.png
+  light: shots/server-roles-list-light.png
+  full_dark: shots/full/server-roles-list-dark.png
+  full_light: shots/full/server-roles-list-light.png
+  ring: {left: 1.15, top: 36.74, width: 98.85, height: 26.74}
+  width: 960
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Remove server
+server-remove:
+  alt: "The Remove server confirmation on the demo-tools page"
+  dark: shots/server-remove-dark.png
+  light: shots/server-remove-light.png
+  full_dark: shots/full/server-remove-dark.png
+  full_light: shots/full/server-remove-light.png
+  ring: {left: 4.49, top: 9.93, width: 91.03, height: 80.14}
+  width: 624
+  height: 282
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Roles > mcp-admin-demo-tools > Assign to a user > User: carol
+mcp-admin-assign:
+  alt: "The Assign mcp-admin-demo-tools dialog with carol picked"
+  dark: shots/mcp-admin-assign-dark.png
+  light: shots/mcp-admin-assign-light.png
+  full_dark: shots/full/mcp-admin-assign-dark.png
+  full_light: shots/full/mcp-admin-assign-light.png
+  ring: {left: 4.49, top: 9.09, width: 91.03, height: 81.82}
+  width: 624
+  height: 308
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# the screen at /console/servers
+carol-servers:
+  alt: "The console as carol, a server admin, with only MCP servers and Drafts and the one server she administers"
+  dark: shots/carol-servers-dark.png
+  light: shots/carol-servers-light.png
+  full_dark: shots/full/carol-servers-dark.png
+  full_light: shots/full/carol-servers-light.png
+  ring: {left: 25.1, top: 53.39, width: 74.9, height: 11.25}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Policies > New policy > Write YAML instead > [role=dialog] textarea: undefined
+policy-yaml:
+  alt: "New policy written as YAML, with the policy text and Save draft"
+  dark: shots/policy-yaml-dark.png
+  light: shots/policy-yaml-light.png
+  full_dark: shots/full/policy-yaml-dark.png
+  full_light: shots/full/policy-yaml-light.png
+  ring: {left: 83.47, top: 93.78, width: 15.0, height: 4.89}
+  width: 720
+  height: 900
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Policies > local-tools-guardrails > Recording: Change > Secrets masked
+policy-recording:
+  alt: "The Change recording sheet on local-tools-guardrails, with Secrets masked picked"
+  dark: shots/policy-recording-dark.png
+  light: shots/policy-recording-light.png
+  full_dark: shots/full/policy-recording-dark.png
+  full_light: shots/full/policy-recording-light.png
+  ring: {left: 5.42, top: 55.31, width: 15.42, height: 6.88}
+  width: 720
+  height: 320
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Add to unpublished changes
+policy-unpublished:
+  alt: "The policy page with unpublished changes, Save draft and Save and publish"
+  dark: shots/policy-unpublished-dark.png
+  light: shots/policy-unpublished-light.png
+  full_dark: shots/full/policy-unpublished-dark.png
+  full_light: shots/full/policy-unpublished-light.png
+  ring: {left: 68.33, top: 54.62, width: 10.62, height: 7.69}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Test a call > Who: dana > Shell command > #pt-command: git status > Test
+test-unpublished:
+  alt: "Test a call on a page with unpublished changes, answering for live now and with your changes"
+  dark: shots/test-unpublished-dark.png
+  light: shots/test-unpublished-light.png
+  full_dark: shots/full/test-unpublished-dark.png
+  full_light: shots/full/test-unpublished-light.png
+  ring: {left: 1.81, top: 58.18, width: 96.53, height: 27.12}
+  width: 720
+  height: 660
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Transcripts > Reload
+transcripts:
+  alt: "The Transcripts page with dana's recorded session"
+  dark: shots/transcripts-dark.png
+  light: shots/transcripts-light.png
+  full_dark: shots/full/transcripts-dark.png
+  full_light: shots/full/transcripts-light.png
+  ring: {left: 1.15, top: 78.04, width: 98.85, height: 9.78}
+  width: 960
+  height: 460
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Search transcripts: billing > Search
+transcript-search:
+  alt: "Transcripts searched for billing, with the matching turn"
+  dark: shots/transcript-search-dark.png
+  light: shots/transcript-search-light.png
+  full_dark: shots/full/transcript-search-dark.png
+  full_light: shots/full/transcript-search-light.png
+  ring: {left: 1.04, top: 32.88, width: 40.83, height: 8.46}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Audit > Lens: recording
+audit-recording:
+  alt: "The Audit page under the lens recording, with the prompt record that keeps size and hash only"
+  dark: shots/audit-recording-dark.png
+  light: shots/audit-recording-light.png
+  full_dark: shots/full/audit-recording-dark.png
+  full_light: shots/full/audit-recording-light.png
+  ring: {left: 1.04, top: 30.38, width: 19.17, height: 7.69}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Policies > By role
+policies-by-role:
+  alt: "The Policies page in the view By role, one row per role"
+  dark: shots/policies-by-role-dark.png
+  light: shots/policies-by-role-light.png
+  full_dark: shots/full/policies-by-role-dark.png
+  full_light: shots/full/policies-by-role-light.png
+  ring: {left: 73.02, top: 85.0, width: 17.92, height: 9.62}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Overview > System details
+overview-system:
+  alt: "The Overview, tab System details, with the security configuration of this server"
+  dark: shots/overview-system-dark.png
+  light: shots/overview-system-light.png
+  full_dark: shots/full/overview-system-dark.png
+  full_light: shots/full/overview-system-light.png
+  ring: {left: 1.88, top: 8.93, width: 98.12, height: 91.07}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Audit > Lens: sentinel
+audit-sentinel:
+  alt: "The Audit page under the lens sentinel, with a critical verdict on a burst of denies and its Revoke session control"
+  dark: shots/audit-sentinel-dark.png
+  light: shots/audit-sentinel-light.png
+  full_dark: shots/full/audit-sentinel-dark.png
+  full_light: shots/full/audit-sentinel-light.png
+  ring: {left: 70.42, top: 70.19, width: 14.06, height: 7.69}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Settings
+settings-config:
+  alt: "Settings, Configuration, with the settings strazad runs with"
+  dark: shots/settings-config-dark.png
+  light: shots/settings-config-light.png
+  full_dark: shots/full/settings-config-dark.png
+  full_light: shots/full/settings-config-light.png
+  ring: {left: 0.59, top: 20.33, width: 10.0, height: 6.17}
+  width: 1190
+  height: 600
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Attestation registry
+settings-registry:
+  alt: "Settings, Attestation registry, with the expected hashes of the managed hook files"
+  dark: shots/settings-registry-dark.png
+  light: shots/settings-registry-light.png
+  full_dark: shots/full/settings-registry-dark.png
+  full_light: shots/full/settings-registry-light.png
+  ring: {left: 13.33, top: 21.79, width: 17.6, height: 6.61}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Settings > API tokens > New API token > Name: ci-drafts > [role=combobox]:has-text('expires in'): 30 days
+settings-new-token:
+  alt: "The New API token sheet with a name, a lifetime of 30 days and the job cards"
+  dark: shots/settings-new-token-dark.png
+  light: shots/settings-new-token-light.png
+  full_dark: shots/full/settings-new-token-dark.png
+  full_light: shots/full/settings-new-token-light.png
+  ring: {left: 1.81, top: 38.0, width: 96.53, height: 36.0}
+  width: 720
+  height: 900
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Sign in > Credentials
+selfservice-credentials:
+  alt: "dana's self-service page, Credentials, with the github server and Paste a token"
+  dark: shots/selfservice-credentials-dark.png
+  light: shots/selfservice-credentials-light.png
+  full_dark: shots/full/selfservice-credentials-dark.png
+  full_light: shots/full/selfservice-credentials-light.png
+  ring: {left: 86.13, top: 39.38, width: 11.26, height: 16.25}
+  width: 1110
+  height: 320
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# Paste a token
+selfservice-paste-token:
+  alt: "The Paste a token sheet for github, with the token box and the optional expiry"
+  dark: shots/selfservice-paste-token-dark.png
+  light: shots/selfservice-paste-token-light.png
+  full_dark: shots/full/selfservice-paste-token-dark.png
+  full_light: shots/full/selfservice-paste-token-light.png
+  ring: {left: 83.55, top: 92.89, width: 14.87, height: 5.78}
+  width: 760
+  height: 900
+  build: strazad v1.1.0-117-g106081a8, standalone
+
+# New role > Application role > demo-tools > role name suffix: docs-example > #nr-description: Reads the demo tools for the docs walk.
+new-role-1:
+  alt: "New role, step 1: Application role picked, server demo-tools picked, name demo-tools-docs-example available"
+  dark: shots/new-role-1-dark.png
+  light: shots/new-role-1-light.png
+  full_dark: shots/full/new-role-1-dark.png
+  full_light: shots/full/new-role-1-light.png
+  ring: {left: 1.04, top: 53.39, width: 23.85, height: 7.42}
+  width: 960
+  height: 620
+  build: strazad v1.1.0-104-g07d2df0e, enterprise
+
+# the screen at /console/overview
+demo-overview:
+  alt: "The demo stack's Overview, with the inventory, the tool decisions and the chain line"
+  dark: shots/demo-overview-dark.png
+  light: shots/demo-overview-light.png
+  full_dark: shots/full/demo-overview-dark.png
+  full_light: shots/full/demo-overview-light.png
+  ring: {left: 62.71, top: 29.29, width: 30.0, height: 9.29}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-104-g07d2df0e, enterprise
+
+# the screen at /console/overview
+demo-version:
+  alt: "The foot of the console sidebar with the profile enterprise and the strazad version"
+  dark: shots/demo-version-dark.png
+  light: shots/demo-version-light.png
+  full_dark: shots/full/demo-overview-dark.png
+  full_light: shots/full/demo-overview-light.png
+  ring: {left: 4.85, top: 86.92, width: 56.67, height: 10.0}
+  width: 330
+  height: 260
+  build: strazad v1.1.0-104-g07d2df0e, enterprise
+
+# Users
+demo-users:
+  alt: "The demo stack's Users page with the people and agents that arrived over SCIM"
+  dark: shots/demo-users-dark.png
+  light: shots/demo-users-light.png
+  full_dark: shots/full/demo-users-dark.png
+  full_light: shots/full/demo-users-light.png
+  ring: {left: 1.15, top: 79.11, width: 98.85, height: 8.93}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-104-g07d2df0e, enterprise
+
+# Status
+demo-users-status:
+  alt: "The Status filter of the Users page, open on its choices"
+  dark: shots/demo-users-status-dark.png
+  light: shots/demo-users-status-light.png
+  full_dark: shots/full/demo-users-dark.png
+  full_light: shots/full/demo-users-light.png
+  ring: {left: 53.42, top: 25.22, width: 17.89, height: 24.78}
+  width: 760
+  height: 460
+  build: strazad v1.1.0-104-g07d2df0e, enterprise
+
+# Roles
+demo-roles:
+  alt: "The demo stack's Roles page with its application, business and approver roles"
+  dark: shots/demo-roles-dark.png
+  light: shots/demo-roles-light.png
+  full_dark: shots/full/demo-roles-dark.png
+  full_light: shots/full/demo-roles-light.png
+  ring: {left: 1.15, top: 69.82, width: 98.85, height: 8.75}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-104-g07d2df0e, enterprise
+
+# MCP servers
+demo-servers:
+  alt: "The demo stack's MCP servers page with each server's health"
+  dark: shots/demo-servers-dark.png
+  light: shots/demo-servers-light.png
+  full_dark: shots/full/demo-servers-dark.png
+  full_light: shots/full/demo-servers-light.png
+  ring: {left: 1.15, top: 45.22, width: 98.85, height: 13.91}
+  width: 960
+  height: 460
+  build: strazad v1.1.0-104-g07d2df0e, enterprise
+
+# Policies
+demo-policies:
+  alt: "The demo stack's Policies page with the live policy sets"
+  dark: shots/demo-policies-dark.png
+  light: shots/demo-policies-light.png
+  full_dark: shots/full/demo-policies-dark.png
+  full_light: shots/full/demo-policies-light.png
+  ring: {left: 1.15, top: 70.19, width: 98.85, height: 13.08}
+  width: 960
+  height: 520
+  build: strazad v1.1.0-104-g07d2df0e, enterprise
+
+# Roles > auditor > Areas
+demo-role-areas:
+  alt: "The demo stack's auditor role, tab Areas, with the console areas its admin.roleAreas entry opens"
+  dark: shots/demo-role-areas-dark.png
+  light: shots/demo-role-areas-light.png
+  full_dark: shots/full/demo-role-areas-dark.png
+  full_light: shots/full/demo-role-areas-light.png
+  ring: {left: 1.04, top: 45.36, width: 98.96, height: 48.57}
+  width: 960
+  height: 560
+  build: strazad v1.1.0-104-g07d2df0e, enterprise
+
+# Settings
+demo-settings:
+  alt: "The demo stack's Settings, Configuration, with the store and the event broker it runs on"
+  dark: shots/demo-settings-dark.png
+  light: shots/demo-settings-light.png
+  full_dark: shots/full/demo-settings-dark.png
+  full_light: shots/full/demo-settings-light.png
+  ring: {left: 0.42, top: 89.67, width: 98.99, height: 10.33}
+  width: 1190
+  height: 600
+  build: strazad v1.1.0-104-g07d2df0e, enterprise

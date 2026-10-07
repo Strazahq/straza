@@ -1,0 +1,17 @@
+apiVersion: v2
+name: straza
+description: Straza, the identity-governed agent platform (control plane + MCP gateway)
+type: application
+version: 1.1.0
+# appVersion is the Straza release this chart installs and the default image
+# tag, so the release tag v1.1.0 must publish ghcr.io/strazahq/straza:1.1.0.
+# image.tag overrides it, as the kind smoke does with tag=dev. NOTES prints
+# the resolved image, never this field.
+appVersion: "1.1.0"
+home: https://straza.dev
+sources:
+  - https://github.com/strazahq/straza
+keywords:
+  - mcp
+  - iga
+  - agent-governance

@@ -1,0 +1,18 @@
+# INVALID: approve.deciders vocabulary is spec-fixed (revision 13), today
+# sponsor alone. A misspelled kind must fail loudly, never silently fall
+# back to the admin pool (the same fail-closed typo posture as notify).
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: deciders-unknown-kind
+spec:
+  rules:
+    - id: r1
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["disable_user"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [manager]

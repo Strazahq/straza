@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://straza.dev/hook-profile/v1beta1/canonical-event.schema.json",
+  "title": "Straza canonical hook event (v1beta1)",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "enum": ["session.start", "prompt.submit", "tool.pre", "tool.post", "permission.request", "subagent.start", "subagent.stop", "session.end", "compact.pre"]
+    },
+    "tool": {
+      "enum": ["shell.exec", "file.read", "file.write", "file.edit", "net.fetch", "mcp.call", "task.spawn", "other"]
+    },
+    "harness": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string" },
+        "sessionId": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "app": { "type": "string", "description": "mcp.call: Straza app name" },
+    "toolName": { "type": "string", "description": "mcp.call: upstream tool; other kinds: the harness-native tool name" },
+    "args": { "type": "object", "description": "mcp.call: the tools/call arguments verbatim (harness tool_input), forwarded for the server-side approval fingerprint (policyset revision 7, binding: call). ABSENT means the args were not observed, so the fingerprint covers tool identity only; an empty object is the observed no-argument call. Never used for matching in v1beta1." },
+    "command": { "type": "string", "description": "shell.exec: raw command line" },
+    "argv": { "type": "array", "items": { "type": "string" } },
+    "interpreter": { "type": "string", "description": "shell.exec: detected interpreter basename (python3, bash, …); absent when the command invokes no known interpreter" },
+    "paths": { "type": "array", "items": { "type": "string" } },
+    "workspace": { "type": "string", "description": "session working directory" },
+    "raw": { "type": "object", "description": "dialect payload verbatim (audit only, never used for decisions)" }
+  },
+  "required": ["kind", "harness"],
+  "additionalProperties": false
+}

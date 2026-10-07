@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://straza.dev/harness-config/v1alpha1/harness-config.schema.json",
+  "title": "Straza harness-config document (v1alpha1)",
+  "description": "GET /v1/harness-config response: the server-rendered managed harness config as a signed artifact set. Each artifact's signature covers the NUL-delimited domain-separated input defined in SPEC.md; content_hash uses the attestation measurement form (sha256:<hex64>) so served artifact, on-disk file, and expected-hash registry row are directly comparable. v1alpha1 (2026-08-09): initial shape.",
+  "type": "object",
+  "properties": {
+    "format": { "const": 1 },
+    "kind": { "const": "harness-config" },
+    "harness": { "type": "string", "minLength": 1 },
+    "platform": { "enum": ["linux", "darwin", "windows"] },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifact": { "type": "string", "pattern": "^(hooks|mcp)\\.[a-z0-9-]+$" },
+          "content": { "type": "string", "contentEncoding": "base64" },
+          "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "key_id": { "type": "string", "minLength": 1 },
+          "sig": { "type": "string", "contentEncoding": "base64" }
+        },
+        "required": ["artifact", "content", "content_hash", "key_id", "sig"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["format", "kind", "harness", "platform", "artifacts"],
+  "additionalProperties": false
+}

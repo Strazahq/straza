@@ -1,0 +1,44 @@
+# Published mapping table: straza-agentkit (kits/python, dialect `python-sdk`,
+# kit 0.1.x–0.2.x; 0.2.0's start_session()/end_turn()/tool_result() are
+# additive and emit only events already in this table) → Straza canonical
+# events. Not a vendor harness: this is the
+# payload shape the kit itself emits when a Python agent process spawns
+# `straza hook`.
+harness: python-sdk
+events:
+  SessionStart: session.start
+  UserPromptSubmit: prompt.submit
+  PreToolUse: tool.pre
+  PostToolUse: tool.post
+  SessionEnd: session.end
+# Deliberately mirrors claude-code's snake_case contract. Base fields on
+# every payload: hook_event_name, session_id (kit-generated `py-<hex>` or
+# $STRAZA_SESSION_ID), cwd, harness_version (the kit version).
+fields:
+  sessionId: session_id
+  workspace: cwd
+  toolName: tool_name
+  toolInput: tool_input
+  prompt: prompt
+  promptResponse: prompt_response
+# The kit speaks the canonical taxonomy natively (identity map); mcp.call
+# arrives as the mcp__<app>__<tool> prefix form, same as claude-code.
+tools:
+  shell.exec: shell.exec
+  file.write: file.write
+  file.edit: file.edit
+  file.read: file.read
+  net.fetch: net.fetch
+  task.spawn: task.spawn
+  other: other
+notes: |
+  Decision encoding: the claude-code family contract, hookSpecificOutput
+  JSON on stdout (permissionDecision allow|deny + permissionDecisionReason)
+  and/or the exit-2 hard-block convention; the kit treats spawn failure,
+  timeout, or an unreadable response on an ENFORCED check as deny
+  (fail-closed, test-pinned in kits/python).
+  tool_input keys: command (string), paths (list of strings), url (string);
+  the kit only includes keys the caller provided.
+  No transcript file exists for SDK agents: SessionEnd carries the model
+  reply IN the payload as `prompt_response` (the same payload-borne lane as
+  gemini's AfterAgent). There is no transcript_path field in this dialect.

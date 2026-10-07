@@ -1,0 +1,648 @@
+# Straza enterprise eval stack, the whole story in one command:
+# Keycloak (OIDC login) + midPoint 4.10 (IGA / SCIM provisioning) + Postgres +
+# NATS/JetStream + strazad (enterprise profile, console embedded) + one MCP
+# server governed through the gateway.
+#
+#   docker compose -f deploy/compose/eval-stack/compose.yaml up -d --build
+#
+# Walkthrough: https://docs.straza.ai/get-started/enterprise-demo-stack/.
+name: straza-eval
+
+# midPoint repository settings shared by the init job and the server
+# (pattern mirrors Evolveum's official midpoint-docker compose).
+x-mp-env: &mp-env
+  MP_SET_midpoint_repository_jdbcUsername: midpoint
+  MP_SET_midpoint_repository_jdbcPassword: midpoint
+  MP_SET_midpoint_repository_jdbcUrl: jdbc:postgresql://midpoint-db:5432/midpoint
+  MP_SET_midpoint_repository_database: postgresql
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # The issuer is the address the host browser and CLI use, which needs
+      # no hosts file on any platform. Containers cannot reach localhost:8480,
+      # so strazad and mcp-midpoint-http fetch discovery at keycloak:8080, and
+      # the dynamic backchannel puts the token and key endpoints of that
+      # document on the address it was fetched from. The issuer, the sign-in
+      # page and the device page stay on localhost, and so does every token.
+      KC_HOSTNAME: http://localhost:8480
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    ports:
+      - "8480:8080"
+    volumes:
+      # ",z" on every bind mount = SELinux shared relabel: required on
+      # enforcing RHEL-family hosts (containers get EACCES without it),
+      # silently ignored by Docker Desktop and non-SELinux Linux.
+      - ./keycloak:/opt/keycloak/data/import:ro,z
+      # Straza login skin. The realm import picks it via loginTheme. The
+      # image's own themes ship in jars, so mounting one directory under
+      # /opt/keycloak/themes hides nothing.
+      - ./keycloak-theme/straza:/opt/keycloak/themes/straza:ro,z
+    healthcheck:
+      # the image ships no curl; a TCP probe is enough: realm import happens
+      # before the listener comes up in start-dev
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  straza-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: straza
+      POSTGRES_PASSWORD: straza
+      POSTGRES_DB: straza
+    volumes:
+      - straza_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U straza"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2
+    command: ["-js", "-sd", "/data"]
+    # Not published: the broker is pod-internal by design. Host-side agent
+    # daemons get the <2 s kill-switch push and the policy nudge over the
+    # gateway-edge SSE lane on strazad's own origin (GET /v1/push), as in
+    # production. No client connects to the broker directly.
+    volumes:
+      - nats_data:/data
+
+  demo-tools:
+    # MCP reference server, streamable-HTTP transport on :3001/mcp. Deliberately
+    # NOT published to the host: the only road to it is strazad's governed gateway.
+    # Built from demo-tools/Dockerfile with the package pinned and installed, so
+    # a cold start needs no network. An unpinned npx fetch can hang on its
+    # audit step for minutes while every app behind it reads degraded.
+    build:
+      context: ./demo-tools
+    restart: unless-stopped
+
+  views-demo:
+    # The MCP Apps example server, streamable HTTP on :3001/mcp, pinned in
+    # views-demo/Dockerfile. Not published to the host: chat apps reach its
+    # views only through strazad's per-server endpoint, /mcp/views-demo.
+    build:
+      context: ./views-demo
+    restart: unless-stopped
+
+  agent-sam:
+    # The always-on AI-agent pod: sam-sre-agent, born in midPoint
+    # (users/agent-sam-sre.xml), provisioned into Straza over SCIM, enrolls
+    # HEADLESS with an Ed25519 key: keygen at first boot, the public half
+    # lands in the shared /keys volume, the seeder registers it, and every
+    # session start is a signed assertion. No IdP client, no committed secret.
+    # The entrypoint is a proof ladder: keygen -> enroll -> session ->
+    # allowed gateway call -> denied rm -rf -> PASS marker (the healthcheck
+    # contract), then a governed heartbeat every 10 minutes (30s probes
+    # while a beat is failing). Demo beats for a human:
+    #   docker exec straza-sam sh /opt/sam/raise-ticket.sh   (day-scale gate)
+    # Agent kill switch: disable sam in midPoint -> the heartbeat dies and
+    # `docker compose ps agent-sam` flips unhealthy. Re-enabling sam heals it.
+
+    # Host networking, with the same caveat as the demo overlay: Linux native,
+    # and Docker Desktop needs 4.34+ with host networking enabled. The key
+    # lane resolves and dials the ADVERTISED issuer, STRAZA_PUBLIC_URL =
+    # http://localhost:8420, which only the host's loopback serves. From the
+    # compose network that address is the pod's own loopback, so enroll fails
+    # by design: reachability never changes the enrollment lane, and an
+    # unreachable lane is a loud error.
+    build:
+      context: ../../..
+      dockerfile: deploy/compose/eval-stack/agent-sam/Dockerfile
+      # Same stamp lane as the strazad service: without these the client in
+      # the pod reports "dev (commit none)" and a rebuild cannot be
+      # positive-controlled by version alone.
+      args:
+        VERSION: ${STRAZA_BUILD_VERSION:-dev}
+        COMMIT: ${STRAZA_BUILD_COMMIT:-none}
+    container_name: straza-sam
+    network_mode: host
+    depends_on:
+      strazad:
+        condition: service_started
+      agent-keys-init:
+        condition: service_completed_successfully
+    environment:
+      STRAZA_SERVER: http://127.0.0.1:8420
+    volumes:
+      # the private key and enrollment survive recreates; down -v starts
+      # the key lane over (fresh keygen, fresh registration by the re-run
+      # seeder)
+      - sam_home:/home/sam
+      - agent_keys:/keys
+    healthcheck:
+      # PASS marker present = the whole proof ladder stood and the heartbeat is
+      # green. retries stays small so the kill-switch demo flips this container
+      # unhealthy seconds after the first missed beat (the miss itself waits
+      # for the running interval, up to 10 minutes); start_period absorbs the slow first boot
+      # (midPoint provisioning + role propagation), during which failures
+      # do not count.
+      test: ["CMD-SHELL", "test -f /tmp/sam.PASS"]
+      interval: 5s
+      retries: 3
+      start_period: 600s
+    restart: unless-stopped
+
+  straza-data-init:
+    # the scratch image runs as uid 65532 but Docker creates named volumes
+    # root-owned; hand the data dir (KEK lives there) to the runtime user once
+    image: busybox:1.36
+    command: ["chown", "-R", "65532:65532", "/var/lib/straza"]
+    volumes:
+      - straza_data:/var/lib/straza
+
+  agent-keys-init:
+    # the public-key handoff volume is written by two unprivileged users
+    # (sam uid 65532, the harness's node uid 1000); sticky world-writable is
+    # fine here because only PUBLIC key halves ever land in it
+    image: busybox:1.36
+    command: ["chmod", "1777", "/keys"]
+    volumes:
+      - agent_keys:/keys
+
+  strazad:
+    build:
+      context: ../../..
+      dockerfile: deploy/Dockerfile
+      # Version stamp: without these the Dockerfile ARGs default to dev/none
+      # and strazad reports version "dev" in logs + console. Rebuild with:
+      #   STRAZA_BUILD_VERSION=$(git describe --tags --always --dirty) \
+      #   STRAZA_BUILD_COMMIT=$(git rev-parse --short HEAD) \
+      #   docker compose -f deploy/compose/eval-stack/compose.yaml build strazad
+      args:
+        VERSION: ${STRAZA_BUILD_VERSION:-dev}
+        COMMIT: ${STRAZA_BUILD_COMMIT:-none}
+    # strazad's stop waits up to 10 s for requests, then up to 5 s to write
+    # the decision records still in memory. Docker's default of 10 s kills
+    # it before that and loses those records.
+    stop_grace_period: 30s
+    depends_on:
+      straza-db:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      straza-data-init:
+        condition: service_completed_successfully
+    extra_hosts:
+      # Lets the gateway reach an MCP server you run on the host. Docker
+      # Desktop resolves the name itself, and Linux maps it to the bridge.
+      - "host.docker.internal:host-gateway"
+    environment:
+      STRAZA_PROFILE: enterprise
+      STRAZA_LISTEN: 0.0.0.0:8420
+      STRAZA_PUBLIC_URL: http://localhost:8420
+      # Human label for this deployment (approvals page header, enroll QR).
+      # Unset, the server derives an opaque "straza-<4hex>" from the project
+      # id, which reads like build debris in a demo. Env wins over the
+      # rs-mode file, so this line is the single source.
+      STRAZA_PROJECT_NAME: Straza eval
+      STRAZA_STORE_DRIVER: postgres
+      STRAZA_STORE_DSN: postgres://straza:straza@straza-db:5432/straza?sslmode=disable
+      STRAZA_EVENTS_URL: nats://nats:4222
+      STRAZA_OIDC_ISSUER: http://localhost:8480/realms/straza
+      STRAZA_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/straza/.well-known/openid-configuration
+      STRAZA_OIDC_CLIENT_ID: straza
+      # The bootstrap actor is the TRANSIENT seed-bootstrap user, which the
+      # seeder locks once alice's admin from midPoint lands. alice is born in
+      # midPoint, and her admin is an AR:straza-admin membership that midPoint
+      # assigns through the BR:Straza-admin-access package.
+      STRAZA_OIDC_BOOTSTRAP_ADMIN: seed-bootstrap
+      # The GitOps apps directory stays at its default under the data volume
+      # and is empty, as on a default deployment. The seeder installs
+      # demo-tools and midpoint through the admin API from seed/apps, so
+      # both are the console's to change.
+      # oauth.providers is map-typed config, so it comes from a file, not env.
+      # The file carries the "keycloak" provider for per-user midpoint grants
+      # (the connect flow). Env still wins over the file.
+      STRAZA_CONFIG: /etc/straza/straza.yaml
+      # Eval relaxation: the enterprise default is minAttestation=managed, which
+      # refuses plain `straza enroll` until a managed install + hash
+      # registration is done. For a first eval that ceremony is out of scope.
+      STRAZA_MIN_ATTESTATION: none
+      # Slack is off in the demo, because its buttons need an inbound tunnel
+      # this stack does not ship. The channel remains a product feature: wire
+      # it with an override file and the settings on
+      # https://docs.straza.ai/guides/approve/slack/.
+
+      # Mobile approver push: the eval stack allowlists ntfy.sh by default,
+      # because phone approval is part of the out-of-the-box demo. Subscribe a
+      # topic in the stock ntfy app, register it on the approver device, and
+      # Straza sends holds and tickets to the phone. The allowlist only bounds
+      # where strazad may POST its content-free {v,ref,kind} envelope, and
+      # nothing leaves until an approver registers an endpoint. Self-hosted
+      # ntfy/UnifiedPush? Override with your host in .env. In production an
+      # empty list refuses every endpoint, see
+      # https://docs.straza.ai/guides/approve/push-delivery/. The FCM pair
+      # stays empty until a Firebase project exists. The four browser push
+      # service hosts join the default because the self-service page in a
+      # browser registers subscriptions whose endpoints live there.
+      # Registration and every send are refused fail-closed unless the
+      # endpoint host is on this list.
+      STRAZA_APPROVAL_PUSH_ALLOWED_HOSTS: ${STRAZA_APPROVAL_PUSH_ALLOWED_HOSTS:-ntfy.sh,fcm.googleapis.com,updates.push.services.mozilla.com,web.push.apple.com,*.notify.windows.com}
+      STRAZA_APPROVAL_PUSH_FCM_ENABLED: ${STRAZA_APPROVAL_PUSH_FCM_ENABLED:-}
+      STRAZA_APPROVAL_PUSH_FCM_SERVICE_ACCOUNT_FILE: ${STRAZA_APPROVAL_PUSH_FCM_SERVICE_ACCOUNT_FILE:-}
+      STRAZA_APPROVAL_PUSH_FCM_PROJECT_ID: ${STRAZA_APPROVAL_PUSH_FCM_PROJECT_ID:-}
+      # WebPush sender: pointing vapidKeyFile into the data volume auto-mints
+      # the deployment's VAPID pair on first boot and advertises the public
+      # key in every approver enroll response, which is what the self-service
+      # page in a browser subscribes with. Eval default ON, because the
+      # browser surface is part of the demo. Override it to empty in .env to
+      # turn the lane off.
+      STRAZA_APPROVAL_PUSH_WEBPUSH_VAPID_KEY_FILE: ${STRAZA_APPROVAL_PUSH_WEBPUSH_VAPID_KEY_FILE:-/var/lib/straza/webpush-vapid.pem}
+      # Hosted push relay, present and enabled in the template so it is
+      # visible and easy to delete. strazad mints the ANONYMOUS deployment
+      # token into the data volume on first boot and sends only the
+      # content-free {v,ref,kind} envelope. The relay holds the Apple and
+      # Firebase publisher credentials, so eval phones get the request with no
+      # Apple or Firebase setup. Off switch: set _ENABLED to false. An empty
+      # URL means the official relay (push.straza.ai).
+      STRAZA_APPROVAL_PUSH_RELAY_ENABLED: ${STRAZA_APPROVAL_PUSH_RELAY_ENABLED:-true}
+      STRAZA_APPROVAL_PUSH_RELAY_URL: ${STRAZA_APPROVAL_PUSH_RELAY_URL:-}
+      STRAZA_APPROVAL_PUSH_RELAY_TOKEN_FILE: ${STRAZA_APPROVAL_PUSH_RELAY_TOKEN_FILE:-/var/lib/straza/relay-token}
+      # Near-expiry ticket reminder offset (server-owned schedule): a single
+      # reminder push fires this long before a still-pending day-scale ticket
+      # lapses. Passthrough only; empty keeps the server default (2h). e.g. 3h.
+      STRAZA_APPROVAL_PUSH_TICKET_REMINDER_BEFORE: ${STRAZA_APPROVAL_PUSH_TICKET_REMINDER_BEFORE:-}
+      # Approver args preview (on by default): shows the human deciding the
+      # redacted, bounded call arguments beside the justification. Passthrough
+      # only; empty keeps the server default (on), set it to false in .env to
+      # turn the preview off stack-wide. Redaction is never gated by this knob.
+      STRAZA_APPROVAL_PREVIEW_ENABLED: ${STRAZA_APPROVAL_PREVIEW_ENABLED:-}
+      # Phone approver by default: strazad mints and persists its own TLS pair
+      # in the data volume, so the SPKI pin survives recreates, while a volume
+      # wipe re-mints it and enrolled phones scan again. The advertised URL
+      # should be a host address your PHONE can dial, and up.sh detects and
+      # exports it. Empty means strazad autodetects, which inside a container
+      # yields the compose-network address, so run up.sh or set the env var
+      # before minting a phone QR.
+      STRAZA_APPROVER_TLS_LISTEN: 0.0.0.0:8443
+      STRAZA_APPROVER_TLS_AUTO_MINT: "true"
+      STRAZA_APPROVER_TLS_PUBLIC_URL: ${STRAZA_APPROVER_TLS_PUBLIC_URL:-}
+    ports:
+      - "8420:8420"
+      - "8443:8443"
+    volumes:
+      - straza_data:/var/lib/straza
+      - ./straza.rs-mode.yaml:/etc/straza/straza.yaml:ro,z
+    # strazad fails loudly by design if OIDC discovery cannot reach Keycloak.
+    # restart covers the healthy-but-not-yet-importing window.
+    restart: unless-stopped
+
+  mcp-midpoint-http:
+    # ENTERPRISE (resource-server) mode of the midPoint MCP server: one shared
+    # HTTP server. Every request carries a per-user OIDC bearer, is correlated
+    # to a midPoint user (preferred_username -> name), and executes as that
+    # user via Switch-To-Principal, while the server itself authenticates as
+    # mcp-service (near-powerless + archetype-scoped #proxy).
+    # MIDPOINT_MCP_ANONYMOUS_DISCOVERY opens exactly
+    # initialize/initialized/ping/tools-list to tokenless callers (none reach
+    # midPoint), which is what strazad's uncredentialed inventory probe for
+    # per-user (oauth-credential) apps needs. Every tools/call still requires
+    # the validated bearer. Users connect once: console "Connect" or
+    # POST /v1/connect/midpoint -> KC login -> grant stored, and whoami then
+    # answers as the real person. NOT published to the host: it is reachable
+    # only from the compose network, and strazad's gateway stays the governed
+    # road.
+
+    # The released image of github.com/strazahq/midpoint-mcp-server, pinned by
+    # digest. Its release workflow signs it and attests how it was built:
+    #   gh attestation verify oci://<image> --owner strazahq
+    # To run an unreleased build instead, build that repository's Dockerfile
+    # from a checkout beside this one and recreate this service on the four
+    # files with MIDPOINT_MCP_IMAGE set:
+    #   docker build -t midpoint-mcp-server:main ../../../../midpoint-mcp-server
+    #   MIDPOINT_MCP_IMAGE=midpoint-mcp-server:main docker compose ... up -d mcp-midpoint-http
+    image: ${MIDPOINT_MCP_IMAGE:-ghcr.io/strazahq/midpoint-mcp-server:0.6.0@sha256:0b24ff42bb60eeb78a756f5db8b24e25a3cfc7887517cf8151e9c4e957194a00}
+    command: ["--http", "0.0.0.0:3001"]
+    depends_on:
+      midpoint:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    environment:
+      MIDPOINT_URL: http://midpoint:8080/midpoint
+      MIDPOINT_USERNAME: mcp-service
+      MIDPOINT_PASSWORD: "McpPr0xy-Ev4l!26"
+      MIDPOINT_MCP_ALLOW_WRITES: "true"
+      # The issuer strazad validates logins against, fetched on the compose
+      # network the same way. The realm's midpoint-mcp-audience mapper stamps
+      # the audience.
+      MIDPOINT_MCP_OIDC_ISSUER: http://localhost:8480/realms/straza
+      MIDPOINT_MCP_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/straza/.well-known/openid-configuration
+      MIDPOINT_MCP_OIDC_AUDIENCE: midpoint-mcp
+      # An agent's own Keycloak client gets a token that carries client_id, and
+      # a person's token does not. Such a token correlates on the client id,
+      # and only to a midPoint user that holds the ai-agent archetype
+      # (midpoint/objects/archetypes/archetype-ai-agent.xml), so a client that
+      # someone names like a person never runs as that person.
+      MIDPOINT_MCP_OIDC_CLIENT_CORRELATION_CLAIM: client_id
+      MIDPOINT_MCP_OIDC_CLIENT_ARCHETYPES: b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c22
+      # The gateway inventories per-user apps without a token. This opens
+      # initialize/ping/tools-list only, a server setting that is opt-in and
+      # off by default.
+      MIDPOINT_MCP_ANONYMOUS_DISCOVERY: "true"
+      MIDPOINT_MCP_CONFIG: /etc/straza/midpoint-mcp.json
+    volumes:
+      - ./apps/midpoint-mcp.config.json:/etc/straza/midpoint-mcp.json:ro,z
+    restart: unless-stopped
+
+  connector-jar:
+    # fetch the Keycloak connector source (openstandia, no prebuilt JAR
+    # published) for kc-connector-build below. The Straza bundle
+    # (uni-connector-build) IS the identity connector. A best-effort cleanup
+    # removes a cached Tirasa SCIM jar left by an older stack.
+    image: curlimages/curl:8.7.1
+    user: "0"
+    command:
+      - sh
+      - -c
+      - >
+        set -e;
+        rm -f /jars/connid-scim-bundle.jar /jars/scim-src.tgz;
+        [ -f /jars/connector-keycloak.jar ] || [ -f /jars/kc-src.tgz ] && echo "kc source/jar present" ||
+        curl -fL -o /jars/kc-src.tgz
+        https://github.com/openstandia/connector-keycloak/archive/refs/tags/v2.0.0.tar.gz
+    volumes:
+      - ./midpoint/connectors:/jars:z
+
+  uni-connector-build:
+    # Straza pull connector (universal-rest-connector, public at
+    # github.com/Strazahq/universal-rest-connector): midPoint SEES apps/
+    # tools/bindings as entitlements (certification direction). Its release
+    # JAR is VENDORED in git and PINNED by midpoint/connectors/SHA256SUMS, so
+    # every checkout loads the same connector. A present JAR must match the
+    # pin or this service fails and midPoint does not start. An absent JAR (a
+    # deliberate delete = a deliberate refresh) is fetched from the latest
+    # public release and checked against that release's own SHA256SUMS; one
+    # that differs from the pin stops here too, until it is re-pinned and
+    # committed, so midPoint never starts on an unpinned connector.
+    image: curlimages/curl:8.7.1
+    user: "0"
+    command:
+      - sh
+      - -c
+      - >
+        set -e;
+        if [ -f /jars/universal-rest-connector.jar ]; then
+          if [ ! -f /jars/SHA256SUMS ]; then echo "uni connector jar present (UNPINNED: no SHA256SUMS beside it)"; exit 0; fi;
+          if (cd /jars && sha256sum -c -s SHA256SUMS); then echo "uni connector jar present and pinned (matches SHA256SUMS)"; exit 0; fi;
+          echo "ERROR: midpoint/connectors/universal-rest-connector.jar does NOT match SHA256SUMS: a local build or a stale copy replaced the vendored, pinned connector. Restore it (git checkout -- deploy/compose/eval-stack/midpoint/connectors/universal-rest-connector.jar) or, if a new release is intended, re-pin it (cd midpoint/connectors && sha256sum universal-rest-connector.jar > SHA256SUMS) and commit both. Refusing to start midPoint on an unpinned connector." >&2;
+          exit 1;
+        fi;
+        REPO=https://github.com/Strazahq/universal-rest-connector;
+        TAG=$$(curl -fsSI "$$REPO/releases/latest" | sed -n 's|^[Ll]ocation: .*/releases/tag/\([^[:space:]]*\).*|\1|p');
+        if [ -z "$$TAG" ]; then echo "ERROR: universal-rest-connector.jar is missing and the latest release of $$REPO could not be found. Restore the vendored jar (git checkout -- deploy/compose/eval-stack/midpoint/connectors/universal-rest-connector.jar) or check this host's access to github.com." >&2; exit 1; fi;
+        V=$${TAG#v};
+        cd /tmp;
+        curl -fsSLO "$$REPO/releases/download/$$TAG/universal-rest-connector-$$V.jar";
+        curl -fsSLO "$$REPO/releases/download/$$TAG/SHA256SUMS";
+        grep " universal-rest-connector-$$V.jar$$" SHA256SUMS > want.sum;
+        sha256sum -c -s want.sum || { echo "ERROR: the $$TAG release jar does not match that release's SHA256SUMS, so it was not installed. Download it again, or restore the vendored jar from git." >&2; exit 1; };
+        cp "universal-rest-connector-$$V.jar" /jars/universal-rest-connector.jar;
+        echo "universal-rest-connector $$TAG fetched from the public release (checksum verified against the release's SHA256SUMS)";
+        if [ -f /jars/SHA256SUMS ] && ! (cd /jars && sha256sum -c -s SHA256SUMS); then echo "ERROR: the fetched $$TAG jar differs from midpoint/connectors/SHA256SUMS. If this refresh is intended, verify its build attestation (gh attestation verify universal-rest-connector.jar -R Strazahq/universal-rest-connector), re-pin it (cd midpoint/connectors && sha256sum universal-rest-connector.jar > SHA256SUMS) and commit both. Refusing to start midPoint on an unpinned connector." >&2; exit 1; fi
+    depends_on:
+      connector-jar:
+        condition: service_completed_successfully
+    volumes:
+      - ./midpoint/connectors:/jars:z
+
+  kc-connector-build:
+    # openstandia publishes no binary JAR; build v2.0.0 once (CI-tested against
+    # Keycloak 26.0.8 + midPoint 4.10.x). Cached: skipped when the JAR exists.
+    image: maven:3.9-eclipse-temurin-17
+    # bypass the image entrypoint: it copies settings-docker.xml into the
+    # shared .m2 volume, and three parallel first-boots race on that copy
+    # (one fails "File exists" on a fresh volume); mvn's defaults already
+    # use /root/.m2, so the copy adds nothing
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - >
+        set -e;
+        if [ -f /jars/connector-keycloak.jar ]; then echo "kc connector jar present"; exit 0; fi;
+        tar -xzf /jars/kc-src.tgz -C /tmp &&
+        cd /tmp/connector-keycloak-2.0.0 &&
+        mvn -q -B -DskipTests package &&
+        cp "$$(ls target/connector-keycloak-*.jar | grep -vE 'javadoc|sources')" /jars/connector-keycloak.jar &&
+        rm -f /jars/kc-src.tgz && echo "kc connector built"
+    depends_on:
+      connector-jar:
+        condition: service_completed_successfully
+    volumes:
+      - ./midpoint/connectors:/jars:z
+      - kc_m2:/root/.m2
+
+  docs-build:
+    # BUILDS the docs site for `landing` below: Hugo, pinned by tag and
+    # digest, renders the Markdown under website/ into the site_build volume.
+    # The source mount is read-only, so --noBuildLock keeps Hugo from writing
+    # its lock file there. Drafts are built on purpose: this stack is where
+    # stub pages are reviewed, and only the public Pages workflow builds
+    # without them. One-shot and not cached: it re-runs on every
+    # `docker compose up` so a restarted stack always serves the current tree.
+    # user: the image runs as hugo (uid 1000) and a fresh named volume is
+    # root-owned, so the build runs as root to be able to write /build.
+    image: ghcr.io/gohugoio/hugo:v0.165.0@sha256:608a19e34f86de36773503adbaab174fc28a6e338dc7904e03c70320b003a153
+    user: "0:0"
+    command: ["--source", "/src", "--destination", "/build", "--noBuildLock", "--cleanDestinationDir", "--buildDrafts"]
+    volumes:
+      - ../../../website:/src:ro,z
+      - site_build:/build
+    restart: "no"
+
+  docs-publish:
+    # PUBLISHES the built site for `landing` below. The served copy is always
+    # tools/site-publish.py OUTPUT, never the raw Hugo build: the layouts and
+    # assets carry comments, and the publish tool strips them and then refuses
+    # a tree that names a maintainer file, a path into the repository's docs/
+    # or internal/ tree, a planning label or the codename, so the served pages
+    # carry no internal notes. One-shot and not cached, like docs-build.
+    # The ORDER is load-bearing: publish to a staging dir, verify the staging
+    # dir, and only then swap it into the served volume, because compose
+    # re-runs this job while an unchanged `landing` keeps serving. A failed
+    # gate leaves the previous good publish in place and exits non-zero.
+    # python: the publish tool is a stdlib python3 script, and the official
+    # alpine image is the smallest thing that can run it.
+    image: python:3.13-alpine
+    depends_on:
+      docs-build:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -c
+      - >
+        set -e;
+        rm -rf /tmp/site-public;
+        python3 /opt/site-publish.py --src /src --out /tmp/site-public;
+        if find /tmp/site-public -name '*.html' -exec grep -l -- '<!--' {} + | grep -q .;
+        then echo "PUBLISH GATE FAILED: HTML comments survived the strip - refusing to publish, /docs/ keeps the last good tree"; exit 1; fi;
+        find /out -mindepth 1 -maxdepth 1 -exec rm -rf {} +;
+        cp -a /tmp/site-public/. /out/;
+        echo "docs published comment-free -> /docs/"
+    volumes:
+      - ../../../tools/site-publish.py:/opt/site-publish.py:ro,z
+      - site_build:/src:ro
+      - site_public:/out
+    restart: "no"
+
+  landing:
+    # eval landing page: every URL, credential, and demo step in one place,
+    # plus the docs site served at /docs/, so the stack ships its own
+    # documentation. The docs mount is the PUBLISHED tree (docs-publish above),
+    # never the website source or the raw Hugo build.
+    image: nginx:1.27-alpine
+    depends_on:
+      docs-publish:
+        condition: service_completed_successfully
+    ports:
+      - "8400:80"
+    volumes:
+      - ./landing:/usr/share/nginx/html:ro,z
+      - site_public:/usr/share/nginx/html/docs:ro
+
+  eval-seed:
+    # one-shot zero-touch seeder: bootstrap login -> one admin API token -> midPoint
+    # resource + role import -> creates the agent cast -> asserts joe and
+    # sam land in Straza over SCIM and registers the working agents'
+    # Ed25519 public keys from /keys. Watch it: docker compose logs -f eval-seed
+    image: alpine:3.20
+    command: ["sh", "-c", "apk add --no-cache curl jq >/dev/null && sh /seed/seed.sh"]
+    environment:
+      MP_ADMIN_PASSWORD: StrazaEval5ecr3t!
+      KC_ADMIN_PASSWORD: admin
+    volumes:
+      - ./seed:/seed:ro,z
+      - ./midpoint:/mp:ro,z
+      - agent_keys:/keys:ro
+    depends_on:
+      strazad:
+        condition: service_started
+      midpoint:
+        condition: service_started
+    restart: "no"
+
+  midpoint-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: midpoint
+      POSTGRES_PASSWORD: midpoint
+      POSTGRES_INITDB_ARGS: --lc-collate=en_US.utf8 --lc-ctype=en_US.utf8
+    volumes:
+      - midpoint_pg:/var/lib/postgresql/data
+
+  midpoint-init:
+    # one-shot native-repo schema init, verbatim from Evolveum's official compose
+    # (Evolveum midpoint-docker, Apache-2.0)
+    image: evolveum/midpoint:${MP_VER:-4.10.3}-alpine
+    command: >
+      bash -c "
+      cd /opt/midpoint ;
+      bin/midpoint.sh init-native ;
+      bin/ninja.sh -B info >/dev/null 2>/tmp/ninja.log ;
+      grep -q ERROR /tmp/ninja.log && (
+      bin/ninja.sh run-sql --create --mode REPOSITORY ;
+      bin/ninja.sh run-sql --create --mode AUDIT
+      ) ||
+      echo 'Repository init is not needed...' ;
+      "
+    depends_on:
+      - midpoint-db
+    environment:
+      <<: *mp-env
+      MP_INIT_CFG: /opt/midpoint/var
+    volumes:
+      - midpoint_home:/opt/midpoint/var
+
+  midpoint-partition-guard:
+    # midPoint 4.10.3 first-shadow ordering bug, seen on a fresh bring-up: the
+    # very first shadow for a resource inserts a child partition row before
+    # the per-resource PARENT partition exists, and
+    # m_shadow_create_partition()'s ATTACH then fails ("relation ... does not
+    # exist"), 500-ing whatever provisioning triggered it. The pull resource
+    # escapes only because its recon storm inserts the parent first. This
+    # one-shot pre-creates parent + default partitions for the three fixed
+    # resource OIDs (SCIM, Keycloak, universal-rest), idempotently, mirroring
+    # exactly the rows midPoint itself writes on the happy path.
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: midpoint
+    command:
+      - sh
+      - -c
+      - >
+        for oid in b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01
+        b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c04
+        0a1b2c3d-4e5f-6071-8293-a1b2c3d4e5f6; do
+        tbl="m_shadow_$$(echo $$oid | tr - _)";
+        psql -h midpoint-db -U midpoint -v ON_ERROR_STOP=1 -c
+        "INSERT INTO m_shadow_partition_def (objectClassId, resourceOid, partition, attached, \"table\")
+        SELECT NULL, '$$oid', false, true, '$$tbl'
+        WHERE NOT EXISTS (SELECT 1 FROM m_shadow_partition_def WHERE \"table\" = '$$tbl');" &&
+        psql -h midpoint-db -U midpoint -v ON_ERROR_STOP=1 -c
+        "INSERT INTO m_shadow_partition_def (objectClassId, resourceOid, partition, attached, \"table\")
+        SELECT NULL, '$$oid', true, false, '$${tbl}_default'
+        WHERE NOT EXISTS (SELECT 1 FROM m_shadow_partition_def WHERE \"table\" = '$${tbl}_default');"
+        || exit 1; done; echo "partition guard done"
+    depends_on:
+      midpoint-init:
+        condition: service_completed_successfully
+      midpoint-db:
+        condition: service_started
+    restart: "no"
+
+  midpoint:
+    image: evolveum/midpoint:${MP_VER:-4.10.3}-alpine
+    command: ["/opt/midpoint/bin/midpoint.sh", "container"]
+    depends_on:
+      midpoint-init:
+        condition: service_completed_successfully
+      midpoint-partition-guard:
+        condition: service_completed_successfully
+      midpoint-db:
+        condition: service_started
+      connector-jar:
+        condition: service_completed_successfully
+      kc-connector-build:
+        condition: service_completed_successfully
+      uni-connector-build:
+        condition: service_completed_successfully
+    environment:
+      <<: *mp-env
+      MP_UNSET_midpoint_repository_hibernateHbm2ddl: "1"
+      MP_NO_ENV_COMPAT: "1"
+      # 4.8+ images have no default administrator password; set the initial one
+      MP_SET_midpoint_administrator_initialPassword: StrazaEval5ecr3t!
+    ports:
+      - "8087:8080" # GUI: http://localhost:8087/midpoint
+    volumes:
+      - midpoint_home:/opt/midpoint/var
+      # ConnId connector JARs (Straza bundle + Keycloak) land here
+      - ./midpoint/connectors:/opt/midpoint/var/icf-connectors:z
+      # pull-connector schema config (its ONLY config; no dynamic config)
+      - ./midpoint/straza-schema.json:/opt/midpoint/var/straza-schema.json:ro,z
+      # midPoint extension schema (strazaOrigin/strazaRuntime/strazaApp/...)
+      # is NOT mounted: the seeder uploads objects/schema/straza-extension.xsd
+      # as a SchemaType object over REST during the first IGA import. midPoint
+      # applies it at boot and on change, with no restart. Edit the xsd and
+      # re-run the seeder.
+
+volumes:
+  kc_m2:
+  straza_pg:
+  straza_data:
+  nats_data:
+  midpoint_pg:
+  midpoint_home:
+  sam_home: # sam's straza home: private NHI key + enrollment
+  agent_keys: # public-key handoff: pods write, the seeder registers
+  site_build: # raw Hugo build of website/, written by docs-build, read by docs-publish
+  site_public: # comment-stripped docs tree, written by docs-publish

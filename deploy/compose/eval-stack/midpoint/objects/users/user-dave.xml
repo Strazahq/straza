@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dave: sample employee (Engineering), the platform engineer. The seeder
+  makes him the global MCP admin: after the user import it assigns him
+  BR:Straza-global-mcp-admin-access, which provisions his Straza account.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c41">
+    <name>dave</name>
+    <fullName>Dave Okafor</fullName>
+    <givenName>Dave</givenName>
+    <familyName>Okafor</familyName>
+    <emailAddress>dave.okafor@example.com</emailAddress>
+    <personalNumber>1002</personalNumber>
+    <organizationalUnit>Engineering</organizationalUnit>
+    <title>Platform Engineer</title>
+    <credentials>
+        <password>
+            <value><t:clearValue>Ev4l-St4ck!26</t:clearValue></value>
+        </password>
+    </credentials>
+    <assignment>
+        <!-- persona archetype, assigned directly (employee) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20" type="ArchetypeType"/>
+    </assignment>
+</user>

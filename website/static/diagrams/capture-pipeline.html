@@ -1,0 +1,373 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capture pipeline · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+.controls .cap{font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;
+  padding:0 4px 0 6px;font-weight:600}
+.legend{display:flex;gap:var(--s3);align-items:center;font-size:11px;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:5px 10px}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.legend .ok{background:var(--ok-bg);border:1px solid var(--ok)}
+.legend .warn{background:var(--warn-bg);border:1px solid var(--warn)}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 11px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);
+  color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.ctl.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+button.ctl.primary[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);
+  color:var(--on-accent);box-shadow:none}
+button.ctl.deny[aria-pressed="true"]{background:var(--danger-bg);border-color:var(--danger);
+  color:var(--danger);box-shadow:inset 0 0 0 1px var(--danger)}
+button.ctl.kill{color:var(--danger);border-color:var(--danger);background:var(--danger-bg)}
+button.ctl.kill:hover{background:var(--danger-bg);border-color:var(--danger);
+  box-shadow:inset 0 0 0 1px var(--danger)}
+button.ctl:disabled{opacity:.4;cursor:default}
+button.ctl:disabled:hover{background:transparent;border-color:transparent}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:98px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:80ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:15px;font-weight:600}
+.s{font-size:12.5px;font-weight:600}
+.d{font-size:11px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+.mono{font-family:var(--font-mono);font-size:10.5px;fill:var(--muted)}
+.box{fill:var(--surface);stroke:var(--border);stroke-width:1.25}
+.chip{fill:var(--surface-2);stroke:var(--border);stroke-width:1.25}
+.box,.chip{transition:stroke .2s,stroke-width .2s,fill .25s,filter .2s,opacity .3s}
+.node{cursor:pointer;outline:none;transition:opacity .3s}
+.node:hover .box,.node:focus .box{stroke:var(--accent);stroke-width:2;
+  fill:var(--accent-bg);filter:drop-shadow(0 0 5px var(--accent))}
+.edge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ar);transition:opacity .3s}
+.edge.async{stroke-dasharray:5 4}
+.mk{fill:var(--muted)}
+.pulse{fill:var(--accent);filter:drop-shadow(0 0 3px var(--accent))}
+.elbl{font-size:10.5px;fill:var(--muted)}
+
+ 
+svg.mode-off .capflow{opacity:.4}
+svg.mode-off .ononly{display:none}
+svg.mode-verbatim .offonly,svg.mode-redact .offonly{display:none}
+svg.mode-verbatim #n-redact{opacity:.4}
+svg.mode-verbatim #c4,svg.mode-verbatim #c5{opacity:.2}
+svg.mode-off #c4b,svg.mode-redact #c4b{opacity:0}
+svg.mode-redact #n-redact .box{stroke:var(--accent);stroke-width:2;fill:var(--accent-bg);filter:drop-shadow(0 0 4px var(--accent))}
+.lf{display:inline}.ls{display:none}
+@media (max-width:600px){.lf{display:none}.ls{display:inline}}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ conversation capture</span></h1>
+  <div class="controls" role="group" aria-label="Capture gate mode">
+    <span class="cap">capture:</span>
+    <button class="ctl" id="mOff" aria-pressed="true">off</button>
+    <button class="ctl" id="mVerbatim" aria-pressed="false">verbatim</button>
+    <button class="ctl" id="mRedact" aria-pressed="false">redact</button>
+    <button class="ctl primary" id="btnSend">send a prompt</button>
+  </div>
+</header>
+
+<div class="stage">
+<svg id="dia" viewBox="0 0 980 560" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD" class="mode-off">
+<title id="svgT">Conversation capture pipeline</title>
+<desc id="svgD">Prompts and reply deltas from a governed session pass a policy capture gate with three modes: off, verbatim, redact. Captured turns are hashed in full, optionally redacted, size-capped, spooled, drained to strazad, published as audit events, mirrored into the conversation store, witnessed by the hash chain, and readable in the Transcripts screen with substring or locally-hashed-value search.</desc>
+<defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
+</defs>
+
+
+<g class="node" id="n-sess" tabindex="0" aria-label="Governed session, announced when captured">
+  <rect class="box" x="16" y="88" width="180" height="76" rx="6"/>
+  <text class="s" x="26" y="110">governed session</text>
+  <text class="d" x="26" y="126">prompts + replies</text>
+  <text class="d ononly" x="26" y="150" style="fill:var(--accent)">banner: session is captured</text>
+</g>
+<path id="c1"  class="edge" d="M196 107 L236 107"/>
+<path id="c1b" class="edge" d="M196 147 L236 147"/>
+<g class="node" id="n-prompt" tabindex="0" aria-label="prompt.submit event carrying the prompt text">
+  <rect class="chip" x="236" y="92" width="160" height="30" rx="5"/>
+  <text class="mono" x="246" y="111" style="fill:var(--text)">prompt.submit</text>
+</g>
+<g class="node" id="n-reply" tabindex="0" aria-label="Reply delta read from the harness transcript at session end">
+  <rect class="chip" x="236" y="132" width="160" height="30" rx="5"/>
+  <text class="mono" x="246" y="151" style="fill:var(--text)">reply &#183; session.end</text>
+</g>
+<path id="c2"  class="edge" d="M396 107 L446 107"/>
+<path id="c2b" class="edge" d="M396 147 L446 147"/>
+<g class="node" id="n-gate" tabindex="0" aria-label="Policy capture gate">
+  <rect class="box" x="446" y="88" width="190" height="86" rx="6"/>
+  <text class="s" x="456" y="108">capture gate</text>
+  <text class="d" x="456" y="124">PolicySet capture: block</text>
+  <text class="mono" x="456" y="142" id="gmode" style="fill:var(--text)">mode: off</text>
+  <text class="d" x="456" y="158">redact wins across sets</text>
+</g>
+<g class="offonly">
+  <path class="edge" d="M541 174 V200"/>
+  <rect class="chip" x="446" y="200" width="190" height="30" rx="5"/>
+  <text class="d" x="541" y="219" text-anchor="middle">no event emitted</text>
+</g>
+
+
+<path id="c3" class="edge capflow" d="M636 131 H865 V248"/>
+<text class="elbl capflow" x="750" y="123" text-anchor="middle">captured turn</text>
+
+
+<g class="node capflow" id="n-hash" tabindex="0" aria-label="Hash the full original before redact or cap">
+  <rect class="box" x="770" y="248" width="190" height="64" rx="6"/>
+  <text class="s" x="780" y="268">hash FULL original</text>
+  <text class="mono" x="780" y="284">SHA-256, before redact/cap</text>
+  <text class="d" x="780" y="300">the chain witnesses everything</text>
+</g>
+<path id="c4" class="edge capflow" d="M770 280 L740 280"/>
+<g class="node capflow" id="n-redact" tabindex="0" aria-label="Redact, client side, only in redact mode">
+  <rect class="box" x="580" y="248" width="160" height="64" rx="6"/>
+  <text class="s" x="590" y="268">redact</text>
+  <text class="d" x="590" y="284">masked on the client</text>
+  <text class="d" x="590" y="300">mode recorded per turn</text>
+</g>
+<path id="c4b" class="edge capflow" d="M770 254 C 700 214, 620 214, 550 254"/>
+<path id="c5" class="edge capflow" d="M580 280 L550 280"/>
+<g class="node capflow" id="n-cap" tabindex="0" aria-label="Size cap with truncation marker">
+  <rect class="box" x="390" y="248" width="160" height="64" rx="6"/>
+  <text class="s" x="400" y="268">size cap</text>
+  <text class="mono" x="400" y="284">truncated: true</text>
+  <text class="d" x="400" y="300">+ full-content hash</text>
+</g>
+<path id="c6" class="edge capflow" d="M390 280 L360 280"/>
+<g class="node capflow" id="n-spool" tabindex="0" aria-label="JSONL audit spool">
+  <rect class="box" x="200" y="248" width="160" height="64" rx="6"/>
+  <text class="s" x="210" y="268">audit spool</text>
+  <text class="d" x="210" y="284">JSONL &#183; async</text>
+  <text class="d" x="210" y="300">rotates on drain</text>
+</g>
+<path id="c7" class="edge async capflow" d="M200 280 L170 280"/>
+<g class="node capflow" id="n-batch" tabindex="0" aria-label="Detached drain to strazad">
+  <rect class="box" x="16" y="248" width="154" height="64" rx="6"/>
+  <text class="s" x="26" y="268">drain</text>
+  <text class="mono" x="26" y="284">/v1/audit/batch</text>
+  <text class="d" x="26" y="300">detached &#183; rebound</text>
+</g>
+
+
+<path id="c8" class="edge async capflow" d="M93 312 V396"/>
+
+
+<g class="node capflow" id="n-stream" tabindex="0" aria-label="Outbox to JetStream, prompt and reply subjects">
+  <rect class="box" x="16" y="396" width="230" height="64" rx="6"/>
+  <text class="s" x="26" y="416">outbox &#8594; JetStream</text>
+  <text class="mono" x="26" y="432">straza.audit.{prompt,reply}</text>
+  <text class="d" x="26" y="447">events rev 5 &#183; additive</text>
+</g>
+<path id="c9a" class="edge capflow" d="M246 420 H266 V408 H286"/>
+<path id="c9b" class="edge async capflow" d="M246 436 H266 V476 H286"/>
+<g class="node capflow" id="n-store" tabindex="0" aria-label="Conversation turns read model with its own retention">
+  <rect class="box" x="286" y="380" width="220" height="56" rx="6"/>
+  <text class="s" x="296" y="400">conversation_turns</text>
+  <text class="d" x="296" y="416">durable consumer &#183; retention 720 h</text>
+</g>
+<g class="node capflow" id="n-chain" tabindex="0" aria-label="Hash chain witness">
+  <rect class="box" x="286" y="452" width="220" height="48" rx="6"/>
+  <text class="s" x="296" y="470">hash chain witness</text>
+  <text class="mono" x="296" y="486">sha256(prev &#8214; ce)</text>
+</g>
+<path id="c10" class="edge capflow" d="M506 408 H556"/>
+<path id="c11" class="edge async capflow" d="M506 476 H540 V440 H556"/>
+<g class="node capflow" id="n-view" tabindex="0" aria-label="Transcripts screen with substring and hashed-value search">
+  <rect class="box" x="556" y="396" width="250" height="76" rx="6"/>
+  <text class="s" x="566" y="416">Transcripts screen</text>
+  <text class="d" x="566" y="432">substring search &#183; hashed-value search</text>
+  <text class="d" x="566" y="447">value hashed locally;</text>
+  <text class="d" x="566" y="461">plaintext never travels</text>
+</g>
+
+<text class="d" x="16" y="540">verbatim is deliberate (leak hunting needs real content), so the operator gates the read model and keeps its retention short</text>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">Capture is <strong>off</strong> unless a matched PolicySet enables it. Flip the gate to verbatim or redact, then send a prompt through the pipeline. Hover any node for its facts.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>Policy-controlled conversation capture. The client captures prompts at prompt.submit and
+  reply deltas from the harness transcript at session.end. The gate is the PolicySet capture:
+  block (policyset rev 2): off unless a matched set enables it, redact wins across sets,
+  verbatim is the default mode when enabled. Captured sessions are told, with a banner and
+  a one-liner in the session context. Every captured turn is hashed in full (SHA-256) before
+  any redaction or size cap, so the hash chain witnesses even what it did not store and a
+  known-leaked value remains findable. Turns ride the normal audit lane (JSONL spool, detached
+  drain to /v1/audit/batch, transactional outbox, JetStream subjects straza.audit.prompt and
+  straza.audit.reply), then a durable consumer mirrors them into conversation_turns with its
+  own retention knob (governance.captureRetention, default 720 h), while the chain writer links
+  them tamper-evidently. The Transcripts screen and strazactl search by substring or by a value
+  hashed locally in the browser/CLI, so the plaintext of a hunted secret never travels.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+var svg=document.getElementById('dia');
+var nar=document.getElementById('nar');
+var DEF='Capture is <strong>off</strong> unless a matched PolicySet enables it. Flip the gate to verbatim or redact, then send a prompt through the pipeline. Hover any node for its facts.';
+var FACTS={
+ 'n-sess':'<strong>governed session</strong>. No silent surveillance: captured sessions are told, with a banner at start plus a one-liner in the session context. The IGA plane decides whose conversations are recorded.',
+ 'n-prompt':'<strong>prompt.submit</strong>: already a canonical hook event (observational, never blocking); the client captures the prompt text at submit.',
+ 'n-reply':'<strong>reply delta</strong>: harnesses do not hand hooks the model text, so the adapter reads the transcript file named in the hook payload at session.end and extracts the delta since the last capture.',
+ 'n-gate':'<strong>capture gate</strong>; the PolicySet capture: block (policyset rev 2): off unless a matched set enables it; redact wins across sets; verbatim is the default mode when enabled, and the session sees the setting in its snapshot.',
+ 'n-hash':'<strong>hash the FULL original</strong>: SHA-256 over the untouched content, before redact or cap. The chain witnesses what it did not store, and hashed-value search still finds a known-leaked value.',
+ 'n-redact':'<strong>redact</strong>: the client-side minimization knob (GDPR, works councils). Mutually exclusive with verbatim by design; the active mode is recorded on every captured turn.',
+ 'n-cap':'<strong>size cap</strong>. Prompts and replies are unbounded, audit events are not: over-cap content is truncated with truncated:true plus the full-content hash.',
+ 'n-spool':'<strong>audit spool</strong>: the same JSONL spool as decisions; asynchronous by invariant and rotated on drain so cross-process appends never lose a record.',
+ 'n-batch':'<strong>drain</strong>: a detached, fire-and-forget <code>straza drain</code> POSTs to /v1/audit/batch; client CE types are allowlisted (tool|prompt|reply) and records are rebound to the caller principal.',
+ 'n-stream':'<strong>outbox &#8594; JetStream</strong>: capture rides the event spine on <code>straza.audit.prompt</code> / <code>straza.audit.reply</code> (spec/events rev 5, additive). Only straza.audit.&gt; enters the chain.',
+ 'n-store':'<strong>conversation_turns</strong>. A durable consumer mirrors turns into the read model with its own retention knob, governance.captureRetention (default 720 h): transcripts are bulkier and more sensitive than the chain.',
+ 'n-chain':'<strong>hash chain witness</strong>; captured turns are hash-chained like every audit CE: sha256(prevHash &#8214; ce), verified by <code>strazactl audit verify</code>.',
+ 'n-view':'<strong>Transcripts screen</strong>: per-session chat view plus search by substring or by exact value hashed locally (browser/CLI), so a hunted secret&#8217;s plaintext never travels. Flagship use: leak hunting (who pasted the credential, in which turn), then rotate it.'
+};
+Object.keys(FACTS).forEach(function(id){
+  var el=document.getElementById(id);
+  el.addEventListener('mouseenter',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('focus',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('mouseleave',function(){nar.innerHTML=DEF;});
+  el.addEventListener('blur',function(){nar.innerHTML=DEF;});
+});
+
+var MODES={mOff:'off',mVerbatim:'verbatim',mRedact:'redact'};
+var mode='off';
+function setMode(m){
+  mode=m;
+  svg.classList.remove('mode-off','mode-verbatim','mode-redact');
+  svg.classList.add('mode-'+m);
+  document.getElementById('gmode').textContent='mode: '+m;
+  Object.keys(MODES).forEach(function(bid){
+    document.getElementById(bid).setAttribute('aria-pressed',String(MODES[bid]===m));
+  });
+  nar.innerHTML=(m==='off')
+    ?'Gate <strong>off</strong> (the policy default): prompt and reply events are simply not emitted; nothing leaves the machine.'
+    :(m==='verbatim')
+    ?'Gate <strong>verbatim</strong> (the default when a set enables capture): the full content flows; leak hunting needs the real bytes. Redact is bypassed.'
+    :'Gate <strong>redact</strong>: the client masks credential shapes after the full-content hash, and the mode is recorded on every turn. Redact wins across sets.';
+}
+Object.keys(MODES).forEach(function(bid){
+  document.getElementById(bid).addEventListener('click',function(){setMode(MODES[bid]);});
+});
+
+var rafs=[],dots=[],sending=false;
+function slide(pathId,dur,done){
+  var path=document.getElementById(pathId),len=path.getTotalLength();
+  var dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  dot.setAttribute('r','4');dot.setAttribute('class','pulse');
+  svg.appendChild(dot);dots.push(dot);
+  var t0=null;
+  function frame(ts){
+    if(t0===null)t0=ts;
+    var k=Math.min((ts-t0)/dur,1);
+    var pt=path.getPointAtLength(len*k);
+    dot.setAttribute('cx',pt.x);dot.setAttribute('cy',pt.y);
+    if(k<1){rafs.push(requestAnimationFrame(frame));}
+    else{if(dot.parentNode)svg.removeChild(dot);if(done)done();}
+  }
+  rafs.push(requestAnimationFrame(frame));
+}
+function chainSlides(ids,done){
+  if(!ids.length){if(done)done();return;}
+  slide(ids[0],ids[0]==='c3'||ids[0]==='c8'?650:400,function(){chainSlides(ids.slice(1),done);});
+}
+function send(){
+  if(sending)return;
+  var END={
+   off:'Dropped at the gate: mode off means no prompt/reply event exists at all.',
+   verbatim:'Captured verbatim: hashed in full, spooled, drained, chained, mirrored; searchable in Transcripts by substring or locally-hashed value.',
+   redact:'Captured redacted: the full-content hash was taken first, so even redacted turns witness the original, then stored, chained, and searchable.'
+  };
+  if(RM){nar.innerHTML=END[mode];return;}    
+  sending=true;
+  nar.innerHTML='A prompt is submitted; a reply follows, both head for the capture gate&#8230;';
+  var route=(mode==='off')?['c1','c2']
+    :(mode==='verbatim')?['c1','c2','c3','c4b','c6','c7','c8','c9a','c10']
+    :['c1','c2','c3','c4','c5','c6','c7','c8','c9a','c10'];
+  chainSlides(route,function(){
+    nar.innerHTML=END[mode];
+    sending=false;
+  });
+}
+document.getElementById('btnSend').addEventListener('click',send);
+})();
+</script>
+</body>
+</html>

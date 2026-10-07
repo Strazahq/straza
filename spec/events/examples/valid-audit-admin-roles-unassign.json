@@ -1,0 +1,19 @@
+{
+  "specversion": "1.0",
+  "id": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e03",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-09-07T09:14:51.902Z",
+  "data": {
+    "action": "roles.unassign",
+    "actor": "alice",
+    "actorId": "0197fa3d-8888-7abc-9def-000000000008",
+    "actorVia": "session",
+    "target": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e02",
+    "user": "0197fa3d-5555-7abc-9def-000000000005",
+    "role": "dev-tools",
+    "roleId": "0197fa3d-7777-7abc-9def-000000000007",
+    "origin": "scim",
+    "reason": "user deleted by admin"
+  }
+}

@@ -1,0 +1,29 @@
+{{ define "main" }}
+<div class="dbody norail">
+{{ partial "lnav.html" . }}
+<main id="main" class="main" tabindex="-1">
+<div class="prose">
+{{ partial "page-head.html" . }}
+{{ .Content }}
+{{- /* A section's own body usually lists its pages with a sentence each.
+The automatic list below is added only when the body links to none of the
+pages it would list, such as the generated command line sections. */ -}}
+{{- $body := string .Content -}}
+{{- $linked := false -}}
+{{- range .Pages -}}
+  {{- if strings.Contains $body (printf `href="%s"` .RelPermalink) }}{{ $linked = true }}{{ end -}}
+{{- end -}}
+{{- if not $linked }}
+{{ with .RegularPages.ByWeight }}{{ partial "pagelist.html" . }}{{ end }}
+{{- range .Sections.ByWeight }}
+<section class="pagegroup">
+  <h2 id="{{ path.Base .RelPermalink }}"><a href="{{ .RelPermalink }}">{{ .Title }}</a></h2>
+  {{ with .Description }}<p>{{ . }}</p>{{ end }}
+  {{ with .Pages.ByWeight }}{{ partial "pagelist.html" . }}{{ end }}
+</section>
+{{- end }}
+{{- end }}
+</div>
+</main>
+</div>
+{{ end }}

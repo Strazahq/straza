@@ -1,0 +1,26 @@
+# A remote MCP server reached over streamable HTTP, credentialed with one shared secret the gateway sends as a header.
+# Both profiles; after install, set the secret with strazactl apps secret set scout-tools, which asks for it at a hidden prompt.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: scout-tools
+  description: Copy of the demo MCP server, with a header credential
+server:
+  name: scout-tools
+  version: "0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: http://demo-tools:3001/mcp
+  credential:
+    kind: static
+    inject:
+      as: header
+      name: X-Demo-Key
+      template: "{{secret}}"
+  exposure:
+    tools: ["*"]
+  limits:
+    rps: 10
+    timeoutSeconds: 30

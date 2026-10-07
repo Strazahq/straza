@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Agent object template: the sponsor REFERENCE (extension/strazaSponsorRef,
+  a clickable, pickable user link) is the writable source of truth on
+  agent-archetype users; the sponsor USERNAME (extension/strazaSponsor) is
+  derived from it here and is presentation read-only. The username stays
+  the Straza SCIM outbound source for `sponsor` (straza-resource.xml), so
+  the wire does not change. Bound via archetypePolicy on the two agent
+  archetypes only (ai-agent 1c22, personal-agent 1c23): employees never grow
+  the fields. This template types nothing and owns exactly one derivation.
+  Its OID is 1c34, because the seeder deletes the older templates at
+  1c30-1c33.
+-->
+<objectTemplate xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+                xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+                oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c34">
+    <name>straza-agent-template</name>
+    <description>Derives the sponsor username (the SCIM outbound source) from the
+        editable sponsor reference on agent-archetype users. One mapping, no
+        typing; the username is presentation-read-only.</description>
+    <item>
+        <ref>extension/ext:strazaSponsor</ref>
+        <limitations>
+            <layer>presentation</layer>
+            <access>
+                <read>true</read>
+                <add>false</add>
+                <modify>false</modify>
+            </access>
+        </limitations>
+    </item>
+    <mapping>
+        <name>sponsor-ref-to-username</name>
+        <strength>strong</strength>
+        <source>
+            <name>sponsorRef</name>
+            <path>extension/ext:strazaSponsorRef</path>
+        </source>
+        <expression>
+            <script>
+                <code>
+                    if (sponsorRef == null || sponsorRef.getOid() == null) { return null }
+                    try {
+                        def u = midpoint.getObject(
+                            com.evolveum.midpoint.xml.ns._public.common.common_3.UserType.class, sponsorRef.getOid())
+                        return u?.getName()?.getOrig()
+                    } catch (com.evolveum.midpoint.util.exception.ObjectNotFoundException e) {
+                        return null
+                    }
+                </code>
+            </script>
+        </expression>
+        <target>
+            <path>extension/ext:strazaSponsor</path>
+        </target>
+    </mapping>
+</objectTemplate>

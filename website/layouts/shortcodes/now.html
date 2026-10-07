@@ -1,0 +1,6 @@
+{{- /* A warning that needs the reader to act now:
+{{< now title="Save both passwords now" >}}...{{< /now >}} */ -}}
+<div class="now" role="note">
+  <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 2.5 18 17H2L10 2.5Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 8v4M10 14.2v.3" stroke="currentColor" stroke-width="1.8"/></svg>
+  <div class="box-body">{{ with .Get "title" }}<p class="box-title">{{ . }}</p>{{ end }}{{ partial "inner.html" (dict "Page" .Page "Inner" .Inner) }}</div>
+</div>

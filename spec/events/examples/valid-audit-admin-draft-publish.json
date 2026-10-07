@@ -1,0 +1,33 @@
+{
+  "specversion": "1.0",
+  "id": "01a0b8d4-1a22-7b30-8c41-3d4e5f607182",
+  "type": "straza.audit.admin",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-09-24T10:31:47.205Z",
+  "data": {
+    "action": "draft.publish",
+    "actor": "alice",
+    "actorId": "0197fa3d-1111-7abc-9def-000000000001",
+    "actorVia": "session",
+    "draft": "41",
+    "revision": 2,
+    "items": [
+      {"kind": "App", "name": "github", "op": "put"},
+      {"kind": "Role", "name": "github-readers", "op": "put"},
+      {"kind": "Role", "name": "github-writers", "op": "put"},
+      {"kind": "PolicySet", "name": "github-writers-access", "op": "put"}
+    ],
+    "snapshot": "sha256:9b1e27c0",
+    "riskDigest": "9a263499d9213344dc3cca68e908e3edaa90ec5cfad405548dd4c113f07509c2",
+    "reviewedDigest": "9a263499d9213344dc3cca68e908e3edaa90ec5cfad405548dd4c113f07509c2",
+    "acknowledged": ["0adba724ed801ac6b8555f0b3c124724e463834cf3fd9a82dfb197f0f7abc2f6"],
+    "typed": [
+      "364c5ece5670f45a85c1d42444fa1af986211c3b6653ea43daa178380d99729b",
+      "6e0b82f9340da0ec9f163c86f13f4fa094ee3232cc45890a8be5ba92e57eacc4"
+    ],
+    "proposer": "ci-bundles",
+    "proposerId": "01a0b8d0-7c21-7a10-8b41-3c4d5e6f7081",
+    "proposerVia": "api-token",
+    "client": "strazactl"
+  }
+}

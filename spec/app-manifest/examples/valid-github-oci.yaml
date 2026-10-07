@@ -1,0 +1,30 @@
+# The official GitHub MCP server as an OCI image with an env-injected secret.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: github-local
+  namespace: io.github.github
+server:
+  name: io.github.github/github-mcp-server
+  description: Connect AI assistants to GitHub - manage repos, issues, PRs, and workflows through natural language.
+  repository:
+    url: https://github.com/github/github-mcp-server
+    source: github
+  version: "0.17.1"
+straza:
+  runtime:
+    kind: oci
+    oci:
+      image: ghcr.io/github/github-mcp-server:0.17.1
+      sandbox: default
+  credential:
+    kind: static
+    inject:
+      as: env
+      name: GITHUB_PERSONAL_ACCESS_TOKEN
+      template: "{{secret}}"
+  limits:
+    cpu: 500m
+    mem: 512Mi
+    rps: 20
+    timeoutSeconds: 120

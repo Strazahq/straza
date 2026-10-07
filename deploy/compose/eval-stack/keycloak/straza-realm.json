@@ -1,0 +1,108 @@
+{
+  "realm": "straza",
+  "enabled": true,
+  "displayName": "Straza eval",
+  "loginTheme": "straza",
+  "registrationAllowed": false,
+  "sslRequired": "none",
+  "users": [
+    {
+      "id": "c0ffee00-5eed-4b00-a1c3-000000000001",
+      "username": "seed-bootstrap",
+      "createdTimestamp": 1785110400000,
+      "enabled": true,
+      "firstName": "Seed",
+      "lastName": "Bootstrap",
+      "email": "seed-bootstrap@example.invalid",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Seed-B00t!26",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "4cb55fc4-a52c-4af3-83e1-597ead8f62d9",
+      "username": "alice",
+      "createdTimestamp": 1785110400000,
+      "enabled": true,
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice",
+          "temporary": false
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "straza",
+      "name": "Straza (device flow)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [],
+      "webOrigins": [
+        "http://localhost:8420"
+      ],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "midpoint-mcp-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "midpoint-mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "straza-connect",
+      "name": "Straza per-user app grants (connect flow)",
+      "description": "strazad /v1/connect code flow: per-user grants for the midpoint app; aud=midpoint-mcp rides the mapper so RS mode impersonates the caller. Public eval secret. (KC caps this field at 255 chars.)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "straza-connect-eval-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8420/v1/connect/callback",
+        "http://127.0.0.1:8420/v1/connect/callback"
+      ],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "midpoint-mcp-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "midpoint-mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ]
+}

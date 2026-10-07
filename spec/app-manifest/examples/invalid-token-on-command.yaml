@@ -1,0 +1,22 @@
+# INVALID: a caller kind (oauth or token) gives each caller their own
+# credential, which only a remote runtime can take. A command or oci server
+# is one process and one identity (revision 4).
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: badcaller
+server:
+  name: example/badcaller
+  version: "1.0.0"
+straza:
+  runtime:
+    kind: command
+    command:
+      exec: npx
+      args: ["-y", "example-mcp"]
+  credential:
+    kind: token
+    agents: sponsor
+    inject:
+      as: env
+      name: EXAMPLE_TOKEN

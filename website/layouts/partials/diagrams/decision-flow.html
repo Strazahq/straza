@@ -1,0 +1,15 @@
+<svg class="dg" viewBox="0 0 900 330" role="img" aria-labelledby="dg-decision-flow-t" data-say='["The whole path of one tool call. Press a step to follow it.", "1. Claude Code wants to run rm -rf /tmp/x. Before it runs anything, it hands the call to the straza hook.", "2. The hook runs on the same machine. It turns Claude Code&#39;s event into the one shape every harness shares.", "3. The hook checks the call against the signed policy it already holds. No network call is needed.", "4. The winning rule decides: allow, deny with a reason, or ask a person. Here the starter policy denies it.", "5. After the decision, the record goes to the audit chain on the server. The call never waits for it."]'>
+<title id="dg-decision-flow-t">An agent asks to run a tool. The straza hook on the machine reads the call and checks it against the signed policy. The outcome is allow, deny, or ask a person. Every outcome is recorded afterwards.</title>
+<defs><marker id="ah-decision-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0 0 10 5 0 10z"/></marker></defs>
+<g data-s="1"><rect class="box" x="10" y="30" width="170" height="92" rx="6"/><text class="t" x="26" y="60">The agent</text><text class="s" x="26" y="84">asks to run</text><text class="m" x="26" y="106">rm -rf /tmp/x</text></g>
+<g data-s="2"><rect class="box" x="230" y="30" width="170" height="92" rx="6"/><text class="t" x="246" y="60">straza hook</text><text class="s" x="246" y="84">on the same machine,</text><text class="s" x="246" y="104">before the tool runs</text></g>
+<g data-s="3"><rect class="box" x="450" y="30" width="190" height="92" rx="6"/><text class="t" x="466" y="60">Signed policy</text><text class="s" x="466" y="84">already on the machine,</text><text class="s" x="466" y="104">checked against its key</text></g>
+<g data-s="4"><rect class="box okbg ok" x="700" y="6" width="190" height="62" rx="6"/><text class="t" x="716" y="32">Allow</text><text class="s" x="716" y="54">the tool runs</text><rect class="box nobg no" x="700" y="80" width="190" height="62" rx="6"/><text class="t" x="716" y="106">Deny</text><text class="s" x="716" y="128">the agent reads why</text><rect class="box wabg wa" x="700" y="154" width="190" height="62" rx="6"/><text class="t" x="716" y="180">Ask a person</text><text class="s" x="716" y="202">it waits for a decision</text></g>
+<path class="ln" d="M182 76 H225" marker-end="url(#ah-decision-flow)"/>
+<path class="ln" d="M402 76 H445" marker-end="url(#ah-decision-flow)"/>
+<path class="ln" d="M642 64 L695 38" marker-end="url(#ah-decision-flow)"/>
+<path class="ln" d="M642 76 H695" marker-end="url(#ah-decision-flow)"/>
+<path class="ln" d="M642 90 L695 184" marker-end="url(#ah-decision-flow)"/>
+<g data-s="5"><rect class="box soft" x="230" y="256" width="410" height="56" rx="6"/><text class="t" x="248" y="282">Audit chain on the server</text><text class="s" x="248" y="302">recorded after the decision, so the call never waits for it</text></g>
+<path class="ln dash" d="M795 218 V284 H645" marker-end="url(#ah-decision-flow)"/>
+</svg>

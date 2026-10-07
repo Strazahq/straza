@@ -1,0 +1,47 @@
+# midpoint-self-service-access: the gates for the application role
+# midpoint-self-service, which reaches the midPoint server's reads and the
+# self-service pair: whoami, ping, list_requestable_roles, request_role and
+# every search_*, get_* and list_* tool. The developer and analyst business
+# roles compose it. The reads run with no rule. request_role writes a
+# request into the identity manager, so the person behind it confirms it: a
+# person's own request on their own enrolled device, an agent's request by
+# its sponsor. midPoint then runs its own approval for the role. binding
+# call: the approval covers these exact arguments, so a request for another
+# role is a new hold.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: midpoint-self-service-access
+  description: Gates for the role midpoint-self-service, written from the role page
+spec:
+  priority: 100
+  match:
+    roles: [midpoint-self-service]
+  rules:
+    - id: midpoint-request-role-approve
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["request_role"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        timeoutSeconds: 600
+        retryTTLSeconds: 600
+        binding: call
+      reason: "Straza: a midPoint role request. The person behind this agent confirms it on their phone or in the console"
+    - id: midpoint-decide-work-item-sponsor
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["decide_work_item"]
+      effect: allow
+      mode: approve
+      approve:
+        class: hold
+        deciders: [sponsor]
+        timeoutSeconds: 600
+        retryTTLSeconds: 600
+        binding: call
+      reason: "Straza: deciding a midPoint approval waits for the person behind the agent (console or approver phone)"

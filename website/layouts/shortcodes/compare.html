@@ -1,0 +1,43 @@
+{{- /* The comparison of the two profiles, from website/data/profiles.yaml: a
+list of areas, each with id, title and rows, and each row with id, what,
+knob, standalone and enterprise. Every row is its own anchor, so a guide can
+link to the one difference it depends on, and site.js adds the area filter.
+The text fields take inline Markdown. A missing file, a row without an id
+or a repeated id fails the build. */ -}}
+{{- $areas := hugo.Data.profiles -}}
+{{- if not $areas }}{{ errorf "%s: compare needs website/data/profiles.yaml, a list of areas with id, title and rows, and the file is missing or empty." .Position }}{{ end -}}
+{{- $seen := slice -}}
+{{- range $areas -}}
+  {{- if not (and .id .title .rows) }}{{ errorf "%s: an area in website/data/profiles.yaml lacks its id, title or rows. Give every area all three." $.Position }}{{ end -}}
+  {{- range .rows -}}
+    {{- if not .id }}{{ errorf "%s: a row of %q in website/data/profiles.yaml has no id. Every row needs one for its link." $.Position .what }}{{ end -}}
+    {{- if in $seen .id }}{{ errorf "%s: the row id %q appears twice in website/data/profiles.yaml. Row ids are link targets, so each must be unique." $.Position .id }}{{ end -}}
+    {{- $seen = $seen | append .id -}}
+  {{- end -}}
+{{- end -}}
+<div class="compare">
+  <div class="filter" role="group" aria-label="Show differences about" hidden>
+    <button type="button" aria-pressed="true" data-area="">All</button>
+    {{- range $areas }}
+    <button type="button" aria-pressed="false" data-area="{{ .id }}">{{ .title }}</button>
+    {{- end }}
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th scope="col">What differs</th><th scope="col">Standalone</th><th scope="col">Enterprise</th></tr></thead>
+    <tbody>
+    {{- range $areas }}
+    {{- $area := .id }}
+      <tr class="area" data-area="{{ $area }}"><th colspan="3" scope="colgroup">{{ .title }}</th></tr>
+      {{- range .rows }}
+      <tr id="{{ .id }}" data-area="{{ $area }}">
+        <td>{{ $.Page.RenderString .what }}<a class="rowlink" href="#{{ .id }}" aria-label="Link to this row">#</a>{{ with .knob }}<span class="knob">{{ replace (htmlEscape .) "." ".<wbr>" | safeHTML }}</span>{{ end }}</td>
+        <td class="v">{{ $.Page.RenderString .standalone }}</td>
+        <td class="v">{{ $.Page.RenderString .enterprise }}</td>
+      </tr>
+      {{- end }}
+    {{- end }}
+    </tbody>
+  </table>
+  </div>
+</div>

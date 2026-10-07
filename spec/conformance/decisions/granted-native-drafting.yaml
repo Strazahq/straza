@@ -1,0 +1,65 @@
+# Decision-table fixtures: the built-in straza app's drafting tools carry
+# the granted fact (revision 20). A conformant gateway lists
+# straza__draft_submit and straza__draft_status only to a subject holding
+# straza-draft-config, and sends a call of either with granted: true. A
+# call no rule matches is then allowed with the revision 17 reason, and a
+# rule that fires still wins, deny and hold included. The approval tools
+# never carry the fact, so without a rule they keep the default deny. The
+# engine does not see the tier-one role check, so these cases pin the
+# events a conformant gateway sends.
+# Provenance: derived from spec/policyset revision 20 and the reference
+# engine's granted-fact semantics, not captured from a live wire [doc].
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: paused-drafting }
+    spec:
+      match: { users: [blocked-agent] }
+      rules:
+        - id: no-submit
+          tools: [mcp.call]
+          apps: [straza]
+          toolNames: { deny: ["draft_submit"] }
+          effect: deny
+          reason: "Straza: drafting is paused for this agent"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: held-drafting }
+    spec:
+      match: { users: [held-agent] }
+      rules:
+        - id: hold-submit
+          tools: [mcp.call]
+          apps: [straza]
+          toolNames: { allow: ["draft_submit"] }
+          effect: allow
+          mode: approve
+          approve: { roles: [config-reviewers], timeoutSeconds: 120 }
+cases:
+  - name: holder-submit-no-rule-allows-by-default
+    subject: { user: build-agent, roles: [straza-draft-config], userType: agent, attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: draft_submit, granted: true }
+    want: { effect: allow, default: true }
+  - name: holder-status-no-rule-allows-by-default
+    subject: { user: build-agent, roles: [straza-draft-config], userType: agent, attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: draft_status, granted: true }
+    want: { effect: allow, default: true }
+  - name: holder-submit-deny-rule-still-refuses
+    subject: { user: blocked-agent, roles: [straza-draft-config], userType: agent, attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: draft_submit, granted: true }
+    want: { effect: deny, ruleId: no-submit, setName: paused-drafting }
+  - name: holder-submit-hold-rule-still-gates
+    subject: { user: held-agent, roles: [straza-draft-config], userType: agent, attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: draft_submit, granted: true }
+    want: { effect: allow, ruleId: hold-submit, setName: held-drafting, approve: true, approveTimeout: 120 }
+  - name: approval-tool-never-carries-the-fact
+    subject: { user: build-agent, roles: [straza-draft-config], userType: agent, attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: approval_status }
+    want: { effect: deny, default: true }
+  - name: drafting-call-without-the-fact-keeps-the-default-deny
+    subject: { user: build-agent, roles: [straza-draft-config], userType: agent, attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: draft_submit }
+    want: { effect: deny, default: true }

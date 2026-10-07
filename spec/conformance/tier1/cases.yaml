@@ -1,0 +1,264 @@
+# Tier-1 hook-profile conformance cases.
+#
+# Runner protocol (normative; see spec/hook-profile/SPEC.md §Conformance):
+# for every case the runner spawns the command under test with the
+# environment variable STRAZA_HARNESS set to `harness`, writes `payload`
+# (JSON-encoded), or `raw` verbatim, to its stdin, and judges the process
+# output against `want`:
+#
+#   decision: allow = exit code 0 and no deny in the response JSON.
+#   decision: deny  = gemini: strict JSON on stdout with decision "deny" and
+#                     a non-empty reason. claude-code: exit code 2 and/or
+#                     hookSpecificOutput.permissionDecision "deny"; the
+#                     reason in permissionDecisionReason or on stderr.
+#                     codex: exit code 2 with the reason on STDERR (codex
+#                     ignores stdout on exit 2 and rejects decision
+#                     documents on exit 0, live 2026-07-31), so a
+#                     stdout-only deny fails OPEN and fails here too.
+#   decision: block = any refusal (non-zero exit or a deny response); used
+#                     for fail-closed cases where the encoding may vary.
+#   silent: true    = the allow ack must be EMPTY stdout. This is the ack
+#                     contract for claude-code non-enforceable events and
+#                     for EVERY codex success (live 2026-07-31: claude
+#                     2.1.220 validates hook stdout against a per-event
+#                     schema union with no SessionEnd variant; codex
+#                     0.146.0 strict-parses per event and rejects even a
+#                     well-formed permissionDecision:"allow"). Printing a
+#                     document where the harness demands silence is a bug
+#                     in front of that harness.
+#
+# Every case carries `provenance` (repo rule 2026-07-30): "live ..." =
+# verified against the real harness binary (named, with date); "doc ..." =
+# derived from vendor docs/schemas, unconfirmed against a binary. The
+# runner refuses an untagged suite.
+#
+# reasonContains (case-insensitive substring) pins that the policy reason is
+# relayed where the model can read it. Payloads mirror the normalization
+# corpus in spec/conformance/hooks/. The implementation must enforce
+# policy.yaml (standalone profile defaults) for the whole run.
+suite: hook-profile
+policy: policy.yaml
+cases:
+  # --- claude-code dialect ---
+  - name: claude-shell-deny-rm-rf
+    harness: claude-code
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: Bash, tool_input: {command: "rm -rf /tmp/x"}}
+    want: {decision: deny, reasonContains: "destructive commands"}
+    provenance: doc claude hooks reference 2026-07 (hand-authored payload)
+  - name: claude-shell-allow-git-status
+    harness: claude-code
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: Bash, tool_input: {command: "git status"}}
+    want: {decision: allow}
+    provenance: doc claude hooks reference 2026-07 (hand-authored payload)
+  - name: claude-write-env-denied
+    harness: claude-code
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: Write, tool_input: {file_path: /work/proj/.env, content: "SECRET=1"}}
+    want: {decision: deny, reasonContains: "environment files"}
+    provenance: doc claude hooks reference 2026-07 (hand-authored payload)
+  - name: claude-mcp-read-allowed
+    harness: claude-code
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: mcp__github__get_repository, tool_input: {owner: x, repo: y}}
+    want: {decision: allow}
+    provenance: doc claude hooks reference 2026-07 (hand-authored payload)
+  - name: claude-mcp-unbound-denied
+    harness: claude-code
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: mcp__github__delete_repository, tool_input: {owner: x, repo: y}}
+    want: {decision: deny}
+    provenance: doc claude hooks reference 2026-07 (hand-authored payload)
+  - name: claude-session-start-never-blocks
+    harness: claude-code
+    payload: {hook_event_name: SessionStart, session_id: abc, cwd: /work/proj}
+    want: {decision: allow}
+    provenance: doc claude hooks reference 2026-07; empty ack and context-doc ack both live-accepted 2026-07-31 (harness-matrix claude lane)
+  - name: claude-prompt-submit-ack-is-silence
+    harness: claude-code
+    payload: {hook_event_name: UserPromptSubmit, session_id: abc, cwd: /work/proj, prompt: "say hi"}
+    want: {decision: allow, silent: true}
+    provenance: live claude-code 2.1.220 2026-07-31 (harness-matrix claude-output gate; empty stdout accepted on UserPromptSubmit; sanitized payload)
+  - name: claude-session-end-ack-is-silence
+    harness: claude-code
+    payload: {hook_event_name: SessionEnd, session_id: abc, cwd: /work/proj, reason: other}
+    want: {decision: allow, silent: true}
+    provenance: live claude-code 2.1.220 2026-07-31 (harness-matrix claude-output gate; SessionEnd hookSpecificOutput document REJECTED with "Hook JSON output validation failed", empty stdout accepted; sanitized payload)
+  - name: claude-permission-request-deny-rm-rf
+    harness: claude-code
+    payload: {hook_event_name: PermissionRequest, session_id: abc, cwd: /work/proj, tool_name: Bash, tool_input: {command: "rm -rf /tmp/x"}}
+    want: {decision: deny, reasonContains: "destructive commands"}
+    provenance: doc claude hooks reference 2026-07 (no live PermissionRequest capture yet; the permission flow needs an interactive session)
+  - name: claude-permission-request-allow
+    harness: claude-code
+    payload: {hook_event_name: PermissionRequest, session_id: abc, cwd: /work/proj, tool_name: Bash, tool_input: {command: "git status"}}
+    want: {decision: allow}
+    provenance: doc claude hooks reference 2026-07 (no live PermissionRequest capture yet)
+  - name: claude-malformed-payload-fails-closed
+    harness: claude-code
+    raw: '{"hook_event_name": "PreToolUse", "tool_name":'
+    want: {decision: block}
+    provenance: doc fail-closed contract (SPEC.md D11); encoding hand-authored
+  # --- codex dialect ---
+  - name: codex-shell-deny-rm-rf
+    harness: codex
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: Shell, tool_input: {command: "rm -rf /tmp/x"}}
+    want: {decision: deny, reasonContains: "destructive commands"}
+    provenance: doc codex hooks reference 2026-07; exit-2+stderr block encoding live-proven 2026-07-31 (owner-box update_plan test + shim diagnostic)
+  - name: codex-shell-allow-git-status
+    harness: codex
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: Shell, tool_input: {command: "git status"}}
+    want: {decision: allow, silent: true}
+    provenance: live codex 0.146.0 2026-07-31 (allow document REJECTED as "unsupported permissionDecision:allow" on the owner box; silence is the only universal success ack; hand-shaped payload)
+  - name: codex-edit-env-denied
+    harness: codex
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: ApplyPatch, tool_input: {file_path: /work/proj/.env.production}}
+    want: {decision: deny, reasonContains: "environment files"}
+    provenance: doc codex hooks reference 2026-07 (hand-authored payload)
+  - name: codex-mcp-read-allowed
+    harness: codex
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: mcp__github__list_issues, tool_input: {}}
+    want: {decision: allow, silent: true}
+    provenance: live codex 0.146.0 2026-07-31 (harness-matrix g3-live attempt ladder asserts the silent mcp allow when the event fires; hand-shaped payload)
+  - name: codex-mcp-unbound-denied
+    harness: codex
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: mcp__github__delete_repository, tool_input: {}}
+    want: {decision: deny}
+    provenance: doc codex hooks reference 2026-07 (hand-authored payload)
+  - name: codex-session-start-never-blocks
+    harness: codex
+    payload: {hook_event_name: SessionStart, session_id: abc, cwd: /work/proj}
+    want: {decision: allow}
+    provenance: doc codex hooks reference 2026-07; context-doc ack live-accepted 2026-07-31 (harness-matrix g4-e2e enrolled SessionStart)
+  - name: codex-prompt-submit-ack-is-silence
+    harness: codex
+    payload: {hook_event_name: UserPromptSubmit, session_id: abc, cwd: /work/proj, prompt: "say hi"}
+    want: {decision: allow, silent: true}
+    provenance: live codex 0.146.0 2026-07-31 (harness-matrix g3-live; silent ack hard-asserted on a real completing turn; sanitized payload, live shape carries turn_id/model/permission_mode)
+  - name: codex-stop-ack-is-silence
+    harness: codex
+    payload: {hook_event_name: Stop, session_id: abc, cwd: /work/proj, stop_hook_active: false, last_assistant_message: "done."}
+    want: {decision: allow, silent: true}
+    provenance: live codex 0.146.0 2026-07-31 (the 07-30 Stop rejection "invalid stop hook JSON output" is what forced ack silence; payload shape from a live g4-e2e capture, values sanitized)
+  - name: codex-session-end-ack-is-silence
+    harness: codex
+    payload: {hook_event_name: SessionEnd, session_id: abc, cwd: /work/proj, reason: other}
+    want: {decision: allow, silent: true}
+    provenance: live codex 0.146.0 2026-07-31 (harness-matrix g3-live/g4-e2e; silent SessionEnd ack hard-asserted; payload shape from a live capture, values sanitized)
+  - name: codex-permission-request-allow-is-silence
+    harness: codex
+    payload: {hook_event_name: PermissionRequest, session_id: abc, cwd: /work/proj, tool_name: Shell, tool_input: {command: "git status"}}
+    want: {decision: allow, silent: true}
+    provenance: doc codex hooks reference 2026-07 for the payload; the every-event silence contract is live 2026-07-31 (per-event conformance sweep, d03703f)
+  - name: codex-permission-request-deny-rm-rf
+    harness: codex
+    payload: {hook_event_name: PermissionRequest, session_id: abc, cwd: /work/proj, tool_name: Shell, tool_input: {command: "rm -rf /tmp/x"}}
+    want: {decision: deny, reasonContains: "destructive commands"}
+    provenance: doc codex hooks reference 2026-07 (no live PermissionRequest capture yet; the permission flow needs an interactive session)
+  - name: codex-malformed-payload-fails-closed
+    harness: codex
+    raw: 'not json at all'
+    want: {decision: block}
+    provenance: doc fail-closed contract (SPEC.md D11); encoding hand-authored
+  # --- gemini / antigravity dialect ---
+  - name: gemini-shell-deny-rm-rf
+    harness: gemini
+    payload: {event: BeforeTool, sessionId: abc, workspaceDir: /work/proj, toolName: run_shell_command, args: {command: "rm -rf /tmp/x"}}
+    want: {decision: deny, reasonContains: "destructive commands"}
+    provenance: doc antigravity hooks reference 2026-07 (legacy camelCase dialect; hand-authored payload)
+  - name: gemini-shell-allow-git-status
+    harness: gemini
+    payload: {event: BeforeTool, sessionId: abc, workspaceDir: /work/proj, toolName: run_shell_command, args: {command: "git status"}}
+    want: {decision: allow}
+    provenance: doc antigravity hooks reference 2026-07 (hand-authored payload)
+  - name: gemini-write-env-denied
+    harness: gemini
+    payload: {event: BeforeTool, sessionId: abc, workspaceDir: /work/proj, toolName: write_file, args: {absolute_path: /work/proj/.env, content: "SECRET=1"}}
+    want: {decision: deny, reasonContains: "environment files"}
+    provenance: doc antigravity hooks reference 2026-07 (hand-authored payload)
+  - name: gemini-mcp-read-allowed
+    harness: gemini
+    payload: {event: BeforeTool, sessionId: abc, workspaceDir: /work/proj, toolName: mcp__github__get_repository, args: {}}
+    want: {decision: allow}
+    provenance: doc antigravity hooks reference 2026-07 (hand-authored payload)
+  - name: gemini-mcp-unbound-denied
+    harness: gemini
+    payload: {event: BeforeTool, sessionId: abc, workspaceDir: /work/proj, toolName: mcp__github__delete_repository, args: {}}
+    want: {decision: deny}
+    provenance: doc antigravity hooks reference 2026-07 (hand-authored payload)
+  - name: gemini-session-start-never-blocks
+    harness: gemini
+    payload: {event: SessionStart, sessionId: abc, workspaceDir: /work/proj}
+    want: {decision: allow}
+    provenance: doc antigravity hooks reference 2026-07 (hand-authored payload)
+  - name: gemini-malformed-payload-fails-closed
+    harness: gemini
+    raw: '[1, 2'
+    want: {decision: block}
+    provenance: doc fail-closed contract (SPEC.md D11); encoding hand-authored
+  # --- gemini shipping dialect (v0.50 mapping table: snake_case keys,
+  # hook_event_name, MCP split carried in mcp_context) ---
+  - name: gemini-v050-shell-deny-rm-rf
+    harness: gemini
+    payload: {hook_event_name: BeforeTool, session_id: abc, cwd: /work/proj, timestamp: "2026-07-16T12:00:00.000Z", tool_name: run_shell_command, tool_input: {command: "rm -rf /tmp/x"}}
+    want: {decision: deny, reasonContains: "destructive commands"}
+    provenance: doc gemini-cli v0.50.0 source pin 2026-07-16; deny positive control live 2026-07-31 (harness-matrix gemini lane)
+  - name: gemini-v050-mcp-read-allowed
+    harness: gemini
+    payload: {hook_event_name: BeforeTool, session_id: abc, cwd: /work/proj, timestamp: "2026-07-16T12:00:01.000Z", tool_name: mcp_github_get_repository, tool_input: {}, mcp_context: {server_name: github, tool_name: get_repository}}
+    want: {decision: allow}
+    provenance: doc gemini-cli v0.50.0 source pin 2026-07-16 (hand-authored payload)
+  - name: gemini-v050-mcp-unbound-denied
+    harness: gemini
+    payload: {hook_event_name: BeforeTool, session_id: abc, cwd: /work/proj, timestamp: "2026-07-16T12:00:02.000Z", tool_name: mcp_github_delete_repository, tool_input: {}, mcp_context: {server_name: github, tool_name: delete_repository}}
+    want: {decision: deny}
+    provenance: doc gemini-cli v0.50.0 source pin 2026-07-16 (hand-authored payload)
+  - name: gemini-v050-before-agent-allow
+    harness: gemini
+    payload: {hook_event_name: BeforeAgent, session_id: abc, cwd: /work/proj, timestamp: "2026-07-16T12:00:03.000Z", prompt: "say hi"}
+    want: {decision: allow}
+    provenance: doc gemini-cli v0.50.0 source pin 2026-07-16 (prompt.submit lane; gemini always answers strict JSON, silence is never its contract)
+  - name: gemini-v050-session-end-allow
+    harness: gemini
+    payload: {hook_event_name: SessionEnd, session_id: abc, cwd: /work/proj, timestamp: "2026-07-16T12:00:04.000Z", reason: exit}
+    want: {decision: allow}
+    provenance: live gemini 0.53.0 2026-07-31 (SessionEnd fires headless with reason + transcript_path; capture-reader lane; sanitized payload)
+  # --- python-sdk dialect (the shape straza-agentkit emits; mapping table
+  # spec/hook-profile/mappings/python-sdk/0.1.yaml: claude-family
+  # snake_case keys, canonical tool names sent directly) ---
+  - name: python-sdk-shell-deny-rm-rf
+    harness: python-sdk
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: shell.exec, tool_input: {command: "rm -rf /tmp/x"}}
+    want: {decision: deny, reasonContains: "destructive commands"}
+    provenance: doc python-sdk mapping table (our own dialect; kit-emitted shapes exercised by kits/python tests)
+  - name: python-sdk-shell-allow-git-status
+    harness: python-sdk
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: shell.exec, tool_input: {command: "git status"}}
+    want: {decision: allow}
+    provenance: doc python-sdk mapping table (our own dialect)
+  - name: python-sdk-mcp-read-allowed
+    harness: python-sdk
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: mcp__github__get_repository, tool_input: {owner: x, repo: y}}
+    want: {decision: allow}
+    provenance: doc python-sdk mapping table (mcp prefix form parsed as in claude-code)
+  - name: python-sdk-mcp-unbound-denied
+    harness: python-sdk
+    payload: {hook_event_name: PreToolUse, session_id: abc, cwd: /work/proj, tool_name: mcp__github__delete_repository, tool_input: {}}
+    want: {decision: deny}
+    provenance: doc python-sdk mapping table (our own dialect)
+  - name: python-sdk-session-start-never-blocks
+    harness: python-sdk
+    payload: {hook_event_name: SessionStart, session_id: abc, cwd: /work/proj}
+    want: {decision: allow}
+    provenance: doc python-sdk mapping table (our own dialect)
+  - name: python-sdk-prompt-submit-ack-is-silence
+    harness: python-sdk
+    payload: {hook_event_name: UserPromptSubmit, session_id: abc, cwd: /work/proj, prompt: "say hi"}
+    want: {decision: allow, silent: true}
+    provenance: doc python-sdk mapping table (claude-family encoding by design; non-enforceable acks are silence)
+  - name: python-sdk-session-end-ack-is-silence
+    harness: python-sdk
+    payload: {hook_event_name: SessionEnd, session_id: abc, cwd: /work/proj, prompt_response: "done."}
+    want: {decision: allow, silent: true}
+    provenance: doc python-sdk mapping table (SessionEnd may carry the payload-borne reply; ack stays silence)
+  - name: python-sdk-malformed-payload-fails-closed
+    harness: python-sdk
+    raw: '{"hook_event_name":'
+    want: {decision: block}
+    provenance: doc fail-closed contract (SPEC.md D11); encoding hand-authored

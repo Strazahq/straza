@@ -1,0 +1,1 @@
+{"provenance":"doc antigravity hooks reference 2026-07 (hand-authored)","harness":"gemini","payload":{"event":"BeforeTool","sessionId":"abc","workspaceDir":"/work/proj","toolName":"write_file","args":{"absolute_path":"/work/proj/main.go","content":"x"}},"expect":{"kind":"tool.pre","tool":"file.write","paths":["/work/proj/main.go"],"workspace":"/work/proj"}}

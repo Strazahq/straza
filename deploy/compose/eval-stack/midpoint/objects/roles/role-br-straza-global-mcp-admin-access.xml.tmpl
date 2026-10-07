@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BR:Straza-global-mcp-admin-access: the GLOBAL MCP ADMIN access package
+  (see the Delegate one MCP server page of the docs). Holding it means holding
+  the governed Straza account, membership of the imported role
+  AR:straza-global-mcp-admin and a Keycloak login, which together are the
+  right to administer every MCP server: its registration, its changes, its
+  credentials and its reach. It is the admin package one lane over, so an
+  access review over this one business role answers "who administers the MCP
+  servers" without also answering "who administers Straza".
+
+  Why the name ends in .xml.tmpl and not .xml: the seeder's roles glob
+  imports objects/roles/*.xml verbatim, long before the Straza resource and
+  the role recon exist, and this package induces a role that the recon
+  materializes with a generated OID. seed.sh therefore waits for
+  AR:straza-global-mcp-admin, substitutes __MCP_ADMIN_ROLE_OID__ and
+  __KC_INDUCEMENT__, and imports the rendered copy, which is the same render
+  lane objects/resources/straza-resource.xml rides. A file named .xml here
+  would be imported with its placeholders unresolved and the seed would die.
+
+  straza-global-mcp-admin itself is strazad-born at boot beside the
+  enrollment pair and is undeletable, so this package assigns a role it never
+  creates. The Straza account rides AR:Straza:Account and the login rides
+  AR:Keycloak:Account, the same layering the other access packages use, so
+  unassigning this role ends the MCP admin office while the account stays.
+
+  requestable=false, mirroring the admin package: the MCP admin office is
+  granted, never self-requested.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0f">
+    <name>BR:Straza-global-mcp-admin-access</name>
+    <assignment>
+        <!-- br-role archetype: the access packages wear their own family -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c27" type="ArchetypeType"/>
+    </assignment>
+    <description>Access package, the GLOBAL MCP ADMIN one: the
+        Straza account plus AR:straza-global-mcp-admin membership (the
+        straza-global-mcp-admin assignment, written by this identity manager)
+        plus a Keycloak login via AR:Keycloak:Account. Holding this role means
+        administering every MCP server, from registration to credentials and
+        reach. It carries no platform administration and no decide authority,
+        so it is certifiable on its own.</description>
+    <requestable>false</requestable>
+    <inducement>
+        <!-- the governed Straza account (AR:Straza:Account owns the construction) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0b" type="RoleType"/>
+    </inducement>
+    <inducement>
+        <!-- the imported role: holding it writes wire-group membership -->
+        <targetRef oid="__MCP_ADMIN_ROLE_OID__" type="RoleType"/>
+    </inducement>
+    __KC_INDUCEMENT__
+</role>

@@ -1,0 +1,16 @@
+{
+  "specversion": "1.0",
+  "id": "0198a1c4-4d90-7f51-8c73-8e1a2b3d4f65",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-09-06T17:18:07.903Z",
+  "data": {
+    "action": "api-token.create",
+    "actor": "alice",
+    "actorId": "01a05ba5-a888-770d-86ea-6ab18be30bb7",
+    "actorVia": "session",
+    "name": "lf-api-0906",
+    "id": "a8553f82-0f20-480b-9af2-b64a897a8997",
+    "scope": "apps:read"
+  }
+}

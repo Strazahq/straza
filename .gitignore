@@ -1,0 +1,52 @@
+# Binaries
+/bin/
+/dist/
+/build/
+*.exe
+*.test
+
+# Coverage & profiling
+coverage.out
+*.prof
+
+# Local state
+*.db
+*.db-journal
+*.sqlite
+/data/
+/apps/
+.env
+.env.*
+
+# Node dependencies of any front-end tree: installed, never committed.
+node_modules/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Local tool settings and flags, never committed
+.claude/allow-core
+.claude/settings.local.json
+
+# Scratch worktrees of local tools, which no tree walk should read
+.claude/worktrees/
+
+# Eval stack: auto-downloaded connector JARs. The Straza pull connector is
+# the ONE exception: vendored + pinned by SHA256SUMS.
+deploy/compose/eval-stack/midpoint/connectors/*.jar
+!deploy/compose/eval-stack/midpoint/connectors/universal-rest-connector.jar
+__pycache__/
+deploy/compose/eval-stack/tls/*.pem
+/load
+
+# stray root builds (smoke tests build here by accident)
+/straza
+/strazactl
+
+# Fonts fetched at build time by a local render step, never committed
+docs/design/brand-straza/linkedin/art/card-template/inter/
+
+# Local tool caches (headless browsers, scratch installs); never shipped.
+.tools/

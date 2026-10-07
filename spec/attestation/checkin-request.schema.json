@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://straza.dev/attestation/v1beta1/checkin-request.schema.json",
+  "title": "Straza check-in request (v1beta1)",
+  "description": "POST /v1/checkin body. Exactly one of id_token (fresh login), device_token (enrolled device starting a session), or session_token (refresh) is required. v1beta1 (2026-09-09): client added, the calling build's version and commit, recorded on the session. v1beta1: id stabilized, no wire changes from v1alpha3. v1alpha3: device_token added, the long-lived enroll credential; its device binding is authoritative, so device_id is ignored alongside it. v1alpha2: attestation.platform added; managed level verified against the expected-hash registry (SPEC.md).",
+  "type": "object",
+  "properties": {
+    "id_token": { "type": "string", "minLength": 1 },
+    "device_token": { "type": "string", "minLength": 1 },
+    "session_token": { "type": "string", "minLength": 1 },
+    "device_id": { "type": "string" },
+    "harness": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "attestation": {
+      "type": "object",
+      "properties": {
+        "managed": { "type": "boolean" },
+        "platform": {
+          "type": "string",
+          "description": "Client GOOS/GOARCH, e.g. linux/amd64; selects platform-scoped registry rows",
+          "pattern": "^[a-z0-9]+/[a-z0-9]+$"
+        },
+        "hashes": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "pattern": "^sha256:[0-9a-f]{6,64}$" }
+        }
+      },
+      "required": ["managed", "hashes"]
+    },
+    "client": {
+      "type": "object",
+      "description": "The straza client build making the check-in (additive, 2026-09-09): its version stamp and commit. Older clients omit it; the server records it on the session.",
+      "properties": {
+        "version": { "type": "string" },
+        "commit": { "type": "string" }
+      }
+    }
+  },
+  "required": ["harness", "attestation"],
+  "oneOf": [
+    { "required": ["id_token"] },
+    { "required": ["device_token"] },
+    { "required": ["session_token"] }
+  ]
+}

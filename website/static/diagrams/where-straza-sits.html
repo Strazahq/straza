@@ -1,0 +1,214 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where Straza sits · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.bar .hint{color:var(--muted);font-size:11.5px}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%;max-height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:92px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:17px;font-weight:650}
+.s{font-size:12.5px;font-weight:600}
+.d{font-size:12.5px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.1em;font-weight:600}
+.tag{font-size:12px;fill:var(--muted)}
+.claim{font-size:12.5px;font-weight:600}
+.tagline{font-size:13.5px;font-weight:600}
+.box{fill:var(--surface);stroke:var(--border);stroke-width:1.25}
+.beacon .box{fill:var(--accent-bg);stroke:var(--accent);stroke-width:1.5}
+.node{cursor:default;outline:none}
+.node:hover .box,.node:focus .box,.node.on .box{stroke:var(--accent);stroke-width:1.75;
+  filter:drop-shadow(0 0 6px var(--accent-bg))}
+.edge{stroke:var(--accent);stroke-width:1.75;fill:none}
+.edge.back{stroke:var(--muted);stroke-width:1.25;stroke-dasharray:4 4}
+.edgehit{stroke:transparent;stroke-width:18;fill:none;cursor:default}
+.edgehit:hover+.edge,.edgehit:focus+.edge{stroke-width:2.5}
+.dot{fill:var(--accent)}
+.divider{stroke:var(--border);stroke-width:1}
+</style>
+</head>
+<body>
+<script>
+var p=new URLSearchParams(location.search).get('theme');
+if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+</script>
+<div class="bar">
+  <h1>Where Straza sits <span class="k">· your IdM decides who, Straza enforces what their agents may do</span></h1>
+  <span class="hint">hover or tab a box or an arrow for the fact behind it</span>
+</div>
+<div class="stage">
+<svg viewBox="0 0 1040 380" role="img" aria-labelledby="ttl" xmlns="http://www.w3.org/2000/svg">
+  <title id="ttl">Three boxes left to right: your IdM or IGA decides who; Straza, between it and the agents, enforces what those agents may do at every action; agents and their tools sit behind Straza.</title>
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+    </marker>
+    <marker id="arm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+    </marker>
+  </defs>
+
+  
+  <g class="node" tabindex="0" data-f="idm">
+    <rect class="box" x="24" y="70" width="252" height="214" rx="8"/>
+    <text class="cap" x="44" y="98">YOUR IdM / IGA</text>
+    <text class="t" x="44" y="126">Decides who</text>
+    <text class="d" x="44" y="156">people and agents (NHIs)</text>
+    <text class="d" x="44" y="178">sponsor: the accountable human</text>
+    <text class="d" x="44" y="200">roles, incl. who may approve</text>
+    <text class="d" x="44" y="222">certification campaigns</text>
+    <text class="d" x="44" y="244">joiner, mover, leaver</text>
+    <text class="d" x="44" y="266">kill switch: disable = dead sessions</text>
+  </g>
+
+  
+  <g class="node beacon" tabindex="0" data-f="straza">
+    <rect class="box" x="356" y="54" width="328" height="246" rx="8"/>
+    <text class="cap" x="376" y="82">STRAZA</text>
+    <text class="t" x="376" y="110">Enforces what, at every action</text>
+    <text class="d" x="376" y="140">policy: decided before the action runs</text>
+    <text class="d" x="376" y="162">human approval: approver roles or the sponsor</text>
+    <text class="d" x="376" y="184">credentials: the agent never sees the secret</text>
+    <text class="d" x="376" y="206">tool catalog per session, from IdM roles</text>
+    <text class="d" x="376" y="228">audit: one hash-chained record per decision</text>
+    <line class="divider" x1="376" y1="248" x2="664" y2="248"/>
+    <text class="claim" x="376" y="273">the control plane between the two</text>
+    <text class="tag" x="376" y="290">enforced by agent hooks and the MCP gateway</text>
+  </g>
+
+  
+  <g class="node" tabindex="0" data-f="agents">
+    <rect class="box" x="764" y="70" width="252" height="214" rx="8"/>
+    <text class="cap" x="784" y="98">AGENTS AND THEIR TOOLS</text>
+    <text class="t" x="784" y="126">Act on someone's behalf</text>
+    <text class="d" x="784" y="156">Claude Code, Codex, LangChain, yours</text>
+    <text class="d" x="784" y="178">MCP servers and their tools</text>
+    <text class="d" x="784" y="200">shell, files, network fetch</text>
+    <text class="d" x="784" y="222">headless fleets and sub-agents</text>
+    <text class="d" x="784" y="244">each one tied to an IdM identity</text>
+    <text class="d" x="784" y="266">and to its human sponsor</text>
+  </g>
+
+  
+  <g tabindex="0" data-f="scim">
+    <path class="edgehit" d="M278 138 L354 138"/>
+    <path class="edge" d="M278 138 L352 138" marker-end="url(#ar)"/>
+  </g>
+  <text class="tag" x="316" y="126" text-anchor="middle">SCIM</text>
+  <text class="tag" x="316" y="158" text-anchor="middle">control</text>
+  <text class="tag" x="316" y="172" text-anchor="middle">one way</text>
+  <g tabindex="0" data-f="pull">
+    <path class="edgehit" d="M354 234 L278 234"/>
+    <path class="edge back" d="M354 234 L280 234" marker-end="url(#arm)"/>
+  </g>
+  <text class="tag" x="316" y="222" text-anchor="middle">evidence</text>
+  <text class="tag" x="316" y="254" text-anchor="middle">read-only</text>
+  <text class="tag" x="316" y="268" text-anchor="middle">pull</text>
+
+  
+  <g tabindex="0" data-f="decision">
+    <path class="edgehit" d="M686 138 L762 138"/>
+    <path class="edge" d="M686 138 L760 138" marker-end="url(#ar)"/>
+  </g>
+  <text class="tag" x="724" y="126" text-anchor="middle">decision</text>
+  <text class="tag" x="724" y="158" text-anchor="middle">credentials</text>
+  <text class="tag" x="724" y="172" text-anchor="middle">reason</text>
+  <g tabindex="0" data-f="ask">
+    <path class="edgehit" d="M762 234 L686 234"/>
+    <path class="edge back" d="M762 234 L688 234" marker-end="url(#arm)"/>
+  </g>
+  <text class="tag" x="724" y="222" text-anchor="middle">every action</text>
+  <text class="tag" x="724" y="254" text-anchor="middle">asks first</text>
+
+  
+  <circle class="dot" cx="520" cy="334" r="3"/>
+  <text class="tagline" x="520" y="358" text-anchor="middle">Your IdM decides who. Straza enforces what their agents may do, at every action.</text>
+</svg>
+</div>
+<div class="narration" id="nar" aria-live="polite"></div>
+<script>
+(function(){
+  var F={
+    idm:['<b>Your IdM/IGA stays the master of people and roles.</b> People, agents, sponsor edges, roles (including who may approve), certification, joiner/mover/leaver and the kill switch are IdM facts. Straza never creates, renames or deletes any of them: roles are Straza-born, membership is IdM-held, and a leaver in the IdM is a dead session in Straza.'],
+    straza:['<b>Straza is the control plane between the two, and the master of actions.</b> At every action an agent attempts it decides against signed policy before the action runs, routes approvals to approver roles or the accountable sponsor, hands out credentials the agent itself never sees, shapes the per-session tool catalog, and seals a hash-chained record. It never sits in the prompt path: enforcement is the hooks on the agent machine and the MCP gateway, both over the same signed policy, and what it governs is actions, identities and evidence.'],
+    agents:['<b>Agents act on someone’s behalf, at machine speed, through tools.</b> Harnesses, MCP servers, shell and files, headless fleets: each session runs under an identity the IdM provisioned, with a human sponsor on the edge, and every tool call passes the hooks on the machine or the MCP gateway before it happens.'],
+    scim:['<b>SCIM is control, one way.</b> Identities, role membership (wire-groups), sponsor edges and activation flow IdM to Straza; Straza accepts them and never writes back a master fact. Two-way sync would mean two masters for the same fact.'],
+    pull:['<b>The pull is evidence, read-only.</b> Your IGA certifies the source grant it owns; Straza’s mirror of apps, tools and roles is the evidence a reviewer opens, and a drift tripwire for grants that did not come from the IdM.'],
+    decision:['<b>What flows out at every action:</b> the decision (allow, deny, needs a human) with a reason the model can read, the credential for the call if one is due, and the approval reference when a person must tap first.'],
+    ask:['<b>Every action asks first.</b> Local tools pass the hooks on the agent’s machine, MCP calls pass the gateway; both decide over the same signed snapshot, fail closed, and write to the same audit chain.']
+  };
+  var def=['<b>Nothing is duplicated.</b> The IdM stays the master of people and roles, Straza is the master of actions, and the agents act behind it under identities the IdM can revoke. Disable the person in the IdM and the agent dies with them.'];
+  var nar=document.getElementById('nar');
+  function show(k){var f=F[k]||def;nar.innerHTML='<span>'+f[0]+'</span>';}
+  show();
+  var els=document.querySelectorAll('[data-f]');
+  for(var i=0;i<els.length;i++){(function(el){
+    var k=el.getAttribute('data-f');
+    el.addEventListener('mouseenter',function(){show(k)});
+    el.addEventListener('focus',function(){show(k)});
+    el.addEventListener('mouseleave',function(){show()});
+    el.addEventListener('blur',function(){show()});
+  })(els[i]);}
+})();
+</script>
+</body>
+</html>

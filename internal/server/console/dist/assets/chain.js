@@ -1,0 +1,2 @@
+const o=typeof crypto<"u"&&!!crypto.subtle;async function a(n){const t=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(n));return Array.from(new Uint8Array(t)).map(r=>r.toString(16).padStart(2,"0")).join("")}async function s(n,t){let r=t;for(const e of n){if(r!==null&&e.prevHash!==r)return{ok:!1,brokenSeq:e.seq};if(await a((e.prevHash||"")+`
+`+e.ce)!==e.hash)return{ok:!1,brokenSeq:e.seq};r=e.hash||""}return{ok:!0,brokenSeq:0}}export{o as c,a as s,s as v};

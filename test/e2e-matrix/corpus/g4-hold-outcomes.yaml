@@ -1,0 +1,400 @@
+# A hook-lane hold through every outcome it can have. One human holds an
+# application role, a rule holds one shell command for straza-admin, and
+# the scenario proves in order: the first call is denied with the pending
+# sentence and a pending record, the admin approves and the identical retry
+# is allowed once with the approver's name, the next identical call raises
+# a new request because the exemption is single use, a different command
+# raises its own record, a denied request stays denied and the same call
+# run again is a new request, a decided record is not decided again (a
+# repeat of the same verdict answers the record, a conflicting verdict is
+# refused), a five-second rule expires to a deny and an expired record
+# cannot be approved, the IdM API token cannot decide because it carries
+# no person, and the state filter lists what it should.
+#
+# The retry after a denial: the how-to guide says a second run of the same
+# command raises a new request and that a deny is final for that request,
+# and the tickets section is where a denial holds for a window. The
+# sentence "Straza: approval denied by NAME (ref ID)" of events revision 31
+# is what a gateway caller reads when the denial lands inside the socket
+# wait, and the hook lane never waits, so this scenario asserts the fresh
+# request. The gateway sibling g4-gateway-refusals shows the binary holding
+# a retry afresh after a denial [live].
+#
+# Shapes the binary forced on the corpus, each with how it was verified: the
+# approvals list is an object with an approvals array, the activate body is
+# {status: active|draft}, a policy delete answers 204 and role deletes
+# answer 200, all recorded on j0-golden-path [live]. The record
+# fields state, lane and rule are the openapi Approval schema [doc]. The
+# steps marked "suspect" below assert a wording, a status code or a list
+# order the published sources leave open; each is listed in the lane
+# report.
+id: g4-hold-outcomes
+group: G4
+title: A hook-lane hold is approved and retried once, raised again, denied, decided twice, expired and filtered by state
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (unknown state and an unanswered or refused hold are a
+  deny);
+  spec/policyset/SPEC.md §2 item 8 (the hook lane answers deny with a
+  retry-after-approval reference, honors a single-use exemption keyed
+  session, rule and argv hash, and nothing beyond that one retry;
+  timeoutSeconds bounds the wait, range 1..3600), revisions 14 and 15
+  (roles: [straza-admin] is how a rule names the admin pool);
+  spec/events/SPEC.md §2.2 (one straza.audit.approval record when the
+  request opens and one when it resolves as approved, denied or expired)
+  and revision 38 (one more when a call uses a hold's approval) and
+  revision 31 (the hook lane's straza.audit.tool record for a hold
+  carries the allowing rule, and the pending sentence is recorded as a
+  deny);
+  pkg/api/openapi.yaml GET /v1/admin/approvals (state enum pending,
+  approved, denied, expired, all; "Unknown values are a 400"),
+  POST /v1/admin/approvals/{id}/approve and /deny (answers 200, 403, 404,
+  409 and 410; security userBearer, which refuses an admin API token
+  because it carries no user; the optional reason body), the Approval
+  schema (state, lane, rule, decidedReason);
+  website/content/guides/write-policy/hold-for-a-human.md (the pending
+  sentence "approval requested (notified roles [...])" and "Retry this
+  exact call after approval"; the allowed retry's reason "approved by";
+  a second run of the same command raises a new request; a deny is final
+  for that request);
+  website/content/concepts/approvals-model.md (the sweep runs every 15
+  seconds and an expired approval is a deny; one retry and nothing more;
+  an approval that nobody answers expires);
+  website/content/reference/api.md section Authentication (the decide
+  routes take any active user's login token and refuse an admin API token
+  with 401 or 403).
+  suspect: the success status codes of the admin routes and the
+  approvals.0 path into a one-record list; that the same call run again
+  after a denied hold raises a fresh request on the hook lane, which the
+  how-to guide states for a second run of the same command and the
+  reference events page can be read against; the mapping of 409 to an
+  already decided record and of 410 to an expired one, which the openapi
+  lists without a sentence; the status of the IdM token's refused
+  decide, which the openapi lists as 403 and the reference page as 401
+  or 403; that a retried call after an expired hold raises a fresh
+  request rather than a refusal, which no page states for the hook lane;
+  the record counts on the chain, which add one request per record, one
+  resolution per decided or expired record and one use per approval a
+  call used.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  carol: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: one role, one human in it, one PolicySet with a long hold and a five-second hold.
+  - name: the admin creates the application role the policy will match
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-hold, kind: application, description: "Hold outcomes scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM provisions carol over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-carol
+        userName: carol
+        displayName: Carol Held
+        active: true
+    want: {status: 201}
+    save: {carolId: id}
+  - name: the admin sets carol's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${carolId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g4-hold"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: carol becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${carolId}"}]
+    want: {status: 200}
+  - name: the admin applies a PolicySet that holds deploy for fifteen minutes and quick-deploy for five seconds
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-hold
+            description: Hold outcomes scenario for role g4-hold
+          spec:
+            match:
+              roles: [g4-hold]
+            rules:
+              - id: hold-deploy
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [straza-admin]
+                  timeoutSeconds: 900
+                  retryTTLSeconds: 300
+                reason: "G4-HOLD: deploy is held for a straza-admin decision"
+              - id: hold-quick
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["quick-deploy *"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [straza-admin]
+                  timeoutSeconds: 5
+                reason: "G4-HOLD-QUICK: quick-deploy is held for a straza-admin decision for five seconds"
+    want: {status: 201}
+  - name: the admin activates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-hold/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: carol enrolls
+    enroll: {as: carol}
+  - name: carol starts a session
+    hook:
+      as: carol
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # 1. The held command is denied with the pending sentence and a pending record.
+  - name: the held command is denied with the pending sentence that names the notified role
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval requested (notified roles [straza-admin])"}
+  - name: exactly one record is pending, on the hook lane, under the rule that held the call
+    # suspect: approvals.0 is the one record of a one-record list
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.lane: hook, approvals.0.rule: hold-deploy, approvals.1: null}
+    save: {holdOne: approvals.0.id}
+  - name: the pending deny is on the chain once and tells the model to retry the exact call after approval
+    audit: {subject: carol, kind: tool.pre, decision: deny, reasonContains: "Retry this exact call after approval", count: 1}
+  - name: the request phase of the hold is on the chain as one approval record
+    audit: {subject: carol, kind: straza.audit.approval, count: 1}
+
+  # 2. The admin approves and the identical retry is allowed once.
+  - name: the admin approves the hold and the record reads approved
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${holdOne}/approve
+    want:
+      status: 200
+      body: {approval.state: approved}
+  - name: the identical retry is allowed by the single-use exemption
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: allow}
+  - name: the allowed retry is on the chain once and its reason names the approver
+    audit: {subject: carol, kind: tool.pre, decision: allow, reasonContains: "approved by", count: 1}
+  - name: the resolution and the retry's use joined the request, three approval records for one hold
+    audit: {subject: carol, kind: straza.audit.approval, count: 3}
+
+  # 3. The exemption was single use, so the next identical call and a different call each raise a record.
+  - name: the same command again is not allowed a second time and raises a new request
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval requested"}
+  - name: the new request is the only pending record
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.rule: hold-deploy, approvals.1: null}
+    save: {holdTwo: approvals.0.id}
+  - name: a different command under the same rule raises its own record
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-two"}
+    want: {decision: deny, reasonContains: "approval requested"}
+  - name: two records are pending now
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.1.state: pending, approvals.2: null}
+
+  # 7. The IdM API token carries no person and cannot decide.
+  - name: the IdM API token is refused on the approve route with 401 because it carries no person
+    # suspect: the reference page says a wrong token is refused with 401 or 403 and a sentence, and the openapi lists only 403 on the decide routes, which g4-hold-routing shows is the pool check on a person; the binary answers 401 with "carries no user and cannot decide" [live]
+    scim:
+      method: POST
+      path: /v1/admin/approvals/${holdTwo}/approve
+    want: {status: 401, bodyContains: "carries no user"}
+  - name: the record the token tried to approve is still pending
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${holdTwo}
+    want:
+      status: 200
+      body: {approval.state: pending}
+
+  # 4. A denied request stays denied, and the same call run again is a new request.
+  - name: the admin denies the second request with a reason and the record carries the words
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${holdTwo}/deny
+      body: {reason: "G4-HOLD: not this one"}
+    want:
+      status: 200
+      body: {approval.state: denied, approval.decidedReason: "G4-HOLD: not this one"}
+  - name: the same call run again after the denial is not allowed and raises a fresh request
+    # suspect: the how-to guide says a second run of the same command raises a new request and a deny is final for that request only
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval requested"}
+  - name: four pending denies are on the chain, one per request the hook lane opened
+    audit: {subject: carol, kind: tool.pre, decision: deny, reasonContains: "approval requested", count: 4}
+  - name: the denied record stayed denied
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${holdTwo}
+    want:
+      status: 200
+      body: {approval.state: denied}
+  - name: the other command's record and the fresh one are the two pending records
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.1.state: pending, approvals.2: null}
+
+  # 5. A decided record is not decided again: a repeat of the same verdict answers the record, a conflicting verdict is refused.
+  - name: a second approve of the approved record answers with the record again and writes no second decision
+    # suspect: the openapi lists 409 on the decide routes without a sentence; the binary answers a same-verdict repeat with 200 and the unchanged record [live], and the approval record count below catches a second resolution
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${holdOne}/approve
+    want:
+      status: 200
+      body: {approval.state: approved}
+  - name: approving the denied record answers 409 because the verdicts conflict
+    # suspect: the openapi lists 409 on the decide routes without a sentence; a conflicting verdict on a decided record is the reading
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${holdTwo}/approve
+    want: {status: 409}
+
+  # 6. A five-second hold expires to a deny and cannot be approved afterwards.
+  - name: the five-second rule holds quick-deploy
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "quick-deploy app-three"}
+    want: {decision: deny, reasonContains: "approval requested"}
+  - name: the sweep flips the record to expired within its window plus one sweep
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=expired
+    want:
+      status: 200
+      body: {approvals.0.state: expired, approvals.0.rule: hold-quick, approvals.1: null}
+    save: {holdFour: approvals.0.id}
+    within: 30s
+  - name: the expiry resolution is on the chain, nine approval records for five requests
+    # suspect: one request per record, one resolution per decided or expired record and one use of the approved hold gives 3+2+1+1+2
+    audit: {subject: carol, kind: straza.audit.approval, count: 9}
+  - name: approving the expired record answers 410
+    # suspect: the openapi lists 410 on the decide routes without a sentence; an expired record is the reading
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${holdFour}/approve
+    want: {status: 410}
+  - name: the retried call after the expiry raises a fresh request rather than a refusal
+    # suspect: no page states what the hook lane answers after an expired hold; a second run of the same command raises a new request is the reading
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "quick-deploy app-three"}
+    want: {decision: deny, reasonContains: "approval requested"}
+
+  # 8. The state filter lists what it should and refuses an unknown value.
+  - name: the approved filter lists the one approved record
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=approved
+    want:
+      status: 200
+      body: {approvals.0.state: approved, approvals.1: null}
+  - name: the denied filter lists the one denied record
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=denied
+    want:
+      status: 200
+      body: {approvals.0.state: denied, approvals.1: null}
+  - name: the expired filter lists two once the fresh quick-deploy request has expired too
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=expired
+    want:
+      status: 200
+      body: {approvals.0.state: expired, approvals.1.state: expired, approvals.2: null}
+    within: 30s
+  - name: the pending filter lists the two records still waiting
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.1.state: pending, approvals.2: null}
+  - name: the all filter lists the six records of the run
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=all
+    want:
+      status: 200
+      body: {approvals.5.lane: hook, approvals.6: null}
+  - name: an unknown state value is refused with 400
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=bogus
+    want: {status: 400}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-hold/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft PolicySet is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g4-hold
+    want: {status: 204}
+  - name: the admin deletes the role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates carol
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${carolId}
+    want: {status: 204}

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MCP proxy: the Switch-To-Principal grant for the midpoint-mcp-server's
+  technical account (user mcp-service, ...1c07).
+  LOAD-BEARING: mcp-service holds no Superuser (it holds "MCP service"
+  ...1c08 instead), so this role is the ONLY thing that lets the account
+  impersonate - exactly the enterprise shape: near-zero standing privilege
+  plus a bounded right to act as someone else. The server's resource-server
+  (OIDC) mode runs on it.
+-->
+
+<!--
+  Verified on 4.10.3, both directions:
+  - superuser's #all DOES cover rest-3#proxy - irrelevant here, because the
+    account is not a superuser;
+  - #proxy ALONE grants no REST entry: a #proxy-only account is 403'd on every
+    endpoint including /self. REST endpoint authorization is evaluated against
+    the AUTHENTICATED account even while impersonating, so the endpoint actions
+    live in "MCP service" ...1c08, which mirrors the rs-service profile the
+    product ships as examples/role-mcp-rs-service.xml.
+-->
+
+<!--
+  SCOPE: employee + ai-agent archetypes only.
+  ObjectSelectorType/archetypeRef is repeatable and OR-ed on 4.10.3, verified
+  live with the eval cast:
+    alice / carol (employee,       ...1c20) -> impersonation OK
+    nina / joe    (ai-agent,       ...1c22) -> proxy check passes
+    heidi         (external,       ...1c21) -> 403, refused
+    pam           (personal-agent, ...1c23) -> 403, refused
+  administrator and every other archetype-less identity are outside the scope by
+  construction, so the MCP app can never act as an admin. Externals and personal
+  agents are excluded on purpose (teaching-grade least privilege): widen the list
+  here if a persona should become governable through the MCP lane.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c06">
+    <name>MCP proxy</name>
+    <description>Allows acting on behalf of employees and AI agents via the Switch-To-Principal REST header (midpoint-mcp-server on-behalf lane).</description>
+    <authorization>
+        <name>rest-proxy</name>
+        <description>Impersonation, scoped to the governable population: employee + ai-agent archetypes.</description>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-rest-3#proxy</action>
+        <object>
+            <type>UserType</type>
+            <!-- archetype "employee" (objects/archetypes/archetype-employee.xml) -->
+            <archetypeRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20"/>
+            <!-- archetype "ai-agent" (objects/archetypes/archetype-ai-agent.xml) -->
+            <archetypeRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c22"/>
+        </object>
+    </authorization>
+</role>

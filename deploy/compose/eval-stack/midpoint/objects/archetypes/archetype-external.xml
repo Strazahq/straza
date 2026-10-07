@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  User archetype: external. Contractors, partners, vendor accounts; humans who
+  are not on the payroll. Assigned directly (seed XML or GUI); holding it
+  types the user human via the induced weak mapping below (subtype retired).
+-->
+<archetype xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+           xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+           oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c21">
+    <name>external</name>
+    <description>External human identity: contractor, partner or vendor. Typically
+        time-bounded access (assignment validity) and stricter certification cadence.</description>
+    <archetypePolicy>
+        <display>
+            <label>External</label>
+            <pluralLabel>Externals</pluralLabel>
+            <icon>
+                <cssClass>fa fa-user-secret</cssClass>
+                <color>#f2711c</color>
+            </icon>
+        </display>
+    </archetypePolicy>
+    <assignment>
+        <assignmentRelation>
+            <holderType>UserType</holderType>
+        </assignmentRelation>
+    </assignment>
+    <inducement>
+        <focusMappings>
+            <mapping>
+                <name>external-types-user</name>
+                <strength>weak</strength>
+                <expression><value>human</value></expression>
+                <target><path>extension/ext:strazaUserType</path></target>
+            </mapping>
+        </focusMappings>
+    </inducement>
+</archetype>

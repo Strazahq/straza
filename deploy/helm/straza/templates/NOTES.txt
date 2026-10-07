@@ -1,0 +1,85 @@
+Straza deployed as {{ include "straza.fullname" . }}.
+
+Image:    {{ include "straza.image" . }}
+Profile:  {{ .Values.profile }}
+Replicas: {{ if .Values.autoscaling.enabled }}{{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} (HPA){{ else }}{{ .Values.replicaCount }}{{ end }}
+Public:   {{ if and (include "straza.filePublicUrl" .) (not .Values.publicUrl) }}{{ include "straza.filePublicUrl" . }} (from configYaml){{ else }}{{ include "straza.publicUrl" . }}{{ if not .Values.publicUrl }} ({{ if .Values.ingress.enabled }}derived from ingress host{{ else }}in-cluster Service DNS, set publicUrl for out-of-cluster clients{{ end }}){{ end }}{{ end }}
+Events:   {{ if include "straza.natsBundled" . }}bundled NATS ({{ include "straza.natsURL" . }}){{ else if .Values.nats.url }}external NATS ({{ .Values.nats.url }}){{ else }}embedded per-pod{{ end }}
+Store:    {{ if include "straza.postgresBundled" . }}bundled Postgres ({{ include "straza.fullname" . }}-postgres, secret {{ include "straza.pgSecretName" . }}){{ else if .Values.postgres.existingSecret }}Postgres (DSN from secret {{ .Values.postgres.existingSecret }}){{ else if .Values.postgres.dsn }}Postgres (values DSN){{ else }}sqlite per-pod{{ end }}
+{{- if .Values.apps.manifests }}
+Apps:     {{ len .Values.apps.manifests }} declarative manifest(s) -> /etc/straza/apps (each proposes a draft: publish it with strazactl drafts publish)
+{{- end }}
+{{- if .Values.approverTLS.enabled }}
+Approver: {{ .Values.approverTLS.publicUrl }} (dedicated https listener on port {{ .Values.approverTLS.port }}, cert {{ .Values.approverTLS.existingSecret }})
+{{- end }}
+Push relay: {{ if .Values.pushRelay.enabled }}on ({{ if .Values.pushRelay.url }}{{ .Values.pushRelay.url }}{{ else }}push.straza.ai{{ end }}; pushRelay.enabled=false turns it off){{ else }}off{{ end }}
+{{- if .Values.demoTools.enabled }}
+Demo:     {{ include "straza.fullname" . }}-demo-tools -> http://{{ include "straza.fullname" . }}-demo-tools:3001/mcp (register it as an app; ClusterIP only)
+{{- end }}
+
+{{- if or (include "straza.postgresBundled" .) .Values.postgres.dsn .Values.postgres.existingSecret }}
+
+strazad is stateless: the store is shared, so any pod serves any session.
+{{- else }}
+
+The store is sqlite in the pod's emptyDir: this one pod serves every session,
+and a replaced pod (rollout, eviction) starts with an empty store. Use
+profile=enterprise with Postgres for durable data and more than one replica.
+{{- end }}
+
+{{- if eq .Values.profile "enterprise" }}
+{{- if and (not (include "straza.postgresBundled" .)) (not .Values.postgres.dsn) (not .Values.postgres.existingSecret) }}
+
+WARNING: enterprise profile needs Postgres but postgres.enabled is off and
+no dsn/existingSecret is set, so strazad will fail at boot. Re-enable the
+bundled instance or bring your own.
+{{- end }}
+{{- if not .Values.oidc.issuer }}
+
+WARNING: the enterprise profile signs people in only through an external OIDC
+identity provider. strazad boots without one, but nobody except the
+break-glass admin can sign in. Set oidc.issuer and oidc.clientId.
+{{- end }}
+{{- if and (gt (int (include "straza.maxReplicas" .)) 1) (not .Values.secrets.kekExistingSecret) }}
+
+WARNING: no secrets.kekExistingSecret, so every pod mints its own ephemeral
+KEK, so stored secrets don't survive a restart and replicas cannot read
+each other's. Fine for a smoke, never for production.
+{{- end }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+
+INGRESS: the rendered rule is path: / (Prefix) on {{ .Values.ingress.host }}, so
+admin API, console, /mcp, SCIM and the UNAUTHENTICATED /metrics all answer
+there. Right for a restricted host; on a host the internet can reach, split
+the surface at the edge instead: publish /v1/approver/* (+ /readyz) only,
+rate-limited, and keep console/admin/gateway on a restricted one. Never let
+/metrics cross a public ingress: it answers anyone unless server.metricsToken
+is set in configYaml, it labels its counts by MCP server, sink, route, status,
+effect and lane, and it is best scraped in-cluster over the Service.
+{{- end }}
+{{- if .Values.approverTLS.enabled }}
+
+APPROVER LISTENER: route the Service's "approver" port ({{ .Values.approverTLS.port }}) at the
+public approver host, never "http"; that listener serves only
+/v1/approver/* + /readyz. Enroll QRs PIN this certificate: replacing secret
+{{ .Values.approverTLS.existingSecret }} re-enrolls every device, and strazad reads the pair at
+boot, so a renewal also needs `kubectl rollout restart`.
+{{- end }}
+{{- if .Values.demoTools.enabled }}
+
+DEMO UPSTREAM: {{ include "straza.fullname" . }}-demo-tools is a demo MCP server, ClusterIP only:
+give it no ingress and no route; strazad's governed /mcp gateway is the only
+road to it. Turn demoTools.enabled off in real deployments.
+{{- end }}
+
+Check health:
+{{- $filePublicUrl := include "straza.filePublicUrl" . }}
+{{- if and $filePublicUrl (not .Values.publicUrl) }}
+  curl {{ $filePublicUrl }}/readyz
+{{- else if or .Values.publicUrl .Values.ingress.enabled }}
+  curl {{ include "straza.publicUrl" . }}/readyz
+{{- else }}
+  kubectl port-forward svc/{{ include "straza.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl {{ if .Values.tls.existingSecret }}-k https{{ else }}http{{ end }}://localhost:{{ .Values.service.port }}/readyz
+{{- end }}

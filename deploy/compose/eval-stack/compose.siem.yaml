@@ -1,0 +1,182 @@
+# OPT-IN SIEM demo overlay: Elasticsearch + Kibana (free Basic tier), fed
+# DIRECTLY by a strazad webhook sink, with no Filebeat/shipper in between (the
+# sink `headers` knob speaks ES's own contract; see siem/straza-siem.yaml).
+#
+#   docker compose -f compose.yaml -f compose.loopback.yaml \
+#     -f compose.siem.yaml up -d
+#
+# Adds ~1.5–2 GiB RAM (ES 512 MiB heap + Kibana), started when demoing,
+# not part of the always-on eval footprint. Kibana: http://127.0.0.1:5601
+# (tunnel it like the console), login elastic / strazasiem, then Discover
+# over a `straza-events` data view. Security is ON (demo-grade: basic auth,
+# loopback publish only); production posture is on
+# https://docs.straza.ai/guides/operate/sinks-and-siem/.
+services:
+  strazad:
+    # The base compose already sets STRAZA_CONFIG=/etc/straza/straza.yaml and
+    # mounts straza.rs-mode.yaml there. strazad reads ONE config file, so this
+    # overlay REPLACES that mount (compose merges volumes by container path)
+    # with the superset file: same oauth block + the sink list. Keep the two
+    # files' oauth blocks in sync.
+    volumes:
+      - ./siem/straza-siem.yaml:/etc/straza/straza.yaml:ro
+    # The sink posts through the straza-id pipeline, which siem-setup
+    # creates. Before it exists Elasticsearch answers 400 and strazad parks
+    # the first events of a fresh boot, so strazad waits for siem-setup.
+    # Compose merges this map with the base file's depends_on.
+    depends_on:
+      siem-setup:
+        condition: service_completed_successfully
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    environment:
+      discovery.type: single-node
+      ELASTIC_PASSWORD: strazasiem
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false" # loopback demo; prod terminates TLS
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "127.0.0.1:9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u elastic:strazasiem http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: give kibana_system its password (Kibana may not connect as
+  # `elastic`) and create the straza-id ingest pipeline that makes ES dedupe
+  # by CloudEvent id: a redelivery hits the same _id and the plain _doc POST
+  # answers 409 (create semantics, NOT an upsert), which strazad counts as
+  # delivered: no duplicates and no stuck delivery.
+  siem-setup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        set -e
+        curl -sf -X POST -u elastic:strazasiem -H 'Content-Type: application/json' \
+          http://elasticsearch:9200/_security/user/kibana_system/_password \
+          -d '{"password":"strazakibana"}'
+        curl -sf -X PUT -u elastic:strazasiem -H 'Content-Type: application/json' \
+          http://elasticsearch:9200/_ingest/pipeline/straza-id \
+          -d '{"description":"CloudEvent id becomes _id: a redelivery answers 409, never a duplicate","processors":[{"script":{"source":"ctx._id = ctx.id"}}]}'
+        # One node holds no replica, so the indices strazad and the alert rules
+        # create ask for none; with the default of one the cluster stays yellow.
+        curl -sf -X PUT -u elastic:strazasiem -H 'Content-Type: application/json' \
+          http://elasticsearch:9200/_index_template/straza-single-node \
+          -d '{"index_patterns":["straza-*"],"priority":10,"template":{"settings":{"number_of_replicas":0}}}'
+        echo "SIEM SETUP DONE"
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.14.3
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      siem-setup:
+        condition: service_completed_successfully
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: strazakibana
+      # Alerting/connectors REQUIRE the encrypted-saved-objects key (the API
+      # 500s without it, confirmed live on this stack). Static demo keys, same
+      # policy as every credential here; production generates its own trio.
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: strazaevalencryptionkey0123456789ab
+      XPACK_SECURITY_ENCRYPTIONKEY: strazaevalsecuritykey0123456789abcd
+      XPACK_REPORTING_ENCRYPTIONKEY: strazaevalreportingkey0123456789ab
+    ports:
+      - "127.0.0.1:5601:5601"
+
+  # One-shot: import the CODE-OWNED SOC saved objects (siem/straza-soc.ndjson:
+  # both data views with fixed ids, five curated searches, the "Straza SOC"
+  # dashboard) so Discover AND a readable dashboard work straight after login;
+  # without it Kibana greets the first visitor with a "create a data view" step.
+  # Also pre-creates approval alerting: an index connector writing to
+  # `straza-alerts`, two Elasticsearch-query rules over the resolution record
+  # of the approval audit events (data.phase resolution, data.state approved
+  # or denied, 30 s cadence, each decision alerts once via
+  # excludeHitsFromPreviousRun), and a `straza-alerts` data view. To see it,
+  # decide a hold or ticket and watch Stack Management → Rules go active AND
+  # the alert document appear in Discover within ~30 s. All free-tier
+  # (.index connector + .es-query rule).
+  # A rerun replaces the saved objects and both rules and keeps the connector.
+  kibana-setup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    depends_on:
+      kibana:
+        condition: service_started
+    restart: "no"
+    volumes:
+      - ./siem:/siem:ro
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        until curl -sf -u elastic:strazasiem http://kibana:5601/api/status >/dev/null; do sleep 3; done
+        # SOC saved objects (both data views with FIXED ids, five curated
+        # searches, the "Straza SOC" dashboard) are CODE-OWNED:
+        # siem/straza-soc.ndjson, imported with overwrite=true on every
+        # setup run so stacks self-heal to the checked-in truth. Edits made
+        # in the Kibana UI do not survive a setup re-run; edit the ndjson.
+        curl -sf -X POST -u elastic:strazasiem 'http://kibana:5601/api/saved_objects/_import?overwrite=true' \
+          -H 'kbn-xsrf: true' --form file=@/siem/straza-soc.ndjson >/dev/null \
+          && echo "SOC OBJECTS IMPORTED (data views + searches + dashboard)" \
+          || { echo "FATAL: SOC saved-objects import failed"; exit 1; }
+        # --- approval alerting (connector + rules + alerts data view) ---
+        # The connector is create-if-missing, then ALWAYS re-listed to extract
+        # the id (the id of a fresh create rides an unpredictable field order;
+        # the list lane is one shape). An empty id means the alerting API is
+        # broken (e.g. the encryption key is missing): fail LOUD, don't create
+        # armless rules.
+        CONNS=$(curl -sf -u elastic:strazasiem -H 'kbn-xsrf: true' http://kibana:5601/api/actions/connectors) || CONNS=""
+        if ! echo "$$CONNS" | grep -q '"name":"straza-alerts-index"'; then
+          curl -sf -X POST -u elastic:strazasiem http://kibana:5601/api/actions/connector \
+            -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -o /dev/null \
+            -d '{"name":"straza-alerts-index","connector_type_id":".index","config":{"index":"straza-alerts","refresh":true}}' \
+            && echo "ALERT CONNECTOR CREATED" || echo "ALERT CONNECTOR CREATE FAILED"
+          CONNS=$(curl -sf -u elastic:strazasiem -H 'kbn-xsrf: true' http://kibana:5601/api/actions/connectors) || CONNS=""
+        fi
+        CONN_ID=$(echo "$$CONNS" | sed 's/},{/}\n{/g' | grep '"name":"straza-alerts-index"' | sed 's/.*"id":"\([^"]*\)".*/\1/' | head -1)
+        if [ -z "$$CONN_ID" ]; then
+          echo "FATAL: no straza-alerts-index connector id; alerting API broken, rules NOT created"; exit 1
+        fi
+        echo "ALERT CONNECTOR ID: $$CONN_ID"
+        # A rule of the same name is REPLACED, never skipped, so a stack that
+        # holds an older query heals on a setup rerun. The search asks for the
+        # name field only, so each hit is an id next to its name: the rule's
+        # own id, never a connector id. The id is read from that pair, and
+        # only where the name is exactly this one. A replaced rule starts with
+        # fresh state, so it may alert once more for a decision made in the
+        # last five minutes.
+        for STATE in approved denied; do
+          NAME="Straza approval $$STATE (hold/ticket)"
+          FOUND=$(curl -sf -G -u elastic:strazasiem -H 'kbn-xsrf: true' http://kibana:5601/api/alerting/rules/_find \
+            --data-urlencode 'per_page=100' --data-urlencode 'fields=["name"]' \
+            --data-urlencode 'search_fields=name' --data-urlencode "search=\"$$NAME\"") \
+            || { echo "RULE NOT REPLACED: $$NAME. Kibana did not list the rules, so nothing was changed. Rerun the kibana-setup job."; continue; }
+          RESULT="RULE CREATED: $$NAME"
+          for ID in $(echo "$$FOUND" | grep -o '"id":"[^"]*","name":"[^"]*"' | grep -F "\"name\":\"$$NAME\"" | sed -n 's/^"id":"\([^"]*\)".*/\1/p'); do
+            curl -sf -X DELETE -u elastic:strazasiem -H 'kbn-xsrf: true' -o /dev/null "http://kibana:5601/api/alerting/rule/$$ID" \
+              || { echo "RULE NOT REPLACED: $$NAME. Kibana did not delete the old rule $$ID, so no second copy was created. Rerun the kibana-setup job."; continue 2; }
+            RESULT="RULE REPLACED: $$NAME"
+          done
+          curl -sf -X POST -u elastic:strazasiem http://kibana:5601/api/alerting/rule \
+            -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -o /dev/null \
+            -d "{\"name\":\"$$NAME\",\"rule_type_id\":\".es-query\",\"consumer\":\"stackAlerts\",\"enabled\":true,
+                 \"schedule\":{\"interval\":\"30s\"},\"tags\":[\"straza\",\"approval\"],
+                 \"params\":{\"searchType\":\"esQuery\",\"index\":[\"straza-events\"],\"timeField\":\"time\",
+                   \"esQuery\":\"{\\\"query\\\":{\\\"bool\\\":{\\\"filter\\\":[{\\\"match\\\":{\\\"type\\\":\\\"straza.audit.approval\\\"}},{\\\"match\\\":{\\\"data.phase\\\":\\\"resolution\\\"}},{\\\"match\\\":{\\\"data.state\\\":\\\"$$STATE\\\"}}]}}}\",
+                   \"size\":10,\"threshold\":[0],\"thresholdComparator\":\">\",
+                   \"timeWindowSize\":5,\"timeWindowUnit\":\"m\",\"excludeHitsFromPreviousRun\":true},
+                 \"actions\":[{\"group\":\"query matched\",\"id\":\"$$CONN_ID\",
+                   \"frequency\":{\"notify_when\":\"onActiveAlert\",\"summary\":false},
+                   \"params\":{\"documents\":[{\"@timestamp\":\"{{context.date}}\",\"rule\":\"{{rule.name}}\",
+                     \"state\":\"$$STATE\",\"hits\":\"{{context.value}}\",\"title\":\"{{context.title}}\",
+                     \"message\":\"{{context.message}}\"}]}}]}" \
+            && echo "$$RESULT" || echo "RULE CREATE FAILED: $$NAME"
+        done
+        echo "KIBANA SETUP DONE (alerts data view rides the SOC import above)"

@@ -1,0 +1,14 @@
+# Golden scenario: bring-your-own backends (the usual production shape), external
+# Postgres via secret DSN + external NATS + shared KEK + native TLS. Must
+# render ZERO bundled StatefulSets: bring-your-own wins over the turnkey
+# defaults, so existing installs upgrade without growing duplicate backends.
+postgres:
+  existingSecret: straza-db
+nats:
+  url: nats://nats.straza.svc:4222
+oidc:
+  issuer: https://idp.example.com/realms/prod
+secrets:
+  kekExistingSecret: straza-kek
+tls:
+  existingSecret: straza-tls
