@@ -142,7 +142,7 @@ func TestFleetMultiPodSmoke(t *testing.T) {
 	} {
 		p, ok := got[name]
 		if !ok {
-			t.Errorf("probe %s missing from the multi-pod fleet", name)
+			t.Errorf("probe %s missing from the multi-pod fleet, which returned %s", name, probeSummary(probes))
 			continue
 		}
 		if strings.HasPrefix(p.Observed, "error:") {
@@ -152,4 +152,14 @@ func TestFleetMultiPodSmoke(t *testing.T) {
 			t.Errorf("probe %s topology does not state 2 pods: %s", name, p.Budget)
 		}
 	}
+}
+
+// probeSummary lists each probe's name and observation, so a fleet that
+// failed at setup says why in the test output.
+func probeSummary(probes []Probe) string {
+	parts := make([]string, 0, len(probes))
+	for _, p := range probes {
+		parts = append(parts, p.Name+": "+p.Observed)
+	}
+	return "[" + strings.Join(parts, "; ") + "]"
 }

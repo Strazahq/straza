@@ -273,7 +273,9 @@ func TestBreakGlassRepairTwoReplicas(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			const rounds = 20
+			// The two boots overlap only when the scheduler runs them at the same
+			// moment, which a busy runner can miss for many rounds in a row.
+			const rounds = 200
 			for round := 1; round <= rounds; round++ {
 				held, err := stores[0].Roles().ListAssignments(ctx, store.SubjectUser, bg.ID)
 				if err != nil {

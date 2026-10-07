@@ -120,6 +120,9 @@ func TestMultiPodHA(t *testing.T) {
 		t.Fatalf("cross-pod re-checkin = %d %v", code, body)
 	}
 	tokB := body["session_token"].(string)
+	// From here on the test calls both pods the way straza does, with the
+	// session's newest token: B's check-in above replaced tokA.
+	cl := &haClient{t: t, tok: tokB}
 
 	// B runs its own instance of the app, started from the store at boot, so
 	// its catalog fills as soon as its own upstream probe lands. Poll until
@@ -157,7 +160,7 @@ spec:
 		t.Fatalf("policy activate via B = %d", code)
 	}
 	waitForHA(t, "policy activated via B enforced by A", func() bool {
-		_, _, raw := mcpCall(t, baseA, tokA, "tools/call", map[string]any{
+		_, _, raw := cl.call(baseA, "tools/call", map[string]any{
 			"name": "github__get_issue", "arguments": map[string]int{"number": 1},
 		})
 		return strings.Contains(string(raw), "off-limits")
@@ -204,7 +207,7 @@ spec:
 		}
 		waitForHA(t, "server "+step.what+" via A converged on B", func() bool {
 			_, live := appB.manager.View("tagged")
-			_, _, raw := mcpCall(t, baseB, tokB, "tools/call", map[string]any{"name": "tagged__whoami", "arguments": map[string]any{}})
+			_, _, raw := cl.call(baseB, "tools/call", map[string]any{"name": "tagged__whoami", "arguments": map[string]any{}})
 			if step.tag == "" {
 				return !live && !strings.Contains(string(raw), "from-")
 			}
@@ -248,7 +251,7 @@ spec:
 		"    bindings:\n        - app: tagged\n          tools:\n            - whoami\n",
 		"apiVersion: straza.dev/v1beta1\nkind: Role\nmetadata:\n    name: tagged-team\nspec:\n    kind: business\n    implies:\n        - tagged-users\n")
 	waitForHA(t, "access row published via A applied on B", func() bool {
-		_, _, raw := mcpCall(t, baseB, tokB, "tools/call", map[string]any{"name": "tagged__whoami", "arguments": map[string]any{}})
+		_, _, raw := cl.call(baseB, "tools/call", map[string]any{"name": "tagged__whoami", "arguments": map[string]any{}})
 		return strings.Contains(string(raw), "from-one")
 	})
 
@@ -264,7 +267,7 @@ spec:
 		}
 	}
 	waitForHA(t, "binding deleted via B empties A's catalog", func() bool {
-		_, listA, _ := mcpCall(t, baseA, tokA, "tools/list", nil)
+		_, listA, _ := cl.call(baseA, "tools/list", nil)
 		return len(toolNamesOf(t, listA)) == 0
 	})
 
@@ -286,11 +289,37 @@ spec:
 		t.Fatal("no active session found to revoke")
 	}
 	waitForHA(t, "session revoked via B refused by A", func() bool {
-		code, _, _ := mcpCall(t, baseA, tokA, "tools/list", nil)
+		code, _, _ := mcpCall(t, baseA, cl.tok, "tools/list", nil)
 		return code == http.StatusForbidden || code == http.StatusUnauthorized
 	})
 
 	_ = appB // both pods stay up for the whole scenario
+}
+
+// haClient calls a pod's gateway the way straza does. A 401 or an answer
+// that asks for a fresh check-in gets one on that pod with the newest token,
+// and the call is sent once more, so every pod ends up serving that token.
+type haClient struct {
+	t   *testing.T
+	tok string
+}
+
+func (c *haClient) call(base, method string, params any) (int, map[string]any, []byte) {
+	c.t.Helper()
+	code, body, raw := mcpCall(c.t, base, c.tok, method, params)
+	if code != http.StatusUnauthorized && !strings.Contains(string(raw), "Check in again") {
+		return code, body, raw
+	}
+	got, in := postJSON(c.t, base+"/v1/checkin", map[string]any{
+		"session_token": c.tok,
+		"harness":       map[string]string{"name": "claude-code", "version": "2.1.0"},
+		"attestation":   map[string]any{"managed": false, "hashes": map[string]string{"self": "x"}},
+	})
+	if got != http.StatusOK {
+		return code, body, raw
+	}
+	c.tok = in["session_token"].(string)
+	return mcpCall(c.t, base, c.tok, method, params)
 }
 
 // rawYAMLReq sends a YAML body (the policy apply contract) with a bearer.

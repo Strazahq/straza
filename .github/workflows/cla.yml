@@ -86,8 +86,8 @@ jobs:
           CLA_RECORDS_TOKEN: ${{ secrets.CLA_RECORDS_TOKEN }}
           CLA_PR: ${{ inputs.pr }}
           CLA_VERSION: "1.2"
-          # The maintainer sets the full commit id of the first public tree here.
-          # Until then the check fails closed and names this line.
-          CLA_TEXT_URL: "https://github.com/strazahq/straza/blob/FILL_FULL_COMMIT_ID/CLA.md"
+          # The agreement text is pinned to the first public commit, so the
+          # version a contributor accepts can never move under them.
+          CLA_TEXT_URL: "https://github.com/strazahq/straza/blob/49f58699f3c0e07923818b3c16e4a584244942ce/CLA.md"
           # The maintainer's account and dependabot[bot].
           CLA_ALLOWLIST_IDS: "98211187,49699333"
