@@ -1,0 +1,16 @@
+{
+  "specversion": "1.0",
+  "id": "0199a3b1-4c2d-7e5f-8a01-7b3c4d5e6f03",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-09-18T10:48:02.077Z",
+  "data": {
+    "action": "roles.delete",
+    "actor": "alice",
+    "actorId": "0197fa3d-8888-7abc-9def-000000000008",
+    "actorVia": "session",
+    "target": "0199a3b1-4c2d-7e5f-8a01-7b3c4d5e6f02",
+    "role": "demo-tools-readers",
+    "server": "demo-tools"
+  }
+}

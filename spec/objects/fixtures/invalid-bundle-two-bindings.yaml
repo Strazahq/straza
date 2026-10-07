@@ -1,0 +1,19 @@
+# INVALID: an application role reaches one MCP server, so a Role document
+# lists at most one binding (revision 4). The bundle reader refuses this Role
+# with role.bindings, and the way out is one role per server composed by a
+# business role. Provenance: derived from this spec's sections 2 and 4, not
+# captured from a live wire. TestBundleFixtures reads it.
+---
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+    name: dev-tools
+spec:
+    kind: application
+    bindings:
+        - app: demo-tools
+          tools:
+            - echo
+        - app: midpoint
+          tools:
+            - get_user

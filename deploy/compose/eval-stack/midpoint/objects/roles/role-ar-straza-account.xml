@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AR:Straza:Account: the ONE owner of the governed Straza account
+  construction. Standard midPoint layering: the account exists exactly while
+  the user holds a role that carries it, and a user with no roles loses the
+  account (default existence semantics, deliberately no weak existence). The
+  access packages do NOT construct the account themselves: they induce the
+  imported Straza role (membership) and the Keycloak login, so unassigning a
+  package removes the association while the account, held by THIS role,
+  stays.
+  Full leaver = lose every role = account deprovisioned (Straza semantics:
+  DELETE deactivates, never purges).
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0b">
+    <name>AR:Straza:Account</name>
+    <description>Account role: the governed Straza account itself.
+        Holding it keeps the account alive, and losing every account-carrying
+        role deprovisions it. Access rides the imported Straza roles
+        (membership IS assignment), never this role.</description>
+    <inducement>
+        <construction>
+            <resourceRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01" type="ResourceType"/>
+            <kind>account</kind>
+            <intent>default</intent>
+        </construction>
+    </inducement>
+</role>

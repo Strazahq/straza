@@ -1,0 +1,22 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: night-shift
+spec:
+  priority: 10
+  match:
+    roles: [contractors]
+  rules:
+    - id: default-shell
+      tools: [shell.exec]
+      command:
+        allowPatterns: ["git *", "go *", "ls*", "cat *"]
+  escape:
+    rego: |
+      package straza.ext
+
+      deny contains msg if {
+        input.event.tool == "shell.exec"
+        contains(input.event.command, "sudo")
+        msg := "contractors may not use sudo"
+      }

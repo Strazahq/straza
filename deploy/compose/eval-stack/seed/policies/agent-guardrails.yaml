@@ -1,0 +1,96 @@
+# agent-guardrails: the rules no role page writes, for every session that
+# holds one of the demo's application roles: demo-tools-sandbox,
+# midpoint-self-service, midpoint-operations and demo-tools-readers. The
+# business roles developer, operator and analyst compose those, so every
+# agent of the cast lands here whichever business role it holds. Each application role's own
+# gates live in the set named after it plus -access, where its role page
+# reads and writes them. What this set holds:
+#
+#   - The hook lane. The enterprise profile denies local tools by default,
+#     so the standard lane is given back: shell, file read, write and edit,
+#     network fetch, subagents. Deploy-shaped commands come back as a
+#     day-scale ticket. Destructive commands and secret-file writes are
+#     denied with a reason, and a deny overrides every allow in every set.
+#   - The gateway's built-in approval tools, so an agent can request, check
+#     and await its own holds and tickets instead of blind-retrying.
+#   - Recording, word for word, of every matched session for the
+#     Transcripts page.
+#
+# Rule order never decides the outcome: deny wins across every matched set,
+# and order only picks the reported rule on a tie (internal/policy/eval.go).
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: agent-guardrails
+  description: The hook lane, the built-in approval tools and the recording for every session holding one of the demo's application roles
+spec:
+  priority: 150
+  match:
+    roles: [demo-tools-sandbox, midpoint-self-service, midpoint-operations, demo-tools-readers]
+  capture:
+    conversations: true
+    mode: verbatim
+  rules:
+    - id: straza-approval-tools
+      # Deciding is never a tool, so this exposes no approver power. The
+      # built-ins have no access row, so this allow is what reaches them.
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [straza]
+      toolNames:
+        allow: ["approval_request", "approval_status", "approval_await"]
+      effect: allow
+    - id: deploy-ticket
+      # The long-approval showcase: no wait at the call, a day to decide, an
+      # hour to consume the single-use grant. The deciders are the agent's
+      # sponsor and every sec-approvers holder, whoever answers first.
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        allowPatterns: ["./deploy*", "make deploy*", "terraform apply*"]
+      effect: allow
+      mode: approve
+      approve:
+        class: ticket
+        deciders: [sponsor]
+        roles: [sec-approvers]
+        ticketTTLSeconds: 86400
+        grantTTLSeconds: 3600
+      reason: "Straza: deploy needs a day-scale approval ticket. Request it, the person behind this agent or a security approver decides, re-run to consume the grant"
+    - id: local-tools
+      # file.read also carries the harness's search built-ins and the
+      # pure-UI tools, so dropping it would brick a session's first turn.
+      events: [tool.pre]
+      tools: [shell.exec, file.read, file.write, file.edit, net.fetch, task.spawn]
+      effect: allow
+    - id: no-rm-rf
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["rm -rf *", "git push --force*", "curl * | *sh*"]
+      effect: deny
+      reason: "Straza: destructive command denied by the agent guardrails"
+    # The next two rules refuse file.read, file.write and file.edit of the
+    # strazactl login in ~/.straza/credentials.json, and a shell command that
+    # names that file. They are a guardrail against a mistake, not a boundary.
+    - id: protect-straza-login
+      events: [tool.pre]
+      tools: [file.read, file.write, file.edit]
+      paths:
+        deny: ["**/.straza/credentials.json"]
+      effect: deny
+      reason: "Straza: an agent may not read or change the strazactl login in ~/.straza/credentials.json. Give the agent its own identity, or an admin API token in STRAZA_API_TOKEN."
+    - id: protect-straza-login-shell
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["*.straza/credentials.json*"]
+      effect: deny
+      reason: "Straza: an agent may not read or change the strazactl login in ~/.straza/credentials.json. Give the agent its own identity, or an admin API token in STRAZA_API_TOKEN."
+    - id: protect-secrets
+      events: [tool.pre]
+      tools: [file.write, file.edit]
+      paths:
+        deny: ["**/.env*", "**/id_rsa*", "**/credentials.json"]
+      effect: deny
+      reason: "Straza: secret-file writes denied by the agent guardrails"

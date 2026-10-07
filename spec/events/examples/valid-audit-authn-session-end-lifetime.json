@@ -1,0 +1,14 @@
+{
+  "specversion": "1.0",
+  "id": "0198a1c2-4d02-7e55-9abc-1f2e3d4c5b28",
+  "type": "straza.audit.authn",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-09-07T09:02:00Z",
+  "data": {
+    "action": "session.end",
+    "outcome": "lifetime-closed",
+    "userId": "0197fa3d-2222-7abc-9def-000000000002",
+    "session": "0198a1c2-4c99-7e55-9abc-1f2e3d4c5b01",
+    "reason": "session older than the maximum lifetime of 12h0m0s; the client starts a new session from its device credential"
+  }
+}

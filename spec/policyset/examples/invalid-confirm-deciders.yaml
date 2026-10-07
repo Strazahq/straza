@@ -1,0 +1,19 @@
+# INVALID: mode confirm may not set approve.deciders (revision 13). The
+# requester is the sole decider under confirm; a decider kind there is an
+# authoring mistake, rejected rather than ignored (same posture as the
+# revision-11 pool-field rejections).
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: confirm-with-deciders
+spec:
+  rules:
+    - id: r1
+      tools: [mcp.call]
+      apps: [github]
+      toolNames:
+        allow: ["create_pull_request"]
+      effect: allow
+      mode: confirm
+      approve:
+        deciders: [sponsor]

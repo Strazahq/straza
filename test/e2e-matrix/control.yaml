@@ -1,0 +1,19 @@
+# The e2e-matrix positive control. The runner creates the NHI e2e-control,
+# gives it the application role e2e-control, activates this set and checks
+# through the real straza hook, on every dialect the corpus uses, that the
+# control command is denied with this reason before any scenario counts.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: e2e-matrix-control
+  description: The e2e-matrix positive control. A denied shell.exec must reach every hook dialect as a deny before a scenario row counts.
+spec:
+  match:
+    roles: [e2e-control]
+  rules:
+    - id: control-deny
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["straza-e2e-control-probe*"]
+      effect: deny
+      reason: "Straza: the e2e-matrix positive control denies this command"

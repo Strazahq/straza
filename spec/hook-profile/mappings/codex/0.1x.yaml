@@ -1,0 +1,55 @@
+# Published mapping table: Codex CLI 0.1x → Straza canonical events.
+# Codex cloned the Claude Code hook contract; divergences pinned per release.
+harness: codex
+events:
+  SessionStart: session.start
+  UserPromptSubmit: prompt.submit
+  PreToolUse: tool.pre
+  PostToolUse: tool.post
+  PermissionRequest: permission.request
+  Stop: session.end
+  # Revision 2026-07-26 (verified against openai/codex generated JSON
+  # schemas, primary source: additive vendor change, so the 0.1x table is
+  # extended in place rather than re-pinned): +SessionEnd (root-only; fires
+  # on close or 30 min idle; never for subagents), +SubagentStart/
+  # +SubagentStop (SubagentStop replaces Stop for thread-spawned children;
+  # payload adds agent_transcript_path + last_assistant_message, nullable;
+  # transcript_path is the CHILD's rollout at SubagentStart but the PARENT's
+  # at SubagentStop, a polarity flip claude-code does not share).
+  SessionEnd: session.end
+  SubagentStart: subagent.start
+  SubagentStop: subagent.stop
+# Revision 2026-07-20 (inventory audit, drift-guard sync): +apply_patch,
+# +spawn_agent: the CANONICAL hook payload tool_name values verified against
+# Codex source at tag rust-v0.144.6 (codex-rs/core/src/tools/hook_names.rs,
+# registry.rs). `Bash` is the shell hook name; `apply_patch`/`spawn_agent` are
+# the canonical edit/subagent names; the capitalized Edit/Write/Agent are
+# Codex's matcher aliases (kept for policy-config compatibility).
+tools:
+  Bash: shell.exec
+  Shell: shell.exec
+  LocalShell: shell.exec
+  Edit: file.edit
+  ApplyPatch: file.edit
+  apply_patch: file.edit
+  Write: file.write
+  Read: file.read
+  WebFetch: net.fetch
+  Task: task.spawn
+  spawn_agent: task.spawn
+notes: |
+  Decision encoding (live-corrected 2026-07-31, codex 0.146.0): SUCCESS is
+  empty stdout on exit 0 for EVERY event; codex strict-parses hook stdout
+  per event and rejects decision documents, including a well-formed
+  permissionDecision:"allow" (unsupported without updatedInput). A block is
+  exit code 2 with the reason on STDERR; codex ignores stdout on exit 2, so
+  a stdout-only deny fails open. (The claude-code doc-plus-exit-2 shape is
+  NOT shared, contrary to this table's pre-2026-07-31 note.)
+  Root reply capture (live 2026-07-31): the root-turn Stop payload carries
+  `last_assistant_message` (final message only; also on SubagentStop). It is
+  deliberately NOT the capture lane for root turns; codex flushes the
+  assistant rollout line to `transcript_path` BEFORE firing Stop, so
+  transcript-delta capture sees the whole turn; mapping the payload field
+  would double-capture across the Stop/SessionEnd pair (both map to
+  session.end). Fixture directory 0.146/ is minted from live sentinel
+  captures (see its provenance fields).

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  User archetype: personal-agent. An AI agent bound to a PERSON: it acts on
+  behalf of its owner (e.g. an employee's coding agent) and should never hold
+  more access than that owner. Assigned directly (seed XML or GUI); holding it
+  types the user via the induced weak mappings below, because the focus
+  subtype is retired. strazaSponsor should name the owner: pam's is carol.
+
+  Modeling note: in the current Straza model a person's agents authenticate AS
+  the person (alice's Claude Code would enroll as alice). The archetype is the
+  landing zone for the moment agent identities split from their owners
+  (delegation), and the seed carries one sample, pam-personal-agent, with no
+  roles. Ownership would then be modeled as a manager/owner relation or an
+  extension reference to the owner.
+-->
+<archetype xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+           xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+           oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c23">
+    <name>personal-agent</name>
+    <description>Personal AI agent identity: acts on behalf of a specific person and is
+        access-bounded by that person. Leaver flow of the owner must cascade here.</description>
+    <archetypePolicy>
+        <display>
+            <label>Personal Agent</label>
+            <pluralLabel>Personal Agents</pluralLabel>
+            <icon>
+                <cssClass>fa fa-user-astronaut</cssClass>
+                <color>#00b5ad</color>
+            </icon>
+        </display>
+        <!-- sponsor derivation (templates/straza-agent-template.xml): the
+             EDITABLE strazaSponsorRef user reference is the truth; the
+             strazaSponsor username is derived from it (presentation-read-only)
+             for the SCIM outbound -->
+        <objectTemplateRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c34"/>
+    </archetypePolicy>
+    <assignment>
+        <assignmentRelation>
+            <holderType>UserType</holderType>
+        </assignmentRelation>
+    </assignment>
+    <inducement>
+        <focusMappings>
+            <mapping>
+                <name>personal-agent-types-user</name>
+                <strength>weak</strength>
+                <expression><value>agent</value></expression>
+                <target><path>extension/ext:strazaUserType</path></target>
+            </mapping>
+            <mapping>
+                <name>personal-agent-agency-mode</name>
+                <strength>weak</strength>
+                <expression><value>interactive</value></expression>
+                <target><path>extension/ext:strazaAgencyMode</path></target>
+            </mapping>
+        </focusMappings>
+    </inducement>
+</archetype>

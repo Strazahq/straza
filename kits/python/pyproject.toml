@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "straza-agentkit"
+version = "0.2.0"
+description = "Runtime governance for Python agents (LangChain, OpenAI Agents SDK, CrewAI, ...): every tool call is decided by the local straza binary before it runs."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "SynapTech s. r. o.", email = "hello@straza.ai" }]
+keywords = ["straza", "agent", "governance", "runtime-governance", "policy", "langchain", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+# Deliberately ZERO dependencies: the package is a thin shim around the
+# straza binary, and all policy, session, crypto and audit live there.
+dependencies = []
+
+# Framework glue: each extra pulls ONLY its
+# framework, so the core stays dependency-free, and the integrations modules
+# import their framework lazily with an actionable hint when absent.
+# Floors = the versions the glue was written and tested against.
+[project.optional-dependencies]
+langchain = ["langchain>=1.0"]
+openai-agents = ["openai-agents>=0.18"]
+claude-agent-sdk = ["claude-agent-sdk>=0.2"]
+# Test-only. deepagents ships the SubAgentMiddleware / create_sub_agent
+# delegation surface the subagent-governance tests drive; no runtime module
+# imports it.
+test = ["deepagents"]
+
+[tool.setuptools.packages.find]
+include = ["straza_agentkit*"]

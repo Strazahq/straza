@@ -1,0 +1,34 @@
+# Loopback-only port publishing for internet-reachable hosts such as a cloud
+# VM: the lab credentials are deliberately public, and Docker publishes
+# ports past firewalld/ufw (its own iptables rules run first), so
+# "the firewall will cover it" is false. This override rebinds every
+# published port to 127.0.0.1; reach the stack through SSH tunnels only
+# (https://docs.straza.ai/get-started/enterprise-demo-stack/#demo-defaults-and-the-hardened-shape).
+#
+#   docker compose -f compose.yaml -f compose.loopback.yaml up -d --build
+#
+# `!override` replaces the base list instead of appending to it (needs
+# docker compose >= 2.24, shipped with any current docker-ce).
+services:
+  keycloak:
+    # Loopback only: the containers that verify tokens fetch Keycloak at
+    # keycloak:8080, so no container on the compose network needs this port.
+    ports: !override
+      - "127.0.0.1:8480:8080"
+  strazad:
+    # The advertised approver URL is pinned to loopback here on purpose: on a
+    # tunnel-only host the phone lane is ssh tunnel + adb reverse, where the
+    # phone really does dial 127.0.0.1:8443. Configured-loopback also keeps
+    # the server's phone-enroll guard quiet (it refuses only DERIVED loopback
+    # URLs, the no-LAN last resort).
+    environment:
+      STRAZA_APPROVER_TLS_PUBLIC_URL: https://127.0.0.1:8443
+    ports: !override
+      - "127.0.0.1:8420:8420"
+      - "127.0.0.1:8443:8443"
+  landing:
+    ports: !override
+      - "127.0.0.1:8400:80"
+  midpoint:
+    ports: !override
+      - "127.0.0.1:8087:8080"

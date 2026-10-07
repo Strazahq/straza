@@ -1,0 +1,29 @@
+# The eval stack's demo upstream: the MCP protocol reference server
+# (upstream package name "server-everything"; our app is named demo-tools
+# because "everything" reads like an aggregator bucket),
+# reached ONLY through strazad's gateway (its container publishes no ports).
+# Credential-free (credential.kind defaults to none): the demo is governance,
+# not injection. For the OAuth story, use the shape of
+# spec/app-manifest/examples/valid-github-remote.yaml.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: demo-tools
+  namespace: io.modelcontextprotocol
+  description: MCP reference server (echo/add/demo tools) via streamable HTTP
+server:
+  name: io.modelcontextprotocol/server-everything
+  description: Reference MCP server exercising every protocol feature.
+  repository:
+    url: https://github.com/modelcontextprotocol/servers
+    source: github
+  version: "2026.8.31"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: http://demo-tools:3001/mcp
+  exposure:
+    tools: ["*"]
+  limits:
+    rps: 10

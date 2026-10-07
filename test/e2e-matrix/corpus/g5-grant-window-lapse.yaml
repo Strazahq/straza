@@ -1,0 +1,229 @@
+# A ticket grant is consumable for a window, and this scenario lets that
+# window close. The rule sets a five second consume window, the admin
+# approves the ticket, nobody cashes the grant, and the identical call after
+# the sleep opens a fresh ticket. The first record keeps its approved
+# decision and never gains the consume fields, so the chain carries a request
+# and a resolution for it and no consumed phase.
+#
+# The wait is a sleep and not a within, because a lapse has nothing to poll
+# for. Polling the gated command would cash the grant on the first attempt,
+# which is the opposite of what the scenario proves. The proof is the call
+# after the sleep, the unconsumed record, and the record count on the chain.
+#
+# Shapes the binary forced on the corpus, each with how it was verified. The
+# approvals list is an object with an approvals array and a single record
+# answers under an approval key (reference/api.md, Approvals answers table).
+# A first PUT of a PolicySet answers 201, the activate body is
+# {status: active} and a policy delete answers 204 [live,
+# recorded in j0]. The ticket refusal sentence is the one g5-ticket-lifecycle
+# asserts on all four dialects [live]. The steps marked "suspect"
+# name a value the published sources leave open; each is listed in the lane
+# report.
+id: g5-grant-window-lapse
+group: G5
+title: A ticket grant that nobody consumes lapses at the end of its window and the identical call asks again
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (fail closed);
+  spec/policyset/SPEC.md §2 item 8 Classes (revision 6: a ticket never
+  blocks, the PEP answers deny-with-ticket at once, ticketTTLSeconds is the
+  decision window and grantTTLSeconds the post-approval consume window,
+  range 1..86400 with a default of 3600; a ticket is consumable only while
+  state is approved and consumed_at is null and now is before decidedAt
+  plus grantTTLSeconds; the grant is DB-durable, single-use and
+  session-agnostic; consumption is a server-side atomic write), revision 15
+  (approve.roles may name straza-admin);
+  spec/policyset/examples/valid-ticket.yaml;
+  spec/events/SPEC.md §2.2 and revision 11 (the request, resolution and
+  consumed phases, the consumed phase written only when a grant is cashed,
+  carrying consumedBy and consumedAt);
+  pkg/api/openapi.yaml the Approval schema (class, grantExpiresAt is the
+  post-approval consume deadline, consumedAt and consumedBy are omitted
+  while unconsumed) and GET /v1/admin/approvals (the state filter);
+  website/content/guides/write-policy/tickets.md (an approval turns the
+  ticket into a grant that a later session consumes once within an hour by
+  default, the grant is single-use so a second run asks again, and an
+  approved grant that nobody consumes lapses at the end of its grant
+  window);
+  website/content/concepts/approvals-model.md section Tickets for decisions
+  that take a day (tickets never block and the first call is denied with a
+  ticket reference).
+  suspect: the success status codes of the admin routes and the
+  approvals.0 path into a one-record list; that the identical call after
+  the lapsed grant opens a fresh ticket, which follows from the grant
+  being unconsumable past its window and a ticket never blocking, while
+  the guide states only that the grant lapses; the state the lapsed record
+  keeps, which the console renders as expired while the API schema leaves
+  it open, so this scenario asserts the consume fields rather than the
+  state; the record counts on the chain.
+harnesses: [claude-code]
+identities:
+  vera: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: one human in the matched role, one ticket rule with a five second grant window.
+  - name: the IdM provisions vera over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g5-vera
+        userName: vera
+        displayName: Vera Grant
+        active: true
+    want: {status: 201}
+    save: {veraId: id}
+  - name: the admin sets vera's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${veraId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the admin creates the application role the ticket policy names
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g5-grant, kind: application, description: "Grant window lapse scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g5-grant"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: vera becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${veraId}"}]
+    want: {status: 200}
+  - name: the admin applies a PolicySet whose ticket leaves five seconds to consume the grant
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g5-grant
+            description: Grant window lapse scenario for role g5-grant
+          spec:
+            match:
+              roles: [g5-grant]
+            rules:
+              - id: deploy-prod-ticket
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy-prod *"]
+                effect: allow
+                mode: approve
+                approve:
+                  class: ticket
+                  roles: [straza-admin]
+                  grantTTLSeconds: 5
+                reason: "G5-GRANT: deploy-prod needs a ticket whose grant lasts five seconds"
+    want: {status: 201}
+  - name: the admin activates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g5-grant/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: vera enrolls
+    enroll: {as: vera}
+  - name: vera starts a session
+    hook:
+      as: vera
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # 1. The call raises a ticket and the admin grants it.
+  - name: the first deploy-prod call is refused at once with the ticket sentence, because a ticket never blocks
+    hook:
+      as: vera
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-prod --release 42"}
+    want: {decision: deny, reasonContains: "approval ticket"}
+  - name: the one pending record is the ticket the call raised
+    # suspect: approvals.0 is the one record of a one-record list
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.class: ticket, approvals.0.rule: deploy-prod-ticket, approvals.1: null}
+    save: {ticketOne: approvals.0.id}
+  - name: the admin approves the ticket, which opens the consume window
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${ticketOne}/approve
+      body: {reason: "G5-GRANT: the change window is open"}
+    want:
+      status: 200
+      body: {approval.state: approved}
+  - name: the approved record carries grantExpiresAt, the consume deadline
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${ticketOne}
+    want: {status: 200, bodyContains: '"grantExpiresAt"'}
+  - name: the request and the resolution are on the chain, two approval records
+    audit: {subject: vera, kind: straza.audit.approval, count: 2}
+
+  # 2. Nobody cashes the grant, and the window closes.
+  - name: the session waits out the five second consume window without calling
+    wait: 8s
+
+  # 3. The identical call raises a fresh ticket instead of consuming the lapsed grant.
+  - name: the identical call after the lapse is refused with a fresh ticket
+    # suspect: the guide states that an unconsumed grant lapses without saying what the next call gets
+    hook:
+      as: vera
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-prod --release 42"}
+    want: {decision: deny, reasonContains: "approval ticket"}
+  - name: the granted record was never cashed, so it carries neither consume field
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${ticketOne}
+    want:
+      status: 200
+      body: {approval.consumedAt: null, approval.consumedBy: null}
+  - name: the command was never allowed, so the chain carries no allow record for it
+    audit: {subject: vera, kind: tool.pre, decision: allow, count: 0}
+  - name: the fresh ticket is the only pending record and it names the same rule
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.rule: deploy-prod-ticket, approvals.1: null}
+  - name: two requests and one resolution are on the chain and no consumed phase, three approval records
+    audit: {subject: vera, kind: straza.audit.approval, count: 3}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g5-grant/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft PolicySet is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g5-grant
+    want: {status: 204}
+  - name: the admin deletes the role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates vera
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${veraId}
+    want: {status: 204}

@@ -1,0 +1,10 @@
+{{- /* Failure help, closed until the reader opens it: a Markdown definition
+list of the exact product sentence and its fix.
+{{< fails >}}
+`invalid username or password`
+: Use the admin password from the first start of this data directory.
+{{< /fails >}} */ -}}
+<details class="fold fails">
+  <summary>If this fails</summary>
+  <div class="in">{{ partial "inner.html" (dict "Page" .Page "Inner" .Inner) }}</div>
+</details>

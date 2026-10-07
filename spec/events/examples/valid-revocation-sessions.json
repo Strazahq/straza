@@ -1,0 +1,15 @@
+{
+  "specversion": "1.0",
+  "id": "0198aa11-4c2b-7c22-a9d4-1b2c3d4e5f88",
+  "type": "straza.revocation.sessions",
+  "source": "strazad",
+  "time": "2026-07-29T12:00:00Z",
+  "data": {
+    "sessions": [
+      "0197fa3d-aaaa-7abc-9def-000000000001",
+      "0197fa3d-bbbb-7abc-9def-000000000002",
+      "0197fa3d-cccc-7abc-9def-000000000003"
+    ],
+    "reason": "bulk stand-down by admin"
+  }
+}

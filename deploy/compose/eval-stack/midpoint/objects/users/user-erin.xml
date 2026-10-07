@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  erin: sample employee (Security). No role assignments: exists in midPoint
+  only, a candidate for access-request / certification demos.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c42">
+    <name>erin</name>
+    <fullName>Erin Castillo</fullName>
+    <givenName>Erin</givenName>
+    <familyName>Castillo</familyName>
+    <emailAddress>erin.castillo@example.com</emailAddress>
+    <personalNumber>1003</personalNumber>
+    <organizationalUnit>Security</organizationalUnit>
+    <title>Security Analyst</title>
+    <assignment>
+        <!-- persona archetype, assigned directly (employee) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20" type="ArchetypeType"/>
+    </assignment>
+</user>

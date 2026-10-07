@@ -1,0 +1,32 @@
+# Revision 9 (identity typology, phase 2): match.identity selects on the
+# checkin-resolved typology: OR within each list, AND across lists and with
+# roles/users/groups. Unclassified subjects (unset field) match no selector.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: autonomous-agent-guardrails
+  description: tighter posture for autonomous fleet agents
+spec:
+  priority: 200
+  match:
+    roles: [dev]
+    identity:
+      userType: [agent]
+      agencyMode: [autonomous, supervised]
+      swarmId: [scan-fleet-1]
+  rules:
+    - id: fleet-read-only
+      tools: [file.write, file.edit, shell.exec]
+      effect: deny
+      reason: "Straza: scan-fleet agents are read-only"
+    - id: fleet-mcp-gated
+      tools: [mcp.call]
+      mode: approve
+      effect: allow
+      approve:
+        roles: [sec-approvers]
+        # selfApproval on an autonomous subject is clamped OFF by the engine
+        # (revision 9 invariant); set here to document that the rule cannot
+        # grant what the identity class forbids.
+        selfApproval: true
+      reason: "fleet MCP writes need a human decision"

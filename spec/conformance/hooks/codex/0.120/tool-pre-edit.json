@@ -1,0 +1,1 @@
+{"provenance":"doc openai/codex generated JSON schemas 2026-07-26 (hand-authored)","harness":"codex","payload":{"hook_event_name":"PreToolUse","session_id":"abc","cwd":"/work/proj","tool_name":"ApplyPatch","tool_input":{"file_path":"/work/proj/main.go"}},"expect":{"kind":"tool.pre","tool":"file.edit","paths":["/work/proj/main.go"],"workspace":"/work/proj"}}

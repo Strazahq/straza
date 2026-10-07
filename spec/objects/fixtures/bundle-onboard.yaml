@@ -1,0 +1,77 @@
+# A bundle of revision 5 that onboards one MCP server: the App github, the
+# two Roles it owns, written in the export's form, and the PolicySet that
+# holds one of their tools for a person. Provenance: derived from this
+# spec's sections 2, 4 and 5, spec/app-manifest and spec/policyset, not
+# captured from a live wire. TestBundleFixtures reads it.
+---
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: github
+  description: GitHub MCP server, each caller's own token injected gateway-side
+server:
+  name: io.github.github/github-mcp-server
+  version: "0.17.1"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://api.githubcopilot.com/mcp/
+  credential:
+    kind: token
+    agents: sponsor
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"
+---
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+    name: github-readers
+spec:
+    kind: application
+    description: Read issues and code on GitHub
+    server: github
+    bindings:
+        - app: github
+          tools:
+            - get_me
+            - search_issues
+---
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+    name: github-writers
+spec:
+    kind: application
+    description: Read issues and code on GitHub, and open issues
+    server: github
+    bindings:
+        - app: github
+          tools:
+            - create_issue
+            - get_me
+            - search_issues
+---
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: github-writers-access
+  description: Gates for the role github-writers
+spec:
+  priority: 100
+  match:
+    roles: [github-writers]
+  rules:
+    - id: github-create-issue-hold
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [github]
+      toolNames:
+        allow: ["create_issue"]
+      effect: allow
+      mode: approve
+      approve:
+        timeoutSeconds: 300
+      reason: "Straza: creating a GitHub issue waits for the person behind the agent"

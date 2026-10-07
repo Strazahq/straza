@@ -1,0 +1,26 @@
+{
+  "specversion": "1.0",
+  "id": "01994c1e-7d2a-7f31-8b6c-5e4d3c2b1a90",
+  "type": "straza.audit.mcp",
+  "source": "strazad",
+  "time": "2026-09-15T09:12:44.507Z",
+  "data": {
+    "session": "01994c1d-0001-7abc-9def-000000000011",
+    "user": "01994c1c-4a1f-7d02-8e3b-000000000007",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "mcp.call",
+    "app": "holdapp",
+    "toolName": "echo",
+    "arguments": "{\"text\":\"denied\"}",
+    "effect": "deny",
+    "ruleId": "hold-echo",
+    "setName": "hold-policy",
+    "reason": "Straza: approval denied by ada (ref 01994c1e-2f10-7c55-9a1b-000000000042)",
+    "snapshot": "sha256:9b1c40aa",
+    "granted": true,
+    "default": false,
+    "bindingId": "01994c1d-2222-7abc-9def-000000000012",
+    "role": "dev"
+  }
+}

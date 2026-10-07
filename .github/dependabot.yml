@@ -1,0 +1,15 @@
+# Keeps the SHA-pinned workflow actions current: Dependabot
+# bumps the pinned SHA and the trailing version comment together. gomod rides
+# along weekly; every new direct dependency still needs its one-line
+# justification per the repo rule, so module PRs are reviewed, never
+# auto-merged.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly

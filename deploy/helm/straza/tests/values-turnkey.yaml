@@ -1,0 +1,7 @@
+# Golden scenario: turnkey enterprise, stock values, only the required OIDC
+# issuer plus a pre-created password secret (the generated-password path is
+# nondeterministic under `helm template`, covered by a smoke in test-render.sh).
+oidc:
+  issuer: https://idp.example.com/realms/prod
+postgres:
+  passwordSecret: straza-db-password

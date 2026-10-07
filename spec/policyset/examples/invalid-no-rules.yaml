@@ -1,0 +1,8 @@
+# INVALID: spec.rules requires at least one rule.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: empty-set
+spec:
+  priority: 5
+  rules: []

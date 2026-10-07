@@ -1,0 +1,25 @@
+# Parse fixture since revision 18: a stored document may still carry the
+# retired obligations list, so the parser and the schema keep admitting it.
+# The platform refuses this document at validate and at activation.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: audit-sensitive-reads
+spec:
+  match:
+    users: [kim, lee]
+  rules:
+    - id: watch-secret-reads
+      events: [tool.pre]
+      tools: [file.read]
+      paths:
+        allow: ["**/secrets/**"]
+      effect: allow
+      reason: "Secret reads are allowed but flagged"
+      obligations: [notify, redact]
+    - id: regex-example
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["re:.*(nc|ncat|netcat)\\s+-l.*"]
+      effect: deny
+      reason: "No listeners"

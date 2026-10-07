@@ -1,0 +1,201 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    # Docs-only pushes skip ci, because the docs source is not embedded in
+    # any binary. Pull requests always run.
+    paths-ignore:
+      - "website/**"
+      - "docs/**"
+      - "**/*.md"
+  pull_request:
+
+# One run per branch: a newer push cancels the run it supersedes instead of
+# billing both to the end.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege (Scorecard token-permissions): nothing in ci writes to the
+# repo; artifacts ride the actions token's default artifact scope.
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
+        with:
+          version: latest
+
+  # Known-vulnerability scan over the module graph + stdlib (call-graph
+  # aware, so only reachable vulns fail). gosec runs as part of golangci-lint.
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  test:
+    runs-on: ubuntu-latest
+    # Billing guard: a hung suite must die in minutes, not the runner
+    # default of six hours.
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: straza
+          POSTGRES_PASSWORD: straza
+          POSTGRES_DB: straza
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U straza"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      # File-length ratchet: the number lives in the Makefile.
+      - run: make lengths
+      # The race runtime needs cgo; release binaries stay CGO_ENABLED=0.
+      # internal/server under -race outgrows Go's default 10-minute package
+      # timeout on 2-core runners without any stuck test. 25m lets a
+      # slow-but-healthy suite finish; the job-level timeout still kills a
+      # genuine hang.
+      - run: go test -race -count=1 -timeout 25m ./...
+        env:
+          CGO_ENABLED: "1"
+          STRAZA_TEST_POSTGRES_DSN: postgres://straza:straza@localhost:5432/straza?sslmode=disable
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # linux for strazad containers; windows/darwin because straza and
+        # strazactl run on developer machines on all three OSes.
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -trimpath -o /dev/null ./cmd/strazad
+          go build -trimpath -o /dev/null ./cmd/strazactl
+          go build -trimpath -o /dev/null ./cmd/straza
+
+  # Whole-suite cross-package statement coverage with a hard floor.
+  # The floor is a ratchet: raise it as coverage grows, never lower it.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: go test -count=1 -coverprofile=cover.out -coverpkg=./internal/... ./...
+      - name: coverage gate (75% floor)
+        run: |
+          total=$(go tool cover -func=cover.out | tail -1 | awk '{gsub(/%/,"",$3); print $3}')
+          echo "total statement coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { if (t < 75.0) { print "UNDER THE 75% FLOOR"; exit 1 } }'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: coverage
+          path: cover.out
+
+  # The journey corpus against binaries built from the tree: real strazad,
+  # real straza hook on every dialect, gateway, admin and SCIM APIs, audit
+  # chain (test/e2e-matrix/README.md). Loopback only. The report is the
+  # artifact, uploaded even when a row is red.
+  e2e-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: make e2e-matrix
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: e2e-matrix-report
+          path: test/e2e-matrix/.work/report.md
+
+  # straza-agentkit (kits/python): stdlib-only shim around the hook kit;
+  # unit tests stub the binary; the dialect contract is pinned Go-side too.
+  python-kit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      # The integrations ARE the delegation-governance surface. Without the
+      # frameworks installed their tests skip, and a skip reports green.
+      # Install the extras, and let test_extras_present.py turn a skip back
+      # into a failure.
+      - run: pip install -e ".[langchain,openai-agents,claude-agent-sdk,test]"
+        working-directory: kits/python
+      - run: python -m unittest discover -s tests -v
+        working-directory: kits/python
+        env:
+          STRAZA_KIT_REQUIRE_EXTRAS: "1"
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      # Chart gate: lint + golden scenario matrix (turnkey/byo/standalone/apps)
+      # + shape assertions + guard must-fail cases (deploy/helm/test-render.sh).
+      - run: deploy/helm/test-render.sh
+      # Compose file is valid and the strazad image builds.
+      - run: docker compose -f deploy/compose/docker-compose.yaml config > /dev/null
+      - run: docker build -f deploy/Dockerfile -t straza:ci --build-arg VERSION=ci .
+
+  # The checked-in console dist is what every strazad binary embeds, so this
+  # job rebuilds it and fails on any difference.
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: app dist must match a fresh rebuild within its gzipped budget
+        run: |
+          go run ./tools/uibuild
+          git status --porcelain -- internal/server/console/dist
+          test -z "$(git status --porcelain -- internal/server/console/dist)"
+      - name: app suites
+        run: cd web/ui && npm test

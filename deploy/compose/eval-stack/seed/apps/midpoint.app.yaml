@@ -1,0 +1,62 @@
+# ENTERPRISE (resource-server) manifest for the midpoint app. The inventory
+# probe uses the server's opt-in anonymous discovery: initialize, ping and
+# tools/list answer without a token, and every tools/call is still
+# bearer-gated.
+#
+# Shape:
+#   remote runtime  -> strazad proxies streamable HTTP to mcp-midpoint-http;
+#     the inventory probe rides the anonymous-discovery lane.
+#   credential oauth -> each user "connects" once (console button or
+#     POST /v1/connect/midpoint -> Keycloak login); the broker stores their
+#     grant, the refresh worker rotates it (KC 5-min access tokens are fine),
+#     and every tools/call injects THAT user's bearer; no grant = deny.
+
+#   The server validates the bearer (issuer/audience/JWKS), correlates
+#   preferred_username -> midPoint name (alice + joe both exist), and runs the
+#   request under Switch-To-Principal: whoami answers as the real person,
+#   my-team/work-items/requests mean something, approvals and audit attribute
+#   correctly. identity.credentialIsShared is irrelevant in this mode.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: midpoint
+  namespace: com.github.strazahq
+  description: midPoint IGA operations, per-user identity (Switch-To-Principal) - reads allowed, writes approve-gated
+server:
+  name: strazahq/midpoint-mcp-server
+  description: MCP server for midPoint identity governance - users, roles, orgs, audit over REST.
+  repository:
+    url: https://github.com/strazahq/midpoint-mcp-server
+    source: github
+  version: "0.6.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: http://mcp-midpoint-http:3001/mcp
+      auth: inject
+  credential:
+    kind: oauth
+    oauth:
+      provider: keycloak
+      scopes: [openid]
+    # An agent with no connection of its own runs on its SPONSOR's
+    # connection once the sponsor opted in (PATCH /v1/connect/midpoint
+    # {"allow_agents": true}, or strazactl connect midpoint --allow-agents):
+    # midPoint then acts as the sponsor, and the gateway record names the
+    # agent plus credentialSource/credentialOwner (spec/app-manifest
+    # revision 4). In the demo, joe works alice's approval inbox as alice,
+    # and deciding an item waits for alice.
+    agents: sponsor
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"
+  # Views on: a chat app that shows MCP Apps views renders the server's
+  # approval inbox through /mcp/midpoint, and every click in it is a governed
+  # tool call. The server serves its ui://midpoint/ views without a bearer.
+  exposure:
+    tools: ["*"]
+    views: true
+  limits:
+    rps: 10

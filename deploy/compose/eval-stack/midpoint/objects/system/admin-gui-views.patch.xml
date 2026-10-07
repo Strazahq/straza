@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  REST modification body (not an importable object): adds the Straza
+  objectCollectionViews to adminGuiConfiguration/objectCollectionViews on the
+  system configuration object. The seeder PATCHes it right after the
+  default-object-policy patch (same lane, so first boots get it too).
+
+  ADD deltas, deliberately NOT replace: on 4.10.3 that container already holds
+  about fifty stock views (case/task/report/mark views, ids 40..282) that a
+  replace would destroy. midPoint delta semantics skip adding container values
+  that already exist, which keeps re-seeds idempotent (verified live: two
+  consecutive PATCHes, still exactly one view per identifier).
+-->
+
+<!--
+  Each view references a Straza archetype as its collection. That is the exact
+  mechanism the stock "application-role" (id 75) and "application" (id 77)
+  views use, so it is known-good on this build. The views land in the left
+  menu under Users / Roles / Services respectively.
+
+  One view per Straza role kind. The labels carry the word Straza because
+  midPoint ships stock views named "Business roles" and "Application roles".
+  Two of them add a column from the role's read-only projection: the owning
+  MCP server of a server-owned application role, and the MCP servers a Straza
+  role administers. A view that declares columns declares all of them, so
+  those two list the name and the description first.
+-->
+<objectModification
+        xmlns="http://midpoint.evolveum.com/xml/ns/public/common/api-types-3"
+        xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+        xmlns:org="http://midpoint.evolveum.com/xml/ns/public/common/org-3"
+        xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+        xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3">
+    <itemDelta>
+        <t:modificationType>add</t:modificationType>
+        <t:path>c:adminGuiConfiguration/c:objectCollectionViews/c:objectCollectionView</t:path>
+        <t:value>
+            <c:identifier>straza-mcp-servers</c:identifier>
+            <c:display>
+                <c:label>MCP server</c:label>
+                <c:pluralLabel>MCP servers</c:pluralLabel>
+                <c:icon>
+                    <c:cssClass>fa fa-server</c:cssClass>
+                    <c:color>#21ba45</c:color>
+                </c:icon>
+            </c:display>
+            <c:displayOrder>210</c:displayOrder>
+            <c:type>c:ServiceType</c:type>
+            <c:collection>
+                <c:collectionRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c24" relation="org:default" type="c:ArchetypeType"/>
+            </c:collection>
+        </t:value>
+        <t:value>
+            <c:identifier>straza-br-roles</c:identifier>
+            <c:display>
+                <c:label>BR Role</c:label>
+                <c:pluralLabel>BR Roles</c:pluralLabel>
+                <c:icon>
+                    <c:cssClass>fa fa-briefcase</c:cssClass>
+                    <c:color>#2185d0</c:color>
+                </c:icon>
+            </c:display>
+            <c:displayOrder>225</c:displayOrder>
+            <c:type>c:RoleType</c:type>
+            <c:collection>
+                <c:collectionRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c27" relation="org:default" type="c:ArchetypeType"/>
+            </c:collection>
+        </t:value>
+        <t:value>
+            <c:identifier>straza-business-roles</c:identifier>
+            <c:display>
+                <c:label>Straza business role</c:label>
+                <c:pluralLabel>Straza business roles</c:pluralLabel>
+                <c:icon>
+                    <c:cssClass>fa fa-briefcase</c:cssClass>
+                    <c:color>#00b5ad</c:color>
+                </c:icon>
+            </c:display>
+            <c:displayOrder>230</c:displayOrder>
+            <c:type>c:RoleType</c:type>
+            <c:collection>
+                <c:collectionRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c29" relation="org:default" type="c:ArchetypeType"/>
+            </c:collection>
+        </t:value>
+        <t:value>
+            <c:identifier>straza-application-roles</c:identifier>
+            <c:display>
+                <c:label>Straza application role</c:label>
+                <c:pluralLabel>Straza application roles</c:pluralLabel>
+                <c:icon>
+                    <c:cssClass>fa fa-id-badge</c:cssClass>
+                    <c:color>#6435c9</c:color>
+                </c:icon>
+            </c:display>
+            <c:displayOrder>231</c:displayOrder>
+            <c:type>c:RoleType</c:type>
+            <c:collection>
+                <c:collectionRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c26" relation="org:default" type="c:ArchetypeType"/>
+            </c:collection>
+            <c:column>
+                <c:name>nameColumn</c:name>
+                <c:path>c:name</c:path>
+            </c:column>
+            <c:column>
+                <c:name>descriptionColumn</c:name>
+                <c:path>c:description</c:path>
+                <c:previousColumn>nameColumn</c:previousColumn>
+            </c:column>
+            <c:column>
+                <c:name>strazaServerColumn</c:name>
+                <c:path>c:extension/ext:strazaServer</c:path>
+                <c:display>
+                    <c:label>Owning MCP server</c:label>
+                </c:display>
+                <c:previousColumn>descriptionColumn</c:previousColumn>
+            </c:column>
+        </t:value>
+        <t:value>
+            <c:identifier>straza-approver-roles</c:identifier>
+            <c:display>
+                <c:label>Straza approver role</c:label>
+                <c:pluralLabel>Straza approver roles</c:pluralLabel>
+                <c:icon>
+                    <c:cssClass>fa fa-user-check</c:cssClass>
+                    <c:color>#767676</c:color>
+                </c:icon>
+            </c:display>
+            <c:displayOrder>232</c:displayOrder>
+            <c:type>c:RoleType</c:type>
+            <c:collection>
+                <c:collectionRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c2a" relation="org:default" type="c:ArchetypeType"/>
+            </c:collection>
+        </t:value>
+        <t:value>
+            <c:identifier>straza-roles</c:identifier>
+            <c:display>
+                <c:label>Straza role</c:label>
+                <c:pluralLabel>Straza roles</c:pluralLabel>
+                <c:icon>
+                    <c:cssClass>fa fa-shield-alt</c:cssClass>
+                    <c:color>#db2828</c:color>
+                </c:icon>
+            </c:display>
+            <c:displayOrder>235</c:displayOrder>
+            <c:type>c:RoleType</c:type>
+            <c:collection>
+                <c:collectionRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c28" relation="org:default" type="c:ArchetypeType"/>
+            </c:collection>
+            <c:column>
+                <c:name>nameColumn</c:name>
+                <c:path>c:name</c:path>
+            </c:column>
+            <c:column>
+                <c:name>descriptionColumn</c:name>
+                <c:path>c:description</c:path>
+                <c:previousColumn>nameColumn</c:previousColumn>
+            </c:column>
+            <c:column>
+                <c:name>strazaAdministersColumn</c:name>
+                <c:path>c:extension/ext:strazaAdministers</c:path>
+                <c:display>
+                    <c:label>Administers</c:label>
+                </c:display>
+                <c:previousColumn>descriptionColumn</c:previousColumn>
+            </c:column>
+        </t:value>
+        <t:value>
+            <c:identifier>straza-ai-agents</c:identifier>
+            <c:display>
+                <c:label>AI agent</c:label>
+                <c:pluralLabel>AI agents</c:pluralLabel>
+                <c:icon>
+                    <c:cssClass>fa fa-robot</c:cssClass>
+                    <c:color>#6435c9</c:color>
+                </c:icon>
+            </c:display>
+            <c:displayOrder>240</c:displayOrder>
+            <c:type>c:UserType</c:type>
+            <c:collection>
+                <c:collectionRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c22" relation="org:default" type="c:ArchetypeType"/>
+            </c:collection>
+        </t:value>
+    </itemDelta>
+</objectModification>

@@ -1,0 +1,9 @@
+# Golden scenario: standalone single-replica smoke (the kind recipe), with no
+# bundled backends (standalone = per-pod sqlite + embedded events), and the
+# chart refuses standalone above one replica.
+profile: standalone
+replicaCount: 1
+image:
+  repository: straza
+  tag: dev
+  pullPolicy: Never

@@ -1,0 +1,20 @@
+# INVALID (semantic): approve.timeoutSeconds must cover the ticket TTL, a
+# cross-field numeric comparison JSON Schema cannot express; the JSON
+# Schema alone admits it; the platform validator MUST reject it (same
+# two-layer contract as invalid-vacuous-rule.yaml).
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: bad-ticket-timeout
+spec:
+  rules:
+    - id: r1
+      tools: [mcp.call]
+      apps: [vault]
+      toolNames:
+        allow: ["rotate_root_key"]
+      effect: allow
+      mode: approve
+      approve:
+        class: ticket
+        timeoutSeconds: 120

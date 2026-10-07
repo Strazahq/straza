@@ -1,0 +1,25 @@
+{
+  "specversion": "1.0",
+  "id": "01a0b8d1-9f00-7a10-8b21-1c2d3e4f5061",
+  "type": "straza.audit.mcp",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-09-24T10:12:58.341Z",
+  "data": {
+    "session": "01a0b8d1-2222-7abc-9def-000000000001",
+    "user": "joe-java-developer-agent",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "mcp.call",
+    "app": "straza",
+    "toolName": "draft_submit",
+    "argumentsDigest": "d35ba920bb57317eb6bb6e437f0bf106822d95db099144abce0a97d51545324a",
+    "argumentsSize": 1843,
+    "effect": "allow",
+    "ruleId": "",
+    "setName": "",
+    "reason": "allowed by role access. No policy rule gates this tool.",
+    "snapshot": "sha256:44f0be1c",
+    "granted": true,
+    "default": true
+  }
+}

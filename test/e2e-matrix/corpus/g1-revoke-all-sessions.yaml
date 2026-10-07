@@ -1,0 +1,166 @@
+# Every active session of one user is revoked in one admin call. The hook
+# lane and the gateway refuse under every dialect, and a new session start
+# re-establishes access, because the user is untouched.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+# The daemon starts after the first session.start of its identity: the
+# daemon keeps a session fresh and holds its push stream, so it refuses to
+# run before one exists [live].
+id: g1-revoke-all-sessions
+group: G1
+title: The admin revokes every session of a user in one call
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (revocation travels as a pushed event);
+  spec/events/SPEC.md revision 17 (the bulk stand-down event);
+  spec/session-token/SPEC.md §Refresh and revocation;
+  spec/scim-profile/SPEC.md §3 §4 and conformance/scim users-lifecycle,
+  groups-roles; website/content/reference/api.md sections Sessions and
+  transcripts, Users and devices, Apps; docs/quickstart-standalone.md §6;
+  website/content/guides/operate/kill-switch-runbook.md (a session revoke
+  is a stand-down).
+  suspect: the field user on the bulk revoke body, the success status
+  codes, the app and binding bodies, the upstream tool name echo and its
+  result, and the gateway refusal wording after a revoke.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  carol: {kind: human, password: "Walk-2026!"}
+steps:
+  - name: the IdM provisions carol over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g1-carol
+        userName: carol
+        displayName: Carol Revoked
+        active: true
+    want: {status: 201}
+    save: {carolId: id}
+  - name: the admin sets carol's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${carolId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the admin registers the app on the hermetic upstream
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g1-all-tools
+            namespace: dev.e2e
+          server:
+            name: dev.e2e/g1-all-tools
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want: {status: 201}
+    save: {appId: id}
+  - name: the admin creates the role the app owns, over every tool of the app, for the gateway control
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g1-all-tools-users, server: g1-all-tools, tools: ["*"], description: "Bulk session revoke scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g1-all-tools-users"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: carol becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${carolId}"}]
+    want: {status: 200}
+  - name: carol enrolls
+    enroll: {as: carol}
+  - name: carol starts a session on every dialect
+    hook:
+      as: carol
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: carol's daemon holds the push stream
+    daemon: {as: carol, action: start}
+  - name: a benign command is allowed before the revoke
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: a gateway call runs before the revoke
+    # suspect: the upstream tool name and result are assumed
+    mcp:
+      as: carol
+      tool: g1-all-tools__echo
+      args: {text: before-revoke}
+    want: {result: before-revoke}
+  - name: the admin revokes every active session of carol
+    # suspect: the body field user is assumed from the route summary "every active session of one user"
+    admin:
+      method: POST
+      path: /v1/admin/sessions/revoke
+      body: {user: "${carolId}"}
+    want: {status: 200}
+  - name: the next hook decision is refused on every dialect, daemon connected
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: deny, reasonContains: "revoked"}
+    within: 10s
+    timer: kill-switch-hook
+  - name: the next gateway call is refused
+    # suspect: no published sentence names the gateway refusal after a revoke
+    mcp:
+      as: carol
+      tool: g1-all-tools__echo
+      args: {text: after-revoke}
+    want: {refused: true}
+    within: 10s
+    timer: kill-switch-gateway
+  - name: a new session start re-establishes access
+    hook:
+      as: carol
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: the benign command is allowed again
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: carol's daemon is stopped
+    daemon: {as: carol, action: stop}
+  - name: the admin deletes the role before its server, which would take it along
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the admin removes the app
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${appId}
+    want: {status: 200}
+  - name: the IdM deactivates carol
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${carolId}
+    want: {status: 204}

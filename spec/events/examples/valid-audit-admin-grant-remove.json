@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "0197fb03-9e2f-7b4c-9d6e-3f4a5b6c7d82",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-09-04T18:25:41.207Z",
+  "data": {
+    "action": "apps.grant.remove",
+    "actor": "midpoint",
+    "actorId": "0197fa3d-4444-7abc-9def-000000000004",
+    "actorVia": "api-token",
+    "app": "midpoint",
+    "user": "0197fa3d-5555-7abc-9def-000000000005",
+    "credentialId": "0197fa3d-6666-7abc-9def-000000000006",
+    "reason": "deactivated via SCIM"
+  }
+}

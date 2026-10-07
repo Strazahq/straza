@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Straza eval stack: midPoint 4.10 LiveSync tasks for the universal-rest-connector.
+  Adapted from universal-rest-connector samples/straza/objects/tasks/livesync-tasks.xml for THIS
+  stack: real resource OID and valid hex task OIDs. One task per synced
+  object class (evidence app, the account class and the wire-group
+  class) because the connector keeps a separate sync token per class
+  (per-class `sync` blocks in straza-schema.json); each run polls Straza's
+  GET /v1/admin/changes feed and emits create/update/delete deltas. First
+  run per class calls getLatestSyncToken (sync-from-now): the one-shot
+  initial recon tasks (initial-recon-tasks.xml in this directory, also
+  seeded) pull the pre-existing catalog once, then LiveSync carries the deltas.
+-->
+
+<!--
+  Import lane: this file is the MANUAL import for an already-running stack
+  (midPoint GUI > Import object). On first boots the seeder (seed/seed.sh)
+  imports the SAME three tasks under the SAME OIDs via REST (one POST per
+  task; the REST tasks endpoint takes single objects, not this <objects>
+  collection). Identical OIDs + options=overwrite keep the two lanes
+  idempotent against each other. Keep this file and the seed.sh loop in sync.
+  The resource's apiToken is the durable read-scope admin token (wat_...,
+  scope=read); the seeder mints it. LiveSync is a long-running poll - a
+  5-minute session token would expire between runs.
+-->
+
+<!--
+  The SCIM classes sync too: `role` feed events drive the wire-group class
+  (task 1c1a; a role change or a membership change refreshes the render, so
+  certification in the identity manager stays current) and `user` events
+  drive the account class (task 1c1b; membership changes emit the affected
+  user ids, keeping the groups reflection fresh). The seeder best-effort
+  deletes three retired task OIDs on re-seeds over an older stack.
+-->
+<objects xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+         xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3">
+
+    <!-- ACCOUNT (__ACCOUNT__, SCIM class) - `user` feed events; re-fetch
+         rides scimToken (revision 12: membership changes emit the affected
+         user ids) -->
+    <task oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c1b">
+        <name>Straza LiveSync - account</name>
+        <objectRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01" type="ResourceType"/>
+        <executionState>runnable</executionState>
+        <schedule><interval>10</interval></schedule>
+        <activity>
+            <work>
+                <liveSynchronization>
+                    <resourceObjects>
+                        <resourceRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01"/>
+                        <kind>account</kind>
+                        <intent>default</intent>
+                        <objectclass>ri:AccountObjectClass</objectclass>
+                    </resourceObjects>
+                </liveSynchronization>
+            </work>
+        </activity>
+    </task>
+
+    <!-- APP (entitlement) - apps.deployed/removed key by app uid -->
+    <task oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c11">
+        <name>Straza LiveSync - app</name>
+        <objectRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01" type="ResourceType"/>
+        <executionState>runnable</executionState>
+        <schedule><interval>10</interval></schedule>
+        <activity>
+            <work>
+                <liveSynchronization>
+                    <resourceObjects>
+                        <resourceRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01"/>
+                        <kind>entitlement</kind>
+                        <intent>app</intent>
+                        <objectclass>ri:CustomappObjectClass</objectclass>
+                    </resourceObjects>
+                </liveSynchronization>
+            </work>
+        </activity>
+    </task>
+
+    <!-- GROUP (wire-group = exported role, revision 12) - `role` feed events:
+         role/binding changes re-render, membership changes refresh members -->
+    <task oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c1a">
+        <name>Straza LiveSync - role</name>
+        <objectRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01" type="ResourceType"/>
+        <executionState>runnable</executionState>
+        <schedule><interval>10</interval></schedule>
+        <activity>
+            <work>
+                <liveSynchronization>
+                    <resourceObjects>
+                        <resourceRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01"/>
+                        <!-- no intent on purpose: the resource has one role
+                             object type, so the sweep covers the whole
+                             objectclass and every role shadow lands in that
+                             one type whatever its kind -->
+                        <kind>entitlement</kind>
+                        <objectclass>ri:GroupObjectClass</objectclass>
+                    </resourceObjects>
+                </liveSynchronization>
+            </work>
+        </activity>
+    </task>
+
+</objects>

@@ -1,0 +1,139 @@
+{
+  "name": "user-groups",
+  "steps": [
+    {
+      "note": "a user with no holdings yet",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+          ],
+          "userName": "mona.l"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "userName": "mona.l"
+        }
+      },
+      "capture": {
+        "uid": "id"
+      }
+    },
+    {
+      "note": "the exported role whose membership will reflect (revision 12: the wire-group IS the role; the IdM resolves it by name and assigns)",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"scim-dev\""
+      },
+      "expect": {
+        "status": 200
+      },
+      "capture": {
+        "gid": "Resources.0.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Groups/{gid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "add",
+              "path": "members",
+              "value": [
+                {
+                  "value": "{uid}"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "note": "User read reflects the holding read-only (RFC 7643 4.1.2): value = role id, display = role name, type direct",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Users/{uid}"
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "groups": [
+            {
+              "value": "{gid}",
+              "display": "scim-dev",
+              "type": "direct"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "the filtered list form renders the reflection too (connectors read users this way)",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Users?filter=userName eq \"mona.l\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "Resources": [
+            {
+              "groups": [
+                {
+                  "value": "{gid}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "membership removal converges the reflection: PATCH the GROUP, re-read the user",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Groups/{gid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "remove",
+              "path": "members[value eq \"{uid}\"]"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "note": "user still reads fine after the removal (groups omitted when empty)",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Users/{uid}"
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "userName": "mona.l"
+        }
+      }
+    }
+  ]
+}

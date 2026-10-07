@@ -1,0 +1,15 @@
+# Isolated $CODEX_HOME/config.toml for the live-model gates' tool-event
+# attempt ladder. Codex reads its MCP servers from config.toml, key
+# [mcp_servers.<name>] with command/args (adapters/codex.yaml). Verified on
+# codex 0.146.0: a stdio server registered this way is advertised to the
+# model as mcp__<name>__<tool>.
+#
+# @NAME@ is the registration key, which is what decides the model-facing
+# prefix and therefore what straza sees:
+#   github  → mcp__github__get_item  → tier-1 conformance ALLOW (g3-live)
+#   straza  → mcp__straza__get_item  → normalize.go GatewayProxied, whole
+#             decision deferred to the gateway PEP (g4-e2e)
+# @BIN@ is the lane's g4boot binary in -mode mcp-echo.
+[mcp_servers.@NAME@]
+command = "@BIN@"
+args = ["-mode", "mcp-echo", "-name", "@NAME@"]

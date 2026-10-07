@@ -1,0 +1,1 @@
+import{c7 as o}from"./index.js";const t=5e3,s={ok:n=>o.success(n,{duration:t}),warn:n=>o.warning(n,{duration:t}),failed:n=>o.error(n,{duration:1/0}),undo:(n,i,r)=>o.success(n,{duration:t,action:{label:i,onClick:r}})};export{s as n};

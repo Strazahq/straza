@@ -1,0 +1,79 @@
+# midpoint-operations-access: the gates for the application role
+# midpoint-operations, which reaches every tool of the midPoint server. The
+# operator business role composes it. The reads run with no rule, and every
+# write-shaped tool needs a person's approval: the server's writes are armed
+# (MIDPOINT_MCP_ALLOW_WRITES in the app manifest) and these rules are the
+# control. Every write routes to the sponsor: an agent's call waits for the
+# person behind it, and a person acting for themselves confirms it on an
+# enrolled device. midPoint's own authorizations and approvals still decide
+# what that person may change. binding call: the approval covers these exact
+# arguments.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: midpoint-operations-access
+  description: Gates for the role midpoint-operations, written from the role page
+spec:
+  priority: 100
+  match:
+    roles: [midpoint-operations]
+  rules:
+    - id: midpoint-work-item-approve
+      # Every rule here is personal: it goes to the person by push and the
+      # console only.
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["decide_work_item"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        timeoutSeconds: 600
+        retryTTLSeconds: 600
+        binding: call
+        notify: [push, console]
+      reason: "Straza: work-item decision. The person behind this agent confirms it on their phone or in the console"
+    - id: midpoint-request-role
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["request_role"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        timeoutSeconds: 600
+        retryTTLSeconds: 600
+        binding: call
+        notify: [push, console]
+      reason: "Straza: a midPoint role request. The person behind this agent confirms it on their phone or in the console"
+    - id: midpoint-cancel-request
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["cancel_request"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        timeoutSeconds: 600
+        retryTTLSeconds: 600
+        binding: call
+        notify: [push, console]
+      reason: "Straza: withdrawing a midPoint request. The person behind this agent confirms it on their phone or in the console"
+    - id: midpoint-write-approve
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["create_user", "enable_user", "disable_user", "assign_role",
+                "unassign_role", "recompute_user"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        timeoutSeconds: 600
+        retryTTLSeconds: 600
+        binding: call
+        notify: [push, console]
+      reason: "Straza: identity manager write. The person behind this agent confirms it on their phone or in the console"

@@ -1,0 +1,89 @@
+# Decision-table fixtures: path matching, ${workspace}, traversal cleaning.
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: fs-scope-set }
+    spec:
+      match: { roles: [dev] }
+      rules:
+        - id: fs-scope
+          tools: [file.write, file.edit]
+          paths:
+            allow: ["${workspace}/**"]
+            deny: ["**/.env*", "/etc/**", "${workspace}/secrets/**"]
+        - id: read-anywhere
+          tools: [file.read]
+          paths:
+            allow: ["**"]
+          effect: allow
+cases:
+  - name: write-in-workspace-allowed
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/work/proj/src/main.go] }
+    want: { effect: allow, ruleId: fs-scope }
+  - name: write-outside-workspace-falls-to-default
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/home/kim/notes.txt] }
+    want: { effect: allow, default: true }
+  - name: env-file-in-workspace-denied
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/work/proj/.env] }
+    want: { effect: deny, ruleId: fs-scope }
+  - name: env-production-denied
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/work/proj/.env.production] }
+    want: { effect: deny, ruleId: fs-scope }
+  - name: env-at-root-denied
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/.env] }
+    want: { effect: deny, ruleId: fs-scope }
+  - name: etc-denied
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/etc/passwd] }
+    want: { effect: deny, ruleId: fs-scope }
+  - name: workspace-secrets-denied
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/work/proj/secrets/api.key] }
+    want: { effect: deny, ruleId: fs-scope }
+  - name: dotdot-traversal-cleaned-then-denied
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/work/proj/../../etc/passwd] }
+    want: { effect: deny, ruleId: fs-scope }
+  - name: dotdot-inside-workspace-cleans-to-allowed
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.edit, workspace: /work/proj, paths: [/work/proj/src/../docs/x.md] }
+    want: { effect: allow, ruleId: fs-scope }
+  - name: relative-path-resolves-against-workspace
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.edit, workspace: /work/proj, paths: [src/main.go] }
+    want: { effect: allow, ruleId: fs-scope }
+  - name: windows-paths-normalized
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: 'C:\Work\Proj', paths: ['c:\Work\Proj\pkg\a.go'] }
+    want: { effect: allow, ruleId: fs-scope }
+  - name: multi-path-any-deny-wins
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/work/proj/a.go, /etc/hosts] }
+    want: { effect: deny, ruleId: fs-scope }
+  - name: multi-path-all-allowed
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/work/proj/a.go, /work/proj/b.go] }
+    want: { effect: allow, ruleId: fs-scope }
+  - name: multi-path-partially-allowed-no-verdict
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [/work/proj/a.go, /tmp/elsewhere.txt] }
+    want: { effect: allow, default: true }
+  - name: read-anywhere-explicit-allow
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.read, workspace: /work/proj, paths: [/etc/passwd] }
+    want: { effect: allow, ruleId: read-anywhere }
+  - name: edit-env-denied
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.edit, workspace: /work/proj, paths: [/work/proj/.env] }
+    want: { effect: deny, ruleId: fs-scope }
+  - name: no-paths-no-verdict
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: file.write, workspace: /work/proj, paths: [] }
+    want: { effect: allow, default: true }

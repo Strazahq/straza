@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ivan: sample employee (IT Operations) and THE eval stack's approval
+  DECIDER. He carries BR:Straza-approver-access (...1c0d), the decider access
+  package: the imported role AR:sec-approvers (approver kind, so it grants
+  decide authority and nothing else, no tools) plus a Keycloak login, which
+  is why he also carries the shared lab password. The governed account
+  itself rides AR:Straza:Account (...1c0b), the same layering as the working
+  agents joe and sam. grace is midPoint-only population and holds no Straza
+  account; carol and dave hold the two delegated MCP administration offices
+  the seeder grants.
+-->
+
+<!--
+  Why a second decider at all: the seeded gates route their approvals to
+  sec-approvers ONLY (admin office is not decide authority), so the demo
+  shows a real separation of duties (the person who decides holds no agent
+  tools, and being admin decides nothing). alice carries the same decider
+  package for the solo demo; unassign ivan's and the pool shrinks to her,
+  which the console's pool counts show live. An IT Operations decider fits
+  deploy tickets and IdM mutations, while erin stays the clean
+  access-request / certification candidate, frank the dev-ops manager the
+  list_my_managers demo resolves to, and judy the People Ops sample.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c46">
+    <name>ivan</name>
+    <fullName>Ivan Petrov</fullName>
+    <givenName>Ivan</givenName>
+    <familyName>Petrov</familyName>
+    <emailAddress>ivan.petrov@example.com</emailAddress>
+    <personalNumber>1006</personalNumber>
+    <organizationalUnit>IT Operations</organizationalUnit>
+    <title>Systems Administrator</title>
+    <credentials>
+        <password>
+            <value><t:clearValue>Ev4l-St4ck!26</t:clearValue></value>
+        </password>
+    </credentials>
+    <assignment>
+        <!-- the governed Straza account (AR:Straza:Account owns the construction) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0b" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- BR:Straza-approver-access: AR:sec-approvers membership (the
+             decide authority, written by this IdM) + a Keycloak login -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0d" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- persona archetype, assigned directly (employee) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20" type="ArchetypeType"/>
+    </assignment>
+</user>

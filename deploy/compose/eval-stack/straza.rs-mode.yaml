@@ -1,0 +1,50 @@
+# strazad config-file layer for rs-mode (oauth.providers is map-typed, so it
+# can't ride STRAZA_* env; only github has env shortcuts). compose mounts
+# this at /etc/straza/straza.yaml and sets STRAZA_CONFIG. Env keeps
+# precedence over the file, so the existing compose env is untouched.
+# The client secret is deliberately public eval material, the same policy as
+# every credential in this stack. The matching confidential client
+# straza-connect ships in keycloak/straza-realm.json.
+# ⚠ The SIEM overlay mounts siem/straza-siem.yaml OVER this file's target
+# (strazad reads one config file); that file carries a COPY of the oauth
+# block below, so change it in BOTH places.
+oauth:
+  providers:
+    keycloak:
+      # authUrl is where the browser goes, so it stays on the KC_HOSTNAME
+      # host: Keycloak stamps that host into form actions and cookies, and a
+      # browser on another name loses its auth cookie mid-flow ("Cookie not
+      # found", verified live). tokenUrl is strazad's own call, made on the
+      # compose network.
+      clientId: straza-connect
+      clientSecret: straza-connect-eval-secret
+      authUrl: http://localhost:8480/realms/straza/protocol/openid-connect/auth
+      tokenUrl: http://keycloak:8080/realms/straza/protocol/openid-connect/token
+      scopes: [openid]
+  # Defaults (1m pass / 10m window) already out-rotate Keycloak's 5-minute
+  # access tokens. They are written out so the settings are visible by name.
+  refreshInterval: 1m
+  refreshWindow: 10m
+
+# Delegated admin demo. roleAreas is map-typed, so it lives in the file like
+# oauth above. Keep it in sync with siem/straza-siem.yaml, the overlay that
+# wins when the full chain runs. Anyone holding role `auditor` gets a read-only
+# console slice (Sessions + Audit + Transcripts) instead of all-or-nothing
+# straza-admin. The seeder creates auditor as a Straza role (kind straza,
+# the control plane): it opens the console, never agent tools. Straza roles
+# render on the SCIM wire like every other role (scim-profile revision 14),
+# so midPoint imports auditor and assigns it like any other role. Inert
+# until someone holds the role.
+admin:
+  roleAreas:
+    auditor: [audit:read, sessions:read, transcripts:read]
+
+# SCIM posture (scim-profile revision 14, the unified role model). Keep it
+# in sync with siem/straza-siem.yaml. Roles are the ONE object, Straza-born:
+# the seeder creates the business roles, the application roles and auditor
+# before midPoint provisions anything. The wire renders EVERY role as a
+# group, on both planes. Membership writes ARE role assignment, and group
+# lifecycle is refused (501). midPoint assigns straza-admin and the
+# straza-enroll-* roles, and an access review certifies WHO holds them. The
+# retired derivation knobs (scim.groupRoleMap, the name-prefix convention,
+# scim.autoCreateRoles) still fail boot loudly if present.

@@ -1,0 +1,18 @@
+{
+  "specversion": "1.0",
+  "id": "01a0b8d4-1a24-7b30-8c41-3d4e5f607184",
+  "type": "straza.audit.admin",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-09-24T10:31:47.198Z",
+  "data": {
+    "action": "apps.install",
+    "actor": "alice",
+    "actorId": "0197fa3d-1111-7abc-9def-000000000001",
+    "actorVia": "session",
+    "app": "github",
+    "runtime": "remote",
+    "update": false,
+    "adminRole": "mcp-admin-github",
+    "draft": "41"
+  }
+}

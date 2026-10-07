@@ -1,0 +1,29 @@
+# An MCP server run as a container over stdio, sandboxed by default, credentialed through an environment variable.
+# Both profiles; the manifest validates everywhere, and a strazad host without a container backend refuses to start it.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: ticket-tools-oci
+  description: Example ticketing MCP server run from a container image
+server:
+  name: example/ticket-mcp
+  version: "1.4.0"
+straza:
+  runtime:
+    kind: oci
+    oci:
+      image: ghcr.io/example/ticket-mcp:1.4.0
+      sandbox: default
+      env:
+        - name: TICKET_BASE_URL
+          value: https://tickets.example.internal
+  credential:
+    kind: static
+    inject:
+      as: env
+      name: TICKET_API_TOKEN
+      template: "{{secret}}"
+  exposure:
+    tools: ["*"]
+  limits:
+    rps: 5

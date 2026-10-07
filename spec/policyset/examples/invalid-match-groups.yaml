@@ -1,0 +1,17 @@
+# match.groups was retired by revision 12 (the unified role model: groups
+# no longer exist as an object). Presence is a loud parse error, even
+# empty: a selector that silently matched nothing would turn a deny into
+# a no-op, the worst possible failure on an enforcement plane. Re-spell
+# onto roles.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: retired-group-selector
+spec:
+  match:
+    groups: [contractors]
+  rules:
+    - id: ctr-no-net
+      tools: [net.fetch]
+      effect: deny
+      reason: "no network fetches for contractors"

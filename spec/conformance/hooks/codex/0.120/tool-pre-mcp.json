@@ -1,0 +1,1 @@
+{"provenance":"doc openai/codex generated JSON schemas 2026-07-26 (hand-authored)","harness":"codex","payload":{"hook_event_name":"PreToolUse","session_id":"abc","cwd":"/work/proj","tool_name":"mcp__github__get_repository","tool_input":{}},"expect":{"kind":"tool.pre","tool":"mcp.call","app":"github","toolName":"get_repository","args":{},"workspace":"/work/proj"}}

@@ -1,0 +1,48 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: approve-disable-user
+  description: "Human-approval gate (revision 4): disabling a user needs a human tap via mode approve"
+spec:
+  match:
+    roles: [high-risk]
+  rules:
+    - id: disable-user-needs-human
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["disable_user", "enable_user"]
+      effect: allow
+      mode: approve
+      approve:
+        roles: [sec-approvers]   # who may decide (IGA-fed; midPoint-assignable)
+        timeoutSeconds: 90       # bounded wait; expiry = deny
+        selfApproval: false      # requester may not approve themself
+        retryTTLSeconds: 60      # single-use hook-lane exemption TTL
+        binding: call            # revision 7 default made explicit: the fingerprint binds the exact arguments
+      reason: "disable_user requires human approval"
+    - id: search-approve-tool-scoped
+      # binding tool (revision 7): the explicit, diffable loosening; one
+      # approval covers the tool identity regardless of arguments. For
+      # high-frequency benign tools only.
+      tools: [mcp.call]
+      apps: [github]
+      toolNames:
+        allow: ["search_code"]
+      effect: allow
+      mode: approve
+      approve:
+        roles: [sec-approvers]
+        binding: tool
+      reason: "code search is approval-gated but arg-volatile"
+    - id: approve-any-defaults
+      # No approve block: the person behind the agent decides (revisions 14
+      # and 19), and the 90s/60s defaults apply.
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["reset_password"]
+      effect: allow
+      mode: approve
+      reason: "password reset requires human approval"

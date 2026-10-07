@@ -1,0 +1,15 @@
+{{- /* An inline SVG diagram drawn in the page's tokens:
+{{< diagram name="decision-flow" caption="..." >}}. The drawing is the
+partial website/layouts/partials/diagrams/<name>.html, and a missing partial
+fails the build. When the root SVG has groups marked data-s="1" and so on
+and a data-say JSON array, site.js adds step buttons above it and shows the
+sentence of the chosen step below it, item 0 for the whole picture. */ -}}
+{{- $name := .Get "name" -}}
+{{- $partial := printf "diagrams/%s.html" $name -}}
+{{- if not (templates.Exists (printf "partials/%s" $partial)) }}{{ errorf "%s: diagram %q has no drawing. Add website/layouts/partials/%s, or use the name of a file in that folder." .Position $name $partial }}{{ end -}}
+<figure class="fig">
+  <div class="canvas">{{ partial $partial .Page | replaceRE `\n[ \t]*\n` "\n" | safeHTML }}</div>
+  {{- with .Get "caption" }}
+  <figcaption>{{ $.Page.RenderString . }}</figcaption>
+  {{- end }}
+</figure>

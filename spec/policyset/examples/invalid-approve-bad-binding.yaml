@@ -1,0 +1,15 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: bad-approve-binding
+spec:
+  rules:
+    - id: r1
+      tools: [mcp.call]
+      apps: [github]
+      toolNames:
+        allow: ["search_code"]
+      effect: allow
+      mode: approve
+      approve:
+        binding: everything

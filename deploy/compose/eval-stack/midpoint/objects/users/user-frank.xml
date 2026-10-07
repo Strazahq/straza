@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  frank: sample employee (Finance). No role assignments; midPoint only.
+  Manager of the dev-ops demo team - the list_my_managers demo resolves to
+  him.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:org="http://midpoint.evolveum.com/xml/ns/public/common/org-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c43">
+    <name>frank</name>
+    <fullName>Frank Novak</fullName>
+    <givenName>Frank</givenName>
+    <familyName>Novak</familyName>
+    <emailAddress>frank.novak@example.com</emailAddress>
+    <personalNumber>1004</personalNumber>
+    <organizationalUnit>Finance</organizationalUnit>
+    <title>Financial Controller</title>
+    <!-- Approver (built-in, for the manager-approval demo): completeWorkItem authority, so frank (org:manager of dev-ops) can decide the work items the metarole routes to him -->
+    <assignment>
+        <targetRef oid="00000000-0000-0000-0000-00000000000a" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- manager of the dev-ops demo team (objects/orgs/team-dev-ops.xml) -->
+        <targetRef oid="d23c0d53-1410-4b63-bf9a-b18142bb3336" type="OrgType" relation="org:manager"/>
+    </assignment>
+    <assignment>
+        <!-- persona archetype, assigned directly (employee) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20" type="ArchetypeType"/>
+    </assignment>
+</user>

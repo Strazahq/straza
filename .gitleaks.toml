@@ -1,0 +1,211 @@
+# Straza gitleaks configuration, used by `make security`.
+#
+# Why this file exists: `make security` runs `gitleaks detect`, which scans the
+# WHOLE git history, and this history contains credential-shaped strings on
+# purpose: published RFC test vectors, leak-detector positive controls, and
+# the documented demo-grade logins of the opt-in local eval stack. Without the
+# entries below the target reports findings and is therefore useless: a
+# scanner nobody believes is the same as no scanner.
+
+# Rules for adding an entry (read before you edit):
+#   1. Every entry states WHY the value is provably not a real secret.
+#      "It's just a test" is not a proof. "It is printed in RFC 8291 §5" is.
+#   2. No rule is disabled globally. Every allowlist is pinned to a path, and
+#      most are additionally pinned to the exact literal (condition = "AND").
+#   3. If you cannot write the one-line proof, the value is NOT fake. Rotate
+#      it and purge it.
+
+title = "Straza"
+
+[extend]
+useDefault = true
+
+# --- published test vectors ------------------------------------------------
+
+[[allowlists]]
+description = """RFC 8291 §5 Web Push encryption test vectors. Both key pairs, \
+the salt and the auth secret are PRINTED IN THE RFC; that publication is the \
+whole reason a known-answer test can exist. The file contains nothing else."""
+paths = ['''internal/approval/webpush_encrypt_test\.go''']
+
+[[allowlists]]
+description = """Slack's own documentation example signing secret \
+(api.slack.com "Verifying requests from Slack"). Copied verbatim so the HMAC \
+fixture matches Slack's published worked example."""
+paths = ['''internal/approval/slack_test\.go''']
+regexes = ['''8f742231b10c8538a610bffdff6d825b''']
+regexTarget = "match"
+condition = "AND"
+
+# --- leak-detector positive controls ---------------------------------------
+
+[[allowlists]]
+description = """internal/sentinel's leak detectors are TESTED with strings \
+that must look like real credentials or the table proves nothing. The AWS ones \
+are a literal alphabet run (AKIA + ABCDEFGHIJKLMNOP); the GitHub/bearer/straza \
+ones are strings.Repeat of a single character. No entropy, no issuer."""
+paths = ['''internal/sentinel/detectors_test\.go''']
+
+[[allowlists]]
+description = """The drafting door's positive control: a hand-typed GitHub \
+token shape (ghp_ + A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8, the alphabet \
+interleaved with the digits) that the tests submit so the door refuses it and \
+no record keeps it. No GitHub account ever issued it."""
+paths = ['''internal/server/native_drafts_test\.go''']
+regexes = ['''ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8''']
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """The secret scan's positive control for a server whose name \
+looks like a Slack bot token: xoxb- plus one digit run written twice (the \
+second with three zeros appended) plus the alphabet followed by the digits. \
+The drafts tests send it so the name is withheld everywhere. Slack never \
+issued it, and it carries no entropy."""
+paths = [
+  '''internal/server/api_drafts_test\.go''',
+  '''internal/server/api_drafts_rows_test\.go''',
+]
+regexes = ['''xoxb-2745010221-2745010221000-abcdefghij0123456789''']
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """The masking unit's hand-typed fixtures: a fake PEM block whose \
+body is the sixteen characters Qe1Sd7FTk8Hn3Vb5 repeated, and the same run \
+rotated, Tk8Hn3Vb5Qe1Sd7F, as the value under API_TOKEN. The tests prove that \
+a server's manifest, its logs and the drafting door mask secret-shaped values, \
+so they need secret-shaped text. Nothing minted either string, and neither \
+carries entropy."""
+paths = [
+  '''internal/server/address_secrets_test\.go''',
+  '''internal/server/api_apps_mask_test\.go''',
+]
+regexes = ['''Qe1Sd7FTk8Hn3Vb5''', '''Tk8Hn3Vb5Qe1Sd7F''']
+regexTarget = "match"
+condition = "AND"
+
+# --- synthetic enrollment payloads -----------------------------------------
+
+[[allowlists]]
+description = """Approver-enrollment QR fixtures: a hand-typed token, a \
+hand-typed SPKI pin and a placeholder Google API key \
+(AIzaSyD- + "1234567890abcdefghijklmnopqrstuv"). No approver project, no \
+server and no Firebase app these ever addressed has existed."""
+paths = ['''internal/qrterm/qrterm_test\.go''', '''cmd/strazactl/approvals_test\.go''']
+regexes = [
+  '''wXTvB-hm3ltEub_uFdvqwl0yvyV_icGg7vzRvK2yy7M''',
+  '''sha256/V13tbotp\+v8SUsHrXjWzV2jrpKRC5TZeBI/IShtoYSA=''',
+  '''AIzaSyD-1234567890abcdefghijklmnopqrstuv''',
+]
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """App-secret broker tests: the value is self-documenting \
+("sk-live-8827-NEVER-LEAK"). These tests assert the secret NEVER reaches the \
+agent, so the literal has to appear in the assertion."""
+paths = ['''internal/server/gateway_test\.go''', '''internal/server/api_admin_gaps_test\.go''']
+regexes = ['''sk-live-\d{4}-NEVER-(LEAK|ECHO)''']
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """Client credentials lane tests: two hand-made strings in the \
+shape of a JWT, because the leak test must find a token or an assertion in an \
+error or a log line if one ever gets there. Their third part is not a \
+signature: it is the base64 of the words signature-bytes and token-signature, \
+and the payloads are {"sub":"sam-sre-agent"} and {"azp":"sam"}. No key signed \
+them and no provider issued them."""
+paths = ['''internal/clientcredentials/helpers_test\.go''', '''internal/clientcredentials/fetch_test\.go''']
+regexes = [
+  '''eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiJzYW0tc3JlLWFnZW50In0\.c2lnbmF0dXJlLWJ5dGVz''',
+  '''eyJhbGciOiJSUzI1NiJ9\.eyJhenAiOiJzYW0ifQ\.dG9rZW4tc2lnbmF0dXJl''',
+]
+regexTarget = "match"
+condition = "AND"
+
+# --- eval-stack demo credentials -------------------------------------------
+
+[[allowlists]]
+description = """Opt-in local SIEM overlay for the eval stack. These are \
+PUBLISHED demo logins (the file header and the site's sinks and SIEM guide, \
+guides/audit/sinks-and-siem/, print "elastic / strazasiem" as the demo \
+stack's login) on a loopback-only \
+compose stack that is never a deployment target. The xpack keys are literal \
+padding ("...0123456789ab"). Production posture is documented separately on \
+the same site page; nothing here is reachable from a real deployment."""
+paths = ['''deploy/compose/eval-stack/compose\.siem\.yaml''']
+regexes = ['''straza(siem|kibana|eval[a-z]*key[0-9a-f]*)''']
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """The eval stack's midPoint administrator login, typed into a \
+curl -u on the demo-stack tutorial page. It is the PUBLISHED demo login of the \
+opt-in loopback compose stack: the seeder prints it at the end of every boot \
+and the site's demo stack tutorial, get-started/enterprise-demo-stack/, prints it. No deployment \
+outside that stack has ever used it."""
+paths = [
+  '''website/content/get-started/enterprise-demo-stack\.md''',
+  '''website/content/guides/connect-identity/midpoint\.md''',
+]
+regexes = ['''administrator:StrazaEval5ecr3t!''']
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """The eval stack's Elasticsearch login, typed into a curl -u on the \
+demo stack page and the sinks guide. It is the PUBLISHED demo login of the opt-in \
+loopback SIEM overlay (compose.siem.yaml prints it in its header and the \
+allowlist entry above covers that file); nothing outside that stack has ever \
+used it."""
+paths = [
+  '''website/content/get-started/enterprise-demo-stack\.md''',
+  '''website/content/guides/audit/sinks-and-siem\.md''',
+]
+regexes = ['''elastic:strazasiem''']
+regexTarget = "match"
+condition = "AND"
+
+# --- docs walk residue -------------------------------------------------------
+
+[[allowlists]]
+description = """First-boot passwords of the standalone tutorial's walk. strazad \
+printed them once inside a throwaway Alpine container that was removed the same \
+hour, so nothing they unlock exists; the page masks them after \
+their first four characters, and the unmasked lines live only in the commit \
+that first pasted them."""
+paths = ['''website/content/get-started/first-governed-session\.md''']
+regexes = ['''2f664c2f763c7ccbb26a26e87723c312f001''', '''c7a38d988beaaf4aa924c1e3e3f2ebd57137''']
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """The Ed25519 PUBLIC halves that straza keygen printed during three \
+headless-agents walks. The earlier ones stay listed because \
+the scan covers the whole history. Public by construction; each private half never \
+left its walk container, which was removed the same day, and the identities they \
+were registered on were deleted. The third is the docs re-walk of 2026-10-06."""
+paths = ['''website/content/guides/govern-an-agent/headless-agents\.md''']
+regexes = [
+  '''xiE9IaMnPUKd55aZo8rZf817r516x5Z5pCtKbNZ8ROA=''',
+  '''DZh7LuQdM1zENTswOoHwFql07Lt97Ffrs3fWuxGBNdM=''',
+  '''hQBJfQNxXQUSn4d9TR\+Oso8k8NTcgHoGgZv2ufDnKzk=''',
+]
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """The Ed25519 PUBLIC halves that straza keygen printed during two \
+agent provisioning walks. The first stays listed because the scan covers the \
+whole history. Public by construction; each private half lived only in a scratch \
+home directory that was deleted the same day, and the identity scout-bot each was \
+registered on was deleted."""
+paths = ['''website/content/guides/connect-identity/nhi-provisioning\.md''']
+regexes = [
+  '''bXmguXE5dlBj2u5E5lfS4PfOSD/CWupFYWbghVKD3lo=''',
+  '''YNw6V5UQxROrLSHGY4eiRCOY4POchjr60rZev41NsQ8=''',
+]
+regexTarget = "match"
+condition = "AND"

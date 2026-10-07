@@ -1,0 +1,37 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: approve-sponsor-deciders
+  description: "Decider kinds (revision 13): approve.deciders routes decide rights to the requester's sponsor"
+spec:
+  rules:
+    - id: agent-writes-sponsor-decides
+      # Sponsor lane: the person behind the agent is resolved at request
+      # time. For a requester who has a sponsor (User.Sponsor, the IdM-owned
+      # edge) that sponsor is persisted on the record as an allowed decider
+      # and the push target. A person with no sponsor is that person, and
+      # the record becomes theirs alone to confirm (revision 19). An agent
+      # with no usable sponsor is denied at request time and no record is
+      # created (revision 14).
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["disable_user"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+      reason: "an agent disabling a user answers to its sponsor"
+    - id: sponsor-or-secops
+      # Composable with roles: the sponsor OR any sec-approvers holder may
+      # decide, whoever answers first.
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["delete_user"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        roles: [sec-approvers]
+      reason: "delete_user takes the sponsor or security operations"

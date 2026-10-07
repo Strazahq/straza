@@ -1,0 +1,272 @@
+# Four eyes on a hook-lane hold: the requester asks and another person
+# decides. A rule that names an approver role routes there, the requester
+# holds no such role and is refused on her own record with the record left
+# pending, the named approver approves with her own login token, and the
+# requester's identical retry is allowed once with the approver's name in
+# the reason.
+#
+# The decide routes take a person's own token, so the deciding steps carry
+# "as" and the runner signs that person in through the built-in issuer's
+# device flow. The operator's token cannot stand in: the bootstrap admin
+# holds no g4-eyes-approve role, and a decider must hold one of the record's
+# roles.
+#
+# Shapes the binary forced on the corpus, each with how it was verified: the
+# approvals list is an object with an approvals array, the activate body is
+# {status: active|draft}, a policy delete answers 204 and role deletes answer
+# 200, all recorded on j0-golden-path [live]. The pending sentence
+# and the allowed retry's "approved by NAME" wording are the transcripts of
+# the hold how-to guide [doc]. The steps marked "suspect" below assert a
+# status code or a field the published sources leave open; each is listed in
+# the lane report.
+id: g4-four-eyes
+group: G4
+title: A hold that names an approver role is decided by that person and not by the requester
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (fail closed with an actionable reason);
+  spec/policyset/SPEC.md §2 item 8 (approve.roles names the approver roles,
+  resolved on the identity plane at decision time; selfApproval defaults to
+  false and governs whether the requester may decide their own request;
+  timeoutSeconds bounds the wait; the hook lane answers deny with a
+  retry-after-approval reference and honors a single-use exemption keyed
+  session, rule and argv hash for retryTTLSeconds), §2 item 8a (approve
+  plus roles is the four-eyes posture), revision 15 (every approve.roles
+  entry must be an approver-kind role or straza-admin, and a decider must
+  freshly hold one of the record's roles);
+  spec/events/SPEC.md §2.2 (one straza.audit.approval record when the
+  request opens and one when it resolves, the resolution carrying the
+  deciding user), revision 38 (one more when a call uses a hold's
+  approval) and revision 31 (the hook lane's straza.audit.tool record
+  for a hold carries the allowing rule and the sentence the model read);
+  pkg/api/openapi.yaml POST /v1/admin/approvals/{id}/approve (security
+  userBearer, a person's session token or ID token; 200, 403, 404, 409 and
+  410; the optional reason body), the Approval schema (state, lane, rule,
+  approverRoles, decidedByName, decidedReason), POST /v1/admin/roles (kind
+  approver is decide authority only) and POST /v1/admin/assignments;
+  website/content/guides/write-policy/hold-for-a-human.md (the rule shape
+  with approve.roles, the pending sentence "approval requested (notified
+  roles [NAME])", the allowed retry's reason "Straza: approved by NAME",
+  and the limit that the requester never decides their own request unless
+  the rule says selfApproval);
+  website/content/concepts/approvals-model.md section Who may answer (an
+  approver role carries decide authority and nothing else, the decider's
+  roles are resolved fresh at decision time, the requester may not decide
+  their own request unless the rule says so);
+  website/content/reference/glossary.md (an eligible decider is a human
+  holder of a listed approver role).
+  suspect: the success status codes of the admin routes and the
+  approvals.0 path into a one-record list; that decidedByName is the
+  deciding username, which no page states; the 403 for a person who holds
+  no approver role, which revision 15 states as a decider must hold one of
+  the record's roles while the openapi lists the code without a sentence.
+harnesses: [claude-code]
+identities:
+  nina: {kind: human, password: "Walk-2026!"}
+  owen: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: the matched role for the requester, an approver role for the decider.
+  - name: the admin creates the application role the policy will match
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-eyes, kind: application, description: "Four-eyes scenario, the matched role"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the admin creates the approver role that carries the decide authority
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-eyes-approve, kind: approver, description: "Four-eyes scenario, the deciders"}
+    want: {status: 201}
+    save: {approverRoleId: id}
+  - name: the IdM provisions nina, who will make the held call
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-nina
+        userName: nina
+        displayName: Nina Requester
+        active: true
+    want: {status: 201}
+    save: {ninaId: id}
+  - name: the admin sets nina's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${ninaId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM provisions owen, the second pair of eyes
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-owen
+        userName: owen
+        displayName: Owen Approver
+        active: true
+    want: {status: 201}
+    save: {owenId: id}
+  - name: the admin sets owen's password, since he signs in to decide
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${owenId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM finds the matched role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g4-eyes"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: nina becomes a member of the matched role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${ninaId}"}]
+    want: {status: 200}
+  - name: the admin gives owen the approver role, and nina never holds it
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${owenId}", role_id: "${approverRoleId}"}
+    want: {status: 201}
+  - name: the admin applies a PolicySet that holds deploy for a g4-eyes-approve holder
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-eyes
+            description: Four-eyes scenario for role g4-eyes
+          spec:
+            match:
+              roles: [g4-eyes]
+            rules:
+              - id: hold-deploy
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: approve
+                approve:
+                  roles: [g4-eyes-approve]
+                  timeoutSeconds: 900
+                  retryTTLSeconds: 300
+                reason: "G4-EYES: deploy is held for a g4-eyes-approve holder"
+    want: {status: 201}
+  - name: the admin activates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-eyes/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: nina enrolls
+    enroll: {as: nina}
+  - name: nina starts a session
+    hook:
+      as: nina
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # 1. The held call opens a record routed to the approver role.
+  - name: nina's held command is denied with the pending sentence that names the approver role
+    hook:
+      as: nina
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval requested (notified roles [g4-eyes-approve])"}
+  - name: exactly one record is pending, on the hook lane, and it names the approver role as its pool
+    # suspect: approvals.0 is the one record of a one-record list
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.lane: hook, approvals.0.rule: hold-deploy, approvals.0.approverRoles.0: g4-eyes-approve, approvals.1: null}
+    save: {holdId: approvals.0.id}
+  - name: the request phase of the hold is on the chain as one approval record
+    audit: {subject: nina, kind: straza.audit.approval, count: 1}
+
+  # 2. The requester holds no approver role and cannot decide her own request.
+  - name: nina deciding her own record is refused, because she holds no approver role
+    # suspect: revision 15 says a decider must hold one of the record's roles, and the openapi lists 403 without a sentence
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${holdId}/approve
+      as: nina
+    want: {status: 403}
+  - name: the record is still pending after the refused decide
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${holdId}
+    want:
+      status: 200
+      body: {approval.state: pending}
+
+  # 3. The named approver decides with his own login token and the retry runs once.
+  - name: owen approves the record with his own login token and his own words
+    # suspect: decidedByName is assumed to be the deciding username
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${holdId}/approve
+      as: owen
+      body: {reason: "G4-EYES: the change window is open"}
+    want:
+      status: 200
+      body:
+        approval.state: approved
+        approval.decidedByName: owen
+        approval.decidedReason: "G4-EYES: the change window is open"
+  - name: nina's identical retry is allowed by the single-use exemption
+    hook:
+      as: nina
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: allow}
+  - name: the allowed retry is on the chain once and its reason names the approver
+    audit: {subject: nina, kind: tool.pre, decision: allow, reasonContains: "approved by owen", count: 1}
+  - name: the resolution and the retry's use joined the request, three approval records for one hold
+    audit: {subject: nina, kind: straza.audit.approval, count: 3}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-eyes/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft PolicySet is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g4-eyes
+    want: {status: 204}
+  - name: the admin deletes the approver role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${approverRoleId}
+    want: {status: 200}
+  - name: the admin deletes the matched role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates owen
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${owenId}
+    want: {status: 204}
+  - name: the IdM deactivates nina
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${ninaId}
+    want: {status: 204}

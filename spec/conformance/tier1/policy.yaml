@@ -1,0 +1,43 @@
+# Tier-1 hook-profile conformance policy. The implementation
+# under test MUST enforce exactly this PolicySet with STANDALONE profile
+# defaults (local tools allow by default, mcp.call deny by default).
+# The runner (`strazactl spec conformance --suite hook-profile`) materializes
+# this file and substitutes `{policy}` in --cmd with its path; implementations
+# with their own configuration may ignore the placeholder and load an
+# equivalent copy themselves.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: tier1-conformance
+  description: The published policy every Tier-1 conformance run enforces.
+spec:
+  priority: 100
+  rules:
+    # events is spelled out on every rule: a rule with no `events:` binds
+    # tool.pre ONLY (published default, SPEC.md §3), so a deny that should
+    # also fire when the harness asks for permission (claude/codex
+    # PermissionRequest → permission.request) must say so. The suite's
+    # permission-request cases assert exactly that early-deny lane.
+    - id: block-destructive
+      events: [tool.pre, permission.request]
+      tools: [shell.exec]
+      command:
+        denyPatterns:
+          - "rm -rf *"
+          - "rm -fr *"
+      effect: deny
+      reason: "Tier-1 conformance policy: destructive commands are blocked"
+    - id: protect-env-files
+      events: [tool.pre, permission.request]
+      tools: [file.write, file.edit]
+      paths:
+        deny: ["**/.env*"]
+      effect: deny
+      reason: "Tier-1 conformance policy: environment files are protected"
+    - id: allow-github-read
+      events: [tool.pre, permission.request]
+      tools: [mcp.call]
+      apps: [github]
+      toolNames:
+        allow: ["get_*", "list_*"]
+      effect: allow

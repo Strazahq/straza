@@ -1,0 +1,60 @@
+/* Straza dark skin over the keycloak.v2 login (PatternFly v5).
+   One palette with the console (web/console/tokens.css), so the sign-in
+   page reads as the same product as the dark console it returns to. */
+:root {
+  --straza-bg: #0d1117;
+  --straza-surface: #161b22;
+  --straza-border: #30363d;
+  --straza-text: #c9d1d9;
+  --straza-muted: #8b949e;
+  --straza-accent: #58a6ff;
+  --straza-accent-hover: #79b8ff;
+}
+html.login-pf, .login-pf body {
+  background: var(--straza-bg) none;
+  color: var(--straza-text);
+}
+.pf-v5-c-login__container { background: transparent; }
+.pf-v5-c-login__main {
+  background: var(--straza-surface);
+  border: 1px solid var(--straza-border);
+  border-radius: 10px;
+  color: var(--straza-text);
+}
+.pf-v5-c-login__main .pf-v5-c-title,
+.pf-v5-c-login__main-body,
+.pf-v5-c-form__label,
+.pf-v5-c-form__label-text {
+  color: var(--straza-text);
+}
+.pf-v5-c-login__header,
+.pf-v5-c-login__footer,
+.pf-v5-c-login__main-footer,
+.pf-v5-c-helper-text__item-text {
+  color: var(--straza-muted);
+}
+/* The realm name over the card: one quiet wordmark, no letterspaced shout. */
+.pf-v5-c-login__header .pf-v5-c-brand,
+#kc-header-wrapper {
+  color: var(--straza-text);
+  text-transform: none;
+  letter-spacing: normal;
+}
+/* PF v5 wraps inputs: skin the wrapper and the input itself. */
+.pf-v5-c-form-control,
+.pf-v5-c-form-control > input,
+.pf-v5-c-form-control > select {
+  background-color: var(--straza-bg);
+  color: var(--straza-text);
+}
+.pf-v5-c-form-control { --pf-v5-c-form-control--BorderColor: var(--straza-border); }
+.pf-v5-c-button.pf-m-primary {
+  background-color: var(--straza-accent);
+  color: #ffffff;
+}
+.pf-v5-c-button.pf-m-primary:hover {
+  background-color: var(--straza-accent-hover);
+}
+a, .pf-v5-c-login__main a {
+  color: var(--straza-accent);
+}

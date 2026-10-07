@@ -1,0 +1,170 @@
+# One session is revoked by the admin. The next hook decision and the next
+# gateway call of that session are refused, and a new session start
+# re-establishes access, because a session revoke is a stand-down and not a
+# lockout. The scenario runs under one dialect so the identity holds exactly
+# one session and the list read below names it.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+# The daemon starts after the first session.start of its identity: the
+# daemon keeps a session fresh and holds its push stream, so it refuses to
+# run before one exists [live].
+id: g1-revoke-one-session
+group: G1
+title: The admin revokes one session and the next hook and gateway calls are refused
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (revocation travels as a pushed event);
+  spec/session-token/SPEC.md §Refresh and revocation;
+  spec/policyset/SPEC.md §3 item 3 (a granted mcp.call allows with no rule);
+  spec/scim-profile/SPEC.md §4 and conformance/scim groups-roles;
+  website/content/reference/api.md sections Users and devices, Sessions
+  and transcripts, Apps; docs/quickstart-standalone.md §6 (the revoke
+  wording); website/content/guides/operate/kill-switch-runbook.md (a
+  session revoke is a stand-down).
+  suspect: the admin user create field username, the success status
+  codes, the sessions list filter names and its 0.id path, the app and
+  binding bodies, the upstream tool name echo and its result, and the
+  gateway refusal wording after a revoke.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  bob: {kind: human, password: "Walk-2026!"}
+steps:
+  - name: the admin creates bob as a local user with his password
+    # suspect: the field username is assumed beside the documented display, email and password fields
+    admin:
+      method: POST
+      path: /v1/admin/users
+      body: {username: bob, display: Bob Revoked, email: bob@e2e.example, password: "Walk-2026!"}
+    want: {status: 201}
+    save: {bobId: id}
+  - name: the admin registers the app on the hermetic upstream
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g1-one-tools
+            namespace: dev.e2e
+          server:
+            name: dev.e2e/g1-one-tools
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want: {status: 201}
+    save: {appId: id}
+  - name: the admin creates the role the app owns, over every tool of the app, for the gateway control
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g1-one-tools-users, server: g1-one-tools, tools: ["*"], description: "Session revoke scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM finds the role on the wire and adds bob to it
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g1-one-tools-users"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: bob becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${bobId}"}]
+    want: {status: 200}
+  - name: bob enrolls and starts his daemon
+    enroll: {as: bob}
+  - name: bob starts a session
+    hook:
+      as: bob
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: bob's daemon holds the push stream
+    daemon: {as: bob, action: start}
+  - name: a benign command is allowed by the standalone default
+    hook:
+      as: bob
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: a gateway call runs on the access grant alone
+    # suspect: the upstream tool name and result are assumed
+    mcp:
+      as: bob
+      tool: g1-one-tools__echo
+      args: {text: before-revoke}
+    want: {result: before-revoke}
+  - name: the admin reads bob's active sessions and keeps the one id
+    # suspect: the filter names user and status mirror the strazactl flags; the list is read as a bare array
+    admin:
+      method: GET
+      path: /v1/admin/sessions?user=${bobId}&status=active
+    want: {status: 200}
+    save: {sessionId: 0.id}
+  - name: the admin revokes that session
+    admin:
+      method: POST
+      path: /v1/admin/sessions/${sessionId}/revoke
+    want: {status: 200}
+  - name: the next hook decision is refused, daemon connected
+    hook:
+      as: bob
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: deny, reasonContains: "revoked"}
+    within: 10s
+    timer: kill-switch-hook
+  - name: the next gateway call is refused
+    # suspect: no published sentence names the gateway refusal after a session revoke
+    mcp:
+      as: bob
+      tool: g1-one-tools__echo
+      args: {text: after-revoke}
+    want: {refused: true}
+    within: 10s
+    timer: kill-switch-gateway
+  - name: a new session start re-establishes access, because a session revoke is a stand-down
+    hook:
+      as: bob
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: the benign command is allowed again in the fresh session
+    hook:
+      as: bob
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: the gateway serves the fresh session again
+    mcp:
+      as: bob
+      tool: g1-one-tools__echo
+      args: {text: after-restart}
+    want: {result: after-restart}
+  - name: bob's daemon is stopped
+    daemon: {as: bob, action: stop}
+  - name: the admin deletes the role before its server, which would take it along
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the admin removes the app
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${appId}
+    want: {status: 200}
+  - name: the admin soft-deletes bob, which revokes his sessions
+    admin:
+      method: DELETE
+      path: /v1/admin/users/${bobId}
+    want: {status: 200}

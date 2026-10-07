@@ -1,0 +1,13 @@
+{
+  "//": "Non-secret settings for the midpoint MCP server. compose.yaml mounts this file at /etc/straza/midpoint-mcp.json and points MIDPOINT_MCP_CONFIG at it. Credentials stay env-only. Unknown keys are a startup ERROR in the server, so keep keys in sync with examples/midpoint-mcp.config.json in strazahq/midpoint-mcp-server.",
+
+  "identity": {
+    "//credentialIsShared": "mcp-service is a technical account. In the resource-server mode this stack runs, every request carries the real end user, so this key is irrelevant. true keeps the self-scoped tools (list_my_team, list_my_teammates, list_my_managers, list_work_items, list_my_requests) refusing with an explanation, instead of answering with the service account's empty inbox, if the server ever runs in personal mode on this account. whoami always answers.",
+    "credentialIsShared": true
+  },
+
+  "requests": {
+    "//requireRequestable": "Default, stated for the demo script: request_role only accepts roles flagged requestable. The stack seeds exactly three: BR:Straza-developer-access and BR:Straza-analyst-access (the requestable access packages) and Finance Team (scenario A).",
+    "requireRequestable": true
+  }
+}

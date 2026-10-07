@@ -1,0 +1,33 @@
+{{- /* The rendered content. With steps: true in the front matter every h2
+becomes a numbered step: the h2 and everything up to the next h2 go in one
+list item of an ol.steps, which site.css draws as a circle on a track line.
+An h2 with the class nostep, written as ## Next {.nostep}, closes the list
+and stays plain. A step after it opens a new list that keeps counting. The
+split works on the rendered HTML, where an h2 never appears inside a code
+block because Goldmark escapes the angle bracket there. */ -}}
+{{- $html := string .Content -}}
+{{- if .Params.steps -}}
+  {{- $chunks := split $html "<h2" -}}
+  {{- $out := index $chunks 0 -}}
+  {{- $open := false -}}
+  {{- $n := 0 -}}
+  {{- range after 1 $chunks -}}
+    {{- $attrs := index (split . ">") 0 -}}
+    {{- if findRE `class="[^"]*\bnostep\b` $attrs -}}
+      {{- if $open }}{{ $out = printf "%s</li></ol>" $out }}{{ $open = false }}{{ end -}}
+      {{- $out = printf "%s<h2%s" $out . -}}
+    {{- else -}}
+      {{- $n = add $n 1 -}}
+      {{- if $open -}}
+        {{- $out = printf "%s</li>" $out -}}
+      {{- else -}}
+        {{- $out = printf `%s<ol class="steps" start="%d">` $out $n -}}
+        {{- $open = true -}}
+      {{- end -}}
+      {{- $out = printf `%s<li data-step="%d"><h2%s` $out $n . -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if $open }}{{ $out = printf "%s</li></ol>" $out }}{{ end -}}
+  {{- $html = $out -}}
+{{- end -}}
+{{ $html | safeHTML }}

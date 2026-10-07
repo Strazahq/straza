@@ -1,0 +1,740 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- THE Straza resource (single-resource mode, scim-profile revision 12): ONE
+  midPoint 4.10 resource on the Straza ConnId bundle (universal-rest-connector).
+  Two lanes, one credential, one jar:
+    WRITE  - account CRUD + role MEMBERSHIP over Straza's SCIM 2.0 profile,
+             credential apiToken (scim:read,scim:write). midPoint masters
+             users. Roles are STRAZA-BORN and render on this wire as groups
+             (the access dialect IdMs speak): lifecycle is refused
+             server-side (501 create/delete, readOnly displayName) and the
+             ONE writable fact is ri:members, which IS the (user, role)
+             assignment row. The connector emits the agentic-SCIM URN on
+             agent/service-typed creates so NHIs are born kind=nhi
+             (emitAgenticUrn, default on).
+    READ   - evidence entitlements (apps) + the LiveSync changes feed
+             over the admin API, the same apiToken (its read grants). -->
+
+<!--
+  ONE projection per user (the account class, revision 11: writable subset
+  plus the read-only Straza-born facts) and ONE projection per role (the
+  wire-group class below; `role` feed events drive this class's LiveSync).
+  Naming note: because the connector declares the ConnId special classes
+  (__ACCOUNT__/__GROUP__), midPoint renders every custom class with its
+  standard decoration: ri:CustomappObjectClass
+  (verified from the cached schema). The wire still speaks the raw names;
+  only these XML references carry the decoration. Typing outbounds copy the
+  focus extension unchanged; the typing logic lives in the archetype
+  inducements. The seeder injects the one apiToken and imports this file;
+  the schema file is mounted at /opt/midpoint/var/straza-schema.json by
+  compose.
+-->
+<resource oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01"
+          xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3"
+          xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3"
+          xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+          xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3">
+
+    <name>Straza</name>
+    <description>
+        The Straza governance plane, one resource: users mastered by midPoint
+        over SCIM (deactivation is the kill switch: active=false revokes
+        every session in seconds; DELETE deactivates, never purges), roles
+        imported as wire-groups whose membership IS role assignment, and
+        apps pulled read-only as certifiable entitlements.
+    </description>
+
+    <!-- Bind by connector class; midPoint resolves the discovered ConnectorType. -->
+    <connectorRef type="ConnectorType">
+        <filter>
+            <q:equal>
+                <q:path>connectorType</q:path>
+                <q:value>ai.straza.connector.rest.UniversalRestConnector</q:value>
+            </q:equal>
+        </filter>
+    </connectorRef>
+
+    <connectorConfiguration>
+        <!-- Namespace = .../bundle/<ConnectorBundle-Name>/<connector class FQN>,
+             both taken from the bundle JAR manifest. -->
+        <icfc:configurationProperties
+                xmlns:cfg="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/ai.straza.universal-rest-connector/ai.straza.connector.rest.UniversalRestConnector">
+            <cfg:baseUrl>http://strazad:8420</cfg:baseUrl>
+            <cfg:apiToken>
+                <clearValue>__UNI_TOKEN__</clearValue>
+            </cfg:apiToken>
+            <!-- default true; explicit for legibility: agent/service-typed
+                 creates carry the agentic URN, humans never do -->
+            <cfg:emitAgenticUrn>true</cfg:emitAgenticUrn>
+            <cfg:schemaFilePath>/opt/midpoint/var/straza-schema.json</cfg:schemaFilePath>
+            <cfg:testEndpoint>/v1/admin/overview</cfg:testEndpoint>
+            <!-- <cfg:trustAllCertificates>false</cfg:trustAllCertificates> dev only -->
+        </icfc:configurationProperties>
+    </connectorConfiguration>
+
+    <!-- midPoint generates <schema> from the connector's schema() on first test; omit here. -->
+
+    <schemaHandling>
+
+        <!-- ACCOUNT = the ONE user projection (single-resource mode): midPoint
+             provisions users INTO Straza over SCIM through this class, and
+             the same read carries the Straza-born facts back (kind/origin
+             inbounds: what Straza concluded, mirrored into the focus
+             extension for display and certification). Typing outbounds copy
+             the focus extension unchanged; the typing logic lives in the
+             archetype inducements. -->
+        <objectType>
+            <kind>account</kind>
+            <intent>default</intent>
+            <displayName>Straza user</displayName>
+            <default>true</default>
+            <objectClass>ri:AccountObjectClass</objectClass>
+            <attribute>
+                <ref>icfs:name</ref>          <!-- __NAME__ = SCIM userName -->
+                <displayName>Username</displayName>
+                <outbound>
+                    <strength>strong</strength>
+                    <source><path>$user/name</path></source>
+                </outbound>
+                <inbound>
+                    <name>straza-user-name</name>
+                    <!-- weak: feeds correlation, never renames an existing user -->
+                    <strength>weak</strength>
+                    <evaluationPhases>
+                        <include>beforeCorrelation</include>
+                    </evaluationPhases>
+                    <target><path>name</path></target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:displayName</ref>
+                <outbound>
+                    <source><path>$user/fullName</path></source>
+                </outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:title</ref>
+                <!-- SCIM core title (profile revision 10): the job/function
+                     line, humans and agents alike ("Deploy bot") -->
+                <outbound>
+                    <source><path>$user/title</path></source>
+                </outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:email</ref>
+                <outbound>
+                    <source><path>$user/emailAddress</path></source>
+                </outbound>
+            </attribute>
+            <!-- Typing outbounds: plain copies of the focus extension.
+                 employee/external induce human; ai-agent agent+autonomous;
+                 personal-agent agent+interactive; a hand-set extension value
+                 wins (weak inducements); no archetype = unclassified,
+                 nothing sent, no policy clamp matches. -->
+            <attribute>
+                <ref>ri:userType</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source><path>$user/extension/ext:strazaUserType</path></source>
+                </outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:agencyMode</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source><path>$user/extension/ext:strazaAgencyMode</path></source>
+                </outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:sponsor</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source><path>$user/extension/ext:strazaSponsor</path></source>
+                </outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:swarmId</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source><path>$user/extension/ext:strazaSwarmId</path></source>
+                </outbound>
+            </attribute>
+            <!-- NHI login binding: push a PINNED IdP subject into SCIM
+                 externalId so the enterprise client-credentials lane
+                 resolves the agent (strazad matches token sub against
+                 externalId). CONDITIONAL on purpose: humans never carry
+                 ext:strazaExternalId, so the mapping stays inert for them
+                 and their externalId (backfilled by Straza at first
+                 interactive login) is never touched. This connector's PUT
+                 respells the current resource before applying replacements,
+                 so it cannot wipe the human backfill. -->
+            <attribute>
+                <ref>ri:externalId</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source><path>$user/extension/ext:strazaExternalId</path></source>
+                    <condition>
+                        <script><code>strazaExternalId != null</code></script>
+                    </condition>
+                </outbound>
+            </attribute>
+            <!-- Straza-born facts (scim-profile revision 11): read-only on the wire
+                 (server answers 400 mutability, connector schema refuses
+                 locally), inbound-mapped into the focus extension. -->
+            <attribute>
+                <ref>ri:kind</ref>
+                <inbound>
+                    <name>straza-user-persona</name>
+                    <strength>strong</strength>
+                    <target><path>extension/ext:strazaPersona</path></target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:origin</ref>
+                <inbound>
+                    <name>straza-user-origin</name>
+                    <strength>strong</strength>
+                    <target><path>extension/ext:strazaOrigin</path></target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:groups</ref>          <!-- read-only membership reflection -->
+                <displayName>Groups (raw)</displayName>
+            </attribute>
+            <!-- Role membership (ri:strazaGroups) is a 4.10 NATIVE association
+                 type: the reference type is declared once under
+                 capabilities/configured/references (strazaRoleMembership,
+                 objectToSubject over the wire-group's writable ri:members,
+                 bound by icfs:uid) and the association type
+                 strazaRoleMembership at the end of schemaHandling names this
+                 account type as its subject and the one role object type as
+                 its object. The connector turns member deltas into PATCH
+                 Groups/{id} ops (add-as-union, value-filter remove,
+                 idempotent server-side); a members write creates or deletes
+                 THE (user, role) assignment row, origin=scim. Values arrive
+                 from the Straza role metarole's order-2 induced construction
+                 (associationFromLink): assigning an imported role IS
+                 membership. The account's ri:groups reflection is read-only. -->
+            <activation>
+                <!-- Native activation: the connector maps __ENABLE__ to the
+                     SCIM `active` PATCH itself (never as a SCIM path).
+                     midPoint disable => active:false => Straza kill switch. -->
+                <existence><outbound/></existence>
+                <administrativeStatus><outbound/></administrativeStatus>
+            </activation>
+            <correlation>
+                <correlators>
+                    <items>
+                        <name>by-username</name>
+                        <item><ref>name</ref></item>
+                    </items>
+                </correlators>
+            </correlation>
+            <synchronization>
+                <reaction>
+                    <situation>linked</situation>
+                    <actions><synchronize/></actions>
+                </reaction>
+                <reaction>
+                    <situation>unlinked</situation>
+                    <actions><link/></actions>
+                </reaction>
+                <reaction>
+                    <situation>deleted</situation>
+                    <actions><unlink/></actions>
+                </reaction>
+                <!-- unmatched: intentionally no reaction. A Straza-local
+                     account (alice) stays an unmatched shadow; addFocus
+                     would create a midPoint user this same resource would
+                     immediately provision straight back (loop). -->
+            </synchronization>
+        </objectType>
+
+        <!-- APP = entitlement (intent=app), materialized as a ServiceType focus
+             with the mcp-server archetype. Its MCP tool inventory is ri:tools. -->
+        <objectType>
+            <kind>entitlement</kind>
+            <intent>app</intent>
+            <displayName>Straza app</displayName>
+            <objectClass>ri:CustomappObjectClass</objectClass>
+            <focus>
+                <type>c:ServiceType</type>
+                <archetypeRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c24"/>
+            </focus>
+            <attribute>
+                <ref>icfs:name</ref>
+                <displayName>App</displayName>
+                <inbound>
+                    <name>straza-app-name</name>
+                    <strength>strong</strength>
+                    <evaluationPhases>
+                        <include>beforeCorrelation</include>
+                    </evaluationPhases>
+                    <expression>
+                        <script>
+                            <code><![CDATA[
+// Naming convention: MCS = MCP Server, catalog-materialized.
+input != null ? 'MCS:' + input : null
+                            ]]></code>
+                        </script>
+                    </expression>
+                    <target>
+                        <path>name</path>
+                    </target>
+                </inbound>
+                <inbound>
+                    <name>straza-app-description</name>
+                    <!-- weak: seeds a description once, admins may annotate -->
+                    <strength>weak</strength>
+                    <expression>
+                        <value>MCP server governed by Straza; materialized read-only from the catalog.</value>
+                    </expression>
+                    <target>
+                        <path>description</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:version</ref>
+                <inbound>
+                    <strength>strong</strength>
+                    <target>
+                        <path>extension/ext:strazaVersion</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:runtime</ref>
+                <inbound>
+                    <strength>strong</strength>
+                    <target>
+                        <path>extension/ext:strazaRuntime</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:status</ref>
+                <inbound>
+                    <!-- live manager state; LiveSync keeps it fresh -->
+                    <strength>strong</strength>
+                    <target>
+                        <path>extension/ext:strazaStatus</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:source</ref>
+                <inbound>
+                    <strength>strong</strength>
+                    <target>
+                        <path>extension/ext:strazaSource</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute><ref>ri:tools</ref></attribute>
+            <correlation>
+                <correlators>
+                    <items>
+                        <name>by-app-name</name>
+                        <item>
+                            <ref>name</ref>
+                        </item>
+                    </items>
+                </correlators>
+            </correlation>
+            <synchronization>
+                <reaction>
+                    <situation>linked</situation>
+                    <actions>
+                        <synchronize/>
+                    </actions>
+                </reaction>
+                <reaction>
+                    <situation>unlinked</situation>
+                    <actions>
+                        <link/>
+                    </actions>
+                </reaction>
+                <reaction>
+                    <situation>unmatched</situation>
+                    <actions>
+                        <addFocus/>
+                    </actions>
+                </reaction>
+                <reaction>
+                    <!-- app removed from Straza: the mirror Service goes too
+                         (LiveSync delete-awareness demo) -->
+                    <situation>deleted</situation>
+                    <actions>
+                        <deleteFocus/>
+                    </actions>
+                </reaction>
+            </synchronization>
+        </objectType>
+
+        <!-- GROUP = the SCIM group render of a Straza role (scim-profile
+             revision 12: on this wire a group IS a role, and no second group
+             object exists). Each role imports as ONE RoleType focus named
+             "BR:<role>" for a business role and "AR:<role>" for every other
+             kind, the object a certifier sees. midPoint writes exactly
+             one thing through this class, ri:members (through the account
+             association below), which IS the (user, role) assignment row in
+             Straza. Lifecycle is refused server-side (501 on create and
+             delete, readOnly displayName), so the focus is a mirror with
+             assignable membership, never a mastered object. The read-only
+             projection (role, roleKind, plane, description, apps, tools,
+             policies, server, administers) is the role's OWN data: what
+             assigning it reaches, visible in certification. -->
+
+        <!-- ONE object type for every kind. The archetype comes from the
+             inbound mapping on ri:roleKind below: Straza business role,
+             Straza application role, Straza approver role or Straza role.
+             A role's kind is fixed at create in Straza, so the archetype is
+             stamped once, when the focus is born, and never has to change.
+             Each imported role is also ASSIGNED the "Straza role metarole",
+             whose order-2 construction turns an imported-role assignment
+             into real membership; see objects/roles/role-straza-metarole.xml. -->
+        <objectType>
+            <kind>entitlement</kind>
+            <intent>group</intent>
+            <displayName>Straza role</displayName>
+            <default>true</default>
+            <delineation>
+                <objectClass>ri:GroupObjectClass</objectClass>
+            </delineation>
+            <focus>
+                <type>c:RoleType</type>
+            </focus>
+            <attribute>
+                <ref>icfs:name</ref>          <!-- __NAME__ = SCIM displayName = the role name -->
+                <displayName>Role</displayName>
+                <inbound>
+                    <name>straza-wire-role-name</name>
+                    <!-- The code is midPoint's own role-type convention: BR: for
+                         a Straza business role, which composes application
+                         roles as a midPoint business role does, and AR: for
+                         every other kind, each an entitlement inside one
+                         system. That the role is imported from Straza is
+                         the archetype's label to say. The code goes on the
+                         name only, never on a displayName, because
+                         displayName mappings proved unstable on 4.10.3.
+                         Straza refuses a
+                         rename and fixes the kind at create, so this name
+                         cannot drift. -->
+                    <strength>strong</strength>
+                    <evaluationPhases>
+                        <include>beforeCorrelation</include>
+                    </evaluationPhases>
+                    <expression>
+                        <script>
+                            <code><![CDATA[
+// Naming: BR: for a Straza business role, AR: for every other kind.
+// The kind is read off the same resource object the name comes from.
+if (input == null) { return null }
+def obj = binding.hasVariable('projection') ? projection : (binding.hasVariable('shadow') ? shadow : null)
+def kind = obj != null ? basic.getAttributeValue(obj, 'roleKind') : null
+return (kind == 'business' ? 'BR:' : 'AR:') + input
+                            ]]></code>
+                        </script>
+                    </expression>
+                    <target>
+                        <path>name</path>
+                    </target>
+                </inbound>
+                <inbound>
+                    <name>straza-wire-role-metarole</name>
+                    <!-- every imported role is ASSIGNED the Straza role
+                         metarole (fixed OID ...1c0a), whose order-2
+                         inducement turns holding this role into wire-group
+                         membership. Inbound-mapped assignment on purpose:
+                         it lands in addFocus, LiveSync, and recon flows
+                         alike, while an archetype inducement would skip the
+                         construction on recompute/reconcile. -->
+                    <strength>strong</strength>
+                    <expression>
+                        <assignmentTargetSearch>
+                            <targetType>c:RoleType</targetType>
+                            <filter>
+                                <q:equal>
+                                    <q:path>name</q:path>
+                                    <q:value>Straza role metarole</q:value>
+                                </q:equal>
+                            </filter>
+                        </assignmentTargetSearch>
+                    </expression>
+                    <target>
+                        <path>assignment</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:members</ref>
+                <displayName>Members</displayName>
+                <!-- the ONE writable attribute. No inbound on purpose:
+                     membership materializes per-user through the account
+                     association; mirroring it into focus assignments here
+                     would double-write the same fact. -->
+            </attribute>
+            <attribute>
+                <ref>ri:role</ref>
+                <displayName>Role (raw)</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:roleKind</ref>
+                <displayName>Kind</displayName>
+                <inbound>
+                    <name>straza-wire-role-kind</name>
+                    <strength>strong</strength>
+                    <target>
+                        <path>extension/ext:strazaKind</path>
+                    </target>
+                </inbound>
+                <inbound>
+                    <name>straza-wire-role-archetype</name>
+                    <!-- The kind decides the archetype: business, application
+                         and approver map to straza-<kind>-role, and the
+                         control plane kind straza maps to straza-role. An
+                         inbound assignment on purpose, like the metarole
+                         above: it lands in addFocus, LiveSync and recon
+                         alike. No range: Straza fixes a role's kind at
+                         create, so this value never changes. -->
+                    <strength>strong</strength>
+                    <expression>
+                        <assignmentTargetSearch>
+                            <targetType>c:ArchetypeType</targetType>
+                            <filter>
+                                <q:equal>
+                                    <q:path>name</q:path>
+                                    <expression>
+                                        <script>
+                                            <code>input == 'straza' ? 'straza-role' : 'straza-' + input + '-role'</code>
+                                        </script>
+                                    </expression>
+                                </q:equal>
+                            </filter>
+                        </assignmentTargetSearch>
+                    </expression>
+                    <target>
+                        <path>assignment</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:plane</ref>
+                <displayName>Plane</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:server</ref>
+                <displayName>Owning MCP server</displayName>
+                <!-- scim-profile revision 19: the MCP server that owns a
+                     server-owned application role, absent on every other
+                     role. A certifier reads it here, never from the name. -->
+                <inbound>
+                    <name>straza-wire-role-server</name>
+                    <strength>strong</strength>
+                    <target>
+                        <path>extension/ext:strazaServer</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:administers</ref>
+                <displayName>Administers</displayName>
+                <!-- scim-profile revision 18: the MCP servers whose admin
+                     role this is, directly or through composition. -->
+                <inbound>
+                    <name>straza-wire-role-administers</name>
+                    <strength>strong</strength>
+                    <target>
+                        <path>extension/ext:strazaAdministers</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:description</ref>
+                <displayName>Description</displayName>
+                <inbound>
+                    <name>straza-wire-role-description</name>
+                    <strength>strong</strength>
+                    <target>
+                        <path>description</path>
+                    </target>
+                </inbound>
+            </attribute>
+            <attribute>
+                <ref>ri:apps</ref>
+                <displayName>Apps granted</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:tools</ref>
+                <displayName>Tools granted</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:policies</ref>
+                <displayName>PolicySets</displayName>
+            </attribute>
+            <!-- role to app evidence (ri:grantedApp) is the NATIVE association
+                 type strazaAppGrant (declared at the end of
+                 schemaHandling; reference type
+                 under capabilities/configured/references): correlates
+                 ri:apps values to app icfs:name, so certifiers see which MCP
+                 servers the role grants. -->
+            <correlation>
+                <correlators>
+                    <items>
+                        <name>by-role-name</name>
+                        <item>
+                            <ref>name</ref>
+                        </item>
+                    </items>
+                </correlators>
+            </correlation>
+            <synchronization>
+                <reaction>
+                    <situation>linked</situation>
+                    <actions>
+                        <synchronize/>
+                    </actions>
+                </reaction>
+                <reaction>
+                    <situation>unlinked</situation>
+                    <actions>
+                        <link/>
+                    </actions>
+                </reaction>
+                <reaction>
+                    <situation>unmatched</situation>
+                    <actions>
+                        <addFocus/>
+                    </actions>
+                </reaction>
+                <reaction>
+                    <!-- role deleted in Straza (or gone from this wire:
+                         un-exported control-plane roles simply vanish):
+                         the mirror focus goes too -->
+                    <situation>deleted</situation>
+                    <actions>
+                        <deleteFocus/>
+                    </actions>
+                </reaction>
+            </synchronization>
+        </objectType>
+
+        <!-- ASSOCIATION TYPES (native in midPoint 4.10).
+             The reference types (the "what links to what over which
+             attribute") live under capabilities/configured/references below;
+             these blocks say which object TYPES take part and how the
+             association renders. Local item names stay ri:strazaGroups and
+             ri:grantedApp, so the metarole construction and every stored
+             shadow item keep their names.
+
+             strazaRoleMembership: account -> wire-group, the WRITE direction of
+             membership (objectToSubject over ri:members). No outbound here on
+             purpose: the Straza role metarole's order-2 construction stays
+             the single writer. tolerant=true keeps console-side grants: they
+             are badged as drift and realized away at the next
+             reconciliation, not deleted by every recompute. -->
+
+        <!-- strazaAppGrant: wire-group -> app, the READ/evidence direction
+             (subjectToObject over ri:apps), declared once for the one role
+             object type. Operational note: midPoint materialises
+             associations and foci during IMPORT / LiveSync (background tasks),
+             which replay whatever static bearer this resource holds. The
+             credential here is durable (one scoped admin API token), and the
+             eval seeder mints it automatically. -->
+        <associationType>
+            <name>strazaRoleMembership</name>
+            <subject>
+                <objectType>
+                    <kind>account</kind>
+                    <intent>default</intent>
+                </objectType>
+                <association>
+                    <ref>ri:strazaGroups</ref>
+                    <tolerant>true</tolerant>
+                </association>
+            </subject>
+            <object>
+                <objectType>
+                    <kind>entitlement</kind>
+                    <intent>group</intent>
+                </objectType>
+            </object>
+        </associationType>
+        <associationType>
+            <name>strazaAppGrant</name>
+            <subject>
+                <objectType>
+                    <kind>entitlement</kind>
+                    <intent>group</intent>
+                </objectType>
+                <association>
+                    <ref>ri:grantedApp</ref>
+                </association>
+            </subject>
+            <object>
+                <objectType>
+                    <kind>entitlement</kind>
+                    <intent>app</intent>
+                </objectType>
+            </object>
+        </associationType>
+
+    </schemaHandling>
+
+    <!-- Simulated REFERENCE TYPES (4.10 native associations): the
+         connector offers no native references (ri:members and ri:apps are
+         plain multi-valued strings on the wire), so midPoint simulates the
+         links here. Element names follow the 4.10 OpenDJ sample
+         (provisioning-impl test resources, resource-opendj-modern.xml).
+         explicitReferentialIntegrity stays TRUE (the default, explicit for
+         legibility): Straza keeps a deactivated user in the wire-group's
+         members render (DELETE deactivates, never purges the assignment
+         rows), so midPoint itself must fix the object side when a subject
+         goes away. -->
+    <capabilities>
+        <configured xmlns:cap="http://midpoint.evolveum.com/xml/ns/public/resource/capabilities-3">
+            <cap:references>
+                <!-- membership: account -> wire-group, written on the group (ri:members) -->
+                <cap:type>
+                    <cap:name>ri:strazaRoleMembership</cap:name>
+                    <cap:subject>
+                        <cap:delineation>
+                            <cap:objectClass>ri:AccountObjectClass</cap:objectClass>
+                        </cap:delineation>
+                        <cap:primaryBindingAttributeRef>icfs:uid</cap:primaryBindingAttributeRef>
+                        <cap:localItemName>ri:strazaGroups</cap:localItemName>
+                    </cap:subject>
+                    <cap:object>
+                        <cap:delineation>
+                            <cap:objectClass>ri:GroupObjectClass</cap:objectClass>
+                        </cap:delineation>
+                        <cap:primaryBindingAttributeRef>ri:members</cap:primaryBindingAttributeRef>
+                    </cap:object>
+                    <cap:direction>objectToSubject</cap:direction>
+                    <cap:explicitReferentialIntegrity>true</cap:explicitReferentialIntegrity>
+                </cap:type>
+                <!-- evidence: wire-group -> app, read from the group (ri:apps) -->
+                <cap:type>
+                    <cap:name>ri:strazaAppGrant</cap:name>
+                    <cap:subject>
+                        <cap:delineation>
+                            <cap:objectClass>ri:GroupObjectClass</cap:objectClass>
+                        </cap:delineation>
+                        <cap:primaryBindingAttributeRef>ri:apps</cap:primaryBindingAttributeRef>
+                        <cap:localItemName>ri:grantedApp</cap:localItemName>
+                    </cap:subject>
+                    <cap:object>
+                        <cap:delineation>
+                            <cap:objectClass>ri:CustomappObjectClass</cap:objectClass>
+                        </cap:delineation>
+                        <cap:primaryBindingAttributeRef>icfs:name</cap:primaryBindingAttributeRef>
+                    </cap:object>
+                    <cap:direction>subjectToObject</cap:direction>
+                </cap:type>
+            </cap:references>
+        </configured>
+    </capabilities>
+</resource>

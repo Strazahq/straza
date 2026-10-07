@@ -1,0 +1,16 @@
+{
+  "specversion": "1.0",
+  "id": "0197fa3e-bb02-7d33-8ac5-2c3d4e5f6a99",
+  "type": "straza.audit.admin",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-08-01T09:12:03Z",
+  "data": {
+    "action": "user.lock",
+    "target": "0197fa3d-3333-7abc-9def-000000000003",
+    "reason": "credential incident IR-2214",
+    "origin": "admin",
+    "actor": "kim",
+    "actorId": "0197fa3d-1111-7abc-9def-000000000001",
+    "actorVia": "login"
+  }
+}

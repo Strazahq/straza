@@ -1,0 +1,21 @@
+# Conversation capture (SPEC.md §6, revision 2): dev sessions are recorded
+# verbatim; the compliance question is "what did the agent actually do and
+# why", and a sanitized transcript can't prove a leak.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: dev-capture
+  description: Record dev conversations into the audit pipeline
+spec:
+  match:
+    roles: [dev]
+  capture:
+    conversations: true
+    mode: verbatim
+  rules:
+    - id: keep-guardrails
+      effect: deny
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["rm -rf *"]
+      reason: "Straza: destructive command blocked for role dev"

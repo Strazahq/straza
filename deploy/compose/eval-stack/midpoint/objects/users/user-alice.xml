@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  alice: the midPoint-born ADMIN. She holds BR:Straza-admin-access (seeded by
+  seed.sh with the resolved AR:straza-admin oid), so midPoint materializes
+  her Straza account AND her straza-admin membership: her admin power is an
+  IdM assignment an access review can certify, not a bootstrap knob's side
+  effect. The transient seed-bootstrap actor mints the SCIM token at boot and
+  is demoted + locked once her grant lands; break-glass remains the standing
+  local exception.
+-->
+
+<!--
+  Her KEYCLOAK account stays the pinned realm import (id 4cb55fc4-..., the
+  ephemeral-KC stability shim): midPoint correlates and links
+  it (kc-username-correlation on the Keycloak resource) instead of creating
+  a fresh account whose new subject would break the strazad external_id
+  binding. No password here for the same reason: alice/alice lives in the
+  realm import. End user (built-in) gives her enough authorization to act
+  when impersonated; org:manager of dev-ops makes her a manager in the team
+  demo. She also carries BR:Straza-approver-access: approve pools name
+  sec-approvers only, so her decide authority is this IdM grant, certifiable
+  and revocable independently of her admin role.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:org="http://midpoint.evolveum.com/xml/ns/public/common/org-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c4a">
+    <name>alice</name>
+    <fullName>Alice Admin</fullName>
+    <givenName>Alice</givenName>
+    <familyName>Admin</familyName>
+    <emailAddress>alice@example.com</emailAddress>
+    <organizationalUnit>Platform</organizationalUnit>
+    <title>Platform Administrator</title>
+    <!-- Approver (built-in, for the manager-approval demo): completeWorkItem authority, so alice (org:manager of dev-ops) can decide the work items the metarole routes to her, in the GUI or through the MCP server decide_work_item -->
+    <assignment>
+        <targetRef oid="00000000-0000-0000-0000-00000000000a" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- End user (midPoint built-in): authorization to act as herself on the on-behalf lane -->
+        <targetRef oid="00000000-0000-0000-0000-000000000008" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- Org team visibility (objects/roles/role-org-team-visibility.xml):
+             as org:manager of dev-ops she reads everyone beneath it, so
+             list_my_team returns her reports under impersonation -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c09" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- manager of the dev-ops demo team (objects/orgs/team-dev-ops.xml) -->
+        <targetRef oid="d23c0d53-1410-4b63-bf9a-b18142bb3336" type="OrgType" relation="org:manager"/>
+    </assignment>
+    <assignment>
+        <!-- persona archetype, assigned directly (employee) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20" type="ArchetypeType"/>
+    </assignment>
+    <assignment>
+        <!-- BR:Straza-admin-access: Straza account + AR:straza-admin
+             membership + Keycloak login (correlates to her pinned account).
+             THE admin grant, made by this IdM. -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0c" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- BR:Straza-approver-access: the DECIDER package,
+             the same grant ivan holds (AR:sec-approvers membership + the
+             straza-enroll-* device roles). The seeded approve pools
+             name sec-approvers ONLY (straza-admin dropped: admin office is
+             not decide authority), so alice decides demo approvals through
+             THIS IdM grant, not her admin role. -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0d" type="RoleType"/>
+    </assignment>
+</user>

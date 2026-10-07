@@ -1,0 +1,14 @@
+# INVALID: capture.mode must be verbatim or redact ("sanitize" is not a
+# mode), and mode without `conversations: true` is inert configuration.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: bad-capture
+spec:
+  capture:
+    conversations: true
+    mode: sanitize
+  rules:
+    - id: r1
+      effect: deny
+      tools: [shell.exec]

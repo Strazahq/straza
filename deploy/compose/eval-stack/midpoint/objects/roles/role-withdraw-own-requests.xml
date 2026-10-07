@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Withdraw own requests: lets a person cancel an approval case they requested
+  themselves, which is the Withdraw button of the midpoint MCP server's My
+  requests view. Stock End user does not grant it. The employee and ai-agent
+  archetypes induce this role, the same population "MCP proxy" may act for.
+  The REST half, rest-3#cancelCase, sits on the server's technical account in
+  "MCP service" (...1c08); midPoint needs both.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c03">
+    <name>Withdraw own requests</name>
+    <description>Cancel an approval case you requested yourself. Induced by the employee and ai-agent archetypes.</description>
+    <authorization>
+        <name>cancel-own-requests</name>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-model-3#cancelCase</action>
+        <object>
+            <type>CaseType</type>
+            <requester>
+                <special>self</special>
+            </requester>
+        </object>
+    </authorization>
+</role>

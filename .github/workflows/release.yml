@@ -1,0 +1,114 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the GitHub release
+  packages: write # push ghcr.io images
+  id-token: write # keyless cosign (GitHub OIDC -> Fulcio)
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      # Every archive and the image copy the console's committed notices, so
+      # they must match a fresh build from the tag's lock file and bundle
+      # before any archive is built.
+      - name: console notices match a fresh build
+        run: |
+          go run ./tools/uibuild
+          git status --porcelain -- internal/server/console/dist
+          test -z "$(git status --porcelain -- internal/server/console/dist)"
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Every archive carries the license files and the notices at its root,
+      # and the notices equal a fresh run over the tag's module graph.
+      - name: archives carry the notices
+        run: |
+          set -eu
+          for a in dist/*.tar.gz dist/*.zip; do
+            [ -f "$a" ] || continue
+            case "$a" in *.zip) list=$(unzip -Z1 "$a") ;; *) list=$(tar -tzf "$a") ;; esac
+            for f in THIRD_PARTY_NOTICES.txt NOTICE LICENSE LICENSE-APACHE; do
+              echo "$list" | grep -qxE "(\./)?$f" || { echo "$a lacks $f at its root" >&2; exit 1; }
+            done
+          done
+          tar -xzf dist/*_linux_amd64.tar.gz -C "$RUNNER_TEMP" THIRD_PARTY_NOTICES.txt
+          go run ./tools/notices -release -version "${GITHUB_REF_NAME#v}" -verify "$RUNNER_TEMP/THIRD_PARTY_NOTICES.txt"
+
+  # The image copies the console's notices too, so it is built only after the
+  # goreleaser job has checked them, and never when that job fails.
+  image:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      # The image is pushed by digest with no tag, so nobody can pull it by
+      # name until the notices check below passes and it is signed.
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: push
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+          outputs: type=image,name=ghcr.io/strazahq/straza,push-by-digest=true,name-canonical=true,push=true
+      # The pushed image carries the license files, the notices and the CA
+      # bundle's terms under /licenses/, or it is never signed.
+      - name: image carries the notices
+        run: |
+          set -eu
+          c=$(docker create --platform linux/amd64 ghcr.io/strazahq/straza@${{ steps.push.outputs.digest }})
+          docker cp "$c:/licenses/" - | tar -t > "$RUNNER_TEMP/licenses.txt"
+          docker rm "$c"
+          for f in THIRD_PARTY_NOTICES.txt NOTICE LICENSE LICENSE-APACHE ca-certificates.copyright; do
+            grep -qx "licenses/$f" "$RUNNER_TEMP/licenses.txt" || { echo "the image lacks /licenses/$f" >&2; exit 1; }
+          done
+      # Sign by digest (immutable), keyless: the signature and cert land in
+      # the registry next to the image; verify with
+      #   cosign verify ghcr.io/strazahq/straza:<version> \
+      #     --certificate-identity-regexp '^https://github\.com/strazahq/straza/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - run: cosign sign --yes ghcr.io/strazahq/straza@${{ steps.push.outputs.digest }}
+      # Only the checked and signed image gets the version and latest tags.
+      # With one index as its source, imagetools copies it unchanged, so both
+      # tags name the signed digest, which the last line proves.
+      - name: tag the signed image
+        run: |
+          set -eu
+          docker buildx imagetools create \
+            -t ghcr.io/strazahq/straza:${{ steps.meta.outputs.version }} \
+            -t ghcr.io/strazahq/straza:latest \
+            ghcr.io/strazahq/straza@${{ steps.push.outputs.digest }}
+          d=$(docker buildx imagetools inspect ghcr.io/strazahq/straza:${{ steps.meta.outputs.version }} --format '{{json .Manifest.Digest}}' | tr -d '"')
+          test "$d" = "${{ steps.push.outputs.digest }}" || { echo "the version tag names $d, not the signed ${{ steps.push.outputs.digest }}. Rerun the image job." >&2; exit 1; }

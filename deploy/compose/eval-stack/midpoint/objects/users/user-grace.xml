@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  grace: sample employee (Data and AI), midPoint-only population: no joiner,
+  nothing provisioned.
+  Assign her the joiner in the GUI to walk a human through the lane.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c44">
+    <name>grace</name>
+    <fullName>Grace Kim</fullName>
+    <givenName>Grace</givenName>
+    <familyName>Kim</familyName>
+    <emailAddress>grace.kim@example.com</emailAddress>
+    <personalNumber>1005</personalNumber>
+    <organizationalUnit>Data &amp; AI</organizationalUnit>
+    <title>ML Engineer</title>
+    <credentials>
+        <password>
+            <value><t:clearValue>Ev4l-St4ck!26</t:clearValue></value>
+        </password>
+    </credentials>
+    <assignment>
+        <!-- persona archetype, assigned directly (employee) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20" type="ArchetypeType"/>
+    </assignment>
+</user>

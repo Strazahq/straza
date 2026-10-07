@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BR:Straza-<role>-access: the access packages of the demo, one per Straza
+  business role (developer, operator, analyst), rendered by seed.sh from this
+  file with the role name, the package OID, the requestable flag, the
+  reach sentence and the OID of the imported focus BR:<role>. Holding a
+  package means holding the imported business role, whose membership IS the
+  Straza assignment, plus a Keycloak login for human holders. AI agents ride
+  the key lane and grow no login. The Straza account rides
+  AR:Straza:Account, so unassigning a package removes the access and keeps
+  the account. Deactivating the user in midPoint cuts everything.
+
+  Why the name ends in .xml.tmpl: the seeder's roles glob imports
+  objects/roles/*.xml verbatim, long before the role recon materializes
+  BR:<role> with a generated OID, so a file named .xml here would import
+  with its placeholders unresolved and the seed would die.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+      oid="__PKG_OID__">
+    <name>BR:Straza-__ROLE__-access</name>
+    <assignment>
+        <!-- br-role archetype: the access packages wear their own family -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c27" type="ArchetypeType"/>
+    </assignment>
+    <assignment>
+        <!-- Metarole: approval by manager (role-approval-by-manager-metarole.xml):
+             a SELF-SERVICE request for this package opens a case for the
+             requestee's manager(s); grants by the identity manager (the seed
+             included) stay direct. Inert on the non-requestable operator
+             package: End user cannot self-request it. -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c52" type="RoleType"/>
+    </assignment>
+    <description>Access package for the __ROLE__ role: __REACH__ Membership of
+        the imported role __ROLE__ is the Straza assignment. Human holders also
+        get a Keycloak login through AR:Keycloak:Account.</description>
+    <!-- requestable: the self-service catalog flag. list_requestable_roles
+         surfaces only requestable roles and request_role refuses the rest
+         (requests.requireRequestable, default on). -->
+    <requestable>__REQUESTABLE__</requestable>
+    <inducement>
+        <!-- the imported business role: holding it writes wire-group membership -->
+        <targetRef oid="__ROLE_OID__" type="RoleType"/>
+    </inducement>
+    __KC_INDUCEMENT_HUMAN__
+</role>

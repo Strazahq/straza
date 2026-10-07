@@ -1,0 +1,389 @@
+# The confirm mode, the rule that inverts the decider pool. A set that
+# configures a pool under mode confirm is refused at apply, because the
+# requester is a fact on the record and not a knob. The held call opens a
+# record whose mode reads confirm, another person is refused on it and so is
+# the bootstrap admin, and the requester's own login token is refused too,
+# because only her enrolled phone or browser can sign her own confirmation.
+# Enrolling a browser takes the straza-enroll-browser role, so her first mint
+# is refused, the IdM gives her the role, and her browser enrolls with a key
+# the runner makes for this run. She confirms on that device, signed, and her
+# identical retry runs once.
+#
+# The decide routes take a person's own token, so the deciding steps carry
+# "as" and the runner signs that person in through the built-in issuer's
+# device flow.
+#
+# What the sources leave open here is the wording. The pages publish the
+# sentence an approve gate refuses with and say nothing about a confirm gate,
+# so the deny steps assert what the spec states, a deny that carries a
+# reference and tells the model to retry, and not a sentence.
+#
+# Shapes the binary forced on the corpus, each with how it was verified: the
+# approvals list is an object with an approvals array, the activate body is
+# {status: active|draft}, a policy delete answers 204 and role deletes answer
+# 200, all recorded on j0-golden-path [live]. A PolicySet that
+# fails validation answers 400 at apply and is not stored, which is how the
+# ticket knobs are refused in g5-ticket-lifecycle [live]. The
+# pending sentence and the "approved by NAME" wording of an allowed retry are
+# the transcripts of the hold how-to guide [doc]. The steps marked "suspect"
+# below assert a status code or a wording the published sources leave open;
+# each is listed in the lane report.
+id: g4-confirm-mode
+group: G4
+title: A confirm rule belongs to the requester alone, her login token cannot sign it, her enrolled browser confirms it, and a pool under confirm is refused at apply
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (fail closed with an actionable reason);
+  spec/policyset/SPEC.md §2 item 8a and revision 11 (mode confirm is the
+  requester-decides gate; it shares the approve knob block for classes,
+  binding, notify and timeouts; approve.roles and approve.selfApproval
+  under mode confirm are rejected at parse; only the requester may decide
+  and any other identity, root included, is refused; non-human identities
+  never decide; an unattended confirm expires into deny; PEP behavior is
+  otherwise the approve flow, so the hook lane answers deny with a
+  reference and honors the single-use retry exemption), revision 13
+  (deciders is rejected under mode confirm too);
+  spec/events/SPEC.md §2.2 (one straza.audit.approval record when the
+  request opens and one when it resolves, the resolution carrying the
+  deciding user) and revision 38 (one more when a call uses a hold's
+  approval);
+  pkg/api/openapi.yaml POST /v1/admin/approvals/{id}/approve (security
+  userBearer, a person's session token or ID token; 200 and 403), the
+  Approval schema (mode is approve or confirm, and confirm means the
+  requester alone with empty pool fields; state, lane, rule,
+  decidedByName), PUT /v1/admin/policies (an invalid document answers 400);
+  website/content/concepts/approvals-model.md section Who may answer (a
+  confirm rule inverts the pool, only the requester may confirm because
+  the record proves the person behind the session was present, and nobody
+  else can supply that);
+  website/content/guides/write-policy/hold-for-a-human.md (the pending
+  sentence and the allowed retry's reason "Straza: approved by NAME").
+  pkg/api/openapi.yaml POST /v1/approvals/self/enroll-token (a person mints
+  an enroll token for their own browser or phone, 403 without the channel's
+  enrollment role), POST /v1/approver/enroll (201 with the approver
+  credential), GET /v1/approver/pending (the decidable rows, each with a
+  single-use challenge) and POST /v1/approver/decide (the signed decision,
+  200 with the final state).
+  suspect: the sentence a confirm gate refuses with and the reason of the
+  allowed retry, neither published for this mode, so the deny steps assert
+  the retry instruction alone and the retry's reason is asserted as the
+  binary worded it; the success
+  status codes of the admin routes and the
+  approvals.0 path into a one-record list; that decidedByName is the
+  deciding username, which no page states; that the parse refusal of a
+  pool under confirm lands at apply rather than at activation, which the
+  spec states as rejected at parse and g5-ticket-lifecycle shows for the
+  ticket knobs; the 403 for a second person and for the bootstrap admin,
+  which revision 11 states as a sentence while the openapi lists only the
+  code.
+harnesses: [claude-code]
+identities:
+  quinn: {kind: human, password: "Walk-2026!"}
+  rae: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: the requester in the matched role and a second person who is not.
+  - name: the admin creates the application role the policy will match
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-confirm, kind: application, description: "Confirm mode scenario, the matched role"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM provisions quinn, who will make the held call
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-quinn
+        userName: quinn
+        displayName: Quinn Requester
+        active: true
+    want: {status: 201}
+    save: {quinnId: id}
+  - name: the admin sets quinn's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${quinnId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM provisions rae, a second person who will try to decide
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-rae
+        userName: rae
+        displayName: Rae Bystander
+        active: true
+    want: {status: 201}
+    save: {raeId: id}
+  - name: the admin sets rae's password, since she signs in to try the decide route
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${raeId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM finds the matched role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g4-confirm"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: quinn becomes a member of the matched role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${quinnId}"}]
+    want: {status: 200}
+
+  # 1. A pool under confirm is an author mistake, refused at apply.
+  - name: a confirm rule that names approver roles is refused at apply, because the requester is the decider
+    # suspect: the spec says rejected at parse, and the apply route is where a document is parsed
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-confirm-bad-roles
+          spec:
+            rules:
+              - id: r1
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: confirm
+                approve:
+                  roles: [straza-admin]
+                reason: "G4-INVALID: a confirm rule cannot name a decider pool"
+    want: {status: 400}
+  - name: a confirm rule that sets selfApproval is refused at apply for the same reason
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-confirm-bad-self
+          spec:
+            rules:
+              - id: r1
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: confirm
+                approve:
+                  selfApproval: true
+                reason: "G4-INVALID: selfApproval is a fact of the confirm mode, not a knob"
+    want: {status: 400}
+
+  # 2. The confirm rule that is well written holds the call for its requester.
+  - name: the admin applies a PolicySet whose deploy rule the requester must confirm
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-confirm
+            description: Confirm mode scenario for role g4-confirm
+          spec:
+            match:
+              roles: [g4-confirm]
+            rules:
+              - id: confirm-deploy
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: confirm
+                approve:
+                  timeoutSeconds: 900
+                  retryTTLSeconds: 300
+                reason: "G4-CONFIRM: deploy runs once the person behind the session confirms it"
+    want: {status: 201}
+  - name: the admin activates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-confirm/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: quinn enrolls
+    enroll: {as: quinn}
+  - name: quinn starts a session
+    hook:
+      as: quinn
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: quinn's held command is denied and told to retry once the gate is answered
+    # suspect: no page publishes the sentence a confirm gate refuses with, so
+    # this step asserts only what the spec states, a deny that tells the model
+    # to retry. The binary answers with a confirmation wording of its own
+    # rather than the approve flow's pending sentence [live].
+    hook:
+      as: quinn
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "retry"}
+  - name: the one pending record is on the hook lane and its mode reads confirm
+    # suspect: approvals.0 is the one record of a one-record list
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.lane: hook, approvals.0.rule: confirm-deploy, approvals.0.mode: confirm, approvals.1: null}
+    save: {confirmHold: approvals.0.id}
+  - name: the request phase of the confirm gate is on the chain as one approval record
+    audit: {subject: quinn, kind: straza.audit.approval, count: 1}
+
+  # 3. Nobody but the requester may confirm, the bootstrap admin included.
+  - name: rae deciding quinn's record is refused, because a confirm record has no pool
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${confirmHold}/approve
+      as: rae
+    want: {status: 403}
+  - name: the bootstrap admin is refused on the same record, because nobody can supply the requester's presence
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${confirmHold}/approve
+    want: {status: 403}
+  - name: the record is still pending after both refused decides
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${confirmHold}
+    want:
+      status: 200
+      body: {approval.state: pending}
+
+  # 4. The requester's own login token cannot confirm, only a device that signs can.
+  - name: quinn's own login token is refused on her own record, and the answer says where to confirm it
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${confirmHold}/approve
+      as: quinn
+      body: {reason: "G4-CONFIRM: I am here and I meant it"}
+    want: {status: 403, bodyContains: "your own request"}
+  - name: the record is still pending after quinn's refused decide
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${confirmHold}
+    want:
+      status: 200
+      body: {approval.state: pending}
+
+  # 5. A browser that signs is the way, and enrolling one takes the enrollment role.
+  - name: quinn cannot mint an enroll token for her browser, because she holds no enrollment role yet
+    admin:
+      method: POST
+      path: /v1/approvals/self/enroll-token
+      as: quinn
+      body: {channel: browser}
+    want: {status: 403, bodyContains: "straza-enroll-browser"}
+  - name: the IdM finds the browser enrollment role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "straza-enroll-browser"'
+    want: {status: 200}
+    save: {enrollGid: Resources.0.id}
+  - name: quinn becomes a member of the browser enrollment role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${enrollGid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${quinnId}"}]
+    want: {status: 200}
+  - name: quinn mints an enroll token for her own browser
+    admin:
+      method: POST
+      path: /v1/approvals/self/enroll-token
+      as: quinn
+      body: {channel: browser}
+    want: {status: 200}
+    save: {enrollToken: enroll_token}
+  - name: quinn's browser enrolls with a key of its own
+    approver: {as: quinn, action: enroll, token: "${enrollToken}"}
+    want: {status: 201}
+
+  # 6. The requester confirms on the device that signs, and her retry runs once.
+  - name: quinn confirms her own request on her enrolled browser, signed, in her own words
+    approver:
+      as: quinn
+      action: decide
+      request: ${confirmHold}
+      verdict: approve
+      reason: "G4-CONFIRM: I am here and I meant it"
+    want:
+      status: 200
+      body: {state: approved}
+  - name: the record says who confirmed it, from which surface and in which words
+    # suspect: decidedByName is assumed to be the deciding username
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${confirmHold}
+    want:
+      status: 200
+      body:
+        approval.state: approved
+        approval.decidedByName: quinn
+        approval.channel: browser
+        approval.decidedReason: "G4-CONFIRM: I am here and I meant it"
+  - name: quinn's identical retry is allowed by the single-use exemption
+    hook:
+      as: quinn
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: allow}
+  - name: the allowed retry is on the chain once and its reason names quinn
+    # suspect: no page publishes the reason of a retry allowed under a confirm
+    # gate. The binary answers "Straza: confirmed by quinn" with the
+    # reference [live].
+    audit: {subject: quinn, kind: tool.pre, decision: allow, reasonContains: "confirmed by quinn", count: 1}
+  - name: the resolution and the retry's use joined the request, three approval records for one hold
+    audit: {subject: quinn, kind: straza.audit.approval, count: 3}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-confirm/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft PolicySet is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g4-confirm
+    want: {status: 204}
+  - name: the admin deletes the matched role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates rae
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${raeId}
+    want: {status: 204}
+  - name: the IdM deactivates quinn
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${quinnId}
+    want: {status: 204}

@@ -1,0 +1,27 @@
+{
+  "specversion": "1.0",
+  "id": "0197fa3e-9c1b-7c22-a9d4-1b2c3d4e5f61",
+  "type": "straza.audit.mcp",
+  "source": "strazad",
+  "time": "2026-09-04T14:41:02.118Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "joe-java-developer-agent",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "mcp.call",
+    "app": "scout-tools",
+    "toolName": "echo",
+    "arguments": "{\"message\":\"hello through the gateway\"}",
+    "effect": "allow",
+    "ruleId": "",
+    "setName": "",
+    "reason": "allowed by role access. No policy rule gates this tool.",
+    "snapshot": "sha256:44f0be1c",
+    "granted": true,
+    "default": true,
+    "bindingId": "0197fa3d-2222-7abc-9def-000000000002",
+    "role": "scout-role",
+    "credentialId": "0197fa3d-3333-7abc-9def-000000000003"
+  }
+}

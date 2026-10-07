@@ -1,0 +1,19 @@
+{
+  "specversion": "1.0",
+  "id": "0198abce-5511-7c22-a9d4-1b2c3d4e5fb1",
+  "type": "straza.audit.sentinel",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-07-17T09:12:30Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "detector": "denyThenVariant",
+    "severity": "critical",
+    "reason": "command denied by protect-prod-config was re-attempted 11s later wrapped in base64 through python3 -c",
+    "evidence": [
+      "0198abcd-2222-7abc-9def-000000000042",
+      "0198abcd-2222-7abc-9def-000000000043"
+    ],
+    "window": "60s"
+  }
+}

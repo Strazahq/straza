@@ -1,0 +1,338 @@
+# The fingerprint a ticket grant binds on the gateway. Under the default
+# binding the grant covers the exact canonicalized call, so the same numbers
+# sent again with the keys in the other order, the numbers spelled 2.0 and
+# 3.0, and a different justification consume it, while a different argument
+# opens a fresh ticket. Under binding: tool the grant covers the tool
+# identity alone, so a call with other arguments consumes it. Every raise,
+# decision and consume is on the chain.
+#
+# Shapes the binary forced on the corpus, each with how it was verified. The
+# approvals list is an object with an approvals array and a single record
+# answers under an approval key (reference/api.md, Approvals answers table).
+# The bootstrap admin's username is admin (reference/glossary.md). A first
+# PUT of a PolicySet answers 201, the activate body is {status: active} and
+# the app manifest is sent as yaml [live, recorded in j0]. The
+# gateway injects a required _straza_justification into a gated tool's
+# schema and the spec drops it from the fingerprint at the top level
+# (spec/policyset/SPEC.md Fingerprint coverage), so the consuming call
+# carries a different justification on purpose: that difference reaches
+# the wire whatever the runner does to key order and number spelling. The
+# gateway refuses a ticket raise with the same sentence the tickets guide
+# quotes for the hook lane, so the raise asserts "approval ticket" [live].
+# The consuming call's straza.audit.mcp allow record carries
+# the rule's own reason and no consume wording, the way events revision 31
+# records an approved hold, while the hook lane's consuming record says
+# consumed [live], so the consume is proved by the
+# approval record's consumed phase and its consumedAt, and the allow
+# record is asserted with the rule's reason. The row for
+# arguments too ambiguous to canonicalize, duplicate keys, is left out,
+# because the mcp step marshals its args as a JSON object and cannot send
+# a duplicate key. The steps marked "suspect" name a value the published
+# sources leave open; each is listed in the lane report.
+id: g5-ticket-binding
+group: G5
+title: A ticket grant binds the exact call by default and the tool identity under binding tool
+provenance: >-
+  doc spec/policyset/SPEC.md §2 item 8 Classes (revision 6: a ticket never
+  blocks, the grant is single-use, bind fingerprint binds exactly this
+  call's EventKey) and Fingerprint coverage (revision 7: call folds the
+  canonicalized arguments into the key, sorted keys, normalized numbers,
+  the injected _straza_justification dropped at the top level, so key
+  order and formatting noise never re-prompt a human while any real
+  argument difference does; tool covers App plus ToolName only; binding
+  applies to ticket grants), revision 15 (approve.roles may name
+  straza-admin);
+  spec/policyset/examples/valid-ticket.yaml and valid-approve.yaml (the
+  binding tool rule shape);
+  spec/events/SPEC.md revision 11 and §2.2 (request, resolution and
+  consumed phases), revision 31 (a call a rule allowed and a gate refused
+  is an effect deny record with the allowing rule and the refusal
+  sentence as its reason);
+  website/content/guides/write-policy/tickets.md (the grant binds the
+  exact call by default, a changed argument after approval is a new
+  request);
+  website/content/concepts/approvals-model.md "What an approval covers"
+  (the fingerprint covers the canonicalized arguments by default, a rule
+  can loosen it to the tool identity) and "Tickets for decisions that take
+  a day" (tickets never block, the first call is denied with a ticket
+  reference);
+  spec/app-manifest/SPEC.md §1 (tools are served as name__toolName);
+  pkg/api/openapi.yaml Approval (class, lane, consumedAt and consumedBy);
+  website/content/reference/api.md sections Approvals, Apps, PolicySets.
+  suspect: the ticket sentence is published for the hook lane only, the
+  gateway is said to deny with a ticket reference; the reason on the
+  consuming allow record is not published for either lane, and the two
+  lanes differ on the binary; the
+  runner may sort keys and print 2.0 as 2 before the wire, so the noise
+  that certainly reaches the gateway is the justification; the upstream
+  tool names and results are assumed; the success status codes of the
+  admin routes are assumed.
+harnesses: [claude-code]
+identities:
+  leo: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: one human with a role, the hermetic upstream as an app that owns
+  # the role, and a PolicySet with a call-bound ticket on get-sum and a
+  # tool-bound ticket on echo.
+  - name: the IdM provisions leo over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g5-leo
+        userName: leo
+        displayName: Leo Binding
+        active: true
+    want: {status: 201}
+    save: {leoId: id}
+  - name: the admin sets leo's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${leoId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the admin registers the hermetic upstream as an app
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g5-bind-tools
+            namespace: dev.e2e
+            description: The hermetic upstream of the ticket binding scenario
+          server:
+            name: dev.e2e/g5-bind-tools
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+            exposure:
+              tools: ["*"]
+    want: {status: 201}
+    save: {appId: id}
+  - name: the admin creates the role the app owns, over every tool of the app, which the policy matches
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g5-bind-tools-callers, server: g5-bind-tools, tools: ["*"], description: "Ticket binding scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g5-bind-tools-callers"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: leo becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${leoId}"}]
+    want: {status: 200}
+  - name: the admin applies a PolicySet with a call-bound ticket on get-sum and a tool-bound ticket on echo
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g5-bind
+            description: Ticket binding scenario for role g5-bind-tools-callers
+          spec:
+            match:
+              roles: [g5-bind-tools-callers]
+            rules:
+              - id: sum-ticket-call
+                tools: [mcp.call]
+                apps: [g5-bind-tools]
+                toolNames:
+                  allow: ["get-sum"]
+                effect: allow
+                mode: approve
+                approve:
+                  class: ticket
+                  roles: [straza-admin]
+                reason: "G5-BIND: get-sum needs a ticket bound to the exact call"
+              - id: echo-ticket-tool
+                tools: [mcp.call]
+                apps: [g5-bind-tools]
+                toolNames:
+                  allow: ["echo"]
+                effect: allow
+                mode: approve
+                approve:
+                  class: ticket
+                  roles: [straza-admin]
+                  binding: tool
+                reason: "G5-BIND: echo needs a ticket bound to the tool identity"
+    want: {status: 201}
+  - name: the admin activates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g5-bind/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: leo enrolls
+    enroll: {as: leo}
+  - name: leo starts a session
+    hook:
+      as: leo
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # 1. The call-bound ticket is raised through the gateway and approved.
+  - name: the first get-sum call is refused at once with the ticket sentence, because a ticket never blocks
+    # suspect: the ticket sentence is published for the hook lane; the gateway is said to deny with a ticket reference
+    mcp:
+      as: leo
+      tool: g5-bind-tools__get-sum
+      args: {a: 2, b: 3, _straza_justification: "the release needs the sum of two and three"}
+    want: {refused: true, reasonContains: "approval ticket"}
+  - name: the raise is on the chain once as a deny record with the ticket sentence
+    audit: {subject: leo, kind: straza.audit.mcp, decision: deny, reasonContains: "approval ticket", count: 1}
+  - name: the admin reads the pending approvals and keeps the id of the ticket
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want: {status: 200, body: {approvals.0.rule: sum-ticket-call, "approvals.1": null}}
+    save: {sumTicket: approvals.0.id}
+  - name: the record is a pending ticket on the gateway lane
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${sumTicket}
+    want: {status: 200, body: {approval.class: ticket, approval.lane: gateway, approval.state: pending, approval.consumedBy: null}}
+  - name: the request phase is on the chain, one approval record
+    audit: {subject: leo, kind: straza.audit.approval, count: 1}
+  - name: the admin approves the ticket
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${sumTicket}/approve
+      body: {reason: "G5: the sum of two and three may run once"}
+    want: {status: 200, body: {approval.state: approved}}
+  - name: the resolution phase is on the chain, two approval records
+    audit: {subject: leo, kind: straza.audit.approval, count: 2}
+
+  # 2. The same call with wire noise consumes the grant.
+  - name: the same numbers with the keys in the other order, spelled 3.0 and 2.0, and another justification consume the grant and the sum comes back
+    # suspect: the runner may sort keys and print 2.0 as 2 before the wire; the justification difference certainly reaches the gateway
+    mcp:
+      as: leo
+      tool: g5-bind-tools__get-sum
+      args: {b: 3.0, a: 2.0, _straza_justification: "the same sum asked again in other words"}
+    want: {result: "5"}
+  - name: the consume is on the chain once as an allow record with the rule's own reason, the way an approved hold is recorded
+    # suspect: no published sentence gives the reason of a consuming allow record on the gateway; revision 31 gives the rule's reason for an approved hold
+    audit: {subject: leo, kind: straza.audit.mcp, decision: allow, reasonContains: "get-sum needs a ticket bound to the exact call", count: 1}
+  - name: the record shows the grant was cashed
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${sumTicket}
+    want: {status: 200, body: {approval.state: approved}, bodyContains: '"consumedAt"'}
+  - name: the consumed phase is on the chain, three approval records
+    audit: {subject: leo, kind: straza.audit.approval, count: 3}
+
+  # 3. A different argument does not consume anything and opens a fresh ticket.
+  - name: a call with a different second number is refused with a fresh ticket, because the grant bound the exact call
+    mcp:
+      as: leo
+      tool: g5-bind-tools__get-sum
+      args: {a: 2, b: 4, _straza_justification: "a different sum"}
+    want: {refused: true, reasonContains: "approval ticket"}
+  - name: the second raise is on the chain, two deny records with the ticket sentence
+    audit: {subject: leo, kind: straza.audit.mcp, decision: deny, reasonContains: "approval ticket", count: 2}
+  - name: the fresh ticket is the only pending record and it is on the get-sum rule
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want: {status: 200, body: {approvals.0.rule: sum-ticket-call, approvals.0.state: pending, "approvals.1": null}}
+    save: {sumTicketTwo: approvals.0.id}
+  - name: the fresh request phase is on the chain, four approval records
+    audit: {subject: leo, kind: straza.audit.approval, count: 4}
+  - name: the admin denies the fresh get-sum ticket so the pending list holds only the echo ticket raised next
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${sumTicketTwo}/deny
+      body: {reason: "G5: only the first sum was wanted"}
+    want: {status: 200, body: {approval.state: denied}}
+  - name: the denied resolution is on the chain, five approval records
+    audit: {subject: leo, kind: straza.audit.approval, count: 5}
+
+  # 4. Under binding tool one approval covers the tool whatever the arguments.
+  - name: the first echo call is refused with the ticket sentence
+    mcp:
+      as: leo
+      tool: g5-bind-tools__echo
+      args: {text: first-words, _straza_justification: "the first echo"}
+    want: {refused: true, reasonContains: "approval ticket"}
+  - name: the echo raise is on the chain, three deny records with the ticket sentence
+    audit: {subject: leo, kind: straza.audit.mcp, decision: deny, reasonContains: "approval ticket", count: 3}
+  - name: the echo ticket is the only pending record
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want: {status: 200, body: {approvals.0.rule: echo-ticket-tool, "approvals.1": null}}
+    save: {echoTicket: approvals.0.id}
+  - name: the admin approves the echo ticket
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${echoTicket}/approve
+      body: {reason: "G5: echo may run once with any text"}
+    want: {status: 200, body: {approval.state: approved}}
+  - name: an echo call with different text consumes the grant, because the fingerprint covers the tool identity only
+    mcp:
+      as: leo
+      tool: g5-bind-tools__echo
+      args: {text: second-words, _straza_justification: "a second echo with other text"}
+    want: {result: second-words}
+  - name: the echo consume is on the chain once as an allow record with the echo rule's own reason
+    audit: {subject: leo, kind: straza.audit.mcp, decision: allow, reasonContains: "echo needs a ticket bound to the tool identity", count: 1}
+  - name: the echo record shows the grant was cashed
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${echoTicket}
+    want: {status: 200, body: {approval.state: approved}, bodyContains: '"consumedAt"'}
+
+  # 5. The whole ticket story is on the chain as the events spec says.
+  - name: the chain holds eight approval records, three requests, three resolutions and two consumes
+    audit: {subject: leo, kind: straza.audit.approval, count: 8}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g5-bind/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft PolicySet is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g5-bind
+    want: {status: 204}
+  - name: the admin deletes the role before its server, which would take it along
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the admin removes the app
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${appId}
+    want: {status: 200}
+  - name: the IdM deactivates leo
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${leoId}
+    want: {status: 204}

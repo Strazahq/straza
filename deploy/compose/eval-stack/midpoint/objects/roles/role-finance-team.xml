@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Finance Team: the scenario-A onboarding TARGET of the straza-agents-demo
+  overlay, in the OID slot that demo claims (...1c4c).
+  A plain requestable role, no constructions on purpose: the demo's story is
+  the GRANT path (agent -> gateway hold -> approval -> midPoint), not
+  downstream provisioning. The steward role (...1c4d) is scoped to exactly
+  this role's OID - renaming or re-slotting this file breaks that filter.
+  Wears "Metarole: approval by manager" (...1c52): a SELF-SERVICE
+  request for Finance Team goes to the requestee's manager. The steward's
+  grant to jana in scenario A is not a self-request and stays direct.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c4c">
+    <name>Finance Team</name>
+    <description>Requestable business role for the finance department - the onboarding target of the governed-agents demo scenario A. No constructions; the grant itself is the story.</description>
+    <assignment>
+        <!-- Metarole: approval by manager (role-approval-by-manager-metarole.xml) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c52" type="RoleType"/>
+    </assignment>
+    <requestable>true</requestable>
+</role>

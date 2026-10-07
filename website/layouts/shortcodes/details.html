@@ -1,0 +1,4 @@
+<details class="fold"{{ if eq (.Get "open") "true" }} open{{ end }}>
+  <summary>{{ .Get "summary" }}</summary>
+  <div class="in">{{ partial "inner.html" (dict "Page" .Page "Inner" .Inner) }}</div>
+</details>

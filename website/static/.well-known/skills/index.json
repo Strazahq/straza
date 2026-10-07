@@ -1,0 +1,33 @@
+{
+  "skills": [
+    {
+      "name": "straza",
+      "description": "Operate Straza, the control plane between an identity manager and AI agents. Use whenever a task mentions Straza, strazad, strazactl, a PolicySet, what an agent or a role may do, adding or onboarding an MCP server with its credential and roles, a tool catalog, an approval hold or ticket, asking a person before a command runs, approving on a phone, SCIM or identity-manager roles for agents, or Straza audit evidence. Covers the five-minute setup, an MCP server end to end, policy with the validator in the loop, a change checked as one draft that a person publishes, replaying recent decisions against a local policy file, explaining a deny, role mapping, and evidence from the audit chain.",
+      "files": [
+        "SKILL.md",
+        "references/evidence.md",
+        "references/examples/app-command.yaml",
+        "references/examples/app-github-token.yaml",
+        "references/examples/app-oci.yaml",
+        "references/examples/app-remote.yaml",
+        "references/examples/capture-conversation.yaml",
+        "references/examples/classify-interpreters.yaml",
+        "references/examples/deny-with-reason.yaml",
+        "references/examples/hold-for-approver.yaml",
+        "references/examples/mcp-tool-gate.yaml",
+        "references/examples/scout-tools-readers-access.yaml",
+        "references/examples/standalone-refusals.yaml",
+        "references/examples/ticket-day-scale.yaml",
+        "references/identity.md",
+        "references/identity/agents.md",
+        "references/identity/generic-scim.md",
+        "references/identity/midpoint.md",
+        "references/identity/okta.md",
+        "references/policy.md",
+        "references/quickstart.md",
+        "references/servers.md",
+        "scripts/replay-recent.sh"
+      ]
+    }
+  ]
+}

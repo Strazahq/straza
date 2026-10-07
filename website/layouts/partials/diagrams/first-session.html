@@ -1,0 +1,26 @@
+<svg class="dg" viewBox="0 0 900 230" role="img" aria-labelledby="dg-first-session-t">
+<title id="dg-first-session-t">strazad signed a policy, the straza hook on this machine checked each call against it, denied rm -rf and allowed git status, and both decisions were recorded.</title>
+<defs><marker id="ah-first-session" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0 0 10 5 0 10z"/></marker></defs>
+<rect class="box" x="10" y="40" width="190" height="80" rx="6"/>
+<text class="t" x="28" y="72">strazad</text>
+<text class="m" x="28" y="96">127.0.0.1:8420</text>
+<rect class="box" x="250" y="40" width="190" height="80" rx="6"/>
+<text class="t" x="268" y="72">Signed policy</text>
+<text class="s" x="268" y="96">standalone-starter</text>
+<rect class="box" x="490" y="40" width="190" height="80" rx="6"/>
+<text class="t" x="508" y="72">straza hook</text>
+<text class="s" x="508" y="96">alice's session</text>
+<rect class="box nobg no" x="730" y="14" width="160" height="56" rx="6"/>
+<text class="t" x="746" y="38">deny</text>
+<text class="m" x="746" y="58">rm -rf /tmp/x</text>
+<rect class="box okbg ok" x="730" y="92" width="160" height="56" rx="6"/>
+<text class="t" x="746" y="116">allow</text>
+<text class="m" x="746" y="136">git status</text>
+<path class="ln" d="M202 80 H245" marker-end="url(#ah-first-session)"/>
+<path class="ln" d="M442 80 H485" marker-end="url(#ah-first-session)"/>
+<path class="ln" d="M682 70 L725 46" marker-end="url(#ah-first-session)"/>
+<path class="ln" d="M682 90 L725 116" marker-end="url(#ah-first-session)"/>
+<rect class="box soft" x="250" y="170" width="430" height="46" rx="6"/>
+<text class="s" x="270" y="198">Both decisions are added to the audit chain after the call.</text>
+<path class="ln dash" d="M810 150 V193 H685" marker-end="url(#ah-first-session)"/>
+</svg>

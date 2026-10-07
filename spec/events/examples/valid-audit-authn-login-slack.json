@@ -1,0 +1,16 @@
+{
+  "specversion": "1.0",
+  "id": "0199d3a4-6b21-7e55-9abc-1f2e3d4c5b41",
+  "type": "straza.audit.authn",
+  "source": "strazad",
+  "time": "2026-09-28T09:14:52.118Z",
+  "data": {
+    "action": "login",
+    "outcome": "failure",
+    "via": "slack",
+    "user": "judy",
+    "userId": "0197fa3d-2222-7abc-9def-000000000002",
+    "approvalId": "0199d3a1-0c77-7e55-9abc-1f2e3d4c5b40",
+    "reason": "user is locked"
+  }
+}

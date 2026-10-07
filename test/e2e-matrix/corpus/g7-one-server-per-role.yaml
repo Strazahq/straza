@@ -1,0 +1,215 @@
+# One MCP server per application role: an application role that reaches a
+# server belongs to that server and reaches no other, a role that belongs to
+# no server is refused every server with a sentence that names the way out,
+# and a team that needs two servers holds a business role composing one
+# application role per server. The operator registers two servers and
+# creates the first server's own role over its echo tool in one call, which
+# writes the role and its one access row. Giving that role the second server
+# is refused, and so is giving the first server to a global application role.
+# The way out is the second server's own role over its get-sum tool and a
+# business role composing both, which rina holds through the identity
+# manager: her catalog lists one tool of each server and nothing else, and
+# one of them runs. The refused rows write no record, so the chain carries
+# two binding creates, one for each role a server owns.
+#
+# The global role's name carries no server's prefix on purpose: a name
+# beginning with a registered server's folded name and a hyphen belongs to
+# that server and a global create of it is refused, the rule
+# g7-server-owned-roles walks.
+#
+# The wire this scenario asserts: a role create that names server and tools
+# writes the role and its access row in one step (pkg/api/openapi.yaml
+# 0.106.0), spec/objects/SPEC.md revision 4 says a Role document of kind
+# application carries at most one binding, and pkg/api/openapi.yaml 0.138.0
+# says an application role that no server owns gains no access row. Shapes
+# read from the published contract, so they are not suspect: installApp
+# answers 201 with the app row, a role create answers 201 with the role row,
+# a bindings list is a bare array, an implication edge is created with
+# implies_role_id and answers 201, and an assignment create answers 201
+# (pkg/api/openapi.yaml, the Apps and the Roles sections). The hermetic
+# upstream serves echo, get-sum and get-env, and a tool is served as
+# name__toolName, which README.md next to this file publishes.
+id: g7-one-server-per-role
+group: G7
+title: An application role belongs to the one server it reaches, a second server is refused, a role of no server is refused with the way out, and a team reaches two servers through a business role composing one role per server
+provenance: >-
+  doc the one-server-per-role model (an application role has at most one
+  access row, the second server is refused before any write with the way
+  out in the sentence, a business role composes any number of application
+  roles, and the guard is the store's unique index, so no second row lands
+  whatever the order of the writes);
+  pkg/api/openapi.yaml 0.106.0 (a role a server owns is created with its
+  tools in one call and reaches only its owning server, 409) and 0.138.0 (an
+  application role that no server owns gains no access row, 409);
+  spec/objects/SPEC.md revision 4 (at most one binding on an application
+  role's document);
+  website/content/concepts/mcp-apps-and-the-gateway.md (an access row
+  grants, and a granted call with no rule runs);
+  README.md next to this package for the hermetic upstream's three tools
+  and the name__toolName rendering the mcp steps use.
+  suspect: the argument name and the echoed result of the echo call, as in
+  g3-catalog; both refusal sentences, which no published document quotes,
+  so each step matches the part that names no tool list.
+harnesses: [claude-code]
+identities:
+  rina: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: two servers and nothing else. The roles are the scenario.
+  - name: the operator registers the first server
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g7-north
+            description: The server the application role reaches
+          server:
+            name: g7/north
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want: {status: 201, body: {name: g7-north}}
+    save: {northId: id}
+  - name: the operator registers the second server
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g7-south
+            description: The server the same role may not reach as well
+          server:
+            name: g7/south
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+    want: {status: 201, body: {name: g7-south}}
+    save: {southId: id}
+
+  # 1. One role, one server. The role belongs to the server it reaches, the
+  # second server is refused, and a role of no server reaches none.
+  - name: the operator creates the first server's own role over its echo tool, which writes its one access row
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g7-north-tools, server: g7-north, tools: ["echo"], description: "One-server rule scenario, the role that reaches g7-north"}
+    want: {status: 201, body: {name: g7-north-tools, kind: application, server: g7-north}}
+    save: {northRoleId: id}
+  - name: giving the same role the second server is refused, and the sentence names the server it belongs to
+    # suspect: the sentence, which no published document quotes
+    admin:
+      method: POST
+      path: /v1/admin/apps/${southId}/bindings
+      body: {role: g7-north-tools, tools: ["get-sum"]}
+    want: {status: 409, bodyContains: "g7-north-tools belongs to the server g7-north and reaches no other server"}
+  - name: the operator creates a global application role, which policy sets may match
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: north-tools, kind: application, description: "One-server rule scenario, the global role that no server owns"}
+    want: {status: 201, body: {name: north-tools, kind: application}}
+  - name: giving the global role the first server is refused, and the sentence names the way out
+    # suspect: the sentence, which no published document quotes; the step stops before the placeholders, which the JSON answer escapes
+    admin:
+      method: POST
+      path: /v1/admin/apps/${northId}/bindings
+      body: {role: north-tools, tools: ["echo"]}
+    want: {status: 409, bodyContains: "north-tools belongs to no MCP server, so it cannot be given access to g7-north. A role that reaches a server belongs to that server, so the identity manager and the console can name the server it reaches. Create a role of g7-north with strazactl roles create g7-north-"}
+  - name: the first server's role holds its one row, and no other row landed
+    admin:
+      method: GET
+      path: /v1/admin/bindings
+    want:
+      status: 200
+      body: {0.role: g7-north-tools, 0.app: g7-north, "1": null}
+
+  # 2. The way out: one role per server, composed by a business role that
+  # the identity manager hands out.
+  - name: the operator creates the second server's own role over its get-sum tool
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g7-south-tools, server: g7-south, tools: ["get-sum"], description: "One-server rule scenario, the role that reaches g7-south"}
+    want: {status: 201, body: {name: g7-south-tools, server: g7-south}}
+    save: {southRoleId: id}
+  - name: the operator creates the team's business role
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: team-north-south, kind: business, description: "One-server rule scenario, the team that reaches both servers"}
+    want: {status: 201}
+    save: {teamRoleId: id}
+  - name: the team role composes the first server's role
+    admin:
+      method: POST
+      path: /v1/admin/roles/${teamRoleId}/implications
+      body: {implies_role_id: "${northRoleId}"}
+    want: {status: 201}
+  - name: the team role composes the second server's role as well
+    admin:
+      method: POST
+      path: /v1/admin/roles/${teamRoleId}/implications
+      body: {implies_role_id: "${southRoleId}"}
+    want: {status: 201}
+  - name: the IdM provisions rina over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g7-rina
+        userName: rina
+        displayName: Rina Team Member
+        active: true
+    want: {status: 201}
+    save: {rinaId: id}
+  - name: the operator sets rina's password, since SCIM carries none and she signs in to work
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${rinaId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the operator gives rina the team role alone
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${rinaId}", role_id: "${teamRoleId}"}
+    want: {status: 201}
+  - name: rina enrolls
+    enroll: {as: rina}
+  - name: rina starts a session
+    hook:
+      as: rina
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: rina reaches one tool of each server and nothing else
+    mcp:
+      as: rina
+      list: true
+    want:
+      tools: [g7-north__echo, g7-south__get-sum]
+      notTools: [g7-north__get-sum, g7-north__get-env, g7-south__echo, g7-south__get-env]
+  - name: one of those tools runs for her
+    # suspect: the argument name and the echoed result are assumed, as in g3-catalog
+    mcp:
+      as: rina
+      tool: g7-north__echo
+      args: {text: hello-from-rina}
+    want: {result: hello-from-rina}
+
+  # 3. The chain carries the two access rows that landed, one with each role
+  # create, and nothing for the refused ones, which never reached the store.
+  - name: two binding creates are on the chain under the operator's name, and the refused ones wrote no record
+    audit: {subject: admin, kind: straza.audit.admin, action: apps.binding.create, count: 2}

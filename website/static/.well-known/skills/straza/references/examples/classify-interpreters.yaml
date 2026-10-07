@@ -1,0 +1,19 @@
+# Send every interpreter invocation of the dev-tools role through the built-in classifier before it runs.
+# Both profiles; the rule fires only on events that carry a detected interpreter, so git status never reaches it.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: classify-interpreters
+  description: Send every interpreter invocation through the built-in classifier before it runs
+spec:
+  priority: 10
+  match:
+    roles: [dev-tools]
+  rules:
+    - id: classify-interpreters
+      events: [tool.pre]
+      tools: [shell.exec]
+      interpreters:
+        allow: ["*"]
+      effect: allow
+      mode: classify

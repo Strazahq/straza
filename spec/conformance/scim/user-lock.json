@@ -1,0 +1,106 @@
+{
+  "name": "user-lock",
+  "steps": [
+    {
+      "note": "create a user: every User response declares and carries the Straza lock extension, unlocked by default (spec/scim-profile §3.1)",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "lena",
+          "active": true
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "userName": "lena",
+          "urn:straza:params:scim:schemas:extension:2.0:User": { "locked": false }
+        }
+      },
+      "capture": { "uid": "id" }
+    },
+    {
+      "note": "GET renders the extension too",
+      "request": { "method": "GET", "path": "/scim/v2/Users/{uid}" },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": { "locked": false }
+        }
+      }
+    },
+    {
+      "note": "the lock block is readOnly: PATCH by bare attribute name is a mutability error",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [{ "op": "replace", "path": "locked", "value": false }]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "mutability" } }
+    },
+    {
+      "note": "PATCH by URN-qualified path is refused the same way",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [{ "op": "replace", "path": "urn:straza:params:scim:schemas:extension:2.0:User:locked", "value": false }]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "mutability" } }
+    },
+    {
+      "note": "PATCH replacing the whole extension object is refused",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [{ "op": "replace", "path": "urn:straza:params:scim:schemas:extension:2.0:User", "value": { "locked": false } }]
+        }
+      },
+      "expect": { "status": 400, "subset": { "scimType": "mutability" } }
+    },
+    {
+      "note": "the refused PATCHes changed nothing: active still flips normally (the IdM keeps mastering its own lane)",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [{ "op": "replace", "path": "active", "value": false }]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "active": false,
+          "urn:straza:params:scim:schemas:extension:2.0:User": { "locked": false }
+        }
+      }
+    },
+    {
+      "note": "the extension schema is discoverable",
+      "request": { "method": "GET", "path": "/scim/v2/Schemas/urn:straza:params:scim:schemas:extension:2.0:User" },
+      "expect": { "status": 200, "subset": { "id": "urn:straza:params:scim:schemas:extension:2.0:User" } }
+    },
+    {
+      "note": "the User resource type declares the extension (non-required)",
+      "request": { "method": "GET", "path": "/scim/v2/ResourceTypes/User" },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "schemaExtensions": [
+            { "schema": "urn:straza:params:scim:schemas:extension:2.0:User", "required": false }
+          ]
+        }
+      }
+    }
+  ]
+}

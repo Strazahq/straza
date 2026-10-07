@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RoleType archetype: BR Role. These are the access packages people hold and
+  request (BR:Straza-developer-access, BR:Straza-admin-access), so they wear
+  an archetype like every imported role does. They are made in midPoint, they
+  compose imported Straza roles plus constructions, and the code BR: on the
+  name marks them. Assigned by the seed's renders (seed.sh) and by hand on any
+  package born in the GUI.
+-->
+<archetype xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+           oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c27">
+    <name>br-role</name>
+    <description>Access package: what a person holds or requests in midPoint.
+        It composes imported Straza roles (membership IS the Straza
+        assignment) and constructions (Keycloak login, Straza
+        account).</description>
+    <archetypePolicy>
+        <display>
+            <label>BR Role</label>
+            <pluralLabel>BR Roles</pluralLabel>
+            <icon>
+                <cssClass>fa fa-briefcase</cssClass>
+                <color>#2185d0</color>
+            </icon>
+        </display>
+    </archetypePolicy>
+    <assignment>
+        <assignmentRelation>
+            <holderType>RoleType</holderType>
+        </assignmentRelation>
+    </assignment>
+</archetype>

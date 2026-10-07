@@ -1,0 +1,41 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.domdomegg/filesystem-mcp",
+  "description": "Read, create, and edit files.",
+  "title": "Filesystem",
+  "repository": {
+    "url": "https://github.com/domdomegg/filesystem-mcp.git",
+    "source": "github"
+  },
+  "version": "1.2.0",
+  "websiteUrl": "https://github.com/domdomegg/filesystem-mcp#readme",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "filesystem-mcp",
+      "version": "1.2.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      }
+    },
+    {
+      "registryType": "npm",
+      "identifier": "filesystem-mcp",
+      "version": "1.2.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:3000/mcp"
+      },
+      "environmentVariables": [
+        {
+          "description": "Transport type.",
+          "isRequired": true,
+          "value": "http",
+          "name": "MCP_TRANSPORT"
+        }
+      ]
+    }
+  ]
+}

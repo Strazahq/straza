@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "0199e2b0-1a01-7c40-8d11-2a3b4c5d6e22",
+  "type": "straza.audit.admin",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-09-29T09:20:47.093Z",
+  "data": {
+    "action": "user.update",
+    "actor": "idm-scim",
+    "actorId": "a8553f82-0f20-480b-9af2-b64a897a8997",
+    "actorVia": "api-token",
+    "target": "0199e2b0-1a01-7c40-8d11-2a3b4c5d6e30",
+    "user": "0199e2b0-1a01-7c40-8d11-2a3b4c5d6e30",
+    "username": "jane.doe@example.com",
+    "changed": ["username", "external_id"]
+  }
+}

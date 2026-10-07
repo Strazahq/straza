@@ -1,0 +1,36 @@
+# The approval choices of the application role scout-tools-readers on its one server scout-tools: get-sum waits up to five minutes for a scout-approvers holder, get-env raises a day-scale ticket for the person behind the agent, and every other tool runs.
+# Both profiles. The name, the priority and the rule shapes are the ones the console's role editor writes and reads back, so the role page shows these as the role's choices. scout-approvers must be a role of kind approver; the server checks that at activation.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: scout-tools-readers-access
+  description: Gates for the role scout-tools-readers
+spec:
+  priority: 100
+  match:
+    roles: [scout-tools-readers]
+  rules:
+    - id: scout-tools-get-sum-approve
+      tools: [mcp.call]
+      apps: [scout-tools]
+      toolNames:
+        allow: ["get-sum"]
+      effect: allow
+      mode: approve
+      approve:
+        roles: [scout-approvers]
+        timeoutSeconds: 300
+      reason: "Straza: get-sum waits for a scout-approvers holder to approve it"
+    - id: scout-tools-get-env-approve
+      tools: [mcp.call]
+      apps: [scout-tools]
+      toolNames:
+        allow: ["get-env"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        class: ticket
+        ticketTTLSeconds: 86400
+        grantTTLSeconds: 3600
+      reason: "Straza: get-env needs a day-scale approval ticket. This call raised it, the person behind this agent decides, and the same call within the hour after approval runs once"

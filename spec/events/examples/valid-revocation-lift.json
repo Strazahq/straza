@@ -1,0 +1,11 @@
+{
+  "specversion": "1.0",
+  "id": "0197fa3e-9c1b-7c22-a9d4-1b2c3d4e5f77",
+  "type": "straza.revocation.lift",
+  "source": "strazad",
+  "time": "2026-07-13T09:31:12Z",
+  "data": {
+    "user": "0197fa3d-3333-7abc-9def-000000000003",
+    "origin": "scim"
+  }
+}

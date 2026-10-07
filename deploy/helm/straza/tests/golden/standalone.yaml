@@ -1,0 +1,106 @@
+---
+# Source: straza/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: straza-straza
+  labels:
+    app.kubernetes.io/name: straza
+    app.kubernetes.io/instance: straza
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: straza-1.1.0
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: straza
+    app.kubernetes.io/instance: straza
+  ports:
+    - name: http
+      port: 8420
+      targetPort: http
+---
+# Source: straza/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: straza-straza
+  labels:
+    app.kubernetes.io/name: straza
+    app.kubernetes.io/instance: straza
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: straza-1.1.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: straza
+      app.kubernetes.io/instance: straza
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: straza
+        app.kubernetes.io/instance: straza
+    spec:
+      # strazad's stop waits up to 10 s for requests, then up to 5 s to write
+      # the decision records still in memory (5 s more on SQLite behind a
+      # lock). A shorter grace kills it first and loses those records.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: strazad
+          image: straza:dev
+          imagePullPolicy: Never
+          args: ["serve", "--profile", "standalone", "--listen", "0.0.0.0:8420"]
+          ports:
+            - name: http
+              containerPort: 8420
+          env:
+            - name: STRAZA_PROFILE
+              value: "standalone"
+            # The session-token issuer + base of every link strazad hands
+            # out. Never loopback in k8s: explicit value, else derived
+            # (ingress host, else in-cluster Service DNS). Suppressed when
+            # configYaml carries server.publicUrl and no chart value
+            # overrides it: env beats file, so injecting would clobber it.
+            - name: STRAZA_PUBLIC_URL
+              value: "http://straza-straza.default.svc:8420"
+            # On by default and visible here. Off renders nothing, so a relay
+            # block in configYaml is never clobbered by an env face. The token
+            # lives in the emptyDir data dir, so every pod start mints one
+            # (values.yaml names the relay's per-address registration limit).
+            - name: STRAZA_APPROVAL_PUSH_RELAY_ENABLED
+              value: "true"
+            - name: STRAZA_APPROVAL_PUSH_RELAY_TOKEN_FILE
+              value: /var/lib/straza/push-relay-token
+          volumeMounts:
+            # Writable data dir (rootfs is read-only): apps dir, and the
+            # generated KEK when secrets.kekExistingSecret is unset (that
+            # per-pod key is ephemeral; set kekExistingSecret in production).
+            - name: data
+              mountPath: /var/lib/straza
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: data
+          emptyDir: {}

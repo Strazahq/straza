@@ -1,0 +1,44 @@
+<!-- Org team visibility: the read grant that makes the MCP server's team
+     tools return people under impersonation (Switch-To-Principal runs AS the
+     caller, and midPoint then applies the caller's authorizations - End user
+     alone reads self only, so list_my_teammates / list_my_team came back
+     empty-with-explanation). Two orgRelation clauses, the upstream-verified
+     pattern (midpoint-mcp-server docs/authorization.md + README, 4.10):
+       - members read fellow members of their orgs (subjectRelation default)
+       - managers read everyone in orgs they manage (subjectRelation manager,
+         allDescendants)
+     Assigned in seed to joe (member: sees carol) and alice (manager of
+     dev-ops: sees joe + carol). Deliberately NOT on the End user role or an
+     archetype: who gets org visibility is a per-deployment decision, and the
+     eval demonstrates the explicit grant. -->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:org="http://midpoint.evolveum.com/xml/ns/public/common/org-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c09">
+  <name>Org team visibility</name>
+  <description>Read users in my orgs: fellow members as a member, everyone
+  beneath as a manager. The grant behind list_my_teammates/list_my_team under
+  the MCP server's per-user (Switch-To-Principal) mode.</description>
+  <authorization>
+    <name>read-my-org-peers</name>
+    <description>Members see fellow members of the same org(s).</description>
+    <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-model-3#read</action>
+    <object>
+      <type>UserType</type>
+      <orgRelation>
+        <subjectRelation>org:default</subjectRelation>
+      </orgRelation>
+    </object>
+  </authorization>
+  <authorization>
+    <name>read-my-reports</name>
+    <description>Managers see everyone in orgs they manage.</description>
+    <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-model-3#read</action>
+    <object>
+      <type>UserType</type>
+      <orgRelation>
+        <subjectRelation>org:manager</subjectRelation>
+        <scope>allDescendants</scope>
+      </orgRelation>
+    </object>
+  </authorization>
+</role>

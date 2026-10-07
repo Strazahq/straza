@@ -1,0 +1,73 @@
+# Published mapping table: Gemini CLI (hooks GA, verified against the
+# v0.50.0 release source) → Straza canonical events. Supersedes
+# antigravity.yaml for shipping builds; the antigravity table remains valid
+# for the legacy camelCase payload shape.
+harness: gemini
+events:
+  SessionStart: session.start
+  BeforeAgent: prompt.submit
+  BeforeTool: tool.pre
+  AfterTool: tool.post
+  AfterAgent: session.end
+  SessionEnd: session.end
+# Payload keys (packages/core/src/hooks/types.ts at v0.50.0): snake_case,
+# same spellings as the Claude Code/Codex family.
+fields:
+  sessionId: session_id
+  workspace: cwd
+  toolName: tool_name
+  toolInput: tool_input
+  prompt: prompt
+  transcriptPath: transcript_path
+  promptResponse: prompt_response
+  mcpContext: mcp_context
+# Revision 2026-07-20 (inventory audit, drift-guard sync): extended with the
+# modern built-in roster VERIFIED against base-declarations.ts, IDENTICAL at
+# tags v0.50.0 AND v0.51.0. All ride file.read per the assignment rule (pure
+# read/UI built-ins pending a meta kind); each has a direct claude-code analog.
+tools:
+  run_shell_command: shell.exec
+  write_file: file.write
+  replace: file.edit
+  read_file: file.read
+  read_many_files: file.read
+  glob: file.read
+  grep_search: file.read
+  list_directory: file.read
+  read_mcp_resource: file.read
+  list_mcp_resources: file.read
+  get_internal_docs: file.read
+  activate_skill: file.read
+  ask_user: file.read
+  write_todos: file.read
+  enter_plan_mode: file.read
+  exit_plan_mode: file.read
+  web_fetch: net.fetch
+  google_web_search: net.fetch
+  invoke_agent: task.spawn
+notes: |
+  Decision encoding: strict JSON on stdout ({"decision":"allow"|"deny"});
+  ALL diagnostics go to stderr. No exit-2 block convention.
+  Base fields on every event: session_id, transcript_path (v0.50 read: a
+  JSON document. Corrected for 0.53.0, verified: a .jsonl
+  session-state file at $HOME/.gemini/tmp/<project>/chats/, a metadata
+  header line, {"id","timestamp","type":"user"|"gemini","content":...}
+  whole-message appends, and {"$set":{...}}/{"$rewindTo":...} deltas. It is
+  gemini's OWN session state, NOT a reply transcript: assistant-shaped
+  transcript readers match nothing in it, so reply capture MUST use the
+  AfterAgent payload), cwd, hook_event_name, timestamp. `timestamp` is
+  unique to this dialect and is the autodetection tiebreak for the event
+  names shared with Claude Code (SessionStart/SessionEnd).
+  MCP tools: the top-level tool_name is mcp_<server>_<tool> with SINGLE
+  underscore separators (packages/core/src/tools/mcp-tool.ts,
+  MCP_QUALIFIED_NAME_SEPARATOR = '_') and MUST NOT be split by guessing;
+  the payload's mcp_context object carries the authoritative pair
+  (server_name + bare tool_name). Without mcp_context an implementation
+  degrades the tool to "other" rather than mis-attributing app/tool.
+  BeforeAgent carries `prompt`; AfterAgent carries the model reply in the
+  payload as `prompt_response`, gemini's ONLY reply lane; no transcript
+  fallback exists (live 0.53.0 2026-07-31: fired on a completing turn;
+  `prompt_response` is never empty (a replyless turn carries the vendor's
+  literal "[no response text]" filler) and SessionEnd fires WITHOUT
+  `prompt_response`, so a turn whose AfterAgent never runs has no
+  recoverable reply).

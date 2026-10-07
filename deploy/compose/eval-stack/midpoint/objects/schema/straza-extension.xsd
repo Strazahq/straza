@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Straza midPoint extension schema (eval stack). Adds Straza lineage
+  attributes to midPoint focus objects so the catalog materialization
+  (universal-rest resource inbounds) has typed places to land:
+    UserType:    strazaUserType / strazaAgencyMode (typing, archetype-sourced:
+                                agent-family archetypes induce weak defaults,
+                                per-user override survives; outbound = plain copy),
+                 strazaOrigin  (Straza user origin: local | scim),
+                 strazaPersona (Straza identity kind: human | nhi; since
+                                scim-profile revision 11 mirrored from the SCIM
+                                extension `kind` on the single account projection),
+                 strazaSponsor / strazaSwarmId (typology outbound sources),
+                 strazaExternalId (pinned IdP subject for NHI login binding)
+-->
+
+<!--
+    ServiceType: strazaRuntime, strazaStatus, strazaSource, strazaVersion
+                 (MCP server lineage from the Straza app record)
+    RoleType:    strazaKind (Straza role kind: business | application |
+                             approver | straza; straza spells the control
+                             plane since scim-profile rev 14, which also
+                             put control-plane roles on the wire)
+-->
+
+<!--
+  Deployment: this file is NOT mounted into the container. The seeder wraps
+  it into a midPoint SchemaType object (oid ...1c35, name straza-extension)
+  and uploads it over REST as the FIRST IGA import; midPoint registers
+  SchemaType extensions at boot and on every change (repo-common
+  SchemaCache: registerDynamicSchemaExtensions + prismContext.reload), so
+  edits land with a re-seed (or a REST overwrite of the schema object), no
+  restart, no file mount.
+-->
+<xsd:schema elementFormDefault="qualified"
+            targetNamespace="http://straza.example.com/xml/ns/straza-extension"
+            xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:a="http://prism.evolveum.com/xml/ns/public/annotation-3"
+            xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3">
+
+    <xsd:import namespace="http://prism.evolveum.com/xml/ns/public/annotation-3"/>
+    <xsd:import namespace="http://midpoint.evolveum.com/xml/ns/public/common/common-3"/>
+
+    <xsd:complexType name="StrazaUserExtensionType">
+        <xsd:annotation>
+            <xsd:appinfo>
+                <a:extension ref="c:UserType"/>
+            </xsd:appinfo>
+        </xsd:annotation>
+        <xsd:sequence>
+            <xsd:element name="strazaUserType" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza user type</a:displayName>
+                        <a:help>What this identity is toward Straza: human, agent or service (SCIM core userType vocabulary). Archetype-sourced: the agent-family archetypes induce a weak default, a hand-set value wins. The SCIM resource outbound copies it verbatim; unset = unclassified (no policy clamp matches).</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaAgencyMode" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza agency mode</a:displayName>
+                        <a:help>How the agent operates: interactive, supervised or autonomous. Archetype-sourced weak default (ai-agent: autonomous, personal-agent: interactive); the engine clamp makes autonomous subjects never selfApproval-eligible. Meaningless for humans, leave unset.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaOrigin" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza origin</a:displayName>
+                        <a:help>How the Straza account came to exist: local (created in Straza) or scim (provisioned by an IdM, normally this midPoint).</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaPersona" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza identity kind</a:displayName>
+                        <a:help>What Straza says the identity IS: human, or nhi (created via the agentic-SCIM extension). Origin says who created the account; this says what it is.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaSponsorRef" type="c:ObjectReferenceType" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza sponsor (link)</a:displayName>
+                        <a:objectReferenceTargetType>c:UserType</a:objectReferenceTargetType>
+                        <a:help>The accountable human behind an agent identity, as a user reference: pick the user here (this is the writable source of truth). The agent object template derives the Straza sponsor username from it for the SCIM outbound.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaSponsor" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza sponsor</a:displayName>
+                        <a:help>Sponsor username, DERIVED by the agent object template from Straza sponsor (link) and presentation-read-only there (edit the link, this follows). Outbound-mapped to the Straza SCIM extension attribute `sponsor` (scim-profile revision 5 typology); consumed by attribution and approval routing (revision 13/14 sponsor default).</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaSwarmId" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza swarm id</a:displayName>
+                        <a:help>Fleet membership for agent identities. Outbound-mapped to the Straza SCIM extension attribute `swarmId`; PolicySets match it (spec/policyset revision 9 match.identity) and the future fleet kill will act on it. Unset = not in a fleet.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaExternalId" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza external id</a:displayName>
+                        <a:help>Pinned IdP subject (in the eval stack: the Keycloak service-account user UUID of the agent's client-credentials client), outbound-mapped to SCIM externalId so the enterprise headless login lane resolves this NHI (strazad matches token sub against externalId). Set it ONLY on agent identities whose IdP subject is pinned; humans never carry it, their externalId is backfilled by Straza at first interactive login.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="StrazaServiceExtensionType">
+        <xsd:annotation>
+            <xsd:appinfo>
+                <a:extension ref="c:ServiceType"/>
+            </xsd:appinfo>
+        </xsd:annotation>
+        <xsd:sequence>
+            <xsd:element name="strazaRuntime" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza runtime</a:displayName>
+                        <a:help>How Straza runs this MCP server: command, remote or oci.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaStatus" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza status</a:displayName>
+                        <a:help>Live status reported by the Straza manager (pending, starting, running, degraded, stopped, failed). Refreshed by LiveSync.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaSource" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza source</a:displayName>
+                        <a:help>Where the app definition came from: api, gitops or registry.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaVersion" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza version</a:displayName>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="StrazaRoleExtensionType">
+        <xsd:annotation>
+            <xsd:appinfo>
+                <a:extension ref="c:RoleType"/>
+            </xsd:appinfo>
+        </xsd:annotation>
+        <xsd:sequence>
+            <xsd:element name="strazaKind" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza role kind</a:displayName>
+                        <a:help>Straza-side role kind: business, application, approver (decide authority only), or straza (control plane: governs Straza itself). Fixed at create in Straza, and it decides the archetype of the imported role.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaServer" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Owning MCP server</a:displayName>
+                        <a:help>The MCP server that owns a server-owned application role, read from the wire and empty on every other role. A certifier reads the owner here, never from the role's name.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaAdministers" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Administers</a:displayName>
+                        <a:help>The MCP servers whose admin role this Straza role is, directly or through a role it composes. Empty on the global MCP admin role, which administers every server.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+        </xsd:sequence>
+    </xsd:complexType>
+
+</xsd:schema>

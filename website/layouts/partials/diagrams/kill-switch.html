@@ -1,0 +1,16 @@
+<svg class="dg" viewBox="0 0 900 270" role="img" aria-labelledby="dg-kill-switch-t" data-say='["What one disable in the identity manager does. Press a step to follow it.", "1. Your identity manager disables a person or an agent. Over SCIM that is active set to false.", "2. Straza revokes every session of that identity and refuses its next check-ins.", "3. Connected clients get the revocation as a push over strazad&#39;s own address and deny every call that session makes.", "4. The identity is stopped on every machine. A client that missed the push is refused at its next check-in.", "5. Each step leaves a record in the audit chain."]'>
+<title id="dg-kill-switch-t">Your identity manager disables a person or an agent. Straza revokes their sessions and refuses new check-ins. Connected clients get the revocation as a push and deny every call. Each step is recorded.</title>
+<defs><marker id="ah-kill-switch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0 0 10 5 0 10z"/></marker></defs>
+<g data-s="1"><rect class="box" x="10" y="30" width="190" height="96" rx="6"/><text class="t" x="26" y="62">Identity manager</text><text class="s" x="26" y="86">disables a person</text><text class="s" x="26" y="106">or an agent</text></g>
+<g data-s="2"><rect class="box" x="250" y="30" width="200" height="96" rx="6"/><text class="t" x="266" y="62">Straza</text><text class="s" x="266" y="86">revokes their sessions,</text><text class="s" x="266" y="106">refuses new check-ins</text></g>
+<g data-s="3"><rect class="box" x="500" y="30" width="200" height="96" rx="6"/><text class="t" x="516" y="62">Their clients</text><text class="s" x="516" y="86">get the revocation</text><text class="s" x="516" y="106">push and deny</text></g>
+<g data-s="4"><rect class="box nobg no" x="750" y="30" width="140" height="96" rx="6"/><text class="t" x="766" y="62">Stopped</text><text class="s" x="766" y="86">on every</text><text class="s" x="766" y="106">machine</text></g>
+<path class="ln" d="M202 78 H245" marker-end="url(#ah-kill-switch)"/>
+<text class="m" x="204" y="140">active: false</text>
+<path class="ln" d="M452 78 H495" marker-end="url(#ah-kill-switch)"/>
+<text class="lab" x="458" y="140">push</text>
+<path class="ln" d="M702 78 H745" marker-end="url(#ah-kill-switch)"/>
+<g data-s="5"><rect class="box soft" x="250" y="196" width="450" height="52" rx="6"/><text class="s" x="270" y="227">Each step is recorded in the audit chain.</text></g>
+<path class="ln dash" d="M350 128 V191" marker-end="url(#ah-kill-switch)"/>
+<path class="ln dash" d="M600 128 V191" marker-end="url(#ah-kill-switch)"/>
+</svg>

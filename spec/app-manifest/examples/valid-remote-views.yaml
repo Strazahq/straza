@@ -1,0 +1,20 @@
+# A remote server whose tools link MCP Apps views (revision 6). With
+# exposure.views on, Straza's initialize to the server advertises the MCP
+# Apps extension, and the views the exposed tools link are served on the
+# server's own gateway endpoint to callers whose catalog holds a linking tool.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: dashboards
+  description: Dashboard server whose tools show an HTML view beside their result
+server:
+  name: com.example/dashboards
+  version: "1.2.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://dashboards.example.com/mcp
+  exposure:
+    tools: ["show_*", "refresh_dashboard"]
+    views: true

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  mcp-service: the technical account the midpoint-mcp-server authenticates with
+  (Basic auth, from the mcp-midpoint-http service env in compose.yaml). The server
+  runs in shared (resource-server) mode, so every tool call borrows the calling
+  person's authority. Two roles, no Superuser:
+  - MCP proxy (...1c06): Switch-To-Principal, limited to employees and AI agents.
+  - MCP service (...1c08): the REST endpoint actions, the read that finds the
+    person behind a token, and reads of the request schema and request rules.
+    No write right, so the password alone changes nothing in midPoint.
+  Not an employee (no persona archetype on purpose) and no provisioning
+  assignments. The archetype-less shape also keeps mcp-service outside its own
+  #proxy scope, so it cannot impersonate itself or any other plumbing account.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c07">
+    <name>mcp-service</name>
+    <fullName>MCP Service Account</fullName>
+    <description>Technical account for strazahq/midpoint-mcp-server (governed MCP app "midpoint"). Least-privilege: MCP service + MCP proxy, no Superuser. Lab credential.</description>
+    <credentials>
+        <password>
+            <value><t:clearValue>McpPr0xy-Ev4l!26</t:clearValue></value>
+        </password>
+    </credentials>
+    <assignment>
+        <!-- MCP service: REST entry and correlation read (objects/roles/role-mcp-service.xml) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c08" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- MCP proxy: archetype-scoped rest-3#proxy grant (objects/roles/role-mcp-proxy.xml) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c06" type="RoleType"/>
+    </assignment>
+</user>

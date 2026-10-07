@@ -1,0 +1,221 @@
+# Gemini CLI / Antigravity hook dialect. Reimplements the same contract with
+# renamed events (BeforeAgent/BeforeTool/AfterTool/AfterAgent) and a strict
+# JSON-on-stdout rule (all diagnostics to stderr, enforced by the encoder).
+# That rule is OURS to keep, not gemini's to enforce. Verified against
+# gemini-cli 0.53.0 by the harness-matrix gates gemini-output and
+# gemini-control: a hook printing non-JSON is not rejected, it is surfaced
+# verbatim as "Hook system message: …". Gemini never rejected hook stdout in
+# this lane, unlike codex's strict deny_unknown_fields parse. What gemini
+# DOES act on is the decision field: our {"decision":"allow"} ack passed
+# silently, and a {"decision":"deny"} control visibly stopped the turn
+# ("Agent execution blocked").
+
+# Three vendor-side settings switch the whole lane off while the wiring file
+# reads perfect. geminitrust.go models all three for doctor. They come from
+# the vendor docs (docs/cli/trusted-folders.md, the settings reference,
+# docs/cli/enterprise.md) and source, and the harness-matrix `gemini` lane
+# (trust battery C1/C4/C5/C6/C7) verified them against gemini-cli 0.53.0.
+
+#   1. Folder trust: with security.folderTrust.enabled active (the feature
+#      itself ships DISABLED by default), governance in a folder gemini does
+#      not trust is OFF and nothing outside gemini can force it. A headless
+#      `gemini -p` in an untrusted cwd refuses to start (exit 55, "not
+#      running in a trusted directory", naming both bypasses), so it fails
+#      closed and loud. A silent safe mode would apply only to the interactive
+#      TUI and stays UNCONFIRMED there: 0.53.0's own trusted-folders doc lists
+#      safe mode's casualties (workspace settings, .env, extensions, tool
+#      auto-accept, memory loading, MCP servers, custom commands), and hooks
+#      are NOT among them. Decisions persist in ~/.gemini/trustedFolders.json,
+#      whose {path: TRUST_FOLDER|TRUST_PARENT|DO_NOT_TRUST} shape gemini
+#      honors. The headless bypasses are GEMINI_CLI_TRUST_WORKSPACE=true and
+#      --skip-trust.
+
+#   2. hooksConfig.enabled=false KILLS every hook ("no hooks will be
+#      executed", default true), and a granular disabled-hooks list exists.
+#      MITIGATED on the managed lane: gemini's precedence puts SYSTEM settings
+#      ABOVE user and workspace, so `straza install --managed gemini` pins
+#      hooksConfig.enabled=true in the system file (install.go), the analog of
+#      codex's [features] hooks = true. CONFIRMED both ways: user-scope false
+#      ran ZERO hooks, and a /etc/gemini-cli/settings.json pinning true over
+#      that same user file ran them all again. The scopes also MERGE hook
+#      registrations: the system file adds straza's beside the operator's and
+#      does not replace them.
+
+#   3. GEMINI_CLI_SYSTEM_SETTINGS_PATH redirects the system-settings read.
+#      The vendor's own enterprise doc notes a user can point it elsewhere to
+#      bypass managed config (their mitigation: a wrapper script that pins
+#      it). Doctor detects and names an active redirect, and that is the
+#      ceiling. CONFIRMED: aiming it away from a deployed managed pin dropped
+#      the session back to zero hooks.
+# Consequence for governance claims: gemini's managed lane is enforcing ONLY
+# in trusted folders, and no gemini scope survives an env redirect, so
+# doctor's gemini-hooks check words its green results accordingly, from
+# evidence and never from file presence.
+harness: gemini
+events:
+  SessionStart: session.start
+  BeforeAgent: prompt.submit
+  BeforeTool: tool.pre
+  AfterTool: tool.post
+  AfterAgent: session.end
+  SessionEnd: session.end
+  # UNMAPPED (deliberate; same treatment as codex's PreCompact
+  # note): the current hooks reference documents 11 events; the five not
+  # mapped here are BeforeModel, BeforeToolSelection, AfterModel (model-lane
+  # interception; no canonical kind exists for skipping/steering an LLM
+  # call), Notification, and PreCompress (observational; compact.pre is the
+  # nearest canonical kind). Each falls through as an unknown event rather
+  # than being half-handled. Mapping any of them means the adapter row, the
+  # install.go roster, AND the published spec table
+  # (spec/hook-profile/mappings/gemini/) move in the same change: the drift
+  # guard (TestAdapterSpecMappingDrift) fails loudly if only one side does.
+
+# Keys pinned against the SHIPPING source at the v0.50.0 release tag
+# (github.com/google-gemini/gemini-cli):
+#   packages/core/src/hooks/types.ts (HookInput base): session_id,
+#     transcript_path, cwd, hook_event_name, timestamp. BeforeTool adds
+#     tool_name/tool_input (+ mcp_context/original_request_name), BeforeAgent
+#     adds prompt, and AfterAgent adds prompt/prompt_response/stop_hook_active.
+#   packages/core/src/hooks/hookEventHandler.ts: those structs are spread
+#     verbatim into the stdin JSON, with no camelCase rename anywhere.
+# The harness-matrix gates confirm the pin against gemini-cli 0.53.0 for
+# SessionStart, BeforeAgent, AfterAgent and BeforeTool: the base keys arrive
+# in snake_case, BeforeAgent carries prompt, and BeforeTool carries
+# tool_name/tool_input in the native-tool shape, without mcp_context.
+# AfterTool is still derived from the v0.50 source.
+
+# gemini-cli 0.53 differs from the v0.50 read in two ways, deliberately NOT
+# re-pinned above, because the shipped fixtures assert the v0.50 read:
+#   - SessionStart carries an extra `source` key ("startup" on a headless
+#     run). Left unmapped: no canonical field wants it.
+#   - transcript_path names a .jsonl under $HOME/.gemini/tmp/<project>/
+#     chats/session-<ts>-<shortid>.jsonl (hookEventHandler createBaseInput →
+#     ChatRecordingService.getConversationFilePath()). It is gemini's own
+#     session state, not a reply transcript: a metadata header line
+#     {sessionId,projectHash,startTime,lastUpdated,kind}, whole-message
+#     appends {"id","timestamp","type":"user"|"gemini","content":…}, and
+#     {"$set":{…}} or {"$rewindTo":…} deltas.
+
+# Our line-based delta reader is a harmless no-op on that file, verified on
+# a completing headless turn. The model reply IS in the file (type "gemini",
+# content a plain string), but assistantText probes only claude-jsonl
+# ({"type":"assistant","message":{"content":…}}) and the codex rollout
+# response_item. Gemini puts content at top level under a "gemini" type, so
+# NO line matches: the delta is "" with no error, the watermark still
+# advances, and no session-state text can be spooled as a reply.
+# TestGeminiSessionStateLinesAreNotReplies and
+# TestTranscriptDeltaGeminiSessionState (internal/agentguard/
+# capture_gemini_test.go) pin this with lines copied VERBATIM from a
+# captured file and a claude-jsonl positive control, so the empty result can
+# never come from a dead reader.
+
+# CONSEQUENCE: gemini has no working transcript fallback at all. The
+# AfterAgent payload is the ONLY reply lane, and a governed turn whose
+# AfterAgent never fires (killed terminal) is UNRECOVERABLE, because
+# pinTranscriptWatermark's orphan-recovery path re-reads this same file.
+# The camelCase set pinned for early builds (sessionId/workspaceDir/
+# toolName/args, the early Antigravity shape) survives as hardcoded
+# fallbacks in Normalize and as the gemini/antigravity fixture corpus, so
+# older builds keep normalizing. Published table:
+# spec/hook-profile/mappings/gemini/.
+
+# Capture keys (same source): BeforeAgent carries `prompt`, and every event
+# carries `transcript_path`, which in 0.53 is the session-state .jsonl
+# described above. AfterAgent carries the reply IN the payload as
+# `prompt_response`, for gemini the ONLY reply lane. Verified against
+# gemini-cli 0.53.0 on a completing headless turn: AfterAgent arrived with
+# prompt, prompt_response and stop_hook_active beside the base keys, and
+# prompt_response was the model's reply text byte for byte. The method needs
+# NO API key: a local fake endpoint serves the model traffic through
+# GOOGLE_GEMINI_BASE_URL. That env var also flips gemini's auth type to
+# "gateway", which validateAuthMethod rejects ("Invalid auth method
+# selected", exit 41) unless settings.json pins security.auth.selectedType.
+# test/harness-matrix/geministub and the gemini-live-* gates run the
+# completing turn on every matrix run.
+
+# Wire edges of that method: the 0.53 model router pre-flights flash-lite
+# :generateContent calls carrying generationConfig.responseJsonSchema (a
+# complexity classifier) and stalls the whole turn in retries unless
+# answered with a schema-valid instance. A functionCall whose params misname
+# a field (list_directory takes dir_path) is killed by the CLI's OWN
+# validator before BeforeTool ever fires, a hook-blind failure mode the
+# live-tool gate exists to notice.
+
+# Two more edges:
+#   - prompt_response is NEVER empty: fireAfterAgentEvent sends
+#     cumulativeResponse || turn.getResponseText() || "[no response text]",
+#     so a replyless turn captures that literal banner as if it were a reply.
+#     The shipped 0.53.0 bundle confirms it.
+#   - SessionEnd DOES fire on a headless run and carries `reason` and
+#     transcript_path but NO prompt_response. AfterAgent and SessionEnd both
+#     map to session.end here, so a SessionEnd captureReply falls through to
+#     the transcript delta, the harmless no-op above, never a second reply
+#     row. Our installer registers only AfterAgent as gemini's turn-end hook
+#     (install.go), so that fall-through is reachable only through an
+#     operator's own SessionEnd registration.
+fields:
+  sessionId: session_id
+  workspace: cwd
+  toolName: tool_name
+  toolInput: tool_input
+  prompt: prompt
+  transcriptPath: transcript_path
+  promptResponse: prompt_response
+  # BeforeTool/AfterTool carry the authoritative MCP server/tool split here
+  # (types.ts McpToolContext: server_name + bare tool_name). The top-level
+  # tool_name for MCP tools is mcp_<server>_<tool> with SINGLE underscores
+  # (mcp-tool.ts MCP_QUALIFIED_NAME_SEPARATOR = '_'), unsplittable when
+  # either side contains an underscore, so Normalize prefers this object
+  # and never guesses the name apart (no context ⇒ degrade to "other").
+  mcpContext: mcp_context
+# Built-in names verified against v0.50.0
+# packages/core/src/tools/definitions/base-declarations.ts; the unsuffixed
+# Shell/edit_file/run_subagent spellings are legacy/Antigravity, kept for
+# older builds.
+tools:
+  run_shell_command: shell.exec
+  Shell: shell.exec
+  write_file: file.write
+  replace: file.edit
+  edit_file: file.edit
+  read_file: file.read
+  read_many_files: file.read
+  # Inventory extended: built-in tool names VERIFIED against the
+  # shipping source packages/core/src/tools/definitions/base-declarations.ts,
+  # IDENTICAL at release tags v0.50.0 AND v0.51.0
+  # (github.com/google-gemini/gemini-cli). Same assignment rule as
+  # adapters/claude-code.yaml (kind = side effect outside the conversation;
+  # pure read/UI built-ins ride the read lane pending a meta kind). Each has a
+  # direct claude-code analog, so cross-dialect classification stays identical.
+  glob: file.read              # cf. Glob
+  grep_search: file.read       # cf. Grep (legacy alias search_file_content → grep_search, tool-names.ts)
+  list_directory: file.read    # cf. LS
+  read_mcp_resource: file.read # cf. ReadMcpResource
+  list_mcp_resources: file.read # cf. ListMcpResources
+  get_internal_docs: file.read # reads bundled docs
+  activate_skill: file.read    # cf. Skill (loads skill instructions)
+  ask_user: file.read          # cf. AskUserQuestion (pure-UI)
+  write_todos: file.read       # cf. TodoWrite (pure-UI/todo)
+  enter_plan_mode: file.read   # cf. EnterPlanMode
+  exit_plan_mode: file.read    # cf. ExitPlanMode
+  web_fetch: net.fetch
+  google_web_search: net.fetch
+  invoke_agent: task.spawn
+  run_subagent: task.spawn
+toolInputs:
+  shell.exec: { command: [command] }
+  file.write: { paths: [file_path, absolute_path, path] }
+  file.edit: { paths: [file_path, absolute_path, path] }
+  file.read: { paths: [file_path, absolute_path, path] }
+  # Shipping web_fetch declares only `prompt` (URLs embedded in free text)
+  # and google_web_search only `query`, so net.fetch usually normalizes
+  # with no paths and is governed at tool level; `url` kept for variants.
+  net.fetch: { paths: [url] }
+
+# Managed/system settings layer: Gemini CLI's system settings.json, merged
+# above user settings. Vendor-documented locations. Re-verify on each
+# harness release. Measured as "hooks.gemini".
+managedSettings:
+  linux: /etc/gemini-cli/settings.json
+  darwin: /Library/Application Support/GeminiCli/settings.json
+  windows: C:\ProgramData\gemini-cli\settings.json

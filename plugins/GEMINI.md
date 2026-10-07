@@ -1,0 +1,3 @@
+# Straza
+
+Straza is the control plane between your identity manager and your AI agents. Identity flows in over SCIM 2.0 or the admin API, and decisions, approvals, credentials and evidence flow out at every tool call. This extension carries one skill for operating it, with reference files for the five-minute setup, adding an MCP server end to end, policy writing with the validator in the loop, mapping identity-manager roles to Straza roles, and evidence from the audit chain. It installs no hooks and holds no credentials. Governance itself comes from `straza install`, which wires the harness hooks and the gateway.

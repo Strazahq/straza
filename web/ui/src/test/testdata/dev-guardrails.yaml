@@ -1,0 +1,234 @@
+# dev-guardrails: the governance contract for the developer seat the demo's
+# working agents hold (joe-java-developer-agent, the harness identity, and
+# sam-sre-agent in the always-on pod). The IdM assigns dev (kind business,
+# wire-group membership); dev composes dev-demo-tools and dev-midpoint
+# (kind application), one role per server, which carry the tool bindings,
+# and THOSE are what this set matches: revision 16 rule, policies match the
+# application roles so every path to the tools is covered (a direct grant
+# of either role, or any other business role composing them, is governed
+# identically). What it protects, in one pass:
+#
+#   - Sandbox MCP tools (demo-tools) and midPoint reads run instantly.
+#   - Every gate routes to the raising agent's SPONSOR by default (bare
+#     approve, revision 14): the accountable human the IdM models on the
+#     agent's sponsor edge. Both working agents are sponsored by alice, so
+#     Straza sends the request to her phone. The deploy ticket also names sec-approvers (kind
+#     approver: decide authority, no tools, IdM-mastered), so alice or
+#     ivan decides, whoever answers first. No pool names straza-admin,
+#     because admin office is not decide authority.
+#   - A HUMAN raising a sponsor-routed gate with no usable sponsor is
+#     denied at request time with the reason naming it. That is the
+#     routing decision, demoed as such, not patched around.
+#   - In the shell, deploy-shaped
+#     commands need a day-scale ticket, and destructive commands are
+#     refused with a reason.
+#   - Local tools are open for dev, but secret-bearing paths stay
+#     write-protected.
+#
+# Two layers decide what an agent sees. Bindings decide which tools EXIST in
+# a role's catalog; this policy decides what is permitted and, with
+# apps.catalog.policyFilter on (the default), what stays VISIBLE: a tool this
+# set never allows is hidden from tools/list, not merely denied on call, and
+# every call is still re-checked against these rules regardless.
+#
+# Ordering: rule order never decides the outcome. A deny overrides every
+# allow across every matched set, so the deny rules at the bottom always
+# hold; order only breaks ties in the reported rule (engine truth:
+# internal/policy/eval.go, deny-wins + priority tie-break).
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: dev-guardrails
+  description: Mode B sandbox governance for the developer seat (matches dev-demo-tools and dev-midpoint, the application roles dev composes; the IdM assigns dev)
+spec:
+  priority: 150
+  match:
+    roles: [dev-demo-tools, dev-midpoint]
+  capture:
+    # Verbatim conversation capture for every session this set matches; the
+    # Transcripts page replays what this block records.
+    conversations: true
+    mode: verbatim
+  rules:
+    - id: dev-mcp-sum-approval-showcase
+      # The 2-MINUTE MCP SHOWCASE, the simplest gate, one MCP tool call
+      # with a decision in under two minutes: ask your
+      # agent to add two numbers with demo-tools and the call is held for a
+      # human tap. A bare approve block routes to the agent's SPONSOR by
+      # default (revision 14): the platform resolves the accountable human
+      # from the IdM edge at request time and sends the request to their
+      # phone; they decide there, in the console, or on /approvals/, and the agent's
+      # retry (or straza__approval_await) runs it. Sits BEFORE the broad
+      # demo-tools allow below on purpose: every fired approve rule marks
+      # the winning allow (engine truth, internal/policy/eval.go), so the
+      # hold would apply anywhere, but the lowest-index fired rule is the
+      # reported rule, so this position makes the decision name THIS rule.
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [demo-tools]
+      toolNames:
+        allow: ["get-sum"]
+      effect: allow
+      mode: approve
+      approve:
+        timeoutSeconds: 120
+        retryTTLSeconds: 120
+        binding: call
+      reason: "Straza: get-sum held for approval, the 2-minute MCP showcase (your sponsor decides on their phone, the console, or /self-service/)"
+    - id: dev-mcp-env-ticket
+      # The DAY-SCALE MCP TICKET: reading the MCP server's
+      # environment is the plausibly sensitive read in the sandbox, so it
+      # comes back as deny-with-TICKET routed to the agent's sponsor (bare
+      # approve, revision 14); the sponsor approves within a day, the next
+      # call within the hour consumes the single-use grant.
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [demo-tools]
+      toolNames:
+        allow: ["get-env"]
+      effect: allow
+      mode: approve
+      approve:
+        class: ticket
+        ticketTTLSeconds: 86400
+        grantTTLSeconds: 3600
+      reason: "Straza: reading the server environment needs a day-scale approval ticket. Request it (this call raised it), your sponsor decides, call again within the hour to consume the grant"
+    - id: dev-mcp-demo-tools
+      # The sandbox lane: demo-tools is the harmless demo MCP server. Under
+      # the access model this rule is redundant, because the dev-demo-tools
+      # access row already grants these calls and a granted call with no
+      # rule runs. It stays as the demo's explicit allow.
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [demo-tools]
+      effect: allow
+    - id: dev-straza-approval-tools
+      # The gateway's built-in approval tools: request, check, and await
+      # one's OWN tickets and holds. Deciding is never a tool, so this
+      # exposes no approver power; it is what lets an agent act on a "wait
+      # with straza__approval_await" deny reason instead of blind-retrying.
+      # Policy-gated like any app (built-ins have no binding row).
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [straza]
+      toolNames:
+        allow: ["approval_request", "approval_status", "approval_await"]
+      effect: allow
+    - id: dev-mcp-midpoint-read
+      # The IdM's own MCP tools, READ lane: search/get/list/ping/whoami are
+      # instant-allow. whoami is the identity diagnostic ("call this first
+      # when a list_my_* answer surprises you") and must never be less
+      # visible than the tools it explains. Write-shaped tools get their own
+      # approve-gated rules below: every function stays reachable through
+      # the gateway, but a mutation costs a human tap.
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["search_*", "get_*", "list_*", "ping", "whoami"]
+      effect: allow
+    - id: dev-mcp-midpoint-workitem-selfapprove
+      # Work-item DECISIONS are personal: when an agent, including a
+      # personal agent acting for its human, calls approve_work_item /
+      # reject_work_item, a human confirms on their own device (phone push /
+      # console). The pool is the sec-approvers role (kind approver: decide
+      # authority, no tools), IdM-granted. approve.roles accepts
+      # approver-kind roles and straza-admin by name, nothing else; this set
+      # names no admin, for separation of duties.
+      # Split out of the general write rule so this intent is explicit, not
+      # incidental. No selfApproval anywhere in this set: the engine clamps
+      # it inert for autonomous subjects anyway, and the agent-first cast
+      # routes decisions to humans by design.
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["approve_work_item", "reject_work_item"]
+      effect: allow
+      mode: approve
+      approve:
+        roles: [sec-approvers]
+        timeoutSeconds: 600
+        retryTTLSeconds: 600
+        binding: call
+        # Routing (revision 8): a personal decision goes to the person via
+        # mobile push + the always-on console only; the team-facing lanes
+        # below omit notify = every configured channel.
+        notify: [push, console]
+      reason: "Straza: work-item decision. The human behind this agent confirms it on their device"
+    - id: dev-mcp-midpoint-write-approve
+      # IdM MUTATIONS through the gateway cost a human tap: the server's
+      # writes are armed (MIDPOINT_MCP_ALLOW_WRITES in the app manifest) and
+      # THIS rule is the control: mode approve holds the call until a
+      # sec-approvers holder decides (console or phone). binding call = the
+      # approval covers these exact arguments, not the tool.
+      # approve_work_item / reject_work_item live in their own rule above
+      # (personal-decision semantics).
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["create_user", "enable_user", "disable_user", "assign_role",
+                "unassign_role", "recompute_user", "request_role"]
+      effect: allow
+      mode: approve
+      approve:
+        roles: [sec-approvers]
+        timeoutSeconds: 600
+        retryTTLSeconds: 600
+        binding: call
+      reason: "Straza: IdM mutation held for human approval (decide in the console or the phone app)"
+    - id: dev-deploy-ticket
+      # The LONG-APPROVAL showcase: deploy-shaped commands come back as
+      # deny-with-TICKET, a day-scale request. The pool COMPOSES deciders
+      # (revision 13): the agent's sponsor plus every sec-approvers holder
+      # (alice or ivan), whoever answers first (phone push rings; a
+      # near-expiry reminder fires); the agent's LATER matching call
+      # consumes the single-use grant within grantTTLSeconds. No blocking
+      # wait, which is what distinguishes a ticket from the get-sum hold
+      # above. The ticket class rejects the blocking knobs by design.
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        allowPatterns: ["./deploy*", "make deploy*", "terraform apply*"]
+      effect: allow
+      mode: approve
+      approve:
+        class: ticket
+        deciders: [sponsor]
+        roles: [sec-approvers]
+        ticketTTLSeconds: 86400
+        grantTTLSeconds: 3600
+      reason: "Straza: deploy needs a day-scale approval ticket. Request it, your sponsor or a security approver decides, re-run to consume the grant"
+    - id: dev-local-tools
+      # The enterprise profile denies local tools by default; this rule gives
+      # role dev the standard lane back: shell, file read/write/edit, network
+      # fetch, subagents. file.read matters beyond reading files: the read
+      # lane also carries the harness's search built-ins (Grep, Glob,
+      # ToolSearch) and the pure-UI tools, so dropping it would brick a
+      # session's first governed turn. The deny rules below still win
+      # (deny-overrides).
+      events: [tool.pre]
+      tools: [shell.exec, file.read, file.write, file.edit, net.fetch, task.spawn]
+      effect: allow
+    - id: no-rm-rf
+      # The hard floor for role dev: recursive deletes, force pushes, and
+      # curl-pipe-to-shell are refused outright, with a reason the agent can
+      # read. A deny overrides every allow above.
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["rm -rf *", "git push --force*", "curl * | *sh*"]
+      effect: deny
+      reason: "Straza: destructive command denied for role dev"
+    - id: protect-secrets
+      # Secret custody: even with local file tools open, writes to env
+      # files, SSH private keys, and credential stores are refused. The rule
+      # gates file.write and file.edit; deny overrides the local-tools allow
+      # above.
+      events: [tool.pre]
+      tools: [file.write, file.edit]
+      paths:
+        deny: ["**/.env*", "**/id_rsa*", "**/credentials.json"]
+      effect: deny
+      reason: "Straza: secret-file writes denied for role dev"

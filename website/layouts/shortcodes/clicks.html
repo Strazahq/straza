@@ -1,0 +1,7 @@
+{{- /* A console click path, one label per press in order:
+{{< clicks "Users" "alice" "Assign" "Assign role" >}}. Each label is quoted
+exactly as the console shows it. */ -}}
+{{- if not .Params }}{{ errorf "%s: clicks needs at least one label." .Position }}{{ end -}}
+<ol class="clickpath" aria-label="Click path">
+{{- range .Params }}<li><span class="k">{{ . }}</span></li>{{ end -}}
+</ol>

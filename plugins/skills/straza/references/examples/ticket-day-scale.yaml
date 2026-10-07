@@ -1,0 +1,27 @@
+# Gate terraform apply behind a day-scale ticket that the requester's sponsor or a release-approvers holder grants once.
+# Both profiles; the grant is single-use, and a fresh session may consume it within the hour after the decision.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: ticket-day-scale
+  description: Gate terraform apply behind a ticket a sponsor or a release-approvers holder grants once
+spec:
+  priority: 10
+  match:
+    roles: [dev-tools]
+  rules:
+    - id: ticket-terraform-apply
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        allowPatterns: ["terraform apply*"]
+      effect: allow
+      mode: approve
+      approve:
+        # A ticket never blocks, so timeoutSeconds and retryTTLSeconds are rejected here.
+        class: ticket
+        deciders: [sponsor]
+        roles: [release-approvers]
+        ticketTTLSeconds: 86400
+        grantTTLSeconds: 3600
+      reason: "Straza: terraform apply needs an approval ticket. This call raised it; your sponsor or a release approver decides within a day, then run the same command again to consume the grant"

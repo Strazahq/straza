@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  sam-sre-agent: the working AUTONOMOUS AI agent of the demo cast (ai-agent
+  archetype assigned directly; the archetype types it agent/autonomous).
+  Sponsored by alice, the accountable human who gets sam's gated calls on
+  her phone (sponsor deciders, policyset revisions 13 and 14).
+  Carries the operator role from the seed, BR:Straza-operator-access: a
+  first boot provisions an AI agent into Straza (imported role operator:
+  wire-group membership IS the assignment) with zero manual steps. The SCIM
+  outbound carries the typology (userType agent, agencyMode autonomous), so
+  Straza classifies sam and the engine clamps apply (autonomous is never
+  selfApproval-eligible).
+-->
+
+<!--
+  The access package's Keycloak inducement is human-gated, so sam gets NO
+  Keycloak account: the pod authenticates with an Ed25519 key. The pod
+  generates the keypair at first boot and the seeder registers the public
+  half via PUT /v1/admin/users/{id}/nhi-key; the assertion subject is the
+  username, so no pinned externalId is needed. sam drives the live agent-sam
+  pod: proof ladder, governed heartbeat, kill-switch beat (disable sam here
+  and the pod's healthcheck dies).
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:ext="http://straza.example.com/xml/ns/straza-extension"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c48">
+    <name>sam-sre-agent</name>
+    <description>Autonomous SRE agent operated by IT Operations, sponsored by
+        alice. Seeded WITH the operator role, BR:Straza-operator-access: the
+        from-boot proof that an AI agent flows through the same
+        assignment lane as an employee. Drives the eval stack's always-on
+        agent-sam pod on the Ed25519 key lane.</description>
+    <extension>
+        <!-- accountable human: alice sponsors the working agents. A user
+             REFERENCE (the editable
+             truth; the agent template derives the username that flows to the
+             SCIM extension `sponsor`). alice = ...1c4a. -->
+        <ext:strazaSponsorRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c4a" type="UserType"/>
+    </extension>
+    <fullName>Sam (SRE agent)</fullName>
+    <givenName>Sam</givenName>
+    <familyName>Agent</familyName>
+    <emailAddress>sam@agents.example.com</emailAddress>
+    <organizationalUnit>IT Operations</organizationalUnit>
+    <assignment>
+        <!-- the governed Straza account (AR:Straza:Account owns the construction) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0b" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- the operator access package (BR:Straza-operator-access) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c50" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- persona archetype, assigned directly (ai-agent) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c22" type="ArchetypeType"/>
+    </assignment>
+</user>

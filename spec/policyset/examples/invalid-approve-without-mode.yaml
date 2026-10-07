@@ -1,0 +1,17 @@
+# INVALID: an `approve` block is legal only alongside `mode: approve`.
+# Here mode is classify, so the parser (and the schema's if/then) reject it.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: approve-without-mode
+spec:
+  rules:
+    - id: rule-one
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["disable_user"]
+      effect: allow
+      mode: classify
+      approve:
+        roles: [sec-approvers]

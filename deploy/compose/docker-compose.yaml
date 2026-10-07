@@ -1,0 +1,85 @@
+# Enterprise-profile Straza for local evaluation: Postgres + external NATS +
+# strazad. `docker compose up` brings up a stateless strazad against a real
+# Postgres and a real NATS/JetStream, the same topology a Helm deployment
+# uses. For the zero-config laptop experience use `strazad serve` directly
+# (standalone: embedded sqlite + NATS).
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: straza
+      POSTGRES_PASSWORD: straza
+      POSTGRES_DB: straza
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U straza"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2
+    command: ["-js", "-sd", "/data"]
+    volumes:
+      - natsdata:/data
+
+  straza-data-init:
+    # the scratch image runs as uid 65532 but Docker creates volumes root-owned;
+    # hand the data dir (auto-generated KEK lives there) to the runtime user once
+    image: busybox:1.36
+    command: ["chown", "-R", "65532:65532", "/var/lib/straza"]
+    volumes:
+      - strazadata:/var/lib/straza
+
+  strazad:
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile
+    # strazad's stop waits up to 10 s for requests, then up to 5 s to write
+    # the decision records still in memory. Docker's default of 10 s kills
+    # it before that and loses those records.
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      straza-data-init:
+        condition: service_completed_successfully
+    environment:
+      STRAZA_PROFILE: enterprise
+      STRAZA_LISTEN: 0.0.0.0:8420
+      STRAZA_STORE_DRIVER: postgres
+      STRAZA_STORE_DSN: postgres://straza:straza@postgres:5432/straza?sslmode=disable
+      STRAZA_EVENTS_URL: nats://nats:4222
+      # The enterprise profile requires an external IdP. Set your issuer:
+      # STRAZA_OIDC_ISSUER: https://idp.example.com
+      # STRAZA_OIDC_CLIENT_ID: straza
+      # Phone approval delivery. The hosted relay is on, so the Straza
+      # approver app on iOS and Android gets the request with no Apple or
+      # Firebase account on your side. strazad mints an anonymous token into
+      # the data volume at first boot and sends the relay a reference only,
+      # never the request. An empty URL means the official relay at
+      # push.straza.ai. Set STRAZA_APPROVAL_PUSH_RELAY_ENABLED to false to
+      # turn the lane off.
+      STRAZA_APPROVAL_PUSH_RELAY_ENABLED: ${STRAZA_APPROVAL_PUSH_RELAY_ENABLED:-true}
+      STRAZA_APPROVAL_PUSH_RELAY_URL: ${STRAZA_APPROVAL_PUSH_RELAY_URL:-}
+      STRAZA_APPROVAL_PUSH_RELAY_TOKEN_FILE: ${STRAZA_APPROVAL_PUSH_RELAY_TOKEN_FILE:-/var/lib/straza/push-relay-token}
+      # Web Push for the browser approvals page and home-screen apps. strazad
+      # mints the VAPID key into the data volume at first boot. The key is the
+      # deployment's push identity, so back it up with the volume. Set the
+      # path to empty to turn the lane off.
+      STRAZA_APPROVAL_PUSH_WEBPUSH_VAPID_KEY_FILE: ${STRAZA_APPROVAL_PUSH_WEBPUSH_VAPID_KEY_FILE:-/var/lib/straza/webpush-vapid.pem}
+      # The push hosts a phone or browser may register: ntfy.sh for the ntfy
+      # app and the four browser push services. Nothing is sent until an
+      # approver registers a route. Set the list to empty to refuse every
+      # such registration, or replace ntfy.sh with your own ntfy host.
+      STRAZA_APPROVAL_PUSH_ALLOWED_HOSTS: ${STRAZA_APPROVAL_PUSH_ALLOWED_HOSTS:-ntfy.sh,fcm.googleapis.com,updates.push.services.mozilla.com,web.push.apple.com,*.notify.windows.com}
+    ports:
+      - "8420:8420"
+    volumes:
+      - strazadata:/var/lib/straza
+
+volumes:
+  pgdata:
+  natsdata:
+  strazadata:

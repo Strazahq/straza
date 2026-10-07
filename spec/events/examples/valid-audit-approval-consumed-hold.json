@@ -1,0 +1,22 @@
+{
+  "specversion": "1.0",
+  "id": "01a0e3e0-5c1d-7a44-9b21-3f4e5d6c7b81",
+  "type": "straza.audit.approval",
+  "source": "strazad",
+  "time": "2026-09-27T09:41:07Z",
+  "data": {
+    "phase": "consumed",
+    "approvalId": "01a0e3df-2a10-7e55-8c11-000000000031",
+    "session": "01a0e3de-1111-7abc-9def-000000000045",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "rule": "hold-disable-user",
+    "set": "iga-guardrails",
+    "lane": "gateway",
+    "summary": "mcp.call midpoint:disable_user",
+    "state": "approved",
+    "decidedBy": "0197fa3c-0000-7abc-9def-000000000011",
+    "channel": "phone",
+    "consumedBy": "01a0e3de-1111-7abc-9def-000000000045",
+    "consumedAt": "2026-09-27T09:41:07Z"
+  }
+}

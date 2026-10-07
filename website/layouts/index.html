@@ -1,0 +1,12 @@
+{{ define "main" }}
+<div class="dbody wide">
+{{ partial "lnav.html" . }}
+<main id="main" class="main home" tabindex="-1">
+<div class="prose">
+<h1>{{ .Title }}</h1>
+{{ with .Description }}<p class="position">{{ . }}</p>{{ end }}
+{{ .Content }}
+</div>
+</main>
+</div>
+{{ end }}

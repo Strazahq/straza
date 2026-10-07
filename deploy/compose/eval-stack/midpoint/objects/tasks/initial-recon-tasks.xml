@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Straza eval stack: one-shot initial import tasks for the universal-rest
+  resource, one per object class. LiveSync starts from "now"
+  (getLatestSyncToken), so a fresh stack needs exactly one full import to
+  materialize the pre-existing catalog: apps as MCP server services and
+  each exported Straza role as one imported role
+  through the wire-group class (1c19). After that the LiveSync tasks carry
+  the deltas.
+-->
+
+<!--
+  Import lane: this file is the MANUAL import for an already-running stack
+  (midPoint GUI > Import object). On first boots the seeder (seed/seed.sh)
+  imports the SAME three tasks under the SAME OIDs via REST (one POST per
+  task; the REST tasks endpoint takes single objects, not this collection).
+  Identical OIDs + options=overwrite keep the two lanes idempotent against
+  each other; a re-seed re-runs the imports, which re-reconciles the mirror.
+  Keep this file and the seed.sh import-task loop in sync.
+-->
+<objects xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+         xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3">
+
+    <!-- USER (account): links Straza accounts to existing midPoint users by
+         username. Deliberately never CREATES users (no unmatched reaction on
+         the resource); alice stays an unmatched shadow. -->
+    <task oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c15">
+        <name>Straza initial recon - account</name>
+        <objectRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01" type="ResourceType"/>
+        <executionState>runnable</executionState>
+        <activity>
+            <work>
+                <reconciliation>
+                    <resourceObjects>
+                        <resourceRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01"/>
+                        <kind>account</kind>
+                        <intent>default</intent>
+                        <objectclass>ri:AccountObjectClass</objectclass>
+                    </resourceObjects>
+                </reconciliation>
+            </work>
+        </activity>
+    </task>
+
+    <!-- APP (entitlement): materializes ServiceType foci (archetype mcp-server) -->
+    <task oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c16">
+        <name>Straza initial recon - app</name>
+        <objectRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01" type="ResourceType"/>
+        <executionState>runnable</executionState>
+        <activity>
+            <work>
+                <reconciliation>
+                    <resourceObjects>
+                        <resourceRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01"/>
+                        <kind>entitlement</kind>
+                        <intent>app</intent>
+                        <objectclass>ri:CustomappObjectClass</objectclass>
+                    </resourceObjects>
+                </reconciliation>
+            </work>
+        </activity>
+    </task>
+
+    <!-- GROUP (entitlement) = the wire-group render of exported Straza
+         roles (revision 12): materializes RoleType foci, each under the
+         archetype of its kind, and links each role's shadow, which the
+         metarole's associationFromLink construction resolves for membership
+         (native association type strazaRoleMembership). -->
+    <task oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c19">
+        <name>Straza initial recon - role</name>
+        <objectRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01" type="ResourceType"/>
+        <executionState>runnable</executionState>
+        <activity>
+            <work>
+                <reconciliation>
+                    <resourceObjects>
+                        <resourceRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01"/>
+                        <!-- no intent on purpose: the resource has one role
+                             object type, so the sweep covers the whole
+                             objectclass and every role shadow lands in that
+                             one type whatever its kind -->
+                        <kind>entitlement</kind>
+                        <objectclass>ri:GroupObjectClass</objectclass>
+                    </resourceObjects>
+                </reconciliation>
+            </work>
+        </activity>
+    </task>
+
+</objects>

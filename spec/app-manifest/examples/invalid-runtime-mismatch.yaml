@@ -1,0 +1,13 @@
+# INVALID: runtime.kind is command but only a remote block is present.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: mismatch
+server:
+  name: example/mismatch
+  version: "1.0.0"
+straza:
+  runtime:
+    kind: command
+    remote:
+      url: https://example.com/mcp

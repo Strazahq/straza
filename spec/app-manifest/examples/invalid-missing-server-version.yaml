@@ -1,0 +1,12 @@
+# INVALID: server.version is required (the registry contract).
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: noversion
+server:
+  name: example/noversion
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://example.com/mcp

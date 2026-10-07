@@ -1,0 +1,15 @@
+{
+  "specversion": "1.0",
+  "id": "01a0b8d2-5e12-7a20-9b31-2c3d4e5f6072",
+  "type": "straza.audit.admin",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-09-24T10:14:03.698Z",
+  "data": {
+    "action": "draft.check",
+    "draft": "41",
+    "revision": 1,
+    "snapshot": "sha256:44f0be1c",
+    "refused": [],
+    "risks": ["server.agents-credential", "server.credential-host", "server.new-host"]
+  }
+}

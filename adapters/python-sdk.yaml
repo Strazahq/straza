@@ -1,0 +1,46 @@
+# python-sdk hook dialect: the payload shape `straza-agentkit` (kits/python)
+# emits when it spawns `straza hook` from inside a Python agent process.
+# The Python agents page of the docs describes the kit.
+#
+# The dialect deliberately mirrors claude-code's snake_case contract (one
+# less shape to reason about) with two differences: the KIT sends canonical
+# tool names directly (it has no vendor tool vocabulary to translate), and
+# SessionEnd may carry the model reply IN the payload (`prompt_response`,
+# the same payload-borne reply lane gemini's AfterAgent uses) because SDK
+# agents have no transcript file to delta-read.
+harness: python-sdk
+events:
+  SessionStart: session.start
+  UserPromptSubmit: prompt.submit
+  PreToolUse: tool.pre
+  PostToolUse: tool.post
+  SessionEnd: session.end
+fields:
+  sessionId: session_id
+  workspace: cwd
+  toolName: tool_name
+  toolInput: tool_input
+  prompt: prompt
+  promptResponse: prompt_response
+# The kit speaks the canonical taxonomy natively; identity map. mcp.call
+# arrives as the mcp__<app>__<tool> prefix form (parsed in code, same as
+# claude-code).
+tools:
+  shell.exec: shell.exec
+  file.write: file.write
+  file.edit: file.edit
+  file.read: file.read
+  net.fetch: net.fetch
+  task.spawn: task.spawn
+  other: other
+toolInputs:
+  shell.exec: { command: [command] }
+  # Delegation target: the langchain glue sends the subagent name in
+  # `command`, and other callers may send `subagent_type` raw. Without this
+  # entry the normalizer would drop it, and a rule that denies delegation to
+  # agent X could never match. Only a deny of all of task.spawn would work.
+  task.spawn: { command: [command, subagent_type] }
+  file.write: { paths: [paths, path] }
+  file.edit: { paths: [paths, path] }
+  file.read: { paths: [paths, path] }
+  net.fetch: { paths: [url, paths] }

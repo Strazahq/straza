@@ -1,0 +1,168 @@
+{
+  "//": "Schema file for the universal-rest-connector against Straza. Every ConnId object class the connector offers is declared here, the reserved __ACCOUNT__ and __GROUP__ included: nothing about Straza lives in the connector's Java. Unified role model (scim-profile revision 12): the SCIM group render is THE role projection, and 'role' feed events drive it.",
+  "//dialect": "The 'dialect' key picks the protocol mechanics. 'json' (the default) is plain REST over the admin API; 'scim' is RFC 7643 and 7644, which the /scim/v2 surface speaks.",
+  "//readonly": "Read-only is the default: creatable and updateable are false unless declared, and 'operations' defaults to search plus sync when the class has a sync block. The evidence classes app and user declare no write operation.",
+  "//sync": "The top-level 'sync' block is the change-feed transport, and each object class's 'sync' block routes feed records.",
+  "target": {
+    "name": "Straza",
+    "credentialHint": "Mint one with strazactl api-token create --scope scim:read,scim:write,identity:read,apps:read,changes:read,config:read, then check the token's scope covers the resource you are reading or writing."
+  },
+  "sync": {
+    "feedEndpoint": "/v1/admin/changes"
+  },
+  "objects": [
+    {
+      "objectClass": "app",
+      "listEndpoint": "/v1/admin/apps",
+      "icfsUid": "id",
+      "icfsName": "name",
+      "attributes": {
+        "version": {},
+        "runtime": {},
+        "status": {},
+        "detail": { "returnedByDefault": false },
+        "source": {},
+        "tools": { "multivalued": true }
+      },
+      "//syncNote": "apps.deployed/removed change events carry the app UID (the uuid id, the same value as GET /v1/admin/apps.id), so create/update re-fetch and delete all key by uid.",
+      "sync": {
+        "requestTypes": ["app"],
+        "self": ["app"]
+      }
+    },
+    {
+      "objectClass": "user",
+      "listEndpoint": "/v1/admin/users",
+      "icfsUid": "id",
+      "icfsName": "username",
+      "attributes": {
+        "email": {},
+        "display": {},
+        "title": {},
+        "status": {},
+        "origin": {},
+        "kind": {},
+        "external_id": {}
+      },
+      "associations": {
+        "roles": {
+          "endpoint": "/v1/admin/assignments",
+          "localField": "id",
+          "matchField": "subject_id",
+          "valueField": "role_id",
+          "where": { "subject_kind": "user" }
+        }
+      },
+      "//syncNote": "user + assignment changes surface as identity events keyed to the user uuid (self); assignment CRUD re-syncs the subject, re-deriving ri:roles (membership changes emit 'user' events for the affected holder at revision 12). Hard deletes surface as type 'identity' → delete.",
+      "sync": {
+        "requestTypes": ["user"],
+        "self": ["user"],
+        "delete": ["identity"]
+      }
+    },
+    {
+      "objectClass": "__ACCOUNT__",
+      "//": "Full user lifecycle over the SCIM 2.0 surface. Uid is the SCIM id, name is userName.",
+      "dialect": "scim",
+      "basePath": "/scim/v2",
+      "coreSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "namespaces": { "ext": "urn:straza:params:scim:schemas:extension:2.0:User" },
+      "icfsUid": "id",
+      "icfsName": "userName",
+      "operations": ["search", "sync", "create", "update", "updateDelta", "delete"],
+      "endpoints": {
+        "list": "/Users",
+        "byId": "/Users/{id}",
+        "create": "/Users",
+        "replace": "/Users/{id}",
+        "patch": "/Users/{id}",
+        "delete": "/Users/{id}"
+      },
+      "//enable": "ConnId __ENABLE__ maps to the SCIM active attribute and is never itself a wire path.",
+      "enable": "active",
+      "//revive": "A create against a previously deactivated userName answers 201 with the SAME id (the profile's revive). The engine takes a new object's uid from the create response, so the revived id is adopted with no key to declare.",
+      "//agentic": "On create only, and only when the outgoing userType is agent or service, the IETF agentic-SCIM URN joins the schemas array so the server stores kind=nhi. The mark is create-only and unrecoverable, so it is never sent for a human or for an absent userType.",
+      "createOnlySchemas": [
+        {
+          "urn": "urn:ietf:params:scim:schemas:extension:agent:2.0:Agent",
+          "when": { "attribute": "userType", "in": ["agent", "service"], "caseInsensitive": true },
+          "configGate": "emitAgenticUrn"
+        }
+      ],
+      "paging": { "pageSize": 200 },
+      "filters": { "pushable": { "__NAME__": "userName", "externalId": "externalId" } },
+      "attributes": {
+        "__NAME__": { "required": true, "creatable": true, "updateable": true },
+        "externalId": { "creatable": true, "updateable": true },
+        "displayName": { "creatable": true, "updateable": true },
+        "title": { "creatable": true, "updateable": true },
+        "email": { "path": "emails[primary=true].value", "creatable": true, "updateable": true },
+        "//typology": "The server reads an absent typology field in a PUT as leave alone, so clearing one is a PATCH remove.",
+        "userType": { "creatable": true, "updateable": true, "clearVia": "patchOnly" },
+        "agencyMode": { "path": "ext:agencyMode", "creatable": true, "updateable": true, "clearVia": "patchOnly" },
+        "sponsor": { "path": "ext:sponsor", "creatable": true, "updateable": true, "clearVia": "patchOnly" },
+        "swarmId": { "path": "ext:swarmId", "creatable": true, "updateable": true, "clearVia": "patchOnly" },
+        "ephemeral": { "path": "ext:ephemeral", "dataType": "Boolean", "creatable": true, "updateable": true, "clearVia": "patchOnly" },
+        "//readonly": "Membership reflection, the lock block and the Straza-born facts are declared read-only so midPoint never writes them.",
+        "groups": { "path": "groups[].value", "multivalued": true },
+        "locked": { "path": "ext:locked", "dataType": "Boolean" },
+        "lockReason": { "path": "ext:lockReason" },
+        "lockedAt": { "path": "ext:lockedAt" },
+        "lockOrigin": { "path": "ext:lockOrigin" },
+        "kind": { "path": "ext:kind" },
+        "origin": { "path": "ext:origin" }
+      },
+      "sync": {
+        "requestTypes": ["user"],
+        "self": ["user"],
+        "delete": ["identity"]
+      }
+    },
+    {
+      "objectClass": "__GROUP__",
+      "//": "A wire-group IS an exported Straza role. Uid is the role id, name is the role name, and membership is the one writable fact.",
+      "dialect": "scim",
+      "basePath": "/scim/v2",
+      "coreSchema": "urn:ietf:params:scim:schemas:core:2.0:Group",
+      "namespaces": { "ext": "urn:straza:params:scim:schemas:extension:2.0:Group" },
+      "icfsUid": "id",
+      "icfsName": "displayName",
+      "//lifecycle": "No create and no delete: roles are born in Straza and the IdM imports them and assigns membership. The name is left read-only, so a rename is refused before it reaches the wire.",
+      "operations": ["search", "sync", "update", "updateDelta"],
+      "//hints": "What a refused verb tells the operator. The connector supplies the refusal, this file supplies the half only Straza knows.",
+      "operationHints": {
+        "create": "Roles are born in Straza, and the identity manager imports them and assigns membership.",
+        "delete": "Roles are deleted in Straza, and the identity manager drops the membership it assigned.",
+        "rename": "Roles are renamed in Straza, and the new name arrives with the next import."
+      },
+      "endpoints": {
+        "list": "/Groups",
+        "byId": "/Groups/{id}",
+        "replace": "/Groups/{id}",
+        "patch": "/Groups/{id}"
+      },
+      "paging": { "pageSize": 200 },
+      "filters": { "pushable": { "__NAME__": "displayName" } },
+      "attributes": {
+        "members": { "path": "members[].value", "multivalued": true, "creatable": true, "updateable": true },
+        "//projection": "The read-only access projection (spec/scim-profile section 4.1) with clean ConnId names. The role-to-app association rides apps.",
+        "role": { "path": "ext:role" },
+        "roleKind": { "path": "ext:roleKind" },
+        "plane": { "path": "ext:plane" },
+        "description": { "path": "ext:description" },
+        "apps": { "path": "ext:apps", "multivalued": true },
+        "tools": { "path": "ext:tools", "multivalued": true },
+        "policies": { "path": "ext:policies", "multivalued": true },
+        "administers": { "path": "ext:administers", "multivalued": true },
+        "server": { "path": "ext:server" }
+      },
+      "//syncNote": "A role change or a membership change emits a role event. A binding change reshapes the projection's apps and tools without an own role event, so the class re-emits on it.",
+      "sync": {
+        "requestTypes": ["role", "binding"],
+        "self": ["role"],
+        "delete": ["identity"],
+        "reemitAll": ["binding"]
+      }
+    }
+  ]
+}

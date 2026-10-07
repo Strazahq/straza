@@ -1,0 +1,31 @@
+# The official GitHub MCP server via its hosted remote endpoint, with a
+# role-bound static token injected gateway-side.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: github
+  namespace: io.github.github
+  description: GitHub MCP server (hosted remote), token injected gateway-side
+server:
+  name: io.github.github/github-mcp-server
+  description: Connect AI assistants to GitHub - manage repos, issues, PRs, and workflows through natural language.
+  repository:
+    url: https://github.com/github/github-mcp-server
+    source: github
+  version: "0.17.1"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://api.githubcopilot.com/mcp/
+      auth: inject
+  credential:
+    kind: static
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"
+  exposure:
+    tools: ["*"]
+  limits:
+    rps: 20

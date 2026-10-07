@@ -1,0 +1,74 @@
+{{- /* mode_default picks the form of the steps a page opens on until the
+reader chooses in the header switch. The pre-paint script lets that stored
+choice win. */ -}}
+{{- $mode := .Params.mode_default | default "console" -}}
+{{- if not (in (slice "console" "cli") $mode) }}{{ errorf "%s: mode_default is %q. Set it to console or cli." .File.Path $mode }}{{ end -}}
+<!DOCTYPE html>
+<html lang="{{ site.Language.Lang }}" data-mode="{{ $mode }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ if .IsHome }}{{ site.Title }}{{ else }}{{ .Title }} · Straza{{ end }}</title>
+{{ with .Description }}<meta name="description" content="{{ . }}">
+{{ end }}<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="%23d6a63a" d="M12 2 4 5v6.2c0 4.9 3.3 9.3 8 10.8 4.7-1.5 8-5.9 8-10.8V5l-8-3Z"/><path fill="%230d1117" d="m12 6.2 1.4 3.6 3.8.2-3 2.4 1 3.7L12 14l-3.2 2.1 1-3.7-3-2.4 3.8-.2L12 6.2Z"/></svg>'>
+<link rel="preload" href="{{ "assets/fonts/atkinson-hyperlegible-next-latin.woff2" | relURL }}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{ printf "assets/site.css?v=%s" (readFile "static/assets/site.css" | sha256) | relURL }}">
+<script> 
+(function(){var d=document.documentElement;d.className+=" js";try{var t=localStorage.getItem("straza-theme");if(t==="light"||t==="dark")d.setAttribute("data-theme",t);var m=localStorage.getItem("straza-mode");if(m==="console"||m==="cli")d.setAttribute("data-mode",m)}catch(e){}})();</script>
+<script src="{{ printf "assets/docs-search.js?v=%s" (readFile "static/assets/docs-search.js" | sha256) | relURL }}" defer></script>
+<script src="{{ printf "assets/site.js?v=%s" (readFile "static/assets/site.js" | sha256) | relURL }}" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+{{- /* The header carries the five reading sections. Project lives in the
+footer only, so it is left out here by its folder name. */}}
+<header class="dhead">
+  <div class="dhead-in">
+    <button type="button" class="menu-btn" aria-expanded="false" aria-controls="lnav" hidden>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      <span>Menu</span>
+    </button>
+    <a class="brand" href="{{ "/" | relURL }}" aria-label="Straza docs home">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="var(--gold)" d="M12 2 4 5v6.2c0 4.9 3.3 9.3 8 10.8 4.7-1.5 8-5.9 8-10.8V5l-8-3Z"/><path fill="var(--bg)" d="m12 6.2 1.4 3.6 3.8.2-3 2.4 1 3.7L12 14l-3.2 2.1 1-3.7-3-2.4 3.8-.2L12 6.2Z"/></svg>
+      <span>STRAZA</span><span class="docs">docs</span>
+    </a>
+    <nav class="dnav" aria-label="Sections">
+      {{- range where site.Home.Sections.ByWeight "Section" "ne" "project" }}
+      <a href="{{ .RelPermalink }}"{{ if eq $.FirstSection . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a>
+      {{- end }}
+    </nav>
+    {{- if .Params.modes }}
+    <div class="modesw" role="group" aria-label="Show steps for" hidden>
+      <span class="msl">Steps for</span>
+      <button type="button" data-mode="console" aria-pressed="false">Console</button>
+      <button type="button" data-mode="cli" aria-pressed="false">CLI</button>
+    </div>
+    {{- end }}
+    <button id="search-open" class="dsearch" type="button" aria-label="Search the docs" aria-haspopup="dialog" aria-controls="search-dialog" hidden>
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m11 11 3.5 3.5" stroke="currentColor" stroke-width="1.6"/></svg>
+      <span class="dsearch-label">Search the docs</span><kbd aria-hidden="true">/</kbd>
+    </button>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch the color theme">
+      <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+      <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path></svg>
+    </button>
+  </div>
+</header>
+
+{{ block "main" . }}{{ end }}
+{{ partial "search.html" . }}
+
+<footer class="dfoot">
+  <nav aria-label="Project">
+    {{- range slice "changelog" "roadmap" "contributing" "license" "faq" "support" }}
+    {{- with site.GetPage (printf "/project/%s" .) }}
+    <a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a>
+    {{- end }}
+    {{- end }}
+  </nav>
+  {{- if not site.Params.version }}{{ errorf "website/hugo.toml has no params.version. Set it to the appVersion in deploy/helm/straza/Chart.yaml." }}{{ end }}
+  <p>These docs describe Straza v{{ site.Params.version }}.</p>
+  <p>Straza™ is a trademark of SynapTech s. r. o.</p>
+</footer>
+</body>
+</html>

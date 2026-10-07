@@ -1,0 +1,15 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: bad-ticket-class
+spec:
+  rules:
+    - id: r1
+      tools: [mcp.call]
+      apps: [vault]
+      toolNames:
+        allow: ["rotate_root_key"]
+      effect: allow
+      mode: approve
+      approve:
+        class: bogus

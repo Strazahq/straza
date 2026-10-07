@@ -1,0 +1,22 @@
+{
+  "specversion": "1.0",
+  "id": "0198abcd-3333-7abc-9def-000000000077",
+  "type": "straza.audit.tool",
+  "source": "straza",
+  "time": "2026-08-24T10:02:44.108Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "shell.exec",
+    "app": "",
+    "command": "ls -la",
+    "workspace": "/work/proj",
+    "effect": "allow",
+    "ruleId": "",
+    "setName": "",
+    "reason": "",
+    "snapshot": "sha256:44f0be1c"
+  }
+}

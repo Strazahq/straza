@@ -1,0 +1,16 @@
+# Invalid: an exposure block must name its tools, also when it only turns
+# views on (revision 6). Write tools: ["*"] beside views to keep every tool.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: dashboards
+server:
+  name: com.example/dashboards
+  version: "1.2.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://dashboards.example.com/mcp
+  exposure:
+    views: true

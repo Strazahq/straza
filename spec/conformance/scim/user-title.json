@@ -1,0 +1,77 @@
+{
+  "name": "user-title",
+  "steps": [
+    {
+      "note": "revision 10: core title (RFC 7643) is a mapped attribute, for agents as much as humans",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "deploy-bot-7",
+          "userType": "agent",
+          "title": "Deploy bot"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "userName": "deploy-bot-7",
+          "title": "Deploy bot",
+          "userType": "agent"
+        }
+      },
+      "capture": { "uid": "id" }
+    },
+    {
+      "note": "PATCH replace, bare path",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            { "op": "replace", "path": "title", "value": "Release manager" }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": { "title": "Release manager" }
+      }
+    },
+    {
+      "note": "PUT is standard replace for title: a document without it clears (unlike the typology deviation)",
+      "request": {
+        "method": "PUT",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "deploy-bot-7"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": { "userName": "deploy-bot-7" }
+      }
+    },
+    {
+      "note": "PATCH remove clears explicitly too",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            { "op": "add", "path": "title", "value": "Interim" },
+            { "op": "remove", "path": "title" }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": { "userName": "deploy-bot-7" }
+      }
+    }
+  ]
+}

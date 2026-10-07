@@ -1,0 +1,114 @@
+# The admin revokes a device enrollment. The kit on that device is stood
+# down by push, the next hook decision is refused, and a fresh enrolment of
+# the same person works again, because the user is untouched.
+# Checked against the running binary [live], because the API
+# reference documents routes without request or response shapes: the activate
+# body is {status: active|draft}, a pack binding names role_id, deletes of
+# roles, apps, users and devices answer 200 with a status field, a policy
+# delete answers 204, and the bare approvals list is an object with an
+# approvals array.
+# The daemon starts after the first session.start of its identity: the
+# daemon keeps a session fresh and holds its push stream, so it refuses to
+# run before one exists [live].
+id: g1-device-revoke
+group: G1
+title: The admin deletes a device and a fresh enrolment works again
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (revocation travels as a pushed event);
+  website/content/security/credentials-and-sessions.md;
+  spec/events/SPEC.md §2 (straza.revocation.device) and §5 (the device
+  push subject); spec/scim-profile/SPEC.md §3 and conformance/scim
+  users-lifecycle; website/content/reference/api.md section Users and
+  devices (the devices list is an array, empty when there are none);
+  website/content/reference/cli/strazactl/strazactl_devices_revoke.md
+  (what a device revoke does and does not touch);
+  docs/quickstart-standalone.md §6 (the revoke wording).
+  suspect: the field id on a device row, the success status codes, and
+  whether the revoke wording of the quickstart is what a device revoke
+  relays.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  dave: {kind: human, password: "Walk-2026!"}
+steps:
+  - name: the IdM provisions dave over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g1-dave
+        userName: dave
+        displayName: Dave Device
+        active: true
+    want: {status: 201}
+    save: {daveId: id}
+  - name: the admin sets dave's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${daveId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: dave has no devices before he enrolls
+    admin:
+      method: GET
+      path: /v1/admin/users/${daveId}/devices
+    want: {status: 200}
+  - name: dave enrolls his laptop
+    enroll: {as: dave}
+  - name: dave starts a session
+    hook:
+      as: dave
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: dave's daemon holds the push stream
+    daemon: {as: dave, action: start}
+  - name: a benign command is allowed
+    hook:
+      as: dave
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: the admin reads dave's devices and keeps the id of the enrolled one
+    # suspect: the row field id is assumed; the list is documented as an array
+    admin:
+      method: GET
+      path: /v1/admin/users/${daveId}/devices
+    want: {status: 200}
+    save: {deviceId: 0.id}
+  - name: the admin revokes the device enrollment
+    admin:
+      method: DELETE
+      path: /v1/admin/users/${daveId}/devices/${deviceId}
+    want: {status: 200}
+  - name: the kit on the revoked device is stood down and the next decision is refused
+    hook:
+      as: dave
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: deny, reasonContains: "revoked"}
+    within: 10s
+    timer: kill-switch-hook
+  - name: dave's old daemon is stopped before the fresh enrolment
+    daemon: {as: dave, action: stop}
+  - name: dave enrolls again with a fresh interactive login
+    enroll: {as: dave}
+  - name: dave starts a session on the fresh enrolment
+    hook:
+      as: dave
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: the benign command is allowed again
+    hook:
+      as: dave
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: the fresh enrolment shows as a device again
+    admin:
+      method: GET
+      path: /v1/admin/users/${daveId}/devices
+    want: {status: 200}
+    save: {freshDeviceId: 0.id}
+  - name: the IdM deactivates dave
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${daveId}
+    want: {status: 204}

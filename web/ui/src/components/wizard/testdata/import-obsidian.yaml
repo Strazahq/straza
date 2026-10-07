@@ -1,0 +1,39 @@
+# The answer of POST /v1/admin/apps/import on eval at v1.0.0-1108-g45167c83, captured 2026-09-11.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+    name: hint-services-obsidian-github-mcp
+    namespace: ai.smithery
+server:
+    $schema: https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json
+    description: Connect AI assistants to your GitHub-hosted Obsidian vault to seamlessly access, search, and analyze your knowledge base.
+    name: ai.smithery/Hint-Services-obsidian-github-mcp
+    remotes:
+        - headers:
+            - description: Bearer token for Smithery authentication
+              isRequired: true
+              isSecret: true
+              name: Authorization
+              value: Bearer {smithery_api_key}
+          type: streamable-http
+          url: https://server.smithery.ai/@Hint-Services/obsidian-github-mcp/mcp
+    repository:
+        source: github
+        url: https://github.com/Hint-Services/obsidian-github-mcp
+    version: 0.4.0
+straza:
+    runtime:
+        kind: remote
+        remote:
+            url: https://server.smithery.ai/@Hint-Services/obsidian-github-mcp/mcp
+            auth: inject
+    credential:
+        kind: static
+        inject:
+            as: header
+            name: Authorization
+            template: Bearer {{secret}}
+    exposure:
+        tools:
+            - '*'
+

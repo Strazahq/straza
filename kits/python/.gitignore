@@ -1,0 +1,5 @@
+# pip building the kit from the tree (the harness-matrix python-kit lane
+# installs ./kits/python the way a user would) drops these in-tree.
+/build/
+/straza_agentkit.egg-info/
+__pycache__/

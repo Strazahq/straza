@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AR:Keycloak:Account: the ONE owner of the Keycloak login construction, the
+  same layering AR:Straza:Account gives the governed Straza account. The
+  access packages give the login by inducing THIS role, never by an inline
+  construction, so "who can sign in" is one certifiable role and the
+  construction lives in one place. A package gates its inducement of this
+  role to human subjects. AI agents authenticate with an Ed25519 key and
+  never grow a Keycloak account.
+  Imported by the seeder's roles glob BEFORE the Keycloak resource exists,
+  the same proven lane AR:Straza:Account rides ahead of the Straza
+  resource: the resourceRef resolves at evaluation time, not at import.
+  When the Keycloak connector is absent the seeder leaves this role
+  uninduced and it stays inert.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0e">
+    <name>AR:Keycloak:Account</name>
+    <description>Account role: the Keycloak login itself. The access
+        packages that include interactive sign-in induce this role. Losing
+        every login-carrying role deprovisions the Keycloak account while
+        the governed Straza account (AR:Straza:Account) stays.</description>
+    <inducement>
+        <construction>
+            <resourceRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c04" type="ResourceType"/>
+            <kind>account</kind>
+            <intent>default</intent>
+        </construction>
+    </inducement>
+</role>

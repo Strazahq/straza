@@ -1,0 +1,7 @@
+{{- /* A section's pages as a plain list: each row is the page's title and
+its description, the whole row one link. */ -}}
+<ul class="pagelist">
+{{- range . }}
+  <li><a href="{{ .RelPermalink }}"><span class="pl-t">{{ .Title }}</span>{{ with .Description }}<span class="pl-d">{{ . }}</span>{{ end }}</a></li>
+{{- end }}
+</ul>

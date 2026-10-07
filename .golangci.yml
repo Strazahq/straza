@@ -1,0 +1,42 @@
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags: [docsgen]
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+    - unparam
+    - gosec
+    - revive
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    gosec:
+      excludes:
+        - G104 # duplicated by errcheck
+    revive:
+      rules:
+        - name: exported
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

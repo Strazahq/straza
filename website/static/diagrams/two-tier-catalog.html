@@ -1,0 +1,360 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two-tier catalog · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+.controls .cap{font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;
+  padding:0 4px 0 6px;font-weight:600}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 10px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);
+  color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.legend{display:flex;gap:10px;align-items:center;font-size:11px;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:5px 10px;flex-wrap:wrap}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.legend .ok{background:var(--ok-bg);border:1px solid var(--ok)}
+.legend .dn{background:var(--danger-bg);border:1px solid var(--danger)}
+.legend .un{background:var(--unknown-bg);border:1px solid var(--unknown)}
+.legend .wn{background:var(--warn-bg);border:1px solid var(--warn)}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:84px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:84ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.s{font-size:12px;font-weight:600}
+.d{font-size:10.5px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.06em}
+.mono{font-family:var(--font-mono);font-size:11px}
+.tx{fill:var(--text)}
+.chip{fill:var(--surface-2);stroke:var(--border);stroke-width:1.25;
+  transition:stroke .2s,stroke-width .2s,fill .25s,filter .2s,opacity .2s}
+.edge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ar)}
+.edge.dash{stroke-dasharray:5 4}
+.edge.dim{opacity:.22}
+.mk{fill:var(--muted)}
+.zone{fill:none;stroke:var(--border);stroke-width:1.25;stroke-dasharray:3 4;opacity:.7}
+
+ 
+.st-ok .chip{stroke:var(--ok);fill:var(--ok-bg)}
+.st-deny .chip{stroke:var(--danger);fill:var(--danger-bg)}
+.st-warn .chip{stroke:var(--warn);fill:var(--warn-bg)}
+.st-un .chip{stroke:var(--unknown);fill:var(--unknown-bg)}
+.st-acc .chip{stroke:var(--accent);fill:var(--accent-bg)}
+
+.lane{cursor:pointer;outline:none;transition:opacity .2s}
+.lane:hover .chip.tool,.lane:focus .chip.tool{stroke:var(--accent);stroke-width:2;filter:drop-shadow(0 0 4px var(--accent))}
+.lane:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hz{cursor:pointer;outline:none}
+.hz:hover .chip,.hz:focus .chip{stroke:var(--accent);stroke-width:2}
+.hz:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.badge{font-size:9.5px;fill:var(--accent);font-family:var(--font-mono)}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ two-tier catalog</span></h1>
+  <div class="controls" role="group" aria-label="Session">
+    <span class="cap">session</span>
+    <button class="ctl" id="sA" aria-pressed="true">A · alice</button>
+    <button class="ctl" id="sB" aria-pressed="false">B · bob</button>
+  </div>
+  <div class="controls" role="group" aria-label="Policy filter">
+    <span class="cap">policyFilter</span>
+    <button class="ctl" id="fOn"  aria-pressed="true">on</button>
+    <button class="ctl" id="fOff" aria-pressed="false">off</button>
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span><span class="sw ok"></span>in tools/list</span>
+    <span><span class="sw dn"></span>hidden</span>
+    <span><span class="sw wn"></span>shown: filter off</span>
+    <span><span class="sw un"></span>nonexistent</span>
+  </div>
+</header>
+
+<div class="stage">
+<svg id="dia" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
+<title id="svgT">The two-tier MCP catalog</title>
+<desc id="svgD">Candidate tools pass two gates. Tier 1, the shared role catalog, keeps only tools bound to the session's roles (inventory intersect exposure intersect bindings); a tool with no binding is never a candidate, and the built-in native straza tools join as candidates for every role with no binding at all. Tier 2, the per-session overlay, probes the policy engine once per tier-1 tool with the full subject: a denied app tool is hidden when policyFilter is on, a denied native tool is always hidden, and an approve-gated tool stays visible with an injected justification field. The same Tier 1 serves both sessions; only the Tier 2 overlay differs. The final tools/list is Tier 1 minus the hidden set, paginated behind an opaque self-validating cursor.</desc>
+<defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
+</defs>
+
+
+<rect class="zone" x="206" y="118" width="176" height="332" rx="8"/>
+<rect class="zone" x="398" y="118" width="188" height="332" rx="8"/>
+<rect class="zone" x="606" y="118" width="380" height="332" rx="8"/>
+
+
+<text class="d" x="20" y="34"><tspan class="tx" style="font-weight:600">subject</tspan> <tspan id="subj" class="mono">alice · roles: developer · userType: human · attestation: verified</tspan></text>
+
+
+<text class="cap" x="20"  y="106">CANDIDATE TOOLS</text>
+<g class="hz" id="hz-t1" tabindex="0" role="button" aria-label="Tier 1, the shared role catalog">
+  <text class="s" x="214" y="98">TIER 1 · shared</text>
+  <text class="cap" x="214" y="112">∩ inventory ∩ exposure ∩ bindings</text>
+</g>
+<g class="hz" id="hz-t2" tabindex="0" role="button" aria-label="Tier 2, the per-session policy overlay">
+  <text class="s" x="406" y="98">TIER 2 · per session</text>
+  <text class="cap" x="406" y="112">probe engine · full subject</text>
+</g>
+<g class="hz" id="hz-out" tabindex="0" role="button" aria-label="The session tools/list output">
+  <text class="s" x="614" y="98">session tools/list</text>
+  <text class="cap" x="614" y="112">tier-1 minus hidden · opaque cursor</text>
+</g>
+
+
+<g id="lanes"></g>
+
+
+<text class="cap" x="20" y="474">DEFAULT-DENY: no binding ⇒ never a candidate · a native tool is visible only when policy authorizes it</text>
+<text class="cap" x="20" y="492">TIER 1 is identical for both sessions (same roles, cached + shared); only the TIER 2 overlay differs by user / typology / attestation</text>
+<text class="cap" x="20" y="510">tools/list paginates behind base64url(1\0digest\0offset); any catalog change fails the cursor with -32602 and the client re-lists</text>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">Switch session (A alice / B bob) and toggle policyFilter to watch the same shared Tier 1 produce a different per-session tools/list. Hover a tool row for its reasoning. Native straza tools carry no binding, so policy is their only visibility gate.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>A gateway tools/list is built in two tiers. <strong>Tier 1</strong> is the shared role catalog:
+  per app, cached upstream inventory intersected with manifest exposure and the union of the session
+  roles' tool bindings. A tool with <strong>no binding is never a candidate</strong> (default-deny), so
+  it cannot appear no matter what. The built-in <strong>native straza app</strong> (approval_request and
+  friends) has no apps-table row and no binding, so it is appended as a candidate for every role. One
+  Tier 1 is computed per role set and shared across every session that holds those roles.
+  <strong>Tier 2</strong> is the per-session overlay: it probes the policy engine once per Tier 1 tool
+  with the session's <strong>full subject</strong> (user, roles, identity typology, attestation), which
+  is what lets user-scoped and typology-scoped rules take effect. A non-allow verdict hides the tool when
+  <code>apps.catalog.policyFilter</code> is on; a denied <strong>native</strong> tool is always hidden,
+  since policy authorization is its only visibility gate; an approve-gated tool stays visible with an
+  injected <code>_straza_justification</code> field. The final list is Tier 1 minus the hidden set, with
+  approve-gated schema swaps, paginated behind an opaque self-validating cursor that fails closed on any
+  catalog change. Because the two sessions here hold the same role, they share one Tier 1; only their
+  Tier 2 overlays differ.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var SVGNS='http://www.w3.org/2000/svg';
+var nar=document.getElementById('nar');
+var DEF='Switch session (A alice / B bob) and toggle policyFilter to watch the same shared Tier 1 produce a different per-session tools/list. Hover a tool row for its reasoning. Native straza tools carry no binding, so policy is their only visibility gate.';
+
+ 
+var TOOLS=[
+ {id:'github:create_issue', bind:'app',    A:'allow',   B:'allow'},
+ {id:'github:merge_pr',      bind:'app',    A:'allow',   B:'approve'},
+ {id:'github:delete_repo',   bind:'app',    A:'deny',    B:'deny'},
+ {id:'db:query',             bind:'app',    A:'allow',   B:'allow'},
+ {id:'secrets:rotate',       bind:'none',   A:'-',       B:'-'},
+ {id:'straza:approval_request', bind:'native', A:'allow', B:'allow'},
+ {id:'straza:approval_status',  bind:'native', A:'allow', B:'deny'}
+];
+var SUBJ={A:'alice · roles: developer · userType: human · attestation: verified',
+          B:'bob · roles: developer · userType: human · attestation: advisory'};
+
+var X={tool:20,twf:172, g1:214,g1w:150, g2:406,g2w:172, res:614,resw:364};
+var Y0=140,DY=44;
+
+ 
+function g1(bind){
+  if(bind==='app')   return {t:'bound',              cls:'st-ok'};
+  if(bind==='native')return {t:'native · no binding',cls:'st-acc'};
+  return {t:'no binding',cls:'st-un'};
+}
+ 
+function resolve(tool,sess,filter){
+  if(tool.bind==='none')
+    return {inT1:false,g2:'not evaluated',g2cls:'st-un',res:'nonexistent · default-deny',rescls:'st-un',cut:'g1'};
+  var v=tool[sess];
+  if(v==='allow')
+    return {inT1:true,g2:'allow',g2cls:'st-ok',res:'in tools/list',rescls:'st-ok',cut:null};
+  if(v==='approve')
+    return {inT1:true,g2:'approve',g2cls:'st-acc',res:'in tools/list',rescls:'st-ok',badge:'+_straza_justification',cut:null};
+   
+  if(tool.bind==='native')
+    return {inT1:true,g2:'not authorized',g2cls:'st-deny',res:'hidden · native gate',rescls:'st-deny',cut:'g2'};
+  if(filter)
+    return {inT1:true,g2:'deny',g2cls:'st-deny',res:'hidden · policyFilter',rescls:'st-deny',cut:'g2'};
+  return {inT1:true,g2:'deny',g2cls:'st-warn',res:'shown · policyFilter off',rescls:'st-warn',cut:null};
+}
+
+ 
+var lanesG=document.getElementById('lanes');
+function mk(tag,attrs,txt){var e=document.createElementNS(SVGNS,tag);for(var k in attrs)e.setAttribute(k,attrs[k]);if(txt!=null)e.textContent=txt;return e;}
+function chip(x,y,w,h){return mk('rect',{'class':'chip',x:x,y:y,width:w,height:h,rx:6});}
+var laneEls=[];
+TOOLS.forEach(function(tool,i){
+  var yc=Y0+i*DY, y=yc-16, h=32;
+  var g=mk('g',{'class':'lane',id:'lane-'+i,tabindex:'0','role':'button','aria-label':tool.id});
+  // tool chip
+  var tc=chip(X.tool,y,X.twf,h); tc.classList.add('tool');
+  g.appendChild(tc);
+  g.appendChild(mk('text',{'class':'mono tx',x:X.tool+10,y:yc+4},tool.id));
+  // edges
+  var e1=mk('path',{'class':'edge',d:'M'+(X.tool+X.twf)+' '+yc+' L'+X.g1+' '+yc});
+  var e2=mk('path',{'class':'edge',d:'M'+(X.g1+X.g1w)+' '+yc+' L'+X.g2+' '+yc});
+  var e3=mk('path',{'class':'edge',d:'M'+(X.g2+X.g2w)+' '+yc+' L'+X.res+' '+yc});
+  // gate-1 (static, coloured via a wrapper class the CSS targets as `.st-xx .chip`)
+  var g1i=g1(tool.bind);
+  g.appendChild(e1);
+  var g1w=mk('g',{'class':g1i.cls});
+  g1w.appendChild(chip(X.g1,y,X.g1w,h));
+  g1w.appendChild(mk('text',{'class':'d tx',x:X.g1+X.g1w/2,y:yc+4,'text-anchor':'middle'},g1i.t));
+  g.appendChild(g1w);
+  // gate-2 chip (dynamic)
+  g.appendChild(e2);
+  var g2w=mk('g',{'class':'g2wrap'});
+  var g2c=chip(X.g2,y,X.g2w,h); g2w.appendChild(g2c);
+  var g2t=mk('text',{'class':'d tx g2t',x:X.g2+X.g2w/2,y:yc+4,'text-anchor':'middle'},''); g2w.appendChild(g2t);
+  g.appendChild(g2w);
+  // result chip (dynamic)
+  g.appendChild(e3);
+  var rw=mk('g',{'class':'reswrap'});
+  var rc=chip(X.res,y,X.resw,h); rw.appendChild(rc);
+  var rt=mk('text',{'class':'s tx rest',x:X.res+12,y:yc+4},''); rw.appendChild(rt);
+  var bd=mk('text',{'class':'badge resbadge',x:X.res+X.resw-10,y:yc+4,'text-anchor':'end'},''); rw.appendChild(bd);
+  g.appendChild(rw);
+  lanesG.appendChild(g);
+  laneEls.push({g:g,e1:e1,e2:e2,e3:e3,g2w:g2w,g2t:g2t,rw:rw,rt:rt,bd:bd,tc:tc,tool:tool});
+});
+
+var SESS='A',FILTER=true;
+function setWrapClass(el,cls){el.setAttribute('class',cls);}
+function render(){
+  document.getElementById('subj').textContent=SUBJ[SESS];
+  laneEls.forEach(function(L){
+    var st=resolve(L.tool,SESS,FILTER);
+    setWrapClass(L.g2w,'g2wrap '+st.g2cls);
+    L.g2t.textContent=st.g2;
+    setWrapClass(L.rw,'reswrap '+st.rescls);
+    L.rt.textContent=st.res;
+    L.bd.textContent=st.badge||'';
+    // dim the edge downstream of a cut
+    L.e2.classList.toggle('dim',st.cut==='g1');
+    L.e3.classList.toggle('dim',st.cut==='g1'||st.cut==='g2');
+    L.g2w.style.opacity=(st.cut==='g1')?'.4':'1';
+  });
+}
+function laneFact(L){
+  var t=L.tool, st=resolve(t,SESS,FILTER);
+  var head='<strong>'+t.id+'</strong>: ';
+  if(t.bind==='none') return head+'no role binding, so it is never a Tier 1 candidate and cannot appear (default-deny).';
+  if(t.bind==='native') head+='built-in native tool (no binding, candidate for every role). ';
+  var v=t[SESS];
+  if(v==='allow')   return head+'policy allows it for '+SUBJ[SESS].split(' ')[0]+', so it is in the tools/list.';
+  if(v==='approve') return head+'approve-gated: it stays visible with an injected <code>_straza_justification</code> field (built regardless of policyFilter).';
+  if(t.bind==='native') return head+'policy does not authorize it, so it is <strong>always hidden</strong> (a native tool has no binding, so policy is its only gate).';
+  if(FILTER) return head+'policy denies it and <code>policyFilter</code> is on, so it is hidden from tools/list.';
+  return head+'policy denies it but <code>policyFilter</code> is off, so it still appears (hiding is off; justification injection would still apply).';
+}
+var HZ={
+ 'hz-t1':'<strong>Tier 1 · shared role catalog</strong>: per app, cached inventory ∩ manifest exposure ∩ the union of the roles’ bindings; raw schemas. No binding ⇒ not a candidate. Cached per (roles, epoch, snapshot) and shared by every session with those roles.',
+ 'hz-t2':'<strong>Tier 2 · per-session overlay</strong>: probes the engine once per Tier 1 tool with the FULL subject (user, roles, identity typology, attestation). Non-allow ⇒ hidden under policyFilter (native: always); approve ⇒ inject <code>_straza_justification</code>.',
+ 'hz-out':'<strong>tools/list</strong>: Tier 1 minus the hidden set, with approve-gated schema swaps, paginated behind an opaque self-validating cursor base64url(1\\0digest\\0offset); any catalog change fails it with -32602 and the client re-lists.'
+};
+
+ 
+var pinned=null;
+function showLane(L){nar.innerHTML=laneFact(L);}
+laneEls.forEach(function(L){
+  L.g.addEventListener('mouseenter',function(){if(!pinned)showLane(L);});
+  L.g.addEventListener('mouseleave',function(){if(!pinned)nar.innerHTML=DEF;});
+  L.g.addEventListener('focus',function(){if(!pinned)showLane(L);});
+  L.g.addEventListener('blur',function(){if(!pinned)nar.innerHTML=DEF;});
+  L.g.addEventListener('click',function(ev){ev.stopPropagation();pinned=(pinned===L)?null:L;showLane(L);});
+  L.g.addEventListener('keydown',function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();pinned=(pinned===L)?null:L;showLane(L);}});
+});
+Object.keys(HZ).forEach(function(id){
+  var el=document.getElementById(id);
+  el.addEventListener('mouseenter',function(){if(!pinned)nar.innerHTML=HZ[id];});
+  el.addEventListener('mouseleave',function(){if(!pinned)nar.innerHTML=DEF;});
+  el.addEventListener('focus',function(){if(!pinned)nar.innerHTML=HZ[id];});
+  el.addEventListener('blur',function(){if(!pinned)nar.innerHTML=DEF;});
+});
+document.getElementById('dia').addEventListener('click',function(){pinned=null;nar.innerHTML=DEF;});
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape'){pinned=null;nar.innerHTML=DEF;}});
+
+function setSess(s){SESS=s;document.getElementById('sA').setAttribute('aria-pressed',String(s==='A'));document.getElementById('sB').setAttribute('aria-pressed',String(s==='B'));render();if(pinned)showLane(pinned);}
+function setFilter(f){FILTER=f;document.getElementById('fOn').setAttribute('aria-pressed',String(f));document.getElementById('fOff').setAttribute('aria-pressed',String(!f));render();if(pinned)showLane(pinned);}
+document.getElementById('sA').addEventListener('click',function(){setSess('A');});
+document.getElementById('sB').addEventListener('click',function(){setSess('B');});
+document.getElementById('fOn').addEventListener('click',function(){setFilter(true);});
+document.getElementById('fOff').addEventListener('click',function(){setFilter(false);});
+
+render();
+})();
+</script>
+</body>
+</html>

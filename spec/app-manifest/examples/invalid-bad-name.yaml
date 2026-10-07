@@ -1,0 +1,14 @@
+# INVALID: metadata.name must be a lowercase DNS label (no underscores; the
+# gateway namespaces tools as <name>__<tool>).
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: My_App
+server:
+  name: example/badname
+  version: "1.0.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://example.com/mcp

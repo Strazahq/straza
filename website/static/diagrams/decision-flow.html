@@ -1,0 +1,473 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decision flow · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+.controls .cap{font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;
+  padding:0 4px 0 6px;font-weight:600}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 10px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);
+  color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.ctl.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+button.ctl.primary[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);
+  color:var(--on-accent);box-shadow:none}
+button.ctl:disabled{opacity:.4;cursor:default}
+button.ctl:disabled:hover{background:transparent;border-color:transparent}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:86px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:82ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:15px;font-weight:600}
+.s{font-size:12.5px;font-weight:600}
+.d{font-size:11px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+.mono{font-family:var(--font-mono);font-size:10.5px;fill:var(--muted)}
+.box{fill:var(--surface);stroke:var(--border);stroke-width:1.25}
+.chip{fill:var(--surface-2);stroke:var(--border);stroke-width:1.25}
+.box,.chip{transition:stroke .2s,stroke-width .2s,fill .25s,filter .2s,opacity .25s}
+.edge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ar)}
+.edge.async{stroke-dasharray:5 4}
+.mk{fill:var(--muted)}.mkA{fill:var(--accent)}
+.elabel{font-size:10.5px;fill:var(--muted)}
+
+ 
+.lane{cursor:pointer;transition:opacity .25s}
+.lane.dim{opacity:.42}
+.lane:hover .chip,.lane:focus .chip{stroke:var(--accent);stroke-width:2;filter:drop-shadow(0 0 4px var(--accent))}
+.lane:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+ 
+.stepedge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ar);
+  transition:stroke .2s,stroke-width .2s}
+.stepedge.done{stroke:var(--muted);stroke-width:1.9}
+.stepedge.on{stroke:var(--accent);stroke-width:2.4;marker-end:url(#arA);filter:drop-shadow(0 0 4px var(--accent))}
+.n .box,.n .chip{transition:stroke .2s,stroke-width .2s,fill .25s,filter .2s}
+.n.done .box,.n.done .chip{stroke:var(--muted);stroke-width:1.8}
+.n.on .box,.n.on .chip{stroke:var(--accent);stroke-width:2;fill:var(--accent-bg);filter:drop-shadow(0 0 5px var(--accent))}
+
+ 
+.eff.ok .chip{stroke:var(--ok);fill:var(--ok-bg)}
+.eff.ok.on .chip{stroke:var(--ok);fill:var(--ok-bg);filter:drop-shadow(0 0 5px var(--ok))}
+.eff.deny .chip{stroke:var(--danger);fill:var(--danger-bg)}
+.eff.deny.on .chip{stroke:var(--danger);fill:var(--danger-bg);filter:drop-shadow(0 0 5px var(--danger))}
+.effcap.ok{fill:var(--ok)}.effcap.deny{fill:var(--danger)}
+
+.dot{fill:var(--accent);stroke:none;filter:drop-shadow(0 0 3px var(--accent))}
+.lf{display:inline}.ls{display:none}
+@media (max-width:620px){.lf{display:none}.ls{display:inline}}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ decision flow</span></h1>
+  <div class="controls" role="group" aria-label="Outcome variant">
+    <span class="cap">outcome</span>
+    <button class="ctl" id="v-allow"  aria-pressed="true">allow</button>
+    <button class="ctl" id="v-deny"   aria-pressed="false">deny</button>
+    <button class="ctl" id="v-server" aria-pressed="false">serverCheck</button>
+    <button class="ctl" id="v-class"  aria-pressed="false">classify</button>
+    <button class="ctl" id="v-hold"   aria-pressed="false">hold</button>
+    <button class="ctl" id="v-ticket" aria-pressed="false">ticket</button>
+  </div>
+  <div class="controls">
+    <button class="ctl primary" id="btnPlay" aria-pressed="false">play</button>
+    <button class="ctl" id="btnStep">step</button>
+    <button class="ctl" id="btnReset">reset</button>
+  </div>
+</header>
+
+<div class="stage">
+<svg id="dia" viewBox="0 0 960 600" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
+<title id="svgT">One governed tool call and the escalation trilogy</title>
+<desc id="svgD">A harness fires a hook; straza normalizes the event, verifies the signed snapshot, and decides locally in microseconds. The winning rule picks one of six outcomes: a plain allow or deny, or one of the three escalations serverCheck, classify, and approve. Approve has two shapes: a hold that blocks for a live human decision, and a ticket that denies now and lets a later real call consume a durable grant. Every outcome is audited asynchronously into the hash chain.</desc>
+<defs>
+  <marker id="ar"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
+  <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mkA"/></marker>
+</defs>
+
+
+<text class="cap" x="24" y="30">1 · LOCAL DECIDE (Tier 1, no server, no DB)</text>
+
+<g class="n" id="n-harness">
+  <rect class="box" x="24" y="42" width="150" height="46" rx="6"/>
+  <text class="s" x="99" y="65" text-anchor="middle">agent harness</text>
+  <text class="d" x="99" y="80" text-anchor="middle"><tspan class="lf">Claude · Codex · Gemini</tspan><tspan class="ls">Tier-1 CLI</tspan></text>
+</g>
+<path id="e1" class="stepedge" d="M174 65 L242 65"/>
+<text class="elabel" x="208" y="57" text-anchor="middle"><tspan class="lf">PreToolUse · stdin</tspan><tspan class="ls">hook</tspan></text>
+
+<g class="n" id="n-hook">
+  <rect class="box" x="246" y="40" width="230" height="50" rx="6"/>
+  <text class="s" x="258" y="59">straza hook · local PDP</text>
+  <text class="d" x="258" y="74">normalize → verify snapshot (fail closed)</text>
+  <text class="mono" x="258" y="87" style="fill:var(--text)">evaluate · deny-overrides · p99 &lt; 100 µs</text>
+</g>
+<path id="e2" class="stepedge" d="M476 65 L544 65"/>
+<text class="elabel" x="510" y="57" text-anchor="middle">winning rule</text>
+
+<g class="n" id="n-decide">
+  <rect class="box" x="548" y="42" width="150" height="46" rx="6"/>
+  <text class="s" x="623" y="63" text-anchor="middle">decide</text>
+  <text class="d" x="623" y="79" text-anchor="middle">effect + escalation?</text>
+</g>
+
+
+<text class="cap" x="150" y="118">2 · THE WINNING RULE PICKS ONE OUTCOME</text>
+<path id="forkbus" class="edge" d="M623 88 V128 H120 V468" style="marker-end:none"/>
+
+<g class="lane" id="lane-allow" tabindex="0" role="button" aria-label="Outcome: plain allow">
+  <path class="edge tap" d="M120 150 L166 150"/>
+  <g class="n" id="mc-allow"><rect class="chip" x="166" y="132" width="120" height="36" rx="6"/>
+    <text class="s" x="226" y="154" text-anchor="middle">allow</text></g>
+  <path class="edge" d="M286 150 L742 150"/>
+  <g class="n eff ok" id="ef-allow"><rect class="chip" x="746" y="132" width="184" height="36" rx="6"/>
+    <text class="s" x="838" y="154" text-anchor="middle">exit 0 · tool runs</text></g>
+</g>
+<g class="lane" id="lane-deny" tabindex="0" role="button" aria-label="Outcome: plain deny">
+  <path class="edge tap" d="M120 212 L166 212"/>
+  <g class="n" id="mc-deny"><rect class="chip" x="166" y="194" width="120" height="36" rx="6"/>
+    <text class="s" x="226" y="216" text-anchor="middle">deny</text></g>
+  <path class="edge" d="M286 212 L742 212"/>
+  <g class="n eff deny" id="ef-deny"><rect class="chip" x="746" y="194" width="184" height="36" rx="6"/>
+    <text class="s" x="838" y="216" text-anchor="middle">exit 2 · Straza: reason</text></g>
+</g>
+<g class="lane" id="lane-server" tabindex="0" role="button" aria-label="Escalation: serverCheck">
+  <path class="edge tap" d="M120 274 L166 274"/>
+  <g class="n" id="mc-server"><rect class="chip" x="166" y="256" width="120" height="36" rx="6"/>
+    <text class="s" x="226" y="278" text-anchor="middle">serverCheck</text></g>
+  <path class="edge" d="M286 274 L392 274"/>
+  <g class="n" id="ma-server"><rect class="box" x="396" y="252" width="230" height="44" rx="6"/>
+    <text class="s" x="408" y="270">strazad · POST /v1/decide</text>
+    <text class="d" x="408" y="285">server PDP re-check · live snapshot</text></g>
+  <path class="edge" d="M626 274 L742 274"/>
+  <g class="n eff ok" id="ef-server"><rect class="chip" x="746" y="256" width="184" height="36" rx="6"/>
+    <text class="s" x="838" y="278" text-anchor="middle">server allow</text></g>
+  <text class="d effcap deny" x="838" y="306" text-anchor="middle">offline / server deny ⇒ deny</text>
+</g>
+<g class="lane" id="lane-class" tabindex="0" role="button" aria-label="Escalation: classify">
+  <path class="edge tap" d="M120 336 L166 336"/>
+  <g class="n" id="mc-class"><rect class="chip" x="166" y="318" width="120" height="36" rx="6"/>
+    <text class="s" x="226" y="340" text-anchor="middle">classify</text></g>
+  <path class="edge" d="M286 336 L392 336"/>
+  <g class="n" id="ma-class"><rect class="box" x="396" y="314" width="230" height="44" rx="6"/>
+    <text class="s" x="408" y="332">classifier</text>
+    <text class="d" x="408" y="347">indirection scan · no model · ≤ 1 s</text></g>
+  <path class="edge" d="M626 336 L742 336"/>
+  <g class="n eff ok" id="ef-class"><rect class="chip" x="746" y="318" width="184" height="36" rx="6"/>
+    <text class="s" x="838" y="340" text-anchor="middle">no signal ⇒ allow</text></g>
+  <text class="d effcap deny" x="838" y="368" text-anchor="middle">clear signal / down ⇒ deny</text>
+</g>
+<g class="lane" id="lane-hold" tabindex="0" role="button" aria-label="Escalation: approve, hold class">
+  <path class="edge tap" d="M120 398 L166 398"/>
+  <g class="n" id="mc-hold"><rect class="chip" x="166" y="380" width="120" height="36" rx="6"/>
+    <text class="s" x="226" y="402" text-anchor="middle">approve · hold</text></g>
+  <path class="edge" d="M286 398 L392 398"/>
+  <g class="n" id="ma-hold"><rect class="box" x="396" y="376" width="230" height="44" rx="6"/>
+    <text class="s" x="408" y="394">human decides in-line</text>
+    <text class="d" x="408" y="409">gateway blocks ≤ 90 s · socket cap 120 s</text></g>
+  <path class="edge" d="M626 398 L742 398"/>
+  <g class="n eff ok" id="ef-hold"><rect class="chip" x="746" y="380" width="184" height="36" rx="6"/>
+    <text class="s" x="838" y="402" text-anchor="middle">approved ⇒ allow</text></g>
+  <text class="d effcap deny" x="838" y="430" text-anchor="middle">denied / timeout ⇒ deny-final</text>
+</g>
+<g class="lane" id="lane-ticket" tabindex="0" role="button" aria-label="Escalation: approve, ticket class">
+  <path class="edge tap" d="M120 460 L166 460"/>
+  <g class="n" id="mc-ticket"><rect class="chip" x="166" y="442" width="120" height="36" rx="6"/>
+    <text class="s" x="226" y="464" text-anchor="middle">approve · ticket</text></g>
+  <path class="edge" d="M286 460 L392 460"/>
+  <g class="n" id="ma-ticket"><rect class="box" x="396" y="438" width="230" height="44" rx="6"/>
+    <text class="s" x="408" y="456">deny-with-ticket now (never blocks)</text>
+    <text class="d" x="408" y="471">human ≤ ticketTTL 24 h · later call ⇒ grant ≤ 1 h</text></g>
+  <path class="edge" d="M626 460 L742 460"/>
+  <g class="n eff ok" id="ef-ticket"><rect class="chip" x="746" y="442" width="184" height="36" rx="6"/>
+    <text class="s" x="838" y="464" text-anchor="middle">grant ⇒ allow once</text></g>
+  <text class="d effcap deny" x="838" y="488" text-anchor="middle">within-window deny ⇒ deny-final</text>
+</g>
+
+
+<text class="cap" x="150" y="524">3 · EVERY OUTCOME IS AUDITED (async, never blocks)</text>
+<path id="a-feeder" class="edge async" d="M470 490 V536 H244 V546"/>
+<g class="n" id="n-spool"><rect class="chip" x="150" y="546" width="188" height="40" rx="6"/>
+  <text class="s" x="244" y="565" text-anchor="middle">audit spool</text>
+  <text class="d" x="244" y="579" text-anchor="middle">JSONL · async</text></g>
+<path id="e-sd" class="edge async" d="M338 566 L392 566"/>
+<g class="n" id="n-drain"><rect class="chip" x="396" y="546" width="230" height="40" rx="6"/>
+  <text class="s" x="408" y="565">drain → /v1/audit/batch</text>
+  <text class="d" x="408" y="579">detached · rotate on drain</text></g>
+<path id="e-dc" class="edge async" d="M626 566 L692 566"/>
+<g class="n" id="n-chain"><rect class="chip" x="696" y="546" width="234" height="40" rx="6"/>
+  <text class="s" x="708" y="565">outbox → JetStream → chain</text>
+  <text class="mono" x="708" y="579" style="fill:var(--text)">sha256(prev ‖ ce) · verify</text></g>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">Pick an outcome (top left), then play or step to walk one governed tool call from hook to hash chain. serverCheck, classify, and approve are the three escalations of a local allow; approve has a hold and a ticket shape.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>One local tool call inside a governed harness. The harness fires PreToolUse and spawns
+  <code>straza hook</code>; the adapter normalizes the dialect to the canonical event; the cached
+  snapshot's ed25519 signature is verified against pinned keys; rules evaluate in-process under
+  deny-overrides (p99 &lt; 100 µs) with no server and no database. The winning rule selects one of six
+  outcomes. A plain allow exits 0; a plain deny exits 2 with an actionable <code>Straza:</code> reason.
+  The three escalations act only on a winning allow. <strong>serverCheck</strong> re-checks at
+  <code>POST /v1/decide</code> against the live server snapshot (offline past grace fails closed).
+  <strong>classify</strong> runs the embedded heuristic classifier (interpreter-aware indirection scan,
+  no model, 1 s deadline); a clear signal or an unavailable classifier denies. <strong>approve</strong>
+  takes two shapes. A
+  <strong>hold</strong> (default class) blocks the gateway lane up to <code>timeoutSeconds</code>
+  (default 90, cap 3600), holding the socket itself at most 120 s (<code>approval.gatewayHoldSeconds</code>)
+  before the caller gets a pending reason it can await, while the hook lane denies with a retry-after-approval reference plus a
+  single-use exemption; denied or expired is deny-final. A <strong>ticket</strong> never blocks: it
+  denies now, a human decides within <code>ticketTTL</code> (default 24 h, cap 30 d), and a later real
+  call, even a fresh session, consumes a DB-durable grant within <code>grantTTL</code> (default 1 h, cap
+  24 h) bound to the human plus fingerprint; a within-window denial stays deny-final. Every outcome is
+  spooled, drained to <code>/v1/audit/batch</code>, and appended to the tamper-evident hash chain. All
+  paths fail closed.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+var svg=document.getElementById('dia');
+var nar=document.getElementById('nar');
+var DEF='Pick an outcome (top left), then play or step to walk one governed tool call from hook to hash chain. serverCheck, classify, and approve are the three escalations of a local allow; approve has a hold and a ticket shape.';
+
+ 
+var VAR={
+ allow:{lane:'lane-allow', resolve:[], effect:['ef-allow']},
+ deny:{lane:'lane-deny', resolve:[], effect:['ef-deny']},
+ server:{lane:'lane-server', resolve:['ma-server'], effect:['ef-server']},
+ class:{lane:'lane-class', resolve:['ma-class'], effect:['ef-class']},
+ hold:{lane:'lane-hold', resolve:['ma-hold'], effect:['ef-hold']},
+ ticket:{lane:'lane-ticket', resolve:['ma-ticket'], effect:['ef-ticket']}
+};
+var BTN={allow:'v-allow',deny:'v-deny',server:'v-server',class:'v-class',hold:'v-hold',ticket:'v-ticket'};
+
+ 
+var SHARED=[
+ {edges:['e1'], nodes:['n-hook']},               
+ {edges:['e2'], nodes:['n-decide']},             
+ {edges:['forkbus'], nodes:[]},                  
+ null,                                           
+ null,                                           
+ {edges:['a-feeder'], nodes:['n-spool']},        
+ {edges:['e-sd'], nodes:['n-drain']},            
+ {edges:['e-dc'], nodes:['n-chain']}             
+];
+var NSTAGE=8;
+
+ 
+var NARR_SHARED=[
+ '1 · The agent proposes a tool call; the harness fires <strong>PreToolUse</strong> and spawns <code>straza hook</code> with the event JSON on stdin.',
+ '2 · The adapter normalizes the dialect to the canonical event, then the cached snapshot’s <strong>ed25519 signature</strong> is verified against pinned keys. Any uncertainty <strong>fails closed</strong>.',
+ '3 · Rules evaluate <strong>in-process</strong>, deny-overrides, p99 &lt; 100 µs at 10k rules. No server, no DB on this path. The <strong>winning rule</strong> sets the effect and any escalation.'
+];
+var NARR_AUDIT=[
+ '· The decision is appended to the <strong>JSONL audit spool</strong>. Audit is asynchronous by invariant; a call never blocks on audit I/O.',
+ '· A detached <code>straza drain</code> POSTs the spool to <code>/v1/audit/batch</code> (fire-and-forget); the spool rotates on drain, nothing is lost.',
+ '· Server side: transactional outbox → JetStream → a durable consumer appends <code>hash = sha256(prev ‖ ce)</code>; <code>strazactl audit verify</code> walks it.'
+];
+var NARR_VAR={
+ allow:[ 'A plain <strong>allow</strong>: nothing to escalate.',
+   '<strong style="color:var(--ok)">exit 0</strong> · the harness runs the tool. End-to-end hook budget p95 &lt; 25 ms.' ],
+ deny:[ 'A <strong>deny</strong> wins under deny-overrides: no escalation.',
+   '<strong style="color:var(--danger)">exit 2</strong> plus an actionable <code>Straza:</code> reason the model reads and adapts to.' ],
+ server:[ '<strong>serverCheck</strong> escalates the allow to <code>POST /v1/decide</code>; the server PDP re-checks it against the live snapshot.',
+   'Server <strong style="color:var(--ok)">allow</strong> ⇒ the call proceeds. Offline past grace, or a server deny, ⇒ <strong style="color:var(--danger)">deny</strong> (fail closed).' ],
+ class:[ '<strong>classify</strong> runs the embedded heuristic <strong>classifier</strong>: an interpreter-aware indirection scan (pipe-to-shell, encoded-exec, inline and 1-level nested eval), no model, ≤ 1 s.',
+   'No signal ⇒ <strong style="color:var(--ok)">allow</strong>. A clear signal, or a down/timed-out classifier, ⇒ <strong style="color:var(--danger)">deny</strong> naming the signal.' ],
+ hold:[ '<strong>approve · hold</strong> puts a human in the loop. The gateway lane <strong>blocks</strong> up to <code>timeoutSeconds</code> (default 90, cap 3600). The socket itself is held at most 120 s (<code>approval.gatewayHoldSeconds</code>), then the caller gets a pending reason it can await. The hook lane denies with a retry-after-approval ref and a single-use exemption clears the retry. Channels: console, Slack, mobile approver.',
+   'Approved ⇒ <strong style="color:var(--ok)">allow</strong>. Denied, or the bounded wait expires, ⇒ <strong style="color:var(--danger)">deny-final</strong>.' ],
+ ticket:[ '<strong>approve · ticket</strong> never blocks: it denies with a ticket now and a human decides within <code>ticketTTL</code> (default 24 h, cap 30 d).',
+   'A later real call, even a fresh session, consumes the DB-durable grant within <code>grantTTL</code> (default 1 h, cap 24 h) bound to the human plus fingerprint ⇒ <strong style="color:var(--ok)">allow once</strong>. A within-window denial ⇒ <strong style="color:var(--danger)">deny-final</strong>; past the window the grant is dead.' ]
+};
+
+var variant='allow';
+var cur=-1,timer=null;
+var LANES=['lane-allow','lane-deny','lane-server','lane-class','lane-hold','lane-ticket'];
+
+function clearMarks(){
+  Array.prototype.forEach.call(svg.querySelectorAll('.stepedge,.n'),function(el){
+    el.classList.remove('on','done');
+  });
+}
+function markStage(stage,on){
+  var spec=null;
+  if(stage<3)spec=SHARED[stage];
+  else if(stage===3)spec={edges:[],nodes:VAR[variant].resolve};
+  else if(stage===4)spec={edges:[],nodes:VAR[variant].effect};
+  else spec=SHARED[stage];
+  if(!spec)return;
+  (spec.edges||[]).forEach(function(id){var e=document.getElementById(id);if(e)e.classList.add(on?'on':'done');});
+  (spec.nodes||[]).forEach(function(id){var n=document.getElementById(id);if(n)n.classList.add(on?'on':'done');});
+}
+function narrFor(stage){
+  if(stage<0)return DEF;
+  if(stage<3)return NARR_SHARED[stage];
+  if(stage===3)return NARR_VAR[variant][0];
+  if(stage===4)return NARR_VAR[variant][1];
+  return NARR_AUDIT[stage-5];
+}
+function pulseFor(stage){
+   
+  if(stage===0)return 'e1';
+  if(stage===1)return 'e2';
+  if(stage===2)return 'forkbus';
+  if(stage===5)return 'a-feeder';
+  if(stage===6)return 'e-sd';
+  if(stage===7)return 'e-dc';
+  return null;
+}
+function render(){
+  clearMarks();
+  for(var s=0;s<=cur;s++)markStage(s,s===cur);
+  nar.innerHTML=narrFor(cur);
+}
+function selectLane(){
+  LANES.forEach(function(id){
+    document.getElementById(id).classList.toggle('dim',id!==VAR[variant].lane);
+  });
+}
+function setVariant(v){
+  variant=v;
+  Object.keys(BTN).forEach(function(k){
+    document.getElementById(BTN[k]).setAttribute('aria-pressed',String(k===v));
+  });
+  selectLane();
+  if(cur>2)cur=2;  
+  render();
+}
+function setStep(i){cur=i;render();}
+function animateDot(pathId){
+  if(RM||!pathId)return;
+  var path=document.getElementById(pathId);
+  if(!path||!path.getTotalLength)return;
+  var len=path.getTotalLength();
+  var dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  dot.setAttribute('r','3.5');dot.setAttribute('class','dot');
+  svg.appendChild(dot);
+  var t0=null,DUR=420;
+  function frame(ts){
+    if(t0===null)t0=ts;
+    var k=Math.min((ts-t0)/DUR,1);
+    var pt=path.getPointAtLength(len*k);
+    dot.setAttribute('cx',pt.x);dot.setAttribute('cy',pt.y);
+    if(k<1)requestAnimationFrame(frame);else svg.removeChild(dot);
+  }
+  requestAnimationFrame(frame);
+}
+function advance(){
+  if(cur>=NSTAGE-1){stop();return;}
+  setStep(cur+1);
+  animateDot(pulseFor(cur));
+  if(cur>=NSTAGE-1)stop();
+}
+function stop(){
+  if(timer){clearInterval(timer);timer=null;}
+  var b=document.getElementById('btnPlay');
+  b.setAttribute('aria-pressed','false');b.textContent='play';
+}
+function play(){
+  var b=document.getElementById('btnPlay');
+  if(timer){stop();return;}
+  if(cur>=NSTAGE-1)setStep(-1);
+  b.setAttribute('aria-pressed','true');b.textContent='pause';
+  advance();
+  timer=setInterval(advance,1650);
+}
+document.getElementById('btnPlay').addEventListener('click',play);
+document.getElementById('btnStep').addEventListener('click',function(){stop();advance();});
+document.getElementById('btnReset').addEventListener('click',function(){stop();setStep(-1);});
+Object.keys(BTN).forEach(function(k){
+  document.getElementById(BTN[k]).addEventListener('click',function(){stop();setVariant(k);});
+});
+ 
+LANES.forEach(function(id){
+  var g=document.getElementById(id),v=id.replace('lane-','');
+  g.addEventListener('click',function(){stop();setVariant(v);});
+  g.addEventListener('keydown',function(ev){
+    if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();stop();setVariant(v);}
+  });
+});
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape'){stop();setVariant('allow');setStep(-1);}});
+selectLane();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{{- /* The page left at a moved page's old address. Hugo's own alias page
+points at the absolute permalink, which would send a reader on the demo
+stack, where the site is served under /docs/, off the stack. This one uses
+the root-relative address, and relativeURLs rewrites it per alias, the
+refresh target included. */ -}}
+<!DOCTYPE html>
+<html lang="{{ site.Language.Lang }}">
+<head>
+<meta charset="utf-8">
+<title>{{ .Page.Title }} · Straza</title>
+<link rel="canonical" href="{{ .Page.RelPermalink }}">
+<meta name="robots" content="noindex">
+<meta http-equiv="refresh" content="0; url={{ .Page.RelPermalink }}">
+</head>
+<body>
+<p>This page moved to <a href="{{ .Page.RelPermalink }}">{{ .Page.Title }}</a>.</p>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  jana: the scenario-A JOINER of the straza-agents-demo overlay
+  (compose.demo.yaml). That demo claims the OID slots ...1c4b-...1c4d, and
+  straza honors them. Do not delete her without checking that repo.
+  Deliberately NO role memberships: onboarding her into Finance Team
+  (role-finance-team.xml, ...1c4c) through the /mcp gateway IS the demo. The
+  employee archetype is assigned directly (subtype retired),
+  same as every employee here. The demo's own runtime seeding
+  (demo/midpoint.py::IdmFixtures.ensure) is only-when-absent, so this
+  fixture and the demo converge on the same record; overwrite-import resets
+  her to the baseline joiner state by design.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c4b">
+    <name>jana</name>
+    <fullName>Jana Novak</fullName>
+    <givenName>Jana</givenName>
+    <familyName>Novak</familyName>
+    <emailAddress>jana@example.com</emailAddress>
+    <title>Financial Analyst</title>
+    <assignment>
+        <!-- persona archetype, assigned directly (employee) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20" type="ArchetypeType"/>
+    </assignment>
+</user>

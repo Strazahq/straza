@@ -1,0 +1,299 @@
+# Straza Helm values. strazad is stateless: scale replicas
+# freely; sessions survive a pod restart because tokens are self-validating
+# and denylists rebuild from the event stream.
+
+image:
+  repository: ghcr.io/strazahq/straza # matches .goreleaser.yaml + release.yml
+  tag: "" # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+profile: enterprise # standalone|enterprise
+
+# The externally reachable base URL, strazad's identity and not just a link
+# base: the session-token issuer, the OIDC discovery base, and the default
+# enroll target all stand on it verbatim (scheme + host only, no path or
+# trailing slash; strazad refuses anything else at boot). Empty = derived,
+# NEVER loopback: the ingress host when ingress.enabled, else the
+# in-cluster Service DNS (http(s)://<fullname>.<namespace>.svc:<port>),
+# correct for in-cluster clients in every shape. Set it explicitly the
+# moment anything outside the cluster dials in. A server.publicUrl inside
+# configYaml is respected: the chart then injects no env var (env beats
+# file, so injecting would silently clobber it) unless this value is set
+# too, because the explicit chart value always wins.
+publicUrl: ""
+
+# Optional strazad config FILE (straza.yaml content, rendered into a
+# ConfigMap and wired via STRAZA_CONFIG). Use it for the knobs that have no
+# environment-variable face: sinks, governance posture/tuning, sentinel
+# (the full face table lives in internal/config/knobs.go, test-enforced).
+# Config layering keeps env vars and the chart's
+# --profile flag winning over this file, and a change here rolls the pods
+# (checksum annotation).
+configYaml: ""
+# configYaml: |
+#   approval:
+#     push:
+#       allowedPushHosts: [ntfy.example.com]
+#   sinks:
+#     - name: audit-file
+#       type: file
+#       path: /var/lib/straza/audit-export.jsonl
+
+# Postgres. Turnkey default: the chart bundles a single-node in-cluster
+# Postgres (StatefulSet + PVC) under the
+# enterprise profile. Bring-your-own always wins: setting dsn or
+# existingSecret suppresses the bundled instance, so existing installs
+# upgrade without growing a second database. Standalone never bundles
+# (per-pod sqlite is the standalone store).
+postgres:
+  enabled: true # bundled instance; ignored when dsn/existingSecret is set
+  image: postgres:16
+  storage: 20Gi
+  # Pre-created secret holding the bundled instance's password at data key
+  # "password". Empty = the chart generates one on first install and keeps
+  # it stable across upgrades (helm lookup of its own secret).
+  passwordSecret: ""
+  dsn: "" # e.g. postgres://straza:straza@straza-postgres:5432/straza?sslmode=disable
+  existingSecret: "" # name of a secret with key STRAZA_STORE_DSN (wins over dsn)
+
+# NATS/JetStream, the event spine. Turnkey default: the chart bundles a
+# cluster-internal NATS (StatefulSet + PVC) under the enterprise profile and
+# points every strazad pod at it; setting url suppresses the bundle
+# (bring-your-own wins). The bundled broker is deliberately NOT exposed
+# outside the cluster: any message on a revocation subject is a revocation
+# (spec/events §5), and daemons get sub-second kill push over the
+# gateway-edge push lane on the HTTPS origin they already dial, so no
+# client-reachable NATS is needed. With no bundle and no url the enterprise
+# profile runs an embedded per-pod broker: fine at one replica, silently
+# split-brained fan-out (approvals, kill switch, console events) at more, so
+# the chart refuses to render that shape (see templates/deployment.yaml).
+nats:
+  enabled: true # bundled broker; ignored when url is set
+  image: nats:2
+  storage: 5Gi
+  url: "" # e.g. nats://straza-nats:4222
+
+# Default-on NetworkPolicies for the bundled NATS and Postgres: narrows
+# their ingress from "anything in the cluster" to the strazad pods only.
+# Needs a CNI that enforces NetworkPolicy (stock k3s does; flannel-only
+# clusters silently ignore the objects). Bring-your-own backends are
+# unaffected: no policy renders for them.
+networkPolicy:
+  enabled: true
+
+# Declarative app registrations (the GitOps apps dir). Each key is a
+# filename, each value a straza.dev/v1beta1 App manifest; they render into a
+# ConfigMap mounted at /etc/straza/apps (STRAZA_APPS_DIR). Each file proposes
+# a draft, and a removed file a removal draft, which a person publishes with
+# `strazactl drafts publish` or on the console, so `helm install` alone
+# registers no server: it leaves drafts to publish. Replicas propose one
+# draft per file revision between them, and a publish on one replica starts
+# the server on every replica. With the per-pod sqlite store a replaced pod
+# starts empty and its files propose again. Bindings stay API-side
+# (strazactl / seed job): role names are deployment data, not chart data.
+apps:
+  manifests: {}
+  # manifests:
+  #   demo-tools.yaml: |
+  #     apiVersion: straza.dev/v1beta1
+  #     kind: App
+  #     metadata:
+  #       name: demo-tools
+  #       namespace: io.modelcontextprotocol
+  #       description: MCP reference server via streamable HTTP
+  #     server:
+  #       name: io.modelcontextprotocol/server-everything
+  #       version: "2026.7.4"
+  #     straza:
+  #       runtime:
+  #         kind: remote
+  #         remote:
+  #           url: http://mcp-demo-tools:3001/mcp
+  #       exposure:
+  #         tools: ["*"]
+
+# External OIDC IdP (required in enterprise).
+oidc:
+  issuer: ""
+  clientId: straza # keep: the OIDC client id must match the IdP registration
+
+# Key-encryption key for the built-in secret store. Reference a secret
+# holding a 32-byte key at data key "kek"; it is mounted at
+# /etc/straza/secret.key and wired via STRAZA_SECRETS_KEK_FILE so every
+# replica decrypts the same secrets. If empty, each pod generates its own
+# ephemeral KEK in its emptyDir (NOT for production: secrets do not survive
+# a pod restart and replicas cannot read each other's).
+secrets:
+  kekExistingSecret: ""
+
+# Native TLS on the strazad listener. Reference a kubernetes.io/tls
+# secret (e.g. cert-manager output: keys tls.crt/tls.key); it is mounted at
+# /etc/straza/tls and wired via STRAZA_TLS_{CERT,KEY}_FILE; probes switch to
+# HTTPS. Leave empty when TLS terminates at the ingress/LB instead; traffic
+# between the terminator and the pod is then plaintext, so keep it on a
+# trusted network (strazad logs a loud warning in the enterprise profile).
+# END-TO-END posture (ingress in front AND pod terminating): set this, then
+# re-encrypt the ingress->pod hop (Traefik: ServersTransport + scheme:https;
+# NGINX: backend-protocol HTTPS); see
+# https://docs.straza.ai/guides/operate/tls-and-exposure/.
+# Rotation caveat: strazad loads the pair at BOOT, so whatever renews the cert
+# must also `kubectl rollout restart` this deployment.
+tls:
+  existingSecret: ""
+
+# The dedicated https-only APPROVER listener (server.approverTLS): a SECOND
+# listener serving ONLY /v1/approver/* + /readyz, so a main listener that is
+# plaintext by necessity can still enroll the https+pin-only phone app. The
+# enroll QR names publicUrl below and pins THIS listener's certificate.
+# Off by default, and usually the WRONG lane on Kubernetes: when an ingress
+# can serve /v1/approver/* on a public host with a publicly-trusted cert, the
+# phone trusts the chain and there is no pin to mint, so put
+# server.approverPublicUrl in configYaml instead (the usual production shape).
+
+# Turn this on when strazad itself must terminate the approver hop: no edge
+# certificate for that name, or a pinned rather than chained trust anchor.
+# Bring your own pair: existingSecret is a kubernetes.io/tls secret (keys
+# tls.crt/tls.key, e.g. cert-manager output); it mounts at
+# /etc/straza/approver-tls and the chart wires listen + cert/key + publicUrl
+# together (strazad refuses a half-configured block at boot, so the chart
+# refuses it at render). autoMint is deliberately NOT a chart knob: the pod's
+# data dir is an emptyDir, so a minted pair would be a different SPKI pin per
+# pod AND per restart, stranding every enrolled phone, the same custody trap
+# the webpush VAPID key documents below. (Under profile=standalone strazad
+# still auto-mints such a pod-local listener at :8443 by default; the chart
+# publishes no port for it, so nothing outside the pod can reach it.)
+
+# Rotation caveat, twice over: strazad loads the pair at BOOT (whatever
+# renews it must `kubectl rollout restart`), and a NEW pair is a new pin, so
+# every enrolled approver device must re-enroll.
+approverTLS:
+  enabled: false
+  existingSecret: "" # kubernetes.io/tls secret (tls.crt/tls.key) this listener serves
+  port: 8443 # container + Service port; nothing shares it, keep it off service.port
+  # The https base URL the PHONE dials, copied verbatim into the enroll QR,
+  # so it must be what the device can actually reach (public name, tailnet,
+  # tunnel). Scheme and host only; a trailing slash is fine.
+  publicUrl: ""
+  # perIPRPS (the listener's per-client-IP throttle, 10/s default) has no
+  # environment face by design; set server.approverTLS.perIPRPS in
+  # configYaml if the default needs tuning.
+
+# WebPush VAPID key custody (approval.push.webpush). The pod's data dir is an
+# emptyDir, so letting strazad auto-mint the key there would mint a NEW push
+# identity on every restart, stranding every keyed subscription (the key IS
+# the deployment's push identity; nightly cert-sync rollouts would rotate it
+# nightly). Set this to a Secret holding the PKCS#8 PEM under data key
+# "vapid.pem"; it mounts read-only at /etc/straza/webpush/ and the chart
+# wires STRAZA_APPROVAL_PUSH_WEBPUSH_VAPID_KEY_FILE at it, so no configYaml
+# edit is needed. Mint the key inside the cluster so it never leaves the
+# deployment:
+#   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+#     | kubectl -n straza create secret generic straza-webpush-vapid \
+#         --from-file=vapid.pem=/dev/stdin
+webpush:
+  existingSecret: ""
+
+# APNs auth key custody (approval.push.apns, the native iOS approver lane).
+# Set this to a Secret holding the Apple-minted .p8 under data key "apns.p8";
+# it mounts read-only at /etc/straza/apns/ and the chart wires
+# STRAZA_APPROVAL_PUSH_APNS_KEY_FILE at it (a mount strazad's config never
+# reads would leave the lane silently off). The companion
+# identifiers ride configYaml (approval.push.apns.{keyId,teamId,topic}) and
+# boot FAILS naming them if the key is mounted without them. Unlike the VAPID
+# key this file is NOT the push identity: leak or loss means revoke in the
+# Apple developer portal, mint a new key, swap the Secret; no phone
+# re-registers. strazad never creates it (Apple is the only mint):
+#   kubectl -n straza create secret generic straza-apns-key \
+#     --from-file=apns.p8=/path/to/AuthKey_XXXXXXXXXX.p8
+apns:
+  existingSecret: ""
+
+# Hosted push relay (approval.push.relay), on by default. The relay is the
+# Straza-operated service at push.straza.ai that holds the Apple and
+# Firebase publisher credentials, so the approver app on iOS and Android
+# gets the request with no vendor account on your side. What leaves the
+# cluster is a reference, a kind and the phone's push route, never the
+# request. strazad mints an anonymous deployment token into its data dir,
+# and because that dir is an emptyDir the token is minted again on every
+# pod start. The relay allows five registrations per hour per source
+# address, so a crash loop or a large scale-out can hit that limit and the
+# new pod then sends nothing until the hour passes (the poll floor still
+# delivers decisions). enabled: false turns the lane off, and it must be
+# off when apns.existingSecret is set or configYaml enables the direct
+# Firebase sender, because strazad refuses two senders for one platform.
+# url empty means push.straza.ai; set it only for a relay you run.
+pushRelay:
+  enabled: true
+  url: ""
+
+service:
+  type: ClusterIP
+  port: 8420
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# Ingress for the MAIN listener. What this chart renders is ONE rule,
+# path: / (Prefix) at one host, so admin API, console, /mcp gateway, SCIM,
+# /v1/approver/* and the unauthenticated /metrics all answer on the same
+# public name. That is only right when the host is already restricted (an
+# internal ingress class, VPN, or an auth-gated edge). Anything reachable
+# from the internet wants the surface SPLIT at the edge instead.
+
+#   public   /v1/approver/* and /readyz: the phone's surface, and the only
+#            one designed to face hostile networks. Rate-limit it at the
+#            edge: strazad's own per-IP throttle guards the dedicated
+#            approverTLS listener, NOT this one.
+#   internal /console/, /v1/admin/*, /mcp, /scim/*: operator and agent
+#            surfaces; keep them on a restricted host.
+#   never    /metrics: UNAUTHENTICATED unless configYaml sets
+#            server.metricsToken, and it labels its counts by MCP server,
+#            sink, route, status, effect and lane (no metric names a session
+#            or a user). Scrape it in-cluster over the Service; if it must cross
+#            an ingress at all, set metricsToken first and gate the path.
+
+# A plain networking.k8s.io Ingress cannot express a host+path allowlist with
+# a rate limit, so deployments that need the split leave ingress.enabled off
+# and route with their provider's CRDs (for example a Traefik IngressRoute
+# with ipAllowList/rateLimit middlewares).
+ingress:
+  enabled: false
+  className: ""
+  host: straza.example.com
+  tls: false
+
+# Demo MCP upstream: the eval stack's "demo-tools", i.e. the MCP protocol
+# reference server (upstream package "server-everything"), so a fresh
+# install has something to register, police, and approve against. Its
+# container publishes no ingress and gets no route: the ONLY road to it is
+# strazad's governed /mcp gateway (no ungoverned surfaces).
+# Off by default: a demo upstream has no business in a real deployment, and
+# the container npx-fetches its package at every pod start.
+# Register it declaratively with apps.manifests above, runtime.remote.url:
+#   http://<release>-straza-demo-tools:3001/mcp
+demoTools:
+  enabled: false
+  image: node:22-alpine
+  # Pin a REAL published version (date scheme). The pin is load-bearing: an
+  # invented one ETARGET-crashloops the pod on every start. npx fetches at
+  # pod start, so the node needs egress to npm.
+  package: "@modelcontextprotocol/server-everything@2026.7.4"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  seccompProfile:
+    type: RuntimeDefault

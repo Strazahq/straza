@@ -1,0 +1,18 @@
+# approve.notify vocabulary is spec-fixed (console|slack|push, revision 8);
+# an unknown channel name is an authoring mistake and MUST be rejected; a
+# typo must never silently widen back to all-configured.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: bad-notify-channel
+spec:
+  rules:
+    - id: r1
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["disable_user"]
+      effect: allow
+      mode: approve
+      approve:
+        notify: [phone]

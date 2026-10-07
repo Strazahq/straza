@@ -1,0 +1,29 @@
+{
+  "specversion": "1.0",
+  "id": "019a0b7c-4d2e-7f10-8a3b-5c6d7e8f9a01",
+  "type": "straza.audit.mcp",
+  "source": "strazad",
+  "time": "2026-09-10T05:12:44.301Z",
+  "data": {
+    "session": "019a0b7b-1111-7abc-9def-000000000001",
+    "user": "019a0b7a-2222-7abc-9def-00000000joe0",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "mcp.call",
+    "app": "github",
+    "toolName": "list_issues",
+    "arguments": "{\"owner\":\"strazahq\",\"repo\":\"straza\"}",
+    "effect": "allow",
+    "ruleId": "",
+    "setName": "",
+    "reason": "allowed by role access. No policy rule gates this tool.",
+    "snapshot": "sha256:44f0be1c",
+    "granted": true,
+    "default": true,
+    "bindingId": "019a0b7a-3333-7abc-9def-000000000002",
+    "role": "dev",
+    "credentialId": "019a0b7a-4444-7abc-9def-000000000003",
+    "credentialSource": "sponsor",
+    "credentialOwner": "019a0b7a-5555-7abc-9def-0000000alice"
+  }
+}

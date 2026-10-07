@@ -1,0 +1,363 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enforcement tiers · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+.controls .cap{font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;
+  padding:0 4px 0 6px;font-weight:600}
+.legend{display:flex;gap:var(--s3);align-items:center;font-size:11px;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:5px 10px}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.legend .ok{background:var(--ok-bg);border:1px solid var(--ok)}
+.legend .warn{background:var(--warn-bg);border:1px solid var(--warn)}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 11px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);
+  color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:116px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:80ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:15px;font-weight:600}
+.s{font-size:12.5px;font-weight:600}
+.d{font-size:11px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+.mono{font-family:var(--font-mono);font-size:10.5px;fill:var(--muted)}
+.box{fill:var(--surface);stroke:var(--border);stroke-width:1.25;
+  transition:stroke .2s,stroke-width .2s,fill .2s,filter .2s,opacity .25s}
+.cell rect.box{fill:var(--surface)}
+.node{cursor:pointer;outline:none;transition:opacity .25s}
+ 
+.node:hover .box,.node:focus .box,.node.sel .box{stroke:var(--accent);stroke-width:2;
+  fill:var(--accent-bg);filter:drop-shadow(0 0 5px var(--accent))}
+.node.dim{opacity:.42}
+.rowlbl{font-size:11px;fill:var(--muted);letter-spacing:.08em}
+.chipok{fill:var(--ok-bg);stroke:var(--ok);stroke-width:1.25}
+.chipwarn{fill:var(--warn-bg);stroke:var(--warn);stroke-width:1.25}
+.chiptok{font-size:10.5px;font-weight:600;fill:var(--ok)}
+.chiptwarn{font-size:10.5px;font-weight:600;fill:var(--warn)}
+.lf{display:inline}.ls{display:none}
+@media (max-width:600px){.lf{display:none}.ls{display:inline}}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ enforcement tiers</span></h1>
+  <div class="legend" aria-hidden="true">
+    <span><span class="sw ok"></span>boundary-grade / attested</span>
+    <span><span class="sw warn"></span>advisory</span>
+  </div>
+</header>
+
+<div class="stage">
+<svg id="dia" viewBox="0 0 980 540" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
+<title id="svgT">Comparison of Straza enforcement tiers</title>
+<desc id="svgD">Four columns compare Tier 1 harness hooks, Tier 2 MCP gateway, Tier 3 exec wrapper and the Python agentkit across what they govern, what they see, their trust grade and their identity story. Green means boundary-grade or attested; amber means advisory.</desc>
+
+
+<text class="rowlbl" x="16" y="150">GOVERNS</text>
+<text class="rowlbl" x="16" y="248">SEES</text>
+<text class="rowlbl" x="16" y="348">TRUST</text>
+<text class="rowlbl" x="16" y="362">GRADE</text>
+<text class="rowlbl" x="16" y="440">IDENTITY</text>
+
+
+<g class="node c1" id="h1" tabindex="0" role="button" aria-pressed="false" aria-label="Tier 1, harness hooks. Activate to spotlight this column.">
+  <rect class="box" x="140" y="36" width="196" height="64" rx="6"/>
+  <text class="cap" x="152" y="54">TIER 1</text>
+  <text class="s" x="152" y="72">harness hooks</text>
+  <text class="d" x="152" y="88"><tspan class="lf">Claude Code &#183; Codex &#183; Gemini</tspan><tspan class="ls">3 harnesses</tspan></text>
+</g>
+<g class="node c2" id="h2" tabindex="0" role="button" aria-pressed="false" aria-label="Tier 2, MCP gateway. Activate to spotlight this column.">
+  <rect class="box" x="350" y="36" width="196" height="64" rx="6"/>
+  <text class="cap" x="362" y="54">TIER 2</text>
+  <text class="s" x="362" y="72">MCP gateway</text>
+  <text class="d" x="362" y="88">any MCP client</text>
+</g>
+<g class="node c3" id="h3" tabindex="0" role="button" aria-pressed="false" aria-label="Tier 3, exec wrapper. Activate to spotlight this column.">
+  <rect class="box" x="560" y="36" width="196" height="64" rx="6"/>
+  <text class="cap" x="572" y="54">TIER 3</text>
+  <text class="s" x="572" y="72">exec wrapper</text>
+  <text class="mono" x="572" y="88">straza exec -- cmd</text>
+</g>
+<g class="node c4" id="h4" tabindex="0" role="button" aria-pressed="false" aria-label="Python agentkit. Activate to spotlight this column.">
+  <rect class="box" x="770" y="36" width="196" height="64" rx="6"/>
+  <text class="cap" x="782" y="54">SDK AGENTS</text>
+  <text class="s" x="782" y="72">python agentkit</text>
+  <text class="mono" x="782" y="88">straza-agentkit</text>
+</g>
+
+
+<g class="node cell c1" id="g1" tabindex="0" aria-label="Tier 1 governs">
+  <rect class="box" x="140" y="112" width="196" height="86" rx="6"/>
+  <text class="d" x="152" y="132" style="fill:var(--text)">local tools: shell &#183; file &#183; net</text>
+  <text class="d" x="152" y="148">+ MCP via the gateway</text>
+  <text class="d" x="152" y="164">+ knowledge packs at start</text>
+  <text class="d" x="152" y="180">+ conversation capture</text>
+</g>
+<g class="node cell c2" id="g2" tabindex="0" aria-label="Tier 2 governs">
+  <rect class="box" x="350" y="112" width="196" height="86" rx="6"/>
+  <text class="d" x="362" y="132" style="fill:var(--text)">tools/list + tools/call</text>
+  <text class="d" x="362" y="148">per-call policy &#183; rps limits</text>
+  <text class="d" x="362" y="164">credential injection</text>
+  <text class="d" x="362" y="180">local actions: not governed</text>
+</g>
+<g class="node cell c3" id="g3" tabindex="0" aria-label="Tier 3 governs">
+  <rect class="box" x="560" y="112" width="196" height="86" rx="6"/>
+  <text class="d" x="572" y="132" style="fill:var(--text)">every spawned process</text>
+  <text class="d" x="572" y="148">argv &#8594; canonical tool.pre</text>
+  <text class="d" x="572" y="164">deny reason on stderr, exit 2</text>
+  <text class="d" x="572" y="180">same PDP, same taxonomy</text>
+</g>
+<g class="node cell c4" id="g4" tabindex="0" aria-label="Python agentkit governs">
+  <rect class="box" x="770" y="112" width="196" height="86" rx="6"/>
+  <text class="d" x="782" y="132" style="fill:var(--text)">native Python tool calls</text>
+  <text class="d" x="782" y="148">@guard + framework seams</text>
+  <text class="d" x="782" y="164">capture: prompts + replies</text>
+  <text class="d" x="782" y="180">MCP stays a gateway job</text>
+</g>
+
+
+<g class="node cell c1" id="v1" tabindex="0" aria-label="Tier 1 visibility">
+  <rect class="box" x="140" y="210" width="196" height="86" rx="6"/>
+  <text class="d" x="152" y="230" style="fill:var(--text)">role catalog only:</text>
+  <text class="d" x="152" y="246">inventory &#8745; exposure &#8745; bindings</text>
+  <text class="d" x="152" y="262">unbound tool = nonexistent</text>
+  <text class="d" x="152" y="278">deny reasons in-harness</text>
+</g>
+<g class="node cell c2" id="v2" tabindex="0" aria-label="Tier 2 visibility">
+  <rect class="box" x="350" y="210" width="196" height="86" rx="6"/>
+  <text class="d" x="362" y="230" style="fill:var(--text)">same filtered catalog</text>
+  <text class="d" x="362" y="246">deny-with-reason on calls</text>
+  <text class="d" x="362" y="262">local commands invisible</text>
+  <text class="d" x="362" y="278">prompts/replies invisible</text>
+</g>
+<g class="node cell c3" id="v3" tabindex="0" aria-label="Tier 3 visibility">
+  <rect class="box" x="560" y="210" width="196" height="86" rx="6"/>
+  <text class="d" x="572" y="230" style="fill:var(--text)">argv + exit codes</text>
+  <text class="d" x="572" y="246">decisions + audit trail</text>
+  <text class="d" x="572" y="262">no prompt/reply seam</text>
+  <text class="d" x="572" y="278">(no transcript exists)</text>
+</g>
+<g class="node cell c4" id="v4" tabindex="0" aria-label="Python agentkit visibility">
+  <rect class="box" x="770" y="210" width="196" height="86" rx="6"/>
+  <text class="d" x="782" y="230" style="fill:var(--text)">framework tool calls,</text>
+  <text class="d" x="782" y="246">mapped by adapters yaml</text>
+  <text class="d" x="782" y="262">prompts/replies in payload</text>
+  <text class="d" x="782" y="278">unknown tools &#8594; "other"</text>
+</g>
+
+
+<g class="node cell c1" id="t1" tabindex="0" aria-label="Tier 1 trust grade">
+  <rect class="box" x="140" y="308" width="196" height="76" rx="6"/>
+  <rect class="chipok" x="152" y="320" width="128" height="20" rx="10"/>
+  <text class="chiptok" x="162" y="334">managed: attested</text>
+  <rect class="chipwarn" x="152" y="348" width="136" height="20" rx="10"/>
+  <text class="chiptwarn" x="162" y="362">user-mode: advisory</text>
+</g>
+<g class="node cell c2" id="t2" tabindex="0" aria-label="Tier 2 trust grade">
+  <rect class="box" x="350" y="308" width="196" height="76" rx="6"/>
+  <rect class="chipok" x="362" y="320" width="150" height="20" rx="10"/>
+  <text class="chiptok" x="372" y="334">boundary-grade PEP</text>
+  <text class="d" x="362" y="362">server-side; creds never</text>
+  <text class="d" x="362" y="376">reach the agent</text>
+</g>
+<g class="node cell c3" id="t3" tabindex="0" aria-label="Tier 3 trust grade">
+  <rect class="box" x="560" y="308" width="196" height="76" rx="6"/>
+  <rect class="chipwarn" x="572" y="320" width="156" height="20" rx="10"/>
+  <text class="chiptwarn" x="582" y="334">advisory: open machine</text>
+  <rect class="chipok" x="572" y="348" width="170" height="20" rx="10"/>
+  <text class="chiptok" x="582" y="362">sandbox: boundary-grade</text>
+</g>
+<g class="node cell c4" id="t4" tabindex="0" aria-label="Python agentkit trust grade">
+  <rect class="box" x="770" y="308" width="196" height="76" rx="6"/>
+  <rect class="chipwarn" x="782" y="320" width="150" height="20" rx="10"/>
+  <text class="chiptwarn" x="792" y="334">advisory: in-process</text>
+  <text class="d" x="782" y="362">attestation=advisory at best;</text>
+  <text class="d" x="782" y="376">weaker than user-mode hooks</text>
+</g>
+
+
+<g class="node cell c1" id="i1" tabindex="0" aria-label="Tier 1 identity story">
+  <rect class="box" x="140" y="396" width="196" height="86" rx="6"/>
+  <text class="d" x="152" y="416" style="fill:var(--text)">OIDC device-flow enroll</text>
+  <text class="d" x="152" y="432">token binds user + device</text>
+  <text class="d" x="152" y="448">+ harness + session &#183; 300 s</text>
+  <text class="d" x="152" y="464">attestation at checkin</text>
+</g>
+<g class="node cell c2" id="i2" tabindex="0" aria-label="Tier 2 identity story">
+  <rect class="box" x="350" y="396" width="196" height="86" rx="6"/>
+  <text class="d" x="362" y="416" style="fill:var(--text)">session token at the gate</text>
+  <text class="d" x="362" y="432">minAttestation re-enforced</text>
+  <text class="d" x="362" y="448">from token claims</text>
+  <text class="d" x="362" y="464">reached through straza mcp</text>
+</g>
+<g class="node cell c3" id="i3" tabindex="0" aria-label="Tier 3 identity story">
+  <rect class="box" x="560" y="396" width="196" height="86" rx="6"/>
+  <text class="mono" x="572" y="416" style="fill:var(--text)">exec-wrapper/&lt;version&gt;</text>
+  <text class="d" x="572" y="432">lazy checkin per invocation</text>
+  <text class="d" x="572" y="448">distinct harness identity:</text>
+  <text class="d" x="572" y="464">policy can gate Tier-3</text>
+</g>
+<g class="node cell c4" id="i4" tabindex="0" aria-label="Python agentkit identity story">
+  <rect class="box" x="770" y="396" width="196" height="86" rx="6"/>
+  <text class="mono" x="782" y="416" style="fill:var(--text)">python-sdk/&lt;fw&gt;@&lt;ver&gt;</text>
+  <text class="d" x="782" y="432">uses the machine's enrollment</text>
+  <text class="d" x="782" y="448">headless: NHI client-creds</text>
+  <text class="d" x="782" y="464">or a registered agent key</text>
+</g>
+
+<text class="d" x="140" y="516">hooks are one layer, never the only one: the gateway PEP governs MCP for every tier, and policy may require Tier-1 attestation for sensitive roles</text>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">Hover or tab to any cell for the full story. Click a column header to spotlight one tier; click again (or press Escape) to clear.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>Straza's four enforcement surfaces compared. Tier 1 (harness hooks) gives full local
+  governance (shell, file, net) plus everything the gateway does; with the managed, root-owned
+  install its enforcement artifacts are tamper-evident and attestation-gated. Tier 2, the MCP
+  gateway, is boundary-grade by construction because the PEP is server-side: any MCP client is
+  governed for MCP traffic, but local actions are invisible. Tier 3, the exec wrapper,
+  governs every spawned process for hookless agents; honest grading: advisory
+  on an open machine, boundary-grade only inside the documented sandbox profile. The Python
+  agentkit plugs into official framework seams (LangChain, OpenAI Agents SDK, Claude
+  Agent SDK, CrewAI, ADK, Pydantic AI) and delegates every decision to the Go kit; being
+  in-process it is advisory, strictly weaker than user-mode hooks, and its sessions carry
+  attestation=advisory at best, which enterprise policy can simply refuse for sensitive
+  roles. Green and amber here are trust semantics only.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var nar=document.getElementById('nar');
+var DEF='Hover or tab to any cell for the full story. Click a column header to spotlight one tier; click again (or press Escape) to clear.';
+var FACTS={
+ h1:'<strong>Tier 1, harness hooks</strong>: full local governance through the harness&#8217;s own hook contract (Codex follows the Claude Code contract closely, and Gemini/Antigravity renames the events). A Cursor adapter is planned.',
+ h2:'<strong>Tier 2, MCP gateway</strong>: any MCP client pointed at /mcp. Nothing to implement beyond the session token; conformance level defined in the spec.',
+ h3:'<strong>Tier 3, exec wrapper</strong>: <code>straza exec -- cmd</code> makes the shim itself the hook layer for agents with no event model. It is a subcommand of the one static binary, not a second app.',
+ h4:'<strong>python agentkit</strong>: <code>straza-agentkit</code> (kits/python): stdlib-only <code>check</code>/<code>@guard</code>/capture core spawning <code>straza hook</code> under the python-sdk dialect; policy never moves into Python.',
+ g1:'<strong>Tier 1 governs</strong> local tool calls (shell, file edits, net) via PreToolUse-family hooks plus MCP through the gateway; role-bound knowledge packs are injected at session start; conversation capture has first-class seams.',
+ g2:'<strong>Tier 2 governs</strong> tools/list (catalog filtering) and tools/call (per-call policy, per-(session,app) rate limits, gateway-side credential injection). Local shell/file actions never pass a Straza PEP in this tier.',
+ g3:'<strong>Tier 3 governs</strong> by giving the agent exactly one way to run things: every spawned process goes through the shim; argv normalizes into the same canonical tool.pre event and meets the same policy.',
+ g4:'<strong>The agentkit governs</strong> native Python tool execution at official blocking seams: LangChain <code>wrap_tool_call</code>, OpenAI Agents tool guardrails, Claude Agent SDK <code>PreToolUse</code>, CrewAI <code>before_tool_call</code>, ADK <code>before_tool_callback</code>, Pydantic AI <code>WrapperToolset</code>. Deny surfaces as the framework&#8217;s native rejection with the Straza: reason.',
+ v1:'<strong>Tier 1 sees</strong> only its virtual catalog: inventory &#8745; manifest exposure &#8745; role bindings, then policy-refined (policyFilter default on hides always-denied tools); an unbound or hidden tool is nonexistent, not merely denied. Deny reasons surface inside the harness so the model can react.',
+ v2:'<strong>Tier 2 sees</strong> the same filtered catalog and deny-with-reason on calls, but Straza cannot see the agent&#8217;s local commands, prompts or files. MCP traffic only.',
+ v3:'<strong>Tier 3 sees</strong> argv, exit codes and decisions, all spooled into the same tamper-evident audit trail. There is no prompt/reply seam: no transcript file exists for a plain process.',
+ v4:'<strong>The agentkit sees</strong> each framework tool call mapped to the canonical taxonomy (adapters/python-sdk.yaml: ShellTool &#8594; shell.exec, file tools &#8594; file.*, unknown callables &#8594; other with toolName preserved); prompts/replies travel payload-borne since SDK agents have no transcript files.',
+ t1:'<strong>Tier 1 trust</strong>: the managed install is root-owned and attestation-verified against the expected-hash registry; a tampered hook config means attestation none, and the enterprise default refuses the token. User-mode installs are advisory.',
+ t2:'<strong>Tier 2 trust</strong>: boundary-grade by construction; the PEP is server-side, bypassing client machinery yields nothing without a valid session token, and upstream credentials never reach the agent.',
+ t3:'<strong>Tier 3 trust, stated honestly</strong>: advisory on an open machine (an agent that can run anything can skip the shim); boundary-grade only where the environment makes the shim exclusive: the documented sandbox/container profile, or the managed layout.',
+ t4:'<strong>Agentkit trust, stated honestly</strong>: advisory and strictly weaker than user-mode hooks: the shim shares the agent&#8217;s address space (it can be monkeypatched), but it cannot corrupt the engine&#8217;s evaluation or forge audit records, which live in the spawned Go binary. Sessions carry attestation=advisory at best.',
+ i1:'<strong>Tier 1 identity</strong>: OIDC device-flow enroll binds the human; the device token opens exactly one door (/v1/checkin); each 300 s session token binds user + device + harness + session.',
+ i2:'<strong>Tier 2 identity</strong>: the session token is the whole story at the gateway, and minAttestation is re-enforced from token claims. A client reaches the gateway through the straza mcp proxy, which keeps the session token current.',
+ i3:'<strong>Tier 3 identity</strong>: sessions ensure themselves lazily under harness <code>exec-wrapper/&lt;version&gt;</code> (a distinct identity), so PolicySets can gate what a Tier-3 session may ever be allowed.',
+ i4:'<strong>Agentkit identity</strong>: sessions check in under <code>python-sdk/&lt;framework&gt;@&lt;version&gt;</code>, using the machine&#8217;s straza enrollment; headless deployments (CI, services) enroll with a registered key or with client credentials.'
+};
+var nodes=Array.prototype.slice.call(document.querySelectorAll('.node'));
+var spot=null;
+function applySpot(){
+  nodes.forEach(function(n){
+    var mine=spot&&n.classList.contains(spot);
+    n.classList.toggle('dim',!!spot&&!mine);
+  });
+  ['h1','h2','h3','h4'].forEach(function(h,i){
+    var on=spot==='c'+(i+1),el=document.getElementById(h);
+    el.setAttribute('aria-pressed',String(on));
+    el.classList.toggle('sel',on);
+  });
+}
+nodes.forEach(function(n){
+  n.addEventListener('mouseenter',function(){nar.innerHTML=FACTS[n.id]||DEF;});
+  n.addEventListener('focus',function(){nar.innerHTML=FACTS[n.id]||DEF;});
+  n.addEventListener('mouseleave',function(){nar.innerHTML=DEF;});
+  n.addEventListener('blur',function(){nar.innerHTML=DEF;});
+});
+['h1','h2','h3','h4'].forEach(function(h,i){
+  var el=document.getElementById(h),col='c'+(i+1);
+  function toggle(){spot=(spot===col)?null:col;applySpot();}
+  el.addEventListener('click',function(ev){ev.stopPropagation();toggle();});
+  el.addEventListener('keydown',function(ev){
+    if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();toggle();}
+  });
+});
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape'){spot=null;applySpot();}});
+document.getElementById('dia').addEventListener('click',function(){spot=null;applySpot();});
+})();
+</script>
+</body>
+</html>

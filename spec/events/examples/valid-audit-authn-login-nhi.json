@@ -1,0 +1,16 @@
+{
+  "specversion": "1.0",
+  "id": "0198f4d2-7b31-7e55-9abc-1f2e3d4c5b22",
+  "type": "straza.audit.authn",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-08-31T09:42:07Z",
+  "data": {
+    "action": "login",
+    "outcome": "success",
+    "via": "client-assertion",
+    "user": "ci-bot",
+    "userId": "0197fa3d-2222-7abc-9def-000000000007",
+    "sourceIp": "10.42.0.17",
+    "userAgent": "straza/0.41"
+  }
+}

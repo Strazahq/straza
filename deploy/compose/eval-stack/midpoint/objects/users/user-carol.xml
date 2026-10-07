@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  carol: sample employee (Engineering). She is the accountable human of
+  pam-personal-agent (its strazaSponsorRef points here) and a dev-ops team
+  member. The seeder makes her the delegated admin of the demo-tools server:
+  after the user import it assigns her AR:Straza:Account,
+  AR:Keycloak:Account and AR:mcp-admin-demo-tools. The lab password is
+  shared by the sample users.
+-->
+<user xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c40">
+    <name>carol</name>
+    <fullName>Carol Jensen</fullName>
+    <givenName>Carol</givenName>
+    <familyName>Jensen</familyName>
+    <emailAddress>carol.jensen@example.com</emailAddress>
+    <personalNumber>1001</personalNumber>
+    <organizationalUnit>Engineering</organizationalUnit>
+    <title>Software Engineer</title>
+    <credentials>
+        <password>
+            <value><t:clearValue>Ev4l-St4ck!26</t:clearValue></value>
+        </password>
+    </credentials>
+    <!-- End user (for the manager-approval demo): lets carol self-request a requestable role; the request then waits for her dev-ops manager (Metarole: approval by manager) -->
+    <assignment>
+        <targetRef oid="00000000-0000-0000-0000-000000000008" type="RoleType"/>
+    </assignment>
+    <assignment>
+        <!-- member of the dev-ops demo team (objects/orgs/team-dev-ops.xml) -->
+        <targetRef oid="d23c0d53-1410-4b63-bf9a-b18142bb3336" type="OrgType"/>
+    </assignment>
+    <assignment>
+        <!-- persona archetype, assigned directly (employee) -->
+        <targetRef oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c20" type="ArchetypeType"/>
+    </assignment>
+</user>

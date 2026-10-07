@@ -1,0 +1,8 @@
+{
+  "specversion": "1.0",
+  "id": "0198abce-5512-7c22-a9d4-1b2c3d4e5fb2",
+  "type": "straza.audit.sentinel",
+  "source": "strazad",
+  "time": "2026-07-17T09:12:31Z",
+  "data": "denyThenVariant"
+}

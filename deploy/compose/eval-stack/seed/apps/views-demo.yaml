@@ -1,0 +1,28 @@
+# The eval stack's MCP Apps demo upstream: the official basic example server
+# of the MCP Apps extension, unmodified, reached ONLY through strazad's gateway
+# (its container publishes no ports). Its views are switched on, so a chat app
+# that shows MCP Apps views renders its clock card through the server's own
+# endpoint, /mcp/views-demo, and the card's button is a governed tool call.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: views-demo
+  namespace: io.modelcontextprotocol
+  description: MCP Apps example server (one tool with a view) via streamable HTTP
+server:
+  name: io.modelcontextprotocol/server-basic-vanillajs
+  description: Basic MCP Apps example server with one view.
+  repository:
+    url: https://github.com/modelcontextprotocol/ext-apps
+    source: github
+  version: "2.0.3"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: http://views-demo:3001/mcp
+  exposure:
+    tools: ["*"]
+    views: true
+  limits:
+    rps: 10

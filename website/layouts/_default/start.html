@@ -1,0 +1,11 @@
+{{ define "main" }}
+<div class="dbody norail">
+{{ partial "lnav.html" . }}
+<main id="main" class="main start-page" tabindex="-1">
+<div class="prose">
+{{ partial "page-head.html" . }}
+{{ .Content }}
+</div>
+</main>
+</div>
+{{ end }}

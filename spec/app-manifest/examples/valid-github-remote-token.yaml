@@ -1,0 +1,26 @@
+# Each caller's own pasted token (revision 4): the GitHub remote endpoint
+# takes a fine-grained token as a bearer, every person pastes their own, and
+# an agent with no token of its own runs on its sponsor's connection once the
+# sponsor allowed it. Provenance: shape derived from the parser and the
+# caller-credentials proposal, not captured from a live wire.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: github
+  namespace: io.github.github
+  description: GitHub MCP server (hosted remote), each caller's own token injected gateway-side
+server:
+  name: io.github.github/github-mcp-server
+  version: "0.17.1"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://api.githubcopilot.com/mcp/
+  credential:
+    kind: token
+    agents: sponsor
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"

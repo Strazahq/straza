@@ -1,0 +1,251 @@
+# The sponsor answering for the agent she is accountable for. A rule that
+# names no decider routes to the requester's sponsor, and g4-hold-routing
+# proves the routing. This scenario carries it through the decision: the
+# sponsor signs in with her own password, approves the record her agent
+# opened, and the agent's identical retry runs once with her name in the
+# reason.
+#
+# The decide routes take a person's own token, so the deciding step carries
+# "as" and the runner signs the sponsor in through the built-in issuer's
+# device flow. The agent could never stand in for her: a non-human identity
+# decides nothing.
+#
+# Shapes the binary forced on the corpus, each with how it was verified: the
+# approvals list is an object with an approvals array, the activate body is
+# {status: active|draft}, a policy delete answers 204 and role deletes answer
+# 200, all recorded on j0-golden-path [live]. The agent is
+# provisioned with the agentic extension URN and its sponsor is set by a
+# PATCH on the URN-qualified path, both as g4-hold-routing does [live].
+# The held call after the sponsor lands carries a within, because
+# the identity change reaches the decision path on its own clock. The steps
+# marked "suspect" below assert a status code or a field the published
+# sources leave open; each is listed in the lane report.
+id: g4-sponsor-decides
+group: G4
+title: The sponsor decides the hold her agent raised and the agent's retry runs once
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (fail closed with an actionable reason);
+  spec/policyset/SPEC.md §2 item 8 (a bare approve rule behaves as
+  deciders sponsor, the sponsor is persisted on the record as
+  approver_users, timeoutSeconds bounds the wait, and the hook lane honors
+  a single-use exemption keyed session, rule and argv hash for
+  retryTTLSeconds), revision 14 (the sponsor default and the unroutable
+  deny), revision 13 (the sponsor is resolved at request time and a usable
+  sponsor is an active non-NHI user other than the requester), revision 15
+  (a decider must freshly hold one of the record's roles or sit in its
+  user-scoped pool, and NHIs never decide);
+  spec/scim-profile/SPEC.md §3.2 (sponsor is a read-write extension
+  attribute whose value is the accountable human's username, PATCHed by the
+  URN-qualified path) and §5 (a create carrying the agentic URN is an NHI);
+  spec/events/SPEC.md §2.2 (one straza.audit.approval record when the
+  request opens and one when it resolves, the resolution carrying the
+  deciding user) and revision 38 (one more when a call uses a hold's
+  approval);
+  pkg/api/openapi.yaml POST /v1/admin/approvals/{id}/approve (security
+  userBearer, a person's session token or ID token; 200 and 403) and the
+  Approval schema (approverUsers are the usernames allowed to decide,
+  resolved from the rule's deciders at request time, today the requester's
+  sponsor; state, lane, rule, decidedByName);
+  website/content/concepts/approvals-model.md section Who may answer (a
+  rule that names nobody routes to the sponsor, the accountable human the
+  IdM models on an agent);
+  website/content/concepts/identities.md (a usable sponsor is an active
+  human other than the requester);
+  website/content/guides/write-policy/hold-for-a-human.md (the pending
+  sentence and the allowed retry's reason "Straza: approved by NAME").
+  suspect: the success status codes of the admin routes and the
+  approvals.0 path into a one-record list; that decidedByName is the
+  deciding username, which no page states; that the agent's retry after
+  the sponsor's approval is allowed exactly as a human requester's is,
+  which the spec states for the hook lane without naming the requester's
+  kind.
+harnesses: [claude-code]
+identities:
+  sam: {kind: human, password: "Walk-2026!"}
+  bot-2: {kind: nhi}
+steps:
+  # Setup: the matched role, the accountable human and the agent she sponsors.
+  - name: the admin creates the application role the policy will match
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g4-sponsor, kind: application, description: "Sponsor decides scenario, the matched role"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM provisions sam, the accountable human
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g4-sam
+        userName: sam
+        displayName: Sam Sponsor
+        active: true
+    want: {status: 201}
+    save: {samId: id}
+  - name: the admin sets sam's password, since she signs in to decide
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${samId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM provisions the agent as an NHI
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas:
+          - "urn:ietf:params:scim:schemas:core:2.0:User"
+          - "urn:ietf:params:scim:schemas:extension:agent:2.0:Agent"
+          - "urn:straza:params:scim:schemas:extension:2.0:User"
+        externalId: idm-g4-bot-2
+        userName: bot-2
+        displayName: Sponsor decides scenario agent
+        userType: agent
+        active: true
+        "urn:straza:params:scim:schemas:extension:2.0:User":
+          agencyMode: supervised
+    want:
+      status: 201
+      body: {userName: bot-2, userType: agent}
+    save: {botId: id}
+  - name: the IdM sets sam as the agent's sponsor through the extension attribute
+    scim:
+      method: PATCH
+      path: /scim/v2/Users/${botId}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: replace
+            path: "urn:straza:params:scim:schemas:extension:2.0:User:sponsor"
+            value: sam
+    want: {status: 200}
+  - name: the IdM finds the matched role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g4-sponsor"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: the agent becomes a member of the matched role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${botId}"}]
+    want: {status: 200}
+  - name: the admin applies a set whose hold names no decider, so it falls on the sponsor
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g4-sponsor
+            description: Sponsor decides scenario for role g4-sponsor
+          spec:
+            match:
+              roles: [g4-sponsor]
+            rules:
+              - id: bare-hold
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy *"]
+                effect: allow
+                mode: approve
+                approve:
+                  timeoutSeconds: 900
+                  retryTTLSeconds: 300
+                reason: "G4-SPONSOR: deploy is held for the agent's accountable human"
+    want: {status: 201}
+  - name: the admin activates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-sponsor/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: the agent enrolls headless on its local key
+    enroll: {as: bot-2}
+  - name: the agent starts a session
+    hook:
+      as: bot-2
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # 1. The agent's held call opens a record routed to its sponsor.
+  - name: the agent's held command is denied and a request opens, routed to the sponsor
+    hook:
+      as: bot-2
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: deny, reasonContains: "approval requested"}
+    within: 10s
+  - name: the one pending record carries the sponsor's username as its decider
+    # suspect: approvals.0 is the one record of a one-record list
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want:
+      status: 200
+      body: {approvals.0.state: pending, approvals.0.lane: hook, approvals.0.rule: bare-hold, approvals.0.approverUsers.0: sam, approvals.1: null}
+    save: {sponsorHold: approvals.0.id}
+  - name: the request phase of the hold is on the chain as one approval record
+    audit: {subject: bot-2, kind: straza.audit.approval, count: 1}
+
+  # 2. The sponsor decides it with her own login token and the agent retries once.
+  - name: sam approves her agent's record with her own login token and her own words
+    # suspect: decidedByName is assumed to be the deciding username
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${sponsorHold}/approve
+      as: sam
+      body: {reason: "G4-SPONSOR: my agent may deploy app-one"}
+    want:
+      status: 200
+      body:
+        approval.state: approved
+        approval.decidedByName: sam
+        approval.decidedReason: "G4-SPONSOR: my agent may deploy app-one"
+  - name: the agent's identical retry is allowed by the single-use exemption
+    hook:
+      as: bot-2
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
+    want: {decision: allow}
+  - name: the allowed retry is on the chain once and its reason names the sponsor
+    audit: {subject: bot-2, kind: tool.pre, decision: allow, reasonContains: "approved by sam", count: 1}
+  - name: the resolution and the retry's use joined the request, three approval records for one hold
+    audit: {subject: bot-2, kind: straza.audit.approval, count: 3}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g4-sponsor/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft PolicySet is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g4-sponsor
+    want: {status: 204}
+  - name: the admin deletes the matched role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates the agent
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${botId}
+    want: {status: 204}
+  - name: the IdM deactivates sam
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${samId}
+    want: {status: 204}

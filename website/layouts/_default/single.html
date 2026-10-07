@@ -1,0 +1,20 @@
+{{ define "main" }}
+<div class="dbody">
+{{ partial "lnav.html" . }}
+<main id="main" class="main" tabindex="-1">
+<div class="prose">
+{{ partial "page-head.html" . }}
+<details class="fold toc-fold">
+  <summary>On this page</summary>
+  <div class="in">{{ .TableOfContents }}</div>
+</details>
+{{ partial "page-content.html" . }}
+{{ partial "walk-record.html" . }}
+</div>
+</main>
+<aside class="rail" aria-labelledby="rail-title">
+  <h2 class="rail-title" id="rail-title">On this page</h2>
+  <nav id="toc-list" aria-labelledby="rail-title"></nav>
+</aside>
+</div>
+{{ end }}

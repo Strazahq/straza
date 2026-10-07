@@ -1,0 +1,46 @@
+# demo-tools-readers-access: the gates for demo-tools-readers, the role the
+# demo-tools server owns over its read-only tools. The server's admin
+# defined the role and the identity manager hands it out: the operator and
+# analyst business roles compose it, so sam holds it from boot and nina gets
+# it with the analyst role. Two roles that reach one tool each carry their
+# own gate in this product, so the same two gates as demo-tools-sandbox-access
+# appear here: get-sum needs approval from the agent's sponsor within two
+# minutes and get-env comes back as a day-scale ticket. The echo tool that
+# sam's proof ladder calls has no rule and runs, because access comes from
+# the access row.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: demo-tools-readers-access
+  description: Gates for the role demo-tools-readers, written from the role page
+spec:
+  priority: 100
+  match:
+    roles: [demo-tools-readers]
+  rules:
+    - id: demo-tools-get-sum-approve
+      tools: [mcp.call]
+      apps: [demo-tools]
+      toolNames:
+        allow: ["get-sum"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        timeoutSeconds: 120
+        retryTTLSeconds: 120
+        binding: call
+      reason: "Straza: get-sum needs approval, the 2-minute MCP showcase (the person behind this agent decides, on their phone or on /self-service/)"
+    - id: demo-tools-get-env-approve
+      tools: [mcp.call]
+      apps: [demo-tools]
+      toolNames:
+        allow: ["get-env"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        class: ticket
+        ticketTTLSeconds: 86400
+        grantTTLSeconds: 3600
+      reason: "Straza: reading the server environment needs a day-scale approval ticket. Request it (this call raised it), the person behind this agent decides, call again within the hour to consume the grant"

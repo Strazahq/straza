@@ -1,0 +1,523 @@
+# The clocks a deployment meets every day, run against one stack whose three
+# governance lifetimes are minutes instead of hours and days. Four clocks run
+# at once. Alice walks the daemonless hook lane: a role she is given after her
+# session started reaches her decisions only when her token refreshes inside
+# its last 120 s, and after the janitor closes her session at its lifetime
+# her next refresh is refused, the hook re-acquires once from her device
+# credential, which is renewed on the way, and a second role arrives with
+# that. Bob shows the other daemonless clock: a policy change reaches a busy
+# session through the snapshot pulse within about 30 s, no refresh needed.
+# Carol walks the lifetime with a daemon. Bob's session then outlives a
+# stopped server into the grace window and past it, after his expired token
+# was refused at the gateway while the server was still up. Dave enrols and
+# stays idle, so his credential expires while carol's active one was renewed.
+# A signing key is rotated under all of them at the start, so every later
+# refresh presents a token the retiring key signed.
+# Times in the step names count from alice's session start. Fixed in the
+# binary: the session token lives 300 s, the client refreshes inside its last
+# 120 s, the snapshot pulse fires at most once per 30 s, the session janitor
+# ticks every 60 s and the key janitor every 30 s. The lifetimes below are
+# chosen against those: the lifetime close starts after alice's 3:01 refresh,
+# every re-acquire falls past half of the device credential's life and
+# before its end, dave's credential is gone, the verifier's skew allowance
+# included, before the 7:43 restart, and the grace window ends after the
+# server stops.
+# Checked against the running binary [live]: a policy change
+# reaches a daemonless session through the snapshot pulse, so the refresh
+# and re-acquire proofs use role assignments, which only a check-in
+# re-resolves.
+id: g9-clock-lifetimes
+group: G9
+title: The session, credential, grace and rotation clocks run their course on a stack with minute lifetimes
+provenance: >-
+  doc the published lifetimes: the offline grace bound is
+  governance.offlineGraceTTL, the session token lives 300 s, a device-token
+  check-in past half life renews the credential while an idle device still
+  expires, a 401-refused refresh falls back once to the enrolment lane, the
+  offline deny names what it observed, and the snapshotLagSeconds pulse,
+  default 30 s, keeps a busy session at most one call plus the lag behind
+  the active policy;
+  spec/session-token/SPEC.md (TTL 300 s; refresh via /v1/checkin; key
+  rotation staged, active, retiring; the JWKS carries staged, active and
+  retiring keys); spec/attestation/SPEC.md §5 (renewal rides the
+  device-token lane only); spec/snapshot/SPEC.md §Envelope (maxAgeSecs is
+  the grace bound); spec/events/SPEC.md revision 28 (session.end outcome
+  lifetime-closed, reason naming the configured lifetime);
+  website/content/reference/configuration.md §Governance (the three knobs;
+  offlineGraceTTL has no env face); website/content/reference/api.md
+  sections Sessions (newest first, filtered by user or status), Roles and
+  assignments, and Signing keys (rotate answers kid, status,
+  active_in_seconds, previous_key_verifies_for_seconds);
+  website/content/security/credentials-and-sessions.md (the grace deny
+  wording, quoted); live (roles reach a daemonless session at
+  its refresh or re-acquire, a policy change through the pulse).
+  suspect: the refusal wording for an expired enrol credential and for an
+  expired session token at the gateway is not published, so those steps
+  assert the refusal alone; the sessions list order and the status word
+  closed follow the API reference; the JWKS member "kid":"<id>" follows
+  RFC 7517 in compact JSON; the verifier accepts a session or
+  device token for about 30 s past its expiry, an allowance no page states,
+  seen live, so the expiry proofs allow for it.
+harnesses: [claude-code]
+governance:
+  offlineGraceTTL: 2m40s
+  deviceTokenTTL: 6m45s
+  sessionMaxLifetime: 3m45s
+identities:
+  alice: {kind: human, password: "Walk-2026!"}
+  bob: {kind: human, password: "Walk-2026!"}
+  carol: {kind: human, password: "Walk-2026!"}
+  dave: {kind: human, password: "Walk-2026!"}
+steps:
+  # Provisioning: four people, two roles alice receives later with a policy
+  # each, a role and an app for bob's gateway call. Both of alice's policies
+  # are active before any session starts, so the only thing that changes for
+  # her decisions later is which roles her session carries.
+  - name: the IdM provisions alice over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g9-alice
+        userName: alice
+        displayName: Alice Refresh
+        active: true
+    want: {status: 201}
+    save: {aliceId: id}
+  - name: the admin sets alice's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${aliceId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM provisions bob over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g9-bob
+        userName: bob
+        displayName: Bob Grace
+        active: true
+    want: {status: 201}
+    save: {bobId: id}
+  - name: the admin sets bob's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${bobId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM provisions carol over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g9-carol
+        userName: carol
+        displayName: Carol Daemon
+        active: true
+    want: {status: 201}
+    save: {carolId: id}
+  - name: the admin sets carol's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${carolId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IdM provisions dave over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g9-dave
+        userName: dave
+        displayName: Dave Idle
+        active: true
+    want: {status: 201}
+    save: {daveId: id}
+  - name: the admin sets dave's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${daveId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the admin creates the role alice receives at 0:15
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g9-clock, kind: application, description: "Clock scenario, adopted at the refresh"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the admin creates the role alice receives at 3:05
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g9-clock-two, kind: application, description: "Clock scenario, adopted at the re-acquire"}
+    want: {status: 201}
+    save: {roleTwoId: id}
+  - name: the admin registers the hermetic upstream as an app
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g9-tools
+            namespace: dev.e2e
+            description: The hermetic upstream, for the clock scenario's gateway calls
+          server:
+            name: dev.e2e/g9-tools
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${upstream}"
+            exposure:
+              tools: ["*"]
+    want: {status: 201}
+    save: {appId: id}
+  - name: the admin creates the role the app owns, over every tool of the app, which bob's gateway access hangs on
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g9-tools-gateway, server: g9-tools, tools: ["*"], description: "Clock scenario, the gateway role"}
+    want: {status: 201}
+    save: {gatewayRoleId: id}
+  - name: bob holds the gateway role
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${bobId}", role_id: "${gatewayRoleId}"}
+    want: {status: 201}
+  - name: the admin applies the policy for the first role, which refuses the first probe
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g9-clock-one
+            description: Clock scenario, the rule role g9-clock brings
+          spec:
+            match:
+              roles: [g9-clock]
+            rules:
+              - id: probe-one
+                tools: [shell.exec]
+                command:
+                  denyPatterns: ["clock-probe one *"]
+                effect: deny
+                reason: "G9-CLOCK-ONE: the first probe is refused for role g9-clock"
+    want: {status: 201}
+  - name: the admin activates it
+    admin:
+      method: POST
+      path: /v1/admin/policies/g9-clock-one/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: the admin applies the policy for the second role, which refuses the second probe
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g9-clock-two
+            description: Clock scenario, the rule role g9-clock-two brings
+          spec:
+            match:
+              roles: [g9-clock-two]
+            rules:
+              - id: probe-two
+                tools: [shell.exec]
+                command:
+                  denyPatterns: ["clock-probe two *"]
+                effect: deny
+                reason: "G9-CLOCK-TWO: the second probe is refused for role g9-clock-two"
+    want: {status: 201}
+  - name: the admin activates that one too
+    admin:
+      method: POST
+      path: /v1/admin/policies/g9-clock-two/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: alice enrolls
+    enroll: {as: alice}
+  - name: bob enrolls
+    enroll: {as: bob}
+  - name: carol enrolls
+    enroll: {as: carol}
+  - name: dave enrolls and then never checks in until his credential has expired
+    enroll: {as: dave}
+
+  # Clock zero: three sessions start, carol's daemon connects.
+  - name: 0:00 alice starts a session on the hook lane, with no daemon and no role yet
+    hook:
+      as: alice
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: 0:00 bob starts a session
+    hook:
+      as: bob
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: 0:00 carol starts a session
+    hook:
+      as: carol
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: 0:00 carol's daemon holds the push stream and keeps her session fresh
+    daemon: {as: carol, action: start}
+  - name: 0:05 bob's fresh token reaches the upstream through the gateway
+    mcp:
+      as: bob
+      tool: g9-tools__echo
+      args: {text: clock-zero}
+    want: {result: clock-zero}
+  - name: 0:05 alice's first probe is allowed because her session carries no role
+    hook:
+      as: alice
+      event: {kind: tool.pre, tool: shell.exec, command: "clock-probe one now"}
+    want: {decision: allow}
+  - name: 0:05 bob's pulse probe is allowed because no rule names it yet, and this decision arms his snapshot pulse
+    hook:
+      as: bob
+      event: {kind: tool.pre, tool: shell.exec, command: "clock-probe pulse now"}
+    want: {decision: allow}
+
+  # Rotation under live sessions: the key is staged now and promoted two key
+  # janitor ticks later, so every refresh after about 1:40 presents a token
+  # the retiring key signed.
+  - name: 0:10 the admin stages a new session signing key
+    admin:
+      method: POST
+      path: /v1/admin/signing-keys/rotate
+    want: {status: 200, body: {status: staged}}
+    save: {kid: kid}
+  - name: 0:10 the JWKS already carries the staged key, so every verifier holds it before it signs
+    admin:
+      method: GET
+      path: /.well-known/straza/jwks.json
+    want: {status: 200, bodyContains: '"kid":"${kid}"'}
+  - name: 0:10 the rotation is on the chain exactly once
+    audit: {kind: straza.audit.admin, action: signing-keys.rotate, count: 1}
+
+  # The two daemonless clocks. A policy change reaches bob's busy session
+  # through the snapshot pulse within about 30 s of his last decision. A role
+  # change reaches alice's session only when her token refreshes inside its
+  # last 120 s, because roles are resolved at check-in.
+  - name: 0:15 alice is given the first role, which her running session does not know yet
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${aliceId}", role_id: "${roleId}"}
+    want: {status: 201}
+  - name: 0:15 the admin applies a policy for bob's role that refuses the pulse probe
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g9-pulse
+            description: Clock scenario, the rule the snapshot pulse carries to bob
+          spec:
+            match:
+              roles: [g9-tools-gateway]
+            rules:
+              - id: probe-pulse
+                tools: [shell.exec]
+                command:
+                  denyPatterns: ["clock-probe pulse *"]
+                effect: deny
+                reason: "G9-PULSE: the pulse probe is refused for role g9-tools-gateway"
+    want: {status: 201}
+  - name: 0:15 the admin activates it
+    admin:
+      method: POST
+      path: /v1/admin/policies/g9-pulse/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: about 0:45 bob's hook denies the pulse probe once the snapshot pulse has run, one call plus the lag after the activation
+    hook:
+      as: bob
+      event: {kind: tool.pre, tool: shell.exec, command: "clock-probe pulse now"}
+    want: {decision: deny, reasonContains: "G9-PULSE"}
+    within: 1m30s
+    timer: policy-pulse
+  - name: about 3:01 alice's hook refreshes inside the last 120 s, her session learns the role and the first probe flips to deny
+    hook:
+      as: alice
+      event: {kind: tool.pre, tool: shell.exec, command: "clock-probe one now"}
+    want: {decision: deny, reasonContains: "G9-CLOCK-ONE"}
+    within: 4m
+    timer: refresh-adopt
+
+  # The lifetime clock: a second role waits for alice's re-acquire, and the
+  # janitor closes the three sessions started at clock zero.
+  - name: 3:05 alice is given the second role, which only a new check-in can bring to her session
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${aliceId}", role_id: "${roleTwoId}"}
+    want: {status: 201}
+  - name: 3:45 to 4:45 the janitor closes carol's session with a chained record that names her and the lifetime
+    audit: {subject: carol, kind: straza.audit.authn, reasonContains: "maximum lifetime of 3m45s", count: 1}
+    within: 3m
+  - name: the janitor closed all three sessions started at clock zero, each with its own record
+    audit: {kind: straza.audit.authn, reasonContains: "maximum lifetime of 3m45s", count: 3}
+    within: 1m
+  - name: by 5:15 carol's daemon read the refused refresh as a stand-down and started a fresh session from her device credential, so she has one closed and one active session and no third
+    admin:
+      method: GET
+      path: /v1/admin/sessions?user=${carolId}
+    want: {status: 200, body: {0.status: active, 1.status: closed, "2": null}}
+    within: 1m
+  - name: carol's hook decides on the fresh session with no human action
+    hook:
+      as: carol
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: 5:01 to 5:31 bob's token has expired and the gateway refuses it once the verifier's skew allowance is past
+    mcp:
+      as: bob
+      tool: g9-tools__echo
+      args: {text: clock-stale}
+    want: {refused: true}
+    within: 1m30s
+  - name: about 6:01 alice's refresh is refused for the closed session, the hook re-acquires once from her device credential, her session learns the second role and the second probe flips to deny
+    hook:
+      as: alice
+      event: {kind: tool.pre, tool: shell.exec, command: "clock-probe two now"}
+    want: {decision: deny, reasonContains: "G9-CLOCK-TWO"}
+    within: 3m30s
+    timer: reacquire-adopt
+  - name: alice has exactly one closed and one active session, so the re-acquire happened once
+    admin:
+      method: GET
+      path: /v1/admin/sessions?user=${aliceId}
+    want: {status: 200, body: {0.status: active, 1.status: closed, "2": null}}
+
+  # The grace clock: bob's token expired at 5:00 and the server is gone, so
+  # his hook decides locally for the grace window and then fails closed.
+  - name: about 6:04 the server is stopped
+    server: {action: stop}
+  - name: bob's hook still allows inside the grace window
+    hook:
+      as: bob
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: allow}
+  - name: 7:41 the grace window ends and bob's hook denies with the published wording
+    hook:
+      as: bob
+      event: {kind: tool.pre, tool: shell.exec, command: "git status"}
+    want: {decision: deny, reasonContains: "offline grace period"}
+    within: 2m30s
+    timer: grace-exhausted
+
+  # The credential clock: the server returns; carol's credential was renewed
+  # at her re-acquire and dave's idle one ran out at about 6:40, or 7:10 with
+  # the verifier's skew allowance.
+  - name: about 7:43 the server is started again on the same port and data directory
+    server: {action: start}
+  - name: carol starts a session on her renewed device credential
+    hook:
+      as: carol
+      event: {kind: session.start}
+    want: {decision: allow}
+    within: 30s
+  - name: dave's idle device credential has expired, so his session start is refused
+    hook:
+      as: dave
+      event: {kind: session.start}
+    want: {decision: block}
+  - name: carol's daemon is stopped
+    daemon: {as: carol, action: stop}
+
+  # Deprovisioning.
+  - name: the admin deactivates the first policy
+    admin:
+      method: POST
+      path: /v1/admin/policies/g9-clock-one/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the first policy is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g9-clock-one
+    want: {status: 204}
+  - name: the admin deactivates the second policy
+    admin:
+      method: POST
+      path: /v1/admin/policies/g9-clock-two/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the second policy is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g9-clock-two
+    want: {status: 204}
+  - name: the admin deactivates the pulse policy
+    admin:
+      method: POST
+      path: /v1/admin/policies/g9-pulse/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the pulse policy is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g9-pulse
+    want: {status: 204}
+  - name: the admin deletes the gateway role before its server, which would take it along
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${gatewayRoleId}
+    want: {status: 200}
+  - name: the admin deletes the app
+    admin:
+      method: DELETE
+      path: /v1/admin/apps/${appId}
+    want: {status: 200}
+  - name: the admin deletes the first role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the admin deletes the second role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleTwoId}
+    want: {status: 200}
+  - name: the IdM deactivates alice
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${aliceId}
+    want: {status: 204}
+  - name: the IdM deactivates bob
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${bobId}
+    want: {status: 204}
+  - name: the IdM deactivates carol
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${carolId}
+    want: {status: 204}
+  - name: the IdM deactivates dave
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${daveId}
+    want: {status: 204}

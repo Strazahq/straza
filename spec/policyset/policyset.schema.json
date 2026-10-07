@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://straza.dev/policyset/v1beta1/policyset.schema.json",
+  "title": "Straza PolicySet (v1beta1)",
+  "description": "Declarative policy document. YAML documents validate after YAML→JSON conversion. Evaluation semantics are normative in SPEC.md.",
+  "type": "object",
+  "properties": {
+    "apiVersion": { "const": "straza.dev/v1beta1" },
+    "kind": { "const": "PolicySet" },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$" },
+        "description": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "priority": { "type": "integer", "minimum": 0, "maximum": 1000000, "default": 0 },
+        "match": {
+          "type": "object",
+          "description": "Subject selectors. OR within each list, AND across lists that are present. Omitted or empty match applies to all sessions.",
+          "properties": {
+            "roles": { "$ref": "#/$defs/stringList", "description": "Matched roles (revision 16): every name that EXISTS as a role MUST be application-kind, the roles that carry tool bindings (sessions hold the implication closure, so matching the application role covers every holder, through any business role or a direct grant); the server refuses a business role (name the application roles it composes instead), an approver role (approve.roles is its place), or a console role, at validate and activation (400 naming every violation and the fix). A name that is not a role in Straza stays legal: match is a selector, not a reference; it matches nobody until the role exists, and a later-born refused kind is caught at the set's next activation plus the boot audit. Sets active from before revision 16 keep governing, with one boot WARN each, until their next activation." },
+            "users": { "$ref": "#/$defs/stringList" },
+            "identity": {
+              "type": "object",
+              "description": "Identity-typology selectors (revision 9): matched against the checkin-resolved subject typology. Same combining as the other selectors; an UNSET subject field matches no listed value, so unclassified identities fall outside identity-scoped sets (write restrictive postures deny-unless-<type>). Documents that set identity require revision-9 clients; roll clients first.",
+              "properties": {
+                "userType": { "type": "array", "minItems": 1, "items": { "type": "string", "enum": ["human", "agent", "service"] } },
+                "agencyMode": { "type": "array", "minItems": 1, "items": { "type": "string", "enum": ["interactive", "supervised", "autonomous"] } },
+                "swarmId": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+              },
+              "minProperties": 1,
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "capture": {
+          "type": "object",
+          "description": "Conversation capture opt-in for the set's matched sessions (revision 2). Off unless a matched set enables it; when matched sets disagree on mode, redact wins. Mode verbatim is the default. Clients older than this field reject documents that use it; roll clients before writing capture blocks.",
+          "properties": {
+            "conversations": { "type": "boolean" },
+            "mode": { "type": "string", "enum": ["verbatim", "redact"] }
+          },
+          "required": ["conversations"],
+          "additionalProperties": false
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/rule" }
+        },
+        "escape": {
+          "type": "object",
+          "description": "Per-set Rego escape hatch. Evaluated after declarative rules; may only add denies (monotonic tightening).",
+          "properties": {
+            "rego": { "type": "string", "minLength": 1 }
+          },
+          "required": ["rego"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["rules"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "patternList": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "allowDeny": {
+      "type": "object",
+      "properties": {
+        "allow": { "$ref": "#/$defs/patternList" },
+        "deny": { "$ref": "#/$defs/patternList" }
+      },
+      "minProperties": 1,
+      "additionalProperties": false
+    },
+    "rule": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$" },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["session.start", "prompt.submit", "tool.pre", "tool.post", "permission.request", "subagent.start", "subagent.stop", "session.end", "compact.pre"]
+          },
+          "default": ["tool.pre"]
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["shell.exec", "file.read", "file.write", "file.edit", "net.fetch", "mcp.call", "task.spawn", "other"]
+          }
+        },
+        "apps": { "$ref": "#/$defs/stringList" },
+        "toolNames": { "$ref": "#/$defs/allowDeny" },
+        "command": {
+          "type": "object",
+          "properties": {
+            "allowPatterns": { "$ref": "#/$defs/patternList" },
+            "denyPatterns": { "$ref": "#/$defs/patternList" }
+          },
+          "minProperties": 1,
+          "additionalProperties": false
+        },
+        "paths": { "$ref": "#/$defs/allowDeny" },
+        "interpreters": {
+          "$ref": "#/$defs/allowDeny",
+          "description": "Matched against the canonical event's interpreter attribute (spec/hook-profile); consulted only when the event carries a non-empty interpreter (revision 3)."
+        },
+        "require": {
+          "type": "object",
+          "properties": {
+            "attestation": { "enum": ["managed", "advisory", "none"] },
+            "deviceCert": { "type": "boolean" },
+            "harness": { "$ref": "#/$defs/stringList" }
+          },
+          "minProperties": 1,
+          "additionalProperties": false
+        },
+        "mode": { "enum": ["serverCheck", "classify", "approve", "confirm"] },
+        "approve": {
+          "type": "object",
+          "description": "Configures a `mode: approve` or `mode: confirm` rule (SPEC.md §2, item 8; revision 4, ticket class added revision 6, binding added revision 7, confirm added revision 11): a winning allow is held for a human decision before it is final. Legal only alongside `mode: approve` or `mode: confirm` (enforced by the `allOf` below); under `confirm` the decider-pool fields `roles`/`selfApproval` are rejected (the requester is the sole decider). Empty or omitted `roles` (with no `deciders` and no `selfApproval`) defaults to `deciders: [sponsor]` since revision 14: the record routes to the requester's accountable human, and a request with no usable sponsor is denied at request time with the cause; rules that want admin deciders say `roles: [straza-admin]`. `class` (revision 6) selects the shape: `hold` (default) is the bounded blocking wait (`timeoutSeconds`/`retryTTLSeconds` apply, default 90/60); `ticket` is a day-scale request whose grant a later session consumes (`ticketTTLSeconds`/`grantTTLSeconds`/`bind` apply, default 24h/1h/fingerprint; the blocking-wait knobs are rejected under `ticket`). `binding` (revision 7) selects what the approval fingerprint covers for mcp.call events: call (the default: canonicalized arguments fold into the key, an approval binds the exact call) or tool (identity only, an explicit loosening).",
+          "properties": {
+            "roles": { "$ref": "#/$defs/stringList", "description": "Approver roles (revision 15): every name MUST be an approver-kind role, or straza-admin by name; the server refuses an access role (business/application), a console role other than straza-admin, or an unknown role at validate and activation (400 naming every violation and the fix). Resolved on the identity plane at decision time, never baked into the snapshot. Empty = the sponsor default (revision 14)." },
+            "class": { "enum": ["hold", "ticket"], "default": "hold", "description": "Approval shape: hold (bounded blocking wait, expiry=deny) or ticket (day-scale request + a later-consumable, DB-durable single-use grant). Default hold, so every pre-revision-6 rule keeps its exact semantics." },
+            "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 3600, "description": "hold only: blocking-wait bound. Rejected under class: ticket." },
+            "selfApproval": { "type": "boolean" },
+            "retryTTLSeconds": { "type": "integer", "minimum": 1, "maximum": 600, "description": "hold only: how long after the decision one identical retry may use the approval (revision 23). Rejected under class: ticket." },
+            "ticketTTLSeconds": { "type": "integer", "minimum": 1, "maximum": 2592000, "description": "ticket only: decision window (request expiry). Default 24h (86400), cap 30d (2592000)." },
+            "grantTTLSeconds": { "type": "integer", "minimum": 1, "maximum": 86400, "description": "ticket only: post-approval consume window. Default 1h (3600), cap 24h (86400)." },
+            "bind": { "enum": ["fingerprint", "predicate"], "default": "fingerprint", "description": "ticket only: how a later call re-matches the grant. fingerprint (default) binds to exactly this call's EventKey. predicate is reserved since revision 22: it stays legal so stored documents keep validating, and every PEP treats it as fingerprint." },
+            "binding": { "enum": ["call", "tool"], "default": "call", "description": "Fingerprint coverage for mcp.call events (revision 7): call (default) folds the canonicalized tools/call arguments into the key; tool covers App+ToolName only. Ignored for non-mcp lanes (always the concrete call). Applies to both classes." },
+            "deciders": { "type": "array", "items": { "enum": ["sponsor"] }, "uniqueItems": true, "description": "Decider kinds (revision 13), resolved per record at request time and composable with roles. sponsor = the requester's accountable human (User.Sponsor, the IdM-owned edge), persisted on the record as an allowed decider and the announcement target. Since revision 19 sponsor means the person behind the agent: a PERSON with no sponsor is that person, and the record becomes a confirm record that the requester alone decides, unless roles carry it. Since revision 14 an agent with no usable sponsor and no roles beside it, or a person whose recorded sponsor is unusable, is DENIED AT REQUEST TIME with the cause (no pending record). Rejected under mode: confirm." },
+            "notify": { "type": "array", "items": { "enum": ["console", "slack", "push"] }, "uniqueItems": true, "description": "Notification routing (revision 8): which channels ANNOUNCE this rule's approvals (create nudge, ticket reminder, terminal status). Empty/omitted = every configured channel (pre-revision-8 behavior). console is the always-on pull surface and names no push notifier, so [console] alone silences third-party notification. Narrows announcement only: who may decide stays roles/selfApproval, and every decision surface keeps working." }
+          },
+          "additionalProperties": false
+        },
+        "effect": { "enum": ["allow", "deny"] },
+        "reason": { "type": "string" },
+        "obligations": {
+          "type": "array",
+          "items": { "enum": ["redact", "notify"] },
+          "description": "Retired by revision 18: the redact and notify obligations never ran on any lane. The list stays in the schema so stored documents keep validating; the platform refuses a document that carries it at validate and at activation, naming the fix (capture.mode: redact on the set for content minimization, approve.notify on the rule for announcements)."
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "required": ["approve"] },
+          "then": { "properties": { "mode": { "enum": ["approve", "confirm"] } }, "required": ["mode"] }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "confirm" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "approve": {
+                "properties": { "roles": false, "selfApproval": false, "deciders": false }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

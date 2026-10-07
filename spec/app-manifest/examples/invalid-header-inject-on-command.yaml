@@ -1,0 +1,21 @@
+# INVALID: inject.as header is only valid for remote runtimes (stdio has no
+# headers).
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: badinject
+server:
+  name: example/badinject
+  version: "1.0.0"
+straza:
+  runtime:
+    kind: command
+    command:
+      exec: npx
+      args: ["-y", "example-mcp"]
+  credential:
+    kind: static
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"

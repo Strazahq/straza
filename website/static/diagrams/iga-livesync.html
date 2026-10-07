@@ -1,0 +1,388 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IGA LiveSync loop · Straza</title>
+<style>
+ 
+:root{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;
+  --accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--radius:6px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}}
+[data-theme="light"]{
+  --bg:#eef1f6;--surface:#ffffff;--surface-2:#f4f6fb;--border:#cdd5e3;
+  --text:#141a24;--muted:#55616f;--accent:#9a6413;--accent-hover:#b87a1c;--on-accent:#ffffff;
+  --ok:#1a7f37;--warn:#8a5a08;--danger:#c62a25;--unknown:#8250df;
+  --ok-bg:rgba(26,127,55,.12);--warn-bg:rgba(138,90,8,.12);
+  --danger-bg:rgba(198,42,37,.11);--unknown-bg:rgba(130,80,223,.12);
+  --accent-bg:rgba(154,100,19,.11);color-scheme:light;}
+[data-theme="dark"]{
+  --bg:#070a11;--surface:#0f141f;--surface-2:#161d2a;--border:#212a3a;
+  --text:#dce4f0;--muted:#8b98ae;--accent:#f6b63c;--accent-hover:#ffc860;--on-accent:#0b0d12;
+  --ok:#4bce6b;--warn:#d69a34;--danger:#ff5f57;--unknown:#bc8cff;
+  --ok-bg:rgba(75,206,107,.13);--warn-bg:rgba(214,154,52,.13);
+  --danger-bg:rgba(255,95,87,.13);--unknown-bg:rgba(188,140,255,.14);
+  --accent-bg:rgba(246,182,60,.13);color-scheme:dark;}
+
+ 
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+  display:flex;flex-direction:column;font-size:13px;-webkit-font-smoothing:antialiased}
+.bar{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s4);
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--surface),var(--bg))}
+.bar h1{font-size:13px;font-weight:600;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.bar h1 .k{color:var(--muted);font-weight:400}
+.controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+.controls .cap{font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;
+  padding:0 4px 0 6px;font-weight:600}
+.legend{display:flex;gap:var(--s3);align-items:center;font-size:11px;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:5px 10px}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.legend .ok{background:var(--ok-bg);border:1px solid var(--ok)}
+.legend .warn{background:var(--warn-bg);border:1px solid var(--warn)}
+button.ctl{font:600 12px var(--font-ui);color:var(--text);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 11px;cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s}
+button.ctl:hover{background:var(--surface);border-color:var(--border)}
+button.ctl[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);
+  color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.ctl.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+button.ctl.primary[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);
+  color:var(--on-accent);box-shadow:none}
+button.ctl.primary:disabled{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button.ctl.deny[aria-pressed="true"]{background:var(--danger-bg);border-color:var(--danger);
+  color:var(--danger);box-shadow:inset 0 0 0 1px var(--danger)}
+button.ctl.kill{color:var(--danger);border-color:var(--danger);background:var(--danger-bg)}
+button.ctl.kill:hover{background:var(--danger-bg);border-color:var(--danger);
+  box-shadow:inset 0 0 0 1px var(--danger)}
+button.ctl:disabled{opacity:.4;cursor:default}
+button.ctl:disabled:hover{background:transparent;border-color:transparent}
+.stage{flex:1;min-height:0;overflow:auto;display:flex}
+.stage svg{display:block;margin:auto;width:100%;height:100%}
+.narration{border-top:1px solid var(--border);
+  background:linear-gradient(180deg,var(--bg),var(--surface));
+  padding:11px var(--s4) 11px calc(var(--s4) + 8px);font-size:12.5px;height:98px;overflow:auto;
+  display:flex;align-items:center;line-height:1.5;position:relative}
+.narration::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+  border-radius:0 2px 2px 0;background:var(--accent)}
+.narration code{font-family:var(--font-mono);font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+details.alt{border-top:1px solid var(--border);font-size:12px;color:var(--muted);padding:var(--s2) var(--s4)}
+details.alt summary{cursor:pointer;font-weight:600;color:var(--text)}
+details.alt summary:hover{color:var(--accent)}
+details.alt p{margin:var(--s2) 0;max-width:80ch;line-height:1.6}
+
+ 
+text{fill:var(--text);font-family:var(--font-ui);user-select:none}
+.t{font-size:15px;font-weight:600}
+.s{font-size:12.5px;font-weight:600}
+.d{font-size:11px;fill:var(--muted)}
+.cap{font-size:10.5px;fill:var(--muted);letter-spacing:.08em}
+.mono{font-family:var(--font-mono);font-size:10.5px;fill:var(--muted)}
+.box{fill:var(--surface);stroke:var(--border);stroke-width:1.25}
+.chip{fill:var(--surface-2);stroke:var(--border);stroke-width:1.25}
+.box,.chip{transition:stroke .3s,stroke-width .3s,fill .3s,filter .2s,opacity .25s}
+.edge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ar)}
+.edge.async{stroke-dasharray:5 4}
+.mk{fill:var(--muted)}
+.pulse{fill:var(--accent);filter:drop-shadow(0 0 3px var(--accent))}
+ 
+.node{cursor:pointer;outline:none}
+.node .cbox{fill:var(--bg)}
+.node:hover .box,.node:focus .box,.node:hover .chip,.node:focus .chip{stroke:var(--accent);
+  stroke-width:2;fill:var(--accent-bg);filter:drop-shadow(0 0 5px var(--accent))}
+.node:hover .cbox,.node:focus .cbox{fill:var(--bg);stroke:var(--accent);
+  stroke-width:2;filter:drop-shadow(0 0 5px var(--accent))}
+ 
+.gchip{opacity:0;transition:opacity .35s}
+.gchip.show{opacity:1}
+.gchip.gone .chip{stroke:var(--danger);stroke-width:2;fill:var(--danger-bg)}
+.gchip.dead .chip{stroke:var(--unknown);stroke-width:1.6;fill:var(--unknown-bg);stroke-dasharray:4 3}
+.gchip.dead text{fill:var(--muted)}
+.deadlbl{opacity:0;fill:var(--unknown);font-size:10px;font-weight:700;transition:opacity .3s}
+.gchip.dead .deadlbl{opacity:1}
+#feedchip{opacity:0;transition:opacity .3s}
+#feedchip.show{opacity:1}
+#feedchip .chip{stroke:var(--accent);stroke-width:1.6;fill:var(--accent-bg)}
+.lf{display:inline}.ls{display:none}
+@media (max-width:600px){.lf{display:none}.ls{display:inline}}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Straza <span class="k">/ IGA LiveSync loop</span></h1>
+  <div class="controls">
+    <button class="ctl primary" id="btnCreate">deploy an app</button>
+    <button class="ctl" id="btnDelete" disabled>remove the app</button>
+    <button class="ctl" id="btnReset">reset</button>
+  </div>
+</header>
+
+<div class="stage">
+<svg id="dia" viewBox="0 0 980 560" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
+<title id="svgT">Bidirectional loop between midPoint and Straza</title>
+<desc id="svgD">midPoint provisions users into Straza over SCIM and writes role membership on the wire-groups that render Straza's exported roles. Straza catalog changes flow back over the cursored admin changes feed, which the ConnId connector polls; midPoint materializes apps as Services and tools and roles as RoleType foci. A create and a delete can be animated through the loop; deletion leaves a dead shadow and the focus is removed.</desc>
+<defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
+</defs>
+
+
+<g class="node" id="mp" tabindex="0" aria-label="midPoint, the IGA system">
+  <rect class="box cbox" x="20" y="56" width="300" height="424" rx="6"/>
+  <text class="t" x="32" y="80">midPoint</text>
+  <text class="d" x="32" y="95">IGA &#183; lifecycle master for identity</text>
+</g>
+<g class="node" id="ug" tabindex="0" aria-label="Users and role membership, written by midPoint">
+  <rect class="box" x="36" y="104" width="268" height="44" rx="6"/>
+  <text class="s" x="46" y="122">users &amp; membership</text>
+  <text class="d" x="46" y="137">owner of the SCIM lane</text>
+</g>
+<text class="cap" x="36" y="176">FOCUS MIRROR (FROM Straza)</text>
+<g class="gchip" id="m-svc">
+  <rect class="chip" x="36" y="186" width="268" height="32" rx="5"/>
+  <text class="d" x="46" y="200" style="fill:var(--text)">demo-tools (Service)</text>
+  <text class="mono" x="46" y="212">archetype mcp-server</text>
+  <text class="deadlbl" x="232" y="206">dead shadow</text>
+</g>
+<g class="gchip" id="m-tool">
+  <rect class="chip" x="36" y="226" width="268" height="32" rx="5"/>
+  <text class="d" x="46" y="240" style="fill:var(--text)">demo-tools:echo (Role)</text>
+  <text class="mono" x="46" y="252">archetype mcp-tool</text>
+  <text class="deadlbl" x="232" y="246">dead shadow</text>
+</g>
+<g class="gchip show" id="m-role">
+  <rect class="chip" x="36" y="266" width="268" height="32" rx="5"/>
+  <text class="d" x="46" y="280" style="fill:var(--text)">AI:dev (Role)</text>
+  <text class="mono" x="46" y="292">archetype ai-role &#183; assignable</text>
+</g>
+<text class="d" x="36" y="326">roles &#8594; imported foci &#183; users &#8594; link-only</text>
+<text class="d" x="36" y="341">(users never addFocus: loop safety)</text>
+<g class="node" id="conn" tabindex="0" aria-label="universal-rest-connector, implementing ConnId SyncOp">
+  <rect class="box" x="36" y="396" width="268" height="60" rx="6"/>
+  <text class="s" x="46" y="416">universal-rest-connector</text>
+  <text class="d" x="46" y="432">ConnId SyncOp &#183; LiveSync polls every 10 s</text>
+  <text class="mono" x="46" y="447">sync token = cursor</text>
+</g>
+
+
+<g class="node" id="wd" tabindex="0" aria-label="Straza, strazad admin plane">
+  <rect class="box cbox" x="660" y="56" width="300" height="424" rx="6"/>
+  <text class="t" x="672" y="80">Straza</text>
+  <text class="d" x="672" y="95">strazad &#183; admin plane</text>
+</g>
+<g class="node" id="scim" tabindex="0" aria-label="Straza's SCIM server">
+  <rect class="box" x="676" y="104" width="268" height="44" rx="6"/>
+  <text class="s" x="686" y="122">SCIM 2.0 server</text>
+  <text class="d" x="686" y="137">roles render as wire-groups</text>
+</g>
+<text class="cap" x="676" y="176">CATALOG</text>
+<g class="gchip" id="w-app">
+  <rect class="chip" x="676" y="186" width="268" height="32" rx="5"/>
+  <text class="d" x="686" y="200" style="fill:var(--text)">demo-tools (app)</text>
+  <text class="mono" x="686" y="212">status: running</text>
+</g>
+<g class="gchip" id="w-tool">
+  <rect class="chip" x="676" y="226" width="268" height="32" rx="5"/>
+  <text class="d" x="686" y="240" style="fill:var(--text)">echo (tool)</text>
+  <text class="mono" x="686" y="252">app lineage: demo-tools</text>
+</g>
+<g class="gchip show" id="w-role">
+  <rect class="chip" x="676" y="266" width="268" height="32" rx="5"/>
+  <text class="d" x="686" y="280" style="fill:var(--text)">dev (role)</text>
+  <text class="mono" x="686" y="292">binds policy &#183; tools &#183; packs</text>
+</g>
+<text class="d" x="676" y="326">installed via API &#183; CLI &#183; GitOps apps/ dir</text>
+<g class="node" id="feed" tabindex="0" aria-label="The admin changes feed">
+  <rect class="box" x="676" y="396" width="268" height="60" rx="6"/>
+  <text class="s" x="686" y="416">changes feed</text>
+  <text class="mono" x="686" y="432">GET /v1/admin/changes</text>
+  <text class="d" x="686" y="447">events outbox &#183; uuidv7 cursor</text>
+</g>
+
+
+<path id="lane-scim" class="edge" d="M320 126 L660 126"/>
+<text class="s" x="490" y="110" text-anchor="middle" style="font-size:11.5px">SCIM 2.0: provision users &amp; membership</text>
+<text class="d" x="490" y="144" text-anchor="middle">wire-group members add &#8658; role assignment</text>
+
+<path id="lane-feed" class="edge async" d="M660 424 L320 424"/>
+<text class="mono" x="490" y="408" text-anchor="middle" style="fill:var(--text)">GET /v1/admin/changes?since=&lt;cursor&gt;</text>
+<text class="d" x="490" y="440" text-anchor="middle">at-least-once &#183; deletes = tombstones &#183; recon = safety net</text>
+
+
+<g id="feedchip">
+  <rect class="chip" x="380" y="452" width="220" height="26" rx="5"/>
+  <text id="feedtxt" class="mono" x="490" y="469" text-anchor="middle" style="fill:var(--text)">0197f3&#8230; &#183; app &#183; create</text>
+</g>
+
+
+<g class="node" id="map" tabindex="0" aria-label="Materialization rules from Straza objects to midPoint foci">
+  <rect class="box" x="350" y="170" width="280" height="166" rx="6"/>
+  <text class="cap" x="490" y="192" text-anchor="middle">MATERIALIZATION: READ-ONLY PULL</text>
+  <text class="d" x="366" y="216" style="fill:var(--text)">app &#8594; Service [mcp-server]</text>
+  <text class="d" x="366" y="240" style="fill:var(--text)">tool &#8594; Role &#8220;app:tool&#8221; [mcp-tool]</text>
+  <text class="d" x="366" y="264" style="fill:var(--text)">role &#8594; Role &#8220;AI:role&#8221; [ai-role]</text>
+  <text class="d" x="366" y="288">membership &#8594; role assignment</text>
+  <text class="d" x="366" y="312">user &#8594; link-only, never addFocus</text>
+</g>
+
+<text class="d" x="350" y="516">types: user &#183; role &#183; app &#183; tool &#183; binding; a scoped wat_ token suffices</text>
+</svg>
+</div>
+
+<div class="narration" aria-live="polite"><span id="nar">Two lanes, loop-safe by direction: identity flows in over SCIM; catalog changes flow back over the cursored feed. Press &#8220;deploy an app&#8221; to watch a create ripple into midPoint.</span></div>
+
+<details class="alt">
+  <summary>What this shows</summary>
+  <p>The bidirectional IGA loop. midPoint owns users and writes them into Straza over the SCIM
+  resource only, together with the one other writable thing: membership of the wire-groups that
+  render Straza's exported roles, which IS the role assignment.
+  In the other direction Straza never receives writes: the universal-rest pull resource is
+  strictly read-only, and universal-rest-connector implements ConnId SyncOp over
+  GET /v1/admin/changes: an ordered page over the events outbox with a uuidv7 cursor,
+  at-least-once delivery (consumers dedupe; periodic recon stays the safety net), and hard
+  deletes surfaced as tombstone markers. midPoint LiveSync tasks poll every 10 seconds and
+  materialize the catalog: apps become ServiceType foci (archetype mcp-server), tools become
+  RoleType foci named app:tool (mcp-tool), exported Straza roles become RoleType foci (ai-role)
+  named AI:&lt;role&gt;. Those role foci are assignable: assigning one writes membership back over
+  SCIM, so the grant is real. Users are link-only (creating a focus for a Straza-local account
+  would immediately provision it back over SCIM, a loop).
+  Deleting an app in Straza leaves a dead shadow in midPoint, and the deleted &gt; deleteFocus
+  reaction removes the focus. Cursor values shown are illustrative.</p>
+</details>
+
+<script>
+'use strict';
+(function(){
+  var p=new URLSearchParams(location.search).get('theme');
+  if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+})();
+(function(){
+var RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+var svg=document.getElementById('dia');
+var nar=document.getElementById('nar');
+var DEF='Two lanes, loop-safe by direction: identity flows in over SCIM; catalog changes flow back over the cursored feed. Press &#8220;deploy an app&#8221; to watch a create ripple into midPoint.';
+var FACTS={
+ mp:'<strong>midPoint</strong>: the demo stack runs midPoint 4.10 with Straza archetypes: mcp-server (Service), mcp-tool and ai-role (Role), plus user personas. Foci display by name, deterministic across every sync flow.',
+ wd:'<strong>Straza</strong>: every relevant mutation already lands in the transactional outbox with a monotonic id, so the feed is a filtered read over existing rows: no new bookkeeping, and no request-path DB reads (this is the admin plane).',
+ ug:'<strong>users &amp; membership</strong>. midPoint&#8217;s lane: exactly two things are writable over the SCIM resource, accounts and wire-group members, and a members write IS the (user, role) assignment. Roles themselves are Straza-born (loop-safety rule one).',
+ scim:'<strong>SCIM 2.0 server</strong>. Strict subset: Users CRUD plus Groups as the render of exported roles (readOnly displayName, writable members, create/delete answer 501), eq filters, PATCH on mapped attrs; DELETE on a user = deactivate. User reads render read-only groups so connector recompute diffs converge.',
+ conn:'<strong>universal-rest-connector</strong>: a separate Java/ConnId project implementing SyncOp with sync token = cursor; four per-object-class midPoint LiveSync tasks (account, app, group, tool) poll every 10 s. Full reconciliation stays the fallback lane.',
+ feed:'<strong>changes feed</strong>. GET /v1/admin/changes?since=&lt;cursor&gt;&amp;types=&#8230;: ordered history over the outbox, uuidv7 cursor (strictly advancing), at-least-once, head = sync-from-now for first-time consumers, identity-noise (session churn) skipped. A wat_ API token scoped identity:read, apps:read, changes:read, config:read suffices; no transcripts.',
+ map:'<strong>materialization</strong>: tools are only unique per app, so the focus name composes as app:tool; apps become Services (mcp-server); exported Straza roles become AI:&lt;role&gt; foci with the custom ai-role archetype (strazaKind preserved in the extension), and assigning one writes membership back over SCIM through the Straza role metarole. Users are link-only: auto-creating the focus would provision it straight back over SCIM.'
+};
+Object.keys(FACTS).forEach(function(id){
+  var el=document.getElementById(id);
+  el.addEventListener('mouseenter',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('focus',function(){nar.innerHTML=FACTS[id];});
+  el.addEventListener('mouseleave',function(){nar.innerHTML=DEF;});
+  el.addEventListener('blur',function(){nar.innerHTML=DEF;});
+});
+
+var btnC=document.getElementById('btnCreate'),btnD=document.getElementById('btnDelete');
+var timers=[],rafs=[],dots=[];
+function later(ms,fn){if(RM){fn();return;}timers.push(setTimeout(fn,ms));}
+function slide(pathId,dur,done){
+  if(RM){if(done)done();return;}
+  var path=document.getElementById(pathId),len=path.getTotalLength();
+  var dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  dot.setAttribute('r','4');dot.setAttribute('class','pulse');
+  svg.appendChild(dot);dots.push(dot);
+  var t0=null;
+  function frame(ts){
+    if(t0===null)t0=ts;
+    var k=Math.min((ts-t0)/dur,1);
+    var pt=path.getPointAtLength(len*k);
+    dot.setAttribute('cx',pt.x);dot.setAttribute('cy',pt.y);
+    if(k<1){rafs.push(requestAnimationFrame(frame));}
+    else{if(dot.parentNode)svg.removeChild(dot);if(done)done();}
+  }
+  rafs.push(requestAnimationFrame(frame));
+}
+function cls(id){return document.getElementById(id).classList;}
+function feedRec(txt,show){
+  document.getElementById('feedtxt').textContent=txt;
+  cls('feedchip').toggle('show',show);
+}
+function stopAll(){
+  timers.forEach(clearTimeout);timers=[];
+  rafs.forEach(cancelAnimationFrame);rafs=[];
+  dots.forEach(function(d){if(d.parentNode)d.parentNode.removeChild(d);});dots=[];
+}
+function reset(){
+  stopAll();
+  ['w-app','w-tool','m-svc','m-tool'].forEach(function(id){
+    cls(id).remove('show','gone','dead');
+  });
+  feedRec('',false);
+  btnC.disabled=false;btnD.disabled=true;
+  nar.innerHTML=DEF;
+}
+function create(){
+  btnC.disabled=true;btnD.disabled=true;
+  cls('w-app').add('show');cls('w-tool').add('show');
+  nar.innerHTML='1 &#183; An MCP app is deployed (manifest install): CE <code>straza.apps.deployed</code> is written to the transactional outbox.';
+  later(1100,function(){
+    feedRec('0197f3… · app · create',true);
+    nar.innerHTML='2 &#183; The outbox row is now a change record. The cursor is a uuidv7, strictly advancing; consumers dedupe (at-least-once).';
+    later(1100,function(){
+      nar.innerHTML='3 &#183; The connector&#8217;s SyncOp polls (LiveSync task, every 10 s) with its stored sync token = cursor and receives the delta.';
+      slide('lane-feed',1000,function(){
+        cls('m-svc').add('show');cls('m-tool').add('show');
+        nar.innerHTML='4 &#183; <code>unmatched &gt; addFocus</code>: midPoint materializes a ServiceType &#8220;demo-tools&#8221; (archetype mcp-server) and a RoleType &#8220;demo-tools:echo&#8221; (mcp-tool). Near real time.';
+        btnD.disabled=false;
+      });
+    });
+  });
+}
+function del(){
+  btnC.disabled=true;btnD.disabled=true;
+  cls('w-app').add('gone');cls('w-tool').add('gone');
+  nar.innerHTML='1 &#183; The app is removed: CE <code>straza.apps.removed</code> lands in the outbox. Hard deletes surface as tombstone markers on the feed.';
+  later(900,function(){
+    cls('w-app').remove('show','gone');cls('w-tool').remove('show','gone');
+    feedRec('0197f4… · app · delete',true);
+    nar.innerHTML='2 &#183; The feed pages a delete record; the cursor advances past it exactly like any other change.';
+    later(1000,function(){
+      slide('lane-feed',1000,function(){
+        cls('m-svc').add('dead');cls('m-tool').add('dead');
+        nar.innerHTML='3 &#183; The pull resource no longer returns the object: its midPoint shadow is <strong style="color:var(--unknown)">dead</strong>.';
+        later(1600,function(){
+          cls('m-svc').remove('show','dead');cls('m-tool').remove('show','dead');
+          nar.innerHTML='4 &#183; Reaction <code>deleted &gt; deleteFocus</code>: the Service and its app:tool role are removed from midPoint (delete-awareness, mirrored).';
+          btnC.disabled=false;
+        });
+      });
+    });
+  });
+}
+btnC.addEventListener('click',create);
+btnD.addEventListener('click',del);
+document.getElementById('btnReset').addEventListener('click',reset);
+})();
+</script>
+</body>
+</html>

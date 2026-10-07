@@ -1,0 +1,46 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: approve-notify-routing
+  description: "Notification routing (revision 8): approve.notify narrows which channels announce a rule's approvals"
+spec:
+  rules:
+    - id: workitem-selfapprove-phone
+      # Self-confirmation lane: the human behind the agent taps on their own
+      # device. notify narrows the ANNOUNCEMENT to mobile push (console is the
+      # always-on pull surface and may be listed for clarity); Slack stays
+      # silent for this rule. WHO may decide is unchanged (roles/selfApproval).
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["approve_work_item", "reject_work_item"]
+      effect: allow
+      mode: approve
+      approve:
+        roles: [dev]
+        selfApproval: true
+        notify: [push, console]
+      reason: "a work-item decision is personal. Ring the requester's device only"
+    - id: deploy-ticket-quiet
+      # notify: [console] alone silences every third-party channel; the
+      # ticket appears in the console/CLI queues only.
+      tools: [shell.exec]
+      command:
+        allowPatterns: ["./deploy*"]
+      effect: allow
+      mode: approve
+      approve:
+        class: ticket
+        notify: [console]
+      reason: "deploys are ticketed but announced nowhere"
+    - id: broadcast-default
+      # Omitted notify = every configured channel (pre-revision-8 behavior).
+      tools: [mcp.call]
+      apps: [midpoint]
+      toolNames:
+        allow: ["disable_user"]
+      effect: allow
+      mode: approve
+      approve:
+        roles: [sec-approvers]
+      reason: "disable_user requires human approval on every channel"

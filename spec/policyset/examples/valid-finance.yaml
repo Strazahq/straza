@@ -1,0 +1,42 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: finance-tools
+  description: Guardrails for the finance role (reference example)
+spec:
+  priority: 100
+  match:
+    roles: [finance]
+  rules:
+    - id: block-destructive
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["rm -rf *", "git push --force*", "curl * | *sh*"]
+      effect: deny
+      reason: "Destructive commands are blocked for role finance"
+    - id: fs-scope
+      events: [tool.pre]
+      tools: [file.write, file.edit]
+      paths:
+        allow: ["${workspace}/**"]
+        deny: ["**/.env*", "/etc/**"]
+    - id: github-readmostly
+      tools: [mcp.call]
+      apps: [github]
+      toolNames:
+        allow: ["get_*", "list_*", "search_*", "create_issue"]
+      effect: allow
+    - id: prod-deploy-server-check
+      tools: [mcp.call]
+      apps: [argo]
+      mode: serverCheck
+      effect: allow
+      require:
+        attestation: managed
+        # deviceCert is not implemented yet (SPEC rev 10): subjects carry
+        # false, so this rule DENIES until the D6 factor ships; shown here
+        # because the shape is the forward-looking reference; validate
+        # answers with a warnings advisory for it.
+        deviceCert: true
+        harness: ["claude-code>=2", "codex>=0.120"]

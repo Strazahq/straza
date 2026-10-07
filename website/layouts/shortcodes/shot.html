@@ -1,0 +1,35 @@
+{{- /* A console screenshot from website/data/shots.yaml:
+{{< shot name="alice-assign" caption="alice's sheet after the assignment." >}}
+The entry names a dark and a light crop, the alt text, the ring around the
+step's target in percent of the crop, the whole screens behind "Show the
+whole screen", and the build the screen shows. site.css shows the crop that
+matches the theme. The build goes to the page's walk record. A name that
+is not in the data, or a crop file that is missing, fails the build. */ -}}
+{{- $name := .Get "name" -}}
+{{- $s := index (hugo.Data.shots | default dict) $name -}}
+{{- if not $s }}{{ errorf "%s: shot %q is not in website/data/shots.yaml. Add an entry for it there, or use a name the file has." .Position $name }}{{ end -}}
+{{- range slice "alt" "dark" "light" -}}
+  {{- if not (index $s .) }}{{ errorf "%s: shot %q in website/data/shots.yaml has no %s. Add it to the entry." $.Position $name . }}{{ end -}}
+{{- end -}}
+{{- range slice $s.dark $s.light $s.full_dark $s.full_light -}}
+  {{- if and . (not (fileExists (printf "static/%s" .))) }}{{ errorf "%s: shot %q names website/static/%s, which does not exist. Capture it, or fix the path in website/data/shots.yaml." $.Position $name . }}{{ end -}}
+{{- end -}}
+{{- $size := images.Config (printf "static/%s" $s.dark) -}}
+{{- with $s.build }}{{ $.Page.Store.Set "shotbuilds" (union ($.Page.Store.Get "shotbuilds" | default slice) (slice .)) }}{{ end -}}
+<figure class="shot">
+  <div class="frame">
+    <img class="sd" src="{{ $s.dark | relURL }}" alt="{{ $s.alt }}" width="{{ $size.Width }}" height="{{ $size.Height }}" loading="lazy" decoding="async">
+    <img class="sl" src="{{ $s.light | relURL }}" alt="{{ $s.alt }}" width="{{ $size.Width }}" height="{{ $size.Height }}" loading="lazy" decoding="async">
+    {{- with $s.ring }}
+    <span class="ring" style="left: {{ .left }}%; top: {{ .top }}%; width: {{ .width }}%; height: {{ .height }}%"></span>
+    {{- end }}
+  </div>
+  {{- if or (.Get "caption") (and $s.full_dark $s.full_light) }}
+  <figcaption>
+    {{- with .Get "caption" }}<span class="shot-cap">{{ $.Page.RenderString . }}</span>{{ end }}
+    {{- if and $s.full_dark $s.full_light }}
+    <a class="zoom" href="{{ $s.full_dark | relURL }}" data-full-dark="{{ $s.full_dark }}" data-full-light="{{ $s.full_light }}" data-alt="{{ $s.alt }}">Show the whole screen</a>
+    {{- end }}
+  </figcaption>
+  {{- end }}
+</figure>

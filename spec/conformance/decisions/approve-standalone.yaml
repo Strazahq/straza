@@ -1,0 +1,299 @@
+# Decision-table fixtures: `mode: approve` (human-approval escalation),
+# standalone profile. Consumed by internal/policy evaluator tests (P2.2) and,
+# later, by the conformance runner (S3). Semantics: spec/policyset/SPEC.md §2
+# item 8. Pinned here: the approve marker is set ONLY on a winning allow and
+# carries the rule's NORMALIZED spec (omitted timeout/ttl default to 90/60); a
+# deny drops the marker; approve is independent of classify/serverCheck. Since
+# revision 18 the reported rule, set and reason are the approve rule's whenever
+# one fires on the winning allow, whatever its priority or set order.
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: approve-explicit }
+    spec:
+      priority: 100
+      match: { roles: [dev] }
+      rules:
+        - id: approve-disable-user
+          tools: [mcp.call]
+          apps: [midpoint]
+          toolNames:
+            allow: ["disable_user", "enable_user"]
+          effect: allow
+          mode: approve
+          approve:
+            roles: [sec-approvers]
+            timeoutSeconds: 120
+            selfApproval: true
+            retryTTLSeconds: 30
+          reason: "disabling a user needs human approval"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: approve-defaults }
+    spec:
+      priority: 100
+      match: { roles: [ops] }
+      rules:
+        - id: approve-deploy
+          tools: [shell.exec]
+          command:
+            allowPatterns: ["deploy-prod*"]
+          effect: allow
+          mode: approve
+          reason: "prod deploys need human approval"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: approve-then-deny }
+    spec:
+      priority: 100
+      match: { roles: [restricted] }
+      rules:
+        - id: approve-any-midpoint
+          tools: [mcp.call]
+          apps: [midpoint]
+          toolNames:
+            allow: ["*"]
+          effect: allow
+          mode: approve
+          approve:
+            roles: [sec-approvers]
+        - id: deny-disable
+          tools: [mcp.call]
+          apps: [midpoint]
+          toolNames:
+            deny: ["disable_user"]
+          effect: deny
+          reason: "disable_user is hard-blocked for restricted"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: ticket-explicit }
+    spec:
+      priority: 100
+      match: { roles: [change] }
+      rules:
+        - id: ticket-deploy
+          tools: [shell.exec]
+          command:
+            allowPatterns: ["deploy-prod*"]
+          effect: allow
+          mode: approve
+          approve:
+            class: ticket
+            roles: [change-approvers]
+            ticketTTLSeconds: 172800
+            grantTTLSeconds: 7200
+            bind: predicate
+          reason: "prod deploys need a change ticket"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: ticket-defaults }
+    spec:
+      priority: 100
+      match: { roles: [rotate] }
+      rules:
+        - id: ticket-rotate
+          tools: [mcp.call]
+          apps: [vault]
+          toolNames:
+            allow: ["rotate_root_key"]
+          effect: allow
+          mode: approve
+          approve:
+            class: ticket
+          reason: "root key rotation needs a ticket"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: approve-and-classify }
+    spec:
+      priority: 100
+      match: { roles: [mixed] }
+      rules:
+        - id: classify-interp
+          tools: [shell.exec]
+          interpreters:
+            allow: ["*"]
+          mode: classify
+          effect: allow
+        - id: approve-python-cmd
+          tools: [shell.exec]
+          command:
+            allowPatterns: ["python3 *"]
+          mode: approve
+          effect: allow
+          approve:
+            roles: [sec-approvers]
+            timeoutSeconds: 45
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: binding-explicit }
+    spec:
+      priority: 100
+      match: { roles: [search] }
+      rules:
+        - id: search-tool-scoped
+          tools: [mcp.call]
+          apps: [github]
+          toolNames:
+            allow: ["search_code"]
+          effect: allow
+          mode: approve
+          approve:
+            roles: [sec-approvers]
+            binding: tool
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: notify-routing }
+    spec:
+      priority: 100
+      match: { roles: [notifyr] }
+      rules:
+        - id: workitem-phone-only
+          tools: [mcp.call]
+          apps: [midpoint]
+          toolNames:
+            allow: ["approve_work_item"]
+          effect: allow
+          mode: approve
+          approve:
+            selfApproval: true
+            notify: [push, console]
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: aaa-tied-allow }
+    spec:
+      priority: 100
+      match: { roles: [tied] }
+      rules:
+        - id: local-tools
+          tools: [shell.exec]
+          command:
+            allowPatterns: ["kubectl *"]
+          effect: allow
+          reason: "kubectl is fine"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: tied-hold }
+    spec:
+      priority: 100
+      match: { roles: [tied] }
+      rules:
+        - id: hold-kubectl-apply
+          tools: [shell.exec]
+          command:
+            allowPatterns: ["kubectl apply *"]
+          effect: allow
+          mode: approve
+          approve:
+            roles: [sec-approvers]
+          reason: "kubectl apply is held"
+cases:
+  # -- approve-explicit: explicit spec values survive compile ----------------
+  - name: disable-user-needs-approval
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: mcp.call, app: midpoint, toolName: disable_user }
+    want: { effect: allow, ruleId: approve-disable-user, approve: true, approveTimeout: 120, approveTtl: 30, approveBinding: call }
+  # -- binding (revision 7): omitted normalizes to call; explicit tool carries --
+  - name: binding-defaults-to-call
+    subject: { user: pat, roles: [ops] }
+    event: { kind: tool.pre, tool: shell.exec, command: "deploy-prod --now" }
+    want: { effect: allow, ruleId: approve-deploy, approve: true, approveBinding: call }
+  - name: binding-tool-carries-verbatim
+    subject: { user: sam, roles: [search] }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: search_code }
+    want: { effect: allow, ruleId: search-tool-scoped, approve: true, approveBinding: tool }
+  - name: enable-user-needs-approval
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: mcp.call, app: midpoint, toolName: enable_user }
+    want: { effect: allow, ruleId: approve-disable-user, approve: true, approveTimeout: 120 }
+  - name: ungated-tool-falls-through-to-mcp-default-deny
+    # read_user is not in the allow list ⇒ rule does not fire ⇒ mcp.call default deny.
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: mcp.call, app: midpoint, toolName: read_user }
+    want: { effect: deny, default: true }
+  - name: approve-rule-skipped-for-other-app
+    # apps: [midpoint] ⇒ the rule never applies to another app ⇒ default deny.
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: mcp.call, app: keycloak, toolName: disable_user }
+    want: { effect: deny, default: true }
+  # -- approve-defaults: omitted timeout/ttl normalize to 90/60 --------------
+  - name: deploy-prod-uses-normalized-defaults
+    subject: { user: pat, roles: [ops] }
+    event: { kind: tool.pre, tool: shell.exec, command: "deploy-prod --now" }
+    want: { effect: allow, ruleId: approve-deploy, approve: true, approveTimeout: 90, approveTtl: 60 }
+  - name: non-deploy-command-not-approved
+    subject: { user: pat, roles: [ops] }
+    event: { kind: tool.pre, tool: shell.exec, command: "ls -la" }
+    want: { effect: allow, default: true }
+  # -- approve-then-deny: deny is final and drops the approve marker ----------
+  - name: deny-wins-drops-approve
+    subject: { user: rae, roles: [restricted] }
+    event: { kind: tool.pre, tool: mcp.call, app: midpoint, toolName: disable_user }
+    want: { effect: deny, ruleId: deny-disable, approve: false }
+  - name: other-midpoint-tool-still-approved
+    subject: { user: rae, roles: [restricted] }
+    event: { kind: tool.pre, tool: mcp.call, app: midpoint, toolName: reset_password }
+    want: { effect: allow, ruleId: approve-any-midpoint, approve: true, approveTimeout: 90, approveTtl: 60 }
+  # -- approve-and-classify: the two escalation markers are independent -------
+  - name: approve-and-classify-both-fire
+    # classify-interp (allow+classify) and approve-python-cmd (allow+approve)
+    # both fire; the decision carries BOTH classify=true and the approve
+    # spec, and since revision 18 the reported rule is the approve rule even
+    # though classify-interp has the lower index.
+    subject: { user: lee, roles: [mixed] }
+    event: { kind: tool.pre, tool: shell.exec, command: "python3 run.py", interpreter: python3 }
+    want: { effect: allow, ruleId: approve-python-cmd, classify: true, approve: true, approveTimeout: 45 }
+  - name: classify-only-when-approve-command-does-not-match
+    # A non-python interpreter command: only classify-interp fires; no approve.
+    subject: { user: lee, roles: [mixed] }
+    event: { kind: tool.pre, tool: shell.exec, command: "bash deploy.sh", interpreter: bash }
+    want: { effect: allow, ruleId: classify-interp, classify: true, approve: false }
+  # -- ticket-explicit: class + ttls + bind survive compile ------------------
+  # bind: predicate is reserved since policyset revision 22 and rides the
+  # decision verbatim. Every PEP treats it as fingerprint.
+  - name: ticket-deploy-explicit-values
+    subject: { user: cho, roles: [change] }
+    event: { kind: tool.pre, tool: shell.exec, command: "deploy-prod --now" }
+    want:
+      effect: allow
+      ruleId: ticket-deploy
+      approve: true
+      approveClass: ticket
+      approveBind: predicate
+      approveTicketTtl: 172800
+      approveGrantTtl: 7200
+  # -- ticket-defaults: omitted ticketTTL/grantTTL/bind normalize -------------
+  - name: ticket-rotate-normalized-defaults
+    subject: { user: ash, roles: [rotate] }
+    event: { kind: tool.pre, tool: mcp.call, app: vault, toolName: rotate_root_key }
+    want:
+      effect: allow
+      ruleId: ticket-rotate
+      approve: true
+      approveClass: ticket
+      approveBind: fingerprint      # default
+      approveTicketTtl: 86400       # 24h default
+      approveGrantTtl: 3600         # 1h default
+  # -- notify routing (revision 8): the verbatim list rides the decision ------
+  - name: notify-routing-carries-verbatim
+    subject: { user: uma, roles: [notifyr] }
+    event: { kind: tool.pre, tool: mcp.call, app: midpoint, toolName: approve_work_item }
+    want: { effect: allow, ruleId: workitem-phone-only, approve: true, approveNotify: [push, console] }
+  # -- revision 18: the approve rule is named over a tied plain allow ---------
+  - name: approve-named-over-earlier-set-plain-allow
+    # aaa-tied-allow/local-tools and tied-hold/hold-kubectl-apply both fire at
+    # priority 100 and the plain allow's set sorts first, yet the record must
+    # name the rule that mandated the hold.
+    subject: { user: ola, roles: [tied] }
+    event: { kind: tool.pre, tool: shell.exec, command: "kubectl apply -f app.yaml" }
+    want: { effect: allow, ruleId: hold-kubectl-apply, setName: tied-hold, approve: true, approveTimeout: 90 }

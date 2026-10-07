@@ -1,0 +1,23 @@
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: classify-interpreters
+  description: "Phase-0 semantic guardrails (D23): interpreter invocations need a classifier verdict"
+spec:
+  match:
+    roles: [engineering]
+  rules:
+    - id: classify-interpreter-exec
+      events: [tool.pre]
+      tools: [shell.exec]
+      interpreters:
+        allow: ["*"]
+      effect: allow
+      mode: classify
+      reason: "Interpreter invocations require a classifier verdict"
+    - id: no-python
+      tools: [shell.exec]
+      interpreters:
+        deny: ["python*"]
+      effect: deny
+      reason: "Python interpreters are blocked for role engineering"

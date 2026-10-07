@@ -1,0 +1,50 @@
+{{- /* The head of a page: the trail of its sections, the title, and the
+description as the outcome line. Tutorials and how-tos add the task strip
+from the front matter fields who, where, applies_to and time. */ -}}
+{{- $trail := where .Ancestors "IsHome" false -}}
+{{- with $trail }}
+<nav class="crumb" aria-label="Breadcrumb">
+  <ol>
+    {{- range .Reverse }}
+    <li><a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a></li>
+    {{- end }}
+    <li aria-current="page">{{ $.LinkTitle }}</li>
+  </ol>
+</nav>
+{{- end }}
+<h1>{{ .Params.heading | default .Title }}</h1>
+{{- with .Description }}
+<p class="outcome">{{ . }}</p>
+{{- end }}
+{{- if in (slice "tutorial" "how-to") .Params.pagetype }}
+{{- /* applies_to names the profile the steps hold for. Every how-to and
+tutorial carries it, with one of the three values below. */ -}}
+{{- $profiles := dict "standalone" "Standalone" "enterprise" "Enterprise" "both" "Standalone and enterprise" -}}
+{{- $p := .Params }}
+{{- if or $p.who $p.where $p.applies_to $p.time }}
+<dl class="task">
+  {{- with $p.who }}
+  <div class="f"><dt><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 14c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Who</dt><dd>{{ . }}</dd></div>
+  {{- end }}
+  {{- with $p.where }}
+  <div class="f"><dt><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m4 6 2.5 2L4 10M8 10h4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Where</dt><dd>{{ . }}</dd></div>
+  {{- end }}
+  {{- with $p.applies_to }}
+  <div class="f"><dt><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5 2.5 3.7v4.2c0 3.3 2.3 5.6 5.5 6.6 3.2-1 5.5-3.3 5.5-6.6V3.7L8 1.5Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Profile</dt><dd>{{ index $profiles . | default . }}</dd></div>
+  {{- end }}
+  {{- with $p.time }}
+  <div class="f"><dt><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5V8l2.5 1.6" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Time</dt><dd>{{ . }}</dd></div>
+  {{- end }}
+</dl>
+{{- end }}
+{{- /* video links the narrated video through its poster: a plain link and a
+local PNG, never an embedded player, so the site loads nothing from another
+host. The poster path is root-absolute and relativeURLs rewrites it per page
+like the diagram hook's src. */ -}}
+{{- with .Params.video }}
+<figure class="video">
+  <a href="{{ .url }}" rel="noopener"><img src="{{ .poster }}" alt="Poster of the narrated video for {{ $.Title }}" loading="lazy"></a>
+  <figcaption><a href="{{ .url }}" rel="noopener">Watch the narrated video</a> on {{ (urls.Parse .url).Host }}</figcaption>
+</figure>
+{{- end }}
+{{- end }}

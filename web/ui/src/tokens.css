@@ -1,0 +1,124 @@
+/* Straza design tokens (colors, typography, spacing): the one tokens file.
+ * web/ui/src/index.css imports it, and both entry pages, the console and
+ * the self-service page, share it. */
+
+/* Straza color tokens.
+ * Dark-first. Light theme via [data-theme="light"] or prefers-color-scheme.
+ * Green/amber/red are RESERVED for trust semantics, never decoration.
+ * Violet = "state cannot be known" (fail-closed). */
+
+:root {
+  /* neutrals (dark): brighter body text and a lighter muted, both well past
+   * 4.5:1 on every surface tone. */
+  --bg:        #0d1117;
+  --surface:   #161b22;
+  --surface-2: #1c2129;
+  --canvas: var(--bg);
+  --panel: var(--surface);
+  --control-border: #778392;
+  --border:    #30363d;
+  --text:      #e6edf3;
+  /* secondary prose tier: sentences the admin must
+   * read (hints, dialog bodies, card descriptions) at 14 px minimum; muted
+   * stays for labels, counts and metadata. 11.2:1 on --surface. */
+  --text-2:    #c9d1d9;
+  --muted:     #9aa4af;
+
+  /* interactive */
+  --accent:       #58a6ff;
+  --accent-hover: #79b8ff;
+
+  /* decorative second hue: kind chips and similar
+   * non-trust labeling, so the reserved semantics below stay clean */
+  --teal:    #39c5cf;
+  --teal-bg: rgba(57, 197, 207, .15);
+
+  /* semantics: reserved for trust states */
+  --ok:      #3fb950;  /* managed / allow / running / verified */
+  --warn:    #d29922;  /* advisory / degraded / relaxed knob   */
+  --danger:  #ff7b72;  /* none / deny / revoked / tamper       */
+  --unknown: #bc8cff;  /* unreachable: state cannot be known   */
+
+  /* 15% alpha fills for badges/banners */
+  --ok-bg:      rgba(63, 185, 80, .15);
+  --warn-bg:    rgba(210, 153, 34, .15);
+  --danger-bg:  rgba(248, 81, 73, .15);
+  --unknown-bg: rgba(188, 140, 255, .15);
+  --accent-bg:  rgba(88, 166, 255, .15);
+
+  color-scheme: dark;
+}
+
+/* Auto light mode from OS preference. Explicit [data-theme] scopes below win
+ * (equal specificity, later in source), so this only applies when unset. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff; --surface: #f6f8fa; --surface-2: #eef1f4;
+    --canvas: var(--surface); --panel: var(--bg); --control-border: #808b98;
+    --border: #d0d7de; --text: #1f2328; --text-2: #424a53; --muted: #56616e;
+    --accent: #075bbb; --accent-hover: #0550ae;
+    --ok: #126d2b; --warn: #825600; --danger: #b91c2b; --unknown: #7040c0;
+    --ok-bg: rgba(26,127,55,.12); --warn-bg: rgba(154,103,0,.12);
+    --danger-bg: rgba(207,34,46,.12); --unknown-bg: rgba(130,80,223,.12);
+    --accent-bg: rgba(9,105,218,.12);
+    --teal: #146c75; --teal-bg: rgba(27,124,133,.12);
+    color-scheme: light;
+  }
+}
+[data-theme="light"] {
+  --bg: #ffffff; --surface: #f6f8fa; --surface-2: #eef1f4;
+  --canvas: var(--surface); --panel: var(--bg); --control-border: #808b98;
+  --border: #d0d7de; --text: #1f2328; --text-2: #424a53; --muted: #56616e;
+  --accent: #075bbb; --accent-hover: #0550ae;
+  --ok: #126d2b; --warn: #825600; --danger: #b91c2b; --unknown: #7040c0;
+  --ok-bg: rgba(26,127,55,.12); --warn-bg: rgba(154,103,0,.12);
+  --danger-bg: rgba(207,34,46,.12); --unknown-bg: rgba(130,80,223,.12);
+  --accent-bg: rgba(9,105,218,.12);
+  --teal: #146c75; --teal-bg: rgba(27,124,133,.12);
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  --bg: #0d1117; --surface: #161b22; --surface-2: #1c2129;
+  --canvas: var(--bg); --panel: var(--surface); --control-border: #778392;
+  --border: #30363d; --text: #e6edf3; --text-2: #c9d1d9; --muted: #9aa4af;
+  --accent: #58a6ff; --accent-hover: #79b8ff;
+  --ok: #3fb950; --warn: #d29922; --danger: #ff7b72; --unknown: #bc8cff;
+  --ok-bg: rgba(63,185,80,.15); --warn-bg: rgba(210,153,34,.15);
+  --danger-bg: rgba(248,81,73,.15); --unknown-bg: rgba(188,140,255,.15);
+  --accent-bg: rgba(88,166,255,.15);
+  --teal: #39c5cf; --teal-bg: rgba(57,197,207,.15);
+  color-scheme: dark;
+}
+
+/* Straza typography tokens.
+ * No webfonts (air-gapped): system UI stack for prose, system mono for evidence.
+ * Scale in px; weights 400/600 only. */
+
+:root {
+  --font-ui:   system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: Menlo, ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+
+  --fs-caption: 13px;  /* labels, badges, table headers */
+  --fs-dense:   14px;  /* table body */
+  --fs-body:    15px;  /* prose */
+  --fs-section: 17px;  /* section headings */
+  --fs-title:   20px;  /* page title */
+  --fs-stat:    28px;  /* stat number */
+
+  --fw-normal: 400; /* @kind other */
+  --fw-strong: 600; /* @kind other */
+  --decision-allowed: color-mix(in srgb, var(--accent) 66%, var(--control-border));
+
+  --tracking-caps: .06em; /* uppercase caption tracking */
+}
+
+/* Straza spacing, shape & layout tokens. 4px grid. */
+
+:root {
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+
+  --radius: 6px;      /* one radius everywhere */
+  --row-h: 36px;      /* dense table row */
+  --nav-w: 220px;     /* fixed left rail */
+  --header-h: 48px;   /* app header */
+}

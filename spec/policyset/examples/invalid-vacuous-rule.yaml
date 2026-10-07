@@ -1,0 +1,12 @@
+# INVALID (semantic): a rule needs an effect, matcher block, or require;
+# this one has none, so it could never produce a verdict. The JSON Schema
+# alone admits it; the platform validator MUST reject it (SPEC.md §2.3).
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: vacuous
+spec:
+  rules:
+    - id: does-nothing
+      events: [tool.pre]
+      tools: [shell.exec]

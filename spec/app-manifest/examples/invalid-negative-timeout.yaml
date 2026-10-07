@@ -1,0 +1,15 @@
+# limits.timeoutSeconds must be >= 0.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: bad-timeout
+server:
+  name: example/bad-timeout
+  version: "1.0.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://mcp.example.com/mcp
+  limits:
+    timeoutSeconds: -5

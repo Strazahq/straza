@@ -1,0 +1,70 @@
+# Decision-table fixtures: `mode: confirm` (requester-decides gate, revision
+# 11), standalone profile. Semantics: spec/policyset/SPEC.md §2 item 8a.
+# Pinned here: confirm sets Decision.Confirm alongside the approve marker and
+# shares the approve knob block (normalized defaults included); the decider
+# pool is NOT configurable (parse rejects roles/selfApproval, pinned in the
+# invalid examples); and an autonomous-agency subject turns a confirm rule
+# into a plain deny at evaluation (there is no human to confirm), the
+# revision-9 clamp's sibling.
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: confirm-explicit }
+    spec:
+      priority: 100
+      match: { roles: [dev] }
+      rules:
+        - id: confirm-create-pr
+          tools: [mcp.call]
+          apps: [github]
+          toolNames:
+            allow: ["create_pull_request"]
+          effect: allow
+          mode: confirm
+          approve:
+            timeoutSeconds: 300
+            retryTTLSeconds: 120
+          reason: "PR creation needs the requester's confirmation"
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: confirm-defaults }
+    spec:
+      priority: 100
+      match: { roles: [ops] }
+      rules:
+        - id: confirm-deploy
+          tools: [shell.exec]
+          command:
+            allowPatterns: ["deploy-prod*"]
+          effect: allow
+          mode: confirm
+          reason: "prod deploys need the requester's confirmation"
+cases:
+  # -- explicit knobs survive compile; confirm marker rides the allow --------
+  - name: create-pr-needs-confirmation
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: create_pull_request }
+    want: { effect: allow, ruleId: confirm-create-pr, approve: true, confirm: true, approveTimeout: 300, approveTtl: 120, approveBinding: call }
+  # -- bare confirm normalizes the shared defaults (90/60, binding call) -----
+  - name: deploy-uses-normalized-defaults
+    subject: { user: pat, roles: [ops] }
+    event: { kind: tool.pre, tool: shell.exec, command: "deploy-prod --now" }
+    want: { effect: allow, ruleId: confirm-deploy, approve: true, confirm: true, approveTimeout: 90, approveTtl: 60 }
+  # -- the engine invariant: autonomous subjects cannot confirm --------------
+  - name: autonomous-subject-turns-confirm-into-deny
+    subject: { user: bot-7, roles: [dev], agencyMode: autonomous }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: create_pull_request }
+    want: { effect: deny, ruleId: confirm-create-pr, approve: false, confirm: false }
+  # -- interactive subject on the same rule keeps the gate (control pair) ----
+  - name: interactive-subject-keeps-the-gate
+    subject: { user: kim, roles: [dev], agencyMode: interactive }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: create_pull_request }
+    want: { effect: allow, ruleId: confirm-create-pr, approve: true, confirm: true }
+  # -- approve fixtures stay confirm-false (cross-mode control) --------------
+  - name: unmatched-tool-falls-to-mcp-default-deny
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: merge_pull_request }
+    want: { effect: deny, default: true, confirm: false }

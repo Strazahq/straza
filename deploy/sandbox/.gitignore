@@ -1,0 +1,2 @@
+# enrollment material (device tokens) must never be committed
+enroll/

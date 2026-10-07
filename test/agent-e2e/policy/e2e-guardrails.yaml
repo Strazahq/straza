@@ -1,0 +1,41 @@
+# PolicySet the e2e driver applies + activates at bootstrap: one distinctive
+# deny-with-reason the episodes can assert on, plus conversation capture so
+# the transcript-search assertion has something to find. Scoped to the e2e
+# NHI only. The starter set stays untouched for everyone else.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: e2e-guardrails
+  description: Agent-e2e lane. Deny destructive deletes with a recognizable reason, capture the conversation
+spec:
+  match:
+    users: [e2e-agent]
+  capture:
+    conversations: true
+    mode: verbatim
+  rules:
+    - id: e2e-no-rm-rf
+      effect: deny
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["rm -rf *", "rm -fr *", "* rm -rf *", "* rm -fr *"]
+      reason: "STRAZA-E2E: recursive force-delete is blocked in the e2e sandbox"
+    # Human-approval lane: a distinctive marker command that a human must
+    # approve. effect allow + mode approve → the hook lane denies with a
+    # retry-after-approval ref; approving mints a single-use exemption so the
+    # retry allows. No approver roles named → straza-admin (the e2e admin) may
+    # approve. timeoutSeconds bounds the pending record for the sweep.
+    - id: e2e-approve-deploy-prod
+      effect: allow
+      tools: [shell.exec]
+      command:
+        allowPatterns: ["*deploy-prod*"]
+      mode: approve
+      approve:
+        # spec/policyset/SPEC.md revision 14: a bare approve rides the sponsor
+        # default, and the e2e NHI has no sponsor (unroutable would deny
+        # instantly). This lane's decider is the admin console, so the rule
+        # says so explicitly.
+        roles: [straza-admin]
+        timeoutSeconds: 120
+      reason: "STRAZA-E2E: production deploy requires human approval"

@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "01a09150-2c11-7e3a-9b0d-4e5f6a7b8c9d",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-09-11T19:10:04Z",
+  "data": {
+    "action": "apps.install",
+    "actor": "alice",
+    "actorId": "0197fa3d-1111-7abc-9def-000000000001",
+    "actorVia": "session",
+    "app": "scout-tools",
+    "runtime": "remote",
+    "update": true,
+    "changed": ["straza.limits.rps", "straza.runtime.remote.url"]
+  }
+}

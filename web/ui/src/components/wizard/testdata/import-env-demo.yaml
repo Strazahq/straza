@@ -1,0 +1,52 @@
+# The answer of POST /v1/admin/apps/import on eval at v1.0.0-1108-g45167c83, captured 2026-09-11.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+    name: env-demo
+    namespace: io.github.example
+server:
+    $schema: https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json
+    description: |-
+        A record with a fixed environment entry and one secret.
+        Second line.
+    name: io.github.example/env-demo
+    packages:
+        - environmentVariables:
+            - isSecret: false
+              name: LOG_LEVEL
+              value: info
+            - isSecret: false
+              name: MODE
+              value: 'read only: yes'
+            - isRequired: true
+              isSecret: true
+              name: API_KEY
+          identifier: env-demo
+          registryType: npm
+          transport:
+            type: stdio
+          version: 1.0.0
+    version: 1.0.0
+straza:
+    runtime:
+        kind: command
+        command:
+            exec: npx
+            args:
+                - -y
+                - env-demo@1.0.0
+            env:
+                - name: LOG_LEVEL
+                  value: info
+                - name: MODE
+                  value: 'read only: yes'
+    credential:
+        kind: static
+        inject:
+            as: env
+            name: API_KEY
+            template: '{{secret}}'
+    exposure:
+        tools:
+            - '*'
+

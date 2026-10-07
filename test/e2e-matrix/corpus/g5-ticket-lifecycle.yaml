@@ -1,0 +1,467 @@
+# The ticket class of approvals on the hook lane. A gated command is refused
+# at once with a ticket the admin has a day to decide, the approval leaves a
+# grant that a fresh session of the same person consumes exactly once, a
+# denied ticket keeps the identical call blocked without opening a new
+# request, an undecided ticket expires on the sweep and the next call asks
+# again, and the knobs a ticket cannot carry are refused at apply.
+#
+# Shapes the binary forced on the corpus, each with how it was verified. The
+# approvals list is an object with an approvals array and a single record
+# answers under an approval key (reference/api.md, Approvals answers table).
+# The sessions list is a bare array, newest first, filtered by user id
+# (openapi.yaml listSessions). The bootstrap admin's username is admin
+# (reference/glossary.md, bootstrap admin). A first PUT of a PolicySet
+# answers 201 and the activate body is {status: active} [live,
+# recorded in j0]. The consume wording is asserted on the chain record and
+# not on the hook answer, because the tickets guide shows the consuming hook
+# answering a bare allow and the codex ack contract demands an empty stdout
+# on every success (spec/conformance/tier1/cases.yaml header). On the
+# binary that record's reason contains "consumed" on all four dialects
+# [live], while the gateway's consuming record carries the rule's own
+# reason instead (g5-ticket-binding). The steps
+# marked "suspect" name a value the published sources leave open; each is
+# listed in the lane report.
+id: g5-ticket-lifecycle
+group: G5
+title: A ticket is raised on the hook lane, approved, consumed once by a fresh session, denied final and expired by the sweep
+provenance: >-
+  doc website/content/security/security-model.md section The invariants and
+  what each one costs (fail closed);
+  spec/policyset/SPEC.md §2 item 8 Classes (revision 6: a ticket never
+  blocks, ExpiresAt = createdAt + ticketTTLSeconds, swept to expired, the
+  grant is DB-durable, single-use and session-agnostic, timeoutSeconds and
+  retryTTLSeconds are rejected at validation under class ticket, the
+  ticketTTLSeconds range ends at 2592000 and grantTTLSeconds at 86400),
+  revision 15 (approve.roles may name straza-admin);
+  spec/policyset/examples/valid-ticket.yaml,
+  invalid-timeout-under-ticket.yaml, invalid-ticket-ttl-over-cap.yaml,
+  invalid-grant-ttl-over-cap.yaml;
+  spec/events/SPEC.md revision 11 and §2.2 (request, resolution and
+  consumed phases, consumedBy is the consuming session, user rides every
+  phase), revision 31 (the hook lane's straza.audit.tool record carries
+  the refusal sentence as its reason);
+  website/content/guides/write-policy/tickets.md (the ticket sentence, the
+  fresh-session consume, the single use, the denied wording "was denied
+  by" and "stays denied");
+  website/content/concepts/approvals-model.md "Tickets for decisions that
+  take a day" and "Timeouts, denies and the record" (the 15 second sweep,
+  expired is a deny, a denied ticket stays denied for its window);
+  pkg/api/openapi.yaml Approval (class, grantExpiresAt, consumedAt and
+  consumedBy are ticket-only and omit-empty) and listSessions;
+  website/content/reference/api.md sections Approvals, Sessions and
+  transcripts, PolicySets (PUT answers 400 on an invalid document);
+  website/content/reference/glossary.md (the bootstrap admin is admin).
+  suspect: the consume wording on the allow record ("consumed") is not
+  published, the tickets guide shows a bare allow on the consuming call;
+  the ticket sentence is quoted only for a 24 hour window, so the five
+  second ticket asserts "approval ticket" alone; that an expired ticket
+  lets the next identical call open a fresh ticket is inferred from the
+  block being described for a denied ticket only; the newest-first order
+  of the sessions list is read from the operation summary; decidedByName
+  is assumed to be the username; the success status codes of the admin
+  routes are assumed.
+harnesses: [claude-code, codex, gemini, python-sdk]
+identities:
+  kim: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: one human with a role, and a PolicySet with two ticket rules,
+  # one on the default day window and one on a five second window.
+  - name: the IdM provisions kim over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g5-kim
+        userName: kim
+        displayName: Kim Ticket
+        active: true
+    want: {status: 201}
+    save: {kimId: id}
+  - name: the admin sets kim's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${kimId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the admin creates the application role the ticket policy names
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g5-ops, kind: application, description: "Ticket lifecycle scenario"}
+    want: {status: 201}
+    save: {roleId: id}
+  - name: the IdM finds the role on the wire
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g5-ops"'
+    want: {status: 200}
+    save: {gid: Resources.0.id}
+  - name: kim becomes a member of the role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${gid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${kimId}"}]
+    want: {status: 200}
+  - name: the admin applies a PolicySet with a day-scale ticket on deploy-prod and a five second ticket on deploy-canary
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g5-ticket
+            description: Ticket lifecycle scenario for role g5-ops
+          spec:
+            match:
+              roles: [g5-ops]
+            rules:
+              - id: deploy-prod-ticket
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy-prod *"]
+                effect: allow
+                mode: approve
+                approve:
+                  class: ticket
+                  roles: [straza-admin]
+                reason: "G5-TICKET: deploy-prod needs an approval ticket a straza-admin decides"
+              - id: deploy-canary-ticket
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy-canary *"]
+                effect: allow
+                mode: approve
+                approve:
+                  class: ticket
+                  roles: [straza-admin]
+                  ticketTTLSeconds: 5
+                reason: "G5-TICKET: deploy-canary needs a ticket that expires after five seconds"
+    want: {status: 201}
+  - name: the admin activates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g5-ticket/activate
+      body: {status: active}
+    want: {status: 200}
+  - name: kim enrolls
+    enroll: {as: kim}
+  - name: kim starts her first session
+    hook:
+      as: kim
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # 1. The first call is refused with the ticket sentence and the record is a pending hook ticket.
+  - name: the first deploy-prod call is refused at once with the ticket sentence, because a ticket never blocks
+    hook:
+      as: kim
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-prod --release 42"}
+    want: {decision: deny, reasonContains: "approval ticket"}
+  - name: the refusal is on the chain once and tells the model to retry the exact call after approval
+    audit: {subject: kim, kind: tool.pre, decision: deny, reasonContains: "Retry this exact call after approval", count: 1}
+  - name: the admin reads the pending approvals and keeps the id of the ticket
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want: {status: 200}
+    save: {ticketOne: approvals.0.id}
+  - name: the record is a pending ticket on the hook lane that names the rule and carries no grant or consume fields yet
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${ticketOne}
+    want:
+      status: 200
+      body:
+        approval.class: ticket
+        approval.lane: hook
+        approval.state: pending
+        approval.rule: deploy-prod-ticket
+        approval.set: g5-ticket
+        approval.grantExpiresAt: null
+        approval.consumedAt: null
+        approval.consumedBy: null
+  - name: the pending record carries an expiry, the decision window the sweep will read
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${ticketOne}
+    want: {status: 200, bodyContains: '"expiresAt"'}
+  - name: the request phase is on the chain, one approval record so far
+    audit: {subject: kim, kind: straza.audit.approval, count: 1}
+
+  # 2. The admin approves and the record gains a grant window.
+  - name: the admin approves the ticket with the login token and a reason of her own
+    # suspect: decidedByName is assumed to be the deciding username
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${ticketOne}/approve
+      body: {reason: "G5: the change window is open"}
+    want:
+      status: 200
+      body:
+        approval.state: approved
+        approval.decidedByName: admin
+        approval.decidedReason: "G5: the change window is open"
+  - name: the approved record shows grantExpiresAt, the consume deadline
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${ticketOne}
+    want: {status: 200, bodyContains: '"grantExpiresAt"'}
+  - name: the resolution phase is on the chain, two approval records
+    audit: {subject: kim, kind: straza.audit.approval, count: 2}
+
+  # 3. A fresh session of the same person consumes the grant once.
+  - name: the admin reads kim's sessions and keeps the id of the session that raised the ticket
+    # suspect: the list is a bare array newest first, so 0.id is the current session
+    admin:
+      method: GET
+      path: /v1/admin/sessions?user=${kimId}
+    want: {status: 200}
+    save: {sessionOne: 0.id}
+  - name: kim ends her first session
+    hook:
+      as: kim
+      event: {kind: session.end}
+    want: {decision: allow}
+  - name: kim starts a second session, so the grant is cashed by a session that never saw the request
+    hook:
+      as: kim
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: the admin reads kim's sessions again and keeps the id of the new one, which is first because the list is newest first
+    admin:
+      method: GET
+      path: /v1/admin/sessions?user=${kimId}
+    want: {status: 200}
+    save: {sessionTwo: 0.id}
+  - name: the identical call from the new session is allowed, because the grant follows the person and not the session
+    hook:
+      as: kim
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-prod --release 42"}
+    want: {decision: allow}
+  - name: the allow is on the chain once and its reason says the ticket was consumed
+    # suspect: the consume wording is not published; the tickets guide shows a bare allow on the consuming call
+    audit: {subject: kim, kind: tool.pre, decision: allow, reasonContains: "consumed", count: 1}
+  - name: the consume reason names the approver, the bootstrap admin
+    # suspect: the consume wording is not published
+    audit: {subject: kim, kind: tool.pre, decision: allow, reasonContains: "admin", count: 1}
+  - name: the consume reason says the call is allowed once
+    # suspect: the consume wording is not published
+    audit: {subject: kim, kind: tool.pre, decision: allow, reasonContains: "allow once", count: 1}
+  - name: the record names the new session as the one that consumed the grant
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${ticketOne}
+    want: {status: 200, body: {approval.state: approved}, bodyContains: '"consumedBy":"${sessionTwo}"'}
+  - name: the record carries consumedAt, the moment the grant was cashed
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${ticketOne}
+    want: {status: 200, bodyContains: '"consumedAt"'}
+  - name: the consumed phase is on the chain, three approval records
+    audit: {subject: kim, kind: straza.audit.approval, count: 3}
+
+  # 4. The grant was single-use, so the next identical call opens a fresh ticket.
+  - name: the next identical call is refused with a fresh ticket, because one approval covers one run
+    hook:
+      as: kim
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-prod --release 42"}
+    want: {decision: deny, reasonContains: "approval ticket"}
+  - name: the second refusal with the retry sentence is on the chain, two such records now
+    audit: {subject: kim, kind: tool.pre, decision: deny, reasonContains: "Retry this exact call after approval", count: 2}
+  - name: the admin reads the pending approvals and keeps the id of the fresh ticket, the only pending one
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want: {status: 200, body: {approvals.0.state: pending, "approvals.1": null}}
+    save: {ticketTwo: approvals.0.id}
+  - name: the fresh ticket is a separate pending record on the same rule
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${ticketTwo}
+    want: {status: 200, body: {approval.state: pending, approval.rule: deploy-prod-ticket, approval.consumedBy: null}}
+  - name: the fresh request phase is on the chain, four approval records
+    audit: {subject: kim, kind: straza.audit.approval, count: 4}
+
+  # 5. A denied ticket keeps the identical call blocked and opens no new request.
+  - name: the admin denies the fresh ticket
+    admin:
+      method: POST
+      path: /v1/admin/approvals/${ticketTwo}/deny
+      body: {reason: "G5: no second deploy in this window"}
+    want: {status: 200, body: {approval.state: denied}}
+  - name: the denied resolution is on the chain, five approval records
+    audit: {subject: kim, kind: straza.audit.approval, count: 5}
+  - name: the identical call is refused with the denial and names who denied it
+    hook:
+      as: kim
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-prod --release 42"}
+    want: {decision: deny, reasonContains: "was denied by"}
+  - name: the refusal after the denial is on the chain once and says the call stays denied
+    audit: {subject: kim, kind: tool.pre, decision: deny, reasonContains: "stays denied", count: 1}
+  - name: no new request was opened by the refused call, the approval records still number five
+    audit: {subject: kim, kind: straza.audit.approval, count: 5}
+  - name: nothing is pending, because a denied ticket blocks without paging the approvers again
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want: {status: 200, body: {"approvals.0": null}}
+
+  # 6. An undecided ticket expires on the sweep, and the next call asks again.
+  - name: a deploy-canary call raises a ticket with a five second decision window
+    hook:
+      as: kim
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-canary --release 42"}
+    want: {decision: deny, reasonContains: "approval ticket"}
+  - name: the admin keeps the id of the short ticket, the only pending record
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want: {status: 200, body: {approvals.0.rule: deploy-canary-ticket, "approvals.1": null}}
+    save: {ticketThree: approvals.0.id}
+  - name: the sweep flips the undecided ticket to expired within two sweep periods
+    admin:
+      method: GET
+      path: /v1/admin/approvals/${ticketThree}
+    want: {status: 200, body: {approval.state: expired}}
+    within: 30s
+    timer: ticket-expiry
+  - name: the expired resolution is on the chain, seven approval records with the short ticket's request
+    audit: {subject: kim, kind: straza.audit.approval, count: 7}
+  - name: the next identical deploy-canary call opens a fresh ticket, because only a denial blocks
+    # suspect: inferred from the block being described for a denied ticket only
+    hook:
+      as: kim
+      event: {kind: tool.pre, tool: shell.exec, command: "deploy-canary --release 42"}
+    want: {decision: deny, reasonContains: "approval ticket"}
+  - name: the fresh short ticket is pending and is the only pending record
+    admin:
+      method: GET
+      path: /v1/admin/approvals?state=pending
+    want: {status: 200, body: {approvals.0.rule: deploy-canary-ticket, approvals.0.state: pending, "approvals.1": null}}
+  - name: the fresh request after the expiry is on the chain, eight approval records
+    audit: {subject: kim, kind: straza.audit.approval, count: 8}
+
+  # 7. The knobs a ticket cannot carry are refused at apply, and the caps hold.
+  - name: a ticket rule carrying timeoutSeconds is refused at apply, because a ticket never blocks
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g5-bad-timeout
+          spec:
+            rules:
+              - id: r1
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy-prod *"]
+                effect: allow
+                mode: approve
+                approve:
+                  class: ticket
+                  timeoutSeconds: 120
+                reason: "G5-INVALID: a ticket cannot carry a blocking timeout"
+    want: {status: 400}
+  - name: a ticket rule carrying retryTTLSeconds is refused at apply for the same reason
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g5-bad-retry
+          spec:
+            rules:
+              - id: r1
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy-prod *"]
+                effect: allow
+                mode: approve
+                approve:
+                  class: ticket
+                  retryTTLSeconds: 60
+                reason: "G5-INVALID: a ticket cannot carry a hold exemption TTL"
+    want: {status: 400}
+  - name: a ticketTTLSeconds over the thirty day cap is refused at apply
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g5-bad-ticket-ttl
+          spec:
+            rules:
+              - id: r1
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy-prod *"]
+                effect: allow
+                mode: approve
+                approve:
+                  class: ticket
+                  ticketTTLSeconds: 9999999
+                reason: "G5-INVALID: the decision window is capped at thirty days"
+    want: {status: 400}
+  - name: a grantTTLSeconds over the one day cap is refused at apply
+    admin:
+      method: PUT
+      path: /v1/admin/policies
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: PolicySet
+          metadata:
+            name: g5-bad-grant-ttl
+          spec:
+            rules:
+              - id: r1
+                tools: [shell.exec]
+                command:
+                  allowPatterns: ["deploy-prod *"]
+                effect: allow
+                mode: approve
+                approve:
+                  class: ticket
+                  grantTTLSeconds: 99999
+                reason: "G5-INVALID: the consume window is capped at one day"
+    want: {status: 400}
+
+  # Teardown leaves nothing behind.
+  - name: the admin deactivates the PolicySet
+    admin:
+      method: POST
+      path: /v1/admin/policies/g5-ticket/activate
+      body: {status: draft}
+    want: {status: 200}
+  - name: the draft PolicySet is deleted
+    admin:
+      method: DELETE
+      path: /v1/admin/policies/g5-ticket
+    want: {status: 204}
+  - name: the admin deletes the role
+    admin:
+      method: DELETE
+      path: /v1/admin/roles/${roleId}
+    want: {status: 200}
+  - name: the IdM deactivates kim
+    scim:
+      method: DELETE
+      path: /scim/v2/Users/${kimId}
+    want: {status: 204}

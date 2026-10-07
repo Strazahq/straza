@@ -1,0 +1,21 @@
+# harness-matrix drift case: the QUOTED-exe command string form.
+#
+# This exact form, a TOML literal whose first token is a double-quoted
+# executable path, is what the pre-fix installer wrote on Windows, and what
+# codex 0.146's Windows spawn path kills at exec with exit 1. The LINUX spawn
+# path tolerates it on 0.144.6 and 0.146.0 (verified live). The matrix pins
+# that tolerance so the day a codex
+# release starts rejecting quotes on Linux too, the latest lane reports it as
+# vendor drift instead of a governance fleet discovering it in production.
+# @SENTINEL@ and @DIR@ are substituted by run.sh.
+[features]
+hooks = true
+
+[hooks]
+managed_dir = "@DIR@"
+
+[[hooks.SessionStart]]
+matcher = "*"
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = '"@SENTINEL@" hook --harness codex'

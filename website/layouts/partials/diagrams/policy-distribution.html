@@ -1,0 +1,15 @@
+<svg class="dg" viewBox="0 0 900 300" role="img" aria-labelledby="dg-policy-distribution-t" data-say='["How a policy reaches every machine. Press a step to follow it.", "1. An admin activates a PolicySet, in the console or with strazactl policy activate.", "2. strazad compiles every active set into one snapshot and signs it.", "3. Each client fetches the snapshot and checks the signature against the keys it pinned when the machine enrolled.", "4. Only a verified snapshot is used. Every decision on that machine is made from it, with no network call.", "5. If the check fails, the client keeps its last verified snapshot until its session time runs out, and then it denies."]'>
+<title id="dg-policy-distribution-t">An admin activates a PolicySet. strazad compiles every active set into one signed snapshot. Each client checks the signature against the keys it pinned at enrollment and decides locally from the verified copy. If the check fails, the client keeps its last verified copy until its session time runs out, then denies.</title>
+<defs><marker id="ah-policy-distribution" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0 0 10 5 0 10z"/></marker></defs>
+<g data-s="1"><rect class="box" x="10" y="30" width="160" height="104" rx="6"/><text class="t" x="26" y="62">An admin</text><text class="s" x="26" y="86">activates a</text><text class="s" x="26" y="106">PolicySet</text></g>
+<g data-s="2"><rect class="box" x="210" y="30" width="220" height="104" rx="6"/><text class="t" x="226" y="62">strazad</text><text class="s" x="226" y="86">compiles active sets</text><text class="s" x="226" y="106">into one signed</text><text class="s" x="226" y="126">snapshot</text></g>
+<g data-s="3"><rect class="box" x="470" y="30" width="220" height="104" rx="6"/><text class="t" x="486" y="62">Each client</text><text class="s" x="486" y="86">fetches the snapshot</text><text class="s" x="486" y="106">and checks it against</text><text class="s" x="486" y="126">its pinned keys</text></g>
+<g data-s="4"><rect class="box okbg ok" x="730" y="30" width="160" height="104" rx="6"/><text class="t" x="746" y="62">Decides locally</text><text class="s" x="746" y="86">from the verified</text><text class="s" x="746" y="106">copy</text></g>
+<path class="ln" d="M172 82 H205" marker-end="url(#ah-policy-distribution)"/>
+
+<path class="ln" d="M432 82 H465" marker-end="url(#ah-policy-distribution)"/>
+<path class="ln" d="M692 82 H725" marker-end="url(#ah-policy-distribution)"/>
+<g data-s="5"><rect class="box wabg wa" x="470" y="198" width="420" height="88" rx="6"/><text class="t" x="486" y="228">If the check fails</text><text class="s" x="486" y="252">the client keeps its last verified copy until its</text><text class="s" x="486" y="272">session time runs out, then it denies.</text></g>
+<path class="ln dash" d="M580 136 V195" marker-end="url(#ah-policy-distribution)"/>
+<text class="lab" x="590" y="172">check fails</text>
+</svg>

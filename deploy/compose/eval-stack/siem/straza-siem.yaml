@@ -1,0 +1,53 @@
+# FULL strazad config for the OPT-IN SIEM demo overlay (compose.siem.yaml
+# mounts this OVER /etc/straza/straza.yaml, replacing the base
+# straza.rs-mode.yaml mount: strazad reads exactly one config file, so an
+# overlay must carry everything the base file had, plus its own additions).
+# Keep the oauth block in sync with ../straza.rs-mode.yaml, which is the
+# source of truth for rs-mode. This file appends the sink list.
+
+# The webhook posts each CloudEvent DIRECTLY to Elasticsearch, with no shipper
+# in between, using the sink `headers` knob: ES insists on
+# Content-Type: application/json and Basic auth. The `straza-id` ingest
+# pipeline (created by siem-setup) sets each document's _id to the CloudEvent
+# id, so an at-least-once redelivery answers 409 instead of storing a
+# duplicate, the same dedupe contract
+# https://docs.straza.ai/guides/operate/sinks-and-siem/ asks of every
+# receiver, done server-side.
+
+# Demo credentials (elastic:strazasiem) match compose.siem.yaml and are for
+# the loopback-bound eval ONLY. Production: TLS endpoint, a dedicated ES API
+# key with create-doc-only privileges on the one index, and the HMAC
+# signature verified by a middleware in front of ES.
+
+# --- rs-mode per-user grants (COPY of straza.rs-mode.yaml, keep in sync) ---
+oauth:
+  providers:
+    keycloak:
+      clientId: straza-connect
+      clientSecret: straza-connect-eval-secret
+      authUrl: http://localhost:8480/realms/straza/protocol/openid-connect/auth
+      tokenUrl: http://keycloak:8080/realms/straza/protocol/openid-connect/token
+      scopes: [openid]
+  refreshInterval: 1m
+  refreshWindow: 10m
+
+# --- delegated admin demo (COPY of straza.rs-mode.yaml, keep in sync) ---
+admin:
+  roleAreas:
+    auditor: [audit:read, sessions:read, transcripts:read]
+
+# SCIM posture (scim-profile revision 14, unified role model; see
+# straza.rs-mode.yaml and keep the two in sync): roles are Straza-born, the
+# wire renders EVERY role as a group on both planes, and the retired
+# derivation knobs fail boot if present. midPoint assigns straza-admin and
+# the straza-enroll-* roles, and the access review certifies who holds them.
+
+# --- SIEM sink (this overlay's own addition) ---
+sinks:
+  - name: elastic
+    type: webhook
+    url: http://elasticsearch:9200/straza-events/_doc?pipeline=straza-id
+    subjects: ["straza.audit.>", "straza.revocation.>"]
+    headers:
+      Content-Type: application/json
+      Authorization: "Basic ZWxhc3RpYzpzdHJhemFzaWVt"
