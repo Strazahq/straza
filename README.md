@@ -26,6 +26,11 @@
 </p>
 
 <p align="center">
+  <strong>Straza is under heavy development.</strong> Expect frequent releases and changes between
+  them, and read the release notes before you upgrade.
+</p>
+
+<p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="website/static/readme/held-call-dark.svg">
     <img alt="Claude Code, running as an AI agent, calls the get-sum tool through the Straza gateway.
@@ -553,7 +558,8 @@ the Helm chart, the compose template and the demo stack, and `pushRelay.enabled:
 
 ## Status
 
-v1.1.0 is the first public release. It carries the three enforcement lanes, human approval in
+v1.1.0 is the first public release, and the project is under heavy development, so expect
+frequent changes between releases. It carries the three enforcement lanes, human approval in
 the console, in Slack and on the phone, headless enrollment, conversation recording and the
 audit sentinel. Microsoft Teams, a Cursor adapter and passkeys for the built-in sign-in come
 next, and the [roadmap](https://docs.straza.ai/project/roadmap/) says what follows.
