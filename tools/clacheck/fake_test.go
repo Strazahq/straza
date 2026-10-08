@@ -293,6 +293,9 @@ func (f *fakeGitHub) prEvent(t *testing.T, action string) []byte {
 	pr := ev["pull_request"].(map[string]any)
 	pr["head"].(map[string]any)["sha"] = f.pr["head"].(map[string]any)["sha"]
 	pr["user"], pr["title"], pr["body"] = f.pr["user"], f.pr["title"], f.pr["body"]
+	if s, ok := f.pr["state"]; ok {
+		pr["state"] = s
+	}
 	return mustJSON(ev)
 }
 
@@ -302,6 +305,9 @@ func (f *fakeGitHub) commentEvent(t *testing.T, action string, id int64, before 
 	ev := decodeMap(t, fixture(t, "issue_comment_event.json"))
 	ev["action"] = action
 	ev["comment"] = f.comment(id)
+	if s, ok := f.pr["state"]; ok {
+		ev["issue"].(map[string]any)["state"] = s
+	}
 	if action == "edited" {
 		ev["changes"] = map[string]any{"body": map[string]any{"from": before}}
 	}

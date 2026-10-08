@@ -106,6 +106,7 @@ type event struct {
 	Action     string
 	PR         int
 	HeadSHA    string
+	Closed     bool
 	Raw        json.RawMessage
 	Comment    *issueComment
 	BodyBefore string
@@ -131,13 +132,15 @@ func readEvent(c config) (event, error) {
 	var p struct {
 		Action      string `json:"action"`
 		PullRequest *struct {
-			Number int `json:"number"`
+			Number int    `json:"number"`
+			State  string `json:"state"`
 			Head   struct {
 				SHA string `json:"sha"`
 			} `json:"head"`
 		} `json:"pull_request"`
 		Issue *struct {
 			Number      int             `json:"number"`
+			State       string          `json:"state"`
 			PullRequest json.RawMessage `json:"pull_request"`
 		} `json:"issue"`
 		Comment json.RawMessage `json:"comment"`
@@ -153,13 +156,13 @@ func readEvent(c config) (event, error) {
 	ev.Action, ev.Raw = p.Action, raw
 	switch {
 	case c.EventName == "pull_request_target" && p.PullRequest != nil && shaRE.MatchString(p.PullRequest.Head.SHA):
-		ev.PR, ev.HeadSHA = p.PullRequest.Number, p.PullRequest.Head.SHA
+		ev.PR, ev.HeadSHA, ev.Closed = p.PullRequest.Number, p.PullRequest.Head.SHA, p.PullRequest.State == "closed"
 	case c.EventName == "issue_comment" && p.Issue != nil && len(p.Issue.PullRequest) > 0 && string(p.Issue.PullRequest) != "null" && len(p.Comment) > 0:
 		cm, err := parseComment(p.Comment, kindComment)
 		if err != nil {
 			return ev, err
 		}
-		ev.PR, ev.Comment, ev.BodyBefore = p.Issue.Number, &cm, cm.Body
+		ev.PR, ev.Comment, ev.BodyBefore, ev.Closed = p.Issue.Number, &cm, cm.Body, p.Issue.State == "closed"
 		if p.Changes.Body != nil {
 			ev.BodyBefore = p.Changes.Body.From
 		}
@@ -178,6 +181,9 @@ type runner struct {
 	now      func() time.Time
 	out      io.Writer
 	accounts map[int64]bool
+	// closed is set once the run knows the pull request is closed, and then
+	// setStatus writes nothing.
+	closed bool
 }
 
 func newRunner(c config, out io.Writer) *runner {
@@ -220,12 +226,13 @@ func (r *runner) markPending() error {
 		return err
 	}
 	head := ev.HeadSHA
+	r.closed = ev.Closed
 	if head == "" {
 		pr, err := r.pull(ev.PR)
 		if err != nil {
 			return err
 		}
-		head = pr.Head.SHA
+		head, r.closed = pr.Head.SHA, pr.State == "closed"
 	}
 	return r.setStatus(head, "pending", pendingText, r.cfg.RunURL)
 }
@@ -240,6 +247,7 @@ func (r *runner) run() error {
 		return err
 	}
 	head := ev.HeadSHA
+	r.closed = ev.Closed
 	if head != "" {
 		if err := r.setStatus(head, "pending", pendingText, r.cfg.RunURL); err != nil {
 			return err
@@ -265,6 +273,7 @@ func (r *runner) check(ev event, head *string) error {
 	if err != nil {
 		return err
 	}
+	r.closed = r.closed || pr.State == "closed"
 	if pr.Head.SHA != *head {
 		*head = pr.Head.SHA
 		if err := r.setStatus(*head, "pending", pendingText, r.cfg.RunURL); err != nil {

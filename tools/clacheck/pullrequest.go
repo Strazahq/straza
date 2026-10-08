@@ -189,8 +189,15 @@ func (e *limitError) Error() string {
 
 // setStatus writes the status on the commit, or the limit failure once the
 // commit holds statusGuard statuses, and then returns a limitError. A failure
-// is always safe to write, so it never waits on the count.
+// is always safe to write, so it never waits on the count. For a closed pull
+// request it writes nothing.
 func (r *runner) setStatus(sha, state, desc, target string) error {
+	if r.closed {
+		// The status belongs to the commit, and an open pull request can
+		// share the head of a closed one, so a closed one never writes it.
+		fmt.Fprintf(r.out, "The pull request is closed, so the check leaves the status of commit %s to any open pull request on it.\n", shortOID(sha))
+		return nil
+	}
 	if state == "failure" {
 		return r.postStatus(sha, state, desc, target)
 	}
