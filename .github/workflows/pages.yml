@@ -67,9 +67,13 @@ jobs:
             echo "PAGES GATE FAILED: a page loads a script, stylesheet, import or fetch from another host. The docs site must be self-contained, so remove that external load and push again."
             exit 1
           fi
+      # The skill bundle, its index and the Claude Code marketplace file live
+      # under .well-known, which the upload drops unless hidden files are
+      # included. Nothing else in the published tree starts with a dot.
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: build/site-public
+          include-hidden-files: true
 
   deploy:
     if: github.repository == 'strazahq/straza'
