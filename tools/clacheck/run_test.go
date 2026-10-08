@@ -248,6 +248,22 @@ func TestRun(t *testing.T) {
 				t.Fatalf("a locked pull request was changed again: %v", w)
 			}
 		}},
+		{"closed pull request leaves the commit status alone", func(t *testing.T, f *fakeGitHub) {
+			// An open pull request can share the head commit, and the status
+			// belongs to the commit, so a closed one must not write it.
+			f.addAccount(alice)
+			f.pr["state"] = "closed"
+			if out, err := f.runMode(t, "pull_request_target", f.prEvent(t, "closed"), nil, true); err != nil {
+				t.Fatalf("pending step failed: %v\n%s", err, out)
+			}
+			mustRun(t, f, "pull_request_target", f.prEvent(t, "closed"))
+			c := f.addComment(bob, "Thanks, closing this in favour of the other one.")
+			mustRun(t, f, "issue_comment", f.commentEvent(t, "created", c, ""))
+			mustRun(t, f, "workflow_dispatch", nil)
+			if len(f.statuses) != 0 {
+				t.Fatalf("a closed pull request set commit statuses: %+v", f.statuses)
+			}
+		}},
 		{"closed pull request without an acceptance is not locked", func(t *testing.T, f *fakeGitHub) {
 			f.addAccount(alice)
 			f.pr["state"] = "closed"
