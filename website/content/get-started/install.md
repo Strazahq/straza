@@ -29,7 +29,7 @@ Release builds exist for Linux, Windows and macOS, each on amd64 and arm64. Choo
 ## Download a release and verify it
 
 
-Each release carries one archive per platform, named after the project, the version, the operating system and the architecture, for example `straza_1.1.0_linux_amd64.tar.gz`. Windows gets a zip, such as `straza_1.1.0_windows_amd64.zip`. Inside are the three binaries, both license files, `NOTICE`, `TRADEMARKS.md`, the third-party notices in `THIRD_PARTY_NOTICES.txt`, the README and the standalone quickstart.
+Each release carries one archive per platform, named after the project, the version, the operating system and the architecture, for example `straza_1.1.1_linux_amd64.tar.gz`. Windows gets a zip, such as `straza_1.1.1_windows_amd64.zip`. Inside are the three binaries, both license files, `NOTICE`, `TRADEMARKS.md`, the third-party notices in `THIRD_PARTY_NOTICES.txt`, the README and the standalone quickstart.
 
 Beside the archives sit `checksums.txt`, its signature `checksums.txt.sig`, the signing certificate `checksums.txt.pem` and a software bill of materials for every archive. The checksums file is signed with keyless cosign by the GitHub Actions job that built the release, so the certificate names that job's identity.
 
@@ -58,7 +58,7 @@ The same check runs in PowerShell, with `cosign` for Windows on your PATH. Power
 cosign verify-blob --signature checksums.txt.sig --certificate checksums.txt.pem `
   --certificate-identity-regexp '^https://github\.com/Strazahq/straza/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' `
   --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
-$zip = "straza_1.1.0_windows_amd64.zip"
+$zip = "straza_1.1.1_windows_amd64.zip"
 $line = Select-String -Path checksums.txt -Pattern ('  ' + [regex]::Escape($zip) + '$')
 (Get-FileHash -Algorithm SHA256 $zip).Hash -eq ($line.Line -split '\s+')[0]
 ```

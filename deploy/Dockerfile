@@ -29,6 +29,10 @@ RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -o /out/strazactl ./cmd/strazactl
 
 FROM scratch
+# The source label links the package to its repository on GitHub.
+LABEL org.opencontainers.image.source="https://github.com/strazahq/straza" \
+      org.opencontainers.image.description="Straza: open source runtime governance for AI agents" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/strazad /usr/local/bin/strazad
 COPY --from=build /out/strazactl /usr/local/bin/strazactl

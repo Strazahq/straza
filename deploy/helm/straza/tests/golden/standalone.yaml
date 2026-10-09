@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   type: ClusterIP
   selector:
@@ -28,7 +28,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   replicas: 1
   selector:

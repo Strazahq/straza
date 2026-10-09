@@ -18,7 +18,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   podSelector:
     matchLabels:
@@ -44,7 +44,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   podSelector:
     matchLabels:
@@ -74,7 +74,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   selector:
     app.kubernetes.io/name: straza-nats
@@ -93,7 +93,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   selector:
     app.kubernetes.io/name: straza-postgres
@@ -109,7 +109,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   type: ClusterIP
   selector:
@@ -129,7 +129,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   replicas: 2
   selector:
@@ -153,7 +153,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: strazad
-          image: ghcr.io/strazahq/straza:1.1.0
+          image: ghcr.io/strazahq/straza:1.1.1
           imagePullPolicy: IfNotPresent
           args: ["serve", "--profile", "enterprise", "--listen", "0.0.0.0:8420"]
           ports:
@@ -233,7 +233,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   serviceName: straza-straza-nats
   replicas: 1
@@ -273,7 +273,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-1.1.0
+    helm.sh/chart: straza-1.1.1
 spec:
   serviceName: straza-straza-postgres
   replicas: 1

@@ -109,7 +109,7 @@ This table records what the docs and the tests ran on, and it makes no promise o
 | The Go test suite and `straza` on macOS | One Mac with Docker Desktop 29.7.2 | The commit checks, which run the suite, passed on 2026-10-01, and `straza` served Claude Desktop the same day. |
 | The other release builds | Linux arm64, macOS amd64 and arm64, Windows arm64 | Built in release shape with `CGO_ENABLED=0` on 2026-10-07, and not run. |
 | The container image | linux/amd64 | Built from `deploy/Dockerfile` and run as the demo stack's strazad. The release also publishes linux/arm64, which was not run. |
-| Go, for a build from source | 1.26.6 | The version every build and run on this page used. `go.mod` requires Go 1.26 and names go1.26.6 as its toolchain, which the go command fetches when the installed one is older. |
+| Go, for a build from source | 1.26.9 | The version every build and run on this page used. `go.mod` requires Go 1.26 and names go1.26.9 as its toolchain, which the go command fetches when the installed one is older. |
 | PostgreSQL | 16.13 | The demo stack's database for the enterprise profile. The chart's bundled Postgres uses the `postgres:16` image. |
 | NATS | 2.14.3 | The demo stack's event bus. The chart's bundled NATS uses the `nats:2` image. |
 | Keycloak | 26.0.8 | The demo stack's OIDC login provider. |

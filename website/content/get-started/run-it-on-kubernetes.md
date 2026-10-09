@@ -128,7 +128,7 @@ helm install straza deploy/helm/straza \
 ```
 {{< /command >}}
 
-{{< see >}}The release status `deployed`, followed by the chart's notes. They name the release `straza-straza`, the image `ghcr.io/strazahq/straza:1.1.0` or your own tag, the profile `standalone`, one replica, the public address `http://127.0.0.1:18420`, embedded per-pod events and a per-pod SQLite store.{{< /see >}}
+{{< see >}}The release status `deployed`, followed by the chart's notes. They name the release `straza-straza`, the image `ghcr.io/strazahq/straza:1.1.1` or your own tag, the profile `standalone`, one replica, the public address `http://127.0.0.1:18420`, embedded per-pod events and a per-pod SQLite store.{{< /see >}}
 
 Each value has a reason:
 
