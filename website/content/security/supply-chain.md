@@ -36,7 +36,7 @@ Every binary in a release is reachable from `checksums.txt`, and that one file i
 The identity pattern pins the repository `Strazahq/straza`, its release workflow `.github/workflows/release.yml` and a version tag. It spells the organization `Strazahq` as GitHub writes it into the certificate, and the match is case-sensitive, so a pattern in lowercase fails. A certificate from another repository, another workflow or a branch does not match. The container image verifies with the same identity:
 
 ```sh
-cosign verify ghcr.io/strazahq/straza:1.1.0 \
+cosign verify ghcr.io/strazahq/straza:1.1.1 \
   --certificate-identity-regexp '^https://github\.com/Strazahq/straza/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```

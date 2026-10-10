@@ -13,7 +13,7 @@ Straza's release notes live on the releases page at https://github.com/strazahq/
 ## Latest release
 
 
-The latest release is [Straza 1.1.0](https://github.com/strazahq/straza/releases/tag/v1.1.0), the first public release. Its notes sum up what Straza does and where to start, and they link the steps that verify your download.
+The latest release is [Straza 1.1.1](https://github.com/strazahq/straza/releases/tag/v1.1.1), a security update of [1.1.0](https://github.com/strazahq/straza/releases/tag/v1.1.0), the first public release. Its notes sum up what Straza does and where to start, and they link the steps that verify your download.
 
 ## How versions are numbered
 

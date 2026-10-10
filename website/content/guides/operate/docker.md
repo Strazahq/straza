@@ -29,8 +29,8 @@ The release image is `ghcr.io/strazahq/straza`, built from `deploy/Dockerfile` i
 
 {{< command terminal="Terminal" purpose="on the Docker host" >}}
 ```sh
-docker pull ghcr.io/strazahq/straza:1.1.0
-docker inspect --format 'user={{.Config.User}} entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}} volumes={{json .Config.Volumes}} exposed={{json .Config.ExposedPorts}} env={{json .Config.Env}}' ghcr.io/strazahq/straza:1.1.0
+docker pull ghcr.io/strazahq/straza:1.1.1
+docker inspect --format 'user={{.Config.User}} entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}} volumes={{json .Config.Volumes}} exposed={{json .Config.ExposedPorts}} env={{json .Config.Env}}' ghcr.io/strazahq/straza:1.1.1
 ```
 {{< /command >}}
 
@@ -68,7 +68,7 @@ Start the container with the volume, the port published on the loopback address 
 
 {{< command terminal="Terminal" purpose="on the Docker host" >}}
 ```sh
-docker run -d --stop-timeout 30 --name straza -v straza-data:/var/lib/straza -p 127.0.0.1:8420:8420 ghcr.io/strazahq/straza:1.1.0 serve --profile standalone --listen 0.0.0.0:8420
+docker run -d --stop-timeout 30 --name straza -v straza-data:/var/lib/straza -p 127.0.0.1:8420:8420 ghcr.io/strazahq/straza:1.1.1 serve --profile standalone --listen 0.0.0.0:8420
 docker logs straza
 ```
 {{< /command >}}

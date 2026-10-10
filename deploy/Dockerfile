@@ -5,7 +5,9 @@
 # The build stage runs on the BUILD platform and cross-compiles for TARGET;
 # multi-arch buildx never compiles Go under qemu emulation.
 ARG GO_VERSION=1.26
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bookworm AS build
+# Docker Hub's official images come through Google's mirror, which serves the
+# same digests without Docker Hub's pull limits for shared CI runners.
+FROM --platform=$BUILDPLATFORM mirror.gcr.io/library/golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src
 
 # Cache modules first.
@@ -29,6 +31,10 @@ RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -o /out/strazactl ./cmd/strazactl
 
 FROM scratch
+# The source label links the package to its repository on GitHub.
+LABEL org.opencontainers.image.source="https://github.com/strazahq/straza" \
+      org.opencontainers.image.description="Straza: open source runtime governance for AI agents" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/strazad /usr/local/bin/strazad
 COPY --from=build /out/strazactl /usr/local/bin/strazactl
