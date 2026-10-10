@@ -57,7 +57,9 @@ jobs:
     timeout-minutes: 35
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub's official image through Google's mirror, without the
+        # pull limits that shared runners hit.
+        image: mirror.gcr.io/library/postgres:16
         env:
           POSTGRES_USER: straza
           POSTGRES_PASSWORD: straza

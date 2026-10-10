@@ -5,7 +5,9 @@
 # The build stage runs on the BUILD platform and cross-compiles for TARGET;
 # multi-arch buildx never compiles Go under qemu emulation.
 ARG GO_VERSION=1.26
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bookworm AS build
+# Docker Hub's official images come through Google's mirror, which serves the
+# same digests without Docker Hub's pull limits for shared CI runners.
+FROM --platform=$BUILDPLATFORM mirror.gcr.io/library/golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src
 
 # Cache modules first.
