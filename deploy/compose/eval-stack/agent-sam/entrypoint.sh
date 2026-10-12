@@ -17,7 +17,7 @@ SRV="${STRAZA_SERVER:-http://127.0.0.1:8420}"
 SAM_USER=sam-sre-agent
 KEYS_DIR="${STRAZA_KEYS_DIR:-/keys}"
 PASS=/tmp/sam.PASS
-ECHO_TOOL=""
+CATALOG_COUNT=0
 say() { echo "[sam] $*"; }
 
 session_token() {
@@ -41,26 +41,20 @@ ensure_key() {
   say "NHI key ready; public half published at $KEYS_DIR/$SAM_USER.pub (the seeder registers it)"
 }
 
-# One governed tools/call through the gateway; returns 0 only when the call
-# was ALLOWED and answered. The echo tool name is discovered from tools/list
-# (the session's own catalog), never hardcoded.
-gateway_echo() {
+# One governed tools/list through the gateway; returns 0 only when the
+# catalog holds a tool that sam's roles reach, and leaves the size of the
+# catalog in CATALOG_COUNT. The built-in straza__ tools are in every catalog,
+# so they do not count as proof that a role arrived. The list is the
+# session's own catalog, so it needs no upstream server and no credential.
+gateway_catalog() {
   TOK=$(session_token)
   [ -n "$TOK" ] || return 1
-  if [ -z "$ECHO_TOOL" ]; then
-    ECHO_TOOL=$(curl -sf -X POST -H "Authorization: Bearer $TOK" \
-      -H 'Content-Type: application/json' \
-      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$SRV/mcp" \
-      | jq -r '.result.tools[].name' 2>/dev/null | grep -i 'echo' | head -1)
-    [ -n "$ECHO_TOOL" ] || return 1
-  fi
-  OUT=$(curl -sf -X POST -H "Authorization: Bearer $TOK" \
+  NAMES=$(curl -sf -X POST -H "Authorization: Bearer $TOK" \
     -H 'Content-Type: application/json' \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$ECHO_TOOL\",\"arguments\":{\"message\":\"sam-heartbeat\"}}}" \
-    "$SRV/mcp") || return 1
-  printf %s "$OUT" | jq -e '.error' >/dev/null 2>&1 && return 1
-  printf %s "$OUT" | jq -e '.result.isError == true' >/dev/null 2>&1 && return 1
-  return 0
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$SRV/mcp" \
+    | jq -r '.result.tools[].name' 2>/dev/null) || return 1
+  CATALOG_COUNT=$(printf '%s\n' "$NAMES" | grep -c .)
+  printf '%s\n' "$NAMES" | grep -v '^straza__' | grep -q .
 }
 
 while :; do
@@ -89,17 +83,17 @@ while :; do
   say "4/6 identity, as the client sees it:"
   straza status 2>&1 | sed 's/^/[sam]    /'
 
-  say "5/6 governed gateway call (demo-tools echo through /mcp)..."
+  say "5/6 governed gateway call (tools/list through /mcp)..."
   n=0
-  while ! gateway_echo; do
+  while ! gateway_catalog; do
     n=$((n + 1))
     [ "$n" -gt 24 ] && break
     sleep 5
   done
   if [ "$n" -le 24 ]; then
-    say "5/6 ALLOWED (gateway): $ECHO_TOOL answered under policy"
+    say "5/6 LISTED (gateway): the catalog holds $CATALOG_COUNT tools for sam's roles"
   else
-    say "5/6 WARNING: gateway echo never succeeded (binding or app still settling); hook lane is already proven, continuing"
+    say "5/6 WARNING: the gateway listed no tool for sam's roles (a role or an MCP server is still settling); hook lane is already proven, continuing"
   fi
 
   say "6/6 destructive command (must be denied with a reason)..."
@@ -127,7 +121,7 @@ while :; do
   while :; do
     if [ "$FAILS" -eq 0 ]; then sleep 600; else sleep 30; fi
     if straza exec -- date >/tmp/hb.log 2>&1; then
-      gateway_echo || true
+      gateway_catalog || true
       [ "$FAILS" -gt 0 ] && say "heartbeat recovered"
       FAILS=0
     else

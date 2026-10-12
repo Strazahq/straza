@@ -7,7 +7,7 @@ keywords: straza docs runtime governance agents identity manager control plane
 ---
 
 
-Straza is the control plane between your IdM/IGA and your agents. Your identity manager (IdM) or identity governance and administration system (IGA) says who people and agents are and which roles they hold. Straza turns those roles into a decision on each tool call that passes through it, on the agent's machine and at the gateway in front of your MCP servers. It records every decision.
+Straza is the control plane between your IGA and your agents. Your identity governance and administration system (IGA) says who people and agents are and which roles they hold. Straza turns those roles into a decision on each tool call that passes through it, on the agent's machine and at the gateway in front of your MCP servers. It records every decision.
 
 
 {{< diagram name="where-straza-sits" caption="Your identity manager stays the source of people and roles. Straza decides, and every decision comes back to it as an audit record. Solid lines carry policy and calls, and dashed lines carry records." >}}
