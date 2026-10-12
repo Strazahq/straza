@@ -5,9 +5,8 @@
 # it with the analyst role. Two roles that reach one tool each carry their
 # own gate in this product, so the same two gates as demo-tools-sandbox-access
 # appear here: get-sum needs approval from the agent's sponsor within two
-# minutes and get-env comes back as a day-scale ticket. The echo tool that
-# sam's proof ladder calls has no rule and runs, because access comes from
-# the access row.
+# minutes and get-env comes back as a day-scale ticket. The echo tool has no
+# rule and runs, because access comes from the access row.
 apiVersion: straza.dev/v1beta1
 kind: PolicySet
 metadata:

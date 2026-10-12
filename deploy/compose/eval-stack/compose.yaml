@@ -99,7 +99,7 @@ services:
     # lands in the shared /keys volume, the seeder registers it, and every
     # session start is a signed assertion. No IdP client, no committed secret.
     # The entrypoint is a proof ladder: keygen -> enroll -> session ->
-    # allowed gateway call -> denied rm -rf -> PASS marker (the healthcheck
+    # gateway catalog -> denied rm -rf -> PASS marker (the healthcheck
     # contract), then a governed heartbeat every 10 minutes (30s probes
     # while a beat is failing). Demo beats for a human:
     #   docker exec straza-sam sh /opt/sam/raise-ticket.sh   (day-scale gate)
