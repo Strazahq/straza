@@ -8,7 +8,7 @@ keywords: changelog releases versions release notes versioning
 ---
 
 
-Straza's release notes live on the releases page at https://github.com/strazahq/straza/releases, one entry per version tag. The repository carries no changelog file, so the releases page is the record to read.
+Straza keeps its changelog in [CHANGELOG.md](https://github.com/strazahq/straza/blob/main/CHANGELOG.md) at the root of the repository. Its Unreleased section lists what the main branch carries since the last release, and each release has a section of its own. The release notes of each version tag live on the releases page at https://github.com/strazahq/straza/releases.
 
 ## Latest release
 
