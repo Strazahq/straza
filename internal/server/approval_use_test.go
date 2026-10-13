@@ -179,12 +179,28 @@ func TestGatewayHoldApprovalRunsOnce(t *testing.T) {
 				reason string
 				ok     bool
 			}
-			first := make(chan result, 1)
-			wait := 200 * time.Millisecond
-			if heldWhenApproved {
-				wait = 10 * time.Second
+			// callAndLeave sends the call as a client that leaves once the request
+			// is pending, and returns the call's answer. The test ends the context
+			// itself: a deadline would also bound the store work before the wait,
+			// and a slow store would then answer a service error, not pending.
+			callAndLeave := func() result {
+				cctx, cancel := context.WithCancel(ctx)
+				defer cancel()
+				answer := make(chan result, 1)
+				go func() {
+					r, ok := app.resolveApprove(cctx, app.approval, claims, sub, ev, d, "why", args)
+					answer <- result{r, ok}
+				}()
+				onePending(t, app)
+				cancel()
+				return <-answer
 			}
-			go func() { r, ok := call(wait); first <- result{r, ok} }()
+			first := make(chan result, 1)
+			if heldWhenApproved {
+				go func() { r, ok := call(10 * time.Second); first <- result{r, ok} }()
+			} else {
+				first <- callAndLeave()
+			}
 			id := onePending(t, app)
 			if !heldWhenApproved {
 				if r := <-first; r.ok || !strings.Contains(r.reason, "approval pending (ref "+id+")") {
@@ -202,8 +218,8 @@ func TestGatewayHoldApprovalRunsOnce(t *testing.T) {
 				t.Fatalf("retry after approval = %q, want it to run", r)
 			}
 
-			if r, ok := call(200 * time.Millisecond); ok || !strings.Contains(r, "approval pending (ref ") || strings.Contains(r, id) {
-				t.Fatalf("identical call after the run = %q, %v, want a new request answered pending", r, ok)
+			if r := callAndLeave(); r.ok || !strings.Contains(r.reason, "approval pending (ref ") || strings.Contains(r.reason, id) {
+				t.Fatalf("identical call after the run = %q, %v, want a new request answered pending", r.reason, r.ok)
 			}
 			if again := onePending(t, app); again == id {
 				t.Fatalf("the pending record is still %s, want a new request", id)
