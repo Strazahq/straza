@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -468,9 +469,15 @@ func (t *sessionAuthTransport) refresh(ctx context.Context, stale Session) (Sess
 	resp, err := t.client.Refresh(ctx, stale.SessionToken,
 		harnessName(stale.Harness), harnessVersion(stale.Harness), measureAttestation(harnessName(stale.Harness)))
 	if err != nil {
-		// The session may be individually revoked while the user stays
-		// active; a device-token checkin is the recovery lane. A killed
-		// user fails here too, with the server's actionable reason.
+		// A 401 says strazad ended this session while the enrollment may
+		// still stand, so the identity lane of a session start gets one try,
+		// as on the hook and the daemon. The session on disk is the one
+		// strazad refused, so it is not adopted again. Any other answer
+		// judged the identity or judged nothing, and checks in for neither.
+		var refuse *StatusError
+		if errors.As(err, &refuse) && refuse.Status == http.StatusUnauthorized {
+			return sessionAfter(ctx, t.store, t.client, t.harness, stale.SessionToken)
+		}
 		return ensureSession(ctx, t.store, t.client, t.harness)
 	}
 	cur, lerr := t.store.LoadSession()
@@ -497,8 +504,19 @@ func (t *sessionAuthTransport) refresh(ctx context.Context, stale Session) (Sess
 // already on disk is ADOPTED, never re-minted: the hook owns
 // conversation-start semantics, the proxy follows.
 func ensureSession(ctx context.Context, store *Store, client *Client, harnessName string) (Session, error) {
+	return sessionAfter(ctx, store, client, harnessName, "")
+}
+
+// sessionAfter is ensureSession for a caller whose session token strazad
+// just refused. A session on disk that still carries refused is not adopted,
+// so the caller checks in under the lock, while a session another process
+// wrote since is adopted as usual. An empty refused adopts any live session.
+func sessionAfter(ctx context.Context, store *Store, client *Client, harnessName, refused string) (Session, error) {
 	const harnessVersion = "mcp" // the proxy checks in as the harness, versioned by its role
-	if ses, err := store.LoadSession(); err == nil && time.Until(ses.ExpiresAt) > 30*time.Second {
+	live := func(ses Session) bool {
+		return time.Until(ses.ExpiresAt) > 30*time.Second && (refused == "" || ses.SessionToken != refused)
+	}
+	if ses, err := store.LoadSession(); err == nil && live(ses) {
 		return ses, nil
 	}
 	lock := store.statePath("checkin.lock")
@@ -518,14 +536,14 @@ func ensureSession(ctx context.Context, store *Store, client *Client, harnessNam
 		}
 		time.Sleep(150 * time.Millisecond)
 		// The lock holder may have finished our work for us.
-		if ses, err := store.LoadSession(); err == nil && time.Until(ses.ExpiresAt) > 30*time.Second {
+		if ses, err := store.LoadSession(); err == nil && live(ses) {
 			return ses, nil
 		}
 	}
 	defer func() { _ = os.Remove(lock) }()
 	// Double-check under the lock.
 	prev, prevErr := store.LoadSession()
-	if prevErr == nil && time.Until(prev.ExpiresAt) > 30*time.Second {
+	if prevErr == nil && live(prev) {
 		return prev, nil
 	}
 	id, err := store.LoadIdentity()
@@ -549,6 +567,7 @@ func ensureSession(ctx context.Context, store *Store, client *Client, harnessNam
 		Attestation: resp.Attestation, Harness: harnessLabel(harnessName, harnessVersion),
 		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second),
 	}
+	adoptIdentity(&ses, resp)
 	// Adopt the policy blob so the pin names a snapshot we actually hold: a hook
 	// reading this freshly minted session verifies blob-against-pin and would
 	// brick fail-closed on a pin with no blob (proxy mints, hook then reads on a

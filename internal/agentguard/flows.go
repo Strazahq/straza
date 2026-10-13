@@ -480,6 +480,7 @@ func SessionStart(ctx context.Context, store *Store, harnessName, harnessVersion
 		Attestation: resp.Attestation, Harness: harnessLabel(harnessName, harnessVersion),
 		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second),
 	}
+	adoptIdentity(&ses, resp)
 	if err := store.SaveSession(ses); err != nil {
 		return nil, info, err
 	}

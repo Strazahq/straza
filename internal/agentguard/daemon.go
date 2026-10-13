@@ -147,7 +147,14 @@ func (d *Daemon) refresh(ctx context.Context) bool {
 			return false
 		}
 		_ = d.store.MarkRevoked("session refresh refused by the server")
-		fmt.Fprintln(d.out, "daemon: refresh refused. Session dropped")
+		if refuse.Status == http.StatusForbidden {
+			// No check-in followed a 403, so strazad's sentence on the refresh
+			// is the only reason there is. The 401 lane printed its own.
+			_, detail := renewalAnswer(refuse)
+			fmt.Fprintf(d.out, "daemon: session renewal refused (%s)\n", detail)
+		}
+		fmt.Fprintln(d.out, "daemon: refresh refused. Session dropped. Tool calls stay denied until a new agent session "+
+			"starts and checks in. Start `straza daemon` again after that.")
 		return true
 	}
 	held := ses.ExpiresAt
