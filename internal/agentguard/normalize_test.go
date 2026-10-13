@@ -361,6 +361,8 @@ func TestModernBuiltinMappings(t *testing.T) {
 		{"EnterPlanMode", policy.ToolFileRead},
 		{"ExitPlanMode", policy.ToolFileRead},
 		{"ReportFindings", policy.ToolFileRead},
+		{"ReadNotifications", policy.ToolFileRead},
+		{"FetchInboxMessage", policy.ToolFileRead},
 		// shell lane companions
 		{"BashOutput", policy.ToolShellExec},
 		{"KillShell", policy.ToolShellExec},
@@ -368,6 +370,7 @@ func TestModernBuiltinMappings(t *testing.T) {
 		// task/agent lane
 		{"Workflow", policy.ToolTaskSpawn},
 		{"SendMessage", policy.ToolTaskSpawn},
+		{"ListAgents", policy.ToolTaskSpawn},
 		{"Monitor", policy.ToolTaskSpawn},
 		{"TaskCreate", policy.ToolTaskSpawn},
 		{"TaskGet", policy.ToolTaskSpawn},
@@ -385,6 +388,9 @@ func TestModernBuiltinMappings(t *testing.T) {
 		{"Artifact", policy.ToolNetFetch},
 		{"PushNotification", policy.ToolNetFetch},
 		{"DesignSync", policy.ToolNetFetch},
+		{"SendFeedback", policy.ToolNetFetch},
+		{"ArtifactComments", policy.ToolNetFetch},
+		{"ArtifactData", policy.ToolNetFetch},
 		// worktree isolation mutates the repo
 		{"EnterWorktree", policy.ToolFileWrite},
 		{"ExitWorktree", policy.ToolFileWrite},
