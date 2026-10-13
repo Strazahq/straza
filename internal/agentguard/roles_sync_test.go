@@ -235,3 +235,51 @@ func TestRefreshKeepsTokenAndRolesConsistent(t *testing.T) {
 		t.Errorf("roles = %#v, want the set the refreshed token was minted for", ses.Roles)
 	}
 }
+
+// identityTypePolicy is a PolicySet scoped to AI agents: it applies only to
+// a subject whose user type is agent, so its deny is a direct read-out of
+// the type the local PDP believes the session has.
+const identityTypePolicy = `
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata: {name: agent-lockdown}
+spec:
+  match:
+    identity:
+      userType: [agent]
+  rules:
+    - {id: r-agent, tools: [shell.exec], command: {denyPatterns: ["secret-cmd *"]}, effect: deny, reason: "agents may not run secret-cmd"}
+`
+
+// TestSessionStartStoresTheIdentityType pins that a session start writes the
+// identity type of the check-in answer onto the session, so a PolicySet
+// scoped to a user type decides the first hook call of the session and does
+// not wait for the first refresh.
+func TestSessionStartStoresTheIdentityType(t *testing.T) {
+	priv, keys := testSnapshotKey(t)
+	signed, snapID := testSignedPolicy(t, priv, identityTypePolicy)
+	srv := rolesSyncServer(t, signed, snapID,
+		`"user":"u1","roles":["dev"],"user_type":"agent","agency_mode":"autonomous","swarm_id":"sw-1",`)
+	store := daemonStore(t)
+	if err := store.SaveConfig(Config{ServerURL: srv.URL, SnapshotKeys: keys}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveIdentity(Identity{DeviceID: "d1", Username: "u1", DeviceToken: "dev-tok"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := SessionStart(context.Background(), store, "claude-code", "2.1.0"); err != nil {
+		t.Fatalf("SessionStart: %v", err)
+	}
+	ses, err := store.LoadSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ses.UserType != "agent" || ses.AgencyMode != "autonomous" || ses.SwarmID != "sw-1" {
+		t.Errorf("the started session's identity type = %q, %q, %q, want agent, autonomous, sw-1",
+			ses.UserType, ses.AgencyMode, ses.SwarmID)
+	}
+	if d := rolesSyncDecide(t, store); d.Effect != policy.EffectDeny {
+		t.Errorf("the first hook decision of the session = %q (%s), want the agent-scoped deny", d.Effect, d.Reason)
+	}
+}

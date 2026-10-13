@@ -93,3 +93,55 @@ func TestDaemonReacquireClassesLikeTheHook(t *testing.T) {
 		})
 	}
 }
+
+// daemonDroppedLine is the daemon's last line when it drops a session that
+// strazad refused to renew.
+const daemonDroppedLine = "daemon: refresh refused. Session dropped. Tool calls stay denied until a new agent session " +
+	"starts and checks in. Start `straza daemon` again after that."
+
+// TestDaemonSaysWhyStrazadRefusedTheRefresh pins the daemon's lines when
+// strazad answers the refresh itself with a 403. That answer judged the
+// identity, so the daemon asks nothing more: it prints strazad's sentence,
+// drops the session, marks it revoked and says what happens next.
+func TestDaemonSaysWhyStrazadRefusedTheRefresh(t *testing.T) {
+	rows := []struct {
+		name       string
+		msg        string
+		wantReason string
+	}{
+		{name: "a disabled user", msg: "user is disabled. Contact your administrator",
+			wantReason: "user is disabled. Contact your administrator"},
+		{name: "a revoked device", msg: "Straza: this device or user has been revoked. Contact your administrator",
+			wantReason: "this device or user has been revoked. Contact your administrator"},
+		{name: "a 403 with no reason",
+			wantReason: "the server answered HTTP 403 and gave no reason. " +
+				"Ask your administrator whether this user or device is still enabled, and check whether a proxy in front of strazad replaces its answers."},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			h := &reacquireCheckin{refreshStatus: http.StatusForbidden, refreshMsg: row.msg, snapshotID: "snap"}
+			srv := httptest.NewServer(h.handler(t))
+			defer srv.Close()
+			store := seedDaemonReacquire(t, srv.URL)
+
+			var out bytes.Buffer
+			d := NewDaemon(store, &out)
+			if gone := d.refreshOnce(t); !gone {
+				t.Fatalf("the daemon kept a session strazad refused; output:\n%s", out.String())
+			}
+			if got := h.deviceCalls.Load(); got != 0 {
+				t.Errorf("device-lane check-ins = %d, want none after a 403", got)
+			}
+			if _, err := store.LoadSession(); err == nil {
+				t.Error("session state survived strazad's refusal")
+			}
+			if rev, err := store.LoadRevocation(); err != nil || rev.Reason == "" {
+				t.Errorf("no revocation marker after strazad's refusal (rev %+v, err %v)", rev, err)
+			}
+			want := "daemon: session renewal refused (" + row.wantReason + ")\n" + daemonDroppedLine + "\n"
+			if out.String() != want {
+				t.Errorf("the daemon printed\n%q\nwant\n%q", out.String(), want)
+			}
+		})
+	}
+}

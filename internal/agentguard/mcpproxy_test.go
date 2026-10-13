@@ -31,6 +31,13 @@ type fakeGateway struct {
 	checkins  atomic.Int64
 	refreshes atomic.Int64
 	calls     atomic.Int64
+	// refreshStatus, when not 0, is the status every session-token refresh
+	// gets, with refreshMsg as its reason. A device check-in still mints.
+	refreshStatus atomic.Int32
+	refreshMsg    string
+	// identity holds extra fields of every check-in answer, such as
+	// user_type. It is set before the gateway serves.
+	identity map[string]any
 
 	// Pagination knobs, exercised only by newPagedGateway. When pageSize > 0 the
 	// /mcp handler answers tools/list itself (slicing pagedTools into
@@ -48,20 +55,29 @@ type fakeGateway struct {
 func (g *fakeGateway) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	w.Header().Set("Content-Type", "application/json")
 	if body["device_token"] != nil {
 		g.checkins.Add(1)
 	} else {
 		g.refreshes.Add(1)
+		if status := g.refreshStatus.Load(); status != 0 {
+			w.WriteHeader(int(status))
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": g.refreshMsg})
+			return
+		}
 	}
 	g.mu.Lock()
 	g.token = "ses-token-" + time.Now().Format("150405.000000")
 	tok := g.token
 	g.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	answer := map[string]any{
 		"session": "s-mcp", "session_token": tok, "expires_in": 300,
 		"user": "bob", "roles": []string{"dev"}, "snapshot": "snap-1", "attestation": "advisory",
-	})
+	}
+	for k, v := range g.identity {
+		answer[k] = v
+	}
+	_ = json.NewEncoder(w).Encode(answer)
 }
 
 func newFakeGateway(t *testing.T) *fakeGateway {

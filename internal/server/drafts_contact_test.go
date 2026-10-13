@@ -12,6 +12,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -23,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -431,6 +433,61 @@ func tlsUpstream(cert *tls.Certificate, roots *x509.CertPool, host string) func(
 			answers[host], name = [][]string{{"127.0.0.1"}}, host
 		}
 		return "https://" + name + ":" + hostPort(t, srv) + "/mcp", testDialer(answers, roots, 3*time.Second)
+	}
+}
+
+// overdue is a context whose deadline has passed and that has not ended
+// yet, the state of a contact's context until its timer runs.
+type overdue struct{ context.Context }
+
+func (overdue) Deadline() (time.Time, bool) { return time.Now().Add(-time.Millisecond), true }
+
+// TestContactReportsTheTimeoutPastItsDeadline pins the reason of a transport
+// error by the contact's own deadline, whatever context the request carried:
+// once the contact's context has ended or its deadline has passed the error
+// is the timeout, before that a lost connection reads as one, and a refusal
+// already noted stays nil.
+func TestContactReportsTheTimeoutPastItsDeadline(t *testing.T) {
+	t.Parallel()
+	live, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	ended, end := context.WithCancel(context.Background())
+	end()
+	closedConn := &net.OpError{Op: "read", Net: "tcp", Err: net.ErrClosed}
+	// clientTimeout is what net/http reports when the client's own Timeout
+	// ends a request.
+	clientTimeout := errors.New("net/http: request canceled")
+	cases := []struct {
+		name string
+		run  context.Context
+		err  error
+		why  string
+	}{
+		{"a truncated answer after the contact ended", ended, io.ErrUnexpectedEOF, reasonTimeout},
+		{"a reset connection after the contact ended", ended, syscall.ECONNRESET, reasonTimeout},
+		{"a closed connection after the contact ended", ended, closedConn, reasonTimeout},
+		{"the client's timeout before the context's timer", overdue{context.Background()}, clientTimeout, reasonTimeout},
+		{"a truncated answer in time", live, io.ErrUnexpectedEOF, reasonConnectionLost},
+		{"a reset connection in time", live, syscall.ECONNRESET, reasonConnectionLost},
+		{"a closed connection in time", live, closedConn, reasonConnectionLost},
+		{"a canceled request in time", live, clientTimeout, reasonConnectionLost},
+		{"a refused address after the contact ended", ended, errContactRefused, ""},
+		{"an unread answer after the contact ended", ended, errContactFault, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			run := &contactRun{d: newContactDialer(), host: "mcp.test", ctx: tc.run}
+			got := run.transportFault(context.Background(), tc.err)
+			if tc.why == "" {
+				if got != nil {
+					t.Fatalf("fault = %+v, want none", got)
+				}
+				return
+			}
+			if want := run.reason(tc.why); got == nil || *got != *want {
+				t.Fatalf("fault = %+v\nwant %+v", got, want)
+			}
+		})
 	}
 }
 
