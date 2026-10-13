@@ -338,7 +338,9 @@ func (b *contactBody) Read(p []byte) (int, error) {
 }
 
 // transportFault answers the reason of a transport error, or nil for a
-// refusal already noted.
+// refusal already noted. Any other error met after ctx has ended or the
+// contact has run out of time is the timeout, whatever the error says,
+// because the end of the contact is what broke the request.
 func (c *contactRun) transportFault(ctx context.Context, err error) *contactFault {
 	var unknown x509.UnknownAuthorityError
 	var hostname x509.HostnameError
@@ -348,7 +350,7 @@ func (c *contactRun) transportFault(ctx context.Context, err error) *contactFaul
 	switch {
 	case errors.Is(err, errContactRefused), errors.Is(err, errContactFault):
 		return nil
-	case errors.Is(err, context.DeadlineExceeded), ctx.Err() != nil, errors.As(err, &timeout) && timeout.Timeout():
+	case errors.Is(err, context.DeadlineExceeded), ctx.Err() != nil, c.expired(), errors.As(err, &timeout) && timeout.Timeout():
 		return c.reason(reasonTimeout)
 	case errors.As(err, &unknown):
 		return c.reason(reasonUntrusted)
@@ -364,6 +366,18 @@ func (c *contactRun) transportFault(ctx context.Context, err error) *contactFaul
 		return c.reason(reasonNoName)
 	}
 	return c.reason(reasonConnectionLost)
+}
+
+// expired reports whether the contact is out of time: its context has ended
+// or its deadline has passed. It reads the clock as well as the context,
+// because the HTTP client's own timeout can end a request before the
+// context's timer has run, and net/http reports that as a canceled request.
+func (c *contactRun) expired() bool {
+	if c.ctx == nil {
+		return false
+	}
+	deadline, ok := c.ctx.Deadline()
+	return c.ctx.Err() != nil || ok && !time.Now().Before(deadline)
 }
 
 // tlsError reports whether err came from the TLS handshake.
