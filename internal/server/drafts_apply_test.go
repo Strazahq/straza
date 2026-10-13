@@ -1587,11 +1587,49 @@ func TestCheckInAppliesAPublishNotAppliedYet(t *testing.T) {
 	b.configMu.Lock()
 	behind(b)
 	b.configMu.Unlock()
-	b.convCons.Handle(ctx, "straza.identity.updated", replicaEvent{"straza.identity.updated", map[string]any{"action": "session.start"}}.payload(t, a.instance))
+	b.convCons.Handle(ctx, "straza.identity.updated", replicaEvent{"straza.identity.updated", map[string]any{"action": "roles.assign"}}.payload(t, a.instance))
 	tok = checkInAgain(t, baseB, tok)
 	got := decidesAll(b, sessionOf(t, b, tok))
 	if want := (map[string]outcome{"echoapp__echo": callRuns, "echoapp__env": callDenied}); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("kim checked in on b before b applied the publish and decides %v, want %v", got, want)
+	}
+}
+
+// TestCheckInSettlesWhileAPeerStartsSessions: a session start on replica a
+// reaches replica b as an identity event, and it changes no user, assignment
+// or role. So b keeps its role resolutions, and kim's check-ins on b settle
+// on the first read however many sessions start on a meanwhile, where a
+// dropped resolution per event sent each check-in back until it answered 503.
+func TestCheckInSettlesWhileAPeerStartsSessions(t *testing.T) {
+	t.Parallel()
+	a, b, _, baseB := replicaPair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	seedGatewayUser(t, a, "kim", "dev")
+	for _, app := range []*App{a, b} {
+		if err := app.converge(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tok := sessionToken(t, baseB, "kim")
+
+	started := replicaEvent{"straza.identity.updated", map[string]any{"action": "session.start", "user": "u1", "session": "s1"}}.payload(t, a.instance)
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				b.convCons.Handle(ctx, "straza.identity.updated", started)
+			}
+		}
+	}()
+	t.Cleanup(func() { close(stop); <-stopped })
+
+	for range 20 {
+		tok = checkInAgain(t, baseB, tok)
 	}
 }
 

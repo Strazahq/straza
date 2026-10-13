@@ -40,7 +40,8 @@ type Convergence struct {
 	// OnIdentity bumps the role-resolution epoch so the next resolution
 	// re-reads the store. Live sessions converge at token refresh (≤ TTL),
 	// the same bound single-pod sessions have; immediate cut-off is the
-	// revocation consumer's job.
+	// revocation consumer's job. It is not called for the events of a
+	// session's own life (sessionLifeActions).
 	OnIdentity func(context.Context) error
 }
 
@@ -134,10 +135,10 @@ func (c *ConvergeConsumer) catchUp(ctx context.Context) error {
 }
 
 // Handle applies one event of the converge stream, as Run does for every
-// message: it skips this pod's own events and the events of a publish that
-// its publish event stands for, and calls the handler of the subject,
-// logging a failure. A test feeds a pod its events through it in the order
-// it chooses.
+// message: it skips this pod's own events, the events of a publish that
+// its publish event stands for and the identity events of a session's own
+// life, and calls the handler of the subject, logging a failure. A test
+// feeds a pod its events through it in the order it chooses.
 func (c *ConvergeConsumer) Handle(ctx context.Context, subject string, data []byte) {
 	var env struct {
 		Source string          `json:"source"`
@@ -157,6 +158,9 @@ func (c *ConvergeConsumer) Handle(ctx context.Context, subject string, data []by
 	case strings.HasPrefix(subject, "straza.apps."):
 		err = c.conv.OnApps(ctx)
 	case strings.HasPrefix(subject, "straza.identity."):
+		if sessionLife(env.Data) {
+			return
+		}
 		err = c.conv.OnIdentity(ctx)
 	default:
 		handled = false
@@ -173,6 +177,31 @@ func (c *ConvergeConsumer) Handle(ctx context.Context, subject string, data []by
 		c.log.Info("converge: reloaded from another pod", "component", "converge",
 			"subject", subject, "source", env.Source)
 	}
+}
+
+// sessionLifeActions are the identity events that the life of a session
+// emits on every pod: a check-in that starts a session, a device credential
+// renewed at a check-in, and an attestation hash registered when a client
+// fetches its harness config. They arrive at the rate of check-ins, not of
+// control-plane changes, and none of them changes a user, an assignment or
+// a role.
+var sessionLifeActions = map[string]bool{
+	"session.start":               true,
+	"renew":                       true,
+	"attestation-hash.registered": true,
+}
+
+// sessionLife reports whether an identity event's data names one of the
+// sessionLifeActions, for which a pod keeps its role resolutions. Dropping
+// them per event made the check-ins of one pod send the check-ins of every
+// other pod back to read their roles again, until they answered 503. Any
+// other action, and data that names none or does not decode, reads as a
+// change that may move roles.
+func sessionLife(data json.RawMessage) bool {
+	var d struct {
+		Action string `json:"action"`
+	}
+	return len(data) > 0 && json.Unmarshal(data, &d) == nil && sessionLifeActions[d.Action]
 }
 
 // partOfPublish reports whether an event is one of a publish's events that
