@@ -50,15 +50,21 @@ tools:
   EnterPlanMode: file.read
   ExitPlanMode: file.read
   ReportFindings: file.read
+  ReadNotifications: file.read
+  FetchInboxMessage: file.read
   WebFetch: net.fetch
   WebSearch: net.fetch
   Artifact: net.fetch
   PushNotification: net.fetch
   DesignSync: net.fetch
+  SendFeedback: net.fetch
+  ArtifactComments: net.fetch
+  ArtifactData: net.fetch
   Task: task.spawn
   Agent: task.spawn
   Workflow: task.spawn
   SendMessage: task.spawn
+  ListAgents: task.spawn
   Monitor: task.spawn
   TaskCreate: task.spawn
   TaskGet: task.spawn

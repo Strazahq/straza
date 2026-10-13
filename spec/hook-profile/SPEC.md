@@ -8,6 +8,14 @@ snake_case), and `python-sdk`, the shape straza-agentkit itself emits
 from Python agents.
 Conformance fixtures: `spec/conformance/hooks/<harness>/<version>/`.
 
+Revision (2026-10-13): claude-code mapping table gains six built-ins of the
+current harness that fell to `other`: `ListAgents` rides `task.spawn` beside
+`SendMessage`, `ReadNotifications` and `FetchInboxMessage` read session
+state and ride `file.read`, and `SendFeedback`, `ArtifactComments` and
+`ArtifactData` send data beyond the machine and ride `net.fetch` beside
+`Artifact`. Additive: no schema change, existing fixtures unchanged, six
+fixtures added.
+
 Revision (2026-09-07): decision semantics text only (no wire-format change).
 The `obligations` list on a decision is always empty since policyset
 revision 18: the `redact` and `notify` obligations were retired, never

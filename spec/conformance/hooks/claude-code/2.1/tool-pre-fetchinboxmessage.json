@@ -1,0 +1,1 @@
+{"provenance":"doc claude-code 2.1 tool inventory of a live session 2026-10-13 (hand-authored)","harness":"claude-code","payload":{"hook_event_name":"PreToolUse","session_id":"abc","cwd":"/work/proj","tool_name":"FetchInboxMessage","tool_input":{"file_id":"file_0123456789abcdef"}},"expect":{"kind":"tool.pre","tool":"file.read","workspace":"/work/proj"}}

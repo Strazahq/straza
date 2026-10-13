@@ -77,15 +77,21 @@ tools:
   EnterPlanMode: file.read
   ExitPlanMode: file.read
   ReportFindings: file.read
+  ReadNotifications: file.read # reads the session's queued notifications
+  FetchInboxMessage: file.read # reads one message of the session's inbox
   WebFetch: net.fetch
   WebSearch: net.fetch
   Artifact: net.fetch          # publishes a page to claude.ai (egress)
   PushNotification: net.fetch  # sends a push beyond the machine
   DesignSync: net.fetch
+  SendFeedback: net.fetch      # drafts feedback that leaves the machine once a person approves
+  ArtifactComments: net.fetch  # reads and answers comments on a published page
+  ArtifactData: net.fetch      # reads and writes a published page's shared database
   Task: task.spawn
   Agent: task.spawn
   Workflow: task.spawn      # orchestrates subagent fleets
   SendMessage: task.spawn   # continues a spawned agent
+  ListAgents: task.spawn    # lists the agents SendMessage can reach
   Monitor: task.spawn       # task/agent-lane lifecycle from here down
   TaskCreate: task.spawn
   TaskGet: task.spawn
