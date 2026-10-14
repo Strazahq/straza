@@ -10,6 +10,8 @@ Straza numbers its binaries, its API and its wire formats.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-13
+
 ### Fixed
 
 - `straza mcp` checks in again when strazad ends its session. Before, it kept sending the
@@ -59,6 +61,7 @@ The first public release.
 - Signed release archives for Linux, macOS and Windows, the container image
   `ghcr.io/strazahq/straza` and the Helm chart under `deploy/helm/straza`.
 
-[Unreleased]: https://github.com/strazahq/straza/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/strazahq/straza/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/strazahq/straza/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/strazahq/straza/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/strazahq/straza/releases/tag/v1.1.0
