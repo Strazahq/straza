@@ -9,7 +9,7 @@ where: A terminal, or PowerShell on Windows
 steps: true
 tested:
   version: v1.1.0-117-g106081a8
-  platform: An Alpine 3.20 linux/amd64 container that held only the three binaries of this build, copied into /usr/local/bin, where the three version commands ran and the state folders of the undo step were seen, while the release download, the cosign and checksum checks and every Windows step were not run because no public release exists before the first one is published, and the build from source was not run because this walk ran no git or make
+  platform: An Alpine 3.20 linux/amd64 container that held only the three binaries of this build, copied into /usr/local/bin, where the three version commands ran and the state folders of the undo step were seen. The release download, the cosign check and the checksum check ran later on Linux against the published release 1.1.2 on 2026-10-14, every Windows step was not run, and the build from source was not run because this walk ran no git or make
   date: 2026-10-06
 applies_to: both
 keywords: install download verify checksum signature binary windows powershell
