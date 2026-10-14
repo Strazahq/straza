@@ -13,7 +13,7 @@ Straza keeps its changelog in [CHANGELOG.md](https://github.com/strazahq/straza/
 ## Latest release
 
 
-The latest release is [Straza 1.1.1](https://github.com/strazahq/straza/releases/tag/v1.1.1), a security update of [1.1.0](https://github.com/strazahq/straza/releases/tag/v1.1.0), the first public release. Its notes sum up what Straza does and where to start, and they link the steps that verify your download.
+The latest release is [Straza 1.1.2](https://github.com/strazahq/straza/releases/tag/v1.1.2), a bug-fix release. It follows [1.1.1](https://github.com/strazahq/straza/releases/tag/v1.1.1), a security update, and [1.1.0](https://github.com/strazahq/straza/releases/tag/v1.1.0), the first public release. Its notes list the fixes, say what to check before you upgrade, and link the steps that verify your download.
 
 ## How versions are numbered
 
