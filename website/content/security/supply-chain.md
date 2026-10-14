@@ -42,7 +42,7 @@ cosign verify ghcr.io/strazahq/straza:1.1.2 \
 ```
 
 
-Every command on this page follows the release pipeline's definition and was not run against a published release. Keyless signing records every signature in the public Rekor transparency log together with the repository identity, which is intended for an open source project and means a signature can be audited later. A key-based fallback exists for a signing outage, and it is never automated, because a long-lived private key whose compromise forges releases is worse than a delayed release.
+The cosign commands on this page were run against the published release 1.1.2: they verified the checksums file and the container image, and a check that expected the identity of another tag failed as it should. `make verify-release` has not been run against a published release yet. Keyless signing records every signature in the public Rekor transparency log together with the repository identity, which is intended for an open source project and means a signature can be audited later. A key-based fallback exists for a signing outage, and it is never automated, because a long-lived private key whose compromise forges releases is worse than a delayed release.
 
 ## Reproducing a release from source
 
