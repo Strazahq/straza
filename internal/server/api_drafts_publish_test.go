@@ -456,7 +456,7 @@ func TestPublishNeedsEveryAcknowledgment(t *testing.T) {
 		}
 		return b
 	}
-	missing := "Publish refused: " + removal.Sentence + " Acknowledge it, typing jira, and publish again."
+	missing := "Publish refused: " + removal.Sentence + " Type jira to confirm, then publish again."
 	for _, tc := range []struct {
 		name string
 		body map[string]any
@@ -464,7 +464,7 @@ func TestPublishNeedsEveryAcknowledgment(t *testing.T) {
 	}{
 		{"a missing tick", body(false, "jira"), missing},
 		{"a missing text", body(true, ""), missing},
-		{"a wrong text", body(true, "jora"), "Publish refused: the text typed for App/jira is not jira. Type jira exactly to acknowledge it, then publish again."},
+		{"a wrong text", body(true, "jora"), "Publish refused: the text typed for App/jira is not jira. Type jira to confirm, then publish again."},
 	} {
 		code, a, _ := f.publish(t, f.root, id, tc.body)
 		if code != http.StatusConflict || a.Error != tc.want || len(a.Verdict.Risks) != len(v.Risks) {
@@ -513,7 +513,7 @@ func TestPublishRefusesARiskCutForItsPublisher(t *testing.T) {
 	}
 	body := acksFor(rev, v)
 	body["typed"] = map[string]string{v.Risks[0].Key: "jira"}
-	cut := "Publish refused: draft " + removal + " holds a risk on something you cannot read, so you cannot type the text that acknowledges it. " +
+	cut := "Publish refused: draft " + removal + " holds a line on something you cannot read, so you cannot type the text that confirms it. " +
 		"Ask someone who can read everything the draft names to publish it."
 	if code, a, _ := f.publish(t, paul, removal, body); code != http.StatusConflict || a.Error != cut || len(a.Verdict.Risks) != 1 {
 		t.Errorf("paul's publish of a cut typed risk = %d %q, want 409 %q with the verdict", code, a.Error, cut)
@@ -524,7 +524,7 @@ func TestPublishRefusesARiskCutForItsPublisher(t *testing.T) {
 		t.Fatalf("paul reads the risks %+v, want one cut tick risk", v.Risks)
 	}
 	none := map[string]any{"revision": rev, "risk_digest": v.RiskDigest, "ticked": []string{}, "typed": map[string]string{}}
-	if code, a, _ := f.publish(t, paul, added, none); code != http.StatusConflict || a.Error != "Publish refused: "+cutLine+" Acknowledge it and publish again." {
+	if code, a, _ := f.publish(t, paul, added, none); code != http.StatusConflict || a.Error != "Publish refused: "+cutLine+" Confirm it, then publish again." {
 		t.Errorf("paul's publish without the tick = %d %q", code, a.Error)
 	}
 	if code, a, _ := f.publish(t, paul, added, acksFor(rev, v)); code != http.StatusOK {
@@ -634,8 +634,8 @@ func TestPublishRecordsEachChangeOnce(t *testing.T) {
 	// A role a server owns composes no other role, so the edge goes out of
 	// the live business role reader to the new role.
 	reader := "apiVersion: straza.dev/v1beta1\nkind: Role\nmetadata:\n    name: reader\nspec:\n    kind: business\n    implies:\n        - tagged-whoami\n"
-	id := f.create(t, f.strazactl, string(taggedManifest(up.URL)), typedRole("tagged-whoami", "tagged", "whoami"), reader, draftSet("guard")).Draft.ID
-	if code, a := f.publishAll(t, f.strazactl, id); code != http.StatusOK {
+	id := f.create(t, f.console, string(taggedManifest(up.URL)), typedRole("tagged-whoami", "tagged", "whoami"), reader, draftSet("guard")).Draft.ID
+	if code, a := f.publishAll(t, f.console, id); code != http.StatusOK {
 		t.Fatalf("publish = %d %q", code, a.Error)
 	}
 	events := outboxOf(t, f.app, id)
@@ -674,8 +674,8 @@ func TestPublishRecordsEachChangeOnce(t *testing.T) {
 			t.Errorf("%s fields = %s, want the example's %s", tc.key, got, want)
 		}
 	}
-	if p := byAction["draft.publish"]; p["client"] != "strazactl" || p["proposer"] != "kim" || p["actorVia"] != laneSession {
-		t.Errorf("draft.publish = %v, want kim's strazactl session", p)
+	if p := byAction["draft.publish"]; p["client"] != "console" || p["proposer"] != "kim" || p["actorVia"] != laneSession {
+		t.Errorf("draft.publish = %v, want kim's console session", p)
 	}
 	for _, key := range []string{"roles.create", "apps.binding.create", "policy.create", "policy.activate", "straza.policy.updated", "straza.apps.updated binding"} {
 		if seen[key] != 1 {

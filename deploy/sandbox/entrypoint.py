@@ -3,16 +3,15 @@
 
 Runs as the agent user (uid 65532) before the agent command starts:
 
-1. Verifies the enrollment material is mounted (read-only volume at
-   $STRAZA_ENROLL_DIR, default /straza/enroll) and fails LOUDLY with the
-   remedy if it is absent: an unenrolled shim can only fail closed, so
-   surface the misconfiguration at start, not on the first command.
-2. Copies config.yaml + state/identity.json into the writable straza
-   home ($STRAZA_HOME, default /run/straza, a tmpfs). The
-   mount itself stays read-only (tamper-proof from inside the container);
-   the copy exists because the shim writes session/snapshot/audit-spool
-   state next to its config.
-3. exec()s the agent command with PATH already pinned to /straza/bin.
+1. Asks the Straza background service, over its socket in the volume the
+   compose file shares at /run/straza-service, whether this account is
+   enrolled, and fails LOUDLY with the remedy if the service does not answer
+   or holds no enrollment for it: an unenrolled shim can only fail closed, so
+   surface the misconfiguration at start, not on the first command. The
+   service runs in its own container under its own account and holds the
+   key, the enrollment and every session, so nothing here stages a
+   credential.
+2. exec()s the agent command with PATH already pinned to /straza/bin.
 
 Why Python and not shell: this image de-executes coreutils (mkdir/cp/chmod
 are root-only after the hardening sweep), and the agent's interpreter is the
@@ -21,14 +20,16 @@ extra entries on the executable allowlist. Deriving this profile for a
 non-Python base means porting this file to that runtime.
 """
 
+import http.client
+import json
 import os
-import shutil
+import socket
 import sys
 
-EX_USAGE, EX_CANTCREAT, EX_CONFIG = 64, 73, 78
+EX_USAGE, EX_UNAVAILABLE, EX_CONFIG = 64, 69, 78
 
-ENROLL_DIR = os.environ.get("STRAZA_ENROLL_DIR", "/straza/enroll")
-AG_HOME = os.environ.get("STRAZA_HOME", "/run/straza")
+SOCKET = "/run/straza-service/service.sock"
+STRAZA = "/opt/straza/bin/straza"
 
 
 def die(code: int, *lines: str) -> None:
@@ -36,85 +37,91 @@ def die(code: int, *lines: str) -> None:
     sys.exit(code)
 
 
-def enrolled_server_url(config_path: str) -> str:
-    """Naive read of serverUrl from config.yaml (no YAML lib in the image;
-    the file is written by `straza enroll`, a flat two-key mapping)."""
-    with open(config_path, encoding="utf-8") as f:
-        for line in f:
-            if line.startswith("serverUrl:"):
-                return line.split(":", 1)[1].strip().strip("'\"")
-    return ""
+class ServiceConnection(http.client.HTTPConnection):
+    """HTTP over the service's unix socket."""
+
+    def __init__(self) -> None:
+        super().__init__("straza-service", timeout=5)
+
+    def connect(self) -> None:
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(SOCKET)
+
+
+def service_status() -> dict:
+    """The caller's status from the service's local API. The service names
+    the caller by the uid the kernel reports, so it answers for this account
+    only. Raises OSError when the service does not answer or refuses."""
+    conn = ServiceConnection()
+    try:
+        conn.request("GET", "/local/v1/status")
+        resp = conn.getresponse()
+        body = resp.read()
+    finally:
+        conn.close()
+    if resp.status >= 400:
+        try:
+            sentence = json.loads(body).get("error", "")
+        except ValueError:
+            sentence = ""
+        raise OSError(sentence or "the service answered HTTP %d" % resp.status)
+    return json.loads(body)
 
 
 def main() -> None:
-    config_src = os.path.join(ENROLL_DIR, "config.yaml")
-    identity_src = os.path.join(ENROLL_DIR, "state", "identity.json")
-
-    missing = [p for p in (config_src, identity_src) if not os.path.isfile(p)]
-    if missing:
+    try:
+        status = service_status()
+    except (OSError, ValueError) as err:
         die(
-            EX_CONFIG,
-            "enrollment material is missing: " + ", ".join(missing),
+            EX_UNAVAILABLE,
+            "the Straza background service did not answer at %s: %s" % (SOCKET, err),
             "",
             "The shim fails closed without it: nothing will be allowed to run.",
-            "Remedy (see https://docs.straza.ai/guides/govern-an-agent/hookless-processes/):",
-            "  1. on an operator workstation: straza enroll --server <strazad-url>",
-            "     (headless NHI, no browser: straza keygen + strazactl users nhi-key set",
-            "      + straza enroll --headless --user <nhi>)",
-            "  2. copy ~/.straza/config.yaml and ~/.straza/state/identity.json",
-            "     (+ state/nhi-key.json for headless) into an enroll dir (keep the state/",
-            "     subdirectory), readable by uid 65532",
-            "  3. mount it read-only at " + ENROLL_DIR + " (compose: STRAZA_ENROLL_DIR)",
+            "Start the profile with its service, which mounts the shared socket volume:",
+            "  docker compose -f deploy/sandbox/compose.yaml up",
+            "and read why the service stopped with:",
+            "  docker compose -f deploy/sandbox/compose.yaml logs straza-service",
         )
 
-    # The enrolled serverUrl is the trust anchor (snapshot keys are pinned to
+    enrollment = status.get("enrollment") or {}
+    enrolled = enrollment.get("server_url", "")
+    if not enrolled:
+        die(
+            EX_CONFIG,
+            "this container's account (uid %d) is not enrolled with the Straza background service." % os.getuid(),
+            "",
+            "The shim fails closed without an enrollment: nothing will be allowed to run.",
+            "Enroll it once through the service (see https://docs.straza.ai/guides/govern-an-agent/hookless-processes/).",
+            "For an AI agent with its own key, from deploy/sandbox:",
+            "  docker compose run --rm --entrypoint %s agent keygen --user <nhi>" % STRAZA,
+            "  (an admin registers the printed public key: strazactl users nhi-key set <nhi> <publicKey>)",
+            "  docker compose run --rm --entrypoint %s agent enroll --headless --user <nhi> --server <strazad-url>" % STRAZA,
+            "For a person, by a sign-in code, which an enterprise server accepts only when governance.minSignIn is code:",
+            "  docker compose run --rm --entrypoint %s agent enroll --use-device-code --server <strazad-url>" % STRAZA,
+            "The enrollment stays in the service's state volume across restarts.",
+        )
+
+    # The enrolled server URL is the trust anchor (snapshot keys are pinned to
     # it at enroll time) and is NEVER rewritten here. STRAZA_SERVER_URL is a
     # cross-check only: a mismatch means the operator pointed the container at
-    # one strazad and mounted enrollment for another; ambiguous trust anchors
-    # stop the boat rather than silently preferring one.
-    enrolled = enrolled_server_url(config_src)
+    # one strazad and enrolled the service with another; ambiguous trust
+    # anchors stop the boat rather than silently preferring one.
     declared = os.environ.get("STRAZA_SERVER_URL", "")
-    if declared and enrolled and declared.rstrip("/") != enrolled.rstrip("/"):
+    if declared and declared.rstrip("/") != enrolled.rstrip("/"):
         die(
             EX_CONFIG,
             "STRAZA_SERVER_URL (%s) != enrolled serverUrl (%s)" % (declared, enrolled),
-            "the enrolled config is the trust anchor and is never rewritten;",
-            "re-enroll against the server you mean, or fix/unset STRAZA_SERVER_URL.",
+            "the enrollment is the trust anchor and is never rewritten;",
+            "enroll again against the server you mean, or fix/unset STRAZA_SERVER_URL.",
         )
-
-    try:
-        os.makedirs(os.path.join(AG_HOME, "state"), mode=0o700, exist_ok=True)
-    except OSError as err:
-        die(
-            EX_CANTCREAT,
-            "cannot create straza home %s: %s" % (AG_HOME, err),
-            "mount a tmpfs there owned by uid 65532, e.g. compose:",
-            "  tmpfs: [\"/run/straza:mode=0700,uid=65532,gid=65532,noexec,nosuid,nodev\"]",
-        )
-    # nhi-key.json is the headless credential, optional: present only
-    # for NHI enrollments, required there because every session start signs a
-    # fresh assertion with it.
-    nhi_key_src = os.path.join(ENROLL_DIR, "state", "nhi-key.json")
-    stage = [
-        (config_src, os.path.join(AG_HOME, "config.yaml")),
-        (identity_src, os.path.join(AG_HOME, "state", "identity.json")),
-    ]
-    if os.path.isfile(nhi_key_src):
-        stage.append((nhi_key_src, os.path.join(AG_HOME, "state", "nhi-key.json")))
-    for src, dst in stage:
-        try:
-            shutil.copyfile(src, dst)
-            os.chmod(dst, 0o600)
-        except OSError as err:
-            die(EX_CONFIG, "cannot stage %s -> %s: %s" % (src, dst, err),
-                "the enroll mount must be readable by uid 65532 (chown/chmod on the host)")
 
     if len(sys.argv) < 2:
         die(EX_USAGE, "no agent command given",
             "usage: <image> <agent-command> [args...]  (e.g. python3 /app/agent.py)")
 
-    print("Straza sandbox: governed profile ready (server %s, home %s)" % (enrolled, AG_HOME),
-          file=sys.stderr)
+    print("Straza sandbox: governed profile ready (server %s, enrolled as %s)"
+          % (enrolled, enrollment.get("username", "?")), file=sys.stderr)
     try:
         os.execvp(sys.argv[1], sys.argv[1:])  # resolves via PATH=/straza/bin only
     except OSError as err:

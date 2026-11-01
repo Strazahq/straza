@@ -1,9 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -12,11 +12,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/strazahq/straza/internal/ctl"
-	"github.com/strazahq/straza/internal/qrterm"
 )
 
 func approvalsCmd(client func() *ctl.Client) *cobra.Command {
-	approvals := &cobra.Command{Use: "approvals", Short: "List and decide approval requests, and mint approver enroll tokens"}
+	approvals := &cobra.Command{Use: "approvals", Short: "List approval requests"}
 
 	var state string
 	var wide bool
@@ -25,163 +24,87 @@ func approvalsCmd(client func() *ctl.Client) *cobra.Command {
 		Short: "List approval requests (default: pending)",
 		Long: "Prints one row per request, a held call and a ticket alike, with the columns ID,\n" +
 			"STATE, REQUESTER, SUMMARY, ROLES, EXPIRES and DECIDED BY. ROLES names the roles\n" +
-			"whose holders may decide it. --wide prints each request as a block instead.",
+			"whose holders may decide it. --wide prints each request as a block instead.\n" +
+			"One line on stderr then says where a person decides: in the console, on the\n" +
+			"self-service page or on the phone.",
 		Example: "  strazactl approvals list\n" +
 			"  strazactl approvals list --wide",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if state == "" {
 				state = "pending"
 			}
-			recs, err := client().Approvals(cmd.Context(), state)
+			c := client()
+			recs, err := c.Approvals(cmd.Context(), state)
 			if err != nil {
 				return err
 			}
 			if wide {
-				return printApprovalsWide(os.Stdout, recs)
+				printApprovalsWide(os.Stdout, recs)
+			} else {
+				tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+				fmt.Fprintln(tw, "ID\tSTATE\tREQUESTER\tSUMMARY\tROLES\tEXPIRES\tDECIDED BY")
+				for _, r := range recs {
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+						r.ID, r.State, r.Username, r.Summary,
+						strings.Join(r.ApproverRoles, ","), expiresIn(r.ExpiresAt), r.DecidedByName)
+				}
+				if err := tw.Flush(); err != nil {
+					return err
+				}
 			}
-			tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "ID\tSTATE\tREQUESTER\tSUMMARY\tROLES\tEXPIRES\tDECIDED BY")
-			for _, r := range recs {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					r.ID, r.State, r.Username, r.Summary,
-					strings.Join(r.ApproverRoles, ","), expiresIn(r.ExpiresAt), r.DecidedByName)
-			}
-			return tw.Flush()
+			// Stdout is the table a script reads, so the way to decide goes to
+			// stderr, after it.
+			fmt.Fprintln(cmd.ErrOrStderr(), decideWhere(c.Base))
+			return nil
 		},
 	}
 	list.Flags().StringVar(&state, "state", "pending", "which requests to list: pending, approved, denied, expired or all")
 	list.Flags().BoolVar(&wide, "wide", false, "detail view: add the redacted call preview and the line that says what an approval covers")
 	approvals.AddCommand(list)
 
-	var approveReason string
-	approve := &cobra.Command{
-		Use:   "approve <id>",
-		Short: "Approve a pending request",
-		Example: "  strazactl approvals list\n" +
-			"  strazactl approvals approve 01a0b944-51a6-7a98-959c-40dddb8d86f9 --reason \"Change window CR-2041 is open until 18:00\"",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			rec, err := client().ApproveApproval(cmd.Context(), args[0], approveReason)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("approved %s (by %s)\n", rec.ID, rec.DecidedByName)
-			return nil
-		},
+	// The hidden approve and deny take whatever the old verbs took and send
+	// nothing. Hidden keeps them off the help, the generated pages and the skill.
+	for _, verb := range []string{"approve", "deny"} {
+		approvals.AddCommand(&cobra.Command{
+			Use:                verb,
+			Hidden:             true,
+			DisableFlagParsing: true,
+			Annotations:        local,
+			RunE: func(*cobra.Command, []string) error {
+				return exitCodeErr{code: 2, err: errNoDecisions}
+			},
+		})
 	}
-	approve.Flags().StringVar(&approveReason, "reason", "", "your own words, recorded on the request (optional, ≤500 bytes)")
-	approvals.AddCommand(approve)
 
-	var denyReason string
-	deny := &cobra.Command{
-		Use:   "deny <id>",
-		Short: "Deny a pending request",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			rec, err := client().DenyApproval(cmd.Context(), args[0], denyReason)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("denied %s (by %s)\n", rec.ID, rec.DecidedByName)
-			return nil
-		},
-	}
-	deny.Flags().StringVar(&denyReason, "reason", "", "your own words, recorded on the request (optional, ≤500 bytes)")
-	approvals.AddCommand(deny)
-
+	// The hidden enroll-token takes whatever the old verb took and sends
+	// nothing, like approve and deny.
 	approvals.AddCommand(&cobra.Command{
-		Use:   "enroll-token <username>",
-		Short: "Mint a one-time mobile-approver enroll token for a user, and draw its QR",
-		Long: "Mints a one-time enroll token for the named user and prints everything the\n" +
-			"approver app needs to pair: the token, the project, the server list the app\n" +
-			"tries, the TLS pin status, and the raw QR payload.\n\n" +
-			"Both streams, every run: the fields go to STDOUT as stable text to pipe or\n" +
-			"grep, and the scannable QR is drawn on STDERR, so `2>/dev/null` mutes the\n" +
-			"QR without touching what a script reads, and a headless box never needs the\n" +
-			"web console to enroll a phone.\n\n" +
-			"The token is single-use and expires in minutes (the output says how many):\n" +
-			"mint a fresh one per phone, at the phone.",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// The ctl.Client's exported Do handles admin auth + refresh; the
-			// server accepts username or user_id (we send username).
-			var out enrollToken
-			if err := client().Do(cmd.Context(), http.MethodPost, "/v1/admin/approvers/enroll-token",
-				map[string]string{"username": args[0]}, &out); err != nil {
-				return err
-			}
-			printEnrollToken(cmd.OutOrStdout(), cmd.ErrOrStderr(), out)
-			return nil
+		Use:                "enroll-token",
+		Hidden:             true,
+		DisableFlagParsing: true,
+		Annotations:        local,
+		RunE: func(*cobra.Command, []string) error {
+			return exitCodeErr{code: 2, err: errNoEnroll}
 		},
 	})
 
 	return approvals
 }
 
-// enrollToken is the POST /v1/admin/approvers/enroll-token response, as much of
-// it as the CLI renders (server side: internal/server/approver_enroll.go).
-type enrollToken struct {
-	EnrollToken string   `json:"enroll_token"`
-	ExpiresIn   int      `json:"expires_in"`
-	Servers     []string `json:"servers"`
-	TLSSPKIPin  string   `json:"tls_spki_pin"`
-	QRPayload   string   `json:"qr_payload"`
-	Project     struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"project"`
-}
+// errNoDecisions answers the retired approve and deny.
+var errNoDecisions = errors.New("strazactl no longer decides requests, because it runs on an admin API token, which is not a person, " +
+	"and a decision must name the person who made it. Decide in the console under Approvals, on the self-service page, or on your phone")
 
-// printEnrollToken writes a minted enrolment to two streams: the fields to
-// stdout, the scannable QR to stderr. Stdout is the contract, so its bytes
-// stay put for anything piping or grepping the payload; drawing the QR on
-// stderr costs the pipeline nothing and can be muted with `2>/dev/null`.
-//
-// Both are unconditional: no --qr flag, no TTY sniffing. What this command
-// mints is a single-use token with a minutes-long TTL for ONE person standing
-// next to you with ONE phone, so the QR is the whole point of it, and a flag
-// would have to be discovered by exactly the operator who would not know to
-// type it. Sniffing the TTY is worse: identical invocations would then emit
-// different bytes depending on where they ran.
-func printEnrollToken(stdout, stderr io.Writer, out enrollToken) {
-	fmt.Fprintf(stdout, "Enroll token (one-time, expires in %ds):\n  %s\n\n", out.ExpiresIn, out.EnrollToken)
-	if out.Project.ID != "" {
-		fmt.Fprintf(stdout, "Project: %s (%s)\n", out.Project.Name, out.Project.ID)
-	}
-	fmt.Fprintln(stdout, "Servers:")
-	for _, s := range out.Servers {
-		fmt.Fprintf(stdout, "  %s\n", s)
-	}
-	if out.TLSSPKIPin != "" {
-		fmt.Fprintf(stdout, "TLS SPKI pin: %s\n", out.TLSSPKIPin)
-	} else {
-		// No pin is the NORMAL shape behind a TLS-terminating ingress: the
-		// phone verifies the public-CA certificate through the system trust
-		// store. Stated as what happens, not as an assumption; the console's
-		// pin-status card uses the same framing.
-		fmt.Fprintln(stdout, "TLS SPKI pin: none (public-CA TLS via the system trust store, the expected ingress shape)")
-	}
-	// qr_payload on its own line, labeled. Scripts parse this line, and it is
-	// the fallback whenever the terminal (or the drawing below) cannot produce
-	// a picture.
-	fmt.Fprintf(stdout, "\nQR payload (encode as a QR for the app):\n  %s\n", out.QRPayload)
+// errNoEnroll answers the retired enroll-token.
+var errNoEnroll = errors.New("strazactl no longer enrolls approver phones, because a phone or browser that decides as a person " +
+	"is enrolled only by whoever is signed in as that person on the self-service page. Give the person the role " +
+	"straza-enroll-mobile in your identity manager, and they choose Add a phone on the self-service page")
 
-	// A failure to draw is a note, never an error: the token is already minted
-	// and burning, so the operator gets it plus a way to encode it themselves.
-	if out.QRPayload == "" {
-		fmt.Fprintln(stderr, "\nno qr_payload in the server response: nothing to draw")
-		return
-	}
-	code, err := qrterm.Render(out.QRPayload)
-	if err != nil {
-		fmt.Fprintf(stderr, "\nQR not drawn (%v): encode the payload above yourself\n", err)
-		return
-	}
-	// The width is stated because a QR wider than the window wraps, and a
-	// wrapped QR is unscannable in a way that looks like a broken token.
-	fmt.Fprintf(stderr, "\nScan with the Straza approver app (%d columns wide; widen the window if it wraps):\n",
-		code.Columns)
-	fmt.Fprint(stderr, code.Text)
+// decideWhere is the line approvals list ends with: where a person decides a
+// request at server, in the console, on the self-service page or on the phone.
+func decideWhere(server string) string {
+	return "A person decides these requests in the console under Approvals at " + server + "/console/approvals, " +
+		"on the Requests tab of the self-service page at " + server + "/self-service/requests, or on their phone."
 }
 
 // printApprovalsWide renders the detail view: the scannable one-liner per record
@@ -189,7 +112,7 @@ func printEnrollToken(stdout, stderr io.Writer, out enrollToken) {
 // server-composed honesty line. The list view does not show them. Params come
 // first (the server's own record), then the unverified justification, then
 // the honesty line beneath both.
-func printApprovalsWide(w io.Writer, recs []ctl.ApprovalInfo) error {
+func printApprovalsWide(w io.Writer, recs []ctl.ApprovalInfo) {
 	for i, r := range recs {
 		if i > 0 {
 			fmt.Fprintln(w)
@@ -213,7 +136,6 @@ func printApprovalsWide(w io.Writer, recs []ctl.ApprovalInfo) error {
 			fmt.Fprintf(w, "  %s\n", honestyLine(r.BindingScope, r.ArgvHashPrefix))
 		}
 	}
-	return nil
 }
 
 // honestyLine composes the "preview only" caption locally (kept in step with

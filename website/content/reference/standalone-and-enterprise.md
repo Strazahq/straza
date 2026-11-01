@@ -20,6 +20,6 @@ Every row has its own address, such as `#offline` for the client that cannot rea
 ## The same in both profiles
 
 
-Some defaults are often taken for differences and are not. Both profiles run the event bus inside strazad, with no network socket, until you set `events.embedded: false` and `events.url`. A session lasts at most 12 hours and a device credential 30 days in both, as [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md" >}}) lists. The audit sentinel is off, a person may publish their own change, and every approval setting starts from the same value.
+Some defaults are often taken for differences and are not. Both profiles run the event bus inside strazad, with no network socket, until you set `events.embedded: false` and `events.url`. A session lasts at most 12 hours in both. A person's machine enrollment lasts 7 days from its sign-in, as [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md" >}}) lists. The audit sentinel is off, a person may publish their own change, and every approval setting starts from the same value.
 
 The same decision rules hold in both profiles. An MCP tool call that no rule matches runs when one of the caller's roles has access to the tool, and is denied when none has. An event kind Straza does not know is denied before any rule is read. The break-glass admin exists on every database, whatever the profile.

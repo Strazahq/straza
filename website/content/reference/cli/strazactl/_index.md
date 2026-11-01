@@ -13,20 +13,13 @@ keywords: strazactl
 
 ## Synopsis
 
-A command that talks to strazad goes to --server, else $STRAZA_SERVER, else the
-server of your strazactl login. It authenticates with that login, or with an
-admin API token when STRAZA_API_TOKEN holds one. With a token, every admin call
-sends it in place of the login, and one line on stderr says so. strazactl login,
-connect and disconnect act as a person and refuse to run while the token is set,
-and strazactl logout still ends the stored login.
-
-Inside a coding agent, a command that changes Straza refuses to run on your
-login, because the agent would act as you. Reads and checks such as policy
-simulate still work. For automation, use an admin API token in
-STRAZA_API_TOKEN. An agent proposes config changes through the built-in straza
-MCP server's drafting tools. strazactl knows it runs inside a coding agent from
-the environment variables that Claude Code, the Gemini CLI and the npm build of
-Codex set for the commands they run.
+A command that talks to strazad goes to --server, else $STRAZA_SERVER. It sends
+the admin API token in STRAZA_API_TOKEN, which a person mints in the console
+under Settings, API tokens, with the scope the commands need and an expiry.
+strazactl has no sign-in of its own. When the identity provider cannot sign
+anyone in, the break-glass admin uses Emergency sign-in on the console's sign-in
+page and mints a token there. strazactl status sends no credential and needs the
+server alone.
 
 Every command exits 0 when it did its job and 1 when it did not. An unknown verb
 exits 1 too. strazactl drafts and strazactl policy diff name other exit codes in
@@ -35,13 +28,13 @@ their help. A retired verb exits 2 and names what replaced it.
 ## Options
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## Commands
 
 * [strazactl api-token](/reference/cli/strazactl/strazactl_api-token/): Manage long-lived admin API tokens, the one credential for automation, connectors and an identity manager's SCIM push
-* [strazactl approvals](/reference/cli/strazactl/strazactl_approvals/): List and decide approval requests, and mint approver enroll tokens
+* [strazactl approvals](/reference/cli/strazactl/strazactl_approvals/): List approval requests
 * [strazactl approvers](/reference/cli/strazactl/strazactl_approvers/): Inspect and revoke enrolled approver phones and browsers
 * [strazactl apps](/reference/cli/strazactl/strazactl_apps/): Manage MCP servers
 * [strazactl assign](/reference/cli/strazactl/strazactl_assign/): Assign a role to a user
@@ -49,12 +42,10 @@ their help. A retired verb exits 2 and names what replaced it.
 * [strazactl audit](/reference/cli/strazactl/strazactl_audit/): Query and verify the audit log
 * [strazactl bindings](/reference/cli/strazactl/strazactl_bindings/): List the access rows of roles on servers
 * [strazactl catalog](/reference/cli/strazactl/strazactl_catalog/): Inspect the effective tool catalog
-* [strazactl connect](/reference/cli/strazactl/strazactl_connect/): Connect your own account or token to an MCP server; no server lists your connections
+* [strazactl connect](/reference/cli/strazactl/strazactl_connect/): Connect a user's token to an MCP server; no server lists the user's connections
 * [strazactl devices](/reference/cli/strazactl/strazactl_devices/): Inspect and revoke a user's enrolled devices
-* [strazactl disconnect](/reference/cli/strazactl/strazactl_disconnect/): Remove a connection to a server: your own, or another user's with --user
-* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store, review and publish drafts of changes to MCP servers, roles, access rows and policy sets
-* [strazactl login](/reference/cli/strazactl/strazactl_login/): Log in via the OIDC device flow and start a strazactl session
-* [strazactl logout](/reference/cli/strazactl/strazactl_logout/): End this machine's strazactl session: revoke it, then delete the stored credentials
+* [strazactl disconnect](/reference/cli/strazactl/strazactl_disconnect/): Remove a user's connection to a server
+* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets
 * [strazactl packs](/reference/cli/strazactl/strazactl_packs/): Manage knowledge packs
 * [strazactl policy](/reference/cli/strazactl/strazactl_policy/): Validate and manage PolicySets
 * [strazactl roles](/reference/cli/strazactl/strazactl_roles/): Manage roles

@@ -834,7 +834,7 @@ func TestPolicyActivateOfARiskySavedEditNamesItsDraft(t *testing.T) {
 
 	id := strconv.FormatInt(d.ID, 10)
 	want := "This deployment needs a second person to publish a change that widens access (admin.secondPerson), and the saved edit of drift-probe is draft " +
-		id + ". Ask another administrator to review and publish draft " + id + ", with strazactl drafts publish " + id + " or on the console under Drafts."
+		id + ". Ask another administrator to review and publish draft " + id + " on the console under Drafts."
 	if code != http.StatusConflict || out["error"] != want {
 		t.Errorf("the risky activate = %d %v; want 409 %q", code, out, want)
 	}

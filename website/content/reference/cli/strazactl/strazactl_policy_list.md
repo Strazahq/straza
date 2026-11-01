@@ -2,7 +2,7 @@
 title: strazactl policy list
 description: List stored PolicySets
 pagetype: reference
-weight: 74
+weight: 70
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl policy list [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

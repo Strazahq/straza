@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/agentguard/trace"
 )
 
@@ -32,7 +33,7 @@ func debugToggleOn(t *testing.T, store *Store) {
 
 func TestMCPProxyCallJournal(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	ctx, p, harness := buildProxy(t, g, store)
 	p.tr, p.harness = store.Trace(), "claude-code"
 
@@ -52,26 +53,24 @@ func TestMCPProxyCallJournal(t *testing.T) {
 		t.Errorf("correlation = %v, want the gateway's X-Request-Id", recs[0].Attrs["correlation"])
 	}
 
-	// Token rotation mid-session: the proxy refreshes and retries; the ONE
-	// logical call leaves ONE record naming the retried answer.
-	g.rotate()
-	if _, err := echoCall(ctx, harness, "after-rotate"); err != nil {
-		t.Fatalf("post-rotation call: %v", err)
+	// A second call leaves its own record naming its own answer.
+	if _, err := echoCall(ctx, harness, "again"); err != nil {
+		t.Fatalf("second call: %v", err)
 	}
 	recs = recordsNamed(journalRecords(t, store), "call")
 	if len(recs) != 2 {
-		t.Fatalf("call records after rotation = %d, want 2", len(recs))
+		t.Fatalf("call records = %d, want 2", len(recs))
 	}
-	assertAttrs(t, "rotated call", recs[1], map[string]any{"outcome": "ok", "status": float64(200)})
-	assertDuration(t, "rotated call", recs[1])
+	assertAttrs(t, "second call", recs[1], map[string]any{"outcome": "ok", "status": float64(200)})
+	assertDuration(t, "second call", recs[1])
 	if first, second := recs[0].Attrs["correlation"], recs[1].Attrs["correlation"]; first == second || second == "" {
-		t.Errorf("rotated call correlation = %v (first %v), want the retried answer's own id", second, first)
+		t.Errorf("second call correlation = %v (first %v), want its own answer's id", second, first)
 	}
 }
 
 func TestMCPProxyDebugLifecycle(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	debugToggleOn(t, store)
 	ctx, p, harness := buildProxy(t, g, store)
 	p.tr, p.harness = store.Trace(), "claude-code"
@@ -80,7 +79,7 @@ func TestMCPProxyDebugLifecycle(t *testing.T) {
 		t.Fatal("debug window not in force")
 	}
 
-	p.debugSession(Session{SessionID: "s-mcp", SnapshotID: "snap-1", ExpiresAt: time.Now().Add(5 * time.Minute)})
+	p.debugSession(localapi.SessionAnswer{SessionID: "s-mcp", SnapshotID: "snap-1"})
 	p.resync(ctx)
 	_ = p.session().Close() // a corpse: the next call revives
 	if _, err := echoCall(ctx, harness, "revive me"); err != nil {
@@ -136,23 +135,21 @@ func TestMCPProxyDebugLifecycle(t *testing.T) {
 	}
 }
 
-func TestSessionAuthTransportObservesCall(t *testing.T) {
+// TestHarnessTransportObservesCall pins that the bridge's transport records
+// the status and X-Request-Id of the answer the service passed back, which
+// joins a journal line to the strazad log record.
+func TestHarnessTransportObservesCall(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
-	client := NewClient(g.URL)
-	ctx := context.Background()
-	if _, err := ensureSession(ctx, store, client, "claude-code"); err != nil {
-		t.Fatal(err)
-	}
-	tr := &sessionAuthTransport{base: http.DefaultTransport, store: store, client: client, harness: "claude-code"}
+	proxyTestStore(t, g)
+	client := serviceHTTPClient(NewServiceClient(), "claude-code")
 	observe := func() (int, string) {
 		t.Helper()
 		call := &trace.Call{}
-		req, err := http.NewRequestWithContext(trace.WithCall(ctx, call), http.MethodGet, g.URL+"/mcp", nil)
+		req, err := http.NewRequestWithContext(trace.WithCall(context.Background(), call), http.MethodGet, gatewayEndpoint(""), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp, err := tr.RoundTrip(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -162,11 +159,8 @@ func TestSessionAuthTransportObservesCall(t *testing.T) {
 	if st, id := observe(); id != "gw-1" || st == 0 || st == http.StatusUnauthorized {
 		t.Errorf("observed (%d, %q), want the gateway's first authorized answer gw-1", st, id)
 	}
-	// Rotation: the first send 401s, the transport refreshes and retries,
-	// and the journal sees the RETRIED answer, never the refusal.
-	g.rotate()
-	if st, id := observe(); id != "gw-2" || st == http.StatusUnauthorized {
-		t.Errorf("observed (%d, %q) after rotation, want the retried answer gw-2", st, id)
+	if st, id := observe(); id != "gw-2" || st == 0 {
+		t.Errorf("observed (%d, %q), want the second answer gw-2", st, id)
 	}
 }
 
@@ -209,7 +203,7 @@ func (t *teeWriteCloser) Close() error { return t.w.Close() }
 // reaches stdout or stderr, and the trace file holds the records.
 func TestMCPProxyStdoutPurity(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	debugToggleOn(t, store)
 
 	origOut, origErr := os.Stdout, os.Stderr

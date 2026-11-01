@@ -106,7 +106,7 @@ func TestApprovalDecideEndpoints(t *testing.T) {
 }
 
 // TestApprovalDecideWithLoginToken pins that an approver deciding from the
-// console/strazactl holds a LOGIN token,
+// console holds a LOGIN token,
 // not an agent session token; requireIdentified must accept it (the service
 // still validates approver roles), and a missing bearer still 401s.
 func TestApprovalDecideWithLoginToken(t *testing.T) {
@@ -257,7 +257,6 @@ func TestDecideRoutesRefuseCodingHarness(t *testing.T) {
 		{"codex", http.StatusForbidden},
 		{"exec-wrapper", http.StatusForbidden},
 		{"console", http.StatusOK},
-		{"strazactl", http.StatusOK},
 		{"self-service", http.StatusOK},
 	}
 	for _, tc := range tests {
@@ -301,7 +300,7 @@ func TestDecideRoutesRefuseCodingHarness(t *testing.T) {
 }
 
 // TestOwnRequestRefusedOnTheConsoleRoute pins the sentence a person reads when
-// they try to decide their own request from the console or strazactl, and
+// they try to decide their own request from the console, and
 // that the config switch lifts the refusal.
 func TestOwnRequestRefusedOnTheConsoleRoute(t *testing.T) {
 	t.Parallel()

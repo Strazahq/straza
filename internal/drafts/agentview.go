@@ -19,14 +19,15 @@ type AgentVerdict struct {
 // agentHidden are the risks and warnings an agent does not read, because
 // they tell who holds a role, who has a device, how a request reaches a
 // person, or whether anyone holds a role at all: the risks of who gains, of
-// an implication and of a row that reaches every tool, and the lines of the
-// tools a role loses, fire only for a role someone holds.
+// an implication, of a row that reaches every tool and of a covers line
+// that reaches more objects, and the lines of the tools a role loses, fire
+// only for a role someone holds.
 // ready.tool-unknown, ready.rule-names-nothing and imply.missing stay,
 // although they tell which servers, tools and roles exist, because an agent
 // that drafts config must be able to fix a name.
 var agentHidden = map[string]bool{codePoolEmpty: true, codeDeciderDevice: true, codeNoPush: true, codeHoldShort: true, codeNobodyConnected: true,
 	codeRoleLoses: true, codeUngated: true, codeGated: true, codeGateLooser: true, codeDenyRemoved: true, codeSelfApproval: true, codeNativeOpened: true,
-	codeImplication: true, codeToolsLater: true}
+	codeImplication: true, codeToolsLater: true, codeCoversWider: true}
 
 // ForAgent is v as the agent that proposed the draft may read it: its
 // refusals, with the publisher clause of draft.stale dropped, the risks

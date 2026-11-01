@@ -180,7 +180,7 @@ func TestDelegatedAdminEnforcement(t *testing.T) {
 	// Session-token lane (the console's steady state after checkin).
 	_, checkin := postJSON(t, base+"/v1/checkin", map[string]any{
 		"id_token": idToken,
-		"harness":  map[string]string{"name": "strazactl", "version": "dev"},
+		"harness":  map[string]string{"name": "console", "version": "dev"},
 		"attestation": map[string]any{
 			"managed": false, "hashes": map[string]string{},
 		},
@@ -222,7 +222,7 @@ func TestCheckinAdminGrants(t *testing.T) {
 		t.Helper()
 		_, resp := postJSON(t, base+"/v1/checkin", map[string]any{
 			"id_token": idToken,
-			"harness":  map[string]string{"name": "strazactl", "version": "dev"},
+			"harness":  map[string]string{"name": "console", "version": "dev"},
 			"attestation": map[string]any{
 				"managed": false, "hashes": map[string]string{},
 			},

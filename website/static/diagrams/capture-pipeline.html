@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Capture pipeline · Straza</title>
 <style>
@@ -212,11 +213,11 @@ svg.mode-redact #n-redact .box{stroke:var(--accent);stroke-width:2;fill:var(--ac
   <text class="d" x="210" y="300">rotates on drain</text>
 </g>
 <path id="c7" class="edge async capflow" d="M200 280 L170 280"/>
-<g class="node capflow" id="n-batch" tabindex="0" aria-label="Detached drain to strazad">
+<g class="node capflow" id="n-batch" tabindex="0" aria-label="straza service drains the spool to the Straza server">
   <rect class="box" x="16" y="248" width="154" height="64" rx="6"/>
   <text class="s" x="26" y="268">drain</text>
   <text class="mono" x="26" y="284">/v1/audit/batch</text>
-  <text class="d" x="26" y="300">detached &#183; rebound</text>
+  <text class="d" x="26" y="300">service &#183; rebound</text>
 </g>
 
 
@@ -265,8 +266,8 @@ svg.mode-redact #n-redact .box{stroke:var(--accent);stroke-width:2;fill:var(--ac
   verbatim is the default mode when enabled. Captured sessions are told, with a banner and
   a one-liner in the session context. Every captured turn is hashed in full (SHA-256) before
   any redaction or size cap, so the hash chain witnesses even what it did not store and a
-  known-leaked value remains findable. Turns ride the normal audit lane (JSONL spool, detached
-  drain to /v1/audit/batch, transactional outbox, JetStream subjects straza.audit.prompt and
+  known-leaked value remains findable. Turns ride the normal audit lane (JSONL spool, drained by
+  <code>straza service</code> to /v1/audit/batch, transactional outbox, JetStream subjects straza.audit.prompt and
   straza.audit.reply), then a durable consumer mirrors them into conversation_turns with its
   own retention knob (governance.captureRetention, default 720 h), while the chain writer links
   them tamper-evidently. The Transcripts screen and strazactl search by substring or by a value
@@ -292,8 +293,8 @@ var FACTS={
  'n-hash':'<strong>hash the FULL original</strong>: SHA-256 over the untouched content, before redact or cap. The chain witnesses what it did not store, and hashed-value search still finds a known-leaked value.',
  'n-redact':'<strong>redact</strong>: the client-side minimization knob (GDPR, works councils). Mutually exclusive with verbatim by design; the active mode is recorded on every captured turn.',
  'n-cap':'<strong>size cap</strong>. Prompts and replies are unbounded, audit events are not: over-cap content is truncated with truncated:true plus the full-content hash.',
- 'n-spool':'<strong>audit spool</strong>: the same JSONL spool as decisions; asynchronous by invariant and rotated on drain so cross-process appends never lose a record.',
- 'n-batch':'<strong>drain</strong>: a detached, fire-and-forget <code>straza drain</code> POSTs to /v1/audit/batch; client CE types are allowlisted (tool|prompt|reply) and records are rebound to the caller principal.',
+ 'n-spool':'<strong>audit spool</strong>: the same JSONL spool as decisions, one per user in the state directory of <code>straza service</code>; asynchronous by invariant and rotated on drain so appends during a drain never lose a record.',
+ 'n-batch':'<strong>drain</strong>: <code>straza service</code> POSTs each user&#8217;s spool to /v1/audit/batch right after a record and again on a short timer, and a failed drain keeps every record. Client CE types are allowlisted (tool|prompt|reply) and records are rebound to the caller principal.',
  'n-stream':'<strong>outbox &#8594; JetStream</strong>: capture rides the event spine on <code>straza.audit.prompt</code> / <code>straza.audit.reply</code> (spec/events rev 5, additive). Only straza.audit.&gt; enters the chain.',
  'n-store':'<strong>conversation_turns</strong>. A durable consumer mirrors turns into the read model with its own retention knob, governance.captureRetention (default 720 h): transcripts are bulkier and more sensitive than the chain.',
  'n-chain':'<strong>hash chain witness</strong>; captured turns are hash-chained like every audit CE: sha256(prevHash &#8214; ce), verified by <code>strazactl audit verify</code>.',

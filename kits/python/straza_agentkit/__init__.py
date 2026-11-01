@@ -179,7 +179,7 @@ def _payload(event: str, **extra: Any) -> dict:
     return p
 
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 def check(
@@ -194,10 +194,25 @@ def check(
     """Decide one tool call before running it. `tool` is the canonical
     taxonomy: shell.exec, file.write, file.edit, file.read, net.fetch,
     task.spawn, other; or pass app= + tool_name= for an MCP-style call
-    (sent as the mcp__<app>__<tool> form the dialect parses)."""
-    native = tool
+    (sent as the mcp__<app>__<tool> form the dialect parses). tool_name
+    without app is the framework's own name of the tool, which policy can
+    allow, hold or deny by name (sent as native_tool_name)."""
+    return _invoke(_tool_payload("PreToolUse", tool, command, paths, url, app, tool_name), enforce=True)
+
+
+def _tool_payload(
+    event: str,
+    tool: str,
+    command: Optional[str],
+    paths: Optional[Iterable[str]],
+    url: Optional[str],
+    app: Optional[str],
+    tool_name: Optional[str],
+) -> dict:
+    """The payload of one tool event, shared by check() and tool_result()."""
+    native, own_name = tool, tool_name
     if app and tool_name:
-        native = f"mcp__{app}__{tool_name}"
+        native, own_name = f"mcp__{app}__{tool_name}", None
     tool_input: dict[str, Any] = {}
     if command is not None:
         tool_input["command"] = command
@@ -205,25 +220,28 @@ def check(
         tool_input["paths"] = list(paths)
     if url is not None:
         tool_input["url"] = url
-    return _invoke(_payload("PreToolUse", tool_name=native, tool_input=tool_input), enforce=True)
+    return _payload(event, tool_name=native, native_tool_name=own_name, tool_input=tool_input)
 
 
 def guard(
     tool: str,
     *,
+    name: Optional[str] = None,
     command_from: Optional[Callable[..., str]] = None,
     paths_from: Optional[Callable[..., Iterable[str]]] = None,
 ) -> Callable:
     """Decorator: decide before every call of the wrapped tool function.
-    command_from/paths_from derive the policy-relevant fields from the call's
-    own arguments; without them the call is decided on the tool kind alone.
-    Deny raises StrazaDenied (frameworks surface the message to the model)."""
+    name is the tool's own name, which policy can allow, hold or deny by
+    name. command_from/paths_from derive the policy-relevant fields from the
+    call's own arguments; without them the call is decided on the tool kind
+    alone. Deny raises StrazaDenied (frameworks surface the message to the
+    model)."""
 
     def wrap(fn: Callable) -> Callable:
         def guarded(*args: Any, **kwargs: Any) -> Any:
             cmd = command_from(*args, **kwargs) if command_from else None
             pth = paths_from(*args, **kwargs) if paths_from else None
-            d = check(tool, command=cmd, paths=pth)
+            d = check(tool, command=cmd, paths=pth, tool_name=name)
             if not d.allowed:
                 raise StrazaDenied(d.reason)
             return fn(*args, **kwargs)
@@ -256,17 +274,7 @@ def tool_result(
     observational, since the decision was already made at `check()`; this closes
     the pair in the audit trail the way a harness's PostToolUse does.
     Arguments mirror `check()`. Never raises."""
-    native = tool
-    if app and tool_name:
-        native = f"mcp__{app}__{tool_name}"
-    tool_input: dict[str, Any] = {}
-    if command is not None:
-        tool_input["command"] = command
-    if paths is not None:
-        tool_input["paths"] = list(paths)
-    if url is not None:
-        tool_input["url"] = url
-    _invoke(_payload("PostToolUse", tool_name=native, tool_input=tool_input), enforce=False)
+    _invoke(_tool_payload("PostToolUse", tool, command, paths, url, app, tool_name), enforce=False)
 
 
 def end_turn(reply: Optional[str] = None) -> None:

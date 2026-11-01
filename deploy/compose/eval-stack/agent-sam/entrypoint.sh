@@ -6,52 +6,54 @@
 # and, after three failed beats, the ladder restarts from enrollment, so
 # re-enabling sam in midPoint self-heals with no manual restart.
 #
-# Credential: an Ed25519 key. The pod generates the pair at first boot
-# (private half stays in the home volume), drops the PUBLIC half into the
-# shared /keys volume, and the seeder registers it
-# via the admin API; enroll retries until that lands. No IdP client, no
-# shared secret, nothing to rotate out of the realm import.
+# Credential: an Ed25519 key that sam's service (straza-sam-service) makes
+# and keeps under its own account, so nothing sam runs can read it. This
+# script drops the PUBLIC half into the shared /keys volume, the seeder
+# registers it via the admin API, and enroll retries until that lands. No
+# IdP client, no shared secret, nothing to rotate out of the realm import.
 set -u
 
 SRV="${STRAZA_SERVER:-http://127.0.0.1:8420}"
 SAM_USER=sam-sre-agent
 KEYS_DIR="${STRAZA_KEYS_DIR:-/keys}"
+SOCK=/run/straza-service/service.sock
 PASS=/tmp/sam.PASS
 CATALOG_COUNT=0
 say() { echo "[sam] $*"; }
 
-session_token() {
-  jq -r '.sessionToken // .session_token // empty' \
-    "$HOME/.straza/state/session.json" 2>/dev/null
+publish_key() {
+  sed -n 's/^Public key: //p' /tmp/keygen.log > "$KEYS_DIR/$SAM_USER.pub"
+  say "the service holds sam's key; public half published at $KEYS_DIR/$SAM_USER.pub (the seeder registers it)"
 }
 
-# Generate the local NHI key when it is missing and publish the public half
-# for the seeder. A kept home with a lost /keys volume regenerates with
-# --force (the old registration is gone with that volume's consumer; the
-# re-run seeder registers the fresh key).
+# Have the service make sam's key when it holds none, and publish the public
+# half for the seeder. Without --force keygen succeeds only when the service
+# holds no key for sam, so a refusal with the public half already published
+# means the key is in place. A lost /keys volume regenerates with --force,
+# and the re-run seeder registers the fresh key.
 ensure_key() {
-  if [ -f "$HOME/.straza/state/nhi-key.json" ] && [ -s "$KEYS_DIR/$SAM_USER.pub" ]; then
+  if straza keygen --user "$SAM_USER" >/tmp/keygen.log 2>&1; then
+    publish_key
     return 0
   fi
-  FORCE=""
-  [ -f "$HOME/.straza/state/nhi-key.json" ] && FORCE="--force"
-  straza keygen --user "$SAM_USER" $FORCE >/tmp/keygen.log 2>&1 \
+  [ -s "$KEYS_DIR/$SAM_USER.pub" ] && return 0
+  straza keygen --user "$SAM_USER" --force >/tmp/keygen.log 2>&1 \
     || { say "keygen failed:"; cat /tmp/keygen.log; return 1; }
-  sed -n 's/^Public key: //p' /tmp/keygen.log > "$KEYS_DIR/$SAM_USER.pub"
-  say "NHI key ready; public half published at $KEYS_DIR/$SAM_USER.pub (the seeder registers it)"
+  publish_key
 }
 
-# One governed tools/list through the gateway; returns 0 only when the
+# One governed tools/list through the service's MCP route, in the session
+# `straza exec` opened (harness exec-wrapper); returns 0 only when the
 # catalog holds a tool that sam's roles reach, and leaves the size of the
-# catalog in CATALOG_COUNT. The built-in straza__ tools are in every catalog,
-# so they do not count as proof that a role arrived. The list is the
-# session's own catalog, so it needs no upstream server and no credential.
+# catalog in CATALOG_COUNT. The service adds the session token and its
+# proof, so no token ever reaches this script. The built-in straza__ tools
+# are in every catalog, so they do not count as proof that a role arrived.
+# The list is the session's own catalog, so it needs no upstream server and
+# no credential.
 gateway_catalog() {
-  TOK=$(session_token)
-  [ -n "$TOK" ] || return 1
-  NAMES=$(curl -sf -X POST -H "Authorization: Bearer $TOK" \
-    -H 'Content-Type: application/json' \
-    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$SRV/mcp" \
+  NAMES=$(curl -sf --unix-socket "$SOCK" -X POST \
+    -H 'Straza-Harness: exec-wrapper' -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://straza-service/local/v1/mcp \
     | jq -r '.result.tools[].name' 2>/dev/null) || return 1
   CATALOG_COUNT=$(printf '%s\n' "$NAMES" | grep -c .)
   printf '%s\n' "$NAMES" | grep -v '^straza__' | grep -q .
@@ -60,30 +62,26 @@ gateway_catalog() {
 while :; do
   rm -f "$PASS"
 
-  say "1/6 generating the Ed25519 NHI key (first boot only)..."
+  say "1/5 having sam's service make the Ed25519 NHI key (first boot only)..."
   until ensure_key; do sleep 5; done
-  say "1/6 enrolling headless as $SAM_USER (signed assertion, key lane)..."
+  say "1/5 enrolling headless as $SAM_USER through the service (signed assertion, key lane)..."
   until straza enroll --headless --user "$SAM_USER" --server "$SRV" >/tmp/enroll.log 2>&1; do
     say "   enroll not ready yet (stack booting, or the seeder has not registered the key): $(tail -1 /tmp/enroll.log)"
     sleep 5
   done
-  say "1/6 enrolled: the platform accepted sam's signed assertion"
+  say "1/5 enrolled: the platform accepted sam's signed assertion"
 
-  say "2/6 starting a governed session (this is the identity-mapping proof)..."
+  say "2/5 starting a governed session (this is the identity-mapping proof)..."
   until straza exec -- date >/tmp/exec.log 2>&1; do
     say "   session not up yet (sam's SCIM row or role may still be provisioning): $(tail -1 /tmp/exec.log)"
     sleep 5
   done
-  say "2/6 session live: deviceless NHI checkin succeeded"
+  say "2/5 session live: the service checked sam in, bound to its key"
 
-  say "3/6 starting the client daemon (revocation push + session renewal)..."
-  straza daemon >/tmp/daemon.log 2>&1 &
-  DAEMON_PID=$!
-
-  say "4/6 identity, as the client sees it:"
+  say "3/5 identity, as the service reports it:"
   straza status 2>&1 | sed 's/^/[sam]    /'
 
-  say "5/6 governed gateway call (tools/list through /mcp)..."
+  say "4/5 governed gateway call (tools/list through the service to /mcp)..."
   n=0
   while ! gateway_catalog; do
     n=$((n + 1))
@@ -91,19 +89,18 @@ while :; do
     sleep 5
   done
   if [ "$n" -le 24 ]; then
-    say "5/6 LISTED (gateway): the catalog holds $CATALOG_COUNT tools for sam's roles"
+    say "4/5 LISTED (gateway): the catalog holds $CATALOG_COUNT tools for sam's roles"
   else
-    say "5/6 WARNING: the gateway listed no tool for sam's roles (a role or an MCP server is still settling); hook lane is already proven, continuing"
+    say "4/5 WARNING: the gateway listed no tool for sam's roles (a role or an MCP server is still settling); hook lane is already proven, continuing"
   fi
 
-  say "6/6 destructive command (must be denied with a reason)..."
+  say "5/5 destructive command (must be denied with a reason)..."
   if straza exec -- rm -rf /tmp/probe >/tmp/deny.log 2>&1; then
-    say "6/6 FATAL: rm -rf was NOT denied; refusing to report PASS. Retrying the ladder in 30s."
-    kill "$DAEMON_PID" 2>/dev/null
+    say "5/5 FATAL: rm -rf was NOT denied; refusing to report PASS. Retrying the ladder in 30s."
     sleep 30
     continue
   fi
-  say "6/6 DENIED WITH REASON: $(grep -io 'straza:[^\"]*' /tmp/deny.log | head -1)"
+  say "5/5 DENIED WITH REASON: $(grep -io 'straza:[^\"]*' /tmp/deny.log | head -1)"
 
   : > "$PASS"
   say "PASS: sam is live and governed. Governed heartbeat every 10 minutes."
@@ -131,7 +128,6 @@ while :; do
       rm -f "$PASS"
       if [ "$FAILS" -ge 3 ]; then
         say "re-entering the enrollment ladder (self-heals once sam is re-enabled)"
-        kill "$DAEMON_PID" 2>/dev/null
         break
       fi
     fi

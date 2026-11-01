@@ -1,0 +1,133 @@
+#!/bin/sh
+# The pre-install script of the Straza package for macOS. It makes every
+# refusal before a file of the package lands, then creates or reuses the
+# hidden account _straza-service and its group, which the background service
+# runs as. It never touches a running service, so a refused upgrade leaves
+# the old one running. The Installer runs it as root and writes what it
+# prints to /var/log/install.log.
+set -eu
+
+account=_straza-service
+first=450
+last=499
+
+# refuse_folder stops the install over folder $1.
+refuse_folder() {
+	echo "Straza was not installed, because accounts other than root can change $1, and the hooks would run whatever program sits there. An administrator must make it owned by root and writable only by root, then run the installer again." >&2
+	exit 1
+}
+
+# refuse_account stops the install over an account of the service's name
+# that the service must not run as.
+refuse_account() {
+	echo "Straza was not installed, because the account $account already exists and is not a hidden account without a login shell. An administrator must remove or fix that account, then run the installer again." >&2
+	exit 1
+}
+
+# dscl_create makes one change to the local directory, and stops the
+# install with a sentence when macOS refuses it.
+dscl_create() {
+	dscl . -create "$@" && return
+	echo "Straza was not installed, because macOS refused to change the directory record $1 for the account $account (dscl . -create $*). An administrator reads why in /var/log/install.log, fixes it, then runs the installer again." >&2
+	exit 1
+}
+
+# attr prints the value of attribute $2 of directory record $1, or nothing
+# when the record or the attribute is missing or holds more than one value.
+# dscl names a native attribute such as IsHidden as dsAttrTypeNative:IsHidden.
+attr() {
+	dscl . -read "$1" "$2" 2>/dev/null | sed -n "s/^\(dsAttrTypeNative:\)\{0,1\}$2: \([^ ]*\)\$/\2/p"
+}
+
+# The hooks run /opt/straza/bin/straza by its full path. An account that
+# can change a folder on that path can swap the program the hooks run, so
+# the install stops while one can. stat -L judges what a link points at,
+# and a link that points nowhere is refused too.
+for d in /opt /opt/straza /opt/straza/bin; do
+	if [ ! -e "$d" ] && [ ! -L "$d" ]; then
+		continue
+	fi
+	info=$(stat -L -f '%u %Lp' "$d" 2>/dev/null) || refuse_folder "$d"
+	owner=${info%% *}
+	mode=${info#* }
+	[ "$owner" = 0 ] || refuse_folder "$d"
+	case "$mode" in '' | *[!0-7]*) refuse_folder "$d" ;; esac
+	[ $((0$mode & 022)) -eq 0 ] || refuse_folder "$d"
+done
+
+# A record of the service's name with no user ID is what an install that
+# failed midway left, and nobody can run as it, so this install finishes it
+# and rewrites every attribute. One with a user ID is reused only when
+# nobody can log in as it. A user ID of 500 or more belongs to the people
+# of this Mac, and 0 is root, so either is refused too.
+uid=
+make_account=yes
+if dscl . -read "/Users/$account" RecordName >/dev/null 2>&1; then
+	uid=$(attr "/Users/$account" UniqueID)
+	make_account=finish
+	if [ -n "$uid" ]; then
+		make_account=no
+		case "$(attr "/Users/$account" UserShell)" in /usr/bin/false | /sbin/nologin) ;; *) refuse_account ;; esac
+		[ "$(attr "/Users/$account" NFSHomeDirectory)" = /var/empty ] || refuse_account
+		[ "$(attr "/Users/$account" IsHidden)" = 1 ] || refuse_account
+		case "$uid" in *[!0-9]*) refuse_account ;; esac
+		if [ "$uid" -lt 1 ] || [ "$uid" -gt 499 ]; then
+			refuse_account
+		fi
+	fi
+fi
+gid=
+have_group=no
+if dscl . -read "/Groups/$account" RecordName >/dev/null 2>&1; then
+	have_group=yes
+	gid=$(attr "/Groups/$account" PrimaryGroupID)
+	case "$gid" in *[!0-9]*) refuse_account ;; esac
+fi
+set_gid=no
+[ -n "$gid" ] || set_gid=yes
+
+# A new account and a new group get one number, the first from 450 to 499
+# that no account and no group uses. That is the range sysadminctl gives
+# role accounts on macOS 26, above Apple's own accounts and the group IDs
+# Apple's com.apple.access groups hold. An account or a group that exists
+# keeps its own number.
+if [ -z "$uid" ] || [ -z "$gid" ]; then
+	users=$(dscl . -list /Users UniqueID)
+	groups=$(dscl . -list /Groups PrimaryGroupID)
+	ids=$(printf '%s\n%s\n' "$users" "$groups" | awk '{ print $NF }')
+	n=$first
+	while [ "$n" -le "$last" ] && printf '%s\n' "$ids" | grep -qx "$n"; do
+		n=$((n + 1))
+	done
+	if [ "$n" -gt "$last" ]; then
+		echo "Straza was not installed, because every user ID from 450 to 499 is taken, and its background service needs one that macOS does not use. An administrator must free one of those IDs, then run the installer again." >&2
+		exit 1
+	fi
+	uid=${uid:-$n}
+	gid=${gid:-$n}
+fi
+
+if [ "$have_group" = no ]; then
+	dscl_create "/Groups/$account"
+	dscl_create "/Groups/$account" RealName "Straza background service"
+	dscl_create "/Groups/$account" Password '*'
+fi
+if [ "$set_gid" = yes ]; then
+	dscl_create "/Groups/$account" PrimaryGroupID "$gid"
+	echo "created the group $account with group ID $gid"
+fi
+# The user ID comes last, so a record that a failure leaves half made has
+# no user ID anyone could run as, and the next install finishes it.
+if [ "$make_account" = yes ]; then
+	dscl_create "/Users/$account"
+fi
+if [ "$make_account" != no ]; then
+	dscl_create "/Users/$account" Password '*'
+	dscl_create "/Users/$account" UserShell /usr/bin/false
+	dscl_create "/Users/$account" NFSHomeDirectory /var/empty
+	dscl_create "/Users/$account" IsHidden 1
+	dscl_create "/Users/$account" RealName "Straza background service"
+	dscl_create "/Users/$account" PrimaryGroupID "$gid"
+	dscl_create "/Users/$account" UniqueID "$uid"
+	echo "created the hidden account $account with user ID $uid"
+fi

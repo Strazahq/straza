@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TestACall, simulationOutcome } from "./test-a-call";
-import { listAudit, listRoles, overview, simulate } from "@/lib/api";
+import { type ObjectsAnswer, appObjects, listAudit, listRoles, overview, simulate } from "@/lib/api";
 import { version } from "@/lib/public";
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  appObjects: vi.fn(),
   listAudit: vi.fn(),
   listRoles: vi.fn(),
   overview: vi.fn(),
@@ -41,6 +43,7 @@ describe("the Test a call sheet", () => {
     vi.mocked(simulate).mockReset();
     vi.mocked(overview).mockReset();
     vi.mocked(listAudit).mockReset();
+    vi.mocked(appObjects).mockReset().mockResolvedValue({ app: "demo-tools", type: "", objects: [], total: 0 });
   });
 
   it("opens with the title, the live context line and the pinned event", async () => {
@@ -222,6 +225,16 @@ describe("the Test a call sheet", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("sends no args and shows no picker on a server that pins no type", async () => {
+    answer({ effect: "allow" });
+    mount();
+    await ready();
+    await run();
+    await result();
+    expect(document.querySelector("[data-object-picker]")).toBeNull();
+    expect("args" in lastBody().event).toBe(false);
+  });
+
   it("takes a typed tool name when the server listed none", async () => {
     answer({ effect: "allow" });
     mount([]);
@@ -249,5 +262,150 @@ describe("practical simulation outcomes", () => {
     [{ effect: "hold" }, "No verdict: the server answered the effect hold, which this console cannot read. The line below holds the full answer.", "plain"],
   ] as const)("reads the complete response %j", (decision, label, tone) => {
     expect(simulationOutcome(decision)).toEqual({ label, tone });
+  });
+});
+
+describe("Test a call on a server that pins repos", () => {
+  const gh = { id: "a-gh", name: "ghapp" };
+  const repos = [
+    { value: "Strazahq/pay-api", id: "9012332", title: "pay-api" },
+    { value: "Strazahq/site", id: "9012331", title: "site" },
+  ];
+  const pinnedAnswer = (q: string): ObjectsAnswer => ({
+    app: "ghapp", type: "repo", plural: "repos", total: 2,
+    pinned: { type: "repo", list: { tool: "repo_list" }, tools: { pr_create: { argument: "repo" }, get_me: "none" } },
+    objects: q.includes("q=zzz") ? [] : q.includes("q=pay") ? repos.slice(0, 1) : repos,
+  });
+  const refusal = "Straza: pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. If the repo is new, Straza refreshes the list within a minute, so try again then.";
+  const mountGh = () => render(<TooltipProvider><TestACall open onOpenChange={() => {}} app={gh} tools={["pr_create", "get_me", "repo_create"]} /></TooltipProvider>);
+  const search = () => screen.findByRole("textbox", { name: "Search repos by name" });
+  const preview = () => (document.querySelector("[data-args-preview]") as HTMLElement).textContent;
+
+  beforeEach(() => {
+    vi.mocked(listRoles).mockReset().mockResolvedValue([{ id: "r-w", name: "ghapp-write", kind: "application" }]);
+    vi.mocked(version).mockReset().mockResolvedValue({ version: "t", commit: "t", go: "g", profile: "enterprise" });
+    vi.mocked(simulate).mockReset();
+    vi.mocked(overview).mockReset();
+    vi.mocked(listAudit).mockReset();
+    vi.mocked(appObjects).mockReset().mockImplementation((_id: string, q = "") => Promise.resolve(pinnedAnswer(q)));
+  });
+
+  it("picks the repo from the server's list and sends it in the tool's argument", async () => {
+    vi.mocked(simulate).mockResolvedValue({
+      active: { effect: "allow", reason: "allowed by role access" }, subject: {}, snapshot: "b8c0a55073d40b84ffee",
+      object: { type: "repo", reach: "argument", value: "Strazahq/pay-api", id: "9012332", covered: true, role: "ghapp-write" },
+    });
+    mountGh();
+    await search();
+    expect(screen.getByText("Pick the repo the call works on. Test a call sends it in the argument repo, as the agent would.")).toBeTruthy();
+    expect(preview()).toBe("args {}");
+    await userEvent.click(await screen.findByRole("button", { name: /Strazahq\/pay-api/ }));
+    expect((document.querySelector("[data-picked]") as HTMLElement).textContent).toContain("Strazahq/pay-api");
+    expect(screen.getByText("id 9012332")).toBeTruthy();
+    expect(preview()).toBe("args {\"repo\":\"Strazahq/pay-api\"}");
+    await run();
+    const card = await result();
+    expect(within(card).getByText("Allowed")).toBeTruthy();
+    expect((card.querySelector("[data-object-line]") as HTMLElement).textContent).toBe("ghapp-write covers Strazahq/pay-api, id 9012332.");
+    expect(lastBody().event).toEqual({ kind: "tool.pre", tool: "mcp.call", app: "ghapp", toolName: "pr_create", args: { repo: "Strazahq/pay-api" } });
+  });
+
+  it("asks for the repo instead of running without one", async () => {
+    mountGh();
+    await search();
+    await run();
+    expect(screen.getByText("Pick the repo this call works on.")).toBeTruthy();
+    expect(document.activeElement).toBe(await search());
+    expect(simulate).not.toHaveBeenCalled();
+  });
+
+  it("searches the list on the server as you type, and says when nothing matches", async () => {
+    mountGh();
+    await userEvent.type(await search(), "pay");
+    await waitFor(() => expect(appObjects).toHaveBeenCalledWith("a-gh", "q=pay&limit=20"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Strazahq\/site/ })).toBeNull());
+    expect(screen.getByRole("button", { name: /Strazahq\/pay-api/ })).toBeTruthy();
+    await userEvent.clear(await search());
+    await userEvent.type(await search(), "zzz");
+    expect(await screen.findByText("No repo in the list matches zzz.")).toBeTruthy();
+  });
+
+  it("clears a picked repo back to the search", async () => {
+    mountGh();
+    await userEvent.click(await screen.findByRole("button", { name: /Strazahq\/site/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Clear the repo" }));
+    expect(await search()).toBeTruthy();
+    expect(preview()).toBe("args {}");
+  });
+
+  it("shows no picker on a tool that names no repo", async () => {
+    vi.mocked(simulate).mockResolvedValue({ active: { effect: "allow" }, subject: {}, snapshot: "s" });
+    mountGh();
+    await search();
+    await userEvent.click(screen.getByRole("combobox", { name: "tool name" }));
+    await userEvent.click(await screen.findByRole("option", { name: "get_me" }));
+    expect(document.querySelector("[data-object-picker]")).toBeNull();
+    await run();
+    await result();
+    expect("args" in lastBody().event).toBe(false);
+  });
+
+  it("reads the repo check's refusal as the reason, never as a profile default", async () => {
+    vi.mocked(simulate).mockResolvedValue({
+      active: { effect: "deny", reason: refusal }, subject: {}, snapshot: "b8c0a55073d40b84ffee",
+      object: { type: "repo", reach: "argument", value: "Strazahq/site", id: "9012331", covered: false, refusal },
+    });
+    mountGh();
+    await userEvent.click(await screen.findByRole("button", { name: /Strazahq\/site/ }));
+    await run();
+    const card = await result();
+    expect(card.className).toContain("border-danger");
+    expect(within(card).getByText("Denied")).toBeTruthy();
+    expect((card.querySelector("[data-gate]") as HTMLElement).textContent).toBe("The repo check refused this call before any policy ran. pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. If the repo is new, Straza refreshes the list within a minute, so try again then.");
+    expect(card.textContent).toContain("subject: roles ghapp-write · snapshot b8c0a55073d40b84 · Simulation only.");
+    expect(card.textContent).not.toContain("No policy matched");
+  });
+
+  it.each([
+    ["names no repo", undefined],
+    ["cut the repo it named", { type: "repo", reach: "argument", value: "x".repeat(512), valueTruncated: true, valueSha256: "0f1e" }],
+  ])("drops an earlier pick when the replayed record %s", async (_, object) => {
+    vi.mocked(overview).mockResolvedValue({ audit: { head_seq: 40 } });
+    vi.mocked(listAudit).mockResolvedValue([
+      { seq: 38, username: "sam-sre-agent", ce: ce("straza.audit.mcp", { app: "ghapp", tool: "mcp.call", toolName: "pr_create", effect: "deny", ...(object ? { object } : {}) }) },
+    ]);
+    mountGh();
+    await userEvent.click(await screen.findByRole("button", { name: /Strazahq\/site/ }));
+    expect(document.querySelector("[data-picked]")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Replay a recent call to this server" }));
+    await userEvent.click(await screen.findByRole("button", { name: /#38/ }));
+    expect(document.querySelector("[data-picked]")).toBeNull();
+    expect(preview()).toBe("args {}");
+  });
+
+  it.each([
+    ["names the missing listing credential", { tool: "repo_list", credential: "missing", outcome: "never", version: 0, count: 0 },
+      "ghapp lists its repos with repo_list. ghapp has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set ghapp --listing, then refresh with strazactl apps objects refresh ghapp."],
+    ["says when the first listing runs", { tool: "repo_list", credential: "set", outcome: "never", version: 0, count: 0 },
+      "ghapp lists its repos with repo_list. No listing yet. Straza runs the first one within 30 seconds. Reload the page to see it."],
+    ["points at the refresh when the list is empty", { tool: "repo_list", credential: "set", outcome: "ok", version: 2, count: 0, listedAt: "2026-10-19T09:00:00Z" },
+      "The repo list is empty, so there is nothing to pick yet. If ghapp has repos now, refresh the list with strazactl apps objects refresh ghapp, then open Test a call again."],
+  ])("on an empty list %s", async (_, listing, hint) => {
+    vi.mocked(appObjects).mockImplementation((_id: string, q = "") => Promise.resolve({ ...pinnedAnswer(q), objects: [], total: 0, listing }));
+    mountGh();
+    expect((await screen.findByText(hint)).hasAttribute("data-object-empty")).toBe(true);
+  });
+
+  it("replays a recorded call with the repo it named", async () => {
+    vi.mocked(overview).mockResolvedValue({ audit: { head_seq: 40 } });
+    vi.mocked(listAudit).mockResolvedValue([
+      { seq: 39, username: "sam-sre-agent", ce: ce("straza.audit.mcp", { app: "ghapp", tool: "mcp.call", toolName: "pr_create", effect: "deny", object: { type: "repo", reach: "argument", value: "Strazahq/site", id: "9012331" } }) },
+    ]);
+    mountGh();
+    await search();
+    await userEvent.click(screen.getByRole("button", { name: "Replay a recent call to this server" }));
+    await userEvent.click(await screen.findByRole("button", { name: /#39/ }));
+    expect((document.querySelector("[data-picked]") as HTMLElement).textContent).toContain("Strazahq/site");
+    expect(preview()).toBe("args {\"repo\":\"Strazahq/site\"}");
   });
 });

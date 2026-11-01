@@ -56,7 +56,7 @@ func TestAdminWrapperWireShapes(t *testing.T) {
 	rec := &wireRecorder{}
 	srv := httptest.NewServer(http.HandlerFunc(rec.handle))
 	t.Cleanup(srv.Close)
-	c := loggedInClient(t, srv.URL)
+	c := tokenClient(t, srv.URL)
 	ctx := context.Background()
 
 	tests := []struct {
@@ -461,27 +461,6 @@ func TestAdminWrapperWireShapes(t *testing.T) {
 			method: http.MethodGet, uri: "/v1/admin/approvals?state=pending",
 		},
 		{
-			name:    "ApproveApproval",
-			respond: `{"approval":{"id":"ap1","state":"approved","decidedByName":"kim"}}`,
-			call: func() (bool, error) {
-				rec, err := c.ApproveApproval(ctx, "ap1", "")
-				return rec.State == "approved" && rec.DecidedByName == "kim", err
-			},
-			method: http.MethodPost, uri: "/v1/admin/approvals/ap1/approve",
-		},
-		{
-			name:    "DenyApproval",
-			respond: `{"approval":{"id":"ap1","state":"denied"}}`,
-			call: func() (bool, error) {
-				rec, err := c.DenyApproval(ctx, "ap1", "with-a-reason")
-				return rec.State == "denied", err
-			},
-			method: http.MethodPost, uri: "/v1/admin/approvals/ap1/deny",
-			// The 0.63.0 optional reason body; ApproveApproval above pins the
-			// reason-less lane (no body at all, the pre-0.63.0 shape).
-			body: map[string]any{"reason": "with-a-reason"},
-		},
-		{
 			name:    "ApproverDevices",
 			respond: `[{"id":"apd_1","user_id":"u1","username":"kim","name":"kim-pixel","platform":"android","push_routes":1}]`,
 			call: func() (bool, error) {
@@ -567,7 +546,7 @@ func auditChainServer(t *testing.T, recs []AuditRecord) *Client {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return loggedInClient(t, srv.URL)
+	return tokenClient(t, srv.URL)
 }
 
 // testChain builds a 3-record chain with real hashes via audit.Link.
@@ -625,7 +604,7 @@ func TestDoSurfacesAPIError(t *testing.T) {
 		_, _ = w.Write([]byte(resp))
 	}))
 	t.Cleanup(srv.Close)
-	c := loggedInClient(t, srv.URL)
+	c := tokenClient(t, srv.URL)
 
 	err := c.RemoveApp(context.Background(), "gh")
 	if err == nil || err.Error() != "forbidden: admin role required" {

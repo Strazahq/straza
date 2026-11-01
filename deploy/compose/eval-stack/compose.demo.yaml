@@ -50,11 +50,17 @@ services:
       # Live-lane model key: env passthrough ONLY, never written here or in
       # the image; empty = replay/booth lanes only.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    # One-time hook-lane enrollment persists here (OIDC device flow:
-    # docker exec -it straza-eval-demo-1 straza enroll --server
-    # http://127.0.0.1:8420). The gateway lane needs no enrollment (KC
-    # password grant per run), but the hook-lane scenarios and the
-    # eval-lane tests do; unenrolled they say so loudly, by design.
+    # One-time hook-lane enrollment persists here. The container shares the
+    # host's network, so a person signs in by the browser lane from the host:
+    # docker exec -it -e BROWSER=true straza-eval-demo-1 straza enroll
+    # --server http://127.0.0.1:8420 prints the sign-in link, which you open
+    # in a browser on this host. The code lane, straza enroll
+    # --use-device-code, works only after STRAZA_MIN_SIGN_IN is set to code
+    # on strazad, because the enterprise default of governance.minSignIn is
+    # browser.
+    # The gateway lane needs no enrollment (KC password grant per run), but
+    # the hook-lane scenarios and the eval-lane tests do; unenrolled they say
+    # so loudly, by design.
     volumes:
       - demo_home:/home/demo
     # First-boot ordering: strazad may be up while Keycloak still imports;
@@ -63,7 +69,7 @@ services:
     restart: unless-stopped
 
   straza-harness:
-    build:
+    build: &harness-build
       context: ./demo
       dockerfile: Dockerfile.harness
       additional_contexts:
@@ -80,15 +86,55 @@ services:
         condition: service_started
       agent-keys-init:
         condition: service_completed_successfully
+      straza-harness-service:
+        condition: service_healthy
     environment:
       STRAZA_SERVER: http://127.0.0.1:8420
     volumes:
       - harness_home:/home/node
       # public-key handoff (declared in compose.yaml): the entry script
-      # publishes joe's Ed25519 public half here; the seeder registers it
+      # publishes joe's Ed25519 public half here; the seeder registers it.
+      # Eval convenience: an agent that can write /keys could register a key
+      # it holds itself, so in production an admin registers the printed
+      # public key by hand.
       - agent_keys:/keys
+      # the socket directory of the harness's service, its only way to Straza
+      - harness_service_socket:/run/straza-service
+    restart: unless-stopped
+
+  straza-harness-service:
+    # The harness's straza service: the same image and binary as the
+    # harness, run as `straza service` under straza-service (uid 64000),
+    # which no agent uses. It alone mounts the state volume with joe's key and
+    # every enrolled uid's enrollment, snapshot and audit spool, keeps every
+    # session in memory, and shares only the socket directory with the
+    # harness, so the hooks, `straza mcp` and `straza connect` reach Straza
+    # only through it and the kernel names the caller's uid. The demo
+    # container gets none: its gateway lane asks
+    # Keycloak for a realm and a client this stack does not have, so it
+    # signs in nowhere today.
+    build: *harness-build
+    container_name: straza-harness-service
+    user: "64000:64000"
+    entrypoint: ["/usr/local/bin/straza", "service"]
+    network_mode: host
+    depends_on:
+      strazad:
+        condition: service_started
+    volumes:
+      - harness_service_socket:/run/straza-service
+      - harness_service_state:/var/lib/straza-service
+    healthcheck:
+      # healthy once the service accepts a connection on its socket
+      test: ["CMD", "node", "-e", "require('net').connect('/run/straza-service/service.sock').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"]
+      interval: 30s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
     restart: unless-stopped
 
 volumes:
   harness_home:
   demo_home:
+  harness_service_socket: # the socket directory the harness and its service share
+  harness_service_state: # the harness's service: joe's key, enrollments, audit spool

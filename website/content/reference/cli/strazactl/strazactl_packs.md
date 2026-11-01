@@ -2,7 +2,7 @@
 title: strazactl packs
 description: Manage knowledge packs
 pagetype: reference
-weight: 62
+weight: 58
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl packs [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

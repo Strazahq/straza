@@ -258,60 +258,49 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// adminEnrollRefusal is the sentence every caller of the admin enroll-token
+// route reads, formatted with the self-service page's address.
+const adminEnrollRefusal = "Straza enrolls an approver phone or browser only for the person who is signed in and mints the code, so this admin route creates no enroll code for anyone. " +
+	"The person signs in to the self-service page at %s and chooses Add a phone, which needs the role " + EnrollMobileRole +
+	", or Enable this browser, which needs the role " + EnrollBrowserRole + ". Assign those roles in your identity manager, or under Roles in the console when no identity manager feeds Straza."
+
 // handleApproverEnrollToken serves POST /v1/admin/approvers/enroll-token
-// (requireAdmin): it mints a one-time enroll token for a user and returns
-// everything the console/CLI needs to render the enroll QR without
-// re-deriving anything: the server base list, the TLS SPKI pin (only when the
-// listener that minted it is the one the base list names), and the exact
-// compact `qr_payload` string. This is the "Add mobile approver" surface, so
-// a mint whose QR no phone could dial is refused (phoneEnrollGuardMessage).
+// (requireAdmin) as a refusal. An enrolled approver device is how a person
+// decides, so its enroll token is minted only on the self route
+// POST /v1/approvals/self/enroll-token, for the account signed in there.
+// This route answers 403 to every caller that reaches it, whoever the body
+// names, the caller included, and mints and stores nothing. It chains one
+// enroll-token.refused record. The body is read best effort, only to name
+// an existing user in that record.
 func (a *App) handleApproverEnrollToken(w http.ResponseWriter, r *http.Request) {
 	var req approverEnrollTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apiError(w, http.StatusBadRequest, "malformed JSON body")
-		return
-	}
-	if msg := a.phoneEnrollGuardMessage(); msg != "" {
-		apiError(w, http.StatusConflict, msg)
-		return
-	}
-	var (
-		u   store.User
-		err error
-	)
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	var named store.User
+	var err error
 	switch {
 	case req.UserID != "":
-		u, err = a.store.Users().GetByID(r.Context(), req.UserID)
+		named, err = a.store.Users().GetByID(r.Context(), req.UserID)
 	case req.Username != "":
-		u, err = a.store.Users().GetByUsername(r.Context(), req.Username)
-	default:
-		apiError(w, http.StatusBadRequest, "user_id or username is required")
-		return
+		named, err = a.store.Users().GetByUsername(r.Context(), req.Username)
 	}
 	if err != nil {
-		apiError(w, http.StatusNotFound, "no such user")
-		return
+		named = store.User{}
 	}
-	resp, err := a.enrollTokenEnvelope(r.Context(), u, "")
-	if err != nil {
-		a.fail(w, r, http.StatusInternalServerError, "could not mint enroll token", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	a.auditEnrollTokenRefused(r.Context(), named)
+	apiError(w, http.StatusForbidden, fmt.Sprintf(adminEnrollRefusal, a.selfServicePage()))
 }
 
 // enrollTokenEnvelope mints a one-time enroll token for u and assembles the
-// response envelope both mint surfaces (admin and self-service) serve, so
-// the two cannot disagree. The QR the console/page encodes verbatim
-// (the approver app's enroll payload): v/servers/token, plus the SPKI pin ONLY
+// response envelope the self route serves. The QR the console/page encodes
+// verbatim (the approver app's enroll payload): v/servers/token, plus the SPKI pin ONLY
 // when the tier that produced the servers list is the endpoint that minted
 // that pin (enrollPin); an unconditional pin here is a time bomb behind an
 // ingress. Plus the BYO-Firebase public app config when the deployment
 // carries one (enrollFCM) and the WebPush VAPID advert when that lane is
 // configured (enrollWebpush). `qr` is the structured twin of `qr_payload`
-// (same bytes, parsed). channel scopes what the token may enroll: the admin
-// lane passes "" (unscoped), the self lane the caller's authorized channel.
-// Every mint chains one enroll-token.create record with the actor ctx holds.
+// (same bytes, parsed). channel, the caller's authorized channel, scopes
+// what the token may enroll. Every mint chains one enroll-token.create
+// record with the actor ctx holds.
 func (a *App) enrollTokenEnvelope(ctx context.Context, u store.User, channel string) (map[string]any, error) {
 	grant, err := a.approval.MintEnrollToken(ctx, u.ID, channel)
 	if err != nil {
@@ -435,8 +424,8 @@ func (a *App) selfEnrollEligibility(ctx context.Context, u store.User) ([]string
 // (requirePersonClient: a person's session or login token, a coding-harness
 // session and wat_ refused, user verified active). The logged-in user mints a one-time approver enroll
 // token for THEMSELF; the body carries ONLY the channel, identity fields in
-// it are ignored, self-scoping is by construction (mint-for-others stays the
-// admin surface). The gate: humans only,
+// it are ignored, self-scoping is by construction, and no route mints for
+// anyone else. The gate: humans only,
 // holding the channel's straza-enroll-* role or straza-admin; the minted
 // token is channel-stamped and consume enforces the scope. Lives on the main
 // listener only: the dedicated approver listener keeps serving device-authed
@@ -451,9 +440,9 @@ func (a *App) handleSelfEnrollToken(w http.ResponseWriter, r *http.Request, user
 	switch req.Channel {
 	case approval.EnrollChannelMobile:
 		need = EnrollMobileRole
-		// Phone-destined: a dud QR is refused here exactly as on the admin
-		// surface. The browser channel stays open, because a browser on this
-		// machine dials loopback just fine.
+		// Phone-destined: a dud QR is refused here (phoneEnrollGuardMessage).
+		// The browser channel stays open, because a browser on this machine
+		// dials loopback just fine.
 		if msg := a.phoneEnrollGuardMessage(); msg != "" {
 			apiError(w, http.StatusConflict, msg)
 			return

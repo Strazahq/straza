@@ -2,7 +2,7 @@
 title: strazactl roles delete
 description: Delete a role; its assignments and access rows go with it
 pagetype: reference
-weight: 80
+weight: 76
 draft: false
 sources:
   - cmd/strazactl
@@ -33,7 +33,7 @@ strazactl roles delete <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

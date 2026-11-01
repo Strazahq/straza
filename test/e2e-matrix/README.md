@@ -33,6 +33,21 @@ being skipped at run time.
 The report lands in `.work/report.md` next to this file, one row per
 scenario and harness, plus the timers table. CI uploads it as an artifact.
 
+A machine that runs the Straza system service, such as one with a managed
+install, makes every `straza` ignore `STRAZA_HOME`, so the lane's identities
+would reach that service and replace the key and enrolment of the account
+running the lane. The test refuses such a machine before it builds anything,
+and `make e2e-matrix` runs it there in a container instead, which has no
+system service and needs no network. The target runs this command:
+
+```
+docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp/home \
+  -e GOCACHE=/tmp/gocache -e GOMODCACHE=/go/pkg/mod -e GOTOOLCHAIN=local \
+  -e STRAZA_E2E_MATRIX=1 -v "$PWD":/src -v "$(go env GOMODCACHE)":/go/pkg/mod:ro \
+  -w /src golang:1.26.10-bookworm \
+  go test -count=1 -timeout 45m -run TestJourneys -v ./test/e2e-matrix
+```
+
 ## What a run does
 
 1. Builds `strazad` and `straza` from the tree into `.work/bin` with
@@ -45,15 +60,32 @@ scenario and harness, plus the timers table. CI uploads it as an artifact.
    written into a config file passed with `--config`, because the offline
    grace bound has no environment face by design.
 3. Signs in as the bootstrap admin through the built-in issuer's device
-   flow, exactly as an operator's `strazactl login` would, and mints an
-   admin API token with the SCIM grants so scenarios can act as an IdM.
+   flow under the console's client id and keeps the ten-minute ID token,
+   the login token the admin plane and the decide routes take from a
+   person. It checks in no session, so a scenario that counts sessions or
+   their records sees only its own. It then mints an admin API token with
+   the SCIM grants so scenarios can act as an IdM.
 4. Starts the hermetic MCP upstream the `mcp` steps and the app manifests
    point at through `${upstream}`. It serves three tools: `echo` returns its
    `text` argument, `get-sum` returns the sum of its numeric `a` and `b` as a
    decimal string, and `get-env` takes no argument and returns the fixed
-   text `E2E_UPSTREAM=1`. The server is started with a two second gateway
-   hold for approve-mode calls, so a held call answers "approval pending"
-   within seconds instead of the production default.
+   text `E2E_UPSTREAM=1`. The same upstream serves a repo server at
+   `${objectsUpstream}`, a second path, so a scenario that binds every tool
+   at `${upstream}` still sees those three. Its tools carry the object marks
+   of `spec/app-manifest/SPEC.md` section 7. `repo_list` is marked
+   `ai.straza/lists-objects` and read-only, and lists seven repos such as
+   `acme/payments` with a numeric id, a title and a `team` attribute, three
+   to a page joined by `nextCursor`. `repo_read` names its repo in the
+   `repo` argument and answers `repo_read on <repo> with
+   ai.straza/object-id <id>.`, or `with no ai.straza/object-id.` when the
+   call carried none. `search_code` reaches every repo and answers how many
+   repo names hold its `query`. `calls_seen` touches no repo and answers
+   `repo_read calls: <n>.` followed by one line for each `repo_read` call
+   that reached it, a repo it does not hold included, so a step proves a
+   refused call never reached the server. The server is
+   started with a two second gateway hold for approve-mode calls, so a held
+   call answers "approval pending" within seconds instead of the production
+   default.
 5. Runs the positive control on every dialect: a policy that must deny is
    checked to deny through the real `straza hook` before any scenario
    counts. A dialect whose control passes silently would make every green
@@ -100,16 +132,31 @@ steps:
 runs once per dialect, in order, and every run gets its own `strazad` on a
 fresh data directory, its own upstream, fresh identities and a fresh
 `STRAZA_HOME` per identity, so nothing a run creates can reach the next one.
+Each identity also gets its own `straza service`, started when the run
+begins and stopped when it ends. The service listens at
+`$STRAZA_HOME/service.sock` and holds the identity's key, enrolment and
+sessions, so the hooks and the `mcp` steps reach the server only through it.
 The report carries one row per scenario and dialect. An `audit` count
-therefore counts one run, and an `mcp` step uses the session that run's
-last `session.start` opened.
+therefore counts one run, and an `mcp` step rides the session of the harness
+window that the identity's `session.start` steps opened in that run.
 
 `identities` declares who takes part. A human identity carries the password
 the built-in issuer will accept; the scenario itself creates the user
 through the admin or SCIM API in a step, and that step must set the same
 password through the admin API, since the SCIM profile does not carry
-passwords. An NHI identity gets a local key from `straza keygen` and a
-headless enrolment.
+passwords. An NHI identity gets a key that its service makes at `straza
+keygen`, and a headless enrolment.
+
+A human enrolls by the code lane unless the step says otherwise. The runner
+starts `straza enroll --use-device-code` and approves the code it prints on
+the built-in issuer's page with the declared password. An enroll step with
+`signIn: browser` starts `straza enroll` without the flag and with `BROWSER`
+set to a helper script that writes the link it is given to a file. The
+runner reads the link, opens it at the built-in issuer, posts the sign-in
+form it finds there with the password, and follows the issuer's redirect,
+which must be the loopback `/callback` the link named, to the identity's
+service. The runner removes `BROWSER`, `DISPLAY` and `WAYLAND_DISPLAY` from
+every child, so no run ever opens the desktop's browser.
 
 `provenance` names what the scenario proves, with the same `doc` and `live`
 tags the conformance corpus uses. The runner refuses a scenario without it.
@@ -119,22 +166,28 @@ first.
 
 An optional `governance` map shortens the lifetimes the scenario's `strazad`
 boots with, as duration strings under the config file's own keys:
-`offlineGraceTTL`, `deviceTokenTTL` and `sessionMaxLifetime`, and nothing
-else. A scenario about the clock sets them to minutes so a token refresh, a
-credential renewal, a lifetime close or a grace window happens inside the
-run. The runner refuses any other governance key, so a scenario can never
-change the posture the binary decides under without the reader seeing it.
+`offlineGraceTTL`, `deviceTokenTTL`, `sessionMaxLifetime` and
+`signInMaxAge`. A scenario about the clock sets them to minutes so a token
+refresh, a lifetime close, a grace window or a sign-in deadline happens
+inside the run. The same map may set `minCustody` to `account` or `user`,
+and `minSignIn` to `code` or `browser`, because the matrix boots the
+standalone profile, whose floors are `user` and `code`. A scenario about
+refusing a key kept in the person's own account, or about the browser
+sign-in, has to raise its floor where the reader sees it. The runner
+refuses any other governance key, so a scenario can never change the
+posture the binary decides under without the reader seeing it.
 
 ```yaml
 governance:
   offlineGraceTTL: 2m40s
-  deviceTokenTTL: 6m45s
   sessionMaxLifetime: 3m45s
+  signInMaxAge: 7m20s
 ```
 
 Two bounds the binary fixes shape such a scenario. The session token lives
-300 s and the client refreshes it inside its last 120 s, so a daemonless
-refresh lands about three minutes after the session start. The admin token
+300 s and the identity's service refreshes it when a call needs it inside
+its last 120 s, so a refresh lands about three minutes after the session
+start. The admin token
 the steps act with is the ten-minute login token; a `server: {action: start}`
 step signs the admin in again, so a scenario that runs longer than that
 restarts the server somewhere inside the ten minutes or ends before them.
@@ -147,8 +200,9 @@ optional keys apply to any step:
 - `save: {<name>: <json path>}` stores a value from the response body, for
   example `save: {appId: id}`, `save: {ref: approval.id}` or `save: {ref: 0.id}`
   on a bare array. Later steps use it as `${appId}`. The runner also provides `${server}` (the strazad base
-  URL), `${upstream}` (the hermetic MCP upstream URL) and `${bin}` (the
-  directory holding the built binaries).
+  URL), `${upstream}` (the hermetic MCP upstream URL), `${objectsUpstream}`
+  (the upstream's repo server URL) and `${bin}` (the directory holding the
+  built binaries).
 - `within: <duration>` repeats the step until `want` holds or the deadline
   passes, and records the elapsed time from the end of the previous step
   under `timer: <name>`. The cadence is 100 ms up to a 20 s wait and one
@@ -164,13 +218,12 @@ Actions:
 |---|---|---|
 | `admin` | `method`, `path`, `body` (an object sent as JSON, or `yaml:` a string sent as `application/yaml`, which PolicySets and app manifests use), sent with the operator's login token from the device flow, or with the login token of the person named under `as: <identity>` | `status`, optional `body: {<json path>: <value>}` where a `null` value asserts the path is absent, which is how a scenario says a list has exactly so many items, and optional `bodyContains: <substring>` of the raw answer |
 | `scim` | `method`, `path`, `body`, sent with the IdM API token the runner minted with the SCIM grants | `status`, optional `body` and `bodyContains` as above |
-| `enroll` | `as: <identity>` | none; an enrolment that does not complete fails the step |
+| `enroll` | `as: <identity>`, and for a human an optional `signIn: code` or `browser`, `code` when absent, the lane the person signs in by as described under Scenario files | none; an enrolment that does not complete fails the step |
 | `approver` | `as: <human identity>` and `action`. `action: enroll` takes `token`, an enroll token that an earlier `admin` step minted as that person with `POST /v1/approvals/self/enroll-token` and saved. The runner makes a P-256 key for the run and enrolls it as a browser, the way the self-service page does. `action: decide` takes `request`, `verdict: approve` or `deny` and an optional `reason`. The runner fetches the single-use challenge, signs the decision with the enrolled key and posts it. A decide takes no `within`, because a repeat after a success answers 409 | `status`, optional `body` and `bodyContains` as above. An enroll answers 201. A decide answers 200 with `state`, and the record's decider, channel and words are read with an `admin` step |
-| `daemon` | `as: <identity>`, `action: start` or `stop`; the `straza daemon` that holds the push stream for that identity | none |
 | `server` | `action: stop` or `start`; stops or restarts `strazad` on the same port and data directory | none |
 | `hook` | `as`, `event` (a canonical event, below) or `payload: {<dialect>: <raw payload>}` for a dialect-specific case | `decision: allow`, `deny` or `block`, `silent: true`, `reasonContains`, `contextContains` for `session.start` |
-| `mcp` | `as`, then `list: true` or `tool` with `args`; the call goes through the gateway with the session the identity's last `session.start` hook step opened, so one precedes it | `tools` and `notTools` for a list; `result` (a substring of the tool result) or `refused: true` with `reasonContains` for a call |
-| `audit` | `subject`, `kind`, `action`, `decision`, `reasonContains`, `count`; matched against rows since the scenario started, `kind` against the event type or the hook event, `action` against the record's action such as `signing-keys.rotate` | the fields are the assertion; `within` defaults to 10 s because the audit drain is asynchronous |
+| `mcp` | `as`, then `list: true` or `tool` with `args`; the call goes through the identity's service to the gateway, in the harness window of the identity's `session.start` hook steps, so one precedes it. The service adds the session and its proof, and no session token ever reaches the runner | `tools` and `notTools` for a list; `result` (a substring of the tool result) or `refused: true` with `reasonContains` for a call |
+| `audit` | `subject`, `kind`, `action`, `decision`, `reasonContains`, `object`, `signIn`, `count`; matched against rows since the scenario started, `kind` against the event type or the hook event, `action` against the record's action such as `signing-keys.rotate`, `object`, a map of any of `type`, `reach`, `value` and `id` such as `{type: repo, value: acme/payments, id: "1001"}`, against the `object` member of a `straza.audit.mcp` record (events revision 44): each named field must equal its string, an id quoted, and a record without an object never matches, and `signIn` against the lane of a `device.enrolled` record (events revision 47) | the fields are the assertion; `within` defaults to 10 s because the audit drain is asynchronous |
 | `wait` | a plain duration written in place of a map, such as `wait: 8s` | none; a wait records nothing |
 
 A step that decides an approval names the person whose verdict it is under
@@ -241,60 +294,68 @@ published budget is reported so the number is known.
 | `hook-overhead` | spawn to exit of every single-shot `hook` step that decides, which is `tool.pre`, `tool.post` and `prompt.submit` without `within`, reported as p50 and p95 per dialect; a polled hook step is a wait and its attempts, some of which refresh or re-acquire over the network, are not samples | p95 under 25 ms |
 | `session-start` | spawn to exit of every `session.start` hook step, which includes the check-in round trip, worst per dialect | none published |
 | `kill-switch-gateway` | SCIM deactivation or session revoke to the first refused gateway call | none published; the target is under 5 s |
-| `kill-switch-hook` | the same, to the first refused hook decision with the identity's daemon connected | p99 under 2 s |
+| `kill-switch-hook` | the same, to the first refused hook decision with the session's push stream connected | p99 under 2 s |
 | `policy-gateway` | PolicySet activation to the first gateway call decided by it | none published |
-| `policy-hook` | PolicySet activation to the first hook decision made under the new snapshot, daemon connected | none published |
-| `catalog-unbind` | binding removal or role removal to the tool disappearing from the identity's gateway list | none published |
+| `policy-hook` | PolicySet activation to the first hook decision made under the new snapshot, push stream connected | none published |
+| `catalog-unbind` | binding removal or role removal to the tool disappearing from the identity's gateway list | none published; no push carries a role removal, so it lands at the session's next renewal, up to about 180 s after its token was minted |
 | `approval-retry` | admin approval to the retried call being allowed | none published |
-| `policy-pulse` | PolicySet activation to the first daemonless hook decision made under it, on a session busy with decisions | none published; the design bound is at most one call plus `snapshotLagSeconds`, 30 s by default |
-| `refresh-adopt` | a role assignment to the first daemonless hook decision made with the role, which the session learns only at its refresh inside the token's last 120 s | none published; the design puts it between 180 s and 300 s after the session start |
-| `reacquire-adopt` | a second role assignment to the first daemonless hook decision made with it after the janitor closed the session, which the session learns when its refused refresh falls back once to the enrolment lane | none published |
+| `policy-pulse` | PolicySet activation to the first hook decision made under it, on a session busy with decisions; the push stream carries the change too and no step can hold it down, so the timer measures whichever of the push and the snapshot pulse arrives first | none published; the design bound for the pulse alone is at most one call plus `snapshotLagSeconds`, 30 s by default |
+| `refresh-adopt` | a role assignment to the first hook decision made with the role, which the session learns only at its refresh inside the token's last 120 s | none published; the design puts it between 180 s and 300 s after the session start |
+| `reacquire-adopt` | a second role assignment to the first hook decision made with it after the janitor closed the session, which the session learns when its refused refresh falls back once to a check-in through the identity's key | none published |
 | `grace-exhausted` | the server stop to the first hook deny past the token's expiry plus the offline grace bound | none published; the bound is the configured `offlineGraceTTL` past expiry |
 | `ticket-expiry` | a ticket raised on a five second window to its record reading expired | none published; the sweep runs every 15 s, so the design puts it under 20 s |
 
-Without a daemon the hook lane learns about a change on two clocks, both
-published. A policy change arrives through the snapshot pulse the detached
-drain fires after every decision, at most once per `snapshotLagSeconds`, so
-a busy session is at most one call plus 30 s behind the active policy and
-an idle one learns it at its next decision. An identity change, such as a
-role, arrives only with a check-in: the refresh the client schedules inside
-the last 120 s of the session token's life, a re-acquire, or a session
-start, because roles are resolved on the server at check-in and the pulse
-carries only the snapshot. The propagation scenarios measure the
-daemon-connected path and prove the no-daemon path by the session-start
-step that follows; the clock scenario measures both no-daemon clocks under
-`policy-pulse` and `refresh-adopt`.
+A session learns about a change on three clocks, all published. A
+revocation and a policy activation arrive on the push stream that the
+identity's service holds for every session it starts, and the runner waits
+for that stream after every allowed `session.start` of a canonical event, so
+the kill-switch and policy timers measure the pushed path. A policy
+change also arrives through the snapshot pulse, at most once per
+`snapshotLagSeconds` after a decision, so a busy session is at most one
+call plus 30 s behind the active policy even while its push stream is
+down. An idle one learns it at its first call back when that call renews
+the session, and otherwise from the call after it. An identity change,
+such as a role, arrives only with a check-in: the refresh inside the last
+120 s of the session token's life, a re-acquire, or a session start,
+because roles are resolved on the server at check-in and the pulse carries
+only the snapshot. The clock scenario times a policy change under
+`policy-pulse` and a role under `refresh-adopt`. No step holds the push
+stream down, so `policy-pulse` cannot tell the pulse from the push. It
+fails only when both are missing.
 
 ## The clock scenario
 
 `g9-clock-lifetimes` boots its stack with minute lifetimes and lets four
 clocks run at once, on the claude-code dialect alone, because the clocks
-live in the client's session logic and in the server, not in the payload
+live in the service's session logic and in the server, not in the payload
 shape the other groups prove on every dialect. It runs about eight
-minutes and proves, in one run: a policy change reaches a busy
-daemonless session through the snapshot pulse; a role given after the
-session started reaches it only at the refresh inside the token's last
-120 s; the janitor closes every session at its lifetime with a chained
-record; a refused refresh falls back once to the enrolment lane on the hook
-lane and on the daemon, the device credential presented there is renewed
-once past half its life, and a second role arrives with that check-in; an
-idle credential still expires; an expired token is refused at the gateway;
-a stopped server leaves the hook deciding locally through the grace window
-and denying past it with the published wording; and a signing key staged
-under live sessions breaks none of them, every later refresh presenting a
-token the retiring key signed. What it cannot prove from outside is that
+minutes and proves, in one run: a policy change reaches a busy session
+within one call plus the pulse lag, through the push or the snapshot pulse;
+a role given after the session started reaches
+it only at the refresh inside the token's last 120 s; the janitor closes
+every session at its lifetime with a chained record; a refused refresh
+falls back once to a check-in through the identity's key, and a second role
+arrives with that check-in; a stopped server leaves the hook deciding
+locally through the grace window and denying past it with the published
+wording; the sign-in deadline counts from the enrollment, so a person who
+used Straza all along and one who never did are both refused past it with
+the published sentence and one record, and a new enrollment works again;
+and a signing key staged under live sessions breaks none of them, every
+later refresh presenting a token the retiring key signed. What it cannot prove from outside is that
 the promoted key is the one signing, because nothing readable through the
 API shows a key's status, and the old key's retirement, which is a month
 away because the approver token lifetime bounds it.
 
 ## Scope
 
-In this lane today: the golden path (J0), session lifecycle (G1), the
+In this lane today: the golden path (J0), session lifecycle (G1) with one
+enrollment by the browser sign-in under a browser floor on one dialect
+(`g1-browser-enroll`), the
 fail-closed matrix (G2), policy and catalog behaviour (G3), approvals
 beyond one hold (G4), tickets and grants (G5), delegated server
 administration (G6), server-owned roles and the one-server rule (G7), each through the four hook
-dialects where a hook step applies, and the clock-driven lifetimes (G9) on
-one dialect.
+dialects where a hook step applies, and the clock-driven lifetimes (G9) and
+object-scoped roles (G12) on one dialect.
 
 The approvals group walks a hook-lane hold through approval, the
 single-use retry, a denial, a repeated and a conflicting decision, expiry
@@ -341,6 +402,28 @@ approved hold whose retry exemption lapses makes the identical call ask again
 (`g4-retry-exemption-lapse`), and an approved ticket whose grant nobody
 consumes lapses the same way, leaving a record that never gains its consume
 fields (`g5-grant-window-lapse`).
+
+Object-scoped roles run on one dialect, because the object check lives in
+the gateway and the hook lane never runs it (`g12-object-scope`). The
+operator registers the repo server at `${objectsUpstream}`, reads the
+declaration its marks make, and pins it with a second install under the
+same name that adds the objects block. Straza then lists the seven repos across three pages, and the
+role that already reached the server covers every repo after that first
+pin. The draft check refuses a covers line on a server that pins no type, a
+role that says nothing about repos, a repo the list does not hold, and a
+search across every repo in a role on some, and each refused role leaves
+no row. A role on two repos allows a covered repo, and the upstream receives
+the repo's id in `_meta`. An uncovered repo and a repo the list does not
+hold are refused with one sentence that lists the repos the caller's roles
+cover, and `calls_seen` shows neither call reached the upstream. A role on
+every repo reads any repo with no id sent and runs the search. Once the
+operator pins `calls_seen` as reaching every repo, stricter than its mark,
+the role on two repos is refused it and the role on every repo is not. Each
+read and each refusal is on the chain once with its `object`, and the IGA
+reads each role's `covers` values over SCIM and is refused a write to them. The listing credential, a listing that fails or breaks a
+limit, the once-a-minute refresh, drift of a mark, the
+`apps.objects.enabled` setting and approvals on an object are not walked
+here.
 
 Not in this lane: the sentence a gateway
 caller reads when a denial lands inside the socket wait, because no step

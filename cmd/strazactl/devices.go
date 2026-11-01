@@ -42,12 +42,12 @@ func devicesCmd(client func() *ctl.Client) *cobra.Command {
 
 	devices.AddCommand(&cobra.Command{
 		Use:   "revoke <username> <device-id>",
-		Short: "Revoke a device enrollment (its device credential stops minting sessions)",
-		Long: "Removes the device enrollment: the long-lived device credential minted at\n" +
-			"enroll can no longer start sessions, sessions bound to the device stop\n" +
-			"refreshing, and a live enforcement kit on it is stood down by push. The user\n" +
-			"is untouched: they re-enroll the machine (or a replacement) with a fresh\n" +
-			"interactive login. For a person-level cut, use `users disable` or `users lock`.",
+		Short: "Revoke a device enrollment (it stops starting sessions)",
+		Long: "Removes the device enrollment: the machine's key can no longer start sessions,\n" +
+			"sessions bound to the device stop refreshing, and a live enforcement kit on it is\n" +
+			"stood down by push. The user is untouched: they enroll the machine, or a\n" +
+			"replacement, again with `straza enroll` and a fresh sign-in. For a person-level\n" +
+			"cut, use `users disable` or `users lock`.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u, err := client().UserByUsername(cmd.Context(), args[0])
@@ -58,7 +58,7 @@ func devicesCmd(client func() *ctl.Client) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"revoked device %s of %s: its device credential is dead; re-enrolling needs a fresh login\n",
+				"revoked device %s of %s. Its key starts no more sessions. To use the machine again, enroll it again with straza enroll.\n",
 				args[1], args[0])
 			return nil
 		},

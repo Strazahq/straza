@@ -2,7 +2,7 @@
 title: strazactl users lock
 description: 'Lock a user: a revocation that an identity manager cannot lift by enabling the user; the status stays as it is'
 pagetype: reference
-weight: 111
+weight: 107
 draft: false
 sources:
   - cmd/strazactl
@@ -25,7 +25,7 @@ strazactl users lock <username> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

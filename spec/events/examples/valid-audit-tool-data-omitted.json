@@ -1,0 +1,23 @@
+{
+  "specversion": "1.0",
+  "id": "0198a3c1-6f10-7d41-9b6a-3c4d5e6f7a91",
+  "type": "straza.audit.tool",
+  "source": "straza",
+  "time": "2026-10-31T11:03:05.020Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "file.write",
+    "app": "",
+    "command": "",
+    "workspace": "/work/proj",
+    "effect": "allow",
+    "ruleId": "",
+    "setName": "",
+    "reason": "Straza: no rule matched; the profile default allows local tools",
+    "snapshot": "sha256:44f0be1c",
+    "dataOmitted": "1080520 bytes, sha256 2da604c0efb1c2bb49b00d3fb7e64b5fba8dc7ac796cce72f9ad5eef53f32142"
+  }
+}

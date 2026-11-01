@@ -19,17 +19,14 @@ const nothingToPublish = "Nothing to publish: every document equals live."
 
 // draftEnd ends create, update, revert and rebase on the draft a answered,
 // as verdictEnd does. A draft whose every document equals live has nothing
-// to publish. When token says the caller is an admin API token, which never
-// publishes, a draft that can be published points to a person's login. A
-// stale draft points to Check again, because no update clears it. files is
-// the -f arguments that send its fixed documents.
-func draftEnd(w io.Writer, asJSON bool, a ctl.DraftAnswer, token bool, files string) error {
-	yes, no := publishHint(a.Draft.ID), updateHint(a.Draft.ID, files)
-	switch {
-	case unchanged(a.Draft.Items, a.Verdict):
+// to publish. Any other draft that can be published points to its page in
+// the console at server, because strazactl runs on an admin API token, which
+// never publishes. A stale draft points to Check again, because no update
+// clears it. files is the -f arguments that send its fixed documents.
+func draftEnd(w io.Writer, asJSON bool, a ctl.DraftAnswer, server, files string) error {
+	yes, no := publishNext(server, a.Draft.ID), updateHint(a.Draft.ID, files)
+	if unchanged(a.Draft.Items, a.Verdict) {
 		yes = nothingToPublish
-	case token:
-		yes = tokenNext(a.Draft.ID) + "."
 	}
 	if stale(a.Verdict) {
 		no = staleHint(a.Draft.ID)
@@ -60,13 +57,6 @@ func stale(v ctl.DraftVerdict) bool {
 // keeps what the draft changed and moves its base to live state.
 func staleHint(id string) string {
 	return "Check the draft again, which keeps what it changed and takes every other field from live state: strazactl drafts rebase " + id
-}
-
-// tokenNext is the way from an admin API token to the publish of draft id:
-// a token never publishes, and strazactl login refuses to run while one is
-// set.
-func tokenNext(id string) string {
-	return "Unset STRAZA_API_TOKEN, run strazactl login, then strazactl drafts publish " + id
 }
 
 // intakeRefused prints the 422 of a create or an update that intake

@@ -1,0 +1,33 @@
+{
+  "provenance": "doc RFC 9449 and spec/session-token/SPEC.md 2026-10-20 (generated, not captured from a client: proof key from the Ed25519 seed of 32 bytes 0x07, other key from 32 bytes 0x09, nonce key the 32 bytes 0x00 to 0x1f, signed at 2026-10-20T12:00:30Z)",
+  "description": "A loopback public URL also accepts the loopback origin the request arrived on with the same scheme and port, and the query and fragment of htu are ignored.",
+  "at": "2026-10-20T12:00:30Z",
+  "request": {
+    "method": "GET",
+    "path": "/v1/snapshot",
+    "origins": [
+      "http://localhost:8420",
+      "http://127.0.0.1:8420"
+    ],
+    "access_token": "example-session-token",
+    "thumbprint": "--6IM5l0OosLj9yWskISYhUA3n_3CURQkmrYMSha_ck"
+  },
+  "proof": "eyJhbGciOiJFZERTQSIsImp3ayI6eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IjZrcHNZLUtjVWdxLTlWQjdFeTdGLVpWSGRxNi12bnVTUWg3cWFSUkcwaXcifSwidHlwIjoiZHBvcCtqd3QifQ.eyJhdGgiOiJvbC1TQXB6bU9WZVZhVDVoNDBPNUJYZ29yM1NzY3Vxdjlod3VoMXYwMWRZIiwiaHRtIjoiR0VUIiwiaHR1IjoiaHR0cDovLzEyNy4wLjAuMTo4NDIwL3YxL3NuYXBzaG90P3NpbmNlPWFiYyN0b3AiLCJpYXQiOjE3OTI0OTc2MzAsImp0aSI6IjM1Mzg0MDgwNjNiOThjNmYzZjEyMTk3NWI2ZTNlNjY2Iiwibm9uY2UiOiJBQUFBQUFISDJ4QUhScl84WkNQMVhKRnIxLVlWZWY5OVdqT2VyTUhRbG9oZ015WEJVbFV6VncifQ.7nUV63lhQ5zJt3ayCpzrT0iL2hlpKMMms6_kaqdnHrY3jab4kP4hMJx5heFFkeASuA-HrywVVVx5EmFENJFWDg",
+  "header": {
+    "alg": "EdDSA",
+    "jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+    },
+    "typ": "dpop+jwt"
+  },
+  "claims": {
+    "ath": "ol-SApzmOVeVaT5h40O5BXgor3Sscuqv9hwuh1v01dY",
+    "htm": "GET",
+    "htu": "http://127.0.0.1:8420/v1/snapshot?since=abc#top",
+    "iat": 1792497630,
+    "jti": "3538408063b98c6f3f121975b6e3e666",
+    "nonce": "AAAAAAHH2xAHRr_8ZCP1XJFr1-YVef99WjOerMHQlohgMyXBUlUzVw"
+  }
+}

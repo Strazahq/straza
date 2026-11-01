@@ -146,11 +146,19 @@ func TestAttestationExamplesMatchSchema(t *testing.T) {
 	runCorpus(t, "spec/attestation/checkin-request.schema.json", "spec/attestation/examples", ".json", nil)
 }
 
+// Grant is schema-side only here: Straza mints grants and never verifies
+// them, and internal/authn's replay test checks the signatures and the
+// verification rules.
+func TestGrantExamplesMatchSchema(t *testing.T) {
+	runCorpus(t, "spec/grant/grant.schema.json", "spec/grant/examples", ".json", nil)
+}
+
 // TestSchemaTitles pins the title of a published schema, the name a code
 // generator gives the top-level type it writes from the schema.
 func TestSchemaTitles(t *testing.T) {
 	for _, tc := range []struct{ schema, title string }{
 		{"spec/events/events.schema.json", "StrazaEvent"},
+		{"spec/grant/grant.schema.json", "StrazaGrant"},
 	} {
 		if got := compileSchema(t, tc.schema).Title; got != tc.title {
 			t.Errorf("%s title = %q, want %q", tc.schema, got, tc.title)

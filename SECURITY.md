@@ -48,7 +48,18 @@ mismatch between the published checksums or signatures and the artifacts at once
 ## Verifying a release
 
 Each release archive comes with `checksums.txt`, its cosign signature and certificate,
-and an SBOM. The verification recipe is at https://docs.straza.ai/get-started/install/.
+and an SBOM. From 2.0.0, a release also carries packages of the `straza` client, and the
+same `checksums.txt` covers each of them. A deb or rpm package holds the same `straza`
+binary as the Linux archive of its architecture, whose SBOM lists the binary's modules.
+The Windows MSI holds the same `straza.exe` as the Windows amd64 zip and carries no
+Authenticode signature yet. The one universal `straza` of the macOS pkg is the binary of
+the darwin archives in every byte but the code signature, which the release workflow
+proves before the draft release exists. The pkg is signed with the Developer ID of
+SynapTech s. r. o. and notarized by Apple, so `pkgutil --check-signature` and
+`spctl -a -vvv -t install` check it on a Mac. Releases from 1.1.2 and earlier carry the
+archives only.
+The verification recipe is at https://docs.straza.ai/get-started/install/, and
+https://docs.straza.ai/security/supply-chain/ explains each check.
 At runtime, policy snapshots and session tokens are Ed25519-signed. A client refuses a
 policy snapshot it cannot verify against the keys it pinned at enrollment, and strazad
 refuses a session token it cannot verify.

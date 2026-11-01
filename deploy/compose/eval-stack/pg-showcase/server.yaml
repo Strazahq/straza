@@ -1,0 +1,32 @@
+# adaptive-pg-mcp on the eval stack, in straza mode: Straza's gateway decides
+# which agent reaches which tool and which database. The server answers only
+# the two lab tokens whose hashes are below, which compose.yaml gives the
+# seeder: lab-pg-app-token, which every tool call carries, and
+# lab-pg-listing-token, which only Straza's listing carries. It listens on
+# plain HTTP inside the compose network, where only strazad reaches it,
+# because the service publishes no port.
+version: 1
+mode: straza
+listen: 0.0.0.0:8080
+allow_plain_http: true
+free_sql: read-write
+limits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }
+gateway_tokens_sha256:
+  - "1122b9d0a30a95164e892a6bb09b1922654c66dced06deefe5b792f856e0cfce" # gitleaks:allow
+  - "f6f2ce57bee556c016c59d2da78546fc29ca5c6d2827879037886a7a55321266" # gitleaks:allow
+catalog: ./catalog
+# Four databases on midPoint's Postgres server, made by pg-showcase/init.sh.
+# helpdesk has a read and a write login, so Postgres is a second lock behind
+# Straza. The other three have one broad login each, so Straza is the only
+# lock. midPoint's own database is not listed, so no call can name it.
+databases:
+  helpdesk:
+    logins:
+      read:  { dsn_env: HELPDESK_READ_DSN }
+      write: { dsn_env: HELPDESK_WRITE_DSN }
+  sales_eu:
+    login: { dsn_env: SALES_EU_DSN }
+  sales_us:
+    login: { dsn_env: SALES_US_DSN }
+  playground:
+    login: { dsn_env: PLAYGROUND_DSN }

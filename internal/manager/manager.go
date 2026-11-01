@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -252,6 +253,11 @@ type instance struct {
 	invHash   string
 	invFilled bool
 
+	// objects is the straza.objects block of the row the instance serves
+	// now, under mu. A change of that block alone keeps the instance, so
+	// runs replaces this copy and view lays it over manifest.
+	objects *ObjectsSpec
+
 	// views are the views served beside inventory, which invHash covers
 	// with it. viewCache is the last read of the views, for the set of links
 	// in viewLinks, made at viewsRead, so a probe reads them again only when
@@ -465,6 +471,7 @@ func (m *Manager) startInstance(ctx context.Context, row store.App, mf Manifest,
 	inst := &instance{
 		app:      row,
 		manifest: mf,
+		objects:  mf.Straza.Objects,
 		ring:     NewRing(m.opts.RingSize),
 		status:   StatusStarting,
 		deployed: booted,
@@ -1163,10 +1170,11 @@ func (m *Manager) unusableOwnRow(inst *instance, sponsor string, row UserCredent
 }
 
 // Call invokes one upstream tool with the credential Credential resolved
-// (nil for a kind none app). It fails closed: a credentialed app is never
-// called with a nil secret. The runtime's error comes back as shown writes
-// it, because the gateway answers it to the AI agent.
-func (m *Manager) Call(ctx context.Context, appName, tool string, args json.RawMessage, secret *Secret) (*mcp.CallToolResult, error) {
+// (nil for a kind none app) and the _meta Straza sets on the call (nil for
+// none). It fails closed: a credentialed app is never called with a nil
+// secret. The runtime's error comes back as shown writes it, because the
+// gateway answers it to the AI agent.
+func (m *Manager) Call(ctx context.Context, appName, tool string, args json.RawMessage, secret *Secret, meta map[string]any) (*mcp.CallToolResult, error) {
 	m.mu.RLock()
 	inst, ok := m.byName[appName]
 	m.mu.RUnlock()
@@ -1176,7 +1184,7 @@ func (m *Manager) Call(ctx context.Context, appName, tool string, args json.RawM
 	if kind := inst.manifest.CredentialKind(); kind != CredentialNone && secret == nil {
 		return nil, m.missingCredential(inst, kind)
 	}
-	res, err := inst.runtime.Call(ctx, CallInput{Tool: tool, Args: args, Secret: secret})
+	res, err := inst.runtime.Call(ctx, CallInput{Tool: tool, Args: args, Secret: secret, Meta: meta})
 	return res, shownErr(err)
 }
 
@@ -1232,10 +1240,12 @@ func (inst *instance) view() AppView {
 	defer inst.mu.Unlock()
 	on := inst.manifest.viewsOn()
 	exposed := servedTools(filterTools(inst.inventory, inst.manifest.ExposedTools()), inst.views, on)
+	mf := inst.manifest
+	mf.Straza.Objects = inst.objects
 	return AppView{
 		ID: inst.app.ID, Name: inst.app.Name, Version: inst.app.Version,
 		Runtime: inst.app.RuntimeKind, Status: inst.status, Detail: inst.detail,
-		Source: inst.app.Source, Tools: exposed, Manifest: inst.manifest,
+		Source: inst.app.Source, Tools: exposed, Manifest: mf,
 		Offered: inventoryNames(inst.inventory), LastProbe: inst.lastProbe,
 		LastHealthy: inst.lastHealthy, StatusSince: inst.statusSince,
 		ViewsOn: on, Views: slices.Clone(inst.views),
@@ -1298,15 +1308,22 @@ func (m *Manager) emit(ctx context.Context, subject string, data map[string]any)
 }
 
 // inventoryHash fingerprints a sorted tool list (names, descriptions, and
-// schemas) for drift detection. With views on, it also covers each tool's
-// view links and each served view's address, document and _meta, each
-// appended only when present, so the hash of a server with no links is the
-// hash of its tools alone.
+// schemas) for drift detection. It also covers each tool's ai.straza/*
+// marks, sorted by key, and with views on each tool's view links and each
+// served view's address, document and _meta. Each is appended only when
+// present, so the hash of a server with no marks and no links is the hash
+// of its tools alone.
 func inventoryHash(tools []*mcp.Tool, views []View, on bool) string {
 	h := sha256.New()
 	for _, t := range tools {
 		schema, _ := json.Marshal(t.InputSchema)
 		fmt.Fprintf(h, "%s\x00%s\x00%s\x00", t.Name, t.Description, schema)
+		for _, k := range slices.Sorted(maps.Keys(t.Meta)) {
+			if strings.HasPrefix(k, markPrefix) {
+				b, _ := json.Marshal(t.Meta[k])
+				fmt.Fprintf(h, "%s\x00%s\x00", k, b)
+			}
+		}
 		if !on {
 			continue
 		}

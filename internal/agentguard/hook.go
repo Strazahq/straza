@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/agentguard/trace"
 	"github.com/strazahq/straza/internal/policy"
 )
@@ -24,7 +25,7 @@ type HookIO struct {
 }
 
 // Decider evaluates a normalized event and returns a decision. allowAll
-// allows everything; the live decider wires the local snapshot PDP.
+// allows everything; serviceDecider asks the Straza background service.
 type Decider interface {
 	Decide(n Normalized) policy.Decision
 }
@@ -37,9 +38,10 @@ func (allowAll) Decide(Normalized) policy.Decision {
 }
 
 // RunHook is the hook entrypoint: read stdin → detect dialect → normalize →
-// (session.start: check in and inject packs) → (tool.pre: local PDP decide) →
-// encode a dialect-appropriate response. A deny is expressed in the response
-// encoding (exit code / JSON). Fail-closed on infrastructure errors.
+// (session.start: start the session in the Straza background service and
+// inject packs) → (every other event: the service decides) → encode a
+// dialect-appropriate response. A deny is expressed in the response encoding
+// (exit code / JSON). Fail-closed on infrastructure errors.
 func RunHook(hio HookIO) error {
 	store, err := OpenStore()
 	if err != nil {
@@ -49,16 +51,19 @@ func RunHook(hio HookIO) error {
 		harness := DetectHarness(hio.Harness, environMap(hio.Environ), nil, nil)
 		return failClosedDialect(hio, harness, "Straza: state unavailable (%v)", err)
 	}
-	return runHook(hio, store, liveDecider{store: store})
+	svc := NewServiceClient()
+	return runHook(hio, store, svc, serviceDecider{store: store, svc: svc})
 }
 
 // runHookWith is the test entrypoint with an injected decider and no
 // session-start side effects.
 func runHookWith(hio HookIO, decider Decider) error {
-	return runHook(hio, nil, decider)
+	return runHook(hio, nil, nil, decider)
 }
 
-func runHook(hio HookIO, store *Store, decider Decider) error {
+// runHook runs one hook event. store and svc are nil in conformance runs and
+// tests, which then decide session.start like any observational event.
+func runHook(hio HookIO, store *Store, svc *localapi.Client, decider Decider) error {
 	env := environMap(hio.Environ)
 	// Determine the dialect as early as possible (from the explicit --harness
 	// override and env markers), so a failure BEFORE the payload can be parsed
@@ -112,39 +117,34 @@ func runHook(hio HookIO, store *Store, decider Decider) error {
 			slog.Bool("delegate", n.AgentID != "" || n.AgentType != ""))
 	}
 
-	// session.start: check in, then inject packs as additional context.
-	if n.Event.Kind == policy.EventSessionStart && store != nil {
-		return handleSessionStart(hio, store, harness, n)
+	// session.start: start the session, then inject packs as additional context.
+	if n.Event.Kind == policy.EventSessionStart && svc != nil {
+		return handleSessionStart(hio, store, svc, harness, n)
 	}
 
 	decision := decider.Decide(n)
 	return encodeDecision(hio, harness, n, decision)
 }
 
-// handleSessionStart checks in and emits the governance banner plus the
-// role-bound knowledge packs as harness additional-context. A checkin failure
-// fails the session closed with an actionable reason (the model relays it).
-func handleSessionStart(hio HookIO, store *Store, harness string, n Normalized) error {
+// handleSessionStart starts or reuses the window's session in the service and
+// emits the governance banner plus the role-bound knowledge packs as harness
+// additional-context. A failure fails the session closed with the sentence
+// that says why (the model relays it).
+func handleSessionStart(hio HookIO, store *Store, svc *localapi.Client, harness string, n Normalized) error {
 	start := time.Now()
 	tl := store.Trace()
-	// The check-in's answer (status + X-Request-Id) is observed by Client.do
-	// through this Call, so the session.start journal line names the server
-	// record it depended on.
-	call := &trace.Call{}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	ctx = trace.WithCall(ctx, call)
-	packs, info, err := SessionStart(ctx, store, n.HarnessName, n.HarnessVersion)
-	status, corr := call.Get()
+	ans, err := svc.StartSession(context.Background(), localapi.SessionRequest{Harness: windowOf(n)})
 	if err != nil {
 		journalDecision(tl, n, policy.Decision{Effect: policy.EffectDeny},
-			decisionFacts{start: start, status: status, correlation: corr, failClosed: true})
-		return failClosedHook(hio, store, harness, n.NativeEvent, "Straza: %v", err)
+			decisionFacts{start: start, failClosed: true})
+		return failClosedHook(hio, store, harness, n.NativeEvent, "%s", denyLine(serviceSentence(err, outcomeDenied)))
 	}
 	journalDecision(tl, n, policy.Decision{Effect: policy.EffectAllow},
-		decisionFacts{start: start, snapshot: info.SnapshotID, status: status, correlation: corr})
+		decisionFacts{start: start, snapshot: ans.SnapshotID})
+	info := SessionInfo{User: ans.User, Roles: ans.Roles, SnapshotID: ans.SnapshotID,
+		Attestation: ans.Attestation, ServerURL: ans.ServerURL, Capture: ans.Capture}
 	context := GovernanceBanner(info)
-	if pc := PackContext(packs); pc != "" {
+	if pc := PackContext(ans.Packs); pc != "" {
 		context += "\n\n" + pc
 	}
 	return encodeSessionStart(hio, harness, n.NativeEvent, context, GovernanceUserLine(info))

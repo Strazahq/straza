@@ -18,6 +18,7 @@ fields:
   sessionId: session_id
   workspace: cwd
   toolName: tool_name
+  nativeTool: native_tool_name
   toolInput: tool_input
   prompt: prompt
   promptResponse: prompt_response

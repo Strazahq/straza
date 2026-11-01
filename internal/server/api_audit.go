@@ -190,8 +190,11 @@ type batchRequest struct {
 // is the uploader's user and device, and any other record is refused and
 // counted in the answer's `refused`.
 func (a *App) handleAuditBatch(w http.ResponseWriter, r *http.Request) {
-	raw := bearerToken(r)
-	claims, err := a.tokens.Verify(raw)
+	raw, scheme := sessionCredential(r)
+	claims, err := a.verifySessionToken(w, r, raw, scheme)
+	if errors.Is(err, errAnswered) {
+		return
+	}
 	if err != nil || claims.Session == "" {
 		apiError(w, http.StatusUnauthorized, "session token rejected")
 		return

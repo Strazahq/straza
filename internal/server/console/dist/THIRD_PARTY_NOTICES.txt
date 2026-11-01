@@ -2848,9 +2848,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-npm vite 7.3.6
+npm vite 7.3.7
 License: MIT
-Origin: https://www.npmjs.com/package/vite/v/7.3.6
+Origin: https://www.npmjs.com/package/vite/v/7.3.7
 ================================================================================
 
 --- LICENSE.md ---
@@ -4997,9 +4997,9 @@ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 
 ================================================================================
-npm zod 4.6.2
+npm zod 4.6.6
 License: MIT
-Origin: https://www.npmjs.com/package/zod/v/4.6.2
+Origin: https://www.npmjs.com/package/zod/v/4.6.6
 ================================================================================
 
 --- LICENSE ---

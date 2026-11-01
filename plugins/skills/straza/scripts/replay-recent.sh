@@ -4,10 +4,11 @@
 # policies live right now.
 #
 # Usage: replay-recent.sh <username> <policy.yaml> [limit]
-# Needs strazactl logged in as an administrator and jq on PATH. It runs on
-# the person's login, inside a coding agent too, because audit tail reads
-# and policy simulate is a check that changes nothing. Nothing is recorded
-# and nothing is published.
+# Needs jq on PATH, and STRAZA_SERVER and STRAZA_API_TOKEN set to an admin
+# API token that holds audit:read and policy:write, the grant simulate's
+# POST needs, though it changes nothing. The person runs it in
+# their own terminal, never an agent, because an agent holds no admin API
+# token. Nothing is recorded and nothing is published.
 set -eu
 
 usage='usage: replay-recent.sh <username> <policy.yaml> [limit]'

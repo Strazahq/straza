@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/store"
 )
@@ -105,6 +106,50 @@ func TestResolverCacheEpochs(t *testing.T) {
 	roles, _ = r.ResolveRoles(ctx, u.ID, time.Now())
 	if got := names(roles); !slices.Equal(got, []string{"dev"}) {
 		t.Errorf("after Bump roles = %v, want [dev]", got)
+	}
+}
+
+// TestResolverEntryEndsAfterOneTokenLifetime pins the age bound of a cached
+// answer: a write whose Bump never reaches this resolver, as on a replica
+// that missed the identity event, is read from one session token lifetime
+// after the answer was resolved, and the answer's window edge is unchanged.
+func TestResolverEntryEndsAfterOneTokenLifetime(t *testing.T) {
+	ctx := context.Background()
+	s := testStore(t)
+	u, _ := s.Users().Create(ctx, store.User{Username: "kim"})
+	dev, _ := s.Roles().Create(ctx, store.Role{Name: "dev"})
+	a, err := s.Roles().Assign(ctx, store.RoleAssignment{SubjectKind: store.SubjectUser, SubjectID: u.ID, RoleID: dev.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	r := NewResolver(s)
+	if roles, _ := r.ResolveRoles(ctx, u.ID, t0); !slices.Equal(names(roles), []string{"dev"}) {
+		t.Fatalf("first resolve = %v, want [dev]", names(roles))
+	}
+	if err := s.Roles().Unassign(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The order matters: each row reads through the cache the rows before it
+	// left.
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		want []string
+	}{
+		{"a second before one token lifetime", t0.Add(authn.DefaultTokenTTL - time.Second), []string{"dev"}},
+		{"at one token lifetime", t0.Add(authn.DefaultTokenTTL), nil},
+	} {
+		roles, until, err := r.ResolveRolesUntil(ctx, u.ID, tc.at)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got := names(roles); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: roles = %v, want %v", tc.name, got, tc.want)
+		}
+		if !until.IsZero() {
+			t.Errorf("%s: until = %v, want zero for an assignment with no window", tc.name, until)
+		}
 	}
 }
 

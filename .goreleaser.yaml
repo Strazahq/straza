@@ -1,6 +1,7 @@
 # Straza release pipeline. It runs from .github/workflows/release.yml on v*
-# tags. Static binaries only (CGO off), SBOMs via syft, and checksums signed
-# with keyless cosign (GitHub OIDC → Fulcio). The Rekor transparency-log
+# tags. Static binaries (CGO off) in archives and, for the straza client, in
+# deb and rpm packages, SBOMs via syft, and checksums signed with keyless
+# cosign (GitHub OIDC → Fulcio). The Rekor transparency-log
 # entry is public and includes the repository identity, which is intended:
 # the project is open source (AGPL-3.0-only core and an Apache-2.0
 # integration surface).
@@ -10,6 +11,13 @@ project_name: straza
 
 env:
   - CGO_ENABLED=0
+
+# A snapshot takes the git describe form, 1.0.0-1663-gfdbd2d08, because rpm
+# and dpkg order versions by their pieces. The default 1.0.0-SNAPSHOT-<hash>
+# made the order depend on the hash, so rpm refused about half the upgrades.
+# The commit count rises with every commit, so a newer build sorts higher.
+snapshot:
+  version_template: '{{ trimprefix .Summary "v" }}'
 
 before:
   hooks:
@@ -28,6 +36,7 @@ builds:
         -X github.com/strazahq/straza/internal/version.Commit={{ .ShortCommit }}
     goos: [linux, windows, darwin]
     goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
   - id: strazactl
     main: ./cmd/strazactl
     binary: strazactl
@@ -38,6 +47,7 @@ builds:
         -X github.com/strazahq/straza/internal/version.Commit={{ .ShortCommit }}
     goos: [linux, windows, darwin]
     goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
   - id: straza
     main: ./cmd/straza
     binary: straza
@@ -48,6 +58,25 @@ builds:
         -X github.com/strazahq/straza/internal/version.Commit={{ .ShortCommit }}
     goos: [linux, windows, darwin]
     goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      # One Windows MSI, built once. build-msi.sh skips every target but
+      # windows amd64, so this post hook packages the straza.exe this build
+      # just produced and does nothing for the other five. It needs docker,
+      # not Windows. The MSI file name follows the archive naming, and
+      # extra_files below sign and release it. A snapshot builds no MSI.
+      post:
+        - cmd: ./deploy/windows/build-msi.sh "{{ .Os }}" "{{ .Arch }}" "{{ .Path }}" "{{ .Version }}" dist
+          env:
+            - STRAZA_SNAPSHOT={{ .IsSnapshot }}
+          output: true
+        # check-release-binary.sh compares each darwin straza byte for byte
+        # with the unsigned binary that the release workflow's macOS job
+        # signed into the pkg, from the folder STRAZA_MACOS_PKG_DIR names. A
+        # binary that differs stops the build before any draft exists. Other
+        # targets, local builds and the MSI rig pass through unchanged.
+        - cmd: ./deploy/macos/check-release-binary.sh "{{ .Os }}" "{{ .Arch }}" "{{ .Path }}"
+          output: true
 
 archives:
   - id: default
@@ -68,8 +97,74 @@ archives:
       - src: build/notices/THIRD_PARTY_NOTICES.txt
         strip_parent: true
 
+nfpms:
+  - id: straza
+    # One deb and one rpm per Linux architecture with the straza binary and
+    # the units, account and scripts of its background service. strazad and
+    # strazactl ship in the archives only. The fixed times and build host
+    # make two builds of one commit byte for byte the same.
+    ids: [straza]
+    package_name: straza
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [deb, rpm]
+    section: admin
+    bindir: /usr/bin
+    vendor: SynapTech s. r. o.
+    maintainer: SynapTech s. r. o. <hello@straza.ai>
+    homepage: https://straza.ai
+    description: |-
+      Straza client and background service.
+      Straza is open source runtime governance for AI agents. This package
+      holds the straza client, which connects the agent harnesses on this
+      machine to a Straza server, and the Straza background service, which
+      holds each local user's keys and sessions under its own OS account.
+    license: AGPL-3.0-only AND Apache-2.0
+    mtime: "{{ .CommitDate }}"
+    contents:
+      - src: deploy/linux/straza-service.socket
+        dst: /usr/lib/systemd/system/straza-service.socket
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: deploy/linux/straza-service.service
+        dst: /usr/lib/systemd/system/straza-service.service
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: deploy/linux/straza-service.sysusers
+        dst: /usr/lib/sysusers.d/straza-service.conf
+        file_info: { mode: 0644, owner: root, group: root }
+      # git runs git-remote-straza for a straza:: remote, and the straza
+      # binary serves as that helper when called by this name.
+      - src: /usr/bin/straza
+        dst: /usr/bin/git-remote-straza
+        type: symlink
+      - src: LICENSE
+        dst: /usr/share/doc/straza/LICENSE
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: LICENSE-APACHE
+        dst: /usr/share/doc/straza/LICENSE-APACHE
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: NOTICE
+        dst: /usr/share/doc/straza/NOTICE
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: build/notices/THIRD_PARTY_NOTICES.txt
+        dst: /usr/share/doc/straza/THIRD_PARTY_NOTICES.txt
+        file_info: { mode: 0644, owner: root, group: root }
+    scripts:
+      preinstall: deploy/linux/preinstall.sh
+      postinstall: deploy/linux/postinstall.sh
+      preremove: deploy/linux/preremove.sh
+      postremove: deploy/linux/postremove.sh
+    rpm:
+      buildhost: straza
+
 checksum:
   name_template: checksums.txt
+  # The MSI and the macOS pkg are not goreleaser-native artifacts, so they
+  # join the checksum list by hand. cosign signs checksums.txt, so this is
+  # what covers them. The release workflow's macOS job puts the pkg in
+  # build/macos. A glob that matches nothing is no error, so the workflow
+  # checks before and after goreleaser that a vX.Y.Z release lists the pkg.
+  extra_files:
+    - glob: dist/*.msi
+    - glob: build/macos/*.pkg
 
 sboms:
   - artifacts: archive
@@ -96,8 +191,17 @@ release:
   # the record of what changed in each version.
   draft: true
   prerelease: auto
+  # The MSI and the macOS pkg are uploaded to the release the same way, by
+  # hand, because they are not goreleaser-native artifacts.
+  extra_files:
+    - glob: dist/*.msi
+    - glob: build/macos/*.pkg
   header: |
-    Static binaries for linux/windows/darwin (amd64/arm64). Verify with:
+    Archives of static binaries for linux/windows/darwin (amd64/arm64), the
+    straza client with its background service as deb and rpm packages for
+    linux (amd64/arm64), and the straza client with its background service as
+    one MSI for windows amd64 and as one signed and notarized pkg for macOS
+    with a universal binary (arm64/amd64). Verify with:
     ```sh
     cosign verify-blob --signature checksums.txt.sig --certificate checksums.txt.pem \
       --certificate-identity-regexp '^https://github\.com/Strazahq/straza/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \

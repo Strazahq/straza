@@ -14,19 +14,20 @@ import (
 
 // Broker resolves the server's own static secret, role-bound static secrets
 // and each user's own rows, OAuth grants and pasted tokens, for the gateway
-// and manager (manager.SecretSource). It caches credential rows
-// (ciphertext) in memory. Refresh runs on the control plane (boot, secret
-// set, connect) so ForRoles/ForUser/AppSecret never read the database on a
-// request path. Decryption happens per resolution, keeping plaintext
-// lifetimes short.
+// and manager (manager.SecretSource), and each server's listing credential
+// for the object lists. It caches credential rows (ciphertext) in memory.
+// Refresh runs on the control plane (boot, secret set, connect) so
+// ForRoles/ForUser/AppSecret never read the database on a request path.
+// Decryption happens per resolution, keeping plaintext lifetimes short.
 type Broker struct {
 	store    store.Store
 	provider Provider
 
-	mu     sync.RWMutex
-	byApp  map[string][]cached               // app id → role statics (sorted by role name)
-	appRow map[string]cached                 // app id → the app-scoped static (the server's own secret)
-	grants map[string]map[string]cachedGrant // app id → user id → the user's own row
+	mu      sync.RWMutex
+	byApp   map[string][]cached               // app id → role statics (sorted by role name)
+	appRow  map[string]cached                 // app id → the app-scoped static (the server's own secret)
+	listing map[string]cached                 // app id → the listing credential, answered by ListingSecret alone
+	grants  map[string]map[string]cachedGrant // app id → user id → the user's own row
 }
 
 type cached struct {
@@ -46,7 +47,8 @@ type cachedGrant struct {
 // NewBroker builds a broker; call Refresh before serving.
 func NewBroker(st store.Store, provider Provider) *Broker {
 	return &Broker{store: st, provider: provider,
-		byApp: map[string][]cached{}, appRow: map[string]cached{}, grants: map[string]map[string]cachedGrant{}}
+		byApp: map[string][]cached{}, appRow: map[string]cached{}, listing: map[string]cached{},
+		grants: map[string]map[string]cachedGrant{}}
 }
 
 // Refresh reloads every app's credential rows into memory (control plane).
@@ -66,6 +68,7 @@ func (b *Broker) Refresh(ctx context.Context) error {
 	}
 	next := map[string][]cached{}
 	nextApp := map[string]cached{}
+	nextListing := map[string]cached{}
 	nextGrants := map[string]map[string]cachedGrant{}
 	for _, app := range apps {
 		creds, err := b.store.Credentials().ListByApp(ctx, app.ID)
@@ -77,6 +80,8 @@ func (b *Broker) Refresh(ctx context.Context) error {
 			switch {
 			case c.Scope == store.CredScopeApp && c.Kind == store.CredStatic:
 				nextApp[app.ID] = cached{id: c.ID, payload: c.EncPayload}
+			case c.Scope == store.CredScopeListing && c.Kind == store.CredStatic:
+				nextListing[app.ID] = cached{id: c.ID, payload: c.EncPayload}
 			case c.Scope == store.CredScopeRole && c.Kind == store.CredStatic:
 				name, ok := roleName[c.OwnerID]
 				if !ok {
@@ -108,6 +113,7 @@ func (b *Broker) Refresh(ctx context.Context) error {
 	b.mu.Lock()
 	b.byApp = next
 	b.appRow = nextApp
+	b.listing = nextListing
 	b.grants = nextGrants
 	b.mu.Unlock()
 	return nil
@@ -174,11 +180,17 @@ func (b *Broker) decrypt(c cached) *manager.Secret {
 // refreshes the cache. An empty roleID stores the server's own secret (one
 // app-scoped row owned by the app); a role id stores that role's override.
 func (b *Broker) Set(ctx context.Context, appID, roleID, value string) (store.Credential, error) {
+	scope, owner := staticScope(appID, roleID)
+	return b.upsertStatic(ctx, appID, scope, owner, value)
+}
+
+// upsertStatic seals value and rotates the static row of scope and owner
+// on appID in place, or creates it, then refreshes the cache.
+func (b *Broker) upsertStatic(ctx context.Context, appID, scope, owner, value string) (store.Credential, error) {
 	sealed, err := b.provider.Seal([]byte(value))
 	if err != nil {
 		return store.Credential{}, err
 	}
-	scope, owner := staticScope(appID, roleID)
 	existing, err := b.store.Credentials().ListByApp(ctx, appID)
 	if err != nil {
 		return store.Credential{}, err

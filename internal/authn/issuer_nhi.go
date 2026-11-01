@@ -11,6 +11,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 
 	"github.com/strazahq/straza/internal/clientassertion"
+	"github.com/strazahq/straza/internal/dpop"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -95,7 +96,10 @@ func (i *Issuer) handleClientCredentials(w http.ResponseWriter, r *http.Request)
 	i.seenJTI[jti] = exp
 	i.mu.Unlock()
 
-	idTok, err := i.tokens.MintIDToken(u.ID, nhiTokenAudience, i.idTTL, u.Username, u.Email)
+	// The token names the key that verified the assertion, so the server
+	// refuses it once an admin replaces or removes that key.
+	idTok, err := i.tokens.MintIDTokenFor(u.ID, nhiTokenAudience, i.idTTL, u.Username, u.Email,
+		LoginFacts{KeyThumbprint: dpop.Thumbprint(pub)})
 	if err != nil {
 		oauthError(w, "server_error", "could not sign id token")
 		return

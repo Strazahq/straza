@@ -55,7 +55,7 @@ func (o approveOutcome) slot(audited bool) decisionSlot {
 // resolveApprove is gateApprove on the combined endpoint, answered as
 // (reason, run).
 func (a *App) resolveApprove(ctx context.Context, gate approvalGate, claims authn.Claims, sub policy.Subject, ev policy.Event, d policy.Decision, justification string, callArgs json.RawMessage) (string, bool) {
-	o := a.gateApprove(ctx, gate, claims, sub, ev, d, justification, callArgs, true)
+	o := a.gateApprove(ctx, gate, claims, sub, ev, d, justification, callArgs, approval.Object{}, true)
 	return o.reason, o.run
 }
 
@@ -67,15 +67,42 @@ func (a *App) resolveApprove(ctx context.Context, gate approvalGate, claims auth
 // refusal the model reads and the audit record keeps: the fail-closed service
 // error, the denied-by reason, the expired/timeout reason, the used-already
 // reason, the pending reason, or afterUse's reason for a client that left
-// while the use was in flight. awaitListed says the endpoint lists the
+// while the use was in flight. obj is the object the call names, zero when
+// none. awaitListed says the endpoint lists the
 // straza__approval_await tool, so a pending hold or ticket may name it. It blocks up to
-// spec.TimeoutSeconds, bounded by the request context (a client disconnect
-// collapses the wait to a timeout). Fail closed on every uncertain state.
-func (a *App) gateApprove(ctx context.Context, gate approvalGate, claims authn.Claims, sub policy.Subject, ev policy.Event, d policy.Decision, justification string, callArgs json.RawMessage, awaitListed bool) approveOutcome {
+// spec.TimeoutSeconds, bounded by gatewayHold and the request context (a
+// client disconnect collapses the wait to a timeout). Fail closed on every
+// uncertain state.
+func (a *App) gateApprove(ctx context.Context, gate approvalGate, claims authn.Claims, sub policy.Subject, ev policy.Event, d policy.Decision, justification string, callArgs json.RawMessage, obj approval.Object, awaitListed bool) approveOutcome {
+	hold := a.gatewayHold(time.Duration(d.Approve.TimeoutSeconds) * time.Second)
+	words := wordsCall
+	if awaitListed {
+		words = wordsAwait
+	}
+	return a.gateApproveWithin(ctx, gate, claims, sub, ev, d, justification, callArgs, obj, words, hold)
+}
+
+// approveWords is the reader a pending or final approval sentence speaks
+// to: a model on an endpoint that does not list straza__approval_await, a
+// model on one that does, or a person who ran git through a git grant.
+type approveWords int
+
+const (
+	wordsCall approveWords = iota
+	wordsAwait
+	wordsGit
+)
+
+// gateApproveWithin is gateApprove with the in-request hold and the
+// sentences' reader given: the git grant route shortens the hold to the
+// request's waitSeconds and speaks of git commands.
+func (a *App) gateApproveWithin(ctx context.Context, gate approvalGate, claims authn.Claims, sub policy.Subject, ev policy.Event, d policy.Decision, justification string, callArgs json.RawMessage, obj approval.Object, words approveWords, hold time.Duration) approveOutcome {
 	spec := d.Approve
-	// Fingerprint: the v2 key (per-rule binding; canonicalized args).
+	// Fingerprint: the v2 key (per-rule binding; canonicalized args) with
+	// the object the call names, so an approval for one object never runs
+	// a call on another, in either binding scope.
 	// Ambiguous args (duplicate keys, malformed JSON) have NO fingerprint: deny.
-	key, err := approval.EventKeyV2(ev, spec.Binding)
+	key, err := approval.EventKeyObject(ev, spec.Binding, obj)
 	if err != nil {
 		a.failClosed(ctx, "gateway", d.RuleID, err)
 		return approveOutcome{reason: "Straza: " + fingerprintUnavailableReason(err)}
@@ -90,7 +117,7 @@ func (a *App) gateApprove(ctx context.Context, gate approvalGate, claims authn.C
 	// return a deny-with-ticket tool error. The blocking Await lane below is
 	// hold-only.
 	if spec.Class == policy.ClassTicket {
-		return a.resolveTicketGateway(ctx, gate, claims, sub, ev, d, key, justification, prev, awaitListed)
+		return a.resolveTicketGateway(ctx, gate, claims, sub, ev, d, key, justification, prev, words)
 	}
 	// A retry of a call that already answered pending uses its approval here.
 	// A lookup that the store cannot answer denies before any request opens.
@@ -121,7 +148,6 @@ func (a *App) gateApprove(ctx context.Context, gate approvalGate, claims authn.C
 		a.failClosed(ctx, "gateway", d.RuleID, err)
 		return approveOutcome{reason: a.approveRequestDenyReason(err)}
 	}
-	hold := a.gatewayHold(time.Duration(spec.TimeoutSeconds) * time.Second)
 	awaitCtx, cancel := context.WithTimeout(ctx, hold)
 	defer cancel()
 	res, err := gate.Await(awaitCtx, rec.ID)
@@ -136,7 +162,7 @@ func (a *App) gateApprove(ctx context.Context, gate approvalGate, claims authn.C
 		// the retry uses at the top of this func, so answering early loses
 		// nothing.
 		if remaining := time.Until(rec.ExpiresAt); remaining > 0 {
-			nameAwait := awaitListed && a.awaitToolVisible(sub)
+			nameAwait := words == wordsAwait && a.awaitToolVisible(sub)
 			return approveOutcome{
 				reason: a.cappedHoldPendingReason(rec, int(remaining.Round(time.Second).Seconds()), nameAwait),
 				ref:    rec.ID, pending: true, expiresAt: rec.ExpiresAt,
@@ -258,10 +284,11 @@ func (a *App) cappedHoldPendingReason(rec approval.Record, secondsLeft int, name
 // already denied the latest ticket for this exact call and its decision window
 // is still open, it denies FINAL without opening a new row, otherwise it
 // opens/dedupes the one pending ticket and answers the deny-with-ticket reason
-// as a pending outcome, naming straza__approval_await only when awaitListed
-// says the endpoint lists it. A store error fails closed. An expired or
-// past-window prior ticket just re-opens a fresh one on retry.
-func (a *App) resolveTicketGateway(ctx context.Context, gate approvalGate, claims authn.Claims, sub policy.Subject, ev policy.Event, d policy.Decision, key string, justification string, prev argsPreview, awaitListed bool) approveOutcome {
+// as a pending outcome, naming straza__approval_await only when words says
+// the endpoint lists it, and in git's words for a git grant. A store error
+// fails closed. An expired or past-window prior ticket just re-opens a fresh
+// one on retry.
+func (a *App) resolveTicketGateway(ctx context.Context, gate approvalGate, claims authn.Claims, sub policy.Subject, ev policy.Event, d policy.Decision, key string, justification string, prev argsPreview, words approveWords) approveOutcome {
 	// A service error on the lookup denies: uncertainty never opens a ticket.
 	if grant, ok, err := gate.ConsumeGrant(ctx, claims.Subject, key, claims.Session); err != nil {
 		a.failClosed(ctx, "gateway", d.RuleID, err)
@@ -276,6 +303,9 @@ func (a *App) resolveTicketGateway(ctx context.Context, gate approvalGate, claim
 		a.failClosed(ctx, "gateway", d.RuleID, err)
 		return approveOutcome{reason: "Straza: approval service error. Denied (fail-closed)"}
 	} else if ok {
+		if words == wordsGit {
+			return outcomeOf(gitTicketDeniedReason(rec), false, rec.ID)
+		}
 		return outcomeOf(ticketDeniedFinalReason(rec), false, rec.ID)
 	}
 	rec, err := gate.Request(ctx, approval.RequestInput{
@@ -298,10 +328,32 @@ func (a *App) resolveTicketGateway(ctx context.Context, gate approvalGate, claim
 		a.failClosed(ctx, "gateway", d.RuleID, err)
 		return approveOutcome{reason: a.approveRequestDenyReason(err)}
 	}
-	return approveOutcome{
-		reason: a.ticketPendingReason(rec, d.Approve.TicketTTLSeconds, awaitListed && a.awaitToolVisible(sub)),
-		ref:    rec.ID, pending: true, expiresAt: rec.ExpiresAt,
+	reason := a.ticketPendingReason(rec, d.Approve.TicketTTLSeconds, words == wordsAwait && a.awaitToolVisible(sub))
+	if words == wordsGit {
+		reason = a.gitTicketPendingReason(rec, d.Approve.TicketTTLSeconds)
 	}
+	return approveOutcome{reason: reason, ref: rec.ID, pending: true, expiresAt: rec.ExpiresAt}
+}
+
+// gitTicketPendingReason is ticketPendingReason for a person who ran git:
+// the ticket, its decision window and where a person decides, and that the
+// same git command run again after the approval goes through.
+func (a *App) gitTicketPendingReason(rec approval.Record, ticketTTLSeconds int) string {
+	return fmt.Sprintf("Straza: approval ticket %s is pending, so git did not run. A person decides within %s, on %s. "+
+		"Run the same git command again once it is approved. It fails if the ticket is denied or expires.",
+		rec.ID, humanDuration(time.Duration(ticketTTLSeconds)*time.Second), a.surfacesHintFor(rec))
+}
+
+// gitTicketDeniedReason is ticketDeniedFinalReason for a person who ran
+// git: the denied ticket, who denied it, and until when the same git
+// command stays refused.
+func gitTicketDeniedReason(rec approval.Record) string {
+	who := rec.DecidedByName
+	if who == "" {
+		who = "an approver"
+	}
+	return fmt.Sprintf("Straza: approval ticket %s was denied by %s, so git did not run, and the same git command stays refused until %s.",
+		rec.ID, who, rec.ExpiresAt.UTC().Format(time.RFC3339))
 }
 
 // fingerprintUnavailableReason words the fail-closed deny for a call whose
@@ -328,12 +380,14 @@ var gatewayHoldCap = 120 * time.Second
 // knob) or the built-in default. The window is always the ceiling:
 // config can shorten the socket wait relative to it, never outlive it.
 func (a *App) gatewayHold(window time.Duration) time.Duration {
-	cap := gatewayHoldCap
+	return min(window, a.gatewayHoldMax())
+}
+
+// gatewayHoldMax is the longest in-request hold: approval.gatewayHoldSeconds
+// when set, else gatewayHoldCap.
+func (a *App) gatewayHoldMax() time.Duration {
 	if s := a.cfg.Approval.GatewayHoldSeconds; s > 0 {
-		cap = time.Duration(s) * time.Second
+		return time.Duration(s) * time.Second
 	}
-	if window < cap {
-		return window
-	}
-	return cap
+	return gatewayHoldCap
 }

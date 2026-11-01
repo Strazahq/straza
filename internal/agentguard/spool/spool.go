@@ -30,7 +30,11 @@ import (
 // loses nothing (at-least-once; the server dedupes by CE id).
 type Spool struct {
 	path string
-	mu   sync.Mutex
+	// mu serializes appends with the rotate of the live file and with
+	// Pending, and drainMu serializes drains, so an append never waits on
+	// an upload.
+	mu      sync.Mutex
+	drainMu sync.Mutex
 }
 
 // NewSpool returns the spool at path.
@@ -160,14 +164,17 @@ type Uploader interface {
 // drainChunkRecords records and drainChunkBytes bytes, and a file's records
 // leave disk only after every one of its chunks landed; a mid-drain failure
 // keeps the current and later files and re-sends next drain.
+// Only the rotate holds the append lock, so no append waits on the network.
 func (s *Spool) Drain(ctx context.Context, client Uploader, sessionToken string) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.drainMu.Lock()
+	defer s.drainMu.Unlock()
 
 	dir := filepath.Dir(s.path)
+	s.mu.Lock()
 	if fi, err := os.Stat(s.path); err == nil && fi.Size() > 0 {
 		_ = os.Rename(s.path, filepath.Join(dir, "audit-pending-"+uuid.NewString()+".jsonl"))
 	}
+	s.mu.Unlock()
 	pending, err := filepath.Glob(filepath.Join(dir, "audit-pending-*.jsonl"))
 	if err != nil {
 		return 0, err
@@ -189,7 +196,9 @@ func (s *Spool) Drain(ctx context.Context, client Uploader, sessionToken string)
 		}
 		removeDrained(dir, p, skipped+oversize)
 	}
+	s.mu.Lock()
 	s.markDrainedIfFlushed()
+	s.mu.Unlock()
 	return total, nil
 }
 

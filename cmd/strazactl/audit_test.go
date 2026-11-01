@@ -21,10 +21,6 @@ type auditServer struct {
 func (s *auditServer) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("GET /v1/admin/audit", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.uris = append(s.uris, r.URL.RequestURI())
@@ -85,7 +81,7 @@ func TestAuditTailFilters(t *testing.T) {
 			s := &auditServer{}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), tc.args...)
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), tc.args...)
 			if err != nil {
 				t.Fatalf("%v: %v", tc.args, err)
 			}
@@ -139,7 +135,7 @@ func TestAuditTailUserPrintsEveryKind(t *testing.T) {
 			s := &auditServer{rows: "[" + tc.row + "]"}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "audit", "tail", "--user", "joe")
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), "audit", "tail", "--user", "joe")
 			if err != nil {
 				t.Fatalf("audit tail --user joe: %v", err)
 			}

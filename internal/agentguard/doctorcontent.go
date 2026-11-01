@@ -64,7 +64,7 @@ func rank(status string) int {
 // presence to judge (never installed here, and no governance claim to
 // contradict).
 func managedContentVerdict(ctx context.Context, cfg Config, harness string) (string, string) {
-	path, err := managedHookPath(harness)
+	path, err := ManagedHookPath(harness)
 	if err != nil {
 		return "", checkOK
 	}
@@ -113,7 +113,7 @@ func managedContentVerdict(ctx context.Context, cfg Config, harness string) (str
 // true = served but unusable (err says why); unverified documents are never
 // returned.
 func fetchDoctorDoc(ctx context.Context, cfg Config, harness string) (*harnesscfg.Document, bool, error) {
-	lookup, err := keyLookup(cfg.SnapshotKeys)
+	lookup, err := KeyLookup(cfg.SnapshotKeys)
 	if err != nil {
 		return nil, false, err
 	}
@@ -131,18 +131,19 @@ func fetchDoctorDoc(ctx context.Context, cfg Config, harness string) (*harnesscf
 
 // matchesLocalRender tries every plausible binary path this box could have
 // installed with: the vendor default, the env-relocated managed path, and
-// whatever the on-disk wiring itself invokes (custom --bin-dir installs).
+// whatever the on-disk wiring itself invokes (custom --bin-dir installs),
+// with the git host file this box's install names.
 func matchesLocalRender(harness string, raw []byte) bool {
 	goos := osName()
 	candidates := map[string]bool{
 		vendorDefaultBinPath(goos): true,
 		ManagedBinaryPath(""):      true,
 	}
-	for _, p := range wiringBinPaths(harness, raw) {
+	for _, p := range wiringBinPaths(harness, raw, codexShimTarget) {
 		candidates[p] = true
 	}
 	for binPath := range candidates {
-		arts, err := RenderManagedArtifacts(harness, goos, binPath)
+		arts, err := renderManagedArtifacts(harness, goos, binPath, gitHostsFileHere())
 		if err == nil && bytes.Equal(arts["hooks."+harness], raw) {
 			return true
 		}
@@ -151,8 +152,10 @@ func matchesLocalRender(harness string, raw []byte) bool {
 }
 
 // wiringBinPaths extracts the binary paths the on-disk wiring invokes, so a
-// custom-layout box's own render is a candidate.
-func wiringBinPaths(harness string, raw []byte) []string {
+// custom-layout box's own render is a candidate. shimTarget resolves a
+// Windows codex shim command to the binary it runs: doctor reads the shim on
+// disk, and install compares the path with the shim it writes.
+func wiringBinPaths(harness string, raw []byte, shimTarget func(shim string) (string, bool)) []string {
 	var out []string
 	marker := " " + hookMarker(harness)
 	if harness == "codex" {
@@ -166,7 +169,7 @@ func wiringBinPaths(harness string, raw []byte) []string {
 			if head, ok := strings.CutSuffix(cmd, marker); ok {
 				out = append(out, strings.TrimSpace(head))
 			} else if codexShimCommand(cmd) {
-				if target, ok := codexShimTarget(cmd); ok {
+				if target, ok := shimTarget(cmd); ok {
 					out = append(out, target)
 				}
 			}

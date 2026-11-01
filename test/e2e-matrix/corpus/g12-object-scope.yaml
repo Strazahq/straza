@@ -1,0 +1,433 @@
+# Object-scoped roles end to end. A repo server marks its tools with
+# Straza's object marks, the operator pins that declaration in the server's
+# manifest, and Straza lists the server's seven repos across three pages.
+# The first pin gives the role that already reached the server every repo,
+# so its holder keeps every call she had. A new role on two repos is
+# written through the draft check, which refuses a binding that says
+# nothing about repos, a repo the list does not hold, and a search across
+# every repo in a role on some. The IGA hands both roles out over SCIM and
+# reads each role's covers line there.
+#
+# At the gateway, pia's role on two repos lets her read a covered repo, and
+# the hermetic upstream receives the repo's id in the call's _meta. An
+# uncovered repo and a repo the list does not hold are refused with the
+# same sentence, which lists the repos her roles do cover, and neither call
+# reaches the upstream. ada's role on every repo reads any repo with no id
+# sent and may run the search. A tool that touches no repo answers pia, and
+# once the operator pins that tool stricter, as reaching every repo, it
+# refuses her and still answers ada. Each read and each refusal is on the
+# chain once, with the repo the call named, or with the type and the reach
+# when the call names no repo.
+#
+# The scenario installs the server unpinned and pins it with a second
+# install under the same name that adds the objects block. That order is
+# the first pin under test, and it also lets the listing start against a
+# server that is already running.
+# The hermetic upstream's /mcp-objects path, which ${objectsUpstream}
+# names, serves repo_list, repo_read, search_code and calls_seen, as
+# README.md next to this package publishes.
+id: g12-object-scope
+group: G12
+title: A pinned repo server is listed across pages, a role on some repos allows covered repos with the id sent and refuses the rest with the repos it covers, a role on every repo allows any, and the draft check refuses what nothing keeps to a role's repos
+provenance: >-
+  doc spec/app-manifest/SPEC.md revision 7 section 7 (straza.objects, the
+  four reaches, an argument naming a required string, a pin stricter than
+  the mark) and 7.2 (the listing with {} and then the cursor, objects with
+  value, id, title and attributes, an integer id kept as its decimal
+  string, nextCursor absent on the last page) and 7.3 (a remote server
+  with no credential is listed without one);
+  website/content/reference/spec.md "Marks for server authors" (the
+  ai.straza/object and ai.straza/lists-objects marks);
+  website/content/guides/serve-mcp-apps/add-a-server.md "Limit a role to
+  some repositories" (the first pin gives every existing role covers
+  every, the draft refuses a binding without covers, a repo the list does
+  not hold and a tool that reaches every repo in a role on some, the gate
+  checks every held role before policy, a refused call lists the repos the
+  caller's roles cover, and a partial grant sends the id in _meta);
+  spec/objects/SPEC.md revision 7 (covers every or covers objects, stored
+  by id, and a role on some objects binds only tools that name the object
+  or touch none);
+  spec/events/SPEC.md revision 44 and the example
+  valid-audit-mcp-object-deny.json (the object member with type and reach
+  on every refusal of the check, the value when the call names an object
+  and the id when the list holds it, a refusal with effect deny and the
+  sentence as reason, and the uncovered sentence word for word);
+  spec/scim-profile/SPEC.md revision 21 (covers values server:type every
+  and server:type "name", read-only, a PATCH answers 400 mutability);
+  pkg/api/openapi.yaml 0.142.0 (Covers on a role create and the bindings
+  list, the objects route with listing, total and coveredBy, 409 for a
+  covers refusal).
+  suspect: the four draft refusal sentences and the reach-all sentence at
+  the gateway, which no published page quotes yet, so each step quotes the
+  sentence the binary answers; and the compact JSON of the SCIM covers
+  array, which the profile does not pin.
+harnesses: [claude-code]
+identities:
+  pia: {kind: human, password: "Walk-2026!"}
+  ada: {kind: human, password: "Walk-2026!"}
+steps:
+  # Setup: two people from the IGA.
+  - name: the IGA provisions pia, who works on the payments repos
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g12-pia
+        userName: pia
+        displayName: Pia Payments
+        active: true
+    want: {status: 201}
+    save: {piaId: id}
+  - name: the operator sets pia's password, since SCIM carries none
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${piaId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: the IGA provisions ada, who works on every repo
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g12-ada
+        userName: ada
+        displayName: Ada Allrepos
+        active: true
+    want: {status: 201}
+    save: {adaId: id}
+  - name: the operator sets ada's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${adaId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+
+  # 1. The server runs unpinned, and Straza reads what its marks declare.
+  - name: the operator registers the repo server with no objects block
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g12-repos
+            description: The repo server whose roles cover some repos
+          server:
+            name: g12/repos
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${objectsUpstream}"
+    want: {status: 201, body: {name: g12-repos}}
+    save: {appId: id}
+  - name: Straza reads the declaration the server's marks make, and nothing is pinned yet
+    admin:
+      method: GET
+      path: /v1/admin/apps/g12-repos/objects
+    within: 10s
+    want:
+      status: 200
+      body: {type: "", declared.type: repo, declared.list.tool: repo_list, declared.tools.repo_read.argument: repo, declared.tools.search_code: all, declared.tools.calls_seen: none}
+  - name: the operator creates the server's role over its three repo tools, before any pin
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g12-repos-all, server: g12-repos, tools: ["repo_read", "search_code", "calls_seen"], description: "Object scope scenario, the role that reached the server before its pin"}
+    want: {status: 201, body: {name: g12-repos-all, server: g12-repos}}
+  - name: a covers line on a server that pins no type is refused
+    # suspect: the sentence, which no published page quotes yet
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g12-repos-early, server: g12-repos, tools: ["repo_read"], covers: {every: true}, description: "Object scope scenario, refused"}
+    want: {status: 409, bodyContains: "g12-repos-early has a covers line on g12-repos, which pins no object type. Remove covers from that binding, or pin g12-repos's objects first."}
+
+  # 2. The pin, and the listing across three pages.
+  - name: the operator pins the declaration in the server's manifest
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g12-repos
+            description: The repo server whose roles cover some repos
+          server:
+            name: g12/repos
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${objectsUpstream}"
+            objects:
+              type: repo
+              list:
+                tool: repo_list
+                attributes:
+                  - {name: team, setBy: org}
+              tools:
+                repo_read: {argument: repo}
+                search_code: all
+                calls_seen: none
+    want: {status: 201, body: {name: g12-repos}}
+  - name: the listing lands with every repo of the three pages, sorted by value, with no credential needed
+    admin:
+      method: GET
+      path: /v1/admin/apps/g12-repos/objects
+    within: 40s
+    want:
+      status: 200
+      body:
+        type: repo
+        plural: repos
+        listing.outcome: ok
+        listing.count: 7
+        listing.credential: not-needed
+        total: 7
+        objects.0.value: acme/billing
+        objects.0.id: "1003"
+        objects.0.title: billing
+        objects.0.attributes.team: billing
+        objects.4.value: acme/payments
+        objects.4.id: "1001"
+        objects.6.value: acme/site
+        "objects.7": null
+  - name: the first pin gave the role that already reached the server every repo, in place
+    admin:
+      method: GET
+      path: /v1/admin/bindings
+    want:
+      status: 200
+      body: {0.role: g12-repos-all, 0.covers.every: true, "1": null}
+
+  # 3. The draft check on a role of the pinned server.
+  - name: a role that says nothing about repos is refused
+    # suspect: the sentence, which no published page quotes yet
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g12-repos-bare, server: g12-repos, tools: ["repo_read"], description: "Object scope scenario, refused"}
+    want: {status: 409, bodyContains: "g12-repos-bare binds tools that work on repos. Say which repos it covers: every repo, or these repos by name."}
+  - name: a repo the list does not hold is refused
+    # suspect: the sentence, which no published page quotes yet
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g12-repos-old, server: g12-repos, tools: ["repo_read"], covers: {objects: [{value: acme/old-payments}]}, description: "Object scope scenario, refused"}
+    want: {status: 409, bodyContains: "acme/old-payments is not in g12-repos's repo list. Compare the name with g12-repos's Repos tab or strazactl apps objects g12-repos. If the repo is new, refresh the list with strazactl apps objects refresh g12-repos, then try again."}
+  - name: a search across every repo in a role on some repos is refused
+    # suspect: the sentence, which no published page quotes yet
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g12-repos-search, server: g12-repos, tools: ["repo_read", "search_code"], covers: {objects: [{value: acme/payments}]}, description: "Object scope scenario, refused"}
+    want: {status: 409, bodyContains: "search_code cannot be in a role on some repos: nothing keeps it to them. Make a role on every repo for it."}
+  - name: the operator creates the payments role on two repos, over a tool that names its repo and one that touches none
+    admin:
+      method: POST
+      path: /v1/admin/roles
+      body: {name: g12-repos-payments, server: g12-repos, tools: ["repo_read", "calls_seen"], covers: {objects: [{value: acme/payments}, {value: acme/payments-web}]}, description: "Object scope scenario, the role on the payments repos"}
+    want: {status: 201, body: {name: g12-repos-payments, server: g12-repos}}
+  - name: the refused roles left no row, so the server has the two roles' rows
+    admin:
+      method: GET
+      path: /v1/admin/bindings
+    want:
+      status: 200
+      body: {"2": null}
+  - name: a payments repo is covered by both roles
+    admin:
+      method: GET
+      path: /v1/admin/apps/g12-repos/objects?q=payments-web
+    want:
+      status: 200
+      body: {total: 1, objects.0.value: acme/payments-web, objects.0.coveredBy: [g12-repos-all, g12-repos-payments]}
+  - name: the site repo is covered by the role on every repo alone
+    admin:
+      method: GET
+      path: /v1/admin/apps/g12-repos/objects?q=acme/site
+    want:
+      status: 200
+      body: {total: 1, objects.0.value: acme/site, objects.0.coveredBy: [g12-repos-all]}
+
+  # 4. The IGA reads the covers line and hands the roles out.
+  - name: the IGA reads the payments role with its two repos, each quoted
+    # suspect: the compact JSON of the array, which the profile does not pin
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g12-repos-payments"'
+    want: {status: 200, bodyContains: '"covers":["g12-repos:repo \"acme/payments\"","g12-repos:repo \"acme/payments-web\""]'}
+    save: {paymentsGid: Resources.0.id}
+  - name: the IGA reads the role on every repo
+    scim:
+      method: GET
+      path: '/scim/v2/Groups?filter=displayName eq "g12-repos-all"'
+    want: {status: 200, bodyContains: '"covers":["g12-repos:repo every"]'}
+    save: {allGid: Resources.0.id}
+  - name: the IGA cannot write the covers line
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${paymentsGid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: replace
+            path: covers
+            value: ["g12-repos:repo every"]
+    want: {status: 400, bodyContains: "mutability"}
+  - name: the IGA makes pia a member of the payments role
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${paymentsGid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${piaId}"}]
+    want: {status: 200}
+  - name: the IGA makes ada a member of the role on every repo
+    scim:
+      method: PATCH
+      path: /scim/v2/Groups/${allGid}
+      body:
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          - op: add
+            path: members
+            value: [{value: "${adaId}"}]
+    want: {status: 200}
+  - name: pia enrolls
+    enroll: {as: pia}
+  - name: ada enrolls
+    enroll: {as: ada}
+  - name: pia starts a session
+    hook:
+      as: pia
+      event: {kind: session.start}
+    want: {decision: allow}
+  - name: ada starts a session
+    hook:
+      as: ada
+      event: {kind: session.start}
+    want: {decision: allow}
+
+  # 5. The gate for a role on some repos.
+  - name: pia's catalog lists her two tools and not the search
+    mcp:
+      as: pia
+      list: true
+    want:
+      tools: [g12-repos__repo_read, g12-repos__calls_seen]
+      notTools: [g12-repos__search_code, g12-repos__repo_list]
+  - name: pia reads a covered repo, and the server receives its id
+    mcp:
+      as: pia
+      tool: g12-repos__repo_read
+      args: {repo: acme/payments}
+    want: {result: "repo_read on acme/payments with ai.straza/object-id 1001."}
+  - name: the allowed read is on the chain once with the repo and its id
+    audit: {subject: pia, kind: straza.audit.mcp, decision: allow, object: {type: repo, reach: argument, value: acme/payments, id: "1001"}, count: 1}
+  - name: pia's read of an uncovered repo is refused with the repos her roles cover
+    mcp:
+      as: pia
+      tool: g12-repos__repo_read
+      args: {repo: acme/site}
+    want: {refused: true, reasonContains: "Straza: repo_read on acme/site was refused: none of your roles on g12-repos covers that repo. Your roles cover repo_read on acme/payments and acme/payments-web. Check the repo's name, or ask an admin for a role that covers it."}
+  - name: the refusal is on the chain once with the repo and its id
+    audit: {subject: pia, kind: straza.audit.mcp, decision: deny, reasonContains: "none of your roles on g12-repos covers that repo", object: {type: repo, reach: argument, value: acme/site, id: "1004"}, count: 1}
+  - name: a repo the list does not hold gets the same sentence, so the gateway does not say which repos exist
+    mcp:
+      as: pia
+      tool: g12-repos__repo_read
+      args: {repo: acme/brand-new}
+    want: {refused: true, reasonContains: "Straza: repo_read on acme/brand-new was refused: none of your roles on g12-repos covers that repo. Your roles cover repo_read on acme/payments and acme/payments-web."}
+  - name: that refusal is on the chain once with the repo the call named
+    audit: {subject: pia, kind: straza.audit.mcp, decision: deny, object: {type: repo, reach: argument, value: acme/brand-new}, count: 1}
+  - name: a tool that touches no repo answers pia, and the server saw her one allowed read and neither refusal
+    mcp:
+      as: pia
+      tool: g12-repos__calls_seen
+    want: {result: "repo_read calls: 1. repo_read on acme/payments with ai.straza/object-id 1001."}
+
+  # 6. The gate for a role on every repo.
+  - name: ada reads the site repo, and the server receives no id
+    mcp:
+      as: ada
+      tool: g12-repos__repo_read
+      args: {repo: acme/site}
+    want: {result: "repo_read on acme/site with no ai.straza/object-id."}
+  - name: ada's read is on the chain once with the repo and its id
+    audit: {subject: ada, kind: straza.audit.mcp, decision: allow, object: {type: repo, reach: argument, value: acme/site, id: "1004"}, count: 1}
+  - name: ada runs the search across every repo
+    mcp:
+      as: ada
+      tool: g12-repos__search_code
+      args: {query: payments}
+    want: {result: "search_code matched 2 repos: acme/payments, acme/payments-web."}
+  - name: the server saw pia's read and ada's, in order
+    mcp:
+      as: ada
+      tool: g12-repos__calls_seen
+    want: {result: "repo_read calls: 2. repo_read on acme/payments with ai.straza/object-id 1001. repo_read on acme/site with no ai.straza/object-id."}
+
+  # 7. A pin stricter than the mark: the tool that touches no repo now
+  # reaches every repo, so only a role on every repo may call it.
+  - name: the operator pins calls_seen as reaching every repo, stricter than the server's mark
+    admin:
+      method: POST
+      path: /v1/admin/apps
+      body:
+        yaml: |
+          apiVersion: straza.dev/v1beta1
+          kind: App
+          metadata:
+            name: g12-repos
+            description: The repo server whose roles cover some repos
+          server:
+            name: g12/repos
+            version: "0.1.0"
+          straza:
+            runtime:
+              kind: remote
+              remote:
+                url: "${objectsUpstream}"
+            objects:
+              type: repo
+              list:
+                tool: repo_list
+                attributes:
+                  - {name: team, setBy: org}
+              tools:
+                repo_read: {argument: repo}
+                search_code: all
+                calls_seen: all
+    want: {status: 201, body: {name: g12-repos}}
+  - name: pia's role on some repos is refused the tool that now reaches every repo
+    # suspect: the sentence, which no published page quotes yet
+    mcp:
+      as: pia
+      tool: g12-repos__calls_seen
+    within: 10s
+    want: {refused: true, reasonContains: "Straza: calls_seen on g12-repos can reach every repo, so only a role on every repo may call it, and none of your roles on g12-repos is one. Ask for a role on every repo, or use a tool that names the repo."}
+  - name: that refusal is on the chain once with the type and the reach
+    audit: {subject: pia, kind: straza.audit.mcp, decision: deny, reasonContains: "can reach every repo", object: {type: repo, reach: all}, count: 1}
+  - name: ada's role on every repo still runs it
+    mcp:
+      as: ada
+      tool: g12-repos__calls_seen
+    want: {result: "repo_read calls: 2."}
+
+  # 8. The chain carries the two access rows that landed and nothing for
+  # the four refused roles.
+  - name: two binding creates are on the chain under the operator's name
+    audit: {subject: admin, kind: straza.audit.admin, action: apps.binding.create, count: 2}

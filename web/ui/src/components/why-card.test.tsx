@@ -118,4 +118,18 @@ describe("the why card", () => {
     expect(box().className).toContain("border-danger/40");
     expect(document.querySelector("[data-engine-fields]")).toBeNull();
   });
+
+  it("reads a deny no rule made with the sentence of the check that refused it, never a profile default", () => {
+    const d = { effect: "deny", reason: "Straza: pr_create on Strazahq/site was refused." };
+    render(<TooltipProvider><WhyCard d={d} profile="enterprise" mark="live" head={<Outcome d={d} />} gate={{ lead: "The repo check refused this call before any policy ran.", reason: "pr_create on Strazahq/site was refused." }} /></TooltipProvider>);
+    expect((document.querySelector("[data-gate]") as HTMLElement).textContent).toBe("The repo check refused this call before any policy ran. pr_create on Strazahq/site was refused.");
+    expect(box().textContent).not.toContain("No policy matched");
+  });
+
+  it("keeps the decided-by sentence of a rule even when a check sentence is given", () => {
+    const d = { effect: "deny", ruleId: "no-env", setName: "dev-guardrails", reason: "Straza: refused." };
+    render(<TooltipProvider><WhyCard d={d} profile="enterprise" mark="live" head={<Outcome d={d} />} gate={{ lead: "The repo check refused this call before any policy ran.", reason: "x" }} /></TooltipProvider>);
+    expect(document.querySelector("[data-gate]")).toBeNull();
+    expect(box().textContent).toContain("Decided by rule no-env in policy dev-guardrails: Straza: refused.");
+  });
 });

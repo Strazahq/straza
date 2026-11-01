@@ -1,0 +1,41 @@
+# A remote GitHub App server that also serves git through Straza
+# (revision 9). An agent's plain git command for a repo under
+# https://github.com reaches Straza, which decides a fetch as a call of
+# git_fetch and a push as a call of git_push, and signs a short git grant
+# for https://ghapp.example.com, the resource server that holds the GitHub
+# App key. The objects block pins both tools to the argument repo, because
+# each grant names one repo from the server's list.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: ghapp
+  description: GitHub App server whose tools and git grants each act on one repository
+server:
+  name: com.example/github-app
+  version: "0.5.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://ghapp.example.com/mcp
+  credential:
+    kind: static
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"
+  objects:
+    type: repo
+    plural: repos
+    list:
+      tool: repo_list
+    tools:
+      git_fetch: {argument: repo}
+      git_push: {argument: repo}
+      pr_create: {argument: repo}
+  git:
+    url: https://ghapp.example.com/
+    upstream: https://github.com
+    ops:
+      fetch: git_fetch
+      push: git_push

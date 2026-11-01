@@ -1,2 +1,4 @@
-# enrollment material (device tokens) must never be committed
+# Enrollment material must never be committed. straza service keeps the
+# enrollment and the key in its own state volume, and the line below ignores
+# a copy that anyone leaves in an enroll folder here.
 enroll/

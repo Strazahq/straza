@@ -2,9 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
@@ -61,12 +64,15 @@ func (a *App) rpcFail(w http.ResponseWriter, r *http.Request, id json.RawMessage
 // gatewayAuth authenticates one gateway request: local token verify +
 // denylist + cached subject. Fail closed with an actionable reason.
 func (a *App) gatewayAuth(w http.ResponseWriter, r *http.Request) (authn.Claims, policy.Subject, bool) {
-	raw := bearerToken(r)
+	raw, scheme := sessionCredential(r)
 	if raw == "" {
 		apiError(w, http.StatusUnauthorized, "missing session token")
 		return authn.Claims{}, policy.Subject{}, false
 	}
-	claims, err := a.tokens.Verify(raw)
+	claims, err := a.verifySessionToken(w, r, raw, scheme)
+	if errors.Is(err, errAnswered) {
+		return authn.Claims{}, policy.Subject{}, false
+	}
 	if err != nil || claims.Session == "" {
 		apiError(w, http.StatusUnauthorized, "session token rejected")
 		return authn.Claims{}, policy.Subject{}, false
@@ -82,19 +88,20 @@ func (a *App) gatewayAuth(w http.ResponseWriter, r *http.Request) (authn.Claims,
 	if minAtt := a.cfg.Governance.MinAttestation; minAtt != "" &&
 		config.AttestationRank(claims.Attestation) < config.AttestationRank(minAtt) {
 		apiError(w, http.StatusForbidden, fmt.Sprintf(
-			"Straza: attestation level %q is below the required level %q. Reinstall with `straza install --managed <harness>`",
+			"Straza: attestation level %q is below the required level %q. "+managedInstallStep,
 			claims.Attestation, minAtt))
 		return authn.Claims{}, policy.Subject{}, false
 	}
-	sub, ok := a.subjects.get(claims.Session)
+	e, ok := a.subjects.forToken(claims)
 	if !ok {
-		// No cached subject (restart, or a role window edge since the
-		// checkin): the token alone cannot prove roles, and guessing would
-		// leak tools. Fail closed; the client re-checks in.
+		// No cached subject for the token's roles (restart, a role window
+		// edge since the checkin, or a token another replica minted after a
+		// role changed): the token alone cannot prove roles, and guessing
+		// would leak tools. Fail closed; the client re-checks in.
 		apiError(w, http.StatusUnauthorized, sessionStateExpiredMsg)
 		return authn.Claims{}, policy.Subject{}, false
 	}
-	return claims, sub, true
+	return claims, e.sub, true
 }
 
 // handleMCP is the gateway endpoint: the combined endpoint /mcp, and a
@@ -119,8 +126,13 @@ func (a *App) handleMCP(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleMCPPost(w http.ResponseWriter, r *http.Request, claims authn.Claims, sub policy.Subject) {
 	var req rpcRequest
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, a.cfg.Server.MCPBodyLimit()))
 	if err := dec.Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			a.refuseLargeBody(w, r, claims, bufferedRequestID(dec.Buffered()), tooLarge.Limit)
+			return
+		}
 		writeRPCError(w, nil, -32700, "parse error: single JSON-RPC message expected (batching is not supported)")
 		return
 	}
@@ -141,6 +153,68 @@ func (a *App) handleMCPPost(w http.ResponseWriter, r *http.Request, claims authn
 		return
 	}
 	method(a, w, r, req, claims, sub, srv)
+}
+
+// largeBodyMsg is the agent's answer to an MCP request whose body is over
+// server.mcpMaxBodyBytes, and largeBodyLog the operator's Warn line of it.
+// Both take the limit, and largeBodyLog also the ceiling.
+const (
+	largeBodyMsg = "Straza: this MCP request was not read, because its body is larger than %d bytes, the most the Straza gateway reads in one request (server.mcpMaxBodyBytes). " +
+		"Send less in one call, for example a file's path or address instead of its content, or ask a Straza administrator to raise server.mcpMaxBodyBytes."
+	largeBodyLog = "strazad refused an MCP request whose body is over server.mcpMaxBodyBytes (%d bytes). Raise the setting, up to %d, if agents need larger calls."
+)
+
+// refuseLargeBody answers an MCP request whose body is over limit with
+// JSON-RPC error -32600 and largeBodyMsg, and logs largeBodyLog once with
+// the session. With the request's id the answer is HTTP 200, as every
+// other JSON-RPC error of this endpoint is, because the go-sdk MCP client
+// that the straza client's bridge uses keeps only the status text of a
+// non-2xx answer and fails its whole connection. With no id it is HTTP 413
+// and id null. The request is never read, so it is never decided and
+// writes no audit record, as a request whose body does not parse writes
+// none.
+func (a *App) refuseLargeBody(w http.ResponseWriter, r *http.Request, claims authn.Claims, id json.RawMessage, limit int64) {
+	a.reqlog(r.Context()).Warn(fmt.Sprintf(largeBodyLog, limit, config.MCPMaxBodyBytesCeiling), "session", claims.Session)
+	status := http.StatusOK
+	if id == nil {
+		status, id = http.StatusRequestEntityTooLarge, json.RawMessage("null")
+	}
+	writeJSON(w, status, map[string]any{"jsonrpc": "2.0", "id": id, "error": rpcError{Code: -32600, Message: fmt.Sprintf(largeBodyMsg, limit)}})
+}
+
+// bufferedRequestID answers the id of a JSON-RPC request from prefix, the
+// part of its body read before the limit: it walks the top-level keys in
+// order and answers the value of id when it is a string or a number that
+// comes before params. It answers nil otherwise, also for a prefix that is
+// not an object and for an id with nothing after it, which the limit may
+// have cut. Keys match without regard to case, as encoding/json matches
+// them when it decodes a whole request.
+func bufferedRequestID(prefix io.Reader) json.RawMessage {
+	dec := json.NewDecoder(prefix)
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return nil
+	}
+	for dec.More() {
+		t, err := dec.Token()
+		key, ok := t.(string)
+		if err != nil || !ok || strings.EqualFold(key, "params") {
+			return nil
+		}
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return nil
+		}
+		if strings.EqualFold(key, "id") {
+			if !dec.More() {
+				return nil
+			}
+			if v[0] == '"' || v[0] == '-' || (v[0] >= '0' && v[0] <= '9') {
+				return v
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 // mcpMethod answers one JSON-RPC method of the gateway. srv is the scope of

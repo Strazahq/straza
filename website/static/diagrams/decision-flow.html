@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Decision flow · Straza</title>
 <style>
@@ -149,7 +150,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <div class="stage">
 <svg id="dia" viewBox="0 0 960 600" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
 <title id="svgT">One governed tool call and the escalation trilogy</title>
-<desc id="svgD">A harness fires a hook; straza normalizes the event, verifies the signed snapshot, and decides locally in microseconds. The winning rule picks one of six outcomes: a plain allow or deny, or one of the three escalations serverCheck, classify, and approve. Approve has two shapes: a hold that blocks for a live human decision, and a ticket that denies now and lets a later real call consume a durable grant. Every outcome is audited asynchronously into the hash chain.</desc>
+<desc id="svgD">A harness fires a hook; the hook normalizes the event and hands it to straza service, which holds the verified signed snapshot and decides locally in microseconds. The winning rule picks one of six outcomes: a plain allow or deny, or one of the three escalations serverCheck, classify, and approve. Approve has two shapes: a hold that blocks for a live human decision, and a ticket that denies now and lets a later real call consume a durable grant. Every outcome is audited asynchronously into the hash chain.</desc>
 <defs>
   <marker id="ar"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
   <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mkA"/></marker>
@@ -168,7 +169,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 
 <g class="n" id="n-hook">
   <rect class="box" x="246" y="40" width="230" height="50" rx="6"/>
-  <text class="s" x="258" y="59">straza hook · local PDP</text>
+  <text class="s" x="258" y="59">straza hook → straza service</text>
   <text class="d" x="258" y="74">normalize → verify snapshot (fail closed)</text>
   <text class="mono" x="258" y="87" style="fill:var(--text)">evaluate · deny-overrides · p99 &lt; 100 µs</text>
 </g>
@@ -263,7 +264,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <path id="e-sd" class="edge async" d="M338 566 L392 566"/>
 <g class="n" id="n-drain"><rect class="chip" x="396" y="546" width="230" height="40" rx="6"/>
   <text class="s" x="408" y="565">drain → /v1/audit/batch</text>
-  <text class="d" x="408" y="579">detached · rotate on drain</text></g>
+  <text class="d" x="408" y="579">by straza service · rotate on drain</text></g>
 <path id="e-dc" class="edge async" d="M626 566 L692 566"/>
 <g class="n" id="n-chain"><rect class="chip" x="696" y="546" width="234" height="40" rx="6"/>
   <text class="s" x="708" y="565">outbox → JetStream → chain</text>
@@ -276,8 +277,9 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <details class="alt">
   <summary>What this shows</summary>
   <p>One local tool call inside a governed harness. The harness fires PreToolUse and spawns
-  <code>straza hook</code>; the adapter normalizes the dialect to the canonical event; the cached
-  snapshot's ed25519 signature is verified against pinned keys; rules evaluate in-process under
+  <code>straza hook</code>; the adapter normalizes the dialect to the canonical event and hands it over a
+  local socket to <code>straza service</code>, which holds the session and a snapshot whose ed25519
+  signature it verified against pinned keys; rules evaluate in its process under
   deny-overrides (p99 &lt; 100 µs) with no server and no database. The winning rule selects one of six
   outcomes. A plain allow exits 0; a plain deny exits 2 with an actionable <code>Straza:</code> reason.
   The three escalations act only on a winning allow. <strong>serverCheck</strong> re-checks at
@@ -292,7 +294,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
   denies now, a human decides within <code>ticketTTL</code> (default 24 h, cap 30 d), and a later real
   call, even a fresh session, consumes a DB-durable grant within <code>grantTTL</code> (default 1 h, cap
   24 h) bound to the human plus fingerprint; a within-window denial stays deny-final. Every outcome is
-  spooled, drained to <code>/v1/audit/batch</code>, and appended to the tamper-evident hash chain. All
+  spooled by <code>straza service</code>, drained by it to <code>/v1/audit/batch</code>, and appended to the tamper-evident hash chain. All
   paths fail closed.</p>
 </details>
 
@@ -335,12 +337,12 @@ var NSTAGE=8;
  
 var NARR_SHARED=[
  '1 · The agent proposes a tool call; the harness fires <strong>PreToolUse</strong> and spawns <code>straza hook</code> with the event JSON on stdin.',
- '2 · The adapter normalizes the dialect to the canonical event, then the cached snapshot’s <strong>ed25519 signature</strong> is verified against pinned keys. Any uncertainty <strong>fails closed</strong>.',
- '3 · Rules evaluate <strong>in-process</strong>, deny-overrides, p99 &lt; 100 µs at 10k rules. No server, no DB on this path. The <strong>winning rule</strong> sets the effect and any escalation.'
+ '2 · The hook’s adapter normalizes the dialect to the canonical event and hands it over a local socket to <code>straza service</code>, which decides with the snapshot whose <strong>ed25519 signature</strong> it verified against pinned keys. A hook that cannot reach the service denies. Any uncertainty <strong>fails closed</strong>.',
+ '3 · Rules evaluate <strong>in-process</strong> in <code>straza service</code>, deny-overrides, p99 &lt; 100 µs at 10k rules. No server, no DB on this path. The <strong>winning rule</strong> sets the effect and any escalation.'
 ];
 var NARR_AUDIT=[
- '· The decision is appended to the <strong>JSONL audit spool</strong>. Audit is asynchronous by invariant; a call never blocks on audit I/O.',
- '· A detached <code>straza drain</code> POSTs the spool to <code>/v1/audit/batch</code> (fire-and-forget); the spool rotates on drain, nothing is lost.',
+ '· <code>straza service</code> appends the decision to the user’s <strong>JSONL audit spool</strong>. Audit is asynchronous by invariant; a call never blocks on audit I/O.',
+ '· <code>straza service</code> POSTs the spool to <code>/v1/audit/batch</code> right after the record and again on a short timer. The spool rotates on drain, and a failed drain keeps every record.',
  '· Server side: transactional outbox → JetStream → a durable consumer appends <code>hash = sha256(prev ‖ ce)</code>; <code>strazactl audit verify</code> walks it.'
 ];
 var NARR_VAR={

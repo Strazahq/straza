@@ -229,11 +229,11 @@ func adminToken(server, password string) (string, error) {
 // needed for the DECISION path. But nothing a turn does without a tool call
 // leaves a server-side trace: session.start is emitted as
 // straza.identity.updated (outbox only, and /v1/admin/changes filters it as
-// liveSync noise), and session.end has no audit CE type at all: it drains
-// the client spool and returns. Capture gives prompt.submit something to
-// spool, so the gate can assert the WHOLE async audit path (hook → local PDP
-// → spool → drain → /v1/audit/batch → outbox → spine → hash-chained
-// audit_log) on a turn that makes no tool call. rules[] must be non-empty
+// liveSync noise), and session.end has no audit CE type at all. Capture
+// gives prompt.submit something to spool, so the gate can assert the WHOLE
+// async audit path (hook → the service's PDP → its spool → drain →
+// /v1/audit/batch → outbox → spine → hash-chained audit_log) on a turn that
+// makes no tool call. rules[] must be non-empty
 // (the parser rejects an empty set), so the placeholder rule is written to
 // match nothing.
 const capturePolicy = `apiVersion: straza.dev/v1beta1
@@ -295,8 +295,10 @@ func bootstrap(server, logFile, user, strazaBin, state string, wait time.Duratio
 	}
 	fmt.Fprintf(os.Stderr, "g4boot: NHI %s ready (%s)\n", user, created.ID)
 
-	// keygen writes the private half under the lane's redirected STRAZA_HOME
-	// (inherited from this process's env; the lane never touches a real one).
+	// keygen asks the lane's straza service, found through the redirected
+	// STRAZA_HOME this process inherits, to make the key, and the private half
+	// stays in that service's state directory (the lane never touches a real
+	// one).
 	cmd := exec.Command(strazaBin, "keygen", "--user", user, "--force") // #nosec G204 -- the lane's own binary path
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

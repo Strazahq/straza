@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { CANCEL } from "@/lib/approval-words";
 import { notify } from "@/lib/notify";
 import { ApiError, readSelf, selfEnrollToken } from "@/lib/api";
+import { beginSignIn, takeResume } from "@/lib/session";
 import { enrollDevice } from "./approver-api";
 import { SelfContext, type SelfState } from "./context";
 import { EnableSheet } from "./enable-sheet";
@@ -13,8 +14,8 @@ import { requestDurable, saveEnrollment } from "./store";
 import * as W from "./words";
 
 // The run's three server calls and its three local ones are the seam. The
-// sign-in card is the console's own screen, stubbed to the one thing this
-// sheet asks of it: say when a session is in hand.
+// sign-in leaves the tab, so the sheet's half of it is the departure with
+// the name and the resume with the name a returning sign-in kept.
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
   readSelf: vi.fn(),
@@ -34,10 +35,10 @@ vi.mock("./store", async (orig) => ({
   requestDurable: vi.fn(async () => true),
   saveEnrollment: vi.fn(async () => undefined),
 }));
-vi.mock("@/components/sign-in", () => ({
-  SignIn: ({ onAuthed }: { onAuthed: (r: unknown) => void }) => (
-    <button type="button" onClick={() => onAuthed({ session_token: "st-1", user: "alice" })}>Finish the sign-in</button>
-  ),
+vi.mock("@/lib/session", async (orig) => ({
+  ...(await orig<typeof import("@/lib/session")>()),
+  beginSignIn: vi.fn(async () => undefined),
+  takeResume: vi.fn(() => null),
 }));
 vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: vi.fn() } }));
 
@@ -156,15 +157,30 @@ describe("the Enable this browser sheet", () => {
     expect(vi.mocked(selfEnrollToken)).not.toHaveBeenCalled();
   });
 
-  it("signs in inside the sheet when the page has no session, then runs", async () => {
+  it("leaves to sign in with the name when the page has no session", async () => {
     mount({ session: { kind: "signed-out" }, self: null });
+    await userEvent.clear(nameField());
+    await userEvent.type(nameField(), "Work laptop");
     await userEvent.click(primary(W.SIGN_IN_AND_ENABLE));
-    expect(screen.getByRole("button", { name: "Finish the sign-in" })).toBeTruthy();
+    expect(vi.mocked(beginSignIn)).toHaveBeenCalledWith({ back: window.location.pathname, sheet: "Work laptop" });
     expect(vi.mocked(selfEnrollToken)).not.toHaveBeenCalled();
+  });
 
-    await userEvent.click(screen.getByRole("button", { name: "Finish the sign-in" }));
+  it("carries on with the name a returning sign-in kept", async () => {
+    vi.mocked(takeResume).mockReturnValueOnce("Work laptop");
+    mount();
     await waitFor(() => expect(vi.mocked(enrollDevice)).toHaveBeenCalledTimes(1));
-    expect(refreshSelf).toHaveBeenCalledTimes(1);
+    expect((vi.mocked(enrollDevice).mock.calls[0][0] as { device: { name: string } }).device.name).toBe("Work laptop");
+  });
+
+  it("asks to sign in again when the session ends during the run, and leaves with the name", async () => {
+    vi.mocked(readSelf).mockRejectedValueOnce(new ApiError("session expired", 401));
+    mount();
+    await userEvent.click(primary(W.ENABLE));
+    expect(await screen.findByText(W.SHEET_SIGN_IN)).toBeTruthy();
+    await userEvent.click(primary(W.SIGN_IN));
+    expect(vi.mocked(beginSignIn)).toHaveBeenCalledWith({ back: window.location.pathname, sheet: expect.any(String) });
+    expect(vi.mocked(selfEnrollToken)).not.toHaveBeenCalled();
   });
 
   it("never enrols a flow the person cancelled", async () => {

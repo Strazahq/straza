@@ -3,17 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
-	"github.com/strazahq/straza/internal/agentguard"
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/store"
 )
@@ -32,9 +33,9 @@ spec:
 `
 
 // probeHook measures the budgeted hook end-to-end overhead (spawn the real
-// straza binary, decide against the cached signed snapshot, exit) for
-// an allowed command, the common path. Budget: p95 < 25 ms.
-// Skipped when no binary path is given (CI builds it first).
+// straza binary, ask straza service to decide against its cached signed
+// snapshot, exit) for an allowed command, the common path. Budget: p95 <
+// 25 ms. Skipped when no binary path is given (CI builds it first).
 func probeHook(ctx context.Context, binPath, dataDir, homeDir string, samples int) Probe {
 	if binPath == "" {
 		return Probe{Name: "hook-e2e", Budget: "p95 < 25ms (spawn→decide→exit)", Observed: "skipped: -straza not set", Pass: true, Skipped: true}
@@ -75,15 +76,18 @@ func probeHook(ctx context.Context, binPath, dataDir, homeDir string, samples in
 		return failed("hook-e2e", err)
 	}
 
-	// Enroll into an isolated straza home; children inherit the env var.
+	// The hook reaches the server only through straza service, run here in
+	// user mode: STRAZA_HOME puts its socket and state under homeDir, and
+	// the service and every hook child inherit it.
 	if err := os.Setenv("STRAZA_HOME", homeDir); err != nil {
 		return failed("hook-e2e", err)
 	}
-	agStore, err := agentguard.OpenStore()
+	stopService, err := startService(ctx, binPath, homeDir)
 	if err != nil {
 		return failed("hook-e2e", err)
 	}
-	if err := driveEnroll(ctx, agStore, w.base, "hook-user", "load-hunter2!"); err != nil {
+	defer stopService()
+	if err := driveEnroll(ctx, localapi.NewClient(homeDir), w.base, "hook-user", "load-hunter2!"); err != nil {
 		return failed("hook-e2e", fmt.Errorf("enroll: %w", err))
 	}
 
@@ -143,35 +147,67 @@ func probeHook(ctx context.Context, binPath, dataDir, homeDir string, samples in
 	}
 }
 
-// driveEnroll runs `straza enroll` programmatically, approving the device
-// code the way a browser user would.
-func driveEnroll(ctx context.Context, agStore *agentguard.Store, base, username, password string) error {
+// startService runs straza service for homeDir and waits until it answers
+// on its socket, a refusal included. The returned func stops it.
+func startService(ctx context.Context, binPath, homeDir string) (func(), error) {
+	cmd := exec.CommandContext(ctx, binPath, "service") // #nosec G204 G702 -- operator-supplied path to the binary under test
 	out := &lockedBuf{}
-	enrollErr := make(chan error, 1)
-	ectx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	go func() { enrollErr <- agentguard.Enroll(ectx, agStore, base, out) }()
-
-	codeRe := regexp.MustCompile(`confirm code ([A-Z2-9]{4}-[A-Z2-9]{4})`)
-	var userCode string
-	for i := 0; i < 400 && userCode == ""; i++ {
-		if m := codeRe.FindStringSubmatch(out.String()); m != nil {
-			userCode = m[1]
-		} else {
-			time.Sleep(25 * time.Millisecond)
+	cmd.Stdout, cmd.Stderr = out, out
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start straza service: %w", err)
+	}
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	stop := func() {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
 		}
 	}
-	if userCode == "" {
-		return fmt.Errorf("no user code from enroll: %q", out.String())
+	lc := localapi.NewClient(homeDir)
+	for i := 0; i < 400; i++ {
+		_, err := lc.Status(ctx)
+		var refused *localapi.RefusalError
+		if err == nil || errors.As(err, &refused) {
+			return stop, nil
+		}
+		select {
+		case <-done:
+			return nil, fmt.Errorf("straza service exited before it answered on %s: %.300s", lc.Socket(), out.String())
+		case <-time.After(25 * time.Millisecond):
+		}
 	}
-	resp, err := http.PostForm(base+"/oidc/device", url.Values{
-		"user_code": {userCode}, "username": {username}, "password": {password},
+	stop()
+	return nil, fmt.Errorf("straza service did not answer on %s within 10s: %.300s", lc.Socket(), out.String())
+}
+
+// driveEnroll enrolls the person through the service, approving the device
+// code the way a browser user would as soon as the service streams it.
+func driveEnroll(ctx context.Context, lc *localapi.Client, base, username, password string) error {
+	ectx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	var approveErr error
+	_, err := lc.Enroll(ectx, localapi.EnrollRequest{ServerURL: base}, func(ev localapi.EnrollEvent) {
+		if ev.Event != localapi.EnrollCode || approveErr != nil {
+			return
+		}
+		resp, err := http.PostForm(base+"/oidc/device", url.Values{
+			"user_code": {ev.UserCode}, "username": {username}, "password": {password},
+		})
+		if err != nil {
+			approveErr = err
+			cancel()
+			return
+		}
+		_ = resp.Body.Close()
 	})
-	if err != nil {
-		return err
+	if approveErr != nil {
+		return fmt.Errorf("approve the device code: %w", approveErr)
 	}
-	_ = resp.Body.Close()
-	return <-enrollErr
+	return err
 }
 
 type lockedBuf struct {

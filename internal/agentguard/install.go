@@ -14,6 +14,21 @@ import (
 // host. Production behavior is identical to the plain runtime.GOOS call.
 var osName = func() string { return runtime.GOOS }
 
+// gitHostsFileHere returns the git host file `straza service` writes on
+// this machine, which a local install and doctor's local render name: on
+// Windows the one in the service's state folder on the volume Windows runs
+// from, the folder localapi.SystemStateDir names, and elsewhere
+// GitHostsFile. A machine whose Windows runs from another volume than C:
+// already takes the local lane, because its binary path differs from the
+// rendered one. It is a variable only so tests can stand in for such a
+// machine.
+var gitHostsFileHere = func() string {
+	if osName() == "windows" {
+		return managedProgramData() + `\straza-service\git\hosts.conf`
+	}
+	return GitHostsFile(osName())
+}
+
 // harnessInstall describes where a harness keeps its user-mode and
 // managed/system hook settings and which native event names carry
 // session-start and pre-tool. The event names mirror adapters/<harness>.yaml.
@@ -182,7 +197,8 @@ func SettingsPath(harness string) (string, error) {
 // InstallHooks writes merge-safe Straza hook wiring for a harness into its
 // user settings, preserving existing settings and adding only the
 // session-start and pre-tool hooks that invoke `straza hook`
-// in user mode. Idempotent.
+// in user mode, plus Claude Code's git env block (applyStrazaEnv) except
+// on Windows. Idempotent.
 func InstallHooks(harness, settingsPath, agentguardPath string) error {
 	return installHooks(harness, settingsPath, agentguardPath, 0o750, 0o600, false)
 }
@@ -196,7 +212,7 @@ func InstallHooks(harness, settingsPath, agentguardPath string) error {
 //
 // A 0600 managed file is worse than no managed file at all, and silently so:
 // every other user's harness fails to read the policy wiring and runs
-// ungoverned, while measureAttestation cannot hash what it cannot open and
+// ungoverned, while the attestation measurement cannot hash what it cannot open and
 // reports att=none, fleet-wide, from a single install. 0600 is correct only
 // for the user scope.
 func InstallManagedHooks(harness, settingsPath, agentguardPath string) error {
@@ -240,6 +256,16 @@ func installHooks(harness, settingsPath, agentguardPath string, dirMode, fileMod
 	pruneStrazaHooks(hooks, hookMarker(harness), cmd)
 	applyStrazaHooks(h, hooks, cmd)
 	settings["hooks"] = hooks
+	hostsFile := gitHostsFileHere()
+	if !managed && osName() == "windows" {
+		// Until the service has created its state folder, any local user can
+		// create that folder and plant git settings that run in every
+		// person's agent. git through Straza on Windows needs the MSI's
+		// git-remote-straza.exe anyway, and the MSI comes with the managed
+		// scope, whose service makes that folder at its first start.
+		hostsFile = ""
+	}
+	replaced := applyStrazaEnv(settings, harness, hostsFile)
 
 	if managed && harness == "gemini" {
 		// Gemini's precedence puts SYSTEM settings above user and workspace,
@@ -284,7 +310,15 @@ func installHooks(harness, settingsPath, agentguardPath string, dirMode, fileMod
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(settingsPath, out, fileMode) // #nosec G306 -- mode is the caller's scope choice (user 0600, managed 0644)
+	if err := os.WriteFile(settingsPath, out, fileMode); err != nil { // #nosec G306 -- mode is the caller's scope choice (user 0600, managed 0644)
+		return err
+	}
+	if len(replaced) > 0 {
+		// Stderr, like the gemini notice above, and only once the file holds
+		// Straza's values.
+		fmt.Fprintln(os.Stderr, replacedGitEnvNotice(settingsPath, replaced))
+	}
+	return nil
 }
 
 // UninstallHooks removes the Straza hook entries for a harness, leaving all
@@ -321,6 +355,7 @@ func UninstallHooks(harness, settingsPath, agentguardPath string) error {
 	// keep = "" : every straza command goes. Hook-level, so a group an operator
 	// merged one of their own hooks into survives with that hook intact.
 	removeStrazaHooks(hooks, h.allEvents(), hookMarker(harness), "")
+	removeStrazaEnv(settings, harness, gitHostsFileHere())
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err

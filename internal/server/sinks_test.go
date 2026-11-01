@@ -67,18 +67,9 @@ func TestSinksEndToEnd(t *testing.T) {
 
 	// Generate identity events (enroll + session.start) WHILE the webhook is
 	// down: they must be redelivered, not dropped.
-	_, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "linux", "fingerprint": "sha256:sink"},
-	})
-	code, checkin := postJSON(t, base+"/v1/checkin", map[string]any{
-		"id_token": idToken, "device_id": enroll["device_id"],
-		"harness":     map[string]string{"name": "claude-code", "version": "2.1.0"},
-		"attestation": map[string]any{"managed": false, "hashes": map[string]string{"self": "sha256:abc123"}},
-	})
-	if code != http.StatusOK {
-		t.Fatalf("checkin = %d %v", code, checkin)
-	}
+	h := newKeyHolder(t, base)
+	h.enroll(idToken, "sha256:sink")
+	h.mustCheckin()
 
 	// Give the pipeline time to attempt (and fail) deliveries, then recover.
 	time.Sleep(2 * time.Second)

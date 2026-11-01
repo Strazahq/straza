@@ -18,9 +18,10 @@ import (
 
 // bulkSelfCapped are the routes that legitimately carry large bodies and
 // already enforce their own bounds; the tighter global default must not
-// shadow them: /mcp caps at 4 MiB (gateway.go), /v1/audit/batch at 4 MiB
-// (api_audit.go). App manifests self-cap at 1 MiB (api_apps.go) and need no
-// exemption while the default cap is not below that.
+// shadow them: /mcp caps at server.mcpMaxBodyBytes, 4 MiB by default
+// (gateway.go), /v1/audit/batch at 4 MiB (api_audit.go). App manifests
+// self-cap at 1 MiB (api_apps.go) and need no exemption while the default
+// cap is not below that.
 var bulkSelfCapped = map[string]bool{
 	"/mcp":            true,
 	"/v1/audit/batch": true,
@@ -28,7 +29,7 @@ var bulkSelfCapped = map[string]bool{
 
 // selfCapped reports whether path caps its own body: a bulkSelfCapped route,
 // or a server's own gateway endpoint /mcp/{server}, which is the /mcp
-// handler and its 4 MiB cap.
+// handler and its server.mcpMaxBodyBytes cap.
 func selfCapped(path string) bool {
 	if bulkSelfCapped[path] {
 		return true
@@ -83,19 +84,39 @@ func perIPLimit(l *ratelimit.Limiter, rps float64, next http.Handler) http.Handl
 	})
 }
 
-// loginLimit throttles ONLY the standalone issuer's password submit (POST
-// /oidc/device) by client IP. bcrypt keeps guesses expensive and uniform-
-// timed; this bounds the request VOLUME an online guesser can spend at all.
-// Other issuer endpoints stay unthrottled: the device-code token poll is
-// legitimately frequent.
+// loginLimit throttles ONLY the built-in issuer's password submits, POST
+// /oidc/device and POST /oidc/authorize, by client IP from one budget.
+// bcrypt keeps guesses expensive and uniform-timed, and this bounds the
+// request VOLUME an online guesser can spend at all. Other issuer endpoints
+// stay unthrottled: the device-code token poll is legitimately frequent.
 func loginLimit(l *ratelimit.Limiter, rps float64, next http.Handler) http.Handler {
 	if rps <= 0 {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/oidc/device" && !l.Allow(clientIP(r), rps) {
+		if r.Method == http.MethodPost && (r.URL.Path == "/oidc/device" || r.URL.Path == "/oidc/authorize") &&
+			!l.Allow(clientIP(r), rps) {
 			w.Header().Set("Retry-After", "1")
 			apiError(w, http.StatusTooManyRequests, "too many login attempts. Retry shortly")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// deviceStartLimit throttles the built-in issuer's device sign-in starts,
+// POST /oidc/device_authorization, by client IP. Each start holds a grant in
+// memory until it expires, so this bounds how fast one address fills the
+// issuer's table. It takes a limiter of its own, so starts never spend the
+// password-guess budget of loginLimit.
+func deviceStartLimit(l *ratelimit.Limiter, rps float64, next http.Handler) http.Handler {
+	if rps <= 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/oidc/device_authorization" && !l.Allow(clientIP(r), rps) {
+			w.Header().Set("Retry-After", "1")
+			apiError(w, http.StatusTooManyRequests, "Too many sign-in starts from this address. Wait a few seconds and sign in again.")
 			return
 		}
 		next.ServeHTTP(w, r)

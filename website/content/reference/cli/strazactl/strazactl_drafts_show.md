@@ -2,7 +2,7 @@
 title: strazactl drafts show
 description: 'Show a draft: who proposed it, each object against live state, its verdict and who gains what'
 pagetype: reference
-weight: 58
+weight: 56
 draft: false
 sources:
   - cmd/strazactl
@@ -24,10 +24,10 @@ strazactl drafts show <id> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
-* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store, review and publish drafts of changes to MCP servers, roles, access rows and policy sets
+* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets
 

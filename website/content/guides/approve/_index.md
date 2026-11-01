@@ -1,5 +1,6 @@
 ---
 title: Approvals
+seo_title: Approve held calls
 description: Answer held calls in the console, on a phone or in Slack, and make sure the request reaches the approver's phone.
 pagetype: index
 weight: 70

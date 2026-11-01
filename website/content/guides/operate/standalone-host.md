@@ -6,7 +6,7 @@ weight: 10
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: An Alpine 3.20 container with the static binaries and curl, in the standalone profile, where every terminal block on this page ran in order and the login was answered with the form post the built-in sign-in page sends. The console sign-in was not clicked, because the server listened on the container's loopback address, so its steps were checked against the console's source
+  platform: An Alpine 3.20 container with the static binaries and curl, in the standalone profile, where every terminal block on this page but the token step ran in order. In that run strazactl signed in with strazactl login, answered with the form post the built-in sign-in page sends, and strazactl no longer signs in, so the token step was written on 2026-11-01 and not walked. The console sign-in was not clicked, because the server listened on the container's loopback address. The console's browser sign-in was written from the code on 2026-10-22 and not walked
   date: 2026-10-06
 applies_to: standalone
 who: You, as the operator of the host
@@ -97,34 +97,39 @@ The server never replaces the approver pair on its own. A new pair is a new pin,
 In this profile the sign-in page is served by strazad itself, and you complete it in a browser with the `admin` username and the password from the boot log.
 
 {{< console >}}
-Open `http://127.0.0.1:8420/console/` in a browser on the host and press **Sign in with a code**.
+Open `http://127.0.0.1:8420/console/` in a browser on the host. The card says `You sign in on this server's own sign-in page and come back to this page.` Press **Sign in**.
 
-{{< shot name="signin-code" caption="The console shows a one-time code. Your code is different." >}}
+{{< shot name="signin" caption="The console's sign-in card." >}}
 
-Press **Open the sign-in page**, check that the code matches, enter `admin` and the password, and press **Sign in**. The tab then says `Signed in. You can close this tab.`
+The tab goes to the page titled Sign in to Straza, which asks for the password every time. Enter `admin` and the password, and press **Sign in**. Then the tab comes back to the console, which says `Signing you in`.
 
 {{< see >}}The console opens on **Overview**, and **Users** lists `admin` and `break-glass`.{{< /see >}}
+
+{{< fails >}}
+`This page is served over plain HTTP from a network address, so the browser will not run the sign-in. Serve Straza over HTTPS, or open it at 127.0.0.1 on the server.`
+: The browser opened the console at the host's network address over plain HTTP, where it offers no Web Crypto for the sign-in. Open `http://127.0.0.1:8420/console/` on the host, or serve Straza over HTTPS.
+{{< /fails >}}
 {{< /console >}}
 
 {{< cli >}}
 
-Log in with `strazactl`. The command prints an address and a code, and waits until you finish the sign-in in a browser.
+strazactl has no sign-in of its own. It runs on an admin API token that you mint in the console, so first sign in there as `admin`, as the console form of this step shows. On a host you reach over SSH, forward the port with `ssh -L 8420:127.0.0.1:8420` and the host's name, and open `http://127.0.0.1:8420/console/` in your own browser. Then open the mint sheet:
+
+{{< clicks "Settings" "API tokens" "New API token" >}}
+
+Name the token after yourself and the host. Pick `expires in 30 days` and the job **Full root** before you press **Mint token**. The token is shown once. Copy it and hand it to strazactl:
 
 {{< command terminal="Terminal 2" purpose="administration" >}}
 ```sh
-strazactl login --server http://127.0.0.1:8420
+export STRAZA_SERVER=http://127.0.0.1:8420
+read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
 ```
 {{< /command >}}
 
-```text
-Open http://127.0.0.1:8420/oidc/device?user_code=2DB5-J28V
-and confirm code 2DB5-J28V
-Logged in as admin.
-note: this login can change Straza's configuration. Keep it away from coding agents. Automation uses an admin API token in STRAZA_API_TOKEN, and an agent proposes config changes through the built-in straza MCP server.
-```
+`read -rs` reads the token you paste without showing it and keeps it out of the shell history. Never put the token where an agent runs as you, such as a shell profile or a file an agent can read. A token is a bearer credential, so whoever holds it acts with its scope until it expires or is revoked. Revoke this one under **Settings**, **API tokens** once the setup is done. Automation gets a token of its own with narrow scopes, and an agent proposes config changes through the built-in straza MCP server.
 
 
-The login lands in `~/.straza/credentials.json`. List the users the first boot made to confirm the session works:
+List the users the first boot made to confirm the token works:
 
 {{< command terminal="Terminal 2" purpose="administration" >}}
 ```sh
@@ -178,7 +183,7 @@ time=2026-10-06T21:37:33.897Z level=INFO msg="strazad serving" addr=127.0.0.1:84
 ```
 
 
-This is a fresh store, so the boot minted a new administrator password, masked to four characters again, and a new approver pair. It also logged a new break-glass password, trimmed here with the other lines that do not show the new paths. Store both new passwords, and sign in again, because the login you made against the first store does not open this one. The old `data` directory is untouched.
+This is a fresh store, so the boot minted a new administrator password, masked to four characters again, and a new approver pair. It also logged a new break-glass password, trimmed here with the other lines that do not show the new paths. Store both new passwords, then sign in to the console again and mint a new token, because the token you minted on the first store does not open this one. The old `data` directory is untouched.
 
 [Configuration]({{< relref "reference/configuration.md" >}}) lists every key of the file with its environment variable.
 

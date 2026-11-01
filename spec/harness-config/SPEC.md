@@ -103,3 +103,30 @@ CHANGELOG + version bump in the same PR.
 - **v1alpha1** (2026-08-09): initial artifact: envelope, signing
   input, verification algorithm, additive registry publication with exact
   per-GOOS/GOARCH rows, retirement-as-stale-version semantics.
+- **v1alpha1 content** (2026-10-24): the linux `hooks.claude-code` artifact
+  gains an `env` table with one git config include: `GIT_CONFIG_COUNT` `1`,
+  `GIT_CONFIG_KEY_0` `include.path` and `GIT_CONFIG_VALUE_0`
+  `/run/straza-service/git/hosts.conf`, the host file `straza service`
+  writes for git through a Straza git grant. The envelope, the signing input
+  and the verification do not change. The artifact's `content_hash` changes
+  once, so publishing adds a registry row beside the old one, and a machine
+  on the old wiring keeps attesting until that row is retired. The four
+  examples built from the linux claude-code render are regenerated.
+- **v1alpha1 content** (2026-10-24): the windows `hooks.claude-code`
+  artifact gains the same `env` table, with `GIT_CONFIG_VALUE_0`
+  `C:\ProgramData\straza-service\git\hosts.conf`, the host file
+  `straza service` writes on Windows. As for linux, the envelope, the
+  signing input and the verification do not change, the `content_hash`
+  changes once and publishing adds a registry row beside the old one. No
+  example is built from the windows render, so none is regenerated.
+- **v1alpha1 content** (2026-10-26): the darwin artifacts of claude-code,
+  codex and gemini run `/opt/straza/bin/straza`, where the Straza package
+  for macOS installs the binary, instead of `/usr/local/bin/straza`. The
+  darwin `hooks.claude-code` artifact also gains the same `env` table as
+  linux and windows, with `GIT_CONFIG_VALUE_0`
+  `/opt/straza/run/git/hosts.conf`, the host file `straza service` writes
+  on macOS. As for linux and windows, the envelope, the signing input and
+  the verification do not change, each `content_hash` changes once and
+  publishing adds a registry row beside the old one.
+  `valid-gemini-darwin.json` is regenerated, because it is built from the
+  darwin gemini render.

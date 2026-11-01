@@ -19,23 +19,23 @@ keywords: codex cli hooks enroll install harness
 You wire Codex CLI to Straza on the workstation where it runs. At the end, Codex hands every tool call to Straza before it runs it, and you have seen a destructive command denied with a reason.
 
 
-Codex uses the same hook contract as Claude Code. Before Codex runs a tool, it passes the call to `straza hook`, which decides the call against a signed policy snapshot cached on the machine. Its answer is an allow, or a deny with a reason that the model reads back. Codex also skips a hook until you trust its exact definition, so this page has one step more than the Claude Code page.
+Codex uses the same hook contract as Claude Code. Before Codex runs a tool, it passes the call to `straza hook`, which hands it to `straza service`, the Straza background service on the machine, to decide against a signed policy snapshot the service holds. Its answer is an allow, or a deny with a reason that the model reads back. Codex also skips a hook until you trust its exact definition, so this page has one step more than the Claude Code page.
 
 ## Before you start {.nostep}
 
 
 - Codex CLI on this machine.
-- A role whose policy allows your local tools. The seeded `developer` role of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) is one. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
+- A role whose policy allows your local tools. A fresh enterprise server holds no PolicySet and denies every local tool that no rule allows, so an admin first sets up the role and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}) and gives you its `developer` role. The seeded `developer` role of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) is such a role already. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
 
 ## Enroll this machine
 
 
-Enroll the machine once, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. The machine is ready for the next step when `straza status` names your identity and `straza doctor` warns only about the session, the snapshot and the wiring.
+Enroll the machine once, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. The machine is ready for the next step when `straza status` names your identity and `straza doctor` warns only about the session and the wiring. Start Codex from a shell that exports the same `STRAZA_HOME` as a `straza service` you started yourself, because its hooks look for that service through it. On a machine with a system service or a managed install, the hooks ignore `STRAZA_HOME` and reach the system service. On an enterprise server the service also has to hold your key under its own OS account, as that page explains.
 
 ## Install the hook wiring
 
 
-Run the installer as yourself, on the machine where Codex runs. It takes no server address. The hooks use the server that `straza enroll --server` saved for you.
+Run the installer as yourself, on the machine where Codex runs. It takes no server address. The hooks reach `straza service`, which keeps the server that `straza enroll --server` named.
 
 {{< command terminal="Terminal" purpose="on the agent's machine" >}}
 ```sh
@@ -61,7 +61,7 @@ sudo straza install --managed --server https://straza.example.com codex
 ```
 {{< /command >}}
 
-`--server` names the server that the root-owned layout pins for every user of the machine, and the install refuses to run without it. Use your own address in place of the example. Each person still enrolls once as themselves, so every call is decided and audited as the person who made it.
+`--server` names the server that the root-owned layout pins for every user of the machine, and the install refuses to run without it. Use your own address in place of the example. Each person still enrolls once as themselves, so every call is decided and audited as the person who made it. The background service reads that server from the managed layout when a person enrolls, so after an administrator points the layout at another server, each person runs `straza enroll` again, as [Move a machine to another server]({{< relref "guides/govern-an-agent/enroll-a-machine.md#move-a-machine-to-another-server" >}}) shows. It reads the snapshot keys the layout pins each time it fetches a new policy and when it starts.
 
 | Install | Who can change the wiring | Sessions attest as |
 |---|---|---|
@@ -174,10 +174,15 @@ Run `straza uninstall codex` to remove the hook entries and the Straza block in 
 ## When a hook seems silent {.nostep}
 
 
-The most common cause on Codex is an untrusted hook. Open `/hooks` and confirm that the Straza entries are trusted. The doctor reports the trust state where it can read it, and it never calls the hooks enforcing because the file exists. Straza fails closed, so a missing snapshot denies with a reason and never lets a call through.
+The most common cause on Codex is an untrusted hook. Open `/hooks` and confirm that the Straza entries are trusted. The doctor reports the trust state where it can read it, and it never calls the hooks enforcing because the file exists. Straza fails closed, so a missing snapshot or a background service that does not answer denies with a reason and never lets a call through.
 
 
-When the server cannot be reached, the hook keeps deciding for the offline grace and then denies, as [Working offline]({{< relref "guides/govern-an-agent/enroll-a-machine.md#working-offline" >}}) explains.
+When the server cannot be reached, the service keeps deciding for the offline grace and then denies, as [Working offline]({{< relref "guides/govern-an-agent/enroll-a-machine.md#working-offline" >}}) explains.
+
+## When Codex adds a tool {.nostep}
+
+
+When a Codex release adds a tool that this Straza client does not know yet, the hook sends the tool as `other` with its own name. An enterprise server denies it with a reason that names the tool and the rule that allows it, and a standalone server allows it by default. An admin allows, holds or denies exactly that tool with a rule of `tools: [other]` and `toolNames: {allow: [<name>]}`, with no Straza release, as [Harness tools by name]({{< relref "reference/policyset-grammar.md#harness-tools-by-name" >}}) shows. A later Straza release puts the tool into its kind, and the rule keeps governing it.
 
 ## Next {.nostep}
 

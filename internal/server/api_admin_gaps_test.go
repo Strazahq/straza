@@ -113,14 +113,8 @@ func TestDevicesListAdmin(t *testing.T) {
 	grantAdmin(t, app, user.ID)
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
 
-	code, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "windows", "fingerprint": "sha256:gaps"},
-	})
-	if code != http.StatusOK {
-		t.Fatalf("enroll = %d %v", code, enroll)
-	}
-	deviceID := enroll["device_id"].(string)
+	d, _ := mintDevice(t, app, user.ID, store.DeviceClientKit, "sha256:gaps")
+	deviceID := d.ID
 
 	// Decode through the wire shape (snake_case devicePayload, 0.46.0), not
 	// the store struct.

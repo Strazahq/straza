@@ -2,7 +2,7 @@
 title: strazactl roles implications remove
 description: Stop composing one role into another (holding the first no longer holds the second)
 pagetype: reference
-weight: 84
+weight: 80
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl roles implications remove <role> <implied> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

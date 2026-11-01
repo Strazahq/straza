@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "019a0f3d-0a72-7e55-9abc-1f2e3d4c5b52",
+  "type": "straza.audit.authn",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-10-20T10:14:03.551Z",
+  "data": {
+    "action": "proof",
+    "outcome": "failure",
+    "userId": "0197fa3d-2222-7abc-9def-000000000002",
+    "session": "019a0f3c-9b44-7e55-9abc-1f2e3d4c5b53",
+    "harness": "claude-code/2.1.0",
+    "reason": "no DPoP proof",
+    "sourceIp": "198.51.100.23",
+    "userAgent": "curl/8.9.1"
+  }
+}

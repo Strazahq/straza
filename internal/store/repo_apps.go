@@ -137,14 +137,16 @@ func (r appRepo) Revive(ctx context.Context, a App) (App, error) {
 
 type toolBindingRepo struct{ s *sqlStore }
 
-const toolBindingCols = "id, role_id, app_id, tool_matcher, effect, created_at"
+const toolBindingCols = "id, role_id, app_id, tool_matcher, effect, object_scope, created_at"
 
 func scanToolBinding(row scanner) (ToolBinding, error) {
 	var b ToolBinding
+	var scope sql.NullString
 	var ca scanTime
-	if err := row.Scan(&b.ID, &b.RoleID, &b.AppID, &b.ToolMatcher, &b.Effect, &ca); err != nil {
+	if err := row.Scan(&b.ID, &b.RoleID, &b.AppID, &b.ToolMatcher, &b.Effect, &scope, &ca); err != nil {
 		return ToolBinding{}, scanErr(err)
 	}
+	b.Scope, b.ScopeFault = decodeScope("the access row "+b.ID, scope)
 	b.CreatedAt = ca.t
 	return b, nil
 }
@@ -158,9 +160,13 @@ func (r toolBindingRepo) Create(ctx context.Context, b ToolBinding) (ToolBinding
 	if b.Effect == "" {
 		b.Effect = "allow"
 	}
-	_, err := r.s.exec(ctx, `INSERT INTO tool_bindings (id, role_id, app_id, tool_matcher, effect, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		b.ID, b.RoleID, b.AppID, b.ToolMatcher, b.Effect, r.s.tArg(b.CreatedAt))
+	scope, err := encodeScope(b.Scope)
+	if err != nil {
+		return ToolBinding{}, err
+	}
+	_, err = r.s.exec(ctx, `INSERT INTO tool_bindings (id, role_id, app_id, tool_matcher, effect, object_scope, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		b.ID, b.RoleID, b.AppID, b.ToolMatcher, b.Effect, scope, r.s.tArg(b.CreatedAt))
 	if err != nil {
 		return ToolBinding{}, err
 	}

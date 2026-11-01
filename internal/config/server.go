@@ -23,10 +23,14 @@ type Server struct {
 	ProjectName string `yaml:"projectName"`
 	// TLS enables native HTTPS on the listener.
 	TLS TLS `yaml:"tls"`
-	// MaxBodyBytes caps every request body (bytes). Bulk lanes with their
-	// own tighter contracts (/mcp, /v1/audit/batch at 4 MiB) are exempt.
-	// 0 disables; the built-in default is 1 MiB.
+	// MaxBodyBytes caps every request body (bytes). The bulk lanes that cap
+	// their own bodies are exempt: /mcp under MCPMaxBodyBytes and
+	// /v1/audit/batch at 4 MiB. 0 disables; the built-in default is 1 MiB.
 	MaxBodyBytes int64 `yaml:"maxBodyBytes"`
+	// MCPMaxBodyBytes caps the body of one request to the MCP gateway, /mcp
+	// and /mcp/{server} (bytes): 4 MiB by default, from 1 to
+	// MCPMaxBodyBytesCeiling. A 0 fails boot and never turns the cap off.
+	MCPMaxBodyBytes int64 `yaml:"mcpMaxBodyBytes"`
 	// MetricsToken, when set, gates GET /metrics behind `Authorization:
 	// Bearer <token>` (Prometheus: bearer_token). Empty keeps /metrics
 	// open, acceptable only on private networks (the labels are
@@ -90,6 +94,25 @@ type ApproverTLS struct {
 // approverTLS fields at boot.
 func (a ApproverTLS) AutoMintEnabled() bool { return a.AutoMint != nil && *a.AutoMint }
 
+// The default and the ceiling of server.mcpMaxBodyBytes. The ceiling is
+// the most of a request body the straza client keeps to resend it after a
+// DPoP nonce challenge, because a larger body is sent once and its retry
+// never comes.
+const (
+	defaultMCPMaxBodyBytes = 4 << 20
+	MCPMaxBodyBytesCeiling = 8 << 20
+)
+
+// MCPBodyLimit is the most bytes the MCP gateway reads of one request body:
+// MCPMaxBodyBytes, or the 4 MiB default on a Server that never went
+// through the Loader and holds 0, so no Server turns the cap off.
+func (s Server) MCPBodyLimit() int64 {
+	if s.MCPMaxBodyBytes <= 0 {
+		return defaultMCPMaxBodyBytes
+	}
+	return s.MCPMaxBodyBytes
+}
+
 // TLS configures native TLS for the API/gateway listener. Both files
 // set = HTTPS with a TLS 1.2 floor (Go's modern cipher defaults); both empty
 // = plaintext, acceptable only on loopback (standalone) or behind a
@@ -121,6 +144,11 @@ func (s Server) validate() error {
 	}
 	if s.MaxBodyBytes < 0 {
 		return fmt.Errorf("server.maxBodyBytes must be >= 0 (0 disables the cap)")
+	}
+	if s.MCPMaxBodyBytes < 1 || s.MCPMaxBodyBytes > MCPMaxBodyBytesCeiling {
+		return fmt.Errorf("server.mcpMaxBodyBytes is %d, and it must be from 1 to %d bytes (8 MiB). "+
+			"The straza client can resend at most 8 MiB of a request after a proof challenge, and each MCP request holds several copies of its body in strazad's memory. "+
+			"Set a value in that range, or remove the key for the 4 MiB default", s.MCPMaxBodyBytes, MCPMaxBodyBytesCeiling)
 	}
 	if s.LoginPerIPRPS < 0 {
 		return fmt.Errorf("server.loginPerIPRPS must be >= 0 (0 disables the throttle)")

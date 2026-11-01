@@ -66,7 +66,7 @@ func TestCheckinUntypedNHIUnderHumanClient(t *testing.T) {
 		harness  string
 		wantCode int
 	}{
-		{"strazactl", http.StatusForbidden},
+		{"self-service", http.StatusForbidden},
 		{"console", http.StatusForbidden},
 		{"claude-code", http.StatusOK},
 	}
@@ -110,8 +110,9 @@ func TestCheckinUntypedNHIUnderHumanClient(t *testing.T) {
 }
 
 // TestEnrollUntypedNHIAsHuman pins that a non-human identity with no
-// user_type cannot enrol a credential for the human clients, writes exactly
-// one authn login failure for it, and still enrols a kit credential.
+// user_type meets the refusal of strazactl's sign-in when it enrols a
+// credential for the human clients, with exactly one authn login failure,
+// and that its kit enrol meets the retired bearer lane's refusal.
 func TestEnrollUntypedNHIAsHuman(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -124,22 +125,21 @@ func TestEnrollUntypedNHIAsHuman(t *testing.T) {
 		})
 	}
 	code, body := enroll(store.DeviceClientHuman, "fp-human")
-	want := "the user build-bot is an agent, and only a person can enrol a credential for strazactl or the console"
-	if code != http.StatusForbidden || body["error"] != want {
-		t.Fatalf("human enrol = %d %v, want 403 with %q", code, body, want)
+	if code != http.StatusForbidden || body["error"] != wantStrazactlMsg {
+		t.Fatalf("human enrol = %d %v, want 403 with %q", code, body, wantStrazactlMsg)
 	}
 	refused := func(d map[string]any) bool {
 		return d["action"] == "login" && d["outcome"] == "failure" && d["user"] == "build-bot"
 	}
 	rec := waitAuthn(t, app, "build-bot's refused enrol", refused)
-	if rec["reason"] != "only a person can enrol a credential for the human clients" || rec["userId"] != u.ID || rec["via"] != "id-token" {
-		t.Fatalf("login failure = %v, want the person-only enrol reason for build-bot", rec)
+	if rec["reason"] != strazactlSignInReason || rec["userId"] != u.ID || rec["via"] != "id-token" {
+		t.Fatalf("login failure = %v, want the strazactl reason for build-bot", rec)
 	}
 	if n := countAuthn(t, app, refused); n != 1 {
 		t.Fatalf("login failures for build-bot = %d, want exactly 1", n)
 	}
-	if code, body := enroll(store.DeviceClientKit, "fp-kit"); code != http.StatusOK {
-		t.Fatalf("kit enrol = %d %v, want 200", code, body)
+	if code, body := enroll(store.DeviceClientKit, "fp-kit"); code != http.StatusForbidden || body["error"] != oldClientMsg {
+		t.Fatalf("kit enrol = %d %v, want the old-client 403", code, body)
 	}
 }
 

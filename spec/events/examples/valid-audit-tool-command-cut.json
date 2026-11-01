@@ -1,0 +1,22 @@
+{
+  "specversion": "1.0",
+  "id": "0198a3c1-6f10-7d41-9b6a-3c4d5e6f7a90",
+  "type": "straza.audit.tool",
+  "source": "strazad",
+  "time": "2026-10-31T11:02:40.311Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "shell.exec",
+    "app": "",
+    "toolName": "",
+    "command": "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<... (921600 bytes, sha256 bd53865339da0eb15964543359e8be8955d56b4ecffbe4f1945a624d3b29c49b)",
+    "effect": "allow",
+    "ruleId": "",
+    "setName": "",
+    "reason": "Straza: no rule matched; the profile default allows local tools",
+    "snapshot": "sha256:44f0be1c"
+  }
+}

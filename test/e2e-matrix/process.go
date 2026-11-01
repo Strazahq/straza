@@ -37,8 +37,8 @@ func (b *syncBuf) String() string {
 	return b.buf.String()
 }
 
-// proc is a long-lived child (strazad, straza daemon, straza enroll) that is
-// stopped by process id, never by name.
+// proc is a long-lived child (strazad, straza service, straza enroll) that
+// is stopped by process id, never by name.
 type proc struct {
 	name string
 	cmd  *exec.Cmd
@@ -148,7 +148,8 @@ func runOnce(ctx context.Context, bin string, args, env []string, stdin []byte) 
 }
 
 // childEnv returns the parent environment without any STRAZA_*, CLAUDE* or
-// ANTHROPIC_* variable, plus the given assignments.
+// ANTHROPIC_* variable and without BROWSER, DISPLAY and WAYLAND_DISPLAY,
+// plus the given assignments, so no child ever opens the desktop's browser.
 func childEnv(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
@@ -156,7 +157,8 @@ func childEnv(extra ...string) []string {
 		if i := strings.IndexByte(kv, '='); i >= 0 {
 			name = kv[:i]
 		}
-		if strings.HasPrefix(name, "STRAZA_") || strings.HasPrefix(name, "CLAUDE") || strings.HasPrefix(name, "ANTHROPIC_") {
+		if strings.HasPrefix(name, "STRAZA_") || strings.HasPrefix(name, "CLAUDE") || strings.HasPrefix(name, "ANTHROPIC_") ||
+			name == "BROWSER" || name == "DISPLAY" || name == "WAYLAND_DISPLAY" {
 			continue
 		}
 		env = append(env, kv)

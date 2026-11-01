@@ -70,9 +70,12 @@ spec:
         denyPatterns: ["rm -rf *", "git push --force*", "curl * | *sh*"]
       effect: deny
       reason: "Straza: destructive command denied by the agent guardrails"
-    # The next two rules refuse file.read, file.write and file.edit of the
-    # strazactl login in ~/.straza/credentials.json, and a shell command that
-    # names that file. They are a guardrail against a mistake, not a boundary.
+    # The next two rules refuse file.read, file.write and file.edit of
+    # ~/.straza/credentials.json, and a shell command that names that file.
+    # strazactl no longer writes it, because it runs on an admin API token,
+    # but a file an older strazactl left still holds a login that a server
+    # not yet upgraded accepts. They are a guardrail against a mistake, not a
+    # boundary.
     - id: protect-straza-login
       events: [tool.pre]
       tools: [file.read, file.write, file.edit]

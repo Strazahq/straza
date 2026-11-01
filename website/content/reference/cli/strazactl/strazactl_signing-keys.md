@@ -2,7 +2,7 @@
 title: strazactl signing-keys
 description: List, rotate and retire signing keys
 pagetype: reference
-weight: 91
+weight: 87
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl signing-keys [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -293,6 +293,49 @@ It answers `gave scout-tools-readers access to scout-tools: echo, get-sum. They 
 
 Deleting the role removes its assignments and access rows. It also turns off every live policy set whose match names only that role, since such a set would match nobody, and names each one in its answer. The delete answers `409` while a live policy set names the role in `approve.roles`, with the set and the fix in the sentence. A product role, one whose name begins with `straza-`, answers `409` as well and is never deleted, so take a holder's access away by removing their assignment.
 
+## Limit a role to some repositories {#covers .nostep}
+
+
+On a server that pins an object type, as [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md#objects" >}}) pins ghapp's repositories, the access row also says which repositories the role covers. It takes one of two forms. `covers: every` covers every repository, the ones the server lists later included. `covers: {objects: [...]}` names the repositories, each as the exact value a tool's `repo` argument carries. This role file gives three write tools on two repositories:
+
+```yaml
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+  name: ghapp-write-payments
+spec:
+  kind: application
+  description: Write tools of ghapp on the payments repos
+  server: ghapp
+  bindings:
+    - app: ghapp
+      tools: [issue_create, pr_create, pr_merge]
+      covers:
+        objects: [Strazahq/pay-api, Strazahq/pay-web]
+```
+
+Propose it with `strazactl drafts create -f ghapp-write-payments.yaml`, as any role file. In the console the same choice sits under the tools of the role's **Edit access**, at **On which repos**, with the cards **Every repo** and **These repos**, and these repositories are ticked in the server's list. Straza resolves each named repository to its id in the list it last fetched and stores both, so a rename keeps the role covering it, and a repository deleted and made again under the old name is not covered. `strazactl roles export` writes the repositories under their current names, sorted, and never an id.
+
+
+{{< fails >}}
+`ghapp-write-payments binds tools that work on repos. Say which repos it covers: every repo, or these repos by name.`
+: Every row on a pinned server needs a covers line. Add `covers: every` or the repositories by name.
+
+`Strazahq/pay-old is not in ghapp's repo list. Compare the name with ghapp's Repos tab or strazactl apps objects ghapp. If the repo is new, refresh the list with strazactl apps objects refresh ghapp, then try again.`
+: Spell the repository as the list holds it, byte for byte. A repository created after the last listing joins after the refresh the sentence names.
+
+`repo_list cannot be in a role on some repos: nothing keeps it to them. Make a role on every repo for it.`
+: Take the tool out of this role and put it in a role with `covers: every`.
+{{< /fails >}}
+
+
+Only two kinds of tool fit a role on some repositories: a tool whose calls name the repository, which on ghapp is every tool except `repo_list`, and a tool that touches none. A tool that can reach every repository at once, such as `repo_list`, goes in a role on every repository, and so does a tool the pinned block leaves out. Straza does not check what a role's own login reaches yet, so a tool whose calls name no repository and leave the limit to the credential goes there too for now. The glob `*` takes in such tools and every tool the server adds later, so a role on some repositories names its tools one by one. In the console's editor such a tool cannot be ticked while **These repos** is chosen, and its row carries the same sentence as the check.
+
+
+The gateway checks every call to such a server against all the roles the caller holds that bind the tool, before any policy runs, so no rule can allow a call it refuses and a refused call spends no approval. A call that names a repository goes through when one of those roles covers it. The first such role by name grants the call, and the audit record and the credential lookup both name that role. A tool that can reach every repository needs a role with `covers: every`. When no role covers the repository, the agent reads `Straza: pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. Your roles cover pr_create on Strazahq/pay-api and Strazahq/pay-web. Check the repo's name, or ask an admin for a role that covers it.` A repository the list does not hold gets the same sentence, so a refusal never tells an agent whether a repository its roles do not cover exists, and such a call asks for a listing, at most once a minute per server. A call whose `repo` argument Straza cannot read is refused for every role, a role on every repository included, such as a call that sends `repo` twice, sends it as a number or leaves it out. A role on every repository covers a repository created a minute ago at once.
+
+When a role on some repositories grants a call, the server receives the repository's id in the call's `_meta`, under `ai.straza/object-id`. ghapp then refuses a repository deleted and made again under the same name, and it makes its GitHub token for that one id. An access row on a pinned server with no covers line covers no repository, and neither does one whose line Straza cannot read. The role's **Access** tab says `Say which repos this role covers.` on a row with no line. `admin.serverAdminsCoverEvery`, true by default, lets a server admin write `covers: every` on a role their server owns, as [Delegate one MCP server]({{< relref "guides/operate/delegate-one-server.md#covers" >}}) shows.
+
 ## Caveats {.nostep}
 
 

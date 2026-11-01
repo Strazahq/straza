@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// devicesServer is the admin surface the devices family walks: the checkin a
-// stored token refreshes through, the users list (username → id resolution),
-// the per-user device list, and the device revoke. It records every revoke.
+// devicesServer is the admin surface the devices family walks: the users list
+// (username → id resolution), the per-user device list, and the device
+// revoke. It records every revoke.
 type devicesServer struct {
 	mu      sync.Mutex
 	revoked []string // "userID/deviceID"
@@ -19,10 +19,6 @@ type devicesServer struct {
 func (s *devicesServer) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("GET /v1/admin/users", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":"u-kim","username":"kim","status":"active"}]`))
@@ -59,7 +55,7 @@ func TestDevicesList(t *testing.T) {
 	s := &devicesServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	credsPath := writeCreds(t, srv.URL)
+	credsPath := onToken(t, srv.URL)
 
 	stdout, _, err := runCLI(t, credsPath, "devices", "list", "kim")
 	if err != nil {
@@ -84,7 +80,7 @@ func TestDevicesRevoke(t *testing.T) {
 	s := &devicesServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	credsPath := writeCreds(t, srv.URL)
+	credsPath := onToken(t, srv.URL)
 
 	stdout, _, err := runCLI(t, credsPath, "devices", "revoke", "kim", "d-1")
 	if err != nil {
@@ -98,6 +94,9 @@ func TestDevicesRevoke(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "revoked device d-1") || !strings.Contains(stdout, "kim") {
 		t.Errorf("stdout must name the device and user:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "enroll it again with straza enroll") {
+		t.Errorf("stdout must name the command that enrolls the machine again:\n%s", stdout)
 	}
 
 	// A refused revoke surfaces the server's reason and exits non-zero.
@@ -113,7 +112,7 @@ func TestDevicesOperandCount(t *testing.T) {
 	s := &devicesServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	credsPath := writeCreds(t, srv.URL)
+	credsPath := onToken(t, srv.URL)
 
 	for _, args := range [][]string{
 		{"devices", "list"},

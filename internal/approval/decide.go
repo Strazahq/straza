@@ -121,7 +121,7 @@ func (s *Service) decide(ctx context.Context, id, verdict, deciderUserID, channe
 	}
 	if deciderUserID == rec.UserID && deviceID == "" && !s.cfg.UnsignedOwnDecisions {
 		// The requester's agent runs as the requester and can reach every
-		// credential on that machine, the console's and strazactl's included.
+		// credential on that machine, the console's included.
 		// Only the signed lane carries proof the agent cannot produce, a
 		// signature from an enrolled device key, so an unsigned decision on
 		// one's own request is refused on every lane.

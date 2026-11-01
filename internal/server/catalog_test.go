@@ -628,3 +628,16 @@ func catStatusMap(entries []previewEntry) map[string]string {
 	}
 	return m
 }
+
+// TestCatalogKeySeparatesRoleNames pins the tier-1 cache key: a role whose
+// name holds a comma never shares a catalog with the roles it spells, and
+// the order of a session's roles does not split one role set.
+func TestCatalogKeySeparatesRoleNames(t *testing.T) {
+	app, _, _ := testAppCounting(t)
+	if app.catalogFor([]string{"a1,a2"}) == app.catalogFor([]string{"a1", "a2"}) {
+		t.Error("the role a1,a2 shares the catalog of the roles a1 and a2")
+	}
+	if app.catalogFor([]string{"a2", "a1"}) != app.catalogFor([]string{"a1", "a2"}) {
+		t.Error("one role set in two orders built two catalogs")
+	}
+}

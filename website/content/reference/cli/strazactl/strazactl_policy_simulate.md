@@ -2,7 +2,7 @@
 title: strazactl policy simulate
 description: Ask what a call would do for a subject, against the live policies
 pagetype: reference
-weight: 76
+weight: 72
 draft: false
 sources:
   - cmd/strazactl
@@ -54,7 +54,7 @@ strazactl policy simulate [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -2,7 +2,7 @@
 title: strazactl version
 description: Print version information
 pagetype: reference
-weight: 117
+weight: 113
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl version [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -34,8 +34,8 @@ const (
 
 // The refusals of step 1 of a publish: only a person publishes.
 const (
-	publishRefusalAdminAPI = "An admin API token carries no person and cannot publish a draft. It may create drafts. A person publishes them on the console or with strazactl."
-	publishRefusalAgent    = "This identity is an agent, and an agent cannot publish a draft, even with an administrator role. A person with standing over every object in the draft publishes it on the console or with strazactl."
+	publishRefusalAdminAPI = "An admin API token carries no person and cannot publish a draft. It may create drafts. A person publishes them on the console under Drafts."
+	publishRefusalAgent    = "This identity is an agent, and an agent cannot publish a draft, even with an administrator role. A person with standing over every object in the draft publishes it on the console under Drafts."
 )
 
 // The refusals of admin.secondPerson: an author of a draft, the
@@ -138,8 +138,8 @@ func tokenAccessRefusal(grants map[string]bool, method string) string {
 // names and whether that sponsor answers for it, and the servers whose
 // admin role the user holds. The
 // door comes from the credential and never from the request: a session of
-// the console is console, a session of strazactl is strazactl, and
-// everything else is api. An admin API token reads nothing.
+// the console is console, and everything else is api. An admin API token
+// reads nothing.
 func (a *App) draftCallerOf(w http.ResponseWriter, r *http.Request, p adminPrincipal) (draftCaller, bool) {
 	c := draftCaller{p: p, door: drafts.DoorAPI,
 		author: drafts.Principal{UserID: p.actor.ID, Username: p.actor.Name, Via: p.actor.Via, Client: clientAdminAPI}}
@@ -160,11 +160,8 @@ func (a *App) draftCallerOf(w http.ResponseWriter, r *http.Request, p adminPrinc
 	c.author = drafts.Principal{UserID: u.ID, Username: u.Username, Agent: !c.person, Via: p.actor.Via, Client: clientLogin}
 	if p.actor.Via == laneSession {
 		c.author.Client = p.harness
-		switch p.harness {
-		case string(drafts.DoorConsole):
+		if p.harness == string(drafts.DoorConsole) {
 			c.door = drafts.DoorConsole
-		case string(drafts.DoorStrazactl):
-			c.door = drafts.DoorStrazactl
 		}
 	}
 	if !c.person && u.Sponsor != "" {
@@ -534,7 +531,7 @@ func (c draftCaller) reviseRefusal(id string, authors []drafts.Principal) string
 	if c.adminAPI() {
 		who = "An admin API token"
 	}
-	return fmt.Sprintf("%s changes only the drafts it wrote, and draft %s was written by someone else. A person can revise it on the console or with strazactl.", who, id)
+	return fmt.Sprintf("%s changes only the drafts it wrote, and draft %s was written by someone else. A person can revise it on the console under Drafts.", who, id)
 }
 
 // discardRefusal answers the 403 sentence that refuses c the discard of

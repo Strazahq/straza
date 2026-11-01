@@ -68,7 +68,7 @@ func usersCmd(client func() *ctl.Client) *cobra.Command {
 			if _, err := client().SetUserStatus(cmd.Context(), u.ID, "active"); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "enabled %s. The status is active and the user's revocations are lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or its device credential expired meanwhile: such a device needs straza enroll again\n", args[0])
+			fmt.Fprintf(cmd.OutOrStdout(), "enabled %s. The status is active and the user's revocations are lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or the sign-in it enrolled with grew older than governance.signInMaxAge meanwhile. Such a device needs straza enroll again\n", args[0])
 			return nil
 		},
 	})
@@ -158,7 +158,7 @@ func usersCmd(client func() *ctl.Client) *cobra.Command {
 		Use:   "create-nhi <username> --type agent|service",
 		Short: "Provision an AI agent or a service account (headless, no password, key-based)",
 		Long: "Provision an identity with no password and no interactive login. --type is required: agent is an AI agent " +
-			"that acts for a person, and service is a technical account with no agency. Neither can sign in to strazactl or the console. " +
+			"that acts for a person, and service is a technical account with no agency. Neither can sign in to the console. " +
 			"Register its key next with strazactl users nhi-key set, after straza keygen prints it on the agent's machine.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -185,7 +185,7 @@ func usersCmd(client func() *ctl.Client) *cobra.Command {
 	nhiKey := &cobra.Command{Use: "nhi-key", Short: "Manage an agent identity's headless assertion key (straza keygen prints it)"}
 	nhiKey.AddCommand(&cobra.Command{
 		Use:   "set <username> <publicKeyBase64>",
-		Short: "Register (or rotate) the agent identity's Ed25519 public key",
+		Short: "Register the agent identity's Ed25519 public key, or rotate it and end the agent's running sessions",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u, err := client().UserByUsername(cmd.Context(), args[0])
@@ -201,7 +201,7 @@ func usersCmd(client func() *ctl.Client) *cobra.Command {
 	})
 	nhiKey.AddCommand(&cobra.Command{
 		Use:   "unset <username>",
-		Short: "Revoke the agent identity's key (the next token request fails; running sessions die via the kill switch)",
+		Short: "Revoke the agent identity's key, which ends its running sessions and refuses its next token request",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u, err := client().UserByUsername(cmd.Context(), args[0])

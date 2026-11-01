@@ -153,6 +153,10 @@ func (b *Bus) Publish(ctx context.Context, subject string, data []byte) error {
 	return err
 }
 
+// MaxPayload answers the largest message in bytes that the bus's server
+// accepts, its max_payload, 1 MiB by default.
+func (b *Bus) MaxPayload() int64 { return b.nc.MaxPayload() }
+
 // AuditConsumer returns (creating if needed) the durable pull consumer that
 // drains the STRAZA_AUDIT stream into the hash chain. Durable + explicit ack
 // so a consumer crash redelivers un-acked messages (at-least-once).

@@ -157,11 +157,24 @@ policy.
 strazad serve --profile standalone
 ```
 
-In a second terminal, enroll this machine. `straza enroll` prints an address and a code: open the
-address, sign in as `admin`, and the terminal ends with `Enrolled as admin` and the device id.
-Then run a destructive command through Straza:
+In a second terminal, start `straza service`, the Straza background service, which holds this
+machine's key and sessions. Here it runs as you for the `STRAZA_HOME` you set, which works on
+Linux and macOS. On Windows it runs only as the Windows service an administrator installs, as
+[Install](https://docs.straza.ai/get-started/install/#install-the-service-on-windows) shows:
 
 ```sh
+export STRAZA_HOME="$HOME/.straza"
+straza service
+```
+
+In a third terminal with the same `STRAZA_HOME`, enroll this machine. `straza enroll` opens your
+browser on the server's sign-in page: sign in as `admin`, and the terminal ends with
+`Enrolled as admin`, the device id, and that the background service holds this machine's key. On
+a machine with no display, add `--use-device-code` and confirm the code it prints in a browser
+that reaches the server. Then run a destructive command through Straza:
+
+```sh
+export STRAZA_HOME="$HOME/.straza"
 straza enroll --server http://127.0.0.1:8420
 straza exec -- rm -rf /tmp/x
 ```
@@ -227,7 +240,7 @@ Recording of prompts and replies is off unless a policy set turns it on.
 | Identity | Okta. The guide's SCIM requests were replayed, not yet run against an Okta tenant | [Okta](https://docs.straza.ai/guides/connect-identity/okta/) |
 | Identity | An OIDC identity provider, Keycloak in the demo stack, or strazad's built-in sign-in | [Keycloak login](https://docs.straza.ai/guides/connect-identity/keycloak-login/) |
 | Approval | Straza approver app for iOS and Android. F-Droid is planned | [Phone](https://docs.straza.ai/guides/approve/phone/) |
-| Approval | Console, the self-service page and `strazactl` | [Console](https://docs.straza.ai/guides/approve/console/) |
+| Approval | Console and the self-service page | [Console](https://docs.straza.ai/guides/approve/console/) |
 | Approval | Slack, not yet run against a live Slack workspace | [Slack](https://docs.straza.ai/guides/approve/slack/) |
 | SIEM | Webhook sink with an optional HMAC-SHA256 signature, and file sink | [Sinks and SIEM](https://docs.straza.ai/guides/audit/sinks-and-siem/) |
 
@@ -235,8 +248,10 @@ Recording of prompts and replies is off unless a policy set turns it on.
 
 The server is one static binary. On a laptop it runs on its embedded SQLite database and event
 broker, and the same binary runs on Postgres and NATS across a Kubernetes cluster. Release
-archives for Linux, macOS and Windows on amd64 and arm64 are on the
-[releases page](https://github.com/strazahq/straza/releases), each with an SBOM. The container
+archives for Linux, macOS and Windows on amd64 and arm64, each with an SBOM, are on the
+[releases page](https://github.com/strazahq/straza/releases). From 2.0.0, each release also
+carries packages of the `straza` client: deb and rpm packages for Linux, an MSI for Windows
+amd64, and a pkg for macOS, signed with a Developer ID and notarized by Apple. The container
 image `ghcr.io/strazahq/straza` is multi-arch and signed by digest, and
 `helm install straza deploy/helm/straza` installs the chart in this repository, which bundles
 Postgres and NATS by default and lets you bring your own.
@@ -263,8 +278,9 @@ Straza checks the actions that pass through its hooks, its MCP gateway and `stra
 lane holds differently:
 
 - A hook installed in user mode on an open machine is advisory, because an agent that can run
-  anything can skip it. `sudo straza install --managed --server <server-url> claude-code` writes a
-  root-owned layout the user cannot edit, and the server checks the measured wiring at check-in.
+  anything can skip it. On a machine with the Straza package installed, the deb, rpm, MSI or pkg,
+  `sudo straza install --managed --server <server-url> claude-code` writes a root-owned layout
+  the user cannot edit, and the server checks the measured wiring at check-in.
 - The MCP gateway holds at a boundary, because the decision, the catalog and the credential all
   live on the server. It sees only what goes through MCP.
 - Inside the sandbox image, `straza exec` is the only way the agent's process can run anything,
@@ -291,11 +307,15 @@ or to [security@straza.ai](mailto:security@straza.ai), never in a public issue.
 
 ## Status
 
-v1.1.0 is the first public release, and the project is under heavy development, so expect
-frequent changes between releases. Microsoft Teams, a Cursor adapter and passkeys for the
-built-in sign-in come next, and the [roadmap](https://docs.straza.ai/project/roadmap/) says what
-follows. The [FAQ](https://docs.straza.ai/project/faq/) has more answers, each with a link to the
-page that covers its topic.
+v2.0.0 is the latest release, a major one, and v1.1.0 was the first public release. Upgrading
+from 1.1.2 changes every governed machine, as
+[Upgrade from 1.1.2 to 2.0.0](https://docs.straza.ai/guides/operate/backup-and-upgrade/#upgrade-from-112-to-200)
+shows. The project is under heavy development, so expect frequent changes between releases. A
+confirmation on the person's phone before a newly enrolled machine starts a session comes next,
+then Microsoft Teams, a Cursor adapter and passkeys for the built-in sign-in, and the
+[roadmap](https://docs.straza.ai/project/roadmap/) says what follows. The
+[FAQ](https://docs.straza.ai/project/faq/) has more answers, each with a link to the page that
+covers its topic.
 
 ## Contributing
 

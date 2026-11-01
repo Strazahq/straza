@@ -8,24 +8,33 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
 // upstream is the hermetic MCP server the mcp steps and the app manifests
-// point at through ${upstream}. It speaks the streamable HTTP shape the
-// gateway's remote runtime dials: one JSON-RPC message per POST answered as
-// application/json, 202 for notifications, 405 for the standalone GET
-// stream. Three tools: echo returns its text argument, get-sum returns the
-// sum of its numeric a and b as a decimal string, and get-env takes no
-// argument and returns the fixed text E2E_UPSTREAM=1.
+// point at through ${upstream} and ${objectsUpstream}. It speaks the
+// streamable HTTP shape the gateway's remote runtime dials: one JSON-RPC
+// message per POST answered as application/json, 202 for notifications, 405
+// for the standalone GET stream. /mcp serves three tools: echo returns its
+// text argument, get-sum returns the sum of its numeric a and b as a
+// decimal string, and get-env takes no argument and returns the fixed text
+// E2E_UPSTREAM=1. /mcp-objects serves the repo tools of upstream_objects.go,
+// so the scenarios that bind every tool on /mcp see the same three tools.
 type upstream struct {
-	URL  string
-	srv  *http.Server
-	ln   net.Listener
-	done chan struct{}
+	URL        string
+	ObjectsURL string
+	srv        *http.Server
+	ln         net.Listener
+	done       chan struct{}
+
+	// mu guards reads, every repo_read call that reached /mcp-objects, in order.
+	mu    sync.Mutex
+	reads []string
 }
 
-// startUpstream listens on a free loopback port and serves /mcp.
+// startUpstream listens on a free loopback port and serves /mcp and
+// /mcp-objects.
 func startUpstream() (*upstream, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -33,8 +42,10 @@ func startUpstream() (*upstream, error) {
 	}
 	u := &upstream{ln: ln, done: make(chan struct{})}
 	u.URL = "http://" + ln.Addr().String() + "/mcp"
+	u.ObjectsURL = "http://" + ln.Addr().String() + "/mcp-objects"
 	mux := http.NewServeMux()
-	mux.HandleFunc("/mcp", u.handle)
+	mux.HandleFunc("/mcp", u.handler("e2e-upstream", upstreamTools, u.call))
+	mux.HandleFunc("/mcp-objects", u.handler("e2e-upstream-objects", objectTools, u.callObjects))
 	u.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		_ = u.srv.Serve(ln)
@@ -58,7 +69,13 @@ type rpcMessage struct {
 	Params  json.RawMessage `json:"params"`
 }
 
-func (u *upstream) handle(w http.ResponseWriter, r *http.Request) {
+// handler answers one path of the upstream: the server name it gives at
+// initialize, the tools it lists and the function that answers a call.
+func (u *upstream) handler(name string, tools func() []any, call func(rpcMessage) any) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { u.handle(w, r, name, tools, call) }
+}
+
+func (u *upstream) handle(w http.ResponseWriter, r *http.Request, name string, tools func() []any, call func(rpcMessage) any) {
 	switch r.Method {
 	case http.MethodGet:
 		http.Error(w, "no standalone stream", http.StatusMethodNotAllowed)
@@ -91,14 +108,14 @@ func (u *upstream) handle(w http.ResponseWriter, r *http.Request) {
 		out = rpcResult(msg.ID, map[string]any{
 			"protocolVersion": negotiate(msg.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "e2e-upstream", "version": "1.0.0"},
+			"serverInfo":      map[string]any{"name": name, "version": "1.0.0"},
 		})
 	case "ping":
 		out = rpcResult(msg.ID, map[string]any{})
 	case "tools/list":
-		out = rpcResult(msg.ID, map[string]any{"tools": upstreamTools()})
+		out = rpcResult(msg.ID, map[string]any{"tools": tools()})
 	case "tools/call":
-		out = u.call(msg)
+		out = call(msg)
 	default:
 		out = rpcErr(msg.ID, -32601, fmt.Sprintf("method %q is not served", msg.Method))
 	}

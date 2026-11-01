@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -95,8 +96,10 @@ func TestPerIPLimit(t *testing.T) {
 	}
 }
 
-// TestLoginLimit: only the password submit is throttled; the device-code
-// token poll and the login PAGE stay free.
+// TestLoginLimit pins that only the password submits of /oidc/device and
+// /oidc/authorize are throttled, from one budget per client address, and
+// that the token poll and the login pages stay free. Device sign-in starts
+// are throttled from a second budget, and both limits are inert at zero.
 func TestLoginLimit(t *testing.T) {
 	t.Parallel()
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -118,12 +121,124 @@ func TestLoginLimit(t *testing.T) {
 	if got := post("/oidc/token"); got != http.StatusOK {
 		t.Fatalf("token poll throttled: %d", got)
 	}
-	page := httptest.NewRequest(http.MethodGet, "/oidc/device", nil)
-	page.RemoteAddr = "198.51.100.9:40000"
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, page)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login page throttled: %d", rec.Code)
+	if got := post("/oidc/authorize"); got != http.StatusTooManyRequests {
+		t.Fatalf("authorize submit after a drained bucket = %d, want 429 from the shared budget", got)
+	}
+	for _, path := range []string{"/oidc/device", "/oidc/authorize"} {
+		page := httptest.NewRequest(http.MethodGet, path, nil)
+		page.RemoteAddr = "198.51.100.9:40000"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, page)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("login page %s throttled: %d", path, rec.Code)
+		}
+	}
+
+	// The authorization endpoint's password submit is throttled on its own.
+	fresh := loginLimit(ratelimit.New(), 1, next)
+	for i, want := range []int{http.StatusOK, http.StatusTooManyRequests} {
+		r := httptest.NewRequest(http.MethodPost, "/oidc/authorize", strings.NewReader("user=a&pass=b"))
+		r.RemoteAddr = "198.51.100.10:40000"
+		rec := httptest.NewRecorder()
+		fresh.ServeHTTP(rec, r)
+		if rec.Code != want {
+			t.Fatalf("authorize submit %d = %d, want %d", i+1, rec.Code, want)
+		}
+	}
+
+	// Device sign-in starts draw on a budget of their own, chained the way
+	// the server wires both limits. A near-zero rate keeps a drained bucket
+	// drained however slowly a loaded run gets to the next step.
+	type step struct {
+		path string
+		want int
+	}
+	const start = "/oidc/device_authorization"
+	for _, tc := range []struct {
+		name  string
+		rps   float64
+		steps []step
+	}{
+		{name: "a device start is throttled", rps: 0.0001, steps: []step{
+			{start, http.StatusOK}, {start, http.StatusTooManyRequests},
+		}},
+		{name: "device starts leave the password budget whole", rps: 0.0001, steps: []step{
+			{start, http.StatusOK}, {start, http.StatusTooManyRequests},
+			{"/oidc/device", http.StatusOK}, {"/oidc/authorize", http.StatusTooManyRequests},
+		}},
+		{name: "password submits leave the device start budget whole", rps: 0.0001, steps: []step{
+			{"/oidc/device", http.StatusOK}, {"/oidc/authorize", http.StatusTooManyRequests},
+			{start, http.StatusOK}, {start, http.StatusTooManyRequests},
+		}},
+		{name: "zero is inert", rps: 0, steps: []step{
+			{start, http.StatusOK}, {start, http.StatusOK}, {start, http.StatusOK},
+			{"/oidc/device", http.StatusOK}, {"/oidc/device", http.StatusOK},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := deviceStartLimit(ratelimit.New(), tc.rps, loginLimit(ratelimit.New(), tc.rps, next))
+			for i, s := range tc.steps {
+				r := httptest.NewRequest(http.MethodPost, s.path, strings.NewReader("client_id=strazactl"))
+				r.RemoteAddr = "198.51.100.11:40000"
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, r)
+				if rec.Code != s.want {
+					t.Fatalf("step %d, POST %s = %d, want %d", i+1, s.path, rec.Code, s.want)
+				}
+				if s.path == start && s.want == http.StatusTooManyRequests {
+					if got := rec.Header().Get("Retry-After"); got != "1" {
+						t.Errorf("step %d: Retry-After = %q, want 1", i+1, got)
+					}
+					if !strings.Contains(rec.Body.String(), deviceStartsRefused) {
+						t.Errorf("step %d: body = %s, want the sentence %q", i+1, rec.Body, deviceStartsRefused)
+					}
+				}
+			}
+		})
+	}
+}
+
+// deviceStartsRefused is the sentence a throttled device sign-in start
+// answers with.
+const deviceStartsRefused = "Too many sign-in starts from this address. Wait a few seconds and sign in again."
+
+// TestDeviceStartLimitE2E proves the wiring on both profiles: a booted app
+// throttles a second rapid device sign-in start from one address, and the
+// password submit after it still has its own budget.
+func TestDeviceStartLimitE2E(t *testing.T) {
+	t.Parallel()
+	for _, profile := range []string{config.ProfileStandalone, config.ProfileEnterprise} {
+		t.Run(profile, func(t *testing.T) {
+			t.Parallel()
+			_, base := testApp(t, func(cfg *config.Config) {
+				cfg.Profile = profile
+				cfg.Server.LoginPerIPRPS = 0.0001
+			})
+			post := func(path string, form url.Values) (int, string) {
+				t.Helper()
+				resp, err := http.PostForm(base+path, form)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = resp.Body.Close() }()
+				body, _ := io.ReadAll(resp.Body)
+				return resp.StatusCode, string(body)
+			}
+			startForm := url.Values{"client_id": {"strazactl"}}
+			if code, body := post("/oidc/device_authorization", startForm); code != http.StatusOK {
+				t.Fatalf("first start = %d %s, want 200", code, body)
+			}
+			if code, body := post("/oidc/device_authorization", startForm); code != http.StatusTooManyRequests || !strings.Contains(body, deviceStartsRefused) {
+				t.Fatalf("second rapid start = %d %s, want 429 with the sentence", code, body)
+			}
+			submit := url.Values{"user_code": {"XXXX-XXXX"}, "username": {"kim"}, "password": {"guess"}}
+			if code, body := post("/oidc/device", submit); code != http.StatusOK {
+				t.Fatalf("password submit after the starts = %d %s, want 200 from its own budget", code, body)
+			}
+			if code, _ := post("/oidc/device", submit); code != http.StatusTooManyRequests {
+				t.Fatalf("second rapid password submit = %d, want 429", code)
+			}
+		})
 	}
 }
 

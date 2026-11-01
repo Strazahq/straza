@@ -223,7 +223,7 @@ td code { white-space: nowrap; overflow-wrap: normal; }
       <h2 id="start-h">Start in the console</h2>
       <div class="creds">
         <span class="k">Address</span><code>http://localhost:8420/console/</code><button class="copy" type="button" data-copy="http://localhost:8420/console/">Copy</button>
-        <span class="k">Sign in</span><span>Press <b>Sign in with a code</b>, then <b>Open the sign-in page</b></span><span></span>
+        <span class="k">Sign in</span><span>Press <b>Sign in</b>. Keycloak opens and sends you back.</span><span></span>
         <span class="k">User</span><code>alice</code><button class="copy" type="button" data-copy="alice">Copy</button>
         <span class="k">Password</span><code>alice</code><button class="copy" type="button" data-copy="alice">Copy</button>
       </div>
@@ -262,9 +262,10 @@ td code { white-space: nowrap; overflow-wrap: normal; }
             <figcaption>Step 1 of New role on this stack, with the server demo-tools picked. Every new application role belongs to the one server it reaches.</figcaption>
           </figure>
           <p class="aside">Those tools now run for whoever holds the role, unless a policy gates them. The guide is <a href="/docs/guides/serve-mcp-apps/catalogs-per-role/">Access per role</a>.</p>
-          <p class="aside">From a terminal with strazactl instead, sign in, then create the role:</p>
+          <p class="aside">From a terminal with strazactl instead, run it on an admin API token that alice mints in the console under Settings, API tokens: pick Custom, set identity to read and write, and keep the lifetime short. The second line waits for you to paste the token and does not show it:</p>
           <div class="cmds">
-            <div class="cmd"><code>strazactl login --server http://localhost:8420</code><button class="copy" type="button" data-copy="strazactl login --server http://localhost:8420">Copy</button></div>
+            <div class="cmd"><code>export STRAZA_SERVER=http://localhost:8420</code><button class="copy" type="button" data-copy="export STRAZA_SERVER=http://localhost:8420">Copy</button></div>
+            <div class="cmd"><code>read -rs STRAZA_API_TOKEN &amp;&amp; export STRAZA_API_TOKEN</code><button class="copy" type="button" data-copy="read -rs STRAZA_API_TOKEN &amp;&amp; export STRAZA_API_TOKEN">Copy</button></div>
             <div class="cmd"><code>strazactl roles create demo-tools-sandbox-readers --app demo-tools --tools echo,get-sum</code><button class="copy" type="button" data-copy="strazactl roles create demo-tools-sandbox-readers --app demo-tools --tools echo,get-sum">Copy</button></div>
           </div>
         </div>
@@ -373,7 +374,7 @@ td code { white-space: nowrap; overflow-wrap: normal; }
             <li>Scan the QR code with the app.</li>
             <li>Straza sends alice's next request to the phone as a notification. Tap it to decide.</li>
           </ol>
-          <p class="aside">An admin can add a phone for any person in the console, under Approvals, then Approver devices. The guide is <a href="/docs/guides/approve/phone/">Approve on a phone</a>.</p>
+          <p class="aside">No admin route or console screen adds a phone for someone else. A phone is added on the self-service page by whoever is signed in as the person, here alice. An admin adds their own phone in the console too, under Approvals, then Approver devices. The guide is <a href="/docs/guides/approve/phone/">Approve on a phone</a>.</p>
         </div>
       </details>
 
@@ -417,7 +418,7 @@ td code { white-space: nowrap; overflow-wrap: normal; }
           <tr><td class="who" data-label="Service">Phone approver</td><td data-label="Address"><code>https://&lt;your address&gt;:8443</code></td><td data-label="What it is">Where a paired phone decides. The QR code carries the address and the certificate pin.</td><td data-label="Runs with">always</td></tr>
           <tr><td class="who" data-label="Service">Kibana, Elasticsearch</td><td data-label="Address"><span><a href="http://localhost:5601/">localhost:5601</a>, <code>127.0.0.1:9200</code></span></td><td data-label="What it is">Search and alerts over the audit events</td><td data-label="Runs with">the SIEM overlay, <code>compose.siem.yaml</code></td></tr>
           <tr><td class="who" data-label="Service">Chat demo</td><td data-label="Address"><a href="http://localhost:8477/">localhost:8477</a></td><td data-label="What it is">joe's chat window</td><td data-label="Runs with">the demo overlay, <code>compose.demo.yaml</code>, which builds from a private repository</td></tr>
-          <tr><td class="who" data-label="Service">demo-tools, views-demo, midPoint MCP</td><td data-label="Address"><span class="na">no address</span></td><td data-label="What it is">MCP servers, reached only through Straza's gateway. midPoint's tools run as the person signed in.</td><td data-label="Runs with">always</td></tr>
+          <tr><td class="who" data-label="Service">demo-tools, views-demo, objects-demo, midPoint MCP</td><td data-label="Address"><span class="na">no address</span></td><td data-label="What it is">MCP servers, reached only through Straza's gateway. midPoint's tools run as the person signed in, and objects-demo's ten repos fill its Repos tab.</td><td data-label="Runs with">always</td></tr>
         </tbody>
       </table>
     </div>
@@ -428,7 +429,7 @@ td code { white-space: nowrap; overflow-wrap: normal; }
     <h2 id="lab-h">Lab shortcuts in this stack</h2>
     <p class="t2">These make the demo quick. None of them is how you run Straza for real.</p>
     <ul>
-      <li>Every password on this page is committed to the repository. So are the Postgres logins <code>straza</code> and <code>midpoint</code>, each with its own name as the password, the midPoint service account, the seed-bootstrap account the seeder disables when it is done, the Keycloak client secret, the Kibana system password and the three Kibana encryption keys.</li>
+      <li>Every password on this page is committed to the repository. So are the Postgres logins <code>straza</code> and <code>midpoint</code>, each with its own name as the password, the midPoint service account, the seed-bootstrap account the seeder disables when it is done, the Keycloak client secret, objects-demo's two tokens, the Kibana system password and the three Kibana encryption keys.</li>
       <li>Plain HTTP everywhere except the phone approver on port 8443, whose certificate strazad makes itself. <a href="/docs/guides/operate/tls-and-exposure/">TLS and exposure</a> covers a real deployment.</li>
       <li>The ports 8400, 8420, 8443, 8480 and 8087 listen on every interface, and Docker's rules run before a host firewall. The loopback overlay, <code>compose.loopback.yaml</code>, keeps them on this machine.</li>
       <li>Attestation is relaxed, so any install of the client gets a session.</li>

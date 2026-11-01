@@ -7,7 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/version"
 )
 
@@ -113,14 +115,6 @@ func newFakeGateway(t *testing.T) *fakeGateway {
 	g.Server = httptest.NewServer(mux)
 	t.Cleanup(g.Close)
 	return g
-}
-
-// rotate invalidates the current token; the next gateway request 401s until
-// the proxy refreshes.
-func (g *fakeGateway) rotate() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.token = "rotated-" + g.token
 }
 
 // newPagedGateway builds a gateway whose /mcp handler paginates tools/list over
@@ -241,20 +235,31 @@ func writeRPC(w http.ResponseWriter, id json.RawMessage, fields map[string]any) 
 	_ = json.NewEncoder(w).Encode(env)
 }
 
-func proxyTestStore(t *testing.T, serverURL string) *Store {
+// proxyTestStore starts a fake service in front of g (proxyService) and
+// returns the thin client's store.
+func proxyTestStore(t *testing.T, g *fakeGateway) *Store {
 	t.Helper()
-	t.Setenv("STRAZA_HOME", t.TempDir())
-	store, err := OpenStore()
+	return proxyService(t, g).store(t)
+}
+
+// proxyService starts a fake service whose MCP route forwards to g with g's
+// current session token, the way the service's proxy adds the caller's
+// session.
+func proxyService(t *testing.T, g *fakeGateway) *fakeService {
+	t.Helper()
+	svc := newFakeService(t)
+	target, err := url.Parse(g.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveConfig(Config{ServerURL: serverURL}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SaveIdentity(Identity{DeviceToken: "dev-token", DeviceID: "d1", Username: "bob"}); err != nil {
-		t.Fatal(err)
-	}
-	return store
+	rp := &httputil.ReverseProxy{FlushInterval: -1, Rewrite: func(pr *httputil.ProxyRequest) {
+		pr.SetURL(target)
+		g.mu.Lock()
+		pr.Out.Header.Set("Authorization", "Bearer "+g.token)
+		g.mu.Unlock()
+	}}
+	svc.mcp = rp
+	return svc
 }
 
 // buildProxy assembles the proxy against the fake gateway and connects an
@@ -274,17 +279,13 @@ func buildProxyFor(t *testing.T, g *fakeGateway, store *Store, server string) (c
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	client := NewClient(g.URL)
-	if _, err := ensureSession(ctx, store, client, "claude-code"); err != nil {
-		t.Fatalf("ensureSession: %v", err)
-	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "straza", Version: version.Version}, proxyServerOptions(server))
 	p := newMCPProxy(srv)
 	p.ctx = ctx // scheduled/periodic resyncs the new tests drive need a context
 	p.server = server
 	// Production wiring: boot and revival share the dialer (redial tests
 	// wrap p.dial to count attempts).
-	p.dial = newGatewayDialer(p, store, client, "claude-code", gatewayEndpoint(g.URL, server))
+	p.dial = newGatewayDialer(p, serviceHTTPClient(NewServiceClient(), "claude-code"), gatewayEndpoint(server))
 	cs, err := p.dial(ctx)
 	if err != nil {
 		t.Fatalf("connect gateway: %v", err)
@@ -317,7 +318,7 @@ func startProxy(t *testing.T, g *fakeGateway, store *Store) *mcp.ClientSession {
 
 func TestMCPProxyEndToEnd(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	harness := startProxy(t, g, store)
 	ctx := context.Background()
 
@@ -336,70 +337,37 @@ func TestMCPProxyEndToEnd(t *testing.T) {
 	if txt := out.Content[0].(*mcp.TextContent).Text; txt != "gateway: hi" {
 		t.Errorf("result = %q", txt)
 	}
-
-	// Token rotation mid-session: the gateway 401s the old token; the proxy
-	// must refresh once and the SAME logical call succeed.
-	g.rotate()
-	out, err = harness.CallTool(ctx, &mcp.CallToolParams{
-		Name: "everything__echo", Arguments: map[string]any{"text": "after-rotate"}})
-	if err != nil {
-		t.Fatalf("post-rotation call: %v", err)
-	}
-	if txt := out.Content[0].(*mcp.TextContent).Text; txt != "gateway: after-rotate" {
-		t.Errorf("post-rotation result = %q", txt)
-	}
-	if g.refreshes.Load()+g.checkins.Load() < 2 {
-		t.Errorf("expected a refresh after rotation (checkins=%d refreshes=%d)",
-			g.checkins.Load(), g.refreshes.Load())
-	}
 }
 
-func TestEnsureSessionAdoptsAndLocks(t *testing.T) {
+// TestMCPProxyNamesItsHarness pins what the bridge sends the service on every
+// request: the harness it fronts, versioned by its role, and no session of
+// its own, so the service picks the harness's newest live session. The
+// bridge holds no credential, so it never sends one.
+func TestMCPProxyNamesItsHarness(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
-	ctx := context.Background()
-	client := NewClient(g.URL)
-
-	// A fresh session on disk is ADOPTED, not re-minted.
-	if err := store.SaveSession(Session{
-		SessionID: "existing", SessionToken: "tok-existing", Harness: "claude-code/2.1",
-		User: "bob", Roles: []string{"dev"},
-		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatal(err)
+	svc := proxyService(t, g)
+	harness := startProxy(t, g, svc.store(t))
+	if _, err := harness.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "everything__echo", Arguments: map[string]any{"text": "hi"}}); err != nil {
+		t.Fatalf("call: %v", err)
 	}
-	ses, err := ensureSession(ctx, store, client, "claude-code")
-	if err != nil || ses.SessionID != "existing" {
-		t.Fatalf("adopt = %+v, %v", ses, err)
+	svc.mu.Lock()
+	sent := append([]http.Header(nil), svc.proxied...)
+	svc.mu.Unlock()
+	if len(sent) == 0 {
+		t.Fatal("the bridge sent the service nothing")
 	}
-	if g.checkins.Load() != 0 {
-		t.Errorf("adoption must not checkin (got %d)", g.checkins.Load())
-	}
-
-	// Concurrent ensureSession calls with NO session spend few checkins
-	// (the lock serializes; late arrivals adopt the winner's session).
-	if err := os.Remove(store.statePath("session.json")); err != nil {
-		t.Fatal(err)
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := ensureSession(ctx, store, client, "claude-code"); err != nil {
-				t.Errorf("ensureSession: %v", err)
-			}
-		}()
-	}
-	wg.Wait()
-	if n := g.checkins.Load(); n > 2 {
-		t.Errorf("8 concurrent ensureSession = %d checkins, want <=2 (lock + adopt)", n)
+	for _, h := range sent {
+		if h.Get(localapi.HeaderHarness) != "claude-code" || h.Get(localapi.HeaderHarnessVersion) != "mcp" ||
+			h.Get(localapi.HeaderHarnessSession) != "" || h.Get("Authorization") != "" {
+			t.Fatalf("request headers = %v, want the harness named, no session and no credential", h)
+		}
 	}
 }
 
 func TestMCPProxyFailClosedMessage(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	harness := startProxy(t, g, store)
 	// Gateway gone mid-session: sever the listener AND live connections,
 	// because a graceful Close would block on the proxy's standalone SSE stream.
@@ -446,7 +414,7 @@ func harnessSchemaHas(t *testing.T, ctx context.Context, harness *mcp.ClientSess
 // contract, so it would never supply the justification the approver reads.
 func TestMCPProxyResyncPropagatesSchemaChange(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	ctx, p, harness := buildProxy(t, g, store)
 
 	// Before: the mirrored echo has no justification field.
@@ -486,7 +454,7 @@ func TestMCPProxyResyncPropagatesSchemaChange(t *testing.T) {
 // opposite branch (a changed digest DOES re-add).
 func TestMCPProxyResyncSkipsUnchanged(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	ctx, p, _ := buildProxy(t, g, store)
 
 	first := p.registered["everything__echo"]
@@ -512,7 +480,7 @@ func TestMCPProxyResyncSkipsUnchanged(t *testing.T) {
 func TestMCPProxyResyncFollowsCursorPages(t *testing.T) {
 	names := []string{"a__one", "a__two", "a__three", "a__four", "a__five"}
 	g := newPagedGateway(t, 2, names...) // 5 tools at page size 2 => 3 pages
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	_, p, _ := buildProxy(t, g, store) // buildProxy performs the initial resync
 
 	if len(p.registered) != len(names) {
@@ -536,7 +504,7 @@ func TestMCPProxyResyncFollowsCursorPages(t *testing.T) {
 // land the full new set.
 func TestMCPProxyResyncRetriesStaleCursorMidListing(t *testing.T) {
 	g := newPagedGateway(t, 1, "a__one", "a__two") // start: 2 tools, 1 per page
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	_, p, _ := buildProxy(t, g, store) // clean initial resync
 	p.retryPause = 0                   // no real sleep between attempts
 
@@ -574,7 +542,7 @@ func TestMCPProxyResyncRetriesStaleCursorMidListing(t *testing.T) {
 // must fold into exactly one resync rather than one walk apiece.
 func TestMCPProxyCoalescesRapidNotifications(t *testing.T) {
 	g := newPagedGateway(t, 2, "a__one", "a__two", "a__three") // 3 tools => 2 pages
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	_, p, _ := buildProxy(t, g, store)
 	p.jitterMax = 50 * time.Millisecond
 
@@ -602,7 +570,7 @@ func TestMCPProxyCoalescesRapidNotifications(t *testing.T) {
 // backstop can find the added tool.
 func TestMCPProxyPeriodicResyncCatchesSilentChange(t *testing.T) {
 	g := newPagedGateway(t, 10, "a__one") // one page, room to grow
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	ctx, p, _ := buildProxy(t, g, store)
 	p.periodicEvery = 5 * time.Millisecond
 	p.periodicJitter = 0

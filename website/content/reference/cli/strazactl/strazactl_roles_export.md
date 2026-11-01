@@ -2,7 +2,7 @@
 title: strazactl roles export
 description: Print the role's canonical VCS document (spec/objects kind Role) to stdout
 pagetype: reference
-weight: 81
+weight: 77
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl roles export <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

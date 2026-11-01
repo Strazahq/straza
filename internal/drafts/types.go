@@ -147,7 +147,9 @@ const (
 // across every text sent, or of the first document of a text it refuses
 // whole, so a client that sent the texts can say where it sits. A warning
 // that replaces such a refusal keeps its number. It is 0 for every other
-// finding.
+// finding. Group, set on a risk only, names the risks a publisher confirms
+// together, once for the whole group; a risk with no group is confirmed on
+// its own, by name when it is typed.
 type Finding struct {
 	Code     string `json:"code"`
 	Class    Class  `json:"class"`
@@ -158,6 +160,7 @@ type Finding struct {
 	Before   string `json:"before,omitempty"`
 	After    string `json:"after,omitempty"`
 	Typed    string `json:"typed,omitempty"`
+	Group    string `json:"group,omitempty"`
 	Document int    `json:"document,omitempty"`
 }
 
@@ -199,6 +202,31 @@ type Gain struct {
 	AfterWords  string   `json:"after_words,omitempty"`
 }
 
+// ObjectName is one object of a server: the id Straza resolved and the value
+// a role file writes for it.
+type ObjectName struct {
+	ID    string `json:"id"`
+	Value string `json:"value"`
+}
+
+// Coverage is what one role reaches on one server that pins an object type,
+// today and after publishing, for every role the draft touches there. Type
+// and Plural are the server's own words for its objects. Every means the
+// role covers every object, those listed later included; otherwise Before
+// and After name the covered objects. HolderCount and Holders follow Gain.
+type Coverage struct {
+	Role        string       `json:"role"`
+	Server      string       `json:"server"`
+	Type        string       `json:"type"`
+	Plural      string       `json:"plural"`
+	Holders     []string     `json:"holders,omitempty"`
+	HolderCount int          `json:"holders_count"`
+	EveryBefore bool         `json:"every_before"`
+	EveryAfter  bool         `json:"every_after"`
+	Before      []ObjectName `json:"before"`
+	After       []ObjectName `json:"after"`
+}
+
 // LastChange is the newest publish that changed an object: the published
 // draft's id, who published it and when. draft.stale names it.
 type LastChange struct {
@@ -216,19 +244,21 @@ type Need struct {
 
 // Verdict is the server's reading of one revision of a draft against live
 // state. Snapshot is the policy version it was checked against. RiskDigest
-// covers the keys of every risk, and a publish carries it back.
+// covers the keys of every risk, and a publish carries it back. Objects is
+// left out when it holds nothing, as on a check that stopped at a refusal.
 type Verdict struct {
-	Draft      string    `json:"draft"`
-	Revision   int       `json:"revision"`
-	Snapshot   string    `json:"snapshot"`
-	CheckedAt  string    `json:"checked_at"`
-	Refused    []Finding `json:"refused"`
-	Risks      []Finding `json:"risks"`
-	Warnings   []Finding `json:"warnings"`
-	Unchecked  []Finding `json:"unchecked"`
-	Passed     []Finding `json:"passed"`
-	Info       []Finding `json:"info"`
-	Gains      []Gain    `json:"gains"`
-	Needs      []Need    `json:"needs"`
-	RiskDigest string    `json:"risk_digest"`
+	Draft      string     `json:"draft"`
+	Revision   int        `json:"revision"`
+	Snapshot   string     `json:"snapshot"`
+	CheckedAt  string     `json:"checked_at"`
+	Refused    []Finding  `json:"refused"`
+	Risks      []Finding  `json:"risks"`
+	Warnings   []Finding  `json:"warnings"`
+	Unchecked  []Finding  `json:"unchecked"`
+	Passed     []Finding  `json:"passed"`
+	Info       []Finding  `json:"info"`
+	Gains      []Gain     `json:"gains"`
+	Objects    []Coverage `json:"objects,omitempty"`
+	Needs      []Need     `json:"needs"`
+	RiskDigest string     `json:"risk_digest"`
 }

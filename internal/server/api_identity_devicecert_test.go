@@ -1,7 +1,6 @@
 package server
 
 import (
-	"net/http"
 	"testing"
 )
 
@@ -19,26 +18,11 @@ func TestSubjectDeviceCertHonestFalse(t *testing.T) {
 	_ = seedIdentity(t, app)
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
 
-	_, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "windows", "fingerprint": "sha256:fp-devicecert"},
-	})
-	deviceID, _ := enroll["device_id"].(string)
-	if deviceID == "" {
-		t.Fatalf("enroll minted no device: %v", enroll)
-	}
+	h := newKeyHolder(t, base)
+	h.enroll(idToken, "sha256:fp-devicecert")
+	_, sessionID := h.mustCheckin()
 
-	code, checkin := postJSON(t, base+"/v1/checkin", map[string]any{
-		"id_token":    idToken,
-		"device_id":   deviceID,
-		"harness":     map[string]string{"name": "claude-code", "version": "2.1.0"},
-		"attestation": map[string]any{"managed": false, "hashes": map[string]string{}},
-	})
-	if code != http.StatusOK {
-		t.Fatalf("checkin = %d %v", code, checkin)
-	}
-
-	sub, ok := app.subjects.get(checkin["session_id"].(string))
+	sub, ok := app.subjects.get(sessionID)
 	if !ok {
 		t.Fatal("subject cache missed the fresh session")
 	}

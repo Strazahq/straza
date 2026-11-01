@@ -23,6 +23,18 @@ func (a *App) keyRetireAfter() time.Duration {
 	return longest + authn.KeyReloadInterval
 }
 
+// deviceTokenTTL is the configured lifetime of the device credential that
+// strazactl and older Straza clients received at enrollment, the default
+// when the knob is unset. strazad issues none any more, and a retiring key
+// keeps verifying the ones it issued, so each still gets the sentence that
+// says why it stopped working.
+func (a *App) deviceTokenTTL() time.Duration {
+	if ttl := a.cfg.Governance.DeviceTokenTTL; ttl > 0 {
+		return ttl
+	}
+	return authn.DefaultDeviceTokenTTL
+}
+
 // handleSigningKeyRotate serves POST /v1/admin/signing-keys/rotate, phase one
 // of a two-phase rotation. It stages a new session signing key, which every
 // replica verifies from its next reload, and the rotation janitor

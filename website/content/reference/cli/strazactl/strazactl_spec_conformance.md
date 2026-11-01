@@ -2,7 +2,7 @@
 title: strazactl spec conformance
 description: Replay the published Tier-1 corpus against a hook implementation and score it
 pagetype: reference
-weight: 99
+weight: 95
 draft: false
 sources:
   - cmd/strazactl
@@ -32,7 +32,7 @@ strazactl spec conformance [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

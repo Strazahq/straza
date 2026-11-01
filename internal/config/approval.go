@@ -35,10 +35,10 @@ type Approval struct {
 	// models paper over. Negative fails boot.
 	GatewayHoldSeconds int `yaml:"gatewayHoldSeconds"`
 	// UnsignedOwnDecisions lets a person decide their own request from the
-	// console, strazactl and Slack, which carry no device signature. False
-	// accepts such a decision only from an enrolled phone or browser, whose
-	// key an agent on that person's machine cannot reach. True means that
-	// agent can run strazactl and approve its own calls.
+	// console and Slack, which carry no device signature. False accepts such
+	// a decision only from an enrolled phone or browser, whose key an agent
+	// on that person's machine cannot reach. True means that agent can
+	// approve its own calls.
 	UnsignedOwnDecisions bool `yaml:"unsignedOwnDecisions"`
 }
 

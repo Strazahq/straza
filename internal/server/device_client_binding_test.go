@@ -42,9 +42,12 @@ func mintDevice(t *testing.T, app *App, userID, kind, fingerprint string) (store
 
 // TestCheckinDeviceClientBinding pins the rule that a device credential opens
 // sessions only for the class of client that enrolled it: a kit row under a
-// human client's harness name is refused, a human row under a coding harness
-// is refused, a row from before the kind was recorded counts as kit, and
-// every refusal writes exactly one chained authn login failure.
+// human client's harness name is refused, a row from before the kind was
+// recorded counts as kit, and every refusal writes exactly one chained authn
+// login failure. A kit or unbound row without a key under a coding harness
+// is the retired bearer lane, which TestCutCheckinRefusesBearerKitRow pins,
+// and a row strazactl enrolled is refused under every name, which
+// TestStrazactlNoLongerSignsIn pins.
 func TestCheckinDeviceClientBinding(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -55,20 +58,12 @@ func TestCheckinDeviceClientBinding(t *testing.T) {
 		wantReason          string
 		wantHint            string
 	}{
-		{"kit row under claude-code", store.DeviceClientKit, "claude-code", http.StatusOK, "", ""},
 		{"kit row under console", store.DeviceClientKit, "console", http.StatusForbidden,
 			"device credential is bound to the enforcement kit", "Sign in to the console in your browser"},
-		{"kit row under strazactl", store.DeviceClientKit, "strazactl", http.StatusForbidden,
-			"device credential is bound to the enforcement kit", "Run strazactl login again from your own terminal"},
 		{"kit row under self-service", store.DeviceClientKit, "self-service", http.StatusForbidden,
 			"device credential is bound to the enforcement kit", "Sign in to the self-service page in your browser"},
-		{"human row under strazactl", store.DeviceClientHuman, "strazactl", http.StatusOK, "", ""},
-		{"human row under console", store.DeviceClientHuman, "console", http.StatusOK, "", ""},
-		{"human row under claude-code", store.DeviceClientHuman, "claude-code", http.StatusForbidden,
-			"device credential is bound to the human clients", "Run straza enroll on this machine"},
-		{"unbound row under codex", "", "codex", http.StatusOK, "", ""},
-		{"unbound row under strazactl", "", "strazactl", http.StatusForbidden,
-			"device credential carries no client kind", "Run strazactl login again from your own terminal"},
+		{"unbound row under console", "", "console", http.StatusForbidden,
+			"device credential carries no client kind", "Sign in to the console in your browser"},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -110,8 +105,7 @@ func TestCheckinDeviceClientBindingLanes(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
 	user := seedIdentity(t, app)
-	kit, kitTok := mintDevice(t, app, user.ID, store.DeviceClientKit, "fp-lanes-kit")
-	_, humanTok := mintDevice(t, app, user.ID, store.DeviceClientHuman, "fp-lanes-human")
+	kit, _ := mintDevice(t, app, user.ID, store.DeviceClientKit, "fp-lanes-kit")
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
 
 	code, body := postJSON(t, base+"/v1/checkin", map[string]any{
@@ -123,35 +117,28 @@ func TestCheckinDeviceClientBindingLanes(t *testing.T) {
 		t.Fatalf("id-token checkin naming a kit device under console = %d %v, want 403 with the kit sentence", code, body)
 	}
 
-	code, body = checkinDeviceAs(t, base, kitTok, "claude-code", "1")
-	if code != http.StatusOK {
-		t.Fatalf("kit session start = %d %v", code, body)
-	}
-	refresh := func(sessionToken, harness string) (int, map[string]any) {
-		return postJSON(t, base+"/v1/checkin", map[string]any{
+	h := newKeyHolder(t, base)
+	h.enroll(idToken, "fp-lanes-key")
+	keyToken, _ := h.mustCheckin()
+	refreshBody := func(sessionToken, harness string) map[string]any {
+		return map[string]any{
 			"session_token": sessionToken,
 			"harness":       map[string]string{"name": harness, "version": "1"},
 			"attestation":   map[string]any{"managed": false, "hashes": map[string]string{}},
-		})
+		}
 	}
 	// The body names console, the session row says claude-code, and the row
-	// is what the kit device is checked against.
-	if code, body = refresh(body["session_token"].(string), "console"); code != http.StatusOK {
+	// is what the keyed kit device is checked against.
+	if code, body = h.call("/v1/checkin", keyToken, refreshBody(keyToken, "console")); code != http.StatusOK {
 		t.Fatalf("refresh of the kit session = %d %v, want 200", code, body)
-	}
-	code, body = checkinDeviceAs(t, base, humanTok, "strazactl", "1")
-	if code != http.StatusOK {
-		t.Fatalf("strazactl session start = %d %v", code, body)
-	}
-	if code, body = refresh(body["session_token"].(string), "strazactl"); code != http.StatusOK {
-		t.Fatalf("refresh of the strazactl session = %d %v, want 200", code, body)
 	}
 }
 
 // TestCheckinDeviceClientBindingBeforeExemption pins that the binding is
 // judged ahead of the human clients' exemption from the attestation minimum:
 // a kit credential under console is refused by the binding, not rescued by
-// the exemption, while a human credential under strazactl still passes.
+// the exemption, while a person's id-token check-in under console still
+// passes.
 func TestCheckinDeviceClientBindingBeforeExemption(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t, func(c *config.Config) {
@@ -159,14 +146,18 @@ func TestCheckinDeviceClientBindingBeforeExemption(t *testing.T) {
 	})
 	user := seedIdentity(t, app)
 	_, kitTok := mintDevice(t, app, user.ID, store.DeviceClientKit, "fp-exempt-kit")
-	_, humanTok := mintDevice(t, app, user.ID, store.DeviceClientHuman, "fp-exempt-human")
 
 	code, body := checkinDeviceAs(t, base, kitTok, "console", "1")
 	if msg, _ := body["error"].(string); code != http.StatusForbidden || !strings.Contains(msg, "enforcement kit") {
 		t.Fatalf("kit credential under console = %d %v, want 403 with the kit sentence", code, body)
 	}
-	if code, body = checkinDeviceAs(t, base, humanTok, "strazactl", "1"); code != http.StatusOK {
-		t.Fatalf("human credential under strazactl = %d %v, want 200 under the exemption", code, body)
+	code, body = postJSON(t, base+"/v1/checkin", map[string]any{
+		"id_token":    loginDeviceFlow(t, base, "kim", "hunter2!"),
+		"harness":     map[string]string{"name": "console", "version": "1"},
+		"attestation": map[string]any{"managed": false, "hashes": map[string]string{}},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("a person's id-token check-in under console = %d %v, want 200 under the exemption", code, body)
 	}
 }
 
@@ -184,7 +175,6 @@ func TestCheckinAgentUnderHumanClient(t *testing.T) {
 		wantWord                string
 	}{
 		{"agent under console", store.UserTypeAgent, "console", http.StatusForbidden, "an agent"},
-		{"agent under strazactl", store.UserTypeAgent, "strazactl", http.StatusForbidden, "an agent"},
 		{"service under self-service", store.UserTypeService, "self-service", http.StatusForbidden, "a service account"},
 		{"agent under claude-code", store.UserTypeAgent, "claude-code", http.StatusOK, ""},
 		{"agent under exec-wrapper", store.UserTypeAgent, "exec-wrapper", http.StatusOK, ""},
@@ -231,10 +221,11 @@ func TestCheckinAgentUnderHumanClient(t *testing.T) {
 	}
 }
 
-// TestEnrollClientKind pins the enrol side: the kind is recorded on the row,
-// a missing kind means kit, a bad value is refused, an unbound row is bound
-// on reuse, a row of the other kind is never reused, an agent cannot enrol a
-// credential for the human clients, and the admin device list shows the kind.
+// TestEnrollClientKind pins the enrol side: a missing kind means kit, whose
+// bearer enrol is retired, human is strazactl's, whose enrol is refused for a
+// person and an agent alike with exactly one login failure, a bad value is
+// refused, no refused enrol writes a row, and the admin device list shows the
+// kind of the rows that exist.
 func TestEnrollClientKind(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -252,50 +243,18 @@ func TestEnrollClientKind(t *testing.T) {
 		}
 		return postJSON(t, base+"/v1/enroll", body)
 	}
-	// enrolled enrols and answers the row's id and stored client kind.
-	enrolled := func(t *testing.T, idt string, kind any, fingerprint string) (string, string) {
-		t.Helper()
-		code, body := enroll(t, idt, kind, fingerprint)
-		if code != http.StatusOK {
-			t.Fatalf("enroll = %d %v, want 200", code, body)
-		}
-		id, _ := body["device_id"].(string)
-		d, err := app.store.Devices().GetByID(ctx, id)
-		if err != nil {
-			t.Fatalf("device %q: %v", id, err)
-		}
-		return id, d.ClientKind
-	}
 
-	if _, kind := enrolled(t, idToken, nil, "fp-missing"); kind != store.DeviceClientKit {
-		t.Fatalf("kind of an enrol without client_kind = %q, want kit", kind)
+	// TestCutEnrollRefusesBearerKit pins the retired bearer enrol's record.
+	for _, kind := range []any{nil, "kit"} {
+		if code, body := enroll(t, idToken, kind, "fp-kit"); code != http.StatusForbidden || body["error"] != oldClientMsg {
+			t.Fatalf("bearer enrol with client_kind %v = %d %v, want the old-client 403", kind, code, body)
+		}
 	}
-	kitID, kind := enrolled(t, idToken, "kit", "fp-kit")
-	if kind != store.DeviceClientKit {
-		t.Fatalf("kind of a kit enrol = %q", kind)
-	}
-	if again, _ := enrolled(t, idToken, "kit", "fp-kit"); again != kitID {
-		t.Fatalf("a kit enrol of the same fingerprint made a new row %s, want %s", again, kitID)
-	}
-	if _, kind := enrolled(t, idToken, "human", "fp-human"); kind != store.DeviceClientHuman {
-		t.Fatalf("kind of a human enrol = %q", kind)
+	if code, body := enroll(t, idToken, "human", "fp-human"); code != http.StatusForbidden || body["error"] != strazactlSignInMsg {
+		t.Fatalf("a person's human enrol = %d %v, want the strazactl 403", code, body)
 	}
 	if code, body := enroll(t, idToken, "phone", "fp-bad"); code != http.StatusBadRequest || body["error"] != "client_kind must be kit or human" {
 		t.Fatalf("bad client_kind = %d %v, want 400 with the sentence", code, body)
-	}
-
-	old, err := app.store.Devices().Create(ctx, store.Device{UserID: user.ID, Name: "old-box", Fingerprint: "fp-old", Platform: "linux"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id, kind := enrolled(t, idToken, "human", "fp-old"); id != old.ID || kind != store.DeviceClientHuman {
-		t.Fatalf("a human enrol over an unbound row gave %s kind %q, want %s bound to human", id, kind, old.ID)
-	}
-	if id, kind := enrolled(t, idToken, "human", "fp-kit"); id == kitID || kind != store.DeviceClientHuman {
-		t.Fatalf("a human enrol over the kit row's fingerprint gave %s kind %q, want a new human row", id, kind)
-	}
-	if d, _ := app.store.Devices().GetByID(ctx, kitID); d.ClientKind != store.DeviceClientKit {
-		t.Fatalf("the kit row changed kind to %q", d.ClientKind)
 	}
 
 	joe, err := app.store.Users().Create(ctx, store.User{Username: "joe", UserType: store.UserTypeAgent})
@@ -306,25 +265,30 @@ func TestEnrollClientKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, body := enroll(t, joeToken, "human", "fp-joe")
-	want := "the user joe is an agent, and only a person can enrol a credential for strazactl or the console"
-	if code != http.StatusForbidden || body["error"] != want {
-		t.Fatalf("agent enrolling a human credential = %d %v, want 403 with %q", code, body, want)
+	if code, body := enroll(t, joeToken, "human", "fp-joe"); code != http.StatusForbidden || body["error"] != strazactlSignInMsg {
+		t.Fatalf("agent enrolling a human credential = %d %v, want the strazactl 403", code, body)
 	}
 	refused := func(d map[string]any) bool {
 		return d["action"] == "login" && d["outcome"] == "failure" && d["user"] == "joe"
 	}
 	rec := waitAuthn(t, app, "joe's refused enrol", refused)
-	if rec["reason"] != "only a person can enrol a credential for the human clients" || rec["userId"] != joe.ID || rec["via"] != "id-token" {
-		t.Fatalf("login failure = %v, want the person-only enrol reason for joe", rec)
+	if rec["reason"] != strazactlSignInReason || rec["userId"] != joe.ID || rec["via"] != "id-token" {
+		t.Fatalf("login failure = %v, want the strazactl reason for joe", rec)
 	}
 	if n := countAuthn(t, app, refused); n != 1 {
 		t.Fatalf("login failures for joe = %d, want exactly 1", n)
 	}
-	if _, kind := enrolled(t, joeToken, "kit", "fp-joe"); kind != store.DeviceClientKit {
-		t.Fatalf("kind of joe's kit enrol = %q", kind)
+	if code, body := enroll(t, joeToken, "kit", "fp-joe"); code != http.StatusForbidden || body["error"] != oldClientMsg {
+		t.Fatalf("joe's kit enrol = %d %v, want the old-client 403", code, body)
+	}
+	for _, u := range []string{user.ID, joe.ID} {
+		if devs, _ := app.store.Devices().ListByUser(ctx, u); len(devs) != 0 {
+			t.Fatalf("refused enrols wrote rows %+v", devs)
+		}
 	}
 
+	kit, _ := mintDevice(t, app, user.ID, store.DeviceClientKit, "fp-kit")
+	human, _ := mintDevice(t, app, user.ID, store.DeviceClientHuman, "fp-human")
 	grantAdmin(t, app, user.ID)
 	var devs []struct {
 		ID         string `json:"id"`
@@ -337,7 +301,7 @@ func TestEnrollClientKind(t *testing.T) {
 	for _, d := range devs {
 		shown[d.ID] = d.ClientKind
 	}
-	if shown[kitID] != store.DeviceClientKit || shown[old.ID] != store.DeviceClientHuman {
-		t.Fatalf("device list kinds = %v, want %s kit and %s human", shown, kitID, old.ID)
+	if shown[kit.ID] != store.DeviceClientKit || shown[human.ID] != store.DeviceClientHuman {
+		t.Fatalf("device list kinds = %v, want %s kit and %s human", shown, kit.ID, human.ID)
 	}
 }

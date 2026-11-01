@@ -2,7 +2,7 @@
 title: strazactl policy delete
 description: Delete a PolicySet that is off (turn a live one off first)
 pagetype: reference
-weight: 72
+weight: 68
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl policy delete <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

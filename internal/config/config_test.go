@@ -429,6 +429,7 @@ func TestValidation(t *testing.T) {
 		{"negative grace", func(c *Config) { c.Governance.OfflineGraceTTL = -time.Second }, "offlineGraceTTL"},
 		{"negative session lifetime", func(c *Config) { c.Governance.SessionMaxLifetime = -time.Second }, "sessionMaxLifetime"},
 		{"bad min attestation", func(c *Config) { c.Governance.MinAttestation = "verified" }, "minAttestation"},
+		{"bad min custody", func(c *Config) { c.Governance.MinCustody = "root" }, "governance.minCustody must be account or user"},
 		{"tls cert without key", func(c *Config) { c.Server.TLS.CertFile = "tls.crt" }, "server.tls"},
 		{"tls key without cert", func(c *Config) { c.Server.TLS.KeyFile = "tls.key" }, "server.tls"},
 		{"sink without name", func(c *Config) { c.Sinks = []Sink{{Type: SinkFile, Path: "x"}} }, "name is required"},

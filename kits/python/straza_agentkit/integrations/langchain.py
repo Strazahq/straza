@@ -245,7 +245,7 @@ class StrazaMiddleware(AgentMiddleware):
         args = tool_call.get("args")
         kind = self.tool_map.get(name, self.default_tool)
         command, paths, url = _extract(kind, args if isinstance(args, dict) else {})
-        decision = check(kind, command=command, paths=paths, url=url)
+        decision = check(kind, command=command, paths=paths, url=url, tool_name=name or None)
         if decision.allowed:
             return handler(request)
         reason = decision.reason or "denied by policy"
@@ -339,7 +339,7 @@ class StrazaCallbackHandler(BaseCallbackHandler):
         self.tool_map = _resolve_tool_map(tool_map)
         self.default_tool = _resolve_default(default_tool)
         self._captured_prompts: set = set()
-        self._in_flight: dict = {}  # run_id -> (canonical kind, args)
+        self._in_flight: dict = {}  # run_id -> (canonical kind, tool name, args)
 
     # ---- prompts / replies ----------------------------------------------
 
@@ -378,7 +378,7 @@ class StrazaCallbackHandler(BaseCallbackHandler):
         emitted here: a tool.pre from this lane would claim a decision."""
         name = (serialized or {}).get("name") or kwargs.get("name") or ""
         kind = self.tool_map.get(name, self.default_tool)
-        self._in_flight[run_id] = (kind, inputs if isinstance(inputs, dict) else {})
+        self._in_flight[run_id] = (kind, name, inputs if isinstance(inputs, dict) else {})
 
     def on_tool_end(self, output: Any, *, run_id: Any = None, **kwargs: Any) -> None:
         """Emit canonical ``tool.post``: this tool call completed."""
@@ -392,9 +392,9 @@ class StrazaCallbackHandler(BaseCallbackHandler):
         pending = self._in_flight.pop(run_id, None)
         if pending is None:
             return  # not a call we saw start; nothing honest to report
-        kind, args = pending
+        kind, name, args = pending
         command, paths, url = _extract(kind, args)
-        tool_result(kind, command=command, paths=paths, url=url)
+        tool_result(kind, command=command, paths=paths, url=url, tool_name=name or None)
 
 
 def govern_subagents(

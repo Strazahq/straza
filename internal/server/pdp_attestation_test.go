@@ -45,7 +45,7 @@ func TestDecideEnforcesAttestationMinimum(t *testing.T) {
 		t.Fatalf("console decide = %d %v, want an attestation deny", code, dec)
 	}
 	reason, _ := dec["reason"].(string)
-	for _, want := range []string{`"advisory"`, `"managed"`, "`straza install --managed <harness>`"} {
+	for _, want := range []string{`"advisory"`, `"managed"`, "`straza install --managed --server <server-url> <harness>`", "Straza package"} {
 		if !strings.Contains(reason, want) {
 			t.Errorf("deny reason %q must say %s", reason, want)
 		}

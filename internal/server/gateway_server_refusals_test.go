@@ -175,6 +175,65 @@ func TestGatewayServerViewReadURICap(t *testing.T) {
 	}
 }
 
+// TestGatewayServerLongNamesCut pins the cut of names the catalog did not
+// resolve on a server endpoint: a long tool name on a known server, and a
+// long server address on tools/call and on resources/read. The answer and
+// the one record carry the same cut name. A record that quotes one long
+// name stays under 4 KiB, and one that quotes the address twice and a tool
+// name, all of <, stays under 8 KiB.
+func TestGatewayServerLongNamesCut(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	seedGatewayUser(t, app, "kim", "dev")
+	installViewsApp(t, app, startViewsUpstream(t), "viewapp", true, 0)
+	waitViews(t, app, "viewapp", 2)
+	tok, sid := gatewaySession(t, base, "kim")
+	// The address is 65536 escaped <, which the server endpoint reads as <.
+	long, longAddr := strings.Repeat("<", 64<<10), strings.Repeat("%3C", 64<<10)
+	cut := strings.Repeat("<", 256) + "... (65536 bytes)"
+	unknown := `unknown tool "` + cut + `"`
+
+	rows := []struct {
+		name, server, method string
+		params               map[string]any
+		wantMsg              string
+		sel                  func(map[string]any) bool
+		want                 map[string]any
+		max                  int
+	}{
+		{"a long tool name on a known server", "viewapp", "tools/call", map[string]any{"name": long}, unknown,
+			func(d map[string]any) bool { return d["app"] == "viewapp" && d["toolName"] == cut },
+			map[string]any{"reason": unknown + ": no access row for this session's roles admits it"}, 4 << 10},
+		{"a long server address on tools/call", longAddr, "tools/call", map[string]any{"name": long}, notInCatalogMsg(cut),
+			func(d map[string]any) bool { return d["app"] == cut && d["toolName"] == cut },
+			map[string]any{"reason": notInCatalogMsg(cut)}, 8 << 10},
+		{"a long server address on resources/read", longAddr, "resources/read", map[string]any{"uri": panelURI}, notInCatalogMsg(cut),
+			func(d map[string]any) bool { return d["app"] == cut && d["event"] == eventResourcesRead },
+			map[string]any{"reason": notInCatalogMsg(cut), "uri": panelURI}, 8 << 10},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			_, res, raw := mcpServerCall(t, base, row.server, tok, row.method, row.params)
+			if code, msg := rpcErrorOf(t, res, raw); code != -32602 || msg != row.wantMsg {
+				t.Fatalf("answer = %d with a %d-byte message, want -32602 %q", code, len(msg), row.wantMsg)
+			}
+			rec := awaitMCPRecords(t, app, 1, row.sel)[0]
+			want := map[string]any{"effect": "deny", "ruleId": "", "setName": "", "session": sid}
+			for k, v := range row.want {
+				want[k] = v
+			}
+			for k, v := range want {
+				if rec[k] != v {
+					t.Errorf("record %s = %v, want %v", k, rec[k], v)
+				}
+			}
+			if size := len(rawMCPRecord(t, app, row.sel)); size >= row.max {
+				t.Errorf("the marshalled record is %d bytes, want under %d", size, row.max)
+			}
+		})
+	}
+}
+
 // TestGatewayServerReadWithoutURIUnrecorded pins that a resources/read with
 // no uri or with malformed params is refused with -32602 and writes no
 // record, as a tools/call with no name does on /mcp. A served read after

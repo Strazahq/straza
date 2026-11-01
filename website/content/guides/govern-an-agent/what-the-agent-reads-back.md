@@ -6,7 +6,7 @@ weight: 80
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: An Alpine Linux container against a standalone server, as alice holding the application role dev, with hook payloads piped into straza hook, gateway calls sent through straza mcp, and an admin deciding with strazactl. approval.gatewayHoldSeconds was 3, so a held gateway call answered pending after three seconds
+  platform: An Alpine Linux container against a standalone server, as alice holding the application role dev, with hook payloads piped into straza hook, gateway calls sent through straza mcp, and an admin deciding with strazactl, which no longer decides, so a person now decides in the console, on the self-service page or on a phone. approval.gatewayHoldSeconds was 3, so a held gateway call answered pending after three seconds
   date: 2026-10-06
 applies_to: both
 keywords: deny reason banner pending approval ticket approval_await approval_request approval_status agent model
@@ -24,7 +24,7 @@ When a session starts, the session-start hook checks in with the server and hand
 Straza governance is active for this session. You are operating as "alice" (roles: dev) against http://127.0.0.1:8420; policy snapshot cde5c229f4fa, attestation advisory. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial.
 ```
 
-Its last sentence tells the agent how to treat every deny on this page. The agent passes the reason on to its user and does not try again.
+Its last sentence tells the agent how to treat every deny on this page. The agent passes the reason on to its user and does not try again, unless the reason asks for a corrected call, as the object checks below do for a malformed argument.
 
 
 When a policy records the session's conversations, the banner gains one sentence. With secrets masked it reads as below, and with recording word for word it ends `recorded word for word to the audit system.`
@@ -37,7 +37,7 @@ Recording is on: by policy, the prompts and responses of this session are record
 Knowledge packs bound to the session's roles follow the banner, as [Knowledge packs]({{< relref "guides/govern-an-agent/knowledge-packs.md" >}}) shows. For Claude Code and Codex the hook also returns `systemMessage`, one line for the person at the keyboard. It starts with a shield symbol and `Straza governance active:`, then names the user, the roles, the server, the policy and the attestation. Gemini gets the context only.
 
 
-When the check-in fails, the session-start hook exits with code 2 and a reason that begins `Straza: checkin failed:`, followed by the server's refusal. Until a session starts, every tool call is denied with `Straza: no active Straza session. Restart the session so straza can check in`. [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows the refusal a server gives a machine below its attestation minimum.
+When the session cannot start, the session-start hook exits with code 2 and a reason that starts `Straza:`, followed by the sentence that says why. That is the server's own refusal, or the sentence of the Straza background service when it does not run or holds no enrollment for the user. Until a session starts, every tool call is denied with `Straza: no active Straza session. Restart the session so straza can check in`. [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows the refusal a server gives a machine below its attestation minimum.
 
 ## How each harness receives a deny
 
@@ -75,6 +75,12 @@ MCP tool that no role of the session reaches, seen by a hook
 Local tool such as `shell.exec` that no rule allows, on an enterprise server
 : `Straza: <tool> is not permitted by default in this profile. Ask an admin for a policy rule that allows it.`
 
+Harness tool that Straza does not classify, such as one a harness release added, that no rule names, on an enterprise server
+: `Straza: <name> is a harness tool Straza does not classify, so this profile denies it. To allow it, an admin adds a policy rule with tools: [other] and toolNames: {allow: [<name>]}.`
+
+The same tool from a client too old to send its name
+: `Straza: this harness tool is one Straza does not classify, and the client sent no tool name, so no rule can allow it. Update the Straza client or the agent kit on this machine, then ask an admin to allow the tool by name.`
+
 Classifier that says no, under a rule with `mode: classify`
 : `Straza: classifier: <the classifier's reason>`
 
@@ -82,30 +88,68 @@ Confirmation rule met by an autonomous AI agent
 : `Straza: rule <set>/<rule> requires the requester's confirmation; an autonomous session has no human to confirm`
 
 Gateway call for a tool the session cannot see
-: The JSON-RPC error `unknown tool "<name>"`, the same answer as for a tool that does not exist.
+: The JSON-RPC error `unknown tool "<name>"`, the same answer as for a tool that does not exist. A name over 256 bytes is quoted as its first 256 bytes followed by `... (<n> bytes)`, its full length.
 
 Rate limit for that server at the gateway, used up
 : `Straza: rate limit exceeded for the MCP server "<server>" (<n> rps). Retry shortly`
 
+Gateway call whose request body is larger than `server.mcpMaxBodyBytes`, 4 MiB by default
+: The JSON-RPC error -32600 `Straza: this MCP request was not read, because its body is larger than <limit> bytes, the most the Straza gateway reads in one request (server.mcpMaxBodyBytes). Send less in one call, for example a file's path or address instead of its content, or ask a Straza administrator to raise server.mcpMaxBodyBytes.` The Straza server never read the call, so it decided nothing and wrote no audit record.
+
 
 The gateway leaves a tool that policy denies out of the session's tool list, so a call to it gets `unknown tool`. With `apps.catalog.policyFilter` set to false, the tool stays listed and the call gets the policy's reason instead.
+
+## A call on a server that limits roles to some objects
+
+
+A server can pin an object type in its manifest, such as ghapp with its repos, and each role on it then covers every repo or a named list. The gateway checks each call to such a server against every role of the session that binds the tool, after the rate limit and before any policy runs, so no rule can allow a call this check refuses. A session's tool list still shows every tool a held role binds, so an agent learns which repos its roles cover from the refusal. Like a policy deny, the refusal is a tool error. A hook never runs this check.
+
+Object that none of the session's roles covers
+: `Straza: <tool> on <value> was refused: none of your roles on <server> covers that <type>. Your roles cover <tool> on <v1>, <v2> and <n> more. Check the <type>'s name, or ask an admin for a role that covers it.` The middle sentence names up to ten objects the session's roles name, and it is left out when they name none.
+
+Tool that can reach every object, with no role on every object
+: `Straza: <tool> on <server> can reach every <type>, so only a role on every <type> may call it, and none of your roles on <server> is one. Ask for a role on every <type>, or use a tool that names the <type>.` A tool marked `credential`, and a tool the pinned block leaves out, read the same.
+
+Call without the argument that names the object
+: `Straza: <tool> needs the <type> it works on in its argument <argument>, and this call carries none. Send <argument> as a string, then try again.` When the argument is there but not a string, the sentence reads `Straza: <tool> needs the <type> in its argument <argument> as a string, and this call sends another type. Send <argument> as a string, then try again.`
+
+Argument sent twice under two spellings, such as `repo` and `Repo`
+: `Straza: <tool>'s arguments carry both <argument> and <other>, and <server> might read either. Send <argument> once, as its input schema spells it, then try again.`
+
+Arguments that two readers could read apart
+: `Straza: <tool>'s arguments could not be read the same way by Straza and by <server>: <fault>. Send each argument once, in one JSON object, then try again.` The fault is one of `a key appears twice`, `they are not valid UTF-8`, `they are not a JSON object`, `they nest deeper than 128 levels`, `there is data after the arguments object` and `they are not valid JSON`.
+
+Tool whose mark or input schema changed since an admin pinned it
+: `Straza: <tool> on <server> changed how it names its <type> since an admin pinned it, so roles on some <plural> cannot use it until an admin publishes the change. Ask an admin to review <server>'s <Plural> tab.`
+
+Object checks turned off by `apps.objects.enabled`
+: `Straza: Straza's <type> checks are off on this deployment, so only a role on every <type> may call <tool> on <server>. Ask an admin to turn apps.objects.enabled back on, or for a role on every <type>.`
+
+
+The argument sentences come before any role is read, so a session with a role on every repo meets them too. The agent fixes the argument and sends the call again, as each of those sentences says. For an object no role covers, the agent relays the sentence to the person and stops, and it does not try the call on other repos. That sentence offers no retry. It asks the agent to check the repo's name or to ask for a role that covers it. A value the list does not hold still makes Straza list the server again, at most once a minute, so a call on a renamed repo passes after about a minute. Every other sentence here is for the person too: the agent relays it and stops, as the banner says.
 
 ## When Straza cannot decide
 
 
 Straza fails closed. When a hook cannot prove its decision, it denies, and the reason says what is wrong and what to do.
 
+No background service on the machine
+: ``Straza: Straza's background service isn't running on this machine, so this command can't reach your Straza session. Run `straza doctor` to see why, or ask IT to reinstall Straza. On Linux, `systemctl status straza-service` shows why.`` On Windows the last sentence reads ``On Windows, `Get-Service straza-service` shows whether it runs, and the Application event log under straza-service shows why it stopped.`` A service started with `STRAZA_HOME` set is named by that path instead, with the hint to start it with `straza service` in a shell that has the same `STRAZA_HOME`.
+
+No enrollment for the user in the service
+: ``Straza: This machine isn't enrolled for you yet. Run `straza enroll` and sign in with your work account.``
+
 No session on the machine
 : `Straza: no active Straza session. Restart the session so straza can check in`
 
-Session that `straza daemon` dropped because the server revoked it or refused to renew it
+Session the server revoked over the kill-switch push
 : `Straza: session revoked (<reason>). Tool calls stay denied until a new session starts and checks in again. If only this session was revoked, that check-in starts a new session. If the device or user was disabled, the check-in is refused until an administrator re-enables it. Inform the user and stop.`
 
 Token expired past the offline grace
 : `Straza: session token expired <age> ago and the offline grace period (<grace>) is exhausted.`, then a sentence that says Straza cannot verify current policy and asks the agent to reconnect and run `straza doctor`
 
 Renewal refused by the server
-: `Straza: session renewal was refused: <the server's sentence>`
+: `Straza: session revoked (<the server's sentence>).`, then the same sentences as a revocation push gives, because a refused renewal marks the session revoked
 
 Newer policy on the server that the machine could not fetch
 : `Straza: this session's policy is out of date: the server holds a newer policy that straza could not fetch.`, then the cause of the failed fetch and a sentence that says tool calls stay denied until straza can fetch the current policy
@@ -221,7 +265,7 @@ Both readers take the reference of a hold as well as a ticket. This is `straza__
 ```
 
 
-`straza__approval_request` refuses a call that a ticket cannot cover, and says why:
+`straza__approval_request` decides an MCP call it describes the way the gateway decides the real call, so it refuses what the real call would be refused. It also refuses a call that a ticket cannot cover. Each answer says why:
 
 Already allowed by policy
 : `Straza: no approval needed. The described call is already allowed by policy; just make the call`
@@ -232,14 +276,39 @@ Gated by a hold
 Denied by policy
 : `Straza: denied by policy. The described call would be denied (<reason>); an approval ticket cannot override a deny`
 
+Not a tool this session can call
+: `Straza: <app>:<tool> is not a tool this session can call, so no approval can be requested for it. Check the app and tool name, or ask an admin for access to the tool.` Here and in the reason of a deny, a name over 256 bytes is quoted as its first 256 bytes followed by `... (<n> bytes)`.
+
+Too many requests for one server
+: `Straza: rate limit exceeded for the MCP server "<app>" (<n> rps). Retry shortly`
+
+A person denied a ticket for this call, and its window is still open
+: `Straza: ticket <ref> was denied by <name>; this call stays denied until <time>`
+
+Nobody who can be asked for the approval
+: `Straza: approval cannot be routed: <cause>. Denied (fail-closed)`
+
+Database out of reach while the server looks up an approval
+: `Straza: this call needs an approval, and the Straza server could not reach its database to check for one, so the call did not run. Denied (fail-closed). Retry the call in a moment, and if this keeps happening ask your Straza administrator to check the server's database connection.`
+
 Not a concrete call
 : `Straza: a concrete call is required. approval_request needs action.tool plus an app+tool_name, a command, or argv (free-text requests are rejected)`
+
+Server or tool missing from an MCP call
+: `Straza: approval_request needs action.app and action.tool_name for an mcp.call: the server and the tool of the later real call. Add both, then request again.`
+
+Command or argv on an MCP call
+: `Straza: an mcp.call action takes no action.command or action.argv, because the later real call is an MCP tool call and carries neither. Remove them, then request again.`
 
 MCP call without its arguments, under a rule that covers the exact call
 : `Straza: this rule's approval covers the exact call. approval_request needs action.args (the exact tool arguments the later real call will use); without them the approved ticket could never be consumed`
 
 Reference the agent does not own, in any of the three tools
 : `Straza: no such approval <ref>`
+
+The not-a-tool answer is the same for a tool that no access row of the session's roles admits, a server that does not exist or is stopped, and a tool that the session's policy hides, so the answer does not tell them apart. With `apps.catalog.policyFilter` on, the default, policy hides every tool that a rule denies, so a call to such a tool gets the not-a-tool answer and not the denied-by-policy one. Each request for an MCP call spends one call of that server's rate limit, as the real call would. When the server's object checks refuse the call, or its arguments break the tool's input schema, the request is refused as the real call would be, and nobody is asked to approve it. Policy alone decides a described command.
+
+A ticket rule that names no approver role goes to the person behind the agent, its sponsor. A confirmation rule, `mode: confirm`, and a rule with `selfApproval: true` go to the requester instead. When the agent has no sponsor, or its sponsor cannot decide, the request is refused, and `<cause>` names what failed and the fix, such as `agent "<name>" has no sponsor, and rule "<rule>" names no approver roles. Fix: set the requester's sponsor to a person in your identity manager, or add approve.roles / approve.deciders to the rule`. The audit record of that `straza__approval_request` call is then a deny with the answer as its reason. No ticket opens and nobody is notified. `straza_approvals_unroutable_total` counts the refusal once.
 
 
 The gateway also serves `straza__draft_submit` and `straza__draft_status`, to a session whose roles include `straza-draft-config`, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) shows. To any other session they do not exist, and a call gets `unknown tool "straza__draft_submit"`.

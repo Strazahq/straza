@@ -2,7 +2,7 @@
 title: strazactl drafts create
 description: Store the documents as a new draft and print its verdict
 pagetype: reference
-weight: 52
+weight: 51
 draft: false
 sources:
   - cmd/strazactl
@@ -26,10 +26,10 @@ strazactl drafts create -f <path>... [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
-* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store, review and publish drafts of changes to MCP servers, roles, access rows and policy sets
+* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets
 

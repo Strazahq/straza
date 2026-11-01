@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://straza.dev/session-token/v1beta1/dpop-proof.schema.json",
+  "title": "Straza DPoP proof (v1beta1)",
+  "description": "The decoded DPoP proof (RFC 9449) a key holder sends in the DPoP request header: the protected header and the claims of the compact JWS. Added 2026-10-20. The schema pins the shape. The verifier also checks what a schema cannot: the signature, the nonce window, the htu match, ath against the token and the spent jti (SPEC.md, Key-bound tokens). Other members of a document that carries a proof are not constrained here.",
+  "type": "object",
+  "required": ["header", "claims"],
+  "properties": {
+    "header": {
+      "type": "object",
+      "required": ["typ", "alg", "jwk"],
+      "properties": {
+        "typ": { "const": "dpop+jwt" },
+        "alg": { "const": "EdDSA" },
+        "jwk": {
+          "type": "object",
+          "description": "The public key that signed the proof. It never carries the private part d.",
+          "required": ["kty", "crv", "x"],
+          "properties": {
+            "kty": { "const": "OKP" },
+            "crv": { "const": "Ed25519" },
+            "x": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+          },
+          "not": { "required": ["d"] }
+        }
+      },
+      "not": { "required": ["crit"] }
+    },
+    "claims": {
+      "type": "object",
+      "required": ["htm", "htu", "iat", "jti", "nonce"],
+      "properties": {
+        "htm": { "type": "string", "minLength": 1, "description": "The request method, compared exactly." },
+        "htu": { "type": "string", "minLength": 1, "description": "The absolute request URL. Query and fragment are ignored." },
+        "iat": { "type": "number", "exclusiveMinimum": 0, "description": "Required and informational. The nonce carries freshness." },
+        "jti": { "type": "string", "minLength": 1, "maxLength": 128, "description": "The proof id, spent per replica for three minutes. At most 128 bytes." },
+        "nonce": { "type": "string", "minLength": 1, "description": "The latest DPoP-Nonce the server sent." },
+        "ath": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "Unpadded base64url SHA-256 of the access token. Present exactly when the request carries a session token." },
+        "ctr": { "type": "integer", "minimum": 1, "description": "The counter of a key check-in, equal to the counter in the body. Present exactly on a key check-in proof. Added 2026-10-20." }
+      }
+    }
+  }
+}

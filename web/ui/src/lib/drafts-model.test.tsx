@@ -6,6 +6,7 @@ import {
   appFacts,
   appRows,
   changeCounts,
+  confirmBlocks,
   findingGroups,
   firstMissing,
   gainGroups,
@@ -28,7 +29,7 @@ import {
   typedMatches,
   typedWrongly,
 } from "./drafts-model";
-import { CUT_RISK, DETAIL, GITHUB_APP, HOST_RISK, PUBLISHED_DETAIL, REACH_RISK, STALE, VERDICT, demoTools, detailWith, readersSet, role, WRITERS_SET } from "@/test/drafts-fixture";
+import { CUT_RISK, DETAIL, GITHUB_APP, PUBLISHED_DETAIL, STALE, VERDICT, demoTools, detailWith, readersSet, role, WRITERS_SET } from "@/test/drafts-fixture";
 
 // The pure reading of a draft the review page and the publish dialog share.
 // The publish body is the one place a mistake would publish the wrong thing,
@@ -37,15 +38,83 @@ import { CUT_RISK, DETAIL, GITHUB_APP, HOST_RISK, PUBLISHED_DETAIL, REACH_RISK, 
 
 const acks = (ticked: Record<string, boolean>, typed: Record<string, string>): Acks => ({ ticked, typed });
 
-describe("the publish body", () => {
-  it("echoes the risk keys, the digest and the typed text from the verdict on screen", () => {
-    const body = publishBody(2, VERDICT, acks({ "k-reach": true }, { "k-host": " API.githubcopilot.com " }));
-    expect(body).toEqual({ revision: 2, risk_digest: VERDICT.risk_digest, ticked: ["k-host", "k-reach"], typed: { "k-host": " API.githubcopilot.com " } });
+// The risks of a newer server, which groups them: a server removal typed by
+// its name, three loosened sets typed by their count and two widened roles
+// under one tick. The object type is an invented one, so a noun the
+// console hardcoded would not match.
+const risk = (key: string, code: string, object: string, over: Partial<DraftFinding> = {}): DraftFinding =>
+  ({ code, class: "risk", ack: "tick", object, key, sentence: key + " widens access.", ...over });
+const REMOVAL = risk("k-rm", "server.removal", "App/legacy-desk", { ack: "typed", typed: "legacy-desk" });
+const SETS = ["a", "b", "c"].map((s) => risk("k-set-" + s, "policy.guardrail-changed", "PolicySet/" + s + "-access", { ack: "typed", typed: s + "-access", group: "policy.guardrail-changed" }));
+const WIDER = ["x", "y"].map((r) => risk("k-wide-" + r, "role.covers-wider", "Role/desk-" + r, { group: "role.covers-wider", sentence: "desk-" + r + " will reach 2 more tickets on desk: T-1 and T-2." }));
+const block = (risks: DraftFinding[], i = 0) => confirmBlocks(risks)[i];
+
+describe("the confirm blocks", () => {
+  it("types a removal by its name, a group by its count and ticks a group once, names first", () => {
+    const blocks = confirmBlocks([WIDER[0], ...SETS, REMOVAL, WIDER[1]]);
+    expect(blocks.map((b) => [b.kind, b.expect, b.lines.map((f) => f.key), b.blocked])).toEqual([
+      ["name", "legacy-desk", ["k-rm"], false],
+      ["count", "3", ["k-set-a", "k-set-b", "k-set-c"], false],
+      ["tick", "", ["k-wide-x", "k-wide-y"], false],
+    ]);
   });
 
-  it("leaves out a line the person did not acknowledge", () => {
-    const body = publishBody(2, VERDICT, acks({}, {}));
-    expect(body).toEqual({ revision: 2, risk_digest: VERDICT.risk_digest, ticked: [], typed: {} });
+  // A name block is keyed by the object and the text, so a server and a set
+  // that share a name are still two things to confirm.
+  it("keeps a removal and an agent's loosening of a set with the same name as two blocks", () => {
+    const removal = risk("k-rm-desk", "server.removal", "App/desk", { ack: "typed", typed: "desk" });
+    const loosen = risk("k-loosen-desk", "agent.guardrail", "PolicySet/desk", { ack: "typed", typed: "desk" });
+    expect(confirmBlocks([removal, loosen]).map((b) => [b.kind, b.expect, b.lines.map((f) => f.key)])).toEqual([
+      ["name", "desk", ["k-rm-desk"]],
+      ["name", "desk", ["k-loosen-desk"]],
+    ]);
+  });
+
+  it("types a group of one line by that line's name", () => {
+    expect(confirmBlocks([SETS[1]]).map((b) => [b.kind, b.expect])).toEqual([["name", "b-access"]]);
+  });
+
+  it("reads a verdict whose lines carry no group line by line", () => {
+    expect(confirmBlocks(VERDICT.risks).map((b) => [b.kind, b.expect, b.lines.map((f) => f.key)])).toEqual([
+      ["name", "api.githubcopilot.com", ["k-host"]],
+      ["tick", "", ["k-reach"]],
+    ]);
+  });
+
+  // A member whose text was cut stays in its group, so the count a reader
+  // sees is the whole group's and the group as a whole cannot be confirmed.
+  it("keeps a group with a line cut for this reader whole, and blocks it", () => {
+    const cut = { ...SETS[2], typed: undefined, object: undefined };
+    expect(confirmBlocks([SETS[0], SETS[1], cut]).map((b) => [b.kind, b.lines.length, b.blocked])).toEqual([["count", 3, true]]);
+    expect(confirmBlocks([CUT_RISK]).map((b) => [b.kind, b.blocked])).toEqual([["name", true]]);
+  });
+});
+
+describe("the publish body", () => {
+  it("sends every key of a count block with each line's own name, for the count typed once", () => {
+    const body = publishBody(2, { ...VERDICT, risks: SETS }, acks({}, { [block(SETS).id]: " 3 " }));
+    expect(body).toEqual({
+      revision: 2, risk_digest: VERDICT.risk_digest,
+      ticked: ["k-set-a", "k-set-b", "k-set-c"],
+      typed: { "k-set-a": "a-access", "k-set-b": "b-access", "k-set-c": "c-access" },
+    });
+  });
+
+  it("sends every key of a ticked group and no text for its lines", () => {
+    const body = publishBody(2, { ...VERDICT, risks: WIDER }, acks({ [block(WIDER).id]: true }, {}));
+    expect(body).toEqual({ revision: 2, risk_digest: VERDICT.risk_digest, ticked: ["k-wide-x", "k-wide-y"], typed: {} });
+  });
+
+  it("echoes the keys of a verdict with no groups in its order, with each line's own text", () => {
+    const [host, reach] = confirmBlocks(VERDICT.risks);
+    const body = publishBody(2, VERDICT, acks({ [reach.id]: true }, { [host.id]: " API.githubcopilot.com " }));
+    expect(body).toEqual({ revision: 2, risk_digest: VERDICT.risk_digest, ticked: ["k-host", "k-reach"], typed: { "k-host": "api.githubcopilot.com" } });
+  });
+
+  it("leaves out a block left, typed wrong or blocked", () => {
+    expect(publishBody(2, VERDICT, acks({}, {}))).toEqual({ revision: 2, risk_digest: VERDICT.risk_digest, ticked: [], typed: {} });
+    expect(publishBody(2, { ...VERDICT, risks: SETS }, acks({}, { [block(SETS).id]: "2" })).ticked).toEqual([]);
+    expect(publishBody(2, { ...VERDICT, risks: [CUT_RISK] }, acks({ [block([CUT_RISK]).id]: true }, { [block([CUT_RISK]).id]: "" })).ticked).toEqual([]);
   });
 
   it("sends a verdict with no risks as an empty acknowledgment", () => {
@@ -54,18 +123,23 @@ describe("the publish body", () => {
   });
 });
 
-describe("whether a line is acknowledged", () => {
-  const cases: [string, DraftFinding, Acks, boolean][] = [
-    ["a tick left empty", REACH_RISK, acks({}, {}), false],
-    ["a tick ticked", REACH_RISK, acks({ "k-reach": true }, {}), true],
-    ["a tick ticked under another key", REACH_RISK, acks({ "k-host": true }, {}), false],
-    ["a typed line left empty", HOST_RISK, acks({}, {}), false],
-    ["a typed line with another host", HOST_RISK, acks({}, { "k-host": "api.github.com" }), false],
-    ["a typed line with spaces and capitals", HOST_RISK, acks({}, { "k-host": "  Api.GithubCopilot.com " }), true],
-    ["a typed line whose text this reader cannot see", CUT_RISK, acks({}, {}), true],
+describe("whether a block is confirmed", () => {
+  const tick = block(WIDER);
+  const name = block([REMOVAL]);
+  const count = block(SETS);
+  const cases: [string, ReturnType<typeof block>, Acks, boolean][] = [
+    ["a tick left empty", tick, acks({}, {}), false],
+    ["a tick ticked", tick, acks({ [tick.id]: true }, {}), true],
+    ["a tick ticked under another block's id", tick, acks({ [name.id]: true }, {}), false],
+    ["a name left empty", name, acks({}, {}), false],
+    ["a name typed as another name", name, acks({}, { [name.id]: "legacy-dex" }), false],
+    ["a name with spaces and capitals", name, acks({}, { [name.id]: "  Legacy-Desk " }), true],
+    ["a count typed as the count", count, acks({}, { [count.id]: "3" }), true],
+    ["a count typed as one of its names", count, acks({}, { [count.id]: "a-access" }), false],
+    ["a block with a line this reader cannot see", block([CUT_RISK]), acks({ [block([CUT_RISK]).id]: true }, {}), false],
   ];
-  it.each(cases)("%s", (_name, f, a, want) => {
-    expect(acknowledged(f, a)).toBe(want);
+  it.each(cases)("%s", (_name, b, a, want) => {
+    expect(acknowledged(b, a)).toBe(want);
   });
 
   it("compares typed text the way strazactl does", () => {
@@ -73,10 +147,12 @@ describe("whether a line is acknowledged", () => {
     expect(typedMatches("x.example", "x.example.")).toBe(false);
   });
 
-  it("names the first line left, in the verdict's order", () => {
-    expect(firstMissing(VERDICT.risks, acks({}, {}))).toBe("k-host");
-    expect(firstMissing(VERDICT.risks, acks({}, { "k-host": "api.githubcopilot.com" }))).toBe("k-reach");
-    expect(firstMissing(VERDICT.risks, acks({ "k-reach": true }, { "k-host": "api.githubcopilot.com" }))).toBe(null);
+  it("names the first block left, in the dialog's order", () => {
+    const blocks = confirmBlocks([...WIDER, REMOVAL]);
+    const [rm, wide] = blocks;
+    expect(firstMissing(blocks, acks({}, {}))).toBe(rm.id);
+    expect(firstMissing(blocks, acks({}, { [rm.id]: "legacy-desk" }))).toBe(wide.id);
+    expect(firstMissing(blocks, acks({ [wide.id]: true }, { [rm.id]: "legacy-desk" }))).toBe(null);
   });
 });
 
@@ -168,11 +244,14 @@ describe("the before and after of an item", () => {
     expect(gainsHidden({ ...VERDICT, info: [{ code: "info.gains-hidden", class: "info", key: "h", sentence: "2 rows are hidden." }] })).toBe("2 rows are hidden.");
   });
 
-  it("tells a wrong typed text from an empty one", () => {
-    expect(typedWrongly(HOST_RISK, acks({}, { "k-host": "api.github.com" }))).toBe(true);
-    expect(typedWrongly(HOST_RISK, acks({}, { "k-host": " " }))).toBe(false);
-    expect(typedWrongly(HOST_RISK, acks({}, { "k-host": "api.githubcopilot.com" }))).toBe(false);
-    expect(typedWrongly(REACH_RISK, acks({}, {}))).toBe(false);
+  it("tells a typed text that can no longer match from an empty one or a start that fits", () => {
+    const name = block([REMOVAL]);
+    const count = block(SETS);
+    const wrong = (b: ReturnType<typeof block>, text: string) => typedWrongly(b, acks({}, { [b.id]: text }));
+    expect([wrong(name, "legacy-dex"), wrong(name, " "), wrong(name, "Legacy-D"), wrong(name, "legacy-desk ")]).toEqual([true, false, false, false]);
+    expect([wrong(count, "4"), wrong(count, "3")]).toEqual([true, false]);
+    expect(wrong(block(WIDER), "x")).toBe(false);
+    expect(wrong(block([CUT_RISK]), "x")).toBe(false);
   });
 });
 

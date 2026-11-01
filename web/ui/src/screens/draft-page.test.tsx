@@ -42,7 +42,7 @@ import { navigate } from "@/lib/router";
 import { readFailed } from "@/lib/say";
 import { snapshot } from "@/lib/session";
 import { absTime } from "@/lib/words";
-import { ALICE, DETAIL, STALE, VERDICT, detailWith } from "@/test/drafts-fixture";
+import { ALICE, COVERS_DETAIL, CUT_RISK, DETAIL, GATE_LOST, LOOSEN_RISK, STALE, VERDICT, detailWith } from "@/test/drafts-fixture";
 
 // The review page of one draft: read
 // top to bottom, the same for every door, with the bar that publishes and
@@ -79,11 +79,19 @@ describe("the review page", () => {
     expect(screen.getByText(DETAIL.draft.title)).toBeTruthy();
     expect(fact("Drafted by").textContent).toContain("joe-java-developer-agent");
     expect(fact("Drafted by").textContent).toContain("an agent, sponsored by you");
-    expect(fact("How it came in").textContent).toContain("the straza app, from claude-code");
+    expect(fact("Came from").textContent).toContain("the straza app, from claude-code");
     expect(fact("Revisions").textContent).toContain(revisionLine(2, "joe-java-developer-agent", "straza-app", absTime(DETAIL.revisions[1].created_at), false));
-    expect(fact("Checked").textContent).toContain(checkedLine(absTime(VERDICT.checked_at), "7f3a91c2"));
-    expect(fact("Publishing needs").textContent).toContain("the server github needs the scope apps:write or the role straza-global-mcp-admin.");
-    expect(fact("Publishing needs").textContent).toContain(MAY_PUBLISH_ALL);
+    expect(fact("Last checked").textContent).toContain(checkedLine(absTime(VERDICT.checked_at), "7f3a91c2"));
+    expect(fact("Who may publish").textContent).toBe("Who may publish" + MAY_PUBLISH_ALL);
+  });
+
+  it("puts the grants publishing needs behind the help of Who may publish", async () => {
+    mount();
+    await title();
+    await userEvent.hover(within(fact("Who may publish")).getByRole("button", { name: "Help: Who may publish" }));
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
+      "The server github needs the scope apps:write or the role straza-global-mcp-admin. The approval set github-writers-access needs the scope policy:write.",
+    );
   });
 
   it("shows the agent's note as unverified text, never as markup or a link", async () => {
@@ -105,21 +113,83 @@ describe("the review page", () => {
     expect((document.querySelector("[data-says]") as HTMLElement).textContent).toContain(saysTitle(false, "carol"));
   });
 
-  it("lays out the strip, what changes, who gains what, the checks and the documents", async () => {
+  it("lays out the strip, what changes, access after publishing, the checks and the files", async () => {
     mount();
     await title();
     expect(document.querySelector("[data-verdict-strip]")).not.toBeNull();
-    for (const name of ["What changes", "Who gains what", "Checks", "The documents"]) expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
-    expect(screen.getByText(docsFold(8, 2))).toBeTruthy();
+    for (const name of ["What changes", "Access after publishing", "Checks", "Files"]) expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
+    expect(screen.getByText(docsFold(8, "open"))).toBeTruthy();
     expect(screen.getByText(DOCS_MASKED)).toBeTruthy();
   });
 
-  it("says how many lines need an acknowledgment and opens the publish dialog", async () => {
+  it("says what to do before publishing and opens the publish dialog", async () => {
     mount();
     await title();
-    expect(bar()?.textContent).toContain(ackBar(2, 2));
+    expect(bar()?.textContent).toContain(ackBar(2, 2, 2));
     await userEvent.click(within(bar() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN }));
     expect(await screen.findByRole("heading", { name: "Publish draft 41?" })).toBeTruthy();
+  });
+
+  it("counts the confirm blocks in the bar, not the lines", async () => {
+    vi.mocked(getDraft).mockResolvedValue(detailWith({ verdict: { risks: [LOOSEN_RISK, GATE_LOST] } }));
+    mount();
+    await title();
+    expect(bar()?.textContent).toContain(ackBar(1, 2, 2));
+    expect(bar()?.textContent).toContain("Publishing asks you for 1 confirmation.");
+  });
+
+  it("opens with a red warning naming the agent when its draft loosens the rules that bind it", async () => {
+    vi.mocked(getDraft).mockResolvedValue(detailWith({ verdict: { risks: [LOOSEN_RISK, GATE_LOST] } }));
+    mount();
+    await title();
+    const warn = document.querySelector("[data-agent-loosens]") as HTMLElement;
+    expect(warn.querySelector("b")?.textContent).toBe("joe-java-developer-agent wrote this draft to loosen its own rules.");
+    expect(warn.textContent).toContain(LOOSEN_RISK.sentence + " " + GATE_LOST.sentence);
+    expect(warn.textContent).toContain("A person may accept it when publishing.");
+    expect(warn.className).toContain("bg-danger-bg");
+    const first = document.querySelector("[data-agent-loosens], [data-lead], [data-facts]");
+    expect(first).toBe(warn);
+  });
+
+  // A line cut for this reader carries no object, so it matches no other
+  // line, and the warning says its sentence once.
+  it("says a cut line of the warning once", async () => {
+    const cut = (code: string, key: string) => ({ ...CUT_RISK, code, key });
+    vi.mocked(getDraft).mockResolvedValue(detailWith({ verdict: { risks: [cut("agent.guardrail", "k-c1"), cut("policy.guardrail-changed", "k-c2")] } }));
+    mount();
+    await title();
+    const warn = document.querySelector("[data-agent-loosens]") as HTMLElement;
+    expect(warn.textContent?.split(CUT_RISK.sentence).length).toBe(2);
+  });
+
+  it.each([
+    ["a gate line alone", { risks: [GATE_LOST] }],
+    ["the same code refused", { risks: [], refused: [{ ...LOOSEN_RISK, class: "refused" as const, ack: undefined, typed: undefined }] }],
+    ["no line of the code", {}],
+  ])("shows no agent warning for %s", async (_name, verdict) => {
+    vi.mocked(getDraft).mockResolvedValue(detailWith({ verdict }));
+    mount();
+    await title();
+    expect(document.querySelector("[data-agent-loosens]")).toBeNull();
+  });
+
+  it("leads with what publishing does to the tickets a held role covers, and who holds it", async () => {
+    vi.mocked(getDraft).mockResolvedValue(COVERS_DETAIL);
+    mount("50");
+    await screen.findByRole("heading", { level: 1, name: "Draft 50" });
+    expect(document.querySelector("[data-lead]")?.textContent).toBe("Changes the role tracker-triage: it will reach 2 more tickets on tracker, T-2 and T-3. 1 person holds it.");
+    expect(bar()?.textContent).toContain(ackBar(1, 1, 0));
+    expect(document.querySelector("[data-strip]")?.textContent).toBe("1line to confirm");
+  });
+
+  it("says in the lead that nobody holds the new roles, and drops the note that said it again", async () => {
+    mount();
+    await title();
+    const lead = document.querySelector("[data-lead]") as HTMLElement;
+    expect(lead.textContent).toContain("Nobody holds github-readers or github-writers yet, so nobody gains access until the identity manager assigns them.");
+    expect(lead.querySelector(".text-warn")?.textContent).toContain("Holders of demo-tools-readers lose tools");
+    expect(document.querySelector('[data-group="info"]')).toBeNull();
+    expect(document.querySelector("[data-gains-lead]")).toBeNull();
   });
 
   it("gives a reader who may not publish the server's sentence and no Publish", async () => {
@@ -176,17 +246,17 @@ describe("the review page", () => {
     vi.mocked(getDraft).mockResolvedValueOnce(detailWith({ verdict: { risks: [] } })).mockImplementationOnce(() => new Promise((r) => { finish = r; }));
     const answer = await publishNow();
     expect(lede()).toBe("Reading draft 41.");
-    expect(fact("Checked").textContent).toContain("Reading draft 41.");
+    expect(fact("Last checked").textContent).toContain("Reading draft 41.");
     expect(document.body.textContent).not.toContain("stored no check");
     finish(detailWith({ draft: answer.draft, verdict: { ...NO_LINES, checked_at: CHECKED_AT, snapshot: "7f3a91c2d4e5" }, checks: { refused: 0, risks: 0, warnings: 0, unchecked: 0, revision: 2, checked_at: CHECKED_AT }, may_publish: false }));
-    await waitFor(() => expect(lede()).toBe("Revision 2 was checked against the live state at " + absTime(CHECKED_AT) + ": nothing to acknowledge. Straza does not check a draft again once it is published."));
+    await waitFor(() => expect(lede()).toBe("Revision 2 was checked against the live state at " + absTime(CHECKED_AT) + ": nothing to confirm. Straza does not check a draft again once it is published."));
   });
 
   it("says the draft was published and could not be read again when the read after a publish fails", async () => {
     vi.mocked(getDraft).mockResolvedValueOnce(detailWith({ verdict: { risks: [] } })).mockRejectedValueOnce(new ApiError("strazad did not answer", 0, true));
     await publishNow();
     await waitFor(() => expect(lede()).toBe("Draft 41 is published. This page could not read it again, so its stored check is not shown. Reload to try again."));
-    expect(fact("Checked").textContent).toContain("Draft 41 is published.");
+    expect(fact("Last checked").textContent).toContain("Draft 41 is published.");
     expect(document.body.textContent).toContain(readFailed(subjectDraft("41"), new ApiError("strazad did not answer", 0, true)));
     expect(document.body.textContent).not.toContain("stored no check");
   });
@@ -199,9 +269,10 @@ describe("the review page", () => {
   const closedLeft = () => {
     expect(document.querySelector("[data-verdict-strip]")).toBeNull();
     expect(document.querySelector("[data-checks]")).toBeNull();
-    expect(fact("Publishing needs")).toBeNull();
-    expect(screen.queryByRole("heading", { level: 2, name: "Who gains what" })).toBeNull();
-    for (const said of ["No object in it needs a grant to publish.", "Nothing refused.", "every read", "No role gains or loses a tool"]) expect(document.body.textContent).not.toContain(said);
+    expect(document.querySelector("[data-lead]")).toBeNull();
+    expect(fact("Who may publish")).toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: "Access after publishing" })).toBeNull();
+    for (const said of ["No object in it needs a grant to publish.", "every read", "No role gains or loses a tool"]) expect(document.body.textContent).not.toContain(said);
   };
 
   it("shows a published draft's proof and the counts of its stored check, never a check run now, and undoes it into a new draft", async () => {
@@ -219,7 +290,7 @@ describe("the review page", () => {
     expect((document.querySelector("[data-checks-lede]") as HTMLElement).textContent).toBe(
       "Revision 2 was checked against the live state at " + absTime(CHECKED_AT) + ": 2 widen access, 1 warning. Straza does not check a draft again once it is published.",
     );
-    expect(fact("Checked").textContent).toContain(checkedLine(absTime(CHECKED_AT), "7f3a91c2"));
+    expect(fact("Last checked").textContent).toContain(checkedLine(absTime(CHECKED_AT), "7f3a91c2"));
     closedLeft();
     await userEvent.click(within(proof).getByRole("button", { name: UNDO }));
     expect(revertDraft).toHaveBeenCalledWith("41", "");
@@ -230,7 +301,7 @@ describe("the review page", () => {
     vi.mocked(getDraft).mockResolvedValue(detailWith({ draft: { state, decided_at: "2026-09-24T11:00:00Z", decided_by: ALICE }, verdict: { ...NO_LINES, checked_at: "", snapshot: "" }, may_publish: false }));
     mount();
     await title();
-    expect(fact("Checked").textContent).toContain("Straza stored no check of revision 2.");
+    expect(fact("Last checked").textContent).toContain("Straza stored no check of revision 2.");
     expect((document.querySelector("[data-checks-lede]") as HTMLElement).textContent).toBe(
       "Straza stored no check of revision 2. Straza does not check a draft again once it is " + state + ".",
     );
@@ -293,7 +364,7 @@ describe("the review page", () => {
     await title();
     expect(within(bar() as HTMLElement).getByRole("button", { name: DISCARD_KEEP_LIVE })).toBeTruthy();
     expect(fact("Drafted by").textContent).toContain("the file demo-tools.yaml");
-    expect(fact("How it came in").textContent).toBe("How it came inthe apps directory, /etc/straza/apps/demo-tools.yaml");
+    expect(fact("Came from").textContent).toBe("Came fromthe apps directory, /etc/straza/apps/demo-tools.yaml");
   });
 
   it("names the server a file's removal keeps when it is discarded", async () => {

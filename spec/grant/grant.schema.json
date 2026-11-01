@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://straza.dev/grant/v1alpha1/grant.schema.json",
+  "title": "StrazaGrant",
+  "description": "A decoded git grant: the protected header and the claims of the compact JWS that Straza issues at POST /v1/grants and a resource server verifies (spec/grant/SPEC.md). Added 2026-10-24. The schema pins the shape. A verifier also checks what a schema cannot: the compact grant's length of at most 8000 bytes, the signature, iss and aud against its own configuration, the lifetime and the clock, the DPoP proof, op against the route, obj against the path, refs against the push commands and the spent jti. Other members of a document that carries a grant are not constrained here.",
+  "type": "object",
+  "required": ["header", "claims"],
+  "properties": {
+    "header": {
+      "type": "object",
+      "required": ["alg", "typ", "kid"],
+      "properties": {
+        "alg": { "const": "EdDSA" },
+        "typ": { "const": "straza-grant+jwt", "description": "Straza writes exactly this value. SPEC.md says how a verifier compares it." },
+        "kid": { "type": "string", "minLength": 1, "description": "The id of the session key that signed the grant, a key of the set at <iss>/.well-known/straza/jwks.json." }
+      },
+      "not": { "required": ["crit"] }
+    },
+    "claims": {
+      "type": "object",
+      "required": ["iss", "aud", "sub", "act", "iat", "exp", "jti", "cnf", "srv", "obj", "op", "dec"],
+      "properties": {
+        "iss": { "type": "string", "minLength": 1, "description": "Straza's public URL, as session tokens carry it." },
+        "aud": { "type": "string", "minLength": 1, "description": "One string: the resource server's git base URL, exactly as the app manifest's straza.git.url canonicalized it." },
+        "sub": { "type": "string", "minLength": 1, "description": "The user id." },
+        "act": {
+          "type": "object",
+          "required": ["ses", "kind"],
+          "properties": {
+            "ses": { "type": "string", "minLength": 1, "description": "The session id." },
+            "hrn": { "type": "string", "minLength": 1, "description": "The session's harness, <name>/<version>. Absent when the session names none." },
+            "kind": { "enum": ["human", "agent", "service"], "description": "The subject's user type." }
+          }
+        },
+        "iat": { "type": "integer", "exclusiveMinimum": 0 },
+        "exp": { "type": "integer", "exclusiveMinimum": 0, "description": "Straza issues exp as iat plus 120. A verifier refuses exp minus iat over 300." },
+        "jti": { "type": "string", "minLength": 1, "description": "The grant id, spent once by the resource server." },
+        "cnf": {
+          "type": "object",
+          "required": ["jkt"],
+          "properties": {
+            "jkt": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "The RFC 7638 SHA-256 thumbprint of the machine key whose DPoP proof comes with every request." }
+          }
+        },
+        "srv": { "type": "string", "minLength": 1, "description": "The app's metadata.name." },
+        "obj": {
+          "type": "object",
+          "required": ["type", "value", "id"],
+          "properties": {
+            "type": { "type": "string", "minLength": 1, "description": "The object type the tool pins, repo for a git server." },
+            "value": { "type": "string", "minLength": 1, "description": "The canonical object value, owner/name for a repo." },
+            "id": { "type": "string", "minLength": 1, "description": "The object list's id for the object, as a string." }
+          }
+        },
+        "op": { "enum": ["fetch", "push"] },
+        "refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "description": "The exact ref updates of a push. Only a push carries refs, and a push without refs opens the receive-pack advertisement only.",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "dec": { "type": "string", "minLength": 1, "description": "The CloudEvents id of the grant's audit record." },
+        "apr": { "type": "string", "minLength": 1, "description": "The approval request id. Present only when an approval ran." }
+      },
+      "if": { "required": ["op"], "properties": { "op": { "const": "fetch" } } },
+      "then": { "not": { "required": ["refs"] } }
+    }
+  },
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "required": ["ref", "old", "new"],
+      "properties": {
+        "ref": { "type": "string", "pattern": "^refs/", "minLength": 6, "description": "The full ref name." },
+        "old": { "type": "string", "description": "The id the ref must hold now, zeros for a create." },
+        "new": { "type": "string", "description": "The id the ref moves to, zeros for a delete." }
+      },
+      "oneOf": [
+        { "properties": { "old": { "pattern": "^[0-9a-f]{40}$" }, "new": { "pattern": "^[0-9a-f]{40}$" } } },
+        { "properties": { "old": { "pattern": "^[0-9a-f]{64}$" }, "new": { "pattern": "^[0-9a-f]{64}$" } } }
+      ]
+    }
+  }
+}

@@ -1,5 +1,6 @@
 ---
 title: Approvals
+seo_title: "Approval model: deciders, holds and retries"
 description: See who may decide an approval, where they decide it, and what the agent does while it waits.
 pagetype: explanation
 weight: 40
@@ -39,7 +40,7 @@ One approval runs one call. A call that is still held uses it when it wakes. A c
 
 An approval binds what the person actually saw. For an MCP call it covers the tool and its exact arguments by default, so a retry with different arguments is a new request. A rule can loosen that to the tool alone, for a harmless tool whose arguments change on every call.
 
-On the gateway, a held tool gains a required justification field, so the agent states in its own words why it needs the call, and the person reads that statement on the request. Straza records the justification as the agent's own unverified words. It strips the field from the arguments before they reach the audit record or the MCP server.
+On the gateway, a held tool gains a required justification field, so the agent states in its own words why it needs the call, and the person reads that statement on the request. Straza records the justification as the agent's own unverified words, and it keeps at most 4 KiB of it and of the request's summary, with the full length after a cut. It strips the field from the arguments before they reach the audit record or the MCP server.
 
 ## Who may answer
 
@@ -51,14 +52,14 @@ When an agent's deciders come out empty, with no roles and no usable sponsor, th
 At decision time the server reads the decider's current roles, so a role removed in the identity manager this morning cannot approve this afternoon. Requesters may not decide their own request unless the rule allows it, and an autonomous agent never may, whatever the rule says. An AI agent is refused on every surface, even when an approver role was assigned to it by mistake.
 
 
-A confirm rule turns this around. Only the requester may confirm, because the record proves that the person behind the session was present and meant it, and nobody else can supply that. An autonomous session has no person behind it, so the engine turns a confirm rule into a plain deny for it at once. The agent runs as its person and can reach every credential on their machine. The confirmation therefore counts only when a phone or browser that the person enrolled signs it. By default the console and strazactl refuse a person's own request, and a session that a coding harness checked in decides nothing at all.
+A confirm rule turns this around. Only the requester may confirm, because a confirmation says that the person behind the session meant the call, and nobody else can say that for them. An autonomous session has no person behind it, so the engine turns a confirm rule into a plain deny for it at once. The agent runs as its person and can reach every credential on their machine. The confirmation therefore counts only when a phone or browser enrolled as that person signs it. That signature proves which device decided, and it does not prove that the person acted, as [the security model]({{< relref "security/security-model.md#an-agent-that-holds-its-persons-login-can-enroll-an-approval-device" >}}) explains. By default the console refuses a person's own request, and a session that a coding harness checked in decides nothing at all.
 
 ## Tickets for decisions that take a day
 
 
 A ticket fits a decision that takes hours or days, such as a deploy that needs a change board or a read of a sensitive store. Tickets never block. The first call is denied with a ticket reference, and the person has 24 hours to decide by default. An approval turns the ticket into a grant. Any later session of the same requester can use the grant once, within an hour by default.
 
-The grant is a stored row that the server uses up, so a client that is offline can never cash it. A ticket that a person denied stays denied for the rest of its window, and a retry inside that window is denied without asking the approvers again. Three built-in gateway tools let an agent request a ticket for a described call, read its state and wait for it. On purpose, no tool can decide a request.
+The grant is a stored row that the server uses up, so a client that is offline can never cash it. A ticket that a person denied stays denied for the rest of its window, and a retry inside that window is denied without asking the approvers again. Three built-in gateway tools let an agent request a ticket for a described call, read its state and wait for it. The request tool decides the described call as the real call would be decided, so it cannot reopen a denied call inside its window either. On purpose, no tool can decide a request.
 
 ## Channels
 
@@ -69,7 +70,7 @@ A person decides in one of these places:
 - On the self-service page, a person who is not an admin decides from a browser they enabled once, which signs each decision with a key it keeps. [Approve in the browser]({{< relref "guides/approve/browser.md" >}}) sets it up.
 - Slack posts a card into a channel you configure and verifies the signature of every button press. The agent's justification is not forwarded there unless you turn that on, as [Slack]({{< relref "guides/approve/slack.md" >}}) shows.
 - Phone approval sends the request to the approver's phone as a push notification that carries only an opaque reference. The Straza approver app, from the App Store or Google Play, fetches the request over its enrolled session and signs the decision with the phone's key. [Approve on a phone]({{< relref "guides/approve/phone.md" >}}) enrolls one.
-- strazactl and the admin API decide too, whatever a rule's notification routing says.
+- The console's decision goes through the admin API, which takes it from a person's own sign-in whatever a rule's notification routing says. An admin API token decides nothing, because a decision must name the person who made it. `strazactl approvals list` only shows what waits.
 
 The `approve.notify` list of a rule narrows which channels announce its requests. A request with no decider signal at all is announced nowhere, so an unconfigured rule cannot notify every admin across a fleet.
 

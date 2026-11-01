@@ -2,7 +2,7 @@
 title: strazactl policy deactivate
 description: Turn a PolicySet off and recompile and distribute the snapshot
 pagetype: reference
-weight: 71
+weight: 67
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl policy deactivate <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

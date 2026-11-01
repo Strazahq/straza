@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>ai.straza.service</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/straza/bin/straza</string>
+		<string>service</string>
+	</array>
+	<key>UserName</key>
+	<string>_straza-service</string>
+	<key>GroupName</key>
+	<string>_straza-service</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>ExitTimeOut</key>
+	<integer>15</integer>
+	<key>StandardErrorPath</key>
+	<string>/var/log/straza-service/service.log</string>
+</dict>
+</plist>

@@ -250,7 +250,7 @@ func TestAdminCRUDFlow(t *testing.T) {
 	// The API path bumps the resolver: checkin now carries finance.
 	_, checkin := postJSON(t, base+"/v1/checkin", map[string]any{
 		"id_token": idToken,
-		"harness":  map[string]string{"name": "strazactl", "version": "dev"},
+		"harness":  map[string]string{"name": "console", "version": "dev"},
 		"attestation": map[string]any{
 			"managed": false, "hashes": map[string]string{},
 		},
@@ -293,7 +293,7 @@ func TestAdminCRUDFlow(t *testing.T) {
 	}
 	_, checkin = postJSON(t, base+"/v1/checkin", map[string]any{
 		"id_token":    idToken,
-		"harness":     map[string]string{"name": "strazactl", "version": "dev"},
+		"harness":     map[string]string{"name": "console", "version": "dev"},
 		"attestation": map[string]any{"managed": false, "hashes": map[string]string{}},
 	})
 	packNames := []string{}
@@ -315,7 +315,7 @@ func TestAdminCRUDFlow(t *testing.T) {
 	}
 	codeN, _ := postJSON(t, base+"/v1/checkin", map[string]any{
 		"session_token": checkin["session_token"],
-		"harness":       map[string]string{"name": "strazactl", "version": "dev"},
+		"harness":       map[string]string{"name": "console", "version": "dev"},
 		"attestation":   map[string]any{"managed": false, "hashes": map[string]string{}},
 	})
 	if codeN != http.StatusUnauthorized {

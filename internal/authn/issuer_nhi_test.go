@@ -13,6 +13,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 
+	"github.com/strazahq/straza/internal/dpop"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -124,6 +125,11 @@ func TestClientCredentialsGrant(t *testing.T) {
 				}
 				if claims.Subject != nhi.ID || claims.Username != nhi.Username {
 					t.Errorf("claims = %+v, want sub %s username %s", claims, nhi.ID, nhi.Username)
+				}
+				// The token names the key that verified the assertion, so the
+				// server can refuse it once that key is replaced or removed.
+				if want := dpop.Thumbprint(pub); claims.KeyThumbprint != want {
+					t.Errorf("KeyThumbprint = %q, want the registered key's thumbprint %q", claims.KeyThumbprint, want)
 				}
 				if at, _ := body["access_token"].(string); at != raw {
 					t.Errorf("access_token should mirror id_token (Straza API convention)")

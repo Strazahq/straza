@@ -375,6 +375,11 @@ func approveSummary(ev policy.Event) string {
 		return "mcp.call " + ev.App + ":" + ev.ToolName
 	case policy.ToolShellExec:
 		return "shell.exec: " + clampShellSummary(ev.Command)
+	case policy.ToolOther:
+		if ev.ToolName != "" {
+			return "other: " + ev.ToolName
+		}
+		return ev.Tool
 	default:
 		s := ev.Tool
 		if len(ev.Paths) > 0 {

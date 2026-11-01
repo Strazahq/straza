@@ -90,7 +90,7 @@ func TestAdminAuditEventsCarryActor(t *testing.T) {
 	// Lane 2: session token (an enrolled session doing admin work).
 	_, checkin := postJSON(t, base+"/v1/checkin", map[string]any{
 		"id_token": idToken,
-		"harness":  map[string]string{"name": "strazactl", "version": "dev"},
+		"harness":  map[string]string{"name": "console", "version": "dev"},
 		"attestation": map[string]any{
 			"managed": false, "hashes": map[string]string{},
 		},

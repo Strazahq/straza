@@ -1,0 +1,22 @@
+# Revision 26: rules that name harness tools by their own name. The first
+# allows one tool Claude Code added after the client's release, the second
+# holds a custom harness's business tool for a person, and the third turns
+# one classified built-in off by name.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata: { name: by-name-tools }
+spec:
+  match: { roles: [dev] }
+  rules:
+    - id: allow-subagent-handback
+      tools: [other]
+      toolNames: { allow: [SubagentHandback] }
+    - id: hold-refunds
+      tools: [other]
+      toolNames: { allow: [refund_order] }
+      mode: approve
+      approve: { deciders: [sponsor] }
+    - id: no-push-notifications
+      tools: [other]
+      toolNames: { deny: [PushNotification] }
+      reason: "Push notifications are off for dev."

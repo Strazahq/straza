@@ -1,0 +1,18 @@
+# Invalid: objects.type is one lowercase word of up to 32 letters, digits
+# or hyphens that starts with a letter (revision 7). Write repo, not Repo.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: ghapp
+server:
+  name: com.example/github-app
+  version: "0.4.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://ghapp.example.com/mcp
+  objects:
+    type: Repo
+    list:
+      tool: repo_list

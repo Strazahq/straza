@@ -2,7 +2,7 @@
 title: strazactl sessions revoke
 description: Revoke a session (kill switch)
 pagetype: reference
-weight: 89
+weight: 85
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl sessions revoke <session-id> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

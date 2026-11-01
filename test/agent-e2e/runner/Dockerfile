@@ -1,6 +1,7 @@
 # Runner image for the agent-e2e lane: the repo's CURRENT straza binary
 # (built from source, CGO off) + the stdlib-only python agentkit + the driver.
-# Build context is the repo root (see ../compose.yaml).
+# Build context is the repo root (see ../compose.yaml). The same image runs
+# the runner's straza service in its own container under straza-service.
 ARG GO_VERSION=1.25
 FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src
@@ -21,6 +22,15 @@ COPY kits/python /opt/straza-agentkit
 RUN pip install --no-cache-dir /opt/straza-agentkit
 COPY test/agent-e2e/runner/driver.py /opt/e2e/driver.py
 COPY test/agent-e2e/policy /opt/e2e/policy
+# straza-service (uid 64000) runs the service container. Its passwd line lets
+# the straza client check that the socket belongs to the service, and Docker
+# copies these two directories' owner and mode into the empty socket and
+# state volumes the first time a container mounts them.
+RUN groupadd --system --gid 64000 straza-service \
+ && useradd --system --uid 64000 --gid 64000 --no-create-home \
+      --home-dir /var/lib/straza-service --shell /usr/sbin/nologin straza-service \
+ && install -d -o 64000 -g 64000 -m 0755 /run/straza-service \
+ && install -d -o 64000 -g 64000 -m 0700 /var/lib/straza-service
 # /work is the episode sandbox the model's file/shell tools are jailed to.
 WORKDIR /work
 ENTRYPOINT ["python3", "-u", "/opt/e2e/driver.py"]

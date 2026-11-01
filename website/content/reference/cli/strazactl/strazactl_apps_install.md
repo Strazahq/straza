@@ -2,7 +2,7 @@
 title: strazactl apps install
 description: Install or update MCP servers from app.yaml manifests
 pagetype: reference
-weight: 21
+weight: 18
 draft: false
 sources:
   - cmd/strazactl
@@ -37,7 +37,7 @@ strazactl apps install -f <path>... [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

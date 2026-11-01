@@ -52,7 +52,7 @@ const refusal501 = "roles are born in Straza, so the IdM cannot create or delete
 func groupProjectionPath(p string) bool {
 	p = strings.TrimPrefix(p, strazaGroupURNLower+":")
 	switch p {
-	case strazaGroupURNLower, "role", "rolekind", "plane", "description", "apps", "tools", "policies", "administers", "server":
+	case strazaGroupURNLower, "role", "rolekind", "plane", "description", "apps", "tools", "policies", "administers", "server", "covers":
 		return true
 	}
 	return false

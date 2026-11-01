@@ -1,0 +1,32 @@
+{
+  "provenance": "doc RFC 9449 and spec/session-token/SPEC.md 2026-10-20 (generated, not captured from a client: proof key from the Ed25519 seed of 32 bytes 0x07, other key from 32 bytes 0x09, nonce key the 32 bytes 0x00 to 0x1f, signed at 2026-10-20T12:00:30Z)",
+  "description": "A key check-in proof. It signs the body counter as ctr and carries no ath, because the body carries no token. The server accepts a proof from any key here, compares its thumbprint with the device row, and then spends its jti in the store.",
+  "at": "2026-10-20T12:00:30Z",
+  "request": {
+    "method": "POST",
+    "path": "/v1/checkin",
+    "origins": [
+      "https://straza.example",
+      "http://127.0.0.1:8420"
+    ],
+    "counter": 7
+  },
+  "proof": "eyJhbGciOiJFZERTQSIsImp3ayI6eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IjZrcHNZLUtjVWdxLTlWQjdFeTdGLVpWSGRxNi12bnVTUWg3cWFSUkcwaXcifSwidHlwIjoiZHBvcCtqd3QifQ.eyJjdHIiOjcsImh0bSI6IlBPU1QiLCJodHUiOiJodHRwczovL3N0cmF6YS5leGFtcGxlL3YxL2NoZWNraW4iLCJpYXQiOjE3OTI0OTc2MzAsImp0aSI6IjQ1NDczZTY5N2M3YjRkNTM2MWIyM2Y3ZTI3ODdlNjUwIiwibm9uY2UiOiJBQUFBQUFISDJ4QUhScl84WkNQMVhKRnIxLVlWZWY5OVdqT2VyTUhRbG9oZ015WEJVbFV6VncifQ.JHM0iRQcOxw6vNHqtpIyP4QA6Woqybn7Qqwmd1dAU2-oPCmt-QEzkK0vK-rekM4np7lybm9Jx_e87G_4qUKsBA",
+  "header": {
+    "alg": "EdDSA",
+    "jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+    },
+    "typ": "dpop+jwt"
+  },
+  "claims": {
+    "ctr": 7,
+    "htm": "POST",
+    "htu": "https://straza.example/v1/checkin",
+    "iat": 1792497630,
+    "jti": "45473e697c7b4d5361b23f7e2787e650",
+    "nonce": "AAAAAAHH2xAHRr_8ZCP1XJFr1-YVef99WjOerMHQlohgMyXBUlUzVw"
+  }
+}

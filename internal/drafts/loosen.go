@@ -17,12 +17,15 @@ import (
 // those of policy.guardrail-changed. typed marks a loosening a publisher
 // types. lane names the role whose closure change loosens, empty for a
 // set change; the agent's own roles are judged on its subject instead.
+// takeover marks an approval that takes over a stricter one, which widens
+// what the sessions of both sets reach whichever of the two changed.
 type loosening struct {
 	changed, object  string
 	clause, sentence string
 	before, after    string
 	typed            bool
 	lane             string
+	takeover         bool
 }
 
 // loosenings answers every loosening the draft makes, read once per check:
@@ -58,10 +61,10 @@ func (c *check) setLoosenings(name string, op Op) []loosening {
 	var out []loosening
 	stop := func(cause, clause, after string) {
 		for _, g := range gatesOf(b) {
-			out = append(out, loosening{name, name, clause, stopWords(name, g, "", cause), ruleRef(g), cmp.Or(after, ruleRef(g)), true, ""})
+			out = append(out, loosening{name, name, clause, stopWords(name, g, "", cause), ruleRef(g), cmp.Or(after, ruleRef(g)), true, "", false})
 		}
 		if b.Spec.Escape != nil {
-			out = append(out, loosening{name, name, clause, moduleWords(name, "", cause), moduleRef(b), cmp.Or(after, moduleRef(b)), true, ""})
+			out = append(out, loosening{name, name, clause, moduleWords(name, "", cause), moduleRef(b), cmp.Or(after, moduleRef(b)), true, "", false})
 		}
 	}
 	switch {
@@ -82,7 +85,7 @@ func (c *check) setLoosenings(name string, op Op) []loosening {
 		if a.Spec.Escape != nil {
 			cause, clause, after = "changes the module", "changes its Rego module", moduleRef(a)
 		}
-		out = append(out, loosening{name, name, clause, moduleWords(name, "", cause), moduleRef(b), after, true, ""})
+		out = append(out, loosening{name, name, clause, moduleWords(name, "", cause), moduleRef(b), after, true, "", false})
 	}
 	return out
 }
@@ -273,8 +276,8 @@ func (c *check) takeovers(changed map[string]bool) []loosening {
 			if !self && !looser(was, now) {
 				continue
 			}
-			l := loosening{x.set, x.set, "adds or widens rule " + x.rule.ID, fmt.Sprintf("Rule %s of %s will gate %s in place of rule %s of %s, with %s where today it is %s.",
-				x.rule.ID, x.set, sharedKinds(x.rule, y.rule), y.rule.ID, y.set, gateWords(x.rule), gateWords(y.rule)), ruleRef(y.rule), ruleRef(x.rule), self, ""}
+			l := loosening{x.set, x.set, widensRule + x.rule.ID, fmt.Sprintf("Rule %s of %s will gate %s in place of rule %s of %s, with %s where today it is %s.",
+				x.rule.ID, x.set, sharedKinds(x.rule, y.rule), y.rule.ID, y.set, gateWords(x.rule), gateWords(y.rule)), ruleRef(y.rule), ruleRef(x.rule), self, "", true}
 			if !changed[x.set] {
 				l.changed, l.object, l.clause = y.set, y.set, "changes its match or priority"
 			}

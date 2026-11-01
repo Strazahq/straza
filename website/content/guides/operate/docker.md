@@ -29,8 +29,8 @@ The release image is `ghcr.io/strazahq/straza`, built from `deploy/Dockerfile` i
 
 {{< command terminal="Terminal" purpose="on the Docker host" >}}
 ```sh
-docker pull ghcr.io/strazahq/straza:1.1.2
-docker inspect --format 'user={{.Config.User}} entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}} volumes={{json .Config.Volumes}} exposed={{json .Config.ExposedPorts}} env={{json .Config.Env}}' ghcr.io/strazahq/straza:1.1.2
+docker pull ghcr.io/strazahq/straza:2.0.0
+docker inspect --format 'user={{.Config.User}} entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}} volumes={{json .Config.Volumes}} exposed={{json .Config.ExposedPorts}} env={{json .Config.Env}}' ghcr.io/strazahq/straza:2.0.0
 ```
 {{< /command >}}
 
@@ -68,7 +68,7 @@ Start the container with the volume, the port published on the loopback address 
 
 {{< command terminal="Terminal" purpose="on the Docker host" >}}
 ```sh
-docker run -d --stop-timeout 30 --name straza -v straza-data:/var/lib/straza -p 127.0.0.1:8420:8420 ghcr.io/strazahq/straza:1.1.2 serve --profile standalone --listen 0.0.0.0:8420
+docker run -d --stop-timeout 30 --name straza -v straza-data:/var/lib/straza -p 127.0.0.1:8420:8420 ghcr.io/strazahq/straza:2.0.0 serve --profile standalone --listen 0.0.0.0:8420
 docker logs straza
 ```
 {{< /command >}}
@@ -123,7 +123,10 @@ A minimal working example is the compose file at `deploy/compose/docker-compose.
 - the ownership init step from above
 - strazad with `STRAZA_STORE_DRIVER=postgres`, `STRAZA_STORE_DSN` pointing at the database and `STRAZA_EVENTS_URL=nats://nats:4222`
 
-The two `STRAZA_OIDC_*` variables are commented out in the file, so set them to your identity provider before `docker compose up`.
+The `STRAZA_OIDC_*` variables are commented out in the file, so set the issuer and the client id to your identity provider before `docker compose up`.
+
+
+At the identity provider, Straza's client takes two redirects. The console and the self-service page return to the address people open the console at, followed by `/console/signin`, such as `https://straza.example.com/console/signin`. `straza enroll` returns to `http://127.0.0.1/callback` on a port each sign-in picks, or on the port `STRAZA_OIDC_LOOPBACK_PORT` fixes for a provider that matches ports exactly. [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}), [Okta login]({{< relref "guides/connect-identity/okta-login.md" >}}) and [Keycloak login]({{< relref "guides/connect-identity/keycloak-login.md" >}}) show where each provider takes them.
 
 With the store and the event stream in their own services, the data volume keeps only what strazad mints at first boot: the key-encryption key unless you mount one, the empty apps directory and, in the repository compose file, the push relay token and the WebPush key. Back up the volume with the database.
 

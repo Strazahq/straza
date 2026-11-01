@@ -78,10 +78,10 @@ export const DEVICE_HELP = "Getting it back means enrolling again with a fresh s
 // The Assertion key section.
 export const NO_KEY_LINE = "Cannot start a session until a key is registered.";
 export const KEY_LABEL = "Public key, base64, 32 bytes";
-export const KEY_HINT = "The Ed25519 public key this agent signs its client_credentials grant with. One key per agent; registering again rotates it. The private half never travels.";
+export const KEY_HINT = "The Ed25519 public key this agent signs its client_credentials grant with. One key per agent; registering another rotates it and ends the agent's running sessions. The private half never travels.";
 export const KEY_MISSING = "Paste the public key. The server refuses anything that is not exactly a 32-byte Ed25519 key.";
-export const keyRevokeBody = (name: string) => name + " can no longer mint sessions with the client_credentials grant.";
-export const KEY_REVOKE_HELP = "Running sessions keep going until revoked; register a new key to restore access.";
+export const keyRevokeBody = (name: string) => "The running sessions of " + name + " end now, and it can no longer mint sessions with the client_credentials grant.";
+export const KEY_REVOKE_HELP = "The ID token the agent already holds stops working too, because it names the removed key. Register a new key to restore access.";
 
 // The list.
 export const SEARCH_PLACEHOLDER = "Search by name, email or external id";

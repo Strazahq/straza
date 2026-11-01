@@ -12,8 +12,9 @@ import { PageHead } from "@/components/page-head";
 import { Button } from "@/components/ui/button";
 import type { ApiError, DraftConflict, DraftDetail, DraftPublished } from "@/lib/api";
 import { UNVERIFIED } from "@/lib/approval-words";
+import { coverageNouns, isNewRole, leadOf, loosenings, mergedNotes, roleToolsOf } from "@/lib/drafts-access";
 import { conflictsOf, contactDraftServer, getDraft, rebaseDraft, revertDraft } from "@/lib/drafts-api";
-import { STALE_CODE, type Shown, gainsHidden, objectOf, stateOf } from "@/lib/drafts-model";
+import { STALE_CODE, type Shown, confirmBlocks, gainsHidden, objectOf, stateOf } from "@/lib/drafts-model";
 import {
   CHANGES_TITLE,
   CHECKS_TITLE,
@@ -27,6 +28,7 @@ import {
   FILE_REFUSED,
   GAINS_HELP,
   GAINS_TITLE,
+  LOOSEN_TAIL,
   MAY_PUBLISH_ALL,
   MISSING_TITLE,
   NEXT_TITLE,
@@ -45,6 +47,7 @@ import {
   UNDO_SUBJECT,
   WAITS_WHOLE,
   ackBar,
+  agentWrote,
   answered,
   cameInLine,
   checkedAgain,
@@ -57,6 +60,7 @@ import {
   draftTitle,
   expiredLine,
   expiresLine,
+  leadLines,
   needLine,
   notCheckedAgain,
   proposerWords,
@@ -81,15 +85,18 @@ import { navigate } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
 import { readFailed } from "@/lib/say";
 import { snapshot } from "@/lib/session";
+import { cn } from "@/lib/utils";
 import { absTime } from "@/lib/words";
 
-// The review page of one draft: who drafted it and how it came in, the
-// proposer's note marked
-// unverified, the verdict strip, what changes, who gains what, the checks
-// and the documents, with a sticky bar that publishes and discards. Every
-// line but the note is the server's. Publish is a person's act: the dialog
-// renders only for a reader the server says may publish, and the server
-// checks again when it runs.
+// The review page of one draft: a red warning when an agent's draft loosens
+// the rules that bind that agent, a lead that says what publishing does to
+// the objects each role covers and who holds the roles, who drafted it and
+// where it came from, the proposer's note marked unverified, the verdict
+// strip, what changes, access after publishing, the checks and the files,
+// with a sticky bar that publishes and discards. Every line but the note is
+// the server's, and the lead and the warning are built from them. Publish
+// is a person's act: the dialog renders only for a reader the server says
+// may publish, and the server checks again when it runs.
 
 const route = routeByKey("drafts");
 const STATE_TONE: Record<Shown, ChipTone> = { ready: "accent", refused: "danger", stale: "warn", published: "ok", discarded: "plain", expired: "plain" };
@@ -229,13 +236,28 @@ export function DraftPage({ id }: { id: string }) {
   // Right after a publish the page waits for its read of the draft, and says
   // so, or says that read failed, rather than claim no check was stored.
   const unread = state.fromPublish ? (state.problem ? publishedUnread(d.id) : readingDraft(d.id)) : null;
-  const barLine = shown === "stale" ? STALE_BAR : shown === "refused" ? REFUSED_BAR : !detail.may_publish ? (detail.publish_refusal ? detail.publish_refusal + " " : "") + WAITS_WHOLE : ackBar((v.risks || []).length, (v.warnings || []).length);
+  const risks = v.risks || [];
+  const barLine = shown === "stale" ? STALE_BAR : shown === "refused" ? REFUSED_BAR : !detail.may_publish ? (detail.publish_refusal ? detail.publish_refusal + " " : "") + WAITS_WHOLE : ackBar(confirmBlocks(risks).length, risks.length, (v.warnings || []).length);
+  const hidden = gainsHidden(v);
+  const lead = leadOf(detail, !!hidden);
+  const leading = open ? leadLines(lead, coverageNouns, !!hidden) : [];
+  const loosened = open ? loosenings(v) : [];
+  const needs = (v.needs || []).map((n) => needLine(n.object, n.standing)).join(" ") || NO_NEEDS;
 
   return (
     <>
       <PageHead label={route.label} title={draftTitle(d.id)} titleExtra={<DraftChip word={STATE_WORD[shown]} tone={STATE_TONE[shown]} attr="data-state-badge" />} description={d.title} />
       <div className="flex flex-col gap-5 px-6 py-5">
         {state.problem && <FetchError subject={subjectDraft(d.id)} detail={state.problem} lastRead={state.lastRead} />}
+        {loosened.length > 0 && (
+          // The agent is named from the draft's proposer, because a line's
+          // own sentence never names a person.
+          <div className={cn(BANNER, "max-w-[90ch] border-danger/60 border-l-danger bg-danger-bg text-[15px]")} data-agent-loosens>
+            <b className="font-semibold text-danger">{agentWrote(proposer?.username || null)}</b>
+            {loosened.map((l) => <span key={l.line.key}>{[l.line, ...l.loses].map((f) => f.sentence).join(" ")}</span>)}
+            <span>{LOOSEN_TAIL}</span>
+          </div>
+        )}
 
         {d.state === "published" && (
           <div role="status" className={PROOF} data-published>
@@ -271,6 +293,11 @@ export function DraftPage({ id }: { id: string }) {
             {checkProblem && <RefusedError subject={CHECK_AGAIN_SUBJECT} message={checkProblem} />}
           </div>
         )}
+        {leading.length > 0 && (
+          <p className="m-0 max-w-[75ch] text-[15px] leading-relaxed text-foreground" data-lead>
+            {leading.map((l, i) => <span key={i} className={l.loses ? "text-warn" : undefined}>{(i ? " " : "") + l.text}</span>)}
+          </p>
+        )}
 
         <table className="w-full max-w-[960px] border-collapse text-sm" data-facts>
           <tbody>
@@ -284,9 +311,9 @@ export function DraftPage({ id }: { id: string }) {
             {d.reverts && <Fact label={FACT.undoes}><Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={() => navigate("drafts", [d.reverts as string])}>{undoesLine(d.reverts)}</Button></Fact>}
             {open && (
               <Fact label={FACT.needs}>
-                <span className="flex flex-col gap-0.5">
-                  {(v.needs || []).length ? (v.needs || []).map((n) => <span key={n.object}>{needLine(n.object, n.standing)}</span>) : <span>{NO_NEEDS}</span>}
-                  <span>{detail.may_publish ? MAY_PUBLISH_ALL : detail.publish_refusal}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  {detail.may_publish ? MAY_PUBLISH_ALL : detail.publish_refusal}
+                  <HelpTip label={FACT.needs} text={needs} />
                 </span>
               </Fact>
             )}
@@ -314,20 +341,20 @@ export function DraftPage({ id }: { id: string }) {
         {open && (
           <section className="flex flex-col gap-3" aria-label={GAINS_TITLE}>
             <div className="flex items-center gap-1.5"><h2 className="m-0 text-base font-semibold text-foreground">{GAINS_TITLE}</h2><HelpTip label={GAINS_TITLE} text={GAINS_HELP} /></div>
-            <DraftGains gains={v.gains || []} hidden={gainsHidden(v)} />
+            <DraftGains gains={v.gains || []} objects={v.objects} toolsOf={roleToolsOf(detail)} isNew={(r) => isNewRole(detail, r)} hidden={hidden} />
           </section>
         )}
 
         <section ref={checksRef} className="flex scroll-mt-40 flex-col gap-3" aria-label={CHECKS_TITLE} id="draft-checks">
           <h2 className="m-0 text-base font-semibold text-foreground">{CHECKS_TITLE}</h2>
-          <p className="m-0 text-sm text-text-2" data-checks-lede>{unread || (open ? checksLede(absTime(v.checked_at)) : closedChecks)}</p>
-          {open && <DraftChecks detail={detail} onContact={contact} />}
+          <p className="m-0 max-w-[75ch] text-[15px] text-text-2" data-checks-lede>{unread || (open ? checksLede(absTime(v.checked_at)) : closedChecks)}</p>
+          {open && <DraftChecks detail={detail} onContact={contact} omit={mergedNotes(v, lead)} />}
         </section>
 
         <section className="flex flex-col gap-2" aria-label={DOCS_TITLE}>
           <h2 className="m-0 text-base font-semibold text-foreground">{DOCS_TITLE}</h2>
           <details>
-            <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">{docsFold(d.items.length, d.revision)}</summary>
+            <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">{docsFold(d.items.length, d.state)}</summary>
             <div className="mt-2 flex flex-col gap-2">
               {d.items.map((it) => (
                 <div key={objectOf(it)} className="flex flex-col gap-1">

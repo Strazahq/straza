@@ -2,7 +2,7 @@
 title: strazactl roles update
 description: Update a role's description (the name and the kind are fixed at create)
 pagetype: reference
-weight: 86
+weight: 82
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl roles update <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

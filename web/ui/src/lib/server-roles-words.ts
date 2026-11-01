@@ -5,6 +5,7 @@
 // server, reaches that server alone, and is assigned by the identity
 // manager, never here.
 import type { AppRow } from "./api";
+import type { Nouns } from "./object-words";
 import { holders } from "./words";
 
 // foldName is the fold a server's name goes through before it opens a role
@@ -35,14 +36,28 @@ export const TAB_HEAD = { name: "Name", role: "Role", tools: "Tools", holders: "
 export const ROLE_HELP = "Named after this server and owned by it. The name cannot change. It goes with the server if the server is removed.";
 export const countLine = (n: number) => (n === 1 ? "1 role of this server" : n + " roles of this server");
 
-export const EDIT_TOOLS = "Edit tools";
+export const EDIT_ACCESS = "Edit access";
 export const DELETE_ROLE = "Delete";
+
+// COVERS_UNREAD is the cell of the column named by a server's plural when
+// the access rows were refused, and coversUnread the line under the table
+// that says why. noCovers is the cell of a role whose row names none of the
+// server's objects, or that has no row on it, which covers none.
+export const COVERS_UNREAD = "not readable";
+export const coversUnread = (plural: string) =>
+  "Which " + plural + " each role covers is not readable with this account, because strazad refused the access rows. Ask a global admin, who can read them on each role's page.";
+export const noCovers = (plural: string) => "no " + plural;
+// moreCovers counts, in the server's noun, the objects a role's cell
+// leaves out after the first SHOWN_VALUES chips.
+export const moreCovers = (n: number, w: Nouns) => "and " + n + " more " + (n === 1 ? w.type : w.plural);
 
 // frozenTools and heldDelete are the server's own refusals, shown before
 // the call as the tooltip of a greyed action and after a click as the
 // refusal line, so the console never promises what the server refuses.
-export const frozenTools = (name: string, held: number) =>
-  "The role " + name + " has " + holders(held) + ". Its tools change only by the global admin or by a new role.";
+// plural names the objects of a server that pins a type, and is empty on
+// one that pins none.
+export const frozenTools = (name: string, held: number, plural = "") =>
+  "The role " + name + " has " + holders(held) + ". Its tools" + (plural ? " and the " + plural + " it covers" : "") + " change only by the global admin or by a new role.";
 export const heldDelete = (name: string, held: number) =>
   "The role " + name + " has " + holders(held) + ". The identity manager removes them first, then delete it.";
 // certifiedHint is what a global admin reads instead: they may widen a
@@ -77,7 +92,7 @@ export const TOOLS_TAB_LINE = "Reach for existing roles stays with the global ad
 
 export const addTitle = (server: string) => "Add a role of " + server;
 export const ADD_LEDE = "It reaches this server only. Your identity manager decides who holds it.";
-export const editTitle = (name: string) => "Edit the tools of " + name;
+export const editTitle = (name: string) => "Edit the access of " + name;
 export const EDIT_LEDE = "The name cannot change. Its tools can, until someone holds it.";
 
 export const NAME = "Name";

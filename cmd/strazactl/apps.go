@@ -267,6 +267,7 @@ func appsCmd(client func() *ctl.Client) *cobra.Command {
 	apps.AddCommand(appsSecretCmd(client))
 	apps.AddCommand(appsShowCmd(client))
 	apps.AddCommand(appsExportCmd(client))
+	apps.AddCommand(appsObjectsCmd(client))
 
 	var (
 		name, runtime, out string

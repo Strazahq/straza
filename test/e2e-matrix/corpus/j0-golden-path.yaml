@@ -15,9 +15,9 @@
 # roles, apps, users and devices answer 200 with a status field, a policy
 # delete answers 204, and the bare approvals list is an object with an
 # approvals array.
-# The daemon starts after the first session.start of its identity: the
-# daemon keeps a session fresh and holds its push stream, so it refuses to
-# run before one exists [live].
+# Each identity runs its own straza service, which holds the push stream of
+# every session it starts, and the runner waits for that stream after each
+# session start that is allowed [doc].
 id: j0-golden-path
 group: J0
 title: A provisioned human and an enrolled agent work through policy, approval and deprovisioning
@@ -236,8 +236,6 @@ steps:
       as: alice
       event: {kind: session.start}
     want: {decision: allow, contextContains: "role e2e-tools-dev"}
-  - name: alice starts her daemon so pushes reach her kit
-    daemon: {as: alice, action: start}
   - name: a recursive delete is refused with the policy reason
     hook:
       as: alice
@@ -400,7 +398,7 @@ steps:
     timer: policy-gateway
   - name: the new gateway refusal is on the chain exactly once with the second revision's reason
     audit: {subject: alice, kind: tool.pre, decision: deny, reasonContains: "R2: echo is refused", count: 1}
-  - name: the hook lane, daemon connected, decides the benign command under the new snapshot
+  - name: the hook lane, with the service's push stream connected, decides the benign command under the new snapshot
     hook:
       as: alice
       event: {kind: tool.pre, tool: shell.exec, command: "git status"}
@@ -419,13 +417,17 @@ steps:
           - op: remove
             path: 'members[value eq "${aliceId}"]'
     want: {status: 200}
-  - name: the tools disappear from alice's gateway list once her session re-resolves its roles
+  - name: the tools disappear from alice's gateway list once her session re-resolves its roles at its next renewal
+    # No push carries a role change, and the service renews only when a call
+    # finds 120 s or less left on the 300 s token, so the change lands up to
+    # about 180 s after the token was minted. A 4m window covers that and
+    # the polls.
     mcp:
       as: alice
       list: true
     want:
       notTools: [e2e-tools__echo, e2e-tools__get-sum]
-    within: 90s
+    within: 4m
     timer: catalog-unbind
   - name: the IdM deactivates alice
     scim:
@@ -447,7 +449,7 @@ steps:
     want: {refused: true}
     within: 10s
     timer: kill-switch-gateway
-  - name: the hook lane refuses alice's next decision, daemon connected
+  - name: the hook lane refuses alice's next decision, with the service's push stream connected
     hook:
       as: alice
       event: {kind: tool.pre, tool: shell.exec, command: "git status"}
@@ -463,8 +465,6 @@ steps:
       body: {active: false}
 
   # Teardown leaves nothing behind.
-  - name: alice's daemon is stopped
-    daemon: {as: alice, action: stop}
   - name: the admin deactivates the PolicySet
     admin:
       method: POST

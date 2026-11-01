@@ -60,6 +60,7 @@ tools:
   SendFeedback: net.fetch
   ArtifactComments: net.fetch
   ArtifactData: net.fetch
+  ArtifactCheck: net.fetch
   Task: task.spawn
   Agent: task.spawn
   Workflow: task.spawn
@@ -78,6 +79,7 @@ tools:
   CronList: task.spawn
   RemoteTrigger: task.spawn
   EndConversation: task.spawn
+  SubagentHandback: task.spawn
   # mcp__<app>__<tool> → mcp.call (app/tool parsed from the name).
   # Gateway re-split (revision 2026-07-20): when <app> is the Straza
   # gateway registration ("straza") and <tool> is itself namespaced

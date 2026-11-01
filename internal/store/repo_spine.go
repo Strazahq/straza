@@ -43,6 +43,11 @@ func (r outboxRepo) InsertBatch(ctx context.Context, events []OutboxEvent) (int,
 	if len(events) == 0 {
 		return 0, nil
 	}
+	// Each record is bounded before the clock is read and the transaction
+	// opens, so the store is held only for the insert of bounded rows.
+	for i := range events {
+		events[i].CE = boundRecord(events[i].CE)
+	}
 	base := now()
 	began := time.Now()
 	for i := range events {
@@ -88,6 +93,14 @@ func (r outboxRepo) InsertBatch(ctx context.Context, events []OutboxEvent) (int,
 	return len(events), nil
 }
 
+// ErrUnpublishable is the error a DrainClaimed publish answers for a row
+// the event bus can never carry, which the drain then sets aside.
+var ErrUnpublishable = errors.New("store: the event bus can never carry this outbox row")
+
+// outboxSetAside is the attempts value of a row the drain set aside. It
+// stays unpublished, and no drain claims it again.
+const outboxSetAside = -1
+
 // DrainClaimed claims up to limit unpublished rows (control-plane subjects
 // only when controlOnly: everything outside straza.audit.>), publishes each
 // via publish in created_at order, and marks the successes published, all in
@@ -103,8 +116,8 @@ func (r outboxRepo) InsertBatch(ctx context.Context, events []OutboxEvent) (int,
 // the count. Row locks are held across the publish calls; that is the
 // point: under SKIP LOCKED nobody waits on them, and the mark can never race
 // another pod re-claiming the same rows.
-func (r outboxRepo) DrainClaimed(ctx context.Context, controlOnly bool, limit int, publish func(OutboxEvent) error) (int, error) {
-	q := `SELECT ` + outboxCols + ` FROM events_outbox WHERE published = FALSE`
+func (r outboxRepo) DrainClaimed(ctx context.Context, controlOnly bool, limit int, publish func(OutboxEvent) error) (int, []OutboxEvent, error) {
+	q := `SELECT ` + outboxCols + ` FROM events_outbox WHERE published = FALSE AND attempts >= 0`
 	if controlOnly {
 		q += ` AND subject NOT LIKE 'straza.audit.%'`
 	}
@@ -114,6 +127,7 @@ func (r outboxRepo) DrainClaimed(ctx context.Context, controlOnly bool, limit in
 	}
 
 	published := 0
+	var aside []OutboxEvent
 	var pubErr error
 	err := r.s.tx(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, r.s.q(q), limit)
@@ -137,13 +151,26 @@ func (r outboxRepo) DrainClaimed(ctx context.Context, controlOnly bool, limit in
 
 		var ids []string
 		for _, e := range events {
-			if err := publish(e); err != nil {
+			// A row the bus can never carry is set aside in this
+			// transaction and the pass goes on, and the rows set aside are
+			// returned only once it committed.
+			err := publish(e)
+			if errors.Is(err, ErrUnpublishable) {
+				aside = append(aside, e)
+				continue
+			}
+			if err != nil {
 				pubErr = err
 				break
 			}
 			ids = append(ids, e.ID)
 		}
 		published = len(ids)
+		for _, e := range aside {
+			if _, err := tx.ExecContext(ctx, r.s.q(`UPDATE events_outbox SET attempts = $1 WHERE id = $2`), outboxSetAside, e.ID); err != nil {
+				return err
+			}
+		}
 		if len(ids) == 0 {
 			return nil
 		}
@@ -159,9 +186,9 @@ func (r outboxRepo) DrainClaimed(ctx context.Context, controlOnly bool, limit in
 		return err
 	})
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	return published, pubErr
+	return published, aside, pubErr
 }
 
 // CountUnpublished counts unpublished outbox rows, capped at ceil.

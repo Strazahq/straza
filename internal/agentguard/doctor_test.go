@@ -1,7 +1,9 @@
-package agentguard_test
+package agentguard
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,20 +11,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strazahq/straza/internal/agentguard"
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 )
 
-func checksByName(cs []agentguard.Check) map[string]agentguard.Check {
-	m := map[string]agentguard.Check{}
+func checksByName(cs []Check) map[string]Check {
+	m := map[string]Check{}
 	for _, c := range cs {
 		m[c.Name] = c
 	}
 	return m
 }
 
-// TestDoctor drives the doctor diagnostics through their states: unenrolled,
-// fully healthy, server unreachable, snapshot tampered. Every non-ok state
-// must carry an actionable hint: a diagnosis without a next step is noise.
+// TestDoctor drives the doctor diagnostics through the states the Straza
+// background service reports: no service, not enrolled, fully healthy,
+// server unreachable, a revoked session, a changed machine and a refused
+// status. Every non-ok state must carry an actionable hint: a diagnosis
+// without a next step is noise.
 func TestDoctor(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -34,49 +38,66 @@ func TestDoctor(t *testing.T) {
 	t.Setenv("STRAZA_GEMINI_CONFIG_DIR", t.TempDir())
 	t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", t.TempDir())
 
-	// Unenrolled: the enrollment failure leads, loud, with the enroll hint,
-	// and the machine-local checks still report after it (their contract; the
-	// full un-enrolled matrix is TestDoctorUnenrolledLocalChecks). Nothing
-	// server-dependent may appear: there is no server to speak of.
-	t.Setenv("STRAZA_HOME", t.TempDir())
-	emptyStore, err := agentguard.OpenStore()
+	// No service: the service failure leads, loud, with how to start it, and
+	// the machine-local checks still report after it (their contract; the
+	// full matrix is TestDoctorUnenrolledLocalChecks). Nothing that needs the
+	// service may appear.
+	noService(t)
+	store, err := OpenStore()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs := agentguard.Doctor(ctx, emptyStore)
-	if len(cs) == 0 || cs[0].Name != "enrollment" || cs[0].Status != "fail" || !strings.Contains(cs[0].Hint, "straza enroll") {
+	cs := Doctor(ctx, store, NewServiceClient())
+	if len(cs) == 0 || cs[0].Name != "service" || cs[0].Status != checkFail || !strings.Contains(cs[0].Hint, "straza service") {
+		t.Fatalf("no-service doctor = %+v", cs)
+	}
+	assertOnly := func(label string, byName map[string]Check, present, absent []string) {
+		t.Helper()
+		for _, name := range present {
+			if _, ok := byName[name]; !ok {
+				t.Errorf("%s: check %s missing: %+v", label, name, byName)
+			}
+		}
+		for _, name := range absent {
+			if c, ok := byName[name]; ok {
+				t.Errorf("%s: check %s ran: %+v", label, name, c)
+			}
+		}
+	}
+	assertOnly("no service", checksByName(cs), []string{"wiring"},
+		[]string{"enrollment", "server", "session", "audit-spool", "killswitch"})
+
+	// Not enrolled: the service answers, and the enrollment failure names
+	// the enroll command.
+	svc := newFakeService(t)
+	store = svc.store(t)
+	cs = Doctor(ctx, store, NewServiceClient())
+	if len(cs) < 2 || cs[0].Name != "service" || cs[0].Status != checkOK ||
+		cs[1].Name != "enrollment" || cs[1].Status != checkFail || !strings.Contains(cs[1].Hint, "straza enroll") {
 		t.Fatalf("unenrolled doctor = %+v", cs)
 	}
-	un := checksByName(cs)
-	for _, name := range []string{"wiring", "audit-spool"} {
-		if _, ok := un[name]; !ok {
-			t.Errorf("un-enrolled doctor dropped local check %s: %+v", name, cs)
-		}
-	}
-	for _, name := range []string{"identity", "server", "session", "snapshot", "killswitch"} {
-		if c, ok := un[name]; ok {
-			t.Errorf("un-enrolled doctor ran server-dependent check %s: %+v", name, c)
-		}
-	}
+	assertOnly("unenrolled", checksByName(cs), []string{"wiring"},
+		[]string{"server", "session", "audit-spool", "killswitch"})
 
-	// Healthy: enrolled against a real strazad, session started, hooks wired.
-	base, _ := bootStrazad(t)
-	home := t.TempDir()
-	t.Setenv("STRAZA_HOME", home)
-	agStore, err := agentguard.OpenStore()
-	if err != nil {
-		t.Fatal(err)
-	}
-	driveEnroll(t, agStore, base)
-	if _, _, err := agentguard.SessionStart(ctx, agStore, "claude-code", "2.1.0"); err != nil {
-		t.Fatal(err)
-	}
+	// Healthy: enrolled at a reachable server, one live session holding its
+	// push stream, hooks wired.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/version" {
+			_, _ = w.Write([]byte(`{"version":"test","profile":"standalone"}`))
+		}
+	}))
+	defer server.Close()
+	now := time.Now()
+	svc.status.Enrollment = &localapi.Enrollment{ServerURL: server.URL, Kind: localapi.KindPerson,
+		Username: "alice", DeviceID: "dev-7f3a", KeyThumbprint: "thumbprint-abcdef", Custody: localapi.CustodyUser}
+	svc.status.Sessions = []localapi.SessionStatus{{
+		Harness: localapi.Harness{Name: "claude-code", Version: "2.1.0", Session: "w1"}, SessionID: "s1",
+		User: "alice", ExpiresAt: now.Add(5 * time.Minute), Push: localapi.PushConnected}}
+	svc.status.Spool = localapi.SpoolStatus{LastDrain: now.Add(-10 * time.Second)}
 	// The full roster a current `straza install` writes, naming a binary that
-	// is actually there. A partial roster is not healthy wiring:
-	// governance would work while the events added later (conversation
-	// capture's) stay dead, which is the state doctor calls out (see
-	// TestMissingHookEvents). A registration naming a binary that ISN'T there
-	// is its own finding (see TestHookBinaryCheck).
+	// is actually there. A partial roster is not healthy wiring (see
+	// TestMissingHookEvents), and a registration naming a binary that ISN'T
+	// there is its own finding (see TestHookBinaryCheck).
 	strazaBin := filepath.Join(t.TempDir(), "straza")
 	if err := os.WriteFile(strazaBin, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -90,20 +111,10 @@ func TestDoctor(t *testing.T) {
 			`"SubagentStop":`+hookEntry+`}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// A live daemon is the other half of the killswitch claim: doctor
-	// reads the heartbeat `straza daemon` refreshes, and a verified lane nobody
-	// subscribes to is a warn, not health. Written raw on purpose: this pins
-	// the on-disk contract from outside the package.
-	if err := os.WriteFile(filepath.Join(home, "state", "daemon-heartbeat.json"),
-		[]byte(`{"pid":`+strconv.Itoa(os.Getpid())+`,"at":"`+time.Now().Format(time.RFC3339)+`","intervalSeconds":30}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	byName := checksByName(agentguard.Doctor(ctx, agStore))
+	byName := checksByName(Doctor(ctx, store, NewServiceClient()))
 	for name, wantStatus := range map[string]string{
-		"enrollment": "ok", "identity": "ok", "server": "ok",
-		"session": "ok", "snapshot": "ok", "wiring": "ok", "killswitch": "ok",
-		"audit-spool": "ok", "hook-binary": "ok",
+		"service": checkOK, "enrollment": checkOK, "server": checkOK, "session": checkOK,
+		"wiring": checkOK, "hook-binary": checkOK, "killswitch": checkOK, "audit-spool": checkOK,
 	} {
 		c, present := byName[name]
 		if !present {
@@ -114,132 +125,85 @@ func TestDoctor(t *testing.T) {
 			t.Errorf("%s = %s (%s / %s), want %s", name, c.Status, c.Detail, c.Hint, wantStatus)
 		}
 	}
-	if c := byName["wiring"]; !strings.Contains(c.Detail, "claude-code (user)") {
-		t.Errorf("wiring detail = %q, want claude-code (user)", c.Detail)
+	if c := byName["enrollment"]; !strings.Contains(c.Detail, "alice (device dev-7f3a) at "+server.URL+", key thumbprint-a") {
+		t.Errorf("enrollment detail = %q", c.Detail)
+	}
+	if c := byName["session"]; !strings.Contains(c.Detail, "claude-code/2.1.0 s1 as alice") {
+		t.Errorf("session detail = %q", c.Detail)
 	}
 	if c := byName["hook-binary"]; !strings.Contains(c.Detail, strazaBin) {
 		t.Errorf("hook-binary detail = %q, want the resolved binary %s", c.Detail, strazaBin)
 	}
-	// The kill-switch line is green only because doctor DIALED the lane AND a
-	// live daemon's heartbeat says someone is subscribed to it (a verified lane
-	// nobody holds delivers nothing sub-second).
-	if c := byName["killswitch"]; !strings.Contains(c.Detail, "verified from here") ||
-		!strings.Contains(c.Detail, "daemon alive") {
-		t.Errorf("killswitch detail = %q, want the lane verified and the daemon alive", c.Detail)
-	}
 	// No audit was ever dropped, so no audit-dropped line: loss is the
 	// exception and healthy output must not carry a routine row for it.
 	if c, ok := byName["audit-dropped"]; ok {
-		t.Errorf("audit-dropped check present without a marker: %+v", c)
-	}
-	// SessionStart's checkin drained the (empty) spool, so the healthy state
-	// already carries a last-drain time, not the "never drained" fallback.
-	if c := byName["audit-spool"]; !strings.Contains(c.Detail, "no pending audit events") ||
-		!strings.Contains(c.Detail, "last successful drain") {
-		t.Errorf("healthy audit-spool detail = %q", c.Detail)
+		t.Errorf("audit-dropped check present with nothing dropped: %+v", c)
 	}
 
-	// Server gone: the server check fails with a reachability hint; local
-	// checks still report (the operator sees the whole picture).
-	cfg, err := agStore.LoadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	good := cfg.ServerURL
-	cfg.ServerURL = "http://127.0.0.1:9" // discard port: nothing listens
-	if err := agStore.SaveConfig(cfg); err != nil {
-		t.Fatal(err)
-	}
-	byName = checksByName(agentguard.Doctor(ctx, agStore))
-	if c := byName["server"]; c.Status != "fail" || !strings.Contains(c.Detail, "unreachable") || c.Hint == "" {
+	// Server gone and the push stream with it: the server check fails with a
+	// reachability hint, and the killswitch line sends the operator there.
+	svc.status.Enrollment.ServerURL = "http://127.0.0.1:9" // discard port: nothing listens
+	svc.status.Sessions[0].Push = localapi.PushConnecting
+	byName = checksByName(Doctor(ctx, store, NewServiceClient()))
+	if c := byName["server"]; c.Status != checkFail || !strings.Contains(c.Detail, "unreachable") || c.Hint == "" {
 		t.Errorf("dead-server check = %+v", c)
 	}
-	if c := byName["snapshot"]; c.Status != "ok" {
-		t.Errorf("snapshot should still verify locally with the server down: %+v", c)
+	if c := byName["killswitch"]; c.Status != checkWarn || !strings.Contains(c.Detail, "0 of 1") || !strings.Contains(c.Hint, "fix the server check first") {
+		t.Errorf("killswitch with the server down = %+v", c)
 	}
-	cfg.ServerURL = good
-	if err := agStore.SaveConfig(cfg); err != nil {
-		t.Fatal(err)
+	svc.status.Enrollment.ServerURL = server.URL
+
+	// A revoked session is a FAIL that says what to do next.
+	svc.status.Sessions[0].Revoked = "an administrator revoked this session"
+	byName = checksByName(Doctor(ctx, store, NewServiceClient()))
+	if c := byName["session"]; c.Status != checkFail || !strings.Contains(c.Detail, "an administrator revoked this session") || c.Hint == "" {
+		t.Errorf("revoked session check = %+v", c)
+	}
+	svc.status.Sessions[0].Revoked = ""
+
+	// A newer policy the server refused to send is a FAIL on that window's
+	// own row, with the server's reason and what ends the denial.
+	svc.status.Sessions[0].PolicyRefused = "The server refused it: the snapshot store is unavailable."
+	byName = checksByName(Doctor(ctx, store, NewServiceClient()))
+	if c := byName["policy"]; c.Status != checkFail ||
+		!strings.Contains(c.Detail, "claude-code/2.1.0 s1 as alice: the server holds a newer policy that straza could not fetch. The server refused it: the snapshot store is unavailable.") ||
+		!strings.Contains(c.Hint, "the first fetch that succeeds ends the denial") {
+		t.Errorf("refused policy check = %+v", c)
+	}
+	if c, ok := byName["session"]; ok {
+		t.Errorf("a refused-policy window also got a session row: %+v", c)
+	}
+	svc.status.Sessions[0].PolicyRefused = ""
+
+	// A changed machine stops the key: a FAIL naming the re-enroll.
+	svc.status.Enrollment.MachineChanged = true
+	byName = checksByName(Doctor(ctx, store, NewServiceClient()))
+	if c := byName["enrollment"]; c.Status != checkFail || !strings.Contains(c.Detail, "identity changed") || !strings.Contains(c.Hint, "straza enroll") {
+		t.Errorf("machine-changed check = %+v", c)
+	}
+	svc.status.Enrollment.MachineChanged = false
+
+	// A check-in with an unknown outcome holds new sessions: a warn with the
+	// time to wait for.
+	svc.status.Enrollment.WaitUntil = now.Add(time.Minute)
+	byName = checksByName(Doctor(ctx, store, NewServiceClient()))
+	if c := byName["enrollment"]; c.Status != checkWarn || !strings.Contains(c.Detail, "waiting for the server") || c.Hint == "" {
+		t.Errorf("waiting check = %+v", c)
 	}
 
-	// Tampered snapshot: verification failure is a FAIL with a re-enroll
-	// hint: hooks are denying and the operator must know why.
-	if err := agStore.SaveSnapshot([]byte("garbage, not a signed snapshot")); err != nil {
-		t.Fatal(err)
-	}
-	byName = checksByName(agentguard.Doctor(ctx, agStore))
-	if c := byName["snapshot"]; c.Status != "fail" || c.Hint == "" {
-		t.Errorf("tampered-snapshot check = %+v", c)
-	}
-
-	// Spooled backlog: doctor counts events across the live file AND rotated
-	// pending files, says how many files hold them, and still reports the
-	// last successful drain.
-	spoolDir := filepath.Dir(agStore.SpoolPath())
-	if err := os.WriteFile(agStore.SpoolPath(), []byte("{\"e\":1}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(spoolDir, "audit-pending-zzz.jsonl"),
-		[]byte("{\"e\":2}\n{\"e\":3}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	byName = checksByName(agentguard.Doctor(ctx, agStore))
-	if c := byName["audit-spool"]; c.Status != "warn" ||
-		!strings.Contains(c.Detail, "3 audit event(s) in 2 file(s)") ||
-		!strings.Contains(c.Detail, "last successful drain") || c.Hint == "" {
-		t.Errorf("backlog audit-spool check = %+v", c)
-	}
-
-	// Unreadable spool (a pending path spool.ScanRecords cannot scan at all):
-	// doctor says so and keeps going, never crashes. A directory stands in for
-	// the permission failures this models, because it reproduces identically on
-	// every OS and as any user; an oversize LINE does not qualify, since the
-	// spool counts those as drops rather than failing the read (spool.go,
-	// ScanRecords).
-	if err := os.Mkdir(filepath.Join(spoolDir, "audit-pending-corrupt.jsonl"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	byName = checksByName(agentguard.Doctor(ctx, agStore))
-	if c := byName["audit-spool"]; c.Status != "warn" ||
-		!strings.Contains(c.Detail, "spool unreadable") || c.Hint == "" {
-		t.Errorf("unreadable audit-spool check = %+v", c)
-	}
-	if _, ok := byName["killswitch"]; !ok {
-		t.Error("checks after the spool check missing: spool failure must not stop doctor")
-	}
-
-	// Dropped audit: a populated audit-dropped marker (what enforceSpoolCap /
-	// the oversize guard write when they discard records) is a loud FAIL with
-	// the totals and the last drop time.
-	// Deleting the marker is the documented acknowledgement and clears it.
-	marker := filepath.Join(spoolDir, "audit-dropped")
-	if err := os.WriteFile(marker,
-		[]byte("2026-07-29T10:00:00Z dropped 2 parked file(s) over the 33554432-byte spool cap\n"+
-			"2026-07-30T04:05:06Z dropped 1 oversize record(s)\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	byName = checksByName(agentguard.Doctor(ctx, agStore))
-	if c := byName["audit-dropped"]; c.Status != "fail" ||
-		!strings.Contains(c.Detail, "2 parked spool file(s)") ||
-		!strings.Contains(c.Detail, "1 oversize record(s)") ||
-		!strings.Contains(c.Detail, "2026-07-30T04:05:06Z") ||
-		!strings.Contains(c.Hint, marker) {
-		t.Errorf("dropped-audit check = %+v", c)
-	}
-	if err := os.Remove(marker); err != nil {
-		t.Fatal(err)
-	}
-	byName = checksByName(agentguard.Doctor(ctx, agStore))
-	if c, ok := byName["audit-dropped"]; ok {
-		t.Errorf("audit-dropped check outlived the marker: %+v", c)
+	// A service that refuses the status request leads with its sentence.
+	svc.refuse = "Straza refused this request."
+	cs = Doctor(ctx, store, NewServiceClient())
+	if cs[0].Name != "service" || cs[0].Status != checkFail || !strings.Contains(cs[0].Detail, "Straza refused this request.") {
+		t.Errorf("refused status = %+v", cs[0])
 	}
 }
 
-// TestDoctorUnenrolledLocalChecks pins localChecks' contract from outside the
-// package: an un-enrolled box still reports every machine-local finding. The
-// wiped-config-live-wiring machine is exactly where a ghost binary, a managed
-// lane, or dropped audit matters most, while nothing server-dependent runs and
-// nothing reads healthier than it is.
+// TestDoctorUnenrolledLocalChecks pins localChecks' contract: a box whose
+// background service does not answer still reports every machine-local
+// finding. The live-wiring-nothing-behind-it machine is exactly where a ghost
+// binary or a managed lane matters most, while nothing that needs the
+// service runs and nothing reads healthier than it is.
 func TestDoctorUnenrolledLocalChecks(t *testing.T) {
 	ctx := context.Background()
 
@@ -253,22 +217,22 @@ func TestDoctorUnenrolledLocalChecks(t *testing.T) {
 			`"SessionEnd":` + entry + `,"SubagentStart":` + entry + `,` +
 			`"SubagentStop":` + entry + `}}`
 	}
-	isolate := func(t *testing.T) (claudeDir, codexHome string, store *agentguard.Store) {
+	isolate := func(t *testing.T) (claudeDir, codexHome string, store *Store) {
 		t.Helper()
 		claudeDir, codexHome = t.TempDir(), t.TempDir()
 		t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
 		t.Setenv("CODEX_HOME", codexHome)
 		t.Setenv("STRAZA_GEMINI_CONFIG_DIR", t.TempDir())
 		t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", t.TempDir())
-		t.Setenv("STRAZA_HOME", t.TempDir())
-		store, err := agentguard.OpenStore()
+		noService(t)
+		store, err := OpenStore()
 		if err != nil {
 			t.Fatal(err)
 		}
 		return claudeDir, codexHome, store
 	}
 
-	t.Run("ghost wiring, managed lane, and dropped audit all surface", func(t *testing.T) {
+	t.Run("ghost wiring and the managed lane surface", func(t *testing.T) {
 		claudeDir, _, store := isolate(t)
 
 		// Live wiring, wiped config: claude-code's full roster points at a
@@ -280,7 +244,7 @@ func TestDoctorUnenrolledLocalChecks(t *testing.T) {
 		}
 		// The codex managed lane, written by the real installer: on the fleet
 		// box this is the ONLY live lane, and doctor must see it un-enrolled.
-		managedPath, err := agentguard.CodexManagedRequirementsPath()
+		managedPath, err := CodexManagedRequirementsPath()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -288,26 +252,12 @@ func TestDoctorUnenrolledLocalChecks(t *testing.T) {
 		if err := os.WriteFile(liveBin, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := agentguard.InstallCodexManagedHooks(managedPath, liveBin); err != nil {
+		if _, err := InstallCodexManagedHooks(managedPath, liveBin); err != nil {
 			t.Fatal(err)
 		}
-		// A spooled backlog and a drop marker: audit evidence in limbo and
-		// audit evidence gone, both of which enrollment must not hide.
-		spoolDir := filepath.Dir(store.SpoolPath())
-		if err := os.MkdirAll(spoolDir, 0o750); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(store.SpoolPath(), []byte("{\"e\":1}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(spoolDir, "audit-dropped"),
-			[]byte("2026-07-30T04:05:06Z dropped 1 oversize record(s)\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-
-		cs := agentguard.Doctor(ctx, store)
-		if len(cs) == 0 || cs[0].Name != "enrollment" || cs[0].Status != "fail" {
-			t.Fatalf("first un-enrolled check = %+v, want the enrollment fail", cs)
+		cs := Doctor(ctx, store, NewServiceClient())
+		if len(cs) == 0 || cs[0].Name != "service" || cs[0].Status != "fail" {
+			t.Fatalf("first check = %+v, want the service fail", cs)
 		}
 		byName := checksByName(cs)
 		if c := byName["hook-binary"]; c.Status != "fail" || !strings.Contains(c.Detail, ghost) {
@@ -317,25 +267,19 @@ func TestDoctorUnenrolledLocalChecks(t *testing.T) {
 			!strings.Contains(c.Detail, "claude-code (user)") {
 			t.Errorf("un-enrolled wiring = %+v, want both lanes listed", c)
 		}
-		if c := byName["audit-dropped"]; c.Status != "fail" {
-			t.Errorf("un-enrolled audit-dropped = %+v, want the loss to stay loud", c)
-		}
-		if c := byName["audit-spool"]; c.Status != "warn" ||
-			!strings.Contains(c.Hint, "nothing can upload until this machine is enrolled") {
-			t.Errorf("un-enrolled audit-spool = %+v, want the enroll-first hint variant", c)
-		}
-		for _, name := range []string{"identity", "server", "session", "snapshot", "killswitch"} {
+		for _, name := range []string{"enrollment", "server", "session", "audit-spool", "killswitch"} {
 			if c, ok := byName[name]; ok {
-				t.Errorf("server-dependent check %s ran un-enrolled: %+v", name, c)
+				t.Errorf("check %s ran with no service: %+v", name, c)
 			}
 		}
 	})
 
 	t.Run("codex user lane stays trust-honest", func(t *testing.T) {
-		// Session{}, false must land codexHooksCheck in its degraded branch:
-		// a fully wired user hooks.json with no readable trust record is a
-		// warn: un-enrolled there is never a session to serve as evidence,
-		// and file presence alone must not green the trust-gated lane.
+		// No sessions must land codexHooksCheck in its degraded branch: a
+		// fully wired user hooks.json with no readable trust record is a
+		// warn: with no service there is never a session to serve as
+		// evidence, and file presence alone must not green the trust-gated
+		// lane.
 		_, codexHome, store := isolate(t)
 		liveBin := filepath.Join(t.TempDir(), "straza")
 		if err := os.WriteFile(liveBin, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
@@ -345,7 +289,7 @@ func TestDoctorUnenrolledLocalChecks(t *testing.T) {
 			[]byte(fullRoster("codex", liveBin)), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		byName := checksByName(agentguard.Doctor(ctx, store))
+		byName := checksByName(Doctor(ctx, store, NewServiceClient()))
 		c, ok := byName["codex-hooks"]
 		if !ok {
 			t.Fatal("codex-hooks check missing un-enrolled")
@@ -375,11 +319,107 @@ func TestHintCatalog(t *testing.T) {
 		"Straza: blocked by policy",
 	}
 	for _, reason := range reasons {
-		if hint := agentguard.HintFor(reason); hint == "" {
+		if hint := HintFor(reason); hint == "" {
 			t.Errorf("no doctor hint for reason %q", reason)
 		}
 	}
-	if agentguard.HintFor("some totally unrelated error") != "" {
+	if HintFor("some totally unrelated error") != "" {
 		t.Error("catalog matched an unrelated reason: substrings too broad")
+	}
+}
+
+// TestSessionChecksFoldIdleWindows pins the session rows of doctor: a window
+// whose token expired at most an hour ago keeps a row of its own, as a
+// revoked one does, and windows unused for longer share one row per kind,
+// so a machine that kept a week of windows lists two rows for them, not
+// hundreds.
+func TestSessionChecksFoldIdleWindows(t *testing.T) {
+	now := time.Now()
+	win := func(id string, expired time.Duration, revoked string) localapi.SessionStatus {
+		return localapi.SessionStatus{Harness: localapi.Harness{Name: "claude-code", Session: id}, SessionID: id,
+			User: "alice", ExpiresAt: now.Add(-expired), Revoked: revoked}
+	}
+	rows := []struct {
+		name     string
+		sessions []localapi.SessionStatus
+		want     []string // status and detail prefix of each row, in order
+	}{
+		{"a live window", []localapi.SessionStatus{win("w1", -time.Minute, "")},
+			[]string{"ok claude-code w1 as alice (token valid"}},
+		{"a window expired ten minutes ago", []localapi.SessionStatus{win("w1", 10*time.Minute, "")},
+			[]string{"warn claude-code w1 as alice: token expired 10m0s ago"}},
+		{"a revoked window", []localapi.SessionStatus{win("w1", 10*time.Minute, "by an admin")},
+			[]string{"fail claude-code w1 as alice: revoked (by an admin)"}},
+		{"a week of idle windows", []localapi.SessionStatus{
+			win("w1", -time.Minute, ""), win("w2", 2*time.Hour, ""), win("w3", 50*time.Hour, ""),
+			win("w4", 3*time.Hour, "by an admin"), win("w5", 6*24*time.Hour, "")},
+			[]string{"ok claude-code w1 as alice (token valid",
+				"ok 3 windows unused for over an hour. Each one checks in again at its next call",
+				"warn 1 revoked window unused for over an hour. Its tool calls stay denied until its harness starts a new session"}},
+	}
+	refused := []localapi.SessionStatus{win("w1", 2*time.Hour, ""), win("w2", 3*time.Hour, "")}
+	for i := range refused {
+		refused[i].PolicyRefused = "the snapshot signature does not verify"
+	}
+	rows = append(rows, struct {
+		name     string
+		sessions []localapi.SessionStatus
+		want     []string
+	}{"idle windows that carry a policy refusal", refused,
+		[]string{"ok 2 windows unused for over an hour. Each one checks in again at its next call"}})
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			got := sessionChecks(row.sessions, now)
+			if len(got) != len(row.want) {
+				t.Fatalf("%d rows %+v, want %d", len(got), got, len(row.want))
+			}
+			for i, c := range got {
+				if line := c.Status + " " + c.Detail; !strings.HasPrefix(line, row.want[i]) {
+					t.Errorf("row %d = %q, want it to start %q", i, line, row.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestKillswitchCheckCountsLiveSessions pins that only a live session's
+// push stream counts. A revoked or lapsed window holds none by design, and
+// the service keeps such windows for days.
+func TestKillswitchCheckCountsLiveSessions(t *testing.T) {
+	now := time.Now()
+	win := func(id string, expired time.Duration, revoked, push string) localapi.SessionStatus {
+		return localapi.SessionStatus{Harness: localapi.Harness{Name: "claude-code", Session: id}, SessionID: id,
+			User: "alice", ExpiresAt: now.Add(-expired), Revoked: revoked, Push: push}
+	}
+	rows := []struct {
+		name     string
+		sessions []localapi.SessionStatus
+		want     string // status and detail prefix, "" for no row
+	}{
+		{"no sessions", nil, ""},
+		{"a live window with its stream", []localapi.SessionStatus{win("w1", -time.Minute, "", localapi.PushConnected)},
+			"ok push stream connected for all 1 session(s)"},
+		{"a live window still connecting", []localapi.SessionStatus{win("w1", -time.Minute, "", localapi.PushConnecting)},
+			"warn push stream connected for 0 of 1 session(s) (claude-code w1: connecting)"},
+		{"only revoked and lapsed windows", []localapi.SessionStatus{
+			win("w1", 2*time.Hour, "by an admin", localapi.PushOff), win("w2", 10*time.Minute, "", localapi.PushOff)}, ""},
+		{"a live window beside revoked and lapsed ones", []localapi.SessionStatus{
+			win("w1", -time.Minute, "", localapi.PushConnected), win("w2", 3*time.Hour, "by an admin", localapi.PushOff),
+			win("w3", 2*24*time.Hour, "", localapi.PushOff), win("w4", -time.Minute, "by an admin", localapi.PushOff)},
+			"ok push stream connected for all 1 session(s)"},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			c := killswitchCheck(row.sessions, now, true)
+			switch {
+			case row.want == "" && c != nil:
+				t.Fatalf("killswitch row %+v, want none", *c)
+			case row.want == "":
+			case c == nil:
+				t.Fatalf("no killswitch row, want %q", row.want)
+			case !strings.HasPrefix(c.Status+" "+c.Detail, row.want):
+				t.Errorf("killswitch row = %q, want it to start %q", c.Status+" "+c.Detail, row.want)
+			}
+		})
 	}
 }

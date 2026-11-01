@@ -61,6 +61,14 @@ function set(next: Location) {
   });
 }
 
+// replaceAddress puts path in place of the current address without a new
+// history entry and tells the subscribers, as a finished sign-in does when
+// it returns the person to the page they started on.
+export function replaceAddress(path: string) {
+  window.history.replaceState(null, "", path);
+  set(readLocation());
+}
+
 // LeaveGuard is what a page with unsaved work registers: it is asked
 // before a navigation away from the current location and calls go when
 // the departure may happen, or never, when the person chose to stay.

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -17,8 +18,7 @@ import (
 // object of the draft that changed on live state since the draft was
 // checked keeps the fields the draft changed and takes every other field
 // from live, and a field both changed needs a --pick. It reads the draft
-// first for the revision, so inside a coding agent it refuses before that
-// read.
+// first for the revision.
 func draftsRebaseCmd(client func() *ctl.Client) *cobra.Command {
 	var picks []string
 	var asJSON bool
@@ -38,9 +38,6 @@ func draftsRebaseCmd(client func() *ctl.Client) *cobra.Command {
 				return err
 			}
 			c := client()
-			if err := c.GuardChange(); err != nil {
-				return err
-			}
 			w := cmd.OutOrStdout()
 			raw, code, err := c.GetDraft(cmd.Context(), id)
 			if err != nil {
@@ -68,7 +65,7 @@ func draftsRebaseCmd(client func() *ctl.Client) *cobra.Command {
 				printItems(w, a.Draft.Items)
 				printVerdict(w, a.Verdict, nil)
 			}
-			return draftEnd(w, asJSON, a, c.APIToken != "", " -f <path>")
+			return draftEnd(w, asJSON, a, c.Base, " -f <path>")
 		},
 	}
 	cmd.Flags().StringArrayVar(&picks, "pick", nil, `the value to keep for a field both sides changed, as "Kind/Name field=draft" or "Kind/Name field=live"; repeatable`)
@@ -124,4 +121,23 @@ func orUnset(v string) string {
 		return "(not set)"
 	}
 	return termText(v)
+}
+
+// termText is text a server wrote as one terminal line: a line break or a
+// tab reads as a space, and any other character that prints nothing, such
+// as the escape that starts a terminal sequence, as its code point, so the
+// server's own text can neither move the cursor nor recolor the terminal.
+func termText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			b.WriteByte(' ')
+		case unicode.IsGraphic(r):
+			b.WriteRune(r)
+		default:
+			fmt.Fprintf(&b, "U+%04X", r)
+		}
+	}
+	return b.String()
 }

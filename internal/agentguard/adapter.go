@@ -32,6 +32,10 @@ type Fields struct {
 	// turn-end event (gemini AfterAgent `prompt_response`). When set and
 	// present, reply capture uses it directly, with no transcript reading.
 	PromptResponse string `yaml:"promptResponse"`
+	// NativeTool is the payload key carrying the harness's own tool name
+	// when ToolName carries a canonical kind instead (python-sdk
+	// `native_tool_name`). Empty means the ToolName value is that name.
+	NativeTool string `yaml:"nativeTool"`
 	// McpContext is the payload key carrying a harness-provided MCP
 	// server/tool split (gemini `mcp_context`: server_name + bare
 	// tool_name). When present it overrides name-based classification:

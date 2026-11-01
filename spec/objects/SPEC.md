@@ -1,4 +1,24 @@
-# Canonical object documents, v1beta1 (revision 6)
+# Canonical object documents, v1beta1 (revision 7)
+
+Revision 7 (2026-10-19; the export of `covers: every` was fired against the eval stack: [live]):
+a binding on an MCP server whose manifest pins an object type
+(spec/app-manifest revision 7, `straza.objects`) gains `covers`, which
+says which objects of that type the role reaches. It takes one of two
+forms: the scalar `every`, every object of the type including the ones the
+server lists later, or the mapping `{objects: [<value>, ...]}`, the named
+objects. A binding on a server that pins a type must carry `covers`, and a
+binding on a server that pins none must not. Each value names an object
+the server's object list holds, once, and the server stores the object's
+id beside it, so a renamed object stays covered, and an object created
+later under a deleted object's name is not covered by the old line. The
+export writes each object's value as
+the list holds it now, sorted, and never an id. A role on some objects may
+bind only tools whose calls name the object or touch none. The parser is
+strict: another scalar, another key, `where` included, and a value that is
+not a string are refused, and a reader that predates the field refuses
+`covers` by name, so an older strazad never widens a role it cannot read.
+`fixtures/role-every.yaml` and `fixtures/role-objects.yaml` carry one
+binding of each form. Every revision 6 document reads unchanged.
 
 Revision 6 (2026-10-01, https://docs.straza.ai/guides/serve-mcp-apps/catalogs-per-role/):
 an application role that reaches an MCP server belongs to it. A Role
@@ -89,6 +109,11 @@ spec:
         - app: <app name>
           tools:    # sorted glob list; ["*"] = every tool; [] grants nothing
             - <glob>
+          covers: every   # since revision 7, on a server that pins an object type
+          # or
+          covers:
+            objects:      # sorted values from the server's object list
+                - <value>
     packs:          # sorted pack names; omitted when empty
         - <pack name>
 ```
@@ -102,7 +127,10 @@ its export.
 
 `fixtures/role-dev.yaml` is round-verified byte-for-byte by
 `TestRoleExportGolden` on every test run (the running serializer is the
-source, not hand-derivation).
+source, not hand-derivation). `fixtures/role-objects.yaml` is
+round-verified the same way by `TestCoversThroughTheAdminRoutes`, and
+`fixtures/role-every.yaml` by `TestRoleDocMarshalWritesCovers`. Both are
+derived from this document, not captured from a live wire.
 
 The bundle fixtures are derived from this document and the app-manifest
 and policyset specifications, not captured from a live wire.

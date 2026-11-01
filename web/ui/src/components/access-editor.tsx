@@ -1,17 +1,21 @@
 import * as React from "react";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
+import { CoversBlock } from "@/components/access-covers";
 import { ApprovalChoice } from "@/components/approval-choice";
 import { HelpTip } from "@/components/help-tip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CardGroup, Code, Fold, OptionCard } from "@/components/wizard/parts";
+import { type Covers, coversKey, coversOf, deadTools, partial, pinnedOf, reachOf } from "@/lib/access-covers";
+import { coversClause, deadTool, everyHeld, laterDead } from "@/lib/access-object-words";
 import {
   type Choice, type FixedRule, type OnCall, type Plan, type Reach, allowOffered, choiceOf, denyOffered, inGrant, narrowed, newToolsRun, planProblems,
-  planSentence, policyWord, rulesFor, rulesText, shapeOf, withCall, withChoice, withOwn, withReach,
+  planSentence, policyWord, rulesFor, rulesText, shapeOf, withCall, withChoice, withCovers, withOwn, withReach,
 } from "@/lib/access-plan";
 import type { Unread } from "@/lib/access-read";
 import type { AppRow, BindingRow, RoleRow, ToolRow } from "@/lib/api";
+import { nounsOf } from "@/lib/object-words";
 import type { Plain } from "@/lib/policy-model";
 import {
   APPROVAL_FOR_HELP, CALL_CHOICE, CHOICE_LABEL, DENY_NEEDS_LATER, EDITOR_HEAD, EVERY_NOTE, FILTER_TOOLS, LATER_LOCKED, NAMES_ONLY, NAME_FIRST, NOT_READABLE, NOT_REACHED,
@@ -111,8 +115,37 @@ export function AccessEditor({ role, app, tools, plan, onPlan, fixed, approvers,
   const rules = written || rulesFor(plan, app.name, names, role, taken);
   const dark = !!readOnly && !!unread && (unread.own || unread.others);
   const who = unnamed ? THE_NEW_ROLE : role;
+  // block is the type the server pins. A row on some of its objects cannot
+  // hold a dead tool, nor the glob, so those rows and cards say why.
+  const block = pinnedOf(app);
+  const nouns = block ? nounsOf(block) : null;
+  const dead = block && partial(plan.covers) ? deadTools(block, names) : [];
+  // unticked are the tools the last pick of These took off the row.
+  const [unticked, setUnticked] = React.useState<string[]>([]);
+  const deadWhy = (r: Reach): string => {
+    if (!block || !nouns || !partial(plan.covers)) return "";
+    if (r === "later") return laterDead(app.name, nouns);
+    return r === "today" && dead.length ? deadTool(dead[0], nouns, reachOf(block, dead[0]) === "credential") : "";
+  };
+  // The note says which dead tools the move to These unticked. A tool a
+  // deny kept out is not one. A pick of a repo keeps the note, and a move
+  // off These clears it.
+  const setCovers = (c: Covers) => {
+    if (!block) return;
+    if (partial(c) && !partial(plan.covers)) {
+      const next = withCovers(plan, c, names, block);
+      const gone = deadTools(block, names);
+      setUnticked(names.filter((t) => gone.includes(t) && inGrant(plan, t) && !inGrant(next, t)));
+    } else if (!partial(c) && partial(plan.covers)) setUnticked([]);
+    onPlan((p) => withCovers(p, c, names, block));
+  };
+  // everyOff is R4: the server says this session may not write covers
+  // every, which bites only where the stored line is not every already.
+  const everyOff = block && nouns && app.may_cover_every === false && coversKey(coversOf(stored?.covers)) !== "every" ? everyHeld(who, app.name, nouns) : "";
 
-  const toggle = (name: string) => onPlan((p) => (p.reach === "tick" ? { ...p, picked: { ...p.picked, [name]: !p.picked[name] } } : narrowed(p, names, name)));
+  // A dead tool is never ticked here. One a stored row still holds can be
+  // unticked, so the save does not carry what the draft check refuses.
+  const toggle = (name: string) => (dead.includes(name) && !inGrant(plan, name) ? undefined : onPlan((p) => (p.reach === "tick" ? { ...p, picked: { ...p.picked, [name]: !p.picked[name] } } : narrowed(p, names, name))));
   // reveal scrolls a tool's own approval into view the first time it draws
   // after Set for this tool, by the least the sheet or the page that holds
   // the editor can move.
@@ -184,7 +217,7 @@ export function AccessEditor({ role, app, tools, plan, onPlan, fixed, approvers,
       {(!readOnly || locked) && (
         <div className="flex flex-col gap-2" data-reach={plan.reach}>
           <Question label={WHICH_TOOLS} help={WHICH_TOOLS_HELP} />
-          <CardGroup label={WHICH_TOOLS} value={plan.reach} onPick={(v) => (namesOnly && v === "later" ? undefined : onPlan((p) => withReach(p, v as Reach)))} className={CARDS}>
+          <CardGroup label={WHICH_TOOLS} value={plan.reach} onPick={(v) => ((namesOnly && v === "later") || deadWhy(v as Reach) ? undefined : onPlan((p) => withReach(p, v as Reach)))} className={CARDS}>
             {REACHES.map((r) => (
               <OptionCard
                 key={r}
@@ -193,8 +226,8 @@ export function AccessEditor({ role, app, tools, plan, onPlan, fixed, approvers,
                 name={REACH_CHOICE[r].label}
                 tag=""
                 on={plan.reach === r}
-                off={namesOnly && r === "later"}
-                line={r === "today" ? REACH_CHOICE.today.line(tools.length) : namesOnly && r === "later" ? (locked ? LATER_LOCKED : NAMES_ONLY) : REACH_CHOICE[r].line}
+                off={(namesOnly && r === "later") || !!deadWhy(r)}
+                line={deadWhy(r) || (r === "today" ? REACH_CHOICE.today.line(tools.length) : namesOnly && r === "later" ? (locked ? LATER_LOCKED : NAMES_ONLY) : REACH_CHOICE[r].line)}
               />
             ))}
           </CardGroup>
@@ -234,7 +267,7 @@ export function AccessEditor({ role, app, tools, plan, onPlan, fixed, approvers,
       {!readOnly && (
         <div className="rounded-md border border-border bg-card px-4 py-3">
           <p className={cn("m-0 max-w-[90ch] text-base leading-relaxed", unnamed ? "text-muted-foreground" : "text-foreground")} data-grant-sentence>
-            {unnamed ? NAME_FIRST : planSentence(plan, app.name, names, role)}
+            {unnamed ? NAME_FIRST : planSentence(plan, app.name, names, role, nouns ? coversClause(app.name, nouns, plan.covers) : "")}
           </p>
         </div>
       )}
@@ -276,6 +309,18 @@ export function AccessEditor({ role, app, tools, plan, onPlan, fixed, approvers,
               </TableRow>
             )}
             {shown.map((t) => {
+              if (block && nouns && dead.includes(t.name)) {
+                const held = inGrant(plan, t.name);
+                return (
+                  <TableRow key={t.name} data-tool={t.name} data-dead className="opacity-70">
+                    <TableCell className={cn(CELL, "px-2")}>
+                      <input type="checkbox" aria-label={toolTick(t.name)} checked={held} disabled={!held} onChange={() => toggle(t.name)} className="size-3.5 align-middle accent-[var(--link)]" />
+                    </TableCell>
+                    <TableCell className={cn("truncate font-mono text-[13px] text-foreground", CELL)} title={t.name}>{t.name}</TableCell>
+                    <TableCell colSpan={2} className="py-1.5 align-top text-[13px] leading-snug whitespace-normal text-text-2" data-dead-why>{deadTool(t.name, nouns, reachOf(block, t.name) === "credential")}</TableCell>
+                  </TableRow>
+                );
+              }
               const on = inGrant(plan, t.name);
               return (
                 <TableRow key={t.name} data-tool={t.name} className={cn(on ? "bg-accent-bg" : "opacity-70")} onClick={() => (tickable ? toggle(t.name) : undefined)}>
@@ -299,6 +344,8 @@ export function AccessEditor({ role, app, tools, plan, onPlan, fixed, approvers,
           </TableBody>
         </Table>
       </div>
+
+      {block && <CoversBlock app={app} block={block} plan={plan} names={names} onCovers={setCovers} unticked={unticked} everyOff={everyOff} />}
 
       {!readOnly && !unnamed && rules.length > 0 && (
         <Fold title={rulesFoldIn(rules.length, ownSet)}>

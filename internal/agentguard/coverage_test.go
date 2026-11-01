@@ -41,3 +41,24 @@ func TestCanonicalEventCoverage(t *testing.T) {
 		}
 	}
 }
+
+// TestClassifiedTools pins the table the by-name policy gate reads: every
+// name an embedded adapter classifies, with its kind, across dialects, and
+// never the kit's identity entry for other, which classifies nothing.
+func TestClassifiedTools(t *testing.T) {
+	tools, err := ClassifiedTools()
+	if err != nil {
+		t.Fatalf("ClassifiedTools: %v", err)
+	}
+	for name, want := range map[string]string{
+		"Bash": "shell.exec", "SubagentHandback": "task.spawn", "ArtifactCheck": "net.fetch",
+		"apply_patch": "file.edit", "run_shell_command": "shell.exec", "file.read": "file.read",
+	} {
+		if got := tools[name]; got != want {
+			t.Errorf("tools[%s] = %q, want %q", name, got, want)
+		}
+	}
+	if kind, ok := tools["other"]; ok {
+		t.Errorf("tools[other] = %q, want no entry", kind)
+	}
+}

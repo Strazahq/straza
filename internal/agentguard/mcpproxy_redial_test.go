@@ -47,7 +47,7 @@ func echoCall(ctx context.Context, harness *mcp.ClientSession, text string) (str
 
 func TestMCPProxyRevivesLatchedSession(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	ctx, p, harness := buildProxy(t, g, store)
 	p.jitterMax = 0 // revive arms a scheduled resync; fire it immediately
 	dials := countDials(p)
@@ -83,7 +83,7 @@ func TestMCPProxyRevivesLatchedSession(t *testing.T) {
 
 func TestMCPProxyRevivalSingleFlight(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	ctx, p, harness := buildProxy(t, g, store)
 	p.jitterMax = 0 // revive arms a scheduled resync; fire it immediately
 	dials := countDials(p)
@@ -112,7 +112,7 @@ func TestMCPProxyRevivalSingleFlight(t *testing.T) {
 
 func TestMCPProxyRevivalFailureBacksOffThenRecovers(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	ctx, p, harness := buildProxy(t, g, store)
 	p.jitterMax = 0 // revive arms a scheduled resync; fire it immediately
 	orig := p.dial
@@ -222,7 +222,7 @@ func newKillerGateway(t *testing.T) (*fakeGateway, *atomic.Int64) {
 
 func TestMCPProxyMidflightErrorNeverReplays(t *testing.T) {
 	g, boomReceived := newKillerGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	ctx, p, harness := buildProxy(t, g, store)
 	dials := countDials(p)
 
@@ -254,7 +254,7 @@ func TestMCPProxyMidflightErrorNeverReplays(t *testing.T) {
 
 func TestMCPProxyResyncRevivesAndCatchesDrift(t *testing.T) {
 	g := newFakeGateway(t)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g)
 	ctx, p, _ := buildProxy(t, g, store)
 	p.jitterMax = 0 // revive arms a scheduled resync; fire it immediately
 	dials := countDials(p)
@@ -306,11 +306,10 @@ func TestMCPProxyDialBoundedBlackHole(t *testing.T) {
 	var release sync.Once
 	t.Cleanup(func() { release.Do(func() { close(released) }) })
 
-	store := proxyTestStore(t, g.URL)
+	proxyTestStore(t, g)
 	ctx, cancel := context.WithCancel(context.Background())
-	// The abandoned handshake keeps running after dialBounded returns and
-	// can still write session state, so the store's directory goes only
-	// after that dial has ended.
+	// The abandoned handshake keeps running after dialBounded returns, so
+	// the fake service's home goes only after that dial has ended.
 	dialDone := make(chan struct{})
 	t.Cleanup(func() {
 		cancel()
@@ -320,14 +319,10 @@ func TestMCPProxyDialBoundedBlackHole(t *testing.T) {
 		case <-time.After(5 * time.Second):
 		}
 	})
-	client := NewClient(g.URL)
-	if _, err := ensureSession(ctx, store, client, "claude-code"); err != nil {
-		t.Fatalf("ensureSession: %v", err)
-	}
 	p := newMCPProxy(mcp.NewServer(&mcp.Implementation{Name: "straza", Version: "test"}, nil))
 	p.ctx = ctx
 	p.redialTimeout = 100 * time.Millisecond
-	dial := newGatewayDialer(p, store, client, "claude-code", gatewayEndpoint(g.URL, ""))
+	dial := newGatewayDialer(p, serviceHTTPClient(NewServiceClient(), "claude-code"), gatewayEndpoint(""))
 	var once sync.Once
 	p.dial = func(c context.Context) (*mcp.ClientSession, error) {
 		defer once.Do(func() { close(dialDone) })

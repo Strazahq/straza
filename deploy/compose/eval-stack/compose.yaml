@@ -16,6 +16,13 @@ x-mp-env: &mp-env
   MP_SET_midpoint_repository_jdbcUrl: jdbc:postgresql://midpoint-db:5432/midpoint
   MP_SET_midpoint_repository_database: postgresql
 
+# objects-demo's two lab tokens, shared by the server and the seeder. The
+# seeder stores the first as the server's own secret and the second as its
+# listing credential.
+x-objects-demo-tokens: &objects-demo-tokens
+  OBJECTS_DEMO_APP_TOKEN: lab-app-token
+  OBJECTS_DEMO_LISTING_TOKEN: lab-listing-token
+
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
@@ -67,9 +74,9 @@ services:
   nats:
     image: nats:2
     command: ["-js", "-sd", "/data"]
-    # Not published: the broker is pod-internal by design. Host-side agent
-    # daemons get the <2 s kill-switch push and the policy nudge over the
-    # gateway-edge SSE lane on strazad's own origin (GET /v1/push), as in
+    # Not published: the broker is pod-internal by design. The agents'
+    # straza services get the <2 s kill-switch push and the policy nudge over
+    # the gateway-edge SSE lane on strazad's own origin (GET /v1/push), as in
     # production. No client connects to the broker directly.
     volumes:
       - nats_data:/data
@@ -92,12 +99,73 @@ services:
       context: ./views-demo
     restart: unless-stopped
 
+  objects-demo:
+    # The object-scope fixture, built from test/objectsdemo: ten repos behind
+    # tools that carry Straza's object marks, streamable HTTP on :3002/mcp, not
+    # published to the host. repo_list answers only to the listing token and
+    # every other tool only to the app token, and whoami says which token a
+    # call carried. The repo list lives on a tmpfs, so a restart brings back
+    # the ten. Add a repo for the next listing with:
+    #   docker compose -f deploy/compose/eval-stack/compose.yaml exec objects-demo objectsdemo add Strazahq/straza-desktop 9120487 product
+    build:
+      context: ../../..
+      dockerfile: deploy/compose/eval-stack/objects-demo/Dockerfile
+    environment:
+      <<: *objects-demo-tokens
+    tmpfs:
+      - /data
+    restart: unless-stopped
+
+  pg-showcase-init:
+    # One-shot: makes adaptive-pg-mcp's showcase databases on midPoint's
+    # Postgres server, helpdesk, sales_eu, sales_us and playground, each with
+    # its own logins and rows from a fixed seed. It works from the postgres
+    # maintenance database and never opens midPoint's own database. A re-run
+    # makes only what is missing. The pg profile keeps this service and
+    # adaptive-pg-mcp opt-in, so the default stack runs without them. Turn
+    # them on with COMPOSE_PROFILES=pg in this folder's .env.
+    profiles: [pg]
+    image: postgres:16-alpine
+    command: ["sh", "/pg-showcase/init.sh"]
+    volumes:
+      - ./pg-showcase:/pg-showcase:ro,z
+    depends_on:
+      midpoint-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  adaptive-pg-mcp:
+    # A Postgres MCP server whose every tool names the database it reaches,
+    # in front of the four showcase databases. Streamable HTTP on :8080/mcp,
+    # not published to the host: only strazad's gateway reaches it, as the
+    # app postgres, and only with the two lab tokens pg-showcase/server.yaml
+    # names. The image is the published 0.1.1 release of
+    # github.com/strazahq/adaptive-pg-mcp, pinned by the digest of its
+    # multi-arch index. The pg profile keeps it opt-in, as above.
+    profiles: [pg]
+    image: ghcr.io/strazahq/adaptive-pg-mcp:0.1.1@sha256:b3c7f9a1a9eea68762bb6cc3afa8e8ab804746d86e09a0d2c1263a3bb6881df2
+    environment:
+      HELPDESK_READ_DSN: postgres://helpdesk_read:helpdesk_read@midpoint-db:5432/helpdesk?sslmode=disable
+      HELPDESK_WRITE_DSN: postgres://helpdesk_write:helpdesk_write@midpoint-db:5432/helpdesk?sslmode=disable
+      SALES_EU_DSN: postgres://sales_eu_app:sales_eu_app@midpoint-db:5432/sales_eu?sslmode=disable
+      SALES_US_DSN: postgres://sales_us_app:sales_us_app@midpoint-db:5432/sales_us?sslmode=disable
+      PLAYGROUND_DSN: postgres://playground_app:playground_app@midpoint-db:5432/playground?sslmode=disable
+    volumes:
+      - ./pg-showcase/server.yaml:/etc/adaptive-pg-mcp/server.yaml:ro,z
+      - ./pg-showcase/catalog:/etc/adaptive-pg-mcp/catalog:ro,z
+    depends_on:
+      pg-showcase-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   agent-sam:
     # The always-on AI-agent pod: sam-sre-agent, born in midPoint
     # (users/agent-sam-sre.xml), provisioned into Straza over SCIM, enrolls
-    # HEADLESS with an Ed25519 key: keygen at first boot, the public half
-    # lands in the shared /keys volume, the seeder registers it, and every
-    # session start is a signed assertion. No IdP client, no committed secret.
+    # HEADLESS with an Ed25519 key: sam's straza service (agent-sam-service)
+    # makes it at first boot and keeps it, the public half lands in the
+    # shared /keys volume, and the seeder registers it. Each ID token comes
+    # from a signed assertion, and every session start is proven with a fresh
+    # DPoP proof from the key. No IdP client, no committed secret.
     # The entrypoint is a proof ladder: keygen -> enroll -> session ->
     # gateway catalog -> denied rm -rf -> PASS marker (the healthcheck
     # contract), then a governed heartbeat every 10 minutes (30s probes
@@ -113,7 +181,7 @@ services:
     # compose network that address is the pod's own loopback, so enroll fails
     # by design: reachability never changes the enrollment lane, and an
     # unreachable lane is a loud error.
-    build:
+    build: &agent-sam-build
       context: ../../..
       dockerfile: deploy/compose/eval-stack/agent-sam/Dockerfile
       # Same stamp lane as the strazad service: without these the client in
@@ -129,14 +197,18 @@ services:
         condition: service_started
       agent-keys-init:
         condition: service_completed_successfully
+      agent-sam-service:
+        condition: service_healthy
     environment:
       STRAZA_SERVER: http://127.0.0.1:8420
     volumes:
-      # the private key and enrollment survive recreates; down -v starts
-      # the key lane over (fresh keygen, fresh registration by the re-run
-      # seeder)
-      - sam_home:/home/sam
+      # Eval convenience: sam publishes its public key here and the seeder
+      # registers what it finds. An agent that can write /keys could
+      # register a key it holds itself, so in production an admin registers
+      # the printed public key by hand.
       - agent_keys:/keys
+      # the socket directory of sam's service, its only way to Straza
+      - sam_service_socket:/run/straza-service
     healthcheck:
       # PASS marker present = the whole proof ladder stood and the heartbeat is
       # green. retries stays small so the kill-switch demo flips this container
@@ -150,6 +222,37 @@ services:
       start_period: 600s
     restart: unless-stopped
 
+  agent-sam-service:
+    # sam's straza service: the same image and binary as sam, run as
+    # `straza service` under straza-service (uid 64000), which no agent
+    # uses. It alone mounts the state volume with sam's key, enrollment and
+    # audit spool, and it shares only the socket directory with sam, so the
+    # kernel names sam's uid on every call and nothing in sam's container can
+    # read the key. Docker here has no user-namespace remap, so the uid the
+    # service sees is sam's real one. STRAZA_HOME stays unset, so the
+    # service uses the system paths /run/straza-service/service.sock and
+    # /var/lib/straza-service. down -v starts the key lane over (fresh
+    # keygen, fresh registration by the re-run seeder).
+    build: *agent-sam-build
+    container_name: straza-sam-service
+    user: "64000:64000"
+    entrypoint: ["/usr/local/bin/straza", "service"]
+    network_mode: host
+    depends_on:
+      strazad:
+        condition: service_started
+    volumes:
+      - sam_service_socket:/run/straza-service
+      - sam_service_state:/var/lib/straza-service
+    healthcheck:
+      # healthy once the service accepts a connection on its socket
+      test: ["CMD", "python3", "-c", "import socket; socket.socket(socket.AF_UNIX).connect('/run/straza-service/service.sock')"]
+      interval: 30s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
+    restart: unless-stopped
+
   straza-data-init:
     # the scratch image runs as uid 65532 but Docker creates named volumes
     # root-owned; hand the data dir (KEK lives there) to the runtime user once
@@ -160,8 +263,10 @@ services:
 
   agent-keys-init:
     # the public-key handoff volume is written by two unprivileged users
-    # (sam uid 65532, the harness's node uid 1000); sticky world-writable is
-    # fine here because only PUBLIC key halves ever land in it
+    # (sam uid 65532, the harness's node uid 1000); sticky world-writable
+    # holds only PUBLIC key halves, and it is an eval convenience: the seeder
+    # registers whatever it finds, so an agent could register a key it holds
+    # itself, which is why production registers keys by hand
     image: busybox:1.36
     command: ["chmod", "1777", "/keys"]
     volumes:
@@ -510,13 +615,18 @@ services:
       - site_public:/usr/share/nginx/html/docs:ro
 
   eval-seed:
-    # one-shot zero-touch seeder: bootstrap login -> one admin API token -> midPoint
+    # one-shot zero-touch seeder: bootstrap login -> its own admin API token -> midPoint
     # resource + role import -> creates the agent cast -> asserts joe and
     # sam land in Straza over SCIM and registers the working agents'
     # Ed25519 public keys from /keys. Watch it: docker compose logs -f eval-seed
     image: alpine:3.20
     command: ["sh", "-c", "apk add --no-cache curl jq >/dev/null && sh /seed/seed.sh"]
     environment:
+      <<: *objects-demo-tokens
+      # adaptive-pg-mcp's two lab tokens, whose hashes pg-showcase/server.yaml
+      # names. The seeder stores them only when the pg profile runs the server.
+      PG_SHOWCASE_APP_TOKEN: lab-pg-app-token
+      PG_SHOWCASE_LISTING_TOKEN: lab-pg-listing-token
       MP_ADMIN_PASSWORD: StrazaEval5ecr3t!
       KC_ADMIN_PASSWORD: admin
     volumes:
@@ -642,7 +752,8 @@ volumes:
   nats_data:
   midpoint_pg:
   midpoint_home:
-  sam_home: # sam's straza home: private NHI key + enrollment
+  sam_service_socket: # the socket directory sam and its service share
+  sam_service_state: # sam's service: private NHI key, enrollment, audit spool
   agent_keys: # public-key handoff: pods write, the seeder registers
   site_build: # raw Hugo build of website/, written by docs-build, read by docs-publish
   site_public: # comment-stripped docs tree, written by docs-publish

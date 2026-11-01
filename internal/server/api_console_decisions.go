@@ -74,6 +74,9 @@ type stoppedCallPayload struct {
 	Outcome string `json:"outcome"`
 	Count   int    `json:"count"`
 	Reason  string `json:"reason"`
+	// Seq is the newest record of the group that carries Reason, so the
+	// console opens a call the operator can see the reason on.
+	Seq int64 `json:"seq"`
 }
 
 // decisionsPayload is one day of decisions: an hour-aligned histogram that
@@ -134,6 +137,7 @@ func catalogRead(ce decisionCE) bool {
 type pendingRequest struct {
 	at      time.Time
 	summary string
+	seq     int64
 }
 
 // approvalMatchWindow bounds how long after its request record a decision
@@ -186,6 +190,8 @@ type stoppedGroup struct {
 	app, tool, outcome string
 	count              int
 	reasons            map[string]int
+	// newest is the highest seq seen per reason.
+	newest map[string]int64
 }
 
 // decisionsBlock counts the last decisionHours hour-aligned hours, ending
@@ -264,7 +270,7 @@ func (a *App) countDecisions(ctx context.Context, since time.Time, step time.Dur
 			if ce.Type == "straza.audit.approval" {
 				if ce.Data.Phase == "request" {
 					key := ce.Data.Session + "\x00" + ce.Data.Rule
-					pending[key] = append(pending[key], pendingRequest{at: ce.Time.UTC(), summary: ce.Data.Summary})
+					pending[key] = append(pending[key], pendingRequest{at: ce.Time.UTC(), summary: ce.Data.Summary, seq: rec.Seq})
 				}
 				continue
 			}
@@ -286,10 +292,10 @@ func (a *App) countDecisions(ctx context.Context, since time.Time, step time.Dur
 				}
 			case outcomeApproval:
 				buckets[i].Approval++
-				tallyStopped(groups, outcomeApproval, ce)
+				tallyStopped(groups, outcomeApproval, ce, rec.Seq)
 			case outcomeDenied:
 				buckets[i].Denied++
-				tallyStopped(groups, outcomeDenied, ce)
+				tallyStopped(groups, outcomeDenied, ce, rec.Seq)
 			}
 		}
 		if len(recs) < decisionScanBatch {
@@ -307,16 +313,17 @@ func (a *App) countDecisions(ctx context.Context, since time.Time, step time.Dur
 			buckets[i].Approval++
 			var ce decisionCE
 			ce.Data.Tool = r.summary
-			tallyStopped(groups, outcomeApproval, ce)
+			tallyStopped(groups, outcomeApproval, ce, r.seq)
 		}
 	}
 	return buckets, groups, nil
 }
 
 // tallyStopped counts one stopped call into its (app, tool, outcome) group
-// and remembers the reason sentence it carried. A hook-lane record has no
-// app, so the empty name is a group of its own rather than a dropped row.
-func tallyStopped(groups map[string]*stoppedGroup, outcome string, ce decisionCE) {
+// and remembers the reason sentence it carried and the newest seq that
+// carried it. A hook-lane record has no app, so the empty name is a group of
+// its own rather than a dropped row.
+func tallyStopped(groups map[string]*stoppedGroup, outcome string, ce decisionCE, seq int64) {
 	tool := ce.Data.Tool
 	if ce.Data.ToolName != "" {
 		tool = ce.Data.ToolName
@@ -324,11 +331,12 @@ func tallyStopped(groups map[string]*stoppedGroup, outcome string, ce decisionCE
 	key := ce.Data.App + "\x00" + tool + "\x00" + outcome
 	g := groups[key]
 	if g == nil {
-		g = &stoppedGroup{app: ce.Data.App, tool: tool, outcome: outcome, reasons: map[string]int{}}
+		g = &stoppedGroup{app: ce.Data.App, tool: tool, outcome: outcome, reasons: map[string]int{}, newest: map[string]int64{}}
 		groups[key] = g
 	}
 	g.count++
 	g.reasons[ce.Data.Reason]++
+	g.newest[ce.Data.Reason] = max(g.newest[ce.Data.Reason], seq)
 }
 
 // topStopped renders the busiest decisionStoppedMax groups, count first and
@@ -338,8 +346,9 @@ func tallyStopped(groups map[string]*stoppedGroup, outcome string, ce decisionCE
 func topStopped(groups map[string]*stoppedGroup) []stoppedCallPayload {
 	out := make([]stoppedCallPayload, 0, len(groups))
 	for _, g := range groups {
+		reason := topReason(g.reasons)
 		out = append(out, stoppedCallPayload{
-			App: g.app, Tool: g.tool, Outcome: g.outcome, Count: g.count, Reason: topReason(g.reasons),
+			App: g.app, Tool: g.tool, Outcome: g.outcome, Count: g.count, Reason: reason, Seq: g.newest[reason],
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

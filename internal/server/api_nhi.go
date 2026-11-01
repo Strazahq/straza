@@ -28,6 +28,8 @@ type nhiKeyMeta struct {
 
 // handleNHIKeySet registers (or rotates) an NHI's assertion key.
 // PUT /v1/admin/users/{id}/nhi-key {"public_key": "<base64 ed25519>"}
+// A key that replaces a different one ends every active session of the
+// user. A first key, or the same key again, ends none.
 func (a *App) handleNHIKeySet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PublicKey string `json:"public_key"`
@@ -55,6 +57,15 @@ func (a *App) handleNHIKeySet(w http.ResponseWriter, r *http.Request) {
 			"only an agent identity holds an assertion key. A person signs in interactively (create the user with kind=nhi, classify it userType agent or service, or provision via agentic SCIM)")
 		return
 	}
+	// The key in place is read before the write, so a rotation knows to end
+	// the sessions the old key started. A row that does not hold a key is
+	// replaced as a different key.
+	prev, err := a.registeredNHIKey(r.Context(), u.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) && !errors.Is(err, errNHIKeyMalformed) {
+		a.fail(w, r, http.StatusInternalServerError, "lookup failed", err)
+		return
+	}
+	replaced := !errors.Is(err, store.ErrNotFound) && !prev.Equal(ed25519.PublicKey(raw))
 	meta, err := json.Marshal(nhiKeyMeta{PublicKey: req.PublicKey, Created: time.Now().UTC()})
 	if err != nil {
 		a.fail(w, r, http.StatusInternalServerError, "encode failed", err)
@@ -68,6 +79,12 @@ func (a *App) handleNHIKeySet(w http.ResponseWriter, r *http.Request) {
 		"action": "nhi-key.set", "user": u.ID,
 	})
 	a.auditNHIKeySet(r.Context(), u, req.PublicKey)
+	if replaced {
+		if err := a.endAgentSessions(r, u, nhiKeyReplacedReason); err != nil {
+			a.fail(w, r, http.StatusInternalServerError, "The new key for "+u.Username+" is registered"+nhiKeySessionsLeftMsg, err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "set", "user_id": u.ID})
 }
 
@@ -107,10 +124,10 @@ const nhiKeyAbsentMsg = "the user %s has no assertion key registered, so there i
 	"To see what is registered, read GET /v1/admin/users/%s/nhi-key. " +
 	"For an AI agent the console also shows the key status on the user's panel."
 
-// handleNHIKeyDelete revokes an NHI's assertion key: the next grant fails.
-// Running sessions die through the normal session/user kill-switch lanes.
-// A user with no key answers 404 and writes no record, because nothing
-// changed.
+// handleNHIKeyDelete revokes an NHI's assertion key: the next grant fails,
+// every active session of the user ends, and the check-in refuses the ID
+// tokens issued for the removed key. A user with no key answers 404 and
+// writes no record, because nothing changed.
 func (a *App) handleNHIKeyDelete(w http.ResponseWriter, r *http.Request) {
 	u, err := a.store.Users().GetByID(r.Context(), r.PathValue("id"))
 	if errors.Is(err, store.ErrNotFound) {
@@ -134,6 +151,10 @@ func (a *App) handleNHIKeyDelete(w http.ResponseWriter, r *http.Request) {
 		"action": "nhi-key.removed", "user": u.ID,
 	})
 	a.auditNHIKeyRemoved(r.Context(), u.ID)
+	if err := a.endAgentSessions(r, u, nhiKeyRemovedReason); err != nil {
+		a.fail(w, r, http.StatusInternalServerError, "The key of "+u.Username+" is removed"+nhiKeySessionsLeftMsg, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed", "user_id": u.ID})
 }
 
@@ -152,17 +173,66 @@ func (a *App) nhiKeyLookup(ctx context.Context, clientID string) (store.User, ed
 	if userKind(u) != "nhi" {
 		return store.User{}, nil, fmt.Errorf("nhi lookup: %s is not an NHI identity", u.ID)
 	}
-	raw, err := a.store.Settings().Get(ctx, nhiKeyPrefix+u.ID)
+	key, err := a.registeredNHIKey(ctx, u.ID)
 	if err != nil {
-		return store.User{}, nil, fmt.Errorf("nhi lookup: no key registered: %w", err)
+		return store.User{}, nil, fmt.Errorf("nhi lookup: no usable key registered: %w", err)
+	}
+	return u, key, nil
+}
+
+// errNHIKeyMalformed reports a stored assertion key row that does not hold
+// an Ed25519 public key.
+var errNHIKeyMalformed = errors.New("the stored assertion key is malformed")
+
+// registeredNHIKey reads the assertion key registered for the user id. It
+// answers store.ErrNotFound when none is registered, errNHIKeyMalformed when
+// the row does not hold an Ed25519 public key, and the store's error when
+// the read fails.
+func (a *App) registeredNHIKey(ctx context.Context, userID string) (ed25519.PublicKey, error) {
+	raw, err := a.store.Settings().Get(ctx, nhiKeyPrefix+userID)
+	if err != nil {
+		return nil, err
 	}
 	var meta nhiKeyMeta
 	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
-		return store.User{}, nil, fmt.Errorf("nhi lookup: stored key unreadable: %w", err)
+		return nil, fmt.Errorf("%w: %v", errNHIKeyMalformed, err)
 	}
 	key, err := base64.StdEncoding.DecodeString(meta.PublicKey)
 	if err != nil || len(key) != ed25519.PublicKeySize {
-		return store.User{}, nil, fmt.Errorf("nhi lookup: stored key malformed")
+		return nil, errNHIKeyMalformed
 	}
-	return u, ed25519.PublicKey(key), nil
+	return ed25519.PublicKey(key), nil
+}
+
+// The session-end reasons of a key change, and the end of the 500 sentence
+// of a key change whose session end did not finish.
+const (
+	nhiKeyReplacedReason  = "the agent's key was replaced"
+	nhiKeyRemovedReason   = "the agent's key was removed"
+	nhiKeySessionsLeftMsg = ", but Straza could not end all of the agent's running sessions. " +
+		"List them with strazactl sessions list and end each one with strazactl sessions revoke <session-id>."
+)
+
+// endAgentSessions ends every active session of u after its assertion key
+// changed, and writes one session.end record with the outcome revoked-admin
+// and reason for each session it ended. It returns an error when the
+// sessions could not be listed or one of them could not be ended.
+func (a *App) endAgentSessions(r *http.Request, u store.User, reason string) error {
+	sessions, err := a.store.Sessions().ListByUser(r.Context(), u.ID)
+	if err != nil {
+		return fmt.Errorf("list the sessions of %s: %w", u.ID, err)
+	}
+	ids := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		if s.Status == store.SessionActive {
+			ids = append(ids, s.ID)
+		}
+	}
+	ended, err := a.endSessions(r.Context(), ids, reason)
+	for _, id := range ended {
+		a.emitAuthnSessionEnd(r.Context(), r, "revoked-admin", authnFields{
+			User: u.Username, UserID: u.ID, Session: id, Reason: reason,
+		})
+	}
+	return err
 }

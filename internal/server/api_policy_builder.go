@@ -43,6 +43,11 @@ func (a *App) handlePolicyValidate(w http.ResponseWriter, r *http.Request) {
 	if !a.obligationsGate(w, doc) {
 		return
 	}
+	// Revision 26: a rule that names harness tools is refused in the draft
+	// check's words, against the set the active snapshot carries.
+	if !a.byNameGate(w, r, doc) {
+		return
+	}
 	// The set compiles as at activation, so a Rego module activation would
 	// refuse is refused here, in the compiler's words.
 	if _, err := policy.NewEngine([]policy.Document{doc}, policy.EffectAllow); err != nil {
@@ -166,10 +171,25 @@ func (a *App) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 	// evaluates, so simulate does too, or an interpreters rule never fires.
 	tagInterpreter(&req.Event)
 
-	out := map[string]any{
-		"active":   a.snapshots.Current().Engine.Evaluate(req.Event, sub),
-		"subject":  sub,
-		"snapshot": a.snapshots.Current().ID,
+	// On a server that pins an object type the object gate runs first, as
+	// at the gateway: its refusal is the answer, and no engine runs.
+	var refused *policy.Decision
+	out := map[string]any{"subject": sub, "snapshot": a.snapshots.Current().ID}
+	if req.Event.Tool == policy.ToolMCPCall {
+		if oc, ok := a.checkObject(sub.Roles, req.Event.App, req.Event.ToolName, req.Event.Args); ok {
+			sim := oc.sim()
+			if sim.Refusal != "" {
+				refused = &policy.Decision{Effect: policy.EffectDeny, Reason: sim.Refusal}
+			}
+			if sim.Refusal != "" || sim.Reach != manager.ReachNone {
+				out["object"] = sim
+			}
+		}
+	}
+	if refused != nil {
+		out["active"] = *refused
+	} else {
+		out["active"] = a.snapshots.Current().Engine.Evaluate(req.Event, sub)
 	}
 
 	if req.Draft != "" {
@@ -201,7 +221,11 @@ func (a *App) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 			apiError(w, http.StatusBadRequest, "draft: "+err.Error())
 			return
 		}
-		out["draft"] = eng.Evaluate(req.Event, sub)
+		if refused != nil {
+			out["draft"] = *refused
+		} else {
+			out["draft"] = eng.Evaluate(req.Event, sub)
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

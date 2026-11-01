@@ -51,8 +51,7 @@ type Config struct {
 	// DataDir holds local state: sqlite database, embedded NATS store, etc.
 	DataDir string `yaml:"dataDir"`
 	// Notices are boot-time warnings Load attaches: keys it read and
-	// ignored (a removed section still present in the file) and a lifetime
-	// pair that can lock an active client out (lifetimeNotice). Not a knob:
+	// ignored (a removed section still present in the file). Not a knob:
 	// never read from yaml, never validated; build() logs each at Warn
 	// before any subsystem starts so the operator can act on it.
 	Notices []string `yaml:"-"`
@@ -83,24 +82,14 @@ func defaults(profile string) Config {
 		Profile: profile,
 		DataDir: "data",
 		Server: Server{Listen: "127.0.0.1:8420", PublicURL: "http://127.0.0.1:8420",
-			MaxBodyBytes: 1 << 20, LoginPerIPRPS: 2,
+			MaxBodyBytes: 1 << 20, MCPMaxBodyBytes: defaultMCPMaxBodyBytes, LoginPerIPRPS: 2,
 			ApproverTLS: ApproverTLS{AutoMint: &autoMint, PerIPRPS: 10}},
-		Log:    Log{Level: "info", Format: "json"},
-		Store:  Store{Driver: DriverSQLite},
-		Events: Events{Embedded: true},
-		OIDC:   OIDC{ClientID: "straza", JITProvision: true},
-		Governance: Governance{
-			OfflineGraceTTL:          15 * time.Minute,
-			LocalToolDefault:         EffectAllow,
-			AuditBackpressure:        BackpressureDrop,
-			MinAttestation:           AttestationNone,
-			DeviceTokenTTL:           30 * 24 * time.Hour,
-			SessionMaxLifetime:       12 * time.Hour,
-			AuditIngestBacklogLimit:  50_000,
-			AuditIngestPerSessionRPS: 5,
-			Sentinel:                 defaultSentinel(),
-		},
-		Approval: defaultApproval(),
+		Log:        Log{Level: "info", Format: "json"},
+		Store:      Store{Driver: DriverSQLite},
+		Events:     Events{Embedded: true},
+		OIDC:       OIDC{ClientID: "straza", JITProvision: true},
+		Governance: defaultGovernance(profile),
+		Approval:   defaultApproval(),
 		Apps: Apps{
 			PollInterval:   time.Second,
 			HealthInterval: 20 * time.Second,
@@ -108,27 +97,19 @@ func defaults(profile string) Config {
 			// enterprise refuses one unless the operator says so.
 			AllowLoopbackUpstreams: profile != ProfileEnterprise,
 			// Governance-forward catalog defaults, shared by both profiles (the
-			// enterprise branch below overrides only Server/Store/OIDC/Governance):
+			// enterprise branch below overrides only Server/Store/OIDC, and
+			// defaultGovernance gives enterprise its own governance):
 			// hide policy-denied tools, warn past 100 tools per role, page
 			// tools/list at 200.
 			Catalog: Catalog{PolicyFilter: true, WarnSize: 100, PageSize: 200},
+			Objects: AppsObjects{Enabled: true},
 		},
+		Admin: Admin{ServerAdminsCoverEvery: true},
 	}
 	if profile == ProfileEnterprise {
 		cfg.Server.Listen = ":8420"
 		cfg.Store.Driver = DriverPostgres
 		cfg.OIDC.JITProvision = false
-		cfg.Governance = Governance{
-			OfflineGraceTTL:          0,
-			LocalToolDefault:         EffectDeny,
-			AuditBackpressure:        BackpressureBlock,
-			MinAttestation:           AttestationManaged,
-			DeviceTokenTTL:           30 * 24 * time.Hour,
-			SessionMaxLifetime:       12 * time.Hour,
-			AuditIngestBacklogLimit:  50_000,
-			AuditIngestPerSessionRPS: 5,
-			Sentinel:                 defaultSentinel(),
-		}
 	}
 	return cfg
 }
@@ -381,9 +362,6 @@ func (l Loader) Load() (Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
-	if n := cfg.lifetimeNotice(); n != "" {
-		cfg.Notices = append(cfg.Notices, n)
-	}
 	return cfg, nil
 }
 
@@ -451,6 +429,7 @@ func applyEnv(cfg *Config, getenv func(string) string) {
 	applyEnvCapture(cfg, getenv)
 	applyEnvApproval(cfg, getenv)
 	applyEnvApps(cfg, getenv)
+	applyEnvAdmin(cfg, getenv)
 	applyEnvOAuth(cfg, getenv)
 }
 

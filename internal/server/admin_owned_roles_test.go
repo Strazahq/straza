@@ -393,6 +393,8 @@ func TestServerAdminRouteParity(t *testing.T) {
 		"POST /v1/admin/apps/{id}/enable": true, "POST /v1/admin/apps/{id}/disable": true,
 		"POST /v1/admin/apps/{id}/secrets": true, "GET /v1/admin/apps/{id}/secrets": true,
 		"DELETE /v1/admin/apps/{id}/secrets": true, "DELETE /v1/admin/apps/{id}/secrets/{role}": true,
+		"GET /v1/admin/apps/{id}/objects": true, "POST /v1/admin/apps/{id}/objects/refresh": true, "POST /v1/admin/apps/{id}/objects/draft": true,
+		"POST /v1/admin/apps/{id}/objects/credential": true, "DELETE /v1/admin/apps/{id}/objects/credential": true,
 		"GET /v1/admin/roles": true, "POST /v1/admin/roles": true,
 		"GET /v1/admin/roles/{id}/export": true,
 		"PATCH /v1/admin/roles/{id}":      true, "DELETE /v1/admin/roles/{id}": true,

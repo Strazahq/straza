@@ -1,6 +1,7 @@
 // Enable this browser: the sheet the page head's
 // one action opens, in the shape of the console's Add a phone. It names the
-// browser, signs the person in when the page has no session, and runs the
+// browser, sends the person to sign in when the page has no session and
+// carries on with the same name when the sign-in returns, and runs the
 // enrolment: read what the account may enrol, mint a one-time token, make
 // the key here, register its public half, keep the record. The key is made
 // only after the token is in hand, so a cooldown or a refused sign-in leaves
@@ -14,11 +15,11 @@ import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
-import { SignIn } from "@/components/sign-in";
 import { ApiError, type SelfAnswer, readSelf, selfEnrollToken } from "@/lib/api";
 import { CANCEL } from "@/lib/approval-words";
 import { notify } from "@/lib/notify";
 import { refused } from "@/lib/say";
+import { beginSignIn, takeResume } from "@/lib/session";
 import { type ApproverError, enrollDevice } from "./approver-api";
 import { useSelf } from "./context";
 import { exportPublicKeyB64, generateDeviceKey } from "./sign";
@@ -57,6 +58,9 @@ export function EnableSheet({ open, onOpenChange }: Props) {
   // One fresh sign-in per run: a session that dies between the read and the
   // mint is retried once in the same run, then the refusal stands.
   const authRetried = React.useRef(false);
+  // The name a returning sign-in kept, held while the sheet is open, so a
+  // second run of the open effect carries on with it too.
+  const resumed = React.useRef<string | null>(null);
 
   // Every open starts from the browser's own name and an empty run, so a
   // sheet opened again never continues the last one.
@@ -66,8 +70,10 @@ export function EnableSheet({ open, onOpenChange }: Props) {
     setStep("name");
     setNote("");
     setProblem("");
-    setName(defaultDeviceName());
-  }, [open]);
+    resumed.current = open ? resumed.current || takeResume() : null;
+    setName(resumed.current || defaultDeviceName());
+    if (resumed.current) void advance(resumed.current);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The cooldown runs off its deadline rather than a counter, so a tick the
   // browser skipped while the tab slept does not slow the clock.
@@ -86,10 +92,10 @@ export function EnableSheet({ open, onOpenChange }: Props) {
   // advance runs the enrolment from the eligibility read onwards. It is
   // entered with a session in hand, from the primary or from the sign-in
   // card inside the sheet.
-  const advance = async () => {
+  const advance = async (runName = name) => {
     const mine = gen.current;
     const stop = () => mine !== gen.current;
-    const trimmed = name.trim();
+    const trimmed = runName.trim();
     setProblem("");
     setStep("working");
     setNote(W.STEP_CHANNELS);
@@ -101,7 +107,6 @@ export function EnableSheet({ open, onOpenChange }: Props) {
       if (stop()) return;
       if (isStatus(e, 401) && !authRetried.current) {
         authRetried.current = true;
-        setNote(W.STEP_SIGN_IN);
         setStep("signing-in");
         return;
       }
@@ -132,7 +137,6 @@ export function EnableSheet({ open, onOpenChange }: Props) {
       }
       if (isStatus(e, 401) && !authRetried.current) {
         authRetried.current = true;
-        setNote(W.STEP_SIGN_IN);
         setStep("signing-in");
         return;
       }
@@ -207,12 +211,22 @@ export function EnableSheet({ open, onOpenChange }: Props) {
       return;
     }
     if (!hasSession) {
-      setProblem("");
-      setNote(W.STEP_SIGN_IN);
-      setStep("signing-in");
+      void leave();
       return;
     }
     void advance();
+  };
+
+  // leave sends the tab to sign in, carrying the name, and the sheet opens
+  // again with it when the sign-in returns.
+  const leave = async () => {
+    setProblem("");
+    try {
+      await beginSignIn({ back: window.location.pathname, sheet: name.trim() });
+    } catch (e) {
+      setProblem(messageOf(e));
+      setStep("name");
+    }
   };
 
   const cancel = () => {
@@ -252,21 +266,8 @@ export function EnableSheet({ open, onOpenChange }: Props) {
 
           {step === "signing-in" && (
             <>
-              <p className="text-sm text-text-2" data-enable-step>{W.STEP_SIGN_IN}</p>
-              <SignIn
-                reason={{ kind: "none", detail: "" }}
-                returnTo={W.ENABLE_BROWSER}
-                adminOnly={false}
-                embedded
-                onAuthed={(resp) => {
-                  shared.current.signedIn(resp);
-                  // The shell reads /v1/self when its own session state
-                  // moves, which a sign-in inside this sheet does not do, so
-                  // its copy is asked for here and the run reads its own.
-                  if (shared.current.self === null) void shared.current.refreshSelf();
-                  void advance();
-                }}
-              />
+              <p className="text-sm text-text-2" data-enable-step>{W.SHEET_SIGN_IN}</p>
+              <div><Button onClick={() => void leave()} data-enable-sign-in>{W.SIGN_IN}</Button></div>
             </>
           )}
 

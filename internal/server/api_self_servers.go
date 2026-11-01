@@ -60,7 +60,8 @@ func (a *App) handleSelfServers(w http.ResponseWriter, r *http.Request, userID s
 }
 
 // reachedApps names the ids of the apps that a tool binding on one of the
-// user's resolved roles reaches.
+// user's resolved roles reaches. A row whose covers line cannot be read
+// grants nothing, so it reaches no app.
 func (a *App) reachedApps(ctx context.Context, userID string) (map[string]bool, error) {
 	roles, err := a.resolver.ResolveRoles(ctx, userID, time.Now())
 	if err != nil {
@@ -76,7 +77,7 @@ func (a *App) reachedApps(ctx context.Context, userID string) (map[string]bool, 
 	}
 	out := map[string]bool{}
 	for _, b := range bindings {
-		if held[b.RoleID] {
+		if held[b.RoleID] && b.ScopeFault == "" {
 			out[b.AppID] = true
 		}
 	}

@@ -1,6 +1,6 @@
 ---
 title: strazactl apps secret set
-description: Store the server's own secret, or with --role the override one role uses instead
+description: Store the server's own secret, with --role the override one role uses instead, or with --listing the listing credential
 pagetype: reference
 weight: 28
 draft: false
@@ -22,6 +22,10 @@ The answer prints the secret's fingerprint, never its value, and setting it agai
 replaces the stored value. A server whose manifest leaves no use for a static secret,
 such as one that declares no credential, refuses it and names the manifest change.
 
+With --listing the value is the listing credential: Straza lists the server's objects
+with it every 10 minutes and never sends it on a tool call. Only a remote server whose
+manifest names a credential takes one.
+
 ```
 strazactl apps secret set <server> [flags]
 ```
@@ -31,11 +35,13 @@ strazactl apps secret set <server> [flags]
 ```
   strazactl apps secret set scout-tools
   strazactl apps secret set scout-tools --role scout-role
+  strazactl apps secret set objects-demo --listing
 ```
 
 ## Options
 
 ```
+      --listing        store the credential Straza lists the server's objects with instead of the server's own secret
       --role string    store the override for this role instead of the server's own secret
       --value string   secret value; it shows in process arguments and shell history, so leave it out and type the value at the hidden prompt
 ```
@@ -43,7 +49,7 @@ strazactl apps secret set <server> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

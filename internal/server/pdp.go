@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -24,6 +25,9 @@ type DecideRequest struct {
 	// optional and absent for the main agent.
 	AgentType string `json:"agentType,omitempty"`
 	AgentID   string `json:"agentId,omitempty"`
+	// NativeTool is the harness's own name of a classified local tool, which
+	// a rule that names harness tools reads (spec/policyset revision 26).
+	NativeTool string `json:"nativeTool,omitempty"`
 }
 
 // DecideResponse is the decision returned to the caller.
@@ -63,12 +67,15 @@ const revokedIdentityMsg = "Straza: this device or user has been revoked. Contac
 func (a *App) handleDecide(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
-	raw := bearerToken(r)
+	raw, scheme := sessionCredential(r)
 	if raw == "" {
 		apiError(w, http.StatusUnauthorized, "missing session token")
 		return
 	}
-	claims, err := a.tokens.Verify(raw)
+	claims, err := a.verifySessionToken(w, r, raw, scheme)
+	if errors.Is(err, errAnswered) {
+		return
+	}
 	if err != nil || claims.Session == "" {
 		apiError(w, http.StatusUnauthorized, "session token rejected")
 		return
@@ -82,6 +89,7 @@ func (a *App) handleDecide(w http.ResponseWriter, r *http.Request) {
 	// (spec/policyset revision 17): a client cannot grant itself access,
 	// so whatever the body carried is dropped before evaluation.
 	req.Event.Granted = false
+	req.Event.NativeTool = req.NativeTool
 	tagInterpreter(&req.Event)
 
 	cur := a.snapshots.Current()
@@ -98,24 +106,26 @@ func (a *App) handleDecide(w http.ResponseWriter, r *http.Request) {
 	if minAtt := a.cfg.Governance.MinAttestation; minAtt != "" &&
 		config.AttestationRank(claims.Attestation) < config.AttestationRank(minAtt) {
 		a.denyBeforeEvaluation(r.Context(), w, start, claims, req, cur.ID, "attestation", fmt.Sprintf(
-			"Straza: attestation level %q is below the required level %q. Reinstall with `straza install --managed <harness>`",
+			"Straza: attestation level %q is below the required level %q. "+managedInstallStep,
 			claims.Attestation, minAtt))
 		return
 	}
 
-	sub, ok := a.subjects.get(claims.Session)
+	e, ok := a.subjects.forToken(claims)
 	if !ok {
-		// No cached subject: this pod restarted, never saw this session's
-		// checkin, or a role window of the user opened or closed since that
-		// checkin. The token alone cannot prove roles (it carries a roles
-		// hash), and evaluating a role-less stand-in silently un-applies every
-		// role-matched set: the audit then records a verdict policy never
-		// made, and where the profile default is allow the window fails OPEN.
-		// Same honest bounce as the gateway lane: 401, the client re-checks
-		// in with this token and retries.
+		// No cached subject for the token's roles: this pod restarted, never
+		// saw this session's checkin, a role window of the user opened or
+		// closed since that checkin, or another pod minted the token after
+		// a role changed. The token alone cannot prove roles (it carries
+		// only their hash), and evaluating a role-less stand-in silently
+		// un-applies every role-matched set: the audit then records a verdict
+		// policy never made, and where the profile default is allow the
+		// window fails OPEN. Same honest bounce as the gateway lane: 401, the
+		// client re-checks in with this token and retries.
 		apiError(w, http.StatusUnauthorized, sessionStateExpiredMsg)
 		return
 	}
+	sub := e.sub
 
 	decision := cur.Engine.Evaluate(req.Event, sub)
 	if decision.Effect == policy.EffectAllow && decision.Classify {
@@ -262,11 +272,11 @@ func (a *App) auditDecision(ctx context.Context, claims authn.Claims, req Decide
 	return true
 }
 
+// bearerToken returns the token of r's Authorization header under the
+// Bearer scheme, or "" for any other header.
 func bearerToken(r *http.Request) string {
-	h := r.Header.Get("Authorization")
-	const p = "Bearer "
-	if len(h) > len(p) && h[:len(p)] == p {
-		return h[len(p):]
+	if raw, scheme := sessionCredential(r); scheme == schemeBearer {
+		return raw
 	}
 	return ""
 }

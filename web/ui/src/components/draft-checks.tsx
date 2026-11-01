@@ -5,14 +5,16 @@ import { HelpTip } from "@/components/help-tip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ApiError, DraftDetail, DraftFinding, DraftVerdict, FindingClass } from "@/lib/api";
-import { UNLISTED_CODE, findingGroups, objectOf, remoteApp } from "@/lib/drafts-model";
-import { CONTACT, CONTACT_FAILED, CONTACT_HELP, GROUP, NOTHING_REFUSED, STRIP_LABEL, ackWords, answered, nowAfter, stripJump, stripWord } from "@/lib/drafts-words";
+import { holdersOfRole } from "@/lib/drafts-access";
+import { COVERS_WIDER_CODE, type ConfirmBlock, UNLISTED_CODE, confirmBlocks, findingGroups, objectOf, remoteApp } from "@/lib/drafts-model";
+import { CONTACT, CONTACT_FAILED, CONTACT_HELP, GROUP, NOTHING_TO_CONFIRM, STRIP_LABEL, ackWords, answered, holdsWords, nowAfter, riskTail, stripJump, stripWord } from "@/lib/drafts-words";
 import { cn } from "@/lib/utils";
 
 // The verdict of a draft as the review page draws it: the strip that counts
-// the classes, and the lines of
-// every class in the server's own words. A line renders by the class of
-// the list it came in, so a code this console does not know still shows.
+// the classes that hold a line, and the lines of every class in the
+// server's own words, an empty class left out and Passed folded. A line
+// renders by the class of the list it came in, so a code this console does
+// not know still shows.
 
 export type ChipTone = "danger" | "warn" | "unknown" | "accent" | "ok" | "plain";
 
@@ -32,6 +34,23 @@ export function DraftChip({ word, tone, title, attr }: { word: string; tone: Chi
   return <Badge variant="outline" title={title} className={cn("rounded-md px-2 text-[13px] font-normal", TONE[tone])} {...data}>{word}</Badge>;
 }
 
+// NameChips lists tool and object names as chips that wrap, the role chip's
+// look. A name marked added reads in the ok tone with its mark.
+export function NameChips({ names, added, mark }: { names: string[]; added?: Set<string>; mark?: (name: string) => string }) {
+  return (
+    <span className="flex flex-wrap gap-1.5" data-names>
+      {names.map((n) => {
+        const plus = !!added?.has(n);
+        return (
+          <span key={n} data-name={n} data-added={plus || undefined} className={cn("inline-block rounded-md border px-1.5 py-px font-mono text-[13px]", plus ? "border-ok text-ok" : "border-border bg-background text-text-2")}>
+            {plus && mark ? mark(n) : n}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 const STRIP: { cls: "refused" | "risk" | "warning" | "unchecked"; list: keyof DraftVerdict; hue: string }[] = [
   { cls: "refused", list: "refused", hue: "text-danger" },
   { cls: "risk", list: "risks", hue: "text-warn" },
@@ -40,12 +59,14 @@ const STRIP: { cls: "refused" | "risk" | "warning" | "unchecked"; list: keyof Dr
 ];
 
 // VerdictStrip counts the lines a person must read, each count a door to
-// the checks below.
+// the checks below. A class with no line is left out, and a verdict with
+// none says there is nothing to confirm.
 export function VerdictStrip({ verdict, onJump }: { verdict: DraftVerdict; onJump: () => void }) {
+  const shown = STRIP.map((s) => ({ ...s, n: ((verdict[s.list] as DraftFinding[] | null) || []).length })).filter((s) => s.n > 0);
   return (
     <div role="group" aria-label={STRIP_LABEL} className="flex flex-wrap gap-2" data-verdict-strip>
-      {STRIP.map(({ cls, list, hue }) => {
-        const n = ((verdict[list] as DraftFinding[] | null) || []).length;
+      {!shown.length && <DraftChip word={NOTHING_TO_CONFIRM} tone="plain" attr="data-strip-none" />}
+      {shown.map(({ cls, hue, n }) => {
         const word = stripWord[cls](n);
         return (
           <button
@@ -56,7 +77,7 @@ export function VerdictStrip({ verdict, onJump }: { verdict: DraftVerdict; onJum
             data-strip={cls}
             className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-text-2 outline-none hover:bg-secondary/60 focus-visible:ring-2 focus-visible:ring-ring/50"
           >
-            <b className={cn("font-mono text-[17px] leading-none font-semibold", n ? hue : "text-muted-foreground")}>{n}</b>
+            <b className={cn("font-mono text-[17px] leading-none font-semibold", hue)}>{n}</b>
             {word}
           </button>
         );
@@ -79,9 +100,11 @@ type Props = {
   // onContact asks the page to contact one proposed server and read the
   // draft again; it throws the server's refusal. Absent, no line offers it.
   onContact?: (object: string) => Promise<void>;
+  // omit are the keys of lines the page already says elsewhere.
+  omit?: string[];
 };
 
-export function DraftChecks({ detail, onContact }: Props) {
+export function DraftChecks({ detail, onContact, omit }: Props) {
   const [contacting, setContacting] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState<Record<string, string>>({});
   const open = detail.draft.state === "open";
@@ -108,38 +131,67 @@ export function DraftChecks({ detail, onContact }: Props) {
     }
   };
 
+  // Each risk says how the publish dialog asks for it, by the confirm block
+  // that holds it, so a grouped line names the count to type.
+  const blockOf = new Map<string, ConfirmBlock>();
+  for (const b of confirmBlocks(detail.verdict.risks || [])) for (const f of b.lines) blockOf.set(f.key, b);
+  const left = new Set(omit || []);
+  // holds is the client's holders sentence after a covers widening, whose
+  // own sentence never counts people.
+  const holds = (f: DraftFinding) => {
+    const n = f.code === COVERS_WIDER_CODE && f.object ? holdersOfRole(detail.verdict, f.object.replace(/^Role\//, "")) : null;
+    return n ? " " + holdsWords(n) : "";
+  };
+
   return (
     <div className="flex flex-col gap-3" data-checks>
-      {findingGroups(detail.verdict).map(({ cls, lines }) => {
-        if (!lines.length && cls !== "refused") return null;
+      {findingGroups(detail.verdict).map(({ cls, lines: all }) => {
+        const lines = all.filter((f) => !left.has(f.key));
+        if (!lines.length) return null;
         const { icon: Icon, hue } = ICON[cls];
+        const head = (
+          <>
+            {GROUP[cls]}
+            <span className="font-mono text-[12px] font-normal text-muted-foreground">{lines.length}</span>
+            {cls === "risk" && <span className="text-[13px] font-normal text-muted-foreground">{"· " + riskTail(lines.length)}</span>}
+          </>
+        );
+        const body = lines.map((f) => {
+          const block = blockOf.get(f.key);
+          return (
+            <div key={f.key} className="flex gap-2.5 border-b border-border px-3.5 py-2 last:border-b-0" data-finding={f.code}>
+              <Icon className={cn("mt-0.5 size-4 shrink-0", hue)} aria-hidden="true" />
+              <div className="flex min-w-0 max-w-[75ch] flex-col gap-1 text-[15px] leading-relaxed text-text-2">
+                <span className="text-foreground">{f.sentence + holds(f)}</span>
+                {f.fix && <span>{f.fix}</span>}
+                {(f.before || f.after) && <span className="text-sm">{nowAfter(f.before || "", f.after || "")}</span>}
+                {cls === "risk" && block && <span className="text-[13px] text-muted-foreground" data-ack-words>{ackWords(block)}</span>}
+                {contactable(f) && (
+                  <span className="flex items-center gap-1.5">
+                    <Button variant="outline" size="sm" onClick={() => void contact(f.object as string)} disabled={!!contacting}>
+                      {contacting === f.object && <Loader2Icon className="animate-spin" />}{CONTACT}
+                    </Button>
+                    <HelpTip label={CONTACT} text={CONTACT_HELP} />
+                  </span>
+                )}
+                {contactable(f) && failed[f.object as string] && <RefusedError subject={CONTACT} heading={CONTACT_FAILED} message={failed[f.object as string]} />}
+              </div>
+            </div>
+          );
+        });
+        const H = "flex items-center gap-2 border-b border-border px-3.5 py-2 text-sm font-semibold text-foreground";
+        if (cls === "passed") {
+          return (
+            <details key={cls} aria-label={GROUP[cls]} className="group rounded-md border border-border bg-card" data-group={cls}>
+              <summary className={cn(H, "cursor-pointer border-b-0 group-open:border-b")}>{head}</summary>
+              {body}
+            </details>
+          );
+        }
         return (
           <section key={cls} aria-label={GROUP[cls]} className="rounded-md border border-border bg-card" data-group={cls}>
-            <h3 className="flex items-center gap-2 border-b border-border px-3.5 py-2 text-sm font-semibold text-foreground">
-              {GROUP[cls]}
-              <span className="font-mono text-[12px] font-normal text-muted-foreground">{lines.length}</span>
-            </h3>
-            {!lines.length && <p className="m-0 px-3.5 py-2 text-sm text-text-2">{NOTHING_REFUSED}</p>}
-            {lines.map((f) => (
-              <div key={f.key} className="flex gap-2.5 border-b border-border px-3.5 py-2 last:border-b-0" data-finding={f.code}>
-                <Icon className={cn("mt-0.5 size-4 shrink-0", hue)} aria-hidden="true" />
-                <div className="flex min-w-0 flex-col gap-1 text-sm leading-relaxed text-text-2">
-                  <span className="text-foreground">{f.sentence}</span>
-                  {f.fix && <span>{f.fix}</span>}
-                  {(f.before || f.after) && <span className="text-[13px]">{nowAfter(f.before || "", f.after || "")}</span>}
-                  {cls === "risk" && <span className="text-[12.5px] text-muted-foreground" data-ack-words>{ackWords(f.ack, f.typed)}</span>}
-                  {contactable(f) && (
-                    <span className="flex items-center gap-1.5">
-                      <Button variant="outline" size="sm" onClick={() => void contact(f.object as string)} disabled={!!contacting}>
-                        {contacting === f.object && <Loader2Icon className="animate-spin" />}{CONTACT}
-                      </Button>
-                      <HelpTip label={CONTACT} text={CONTACT_HELP} />
-                    </span>
-                  )}
-                  {contactable(f) && failed[f.object as string] && <RefusedError subject={CONTACT} heading={CONTACT_FAILED} message={failed[f.object as string]} />}
-                </div>
-              </div>
-            ))}
+            <h3 className={H}>{head}</h3>
+            {body}
           </section>
         );
       })}

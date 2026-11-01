@@ -2,7 +2,7 @@
 title: strazactl users create-nhi
 description: Provision an AI agent or a service account (headless, no password, key-based)
 pagetype: reference
-weight: 107
+weight: 103
 draft: false
 sources:
   - cmd/strazactl
@@ -13,7 +13,7 @@ keywords: strazactl, users, create-nhi
 
 ## Synopsis
 
-Provision an identity with no password and no interactive login. --type is required: agent is an AI agent that acts for a person, and service is a technical account with no agency. Neither can sign in to strazactl or the console. Register its key next with strazactl users nhi-key set, after straza keygen prints it on the agent's machine.
+Provision an identity with no password and no interactive login. --type is required: agent is an AI agent that acts for a person, and service is a technical account with no agency. Neither can sign in to the console. Register its key next with strazactl users nhi-key set, after straza keygen prints it on the agent's machine.
 
 ```
 strazactl users create-nhi <username> --type agent|service [flags]
@@ -29,7 +29,7 @@ strazactl users create-nhi <username> --type agent|service [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -2,7 +2,7 @@
 // holding every finding class and every kind of item the review page
 // draws, for the Drafts area's suites. The risk keys are plain labels, not
 // hashes, so a client that computed a key instead of echoing it fails.
-import type { DraftDetail, DraftFinding, DraftSummary, DraftVerdict } from "@/lib/api";
+import type { DraftCoverage, DraftDetail, DraftFinding, DraftSummary, DraftVerdict } from "@/lib/api";
 
 export const GITHUB_APP = `apiVersion: straza.dev/v1beta1
 kind: App
@@ -144,7 +144,7 @@ export const VERDICT: DraftVerdict = {
     { code: "unchecked.tools", class: "unchecked", object: "App/github", key: "k-u1", sentence: "Straza has not contacted api.githubcopilot.com, because an address in a draft is contacted only when a person asks, so the tool names of github are unknown." },
   ],
   passed: [{ code: "names.free", class: "passed", key: "k-p1", sentence: "The names github, github-readers and github-writers-access are free." }],
-  info: [{ code: "role.nobody-holds", class: "info", object: "Role/github-readers", key: "k-i1", sentence: "Nobody holds github-readers yet, so it reaches nothing until someone is assigned it." }],
+  info: [{ code: "info.nobody-holds", class: "info", object: "Role/github-readers", key: "k-i1", sentence: "Nobody holds github-readers yet, so it reaches nothing until someone is assigned it." }],
   gains: [
     { role: "github-readers", server: "github", tool: "get_me", holders_count: 0, holders: [], before: "not-reachable", after: "runs" },
     { role: "github-writers", server: "github", tool: "create_pull_request", holders_count: 0, before: "not-reachable", after: "needs-approval", after_words: "a hold, up to 10 minutes, decided by sec-approvers" },
@@ -203,6 +203,49 @@ export function detailWith(patch: { draft?: Partial<DraftDetail["draft"]>; verdi
   const { draft, verdict, ...rest } = patch;
   return { ...structuredClone(DETAIL), ...rest, draft: { ...structuredClone(DETAIL.draft), ...draft }, verdict: { ...structuredClone(VERDICT), ...verdict } };
 }
+
+// The tracker server pins an invented object type, ticket and tickets, so a
+// view that hardcodes a noun fails. trackerRole is a role file on it with
+// a covers line.
+export const trackerRole = (name: string, tools: string[], tickets: string[]) => role(name, "tracker", tools) + "          covers:\n            objects: [" + tickets.join(", ") + "]\n";
+const ticket = (n: number) => ({ id: "t" + n, value: "T-" + n });
+
+// COVERAGE is tracker-triage, held by one person, widened from T-1 to T-1,
+// T-2 and T-3 with the same tools: the case no gain row shows.
+export const COVERAGE: DraftCoverage = {
+  role: "tracker-triage", server: "tracker", type: "ticket", plural: "tickets", holders_count: 1,
+  every_before: false, every_after: false, before: [ticket(1)], after: [ticket(1), ticket(2), ticket(3)],
+};
+export const COVERS_RISK: DraftFinding = {
+  code: "role.covers-wider", class: "risk", ack: "tick", group: "role.covers-wider", object: "Role/tracker-triage", key: "k-covers",
+  sentence: "tracker-triage will reach more tickets on tracker: T-2 and T-3.", before: "T-1", after: "T-1, T-2, T-3",
+};
+const TRIAGE_TOOLS = ["ticket_comment", "ticket_read", "ticket_search"];
+
+// COVERS_DETAIL is draft 50, which widens tracker-triage's covers line and
+// changes nothing else, so the verdict holds no gain row.
+export const COVERS_DETAIL: DraftDetail = {
+  ...DETAIL,
+  draft: {
+    ...DETAIL.draft, id: "50", door: "console", note: "", authors: [ALICE], title: "Change role tracker-triage",
+    items: [{ kind: "Role", name: "tracker-triage", op: "put", doc: trackerRole("tracker-triage", TRIAGE_TOOLS, ["T-1", "T-2", "T-3"]), existed: true, base: "fp9" }],
+  },
+  verdict: { ...VERDICT, draft: "50", risks: [COVERS_RISK], warnings: [], unchecked: [], info: [], passed: [], gains: [], objects: [COVERAGE], needs: [] },
+  live: { "Role/tracker-triage": { op: "put", doc: trackerRole("tracker-triage", TRIAGE_TOOLS, ["T-1"]) } },
+  revisions: [],
+};
+
+// LOOSEN_RISK and GATE_LOST are an agent's draft that turns off a set that
+// binds that agent: the agent.guardrail line typed by the set's name, and
+// the line of the same set that says which gate stops applying.
+export const LOOSEN_RISK: DraftFinding = {
+  code: "agent.guardrail", class: "risk", ack: "typed", typed: "agent-guardrails", object: "PolicySet/agent-guardrails", key: "k-loosen",
+  sentence: "agent-guardrails binds the agent that wrote this draft, and this draft turns it off.",
+};
+export const GATE_LOST: DraftFinding = {
+  code: "policy.guardrail-changed", class: "risk", ack: "typed", typed: "agent-guardrails", object: "PolicySet/agent-guardrails", key: "k-gate",
+  sentence: "agent-guardrails stops asking for a ticket before deploy runs, because this draft turns it off.", before: "rule deploy-ticket", after: "off",
+};
 
 // SUMMARY is draft 41 as a row of the queue.
 export const SUMMARY: DraftSummary = {

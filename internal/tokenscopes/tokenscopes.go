@@ -224,6 +224,12 @@ var AdminRouteArea = map[string]string{
 	"POST /v1/admin/apps/import":                "apps",
 	"GET /v1/admin/oauth/providers":             "apps",
 	"GET /v1/admin/access/grant-only":           "apps",
+	// The object list of one server and the credential that lists it.
+	"GET /v1/admin/apps/{id}/objects":               "apps",
+	"POST /v1/admin/apps/{id}/objects/refresh":      "apps",
+	"POST /v1/admin/apps/{id}/objects/draft":        "apps",
+	"POST /v1/admin/apps/{id}/objects/credential":   "apps",
+	"DELETE /v1/admin/apps/{id}/objects/credential": "apps",
 
 	// approvals: pending decisions, channels, approver devices.
 	// approve/deny ride requirePersonClient (human identities), so a wat_

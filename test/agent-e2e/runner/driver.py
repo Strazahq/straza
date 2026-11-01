@@ -8,9 +8,12 @@ Stdlib only, mirroring the kit's own constraint. The flow:
   2. admin bootstrap: scripted OIDC device flow (the same endpoints a human
      browser hits), then over the admin API: apply+activate the e2e
      PolicySet, create the e2e NHI, register its keygen public key
-  3. `straza enroll --headless`: no browser anywhere
-  4. fire the python-sdk SessionStart event (checkin: session token +
-     signed snapshot + capture flags land client-side)
+  3. `straza enroll --headless`: no browser anywhere. keygen and enroll
+     both go to the runner's straza service, which keeps the key in its
+     own container
+  4. fire the python-sdk SessionStart event (checkin: the session token,
+     the signed snapshot and the capture flags land in the service, never
+     in the runner)
   5. run EPISODES: elaborate prompts to the local model, which calls tools;
      every tool call is decided by straza_agentkit.check() against the
      signed snapshot; denials feed the Straza reason back to the model

@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kill switch · Straza</title>
 <style>
@@ -143,7 +144,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <div class="stage">
 <svg id="dia" viewBox="0 0 960 500" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
 <title id="svgT">Kill-switch propagation race</title>
-<desc id="svgD">Disabling a user in the identity system sends a SCIM deactivate to strazad, which writes a revocation, updates the denylist, revokes sessions, and fans the event out: a push relayed over each daemon's SSE stream reaches connected daemons in under two seconds, JetStream replay converges every gateway pod, and without a daemon the 300-second token TTL bounds the session's death. The kill itself is hash-chained.</desc>
+<desc id="svgD">Disabling a user in the identity system sends a SCIM deactivate to strazad, which writes a revocation, updates the denylist, revokes sessions, and fans the event out: a push relayed over the SSE stream that straza service holds for each session reaches it in under two seconds, JetStream replay converges every gateway pod, and with the stream down the session's next refresh revokes it, at most about 180 seconds after its token was minted. The kill itself is hash-chained.</desc>
 <defs>
   <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
 </defs>
@@ -182,17 +183,17 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <path class="edge" d="M225 392 H250"/>
 
 
-<g class="node" id="la" tabindex="0" aria-label="Push lane: strazad publishes, the daemon's SSE stream relays, under two seconds">
+<g class="node" id="la" tabindex="0" aria-label="Push lane: strazad publishes, the SSE stream of straza service relays, under two seconds">
   <rect class="chip" x="250" y="190" width="220" height="44" rx="5"/>
   <text class="s" x="260" y="208" style="font-size:11.5px">push relay: NATS &#8594; SSE</text>
   <text class="mono" x="260" y="224">straza.push.user.&lt;id&gt;</text>
 </g>
 <path id="pa" class="edge plain" d="M470 212 L710 212"/>
 <text id="ta" class="tlabel" x="590" y="202" text-anchor="middle">p99 &lt; 2 s</text>
-<g class="node laneEnd" id="ea" tabindex="0" aria-label="straza daemon drops session state on the SSE revocation event">
+<g class="node laneEnd" id="ea" tabindex="0" aria-label="straza service revokes the session on the SSE revocation event">
   <rect class="box" x="710" y="186" width="234" height="52" rx="6"/>
-  <text class="s" x="720" y="206">straza daemon</text>
-  <text class="d" x="720" y="222">SSE /v1/push &#183; state dropped</text>
+  <text class="s" x="720" y="206">straza service</text>
+  <text class="d" x="720" y="222">SSE /v1/push &#183; session revoked</text>
 </g>
 
 
@@ -210,21 +211,21 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 </g>
 
 
-<g class="node" id="lc" tabindex="0" aria-label="Without push: poll refresh, bounded by the token TTL">
+<g class="node" id="lc" tabindex="0" aria-label="Without push: the next refresh, at most about 180 seconds after the token was minted">
   <rect class="chip" x="250" y="370" width="220" height="44" rx="5"/>
-  <text class="s" x="260" y="388" style="font-size:11.5px">no daemon &#183; poll-refresh</text>
-  <text class="mono" x="260" y="404">next checkin &#8594; 401</text>
+  <text class="s" x="260" y="388" style="font-size:11.5px">no stream &#183; next refresh</text>
+  <text class="mono" x="260" y="404">refresh &#8594; refused</text>
 </g>
 <path id="pc" class="edge plain" d="M470 392 L710 392"/>
-<text id="tc" class="tlabel" x="590" y="382" text-anchor="middle">&#8804; 300 s (token TTL)</text>
-<g class="node laneEnd" id="ec" tabindex="0" aria-label="Session token expires and can never refresh">
+<text id="tc" class="tlabel" x="590" y="382" text-anchor="middle">&#8804; ~180 s (next refresh)</text>
+<g class="node laneEnd" id="ec" tabindex="0" aria-label="The refused refresh revokes the session at once">
   <rect class="box" x="710" y="366" width="234" height="52" rx="6"/>
-  <text class="s" x="720" y="386">session token dies</text>
-  <text class="d" x="720" y="402">300 s TTL &#183; refresh refused</text>
+  <text class="s" x="720" y="386">revoked at refresh</text>
+  <text class="d" x="720" y="402">403 &#183; denied from that call on</text>
 </g>
 
 <text class="d" x="250" y="448">reactivation is explicit: <tspan class="mono">straza.revocation.lift</tspan> deletes the row, lifts denylists, converges pods and replays</text>
-<text class="d" x="250" y="466">daemon crash changes nothing: hooks re-verify token + snapshot on every call and fail closed</text>
+<text class="d" x="250" y="466">service down changes nothing: a hook that cannot reach it denies, and a restart must check in again</text>
 </svg>
 </div>
 
@@ -236,14 +237,15 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
   strazad as a SCIM <code>active:false</code> or DELETE. <code>revokeUserCtx</code> writes the
   revocation row, updates the in-memory denylist, revokes the user's session rows, and emits the
   events. Propagation races on three lanes: (1) a target-scoped push: strazad publishes
-  <code>straza.push.user.&lt;id&gt;</code> on core NATS (pod-internal), the pod holding that
-  daemon's SSE stream relays a <code>revocation</code> event over <code>GET /v1/push</code>, and
-  the daemon drops session state with a p99 under 2 seconds (the CI-gated budget at 100k
+  <code>straza.push.user.&lt;id&gt;</code> on core NATS (pod-internal), the pod holding the SSE
+  stream that <code>straza service</code> keeps for the session relays a <code>revocation</code> event over
+  <code>GET /v1/push</code>, and the service revokes the session with a p99 under 2 seconds (the CI-gated budget at 100k
   simulated clients); this works in every profile, standalone included, because no broker
   is client-reachable; (2) JetStream replay of <code>straza.revocation.user</code> that converges every
   gateway pod's denylist (boot also seeds from the revocations table, fail-closed on read
-  error); (3) without a running daemon (or with its stream down), the next
-  checkin 401s and the 300-second token TTL is the hard bound on the session's life. The kill
+  error); (3) with the stream down, a call starts the session's next refresh once
+  120 seconds or less of its 300-second token remain, and the refused refresh revokes the session at
+  once, at most about 180 seconds after its token was minted. An idle session decides nothing meanwhile. The kill
   itself is tamper-evident: <code>straza.audit.identity</code> (user.killed) enters the hash
   chain. Reactivation is an explicit lift event, never implicit.</p>
 </details>
@@ -262,14 +264,14 @@ var DEF='Press &#8220;disable user&#8221; to race the revocation across all thre
 var FACTS={
  n1:'<strong>midPoint / IdM</strong>: the identity system is the source of truth; deactivation there is the governance action. Admin API deactivation takes the same path.',
  n2:'<strong>strazad SCIM</strong>: <code>active:false</code> or DELETE on /scim/v2 Users means deactivate (the profile&#8217;s revocation semantics).',
- n3:'<strong>revokeUserCtx</strong>: revocation row + in-memory denylist + session rows revoked + CE <code>straza.revocation.user</code> + core-NATS push publish (relayed to the daemon over SSE), in one server-side action.',
+ n3:'<strong>revokeUserCtx</strong>: revocation row + in-memory denylist + session rows revoked + CE <code>straza.revocation.user</code> + core-NATS push publish (relayed to <code>straza service</code> over SSE), in one server-side action.',
  trace:'<strong>hash-chained trace</strong>: <code>straza.audit.identity</code> (user.killed / user.reactivated) is the kill switch&#8217;s tamper-evident record; revocation events converge enforcement but only straza.audit.&gt; enters the chain.',
- la:'<strong>push relay</strong>: strazad publishes the target-scoped subjects <code>straza.push.{user,session,device}.&lt;id&gt;</code> on core NATS (pod-internal); the pod holding the daemon&#8217;s SSE stream (<code>GET /v1/push</code>, session-token auth) forwards only the subjects derived from that token&#8217;s own claims (no cross-principal visibility). Works in every profile, standalone included: no broker is client-reachable.',
- ea:'<strong>straza daemon</strong>: a <code>revocation</code> event on its SSE stream drops session state; budget p99 &lt; 2 s at 100k simulated clients. Hooks fail closed even if the daemon crashes.',
+ la:'<strong>push relay</strong>: strazad publishes the target-scoped subjects <code>straza.push.{user,session,device}.&lt;id&gt;</code> on core NATS (pod-internal); the pod holding the session&#8217;s SSE stream from <code>straza service</code> (<code>GET /v1/push</code>, session-token auth) forwards only the subjects derived from that token&#8217;s own claims (no cross-principal visibility). Works in every profile, standalone included: no broker is client-reachable.',
+ ea:'<strong><code>straza service</code></strong>: a <code>revocation</code> event on a session&#8217;s SSE stream revokes that session and drops its token; budget p99 &lt; 2 s at 100k simulated clients. Hooks fail closed even when the service is down.',
  lb:'<strong>JetStream replay</strong>: every pod runs an ephemeral DeliverAll consumer on <code>straza.revocation.&gt;</code> and rebuilds its denylist; the data plane stays stateless.',
  eb:'<strong>gateway denylists</strong>: user/session/device/jti checks are in-memory on every call; no per-call DB lookups.',
- lc:'<strong>poll-refresh fallback</strong>: with no daemon running (or its stream down), a revoked session&#8217;s next /v1/checkin 401s and state is dropped.',
- ec:'<strong>token death</strong>: session tokens live 300 s and refresh is refused after revocation, so the TTL is the hard bound without push.'
+ lc:'<strong>refresh fallback</strong>: with the stream down, <code>straza service</code> refreshes the session at a call that finds 120 s or less of its 300 s token left, at most about 180 s after the token was minted. The refresh answers 403 because the user is disabled, and the service marks the session revoked at once, so it denies from that call on. An idle session decides nothing meanwhile.',
+ ec:'<strong>revoked at refresh</strong>: a refresh after the disable answers 403, and <code>straza service</code> marks the session revoked at once, so it denies from that call on. Tokens live 300 s and a call refreshes once 120 s or less remain, so that comes at most about 180 s after the token was minted.'
 };
 Object.keys(FACTS).forEach(function(id){
   var el=document.getElementById(id);
@@ -318,7 +320,7 @@ function kill(){
     mark('n3',true);document.getElementById('trace').classList.add('on');
     ['ea','eb','ec'].forEach(function(id){mark(id,true);});
     ['ta','tb','tc'].forEach(function(id){label(id,true);});
-    nar.innerHTML='Everything is dark: daemon dropped state (&lt; 2 s), every pod denies, and the token can never refresh (&#8804; 300 s). The kill is hash-chained.';
+    nar.innerHTML='Everything is dark: the service revoked the session (&lt; 2 s), every pod denies, and the first refresh revokes the session (&#8804; ~180 s). The kill is hash-chained.';
     running=false;return;
   }
   slide('e1',450,function(){
@@ -329,14 +331,14 @@ function kill(){
        
       slide('pa',1100,function(){
         mark('ea',true);label('ta',true);
-        nar.innerHTML='<strong style="color:var(--danger)">&lt; 2 s</strong>: the target-scoped push is relayed over the daemon&#8217;s SSE stream and session state is dropped (p99 &lt; 2 s @ 100k clients).';
+        nar.innerHTML='<strong style="color:var(--danger)">&lt; 2 s</strong>: the target-scoped push is relayed over the session&#8217;s SSE stream and <code>straza service</code> revokes the session (p99 &lt; 2 s @ 100k clients).';
       });
       slide('pb',1500,function(){
         mark('eb',true);label('tb',true);
       });
       slide('pc',3600,function(){
         mark('ec',true);label('tc',true);
-        nar.innerHTML='Without a daemon (no push stream), poll-refresh 401s at the next checkin: the 300 s token TTL is the hard bound. User is dark everywhere; reactivation is an explicit <code>straza.revocation.lift</code>.';
+        nar.innerHTML='With the push stream down, the session&#8217;s next refresh is refused and revokes it at once, at most about 180 s after its token was minted. An idle session decides nothing meanwhile. User is dark everywhere; reactivation is an explicit <code>straza.revocation.lift</code>.';
         running=false;
       });
     });

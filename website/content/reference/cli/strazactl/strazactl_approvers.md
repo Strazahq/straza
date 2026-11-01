@@ -2,7 +2,7 @@
 title: strazactl approvers
 description: Inspect and revoke enrolled approver phones and browsers
 pagetype: reference
-weight: 12
+weight: 9
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl approvers [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

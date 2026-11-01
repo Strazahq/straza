@@ -122,7 +122,7 @@ func (c *check) setWarnings(name string, written bool) []Finding {
 	}
 	if m := a.Spec.Match; len(m.Roles) == 1 && len(m.Users) == 0 && m.Identity == nil && c.after.Roles[m.Roles[0]].Kind == RoleKindApplication && name != m.Roles[0]+"-access" {
 		out = append(out, warning(codeSetName, object, fmt.Sprintf("%s gates %s and is not named %s-access, so the console's role editor will not read it back.", name, m.Roles[0], m.Roles[0]),
-			fmt.Sprintf("Name it %s-access.", m.Roles[0])))
+			fmt.Sprintf("Rename the set to %s-access, so the role page can edit it.", m.Roles[0])))
 	}
 	advisories := c.in.Advisories
 	if advisories == nil {
@@ -213,8 +213,7 @@ func (c *check) poolWarnings(name string, doc policy.Document, rule policy.Rule,
 	if (confirm || sponsor) && c.ownDecidersWithoutDevice(doc, confirm) {
 		out = append(out, warning(codeDeciderDevice, object, fmt.Sprintf(
 			"The requests of rule %s of %s go to people who have no enrolled phone or browser, and the console and strazactl cannot decide a person's own request.", rule.ID, name),
-			"Assign them straza-enroll-browser or straza-enroll-mobile, which let them enroll on the self-service page, "+
-				"or run strazactl approvals enroll-token <username> for each of them."))
+			"Assign them straza-enroll-browser or straza-enroll-mobile, which let them enroll on the self-service page."))
 	}
 	return out
 }
@@ -340,12 +339,14 @@ func unoffered(object, who, server string, names, offered []string) []Finding {
 }
 
 // gainWarnings answers the warnings of who gains: the tools holders of a
-// role lose, a set a removed role leaves matching nothing, and a tool
-// newly reached or newly ungated whose name says it destroys something.
+// role lose, a set a removed role leaves matching nothing, and a tool that
+// comes to run with no approval and destroys something, as its server
+// marks it or, where the server sets no hint, as its name says.
 func (c *check) gainWarnings(rows []gainRow) []Finding {
 	var out []Finding
 	var keys []toolKey
 	lost := map[toolKey][]string{}
+	marked := map[string][]string{}
 	for _, row := range rows {
 		b, a := row.b, row.a
 		if row.HolderCount > 0 && (b.outcome == OutcomeRuns || b.outcome == OutcomeApproval) && outcomeRank[a.outcome] == 0 {
@@ -355,13 +356,30 @@ func (c *check) gainWarnings(rows []gainRow) []Finding {
 			}
 			lost[k] = append(lost[k], row.Tool)
 		}
-		reached := (a.outcome == OutcomeRuns || a.outcome == OutcomeApproval) && outcomeRank[b.outcome] == 0
-		if row.Server != nativeApp && (reached || (a.outcome == OutcomeRuns && b.outcome == OutcomeApproval)) && !slices.Contains(c.after.Apps[row.Server].ReadOnly, row.Tool) {
-			if verb := destructiveVerb(row.Tool); verb != "" {
-				out = append(out, warning(codeDestructive, "App/"+row.Server,
-					fmt.Sprintf("%s on %s does not say it is read-only, and its name says it %s.", row.Tool, row.Server, verb), "Gate it with an approval rule, or leave it out of the role."))
-			}
+		if row.Server == nativeApp || a.outcome != OutcomeRuns || outcomeRank[b.outcome] >= outcomeRank[OutcomeRuns] {
+			continue
 		}
+		// An explicit destructiveHint, true or false, outranks the name, and
+		// so does readOnlyHint.
+		app := c.after.Apps[row.Server]
+		hint, set := app.Destructive[row.Tool]
+		switch verb := destructiveVerb(row.Tool); {
+		case hint:
+			if !slices.Contains(marked[row.Server], row.Tool) {
+				marked[row.Server] = append(marked[row.Server], row.Tool)
+			}
+		case !set && verb != "" && !slices.Contains(app.ReadOnly, row.Tool):
+			out = append(out, warning(codeDestructive, "App/"+row.Server,
+				fmt.Sprintf("%s on %s does not say it is read-only, and its name says it %s.", row.Tool, row.Server, verb), "Gate it with an approval rule, or leave it out of the role."))
+		}
+	}
+	for _, s := range sortedKeys(marked) {
+		tools := sortedCopy(marked[s])
+		sentence, fix := fmt.Sprintf("%s runs with no approval, and %s marks it as destructive.", tools[0], s), "Gate it with an approval rule, or leave it out of the role."
+		if len(tools) > 1 {
+			sentence, fix = fmt.Sprintf("%s run with no approval, and %s marks them as destructive.", listWords(tools, "and"), s), "Gate them with an approval rule, or leave them out of the role."
+		}
+		out = append(out, warning(codeDestructive, "App/"+s, sentence, fix))
 	}
 	for _, k := range keys {
 		out = append(out, warning(codeRoleLoses, "Role/"+k.role, fmt.Sprintf("Holders of %s lose %s on %s.", k.role, listWords(slices.Compact(lost[k]), "and"), k.server), ""))

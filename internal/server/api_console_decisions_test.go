@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,9 +105,9 @@ func seedDecisions(t *testing.T, app *App, seeds []decisionSeed) {
 // block is 24 hour-aligned buckets ending with the current hour, empty
 // hours carry zeros, the effect words map to the three outcomes the console
 // reads, an allowed catalog read counts apart from them, the stopped list is
-// the busiest five groups with their most frequent reason verbatim, and the
-// whole block is cached for a minute so a 30 second poll costs one window
-// scan.
+// the busiest five groups with their most frequent reason verbatim and the
+// seq of the newest record that carries it, and the whole block is cached
+// for a minute so a 30 second poll costs one window scan.
 func TestOverviewDecisionBlock(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -186,6 +187,7 @@ func TestOverviewDecisionBlock(t *testing.T) {
 		Outcome string `json:"outcome"`
 		Count   int    `json:"count"`
 		Reason  string `json:"reason"`
+		Seq     int64  `json:"seq"`
 	}
 	var out struct {
 		Decisions struct {
@@ -246,10 +248,53 @@ func TestOverviewDecisionBlock(t *testing.T) {
 	if len(out.Decisions.Stopped) != len(want) {
 		t.Fatalf("stopped = %+v, want %d entries", out.Decisions.Stopped, len(want))
 	}
+	// Each row's seq is the newest chained record of its group that carries
+	// its reason. A held call that no decision answered is its request.
+	recs, err := app.store.Audit().ListSince(context.Background(), since, 0, 10000)
+	if err != nil {
+		t.Fatalf("ListSince: %v", err)
+	}
+	newest := func(w stopped) int64 {
+		var seq int64
+		for _, rec := range recs {
+			var ce decisionCE
+			if json.Unmarshal([]byte(rec.CE), &ce) != nil {
+				continue
+			}
+			name := ce.Data.Tool
+			if ce.Data.ToolName != "" {
+				name = ce.Data.ToolName
+			}
+			decision := (ce.Type == "straza.audit.tool" || ce.Type == "straza.audit.mcp") &&
+				ce.Data.App == w.App && name == w.Tool && ce.Data.Reason == w.Reason
+			request := ce.Type == "straza.audit.approval" && ce.Data.Phase == "request" &&
+				w.App == "" && w.Reason == "" && ce.Data.Summary == w.Tool
+			if decision || request {
+				seq = max(seq, rec.Seq)
+			}
+		}
+		return seq
+	}
 	for i, w := range want {
+		w.Seq = newest(w)
+		if w.Seq == 0 {
+			t.Fatalf("no chained record matches %+v", w)
+		}
 		if out.Decisions.Stopped[i] != w {
 			t.Errorf("stopped[%d] = %+v, want %+v", i, out.Decisions.Stopped[i], w)
 		}
+	}
+	// The console opens a row's record with the audit read after seq-1.
+	first := out.Decisions.Stopped[0]
+	var page []struct {
+		Seq int64  `json:"seq"`
+		CE  string `json:"ce"`
+	}
+	if code := adminReq(t, http.MethodGet, fmt.Sprintf("%s/v1/admin/audit?after=%d&limit=1", base, first.Seq-1), idToken, nil, &page); code != http.StatusOK {
+		t.Fatalf("audit read = %d", code)
+	}
+	if len(page) != 1 || page[0].Seq != first.Seq || !strings.Contains(page[0].CE, first.Reason) {
+		t.Errorf("audit read after %d = %+v, want record %d with reason %q", first.Seq-1, page, first.Seq, first.Reason)
 	}
 
 	// The cache: records chained after the first read stay invisible until

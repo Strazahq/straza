@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 )
 
 // Codex hook TRUST, read from outside codex: best effort, never a claim we
@@ -150,7 +152,7 @@ func codexManagedShimCheck(reqPath string) *Check {
 // checked in: the SessionStart hook is what creates it, so its existence
 // proves the hooks ran at least once. With that, ok. Without it, warn and say
 // exactly what is unknown.
-func codexHooksCheck(ses Session, haveSession bool) *Check {
+func codexHooksCheck(sessions []localapi.SessionStatus) *Check {
 	hooks, err := CodexHooksPath()
 	if err != nil {
 		return nil
@@ -223,9 +225,9 @@ func codexHooksCheck(ses Session, haveSession bool) *Check {
 	// No readable trust state. A codex session that checked in is the one
 	// piece of outside evidence that the hooks did run; the SessionStart hook
 	// is what creates it.
-	if haveSession && strings.HasPrefix(ses.Harness, "codex/") {
+	if label, ok := checkedIn(sessions, "codex"); ok {
 		return &Check{"codex-hooks", checkOK,
-			"wiring written to " + hooks + " and a codex session checked in (" + ses.Harness + "), so codex is running the hooks", ""}
+			"wiring written to " + hooks + " and a codex session checked in (" + label + "), so codex is running the hooks", ""}
 	}
 	return &Check{"codex-hooks", checkWarn,
 		"wiring written to " + hooks + "; trust cannot be verified from outside (codex skips untrusted hooks, and this machine has no readable trust record)",

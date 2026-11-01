@@ -408,8 +408,16 @@ func AppFieldText(doc string) (map[string]string, error) {
 	return out, nil
 }
 
+// coversField is a binding's covers line as a merge field: every, or the
+// values sorted. A merge reads documents, which name values and no ids.
+type coversField struct {
+	Every   bool     `json:"every,omitempty"`
+	Objects []string `json:"objects,omitempty"`
+}
+
 // roleFields reads a Role document into its three fields: spec.description,
-// spec.bindings and spec.implies, each unset when empty.
+// spec.bindings, each binding with its covers line, and spec.implies, each
+// unset when empty.
 func roleFields(doc string) (fieldSet, error) {
 	d, err := ParseRole(doc)
 	if err != nil {
@@ -423,6 +431,14 @@ func roleFields(doc string) (fieldSet, error) {
 		list := make([]map[string]any, len(d.Spec.Bindings))
 		for i, b := range d.Spec.Bindings {
 			list[i] = map[string]any{"app": b.App, "tools": sortedCopy(b.Tools)}
+			if c := b.Covers; c != nil {
+				f := coversField{Every: c.Every, Objects: []string{}}
+				for _, o := range c.Objects {
+					f.Objects = append(f.Objects, o.Value)
+				}
+				f.Objects = sortedCopy(f.Objects)
+				list[i]["covers"] = f
+			}
 		}
 		sort.SliceStable(list, func(i, j int) bool { return list[i]["app"].(string) < list[j]["app"].(string) })
 		raw, _ := json.Marshal(list)
@@ -463,14 +479,22 @@ func buildDoc(kind Kind, draftDoc string, fs fieldSet) (string, error) {
 	}
 	if f, ok := fs["spec.bindings"]; ok {
 		var list []struct {
-			App   string   `json:"app"`
-			Tools []string `json:"tools"`
+			App    string       `json:"app"`
+			Tools  []string     `json:"tools"`
+			Covers *coversField `json:"covers"`
 		}
 		if err := json.Unmarshal(f.raw, &list); err != nil {
 			return "", err
 		}
 		for _, b := range list {
-			d.Spec.Bindings = append(d.Spec.Bindings, RoleBinding{App: b.App, Tools: b.Tools})
+			rb := RoleBinding{App: b.App, Tools: b.Tools}
+			if c := b.Covers; c != nil {
+				rb.Covers = &Scope{Every: c.Every, Objects: []ObjectRef{}}
+				for _, v := range c.Objects {
+					rb.Covers.Objects = append(rb.Covers.Objects, ObjectRef{Value: v})
+				}
+			}
+			d.Spec.Bindings = append(d.Spec.Bindings, rb)
 		}
 	}
 	if f, ok := fs["spec.implies"]; ok {

@@ -3,7 +3,7 @@
 // and sign-out. The token itself stays inside the session module.
 import * as React from "react";
 import { ApiError } from "./api";
-import { type CheckinResponse, logout, onAuthLost, refresh, resume, revokeSelf } from "./session";
+import { type CheckinResponse, SIGNIN_PATH, logout, onAuthLost, refresh, resume, revokeSelf } from "./session";
 
 // SignedOutReason says why the tab has no session, so the sign-in card can
 // word its notice: none is a fresh tab, lost carries the server's sentence,
@@ -47,6 +47,12 @@ export function useSession({ adminOnly = true }: { adminOnly?: boolean } = {}): 
     let alive = true;
     (async () => {
       let next: SessionState;
+      // An identity provider's answer is finished by the sign-in card, never
+      // by a session this tab still holds.
+      if (window.location.pathname === SIGNIN_PATH) {
+        setState(signedOut("none"));
+        return;
+      }
       try {
         const r = await resume();
         if (r && (r.admin_grants || r.admin_servers || !adminOnly)) {

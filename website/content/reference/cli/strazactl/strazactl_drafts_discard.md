@@ -2,7 +2,7 @@
 title: strazactl drafts discard
 description: Discard an open draft, which changes nothing live
 pagetype: reference
-weight: 53
+weight: 52
 draft: false
 sources:
   - cmd/strazactl
@@ -26,10 +26,10 @@ strazactl drafts discard <id> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
-* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store, review and publish drafts of changes to MCP servers, roles, access rows and policy sets
+* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets
 

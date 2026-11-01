@@ -2,7 +2,7 @@
 title: strazactl packs delete
 description: Delete a knowledge pack that no role is bound to (unbind it first)
 pagetype: reference
-weight: 65
+weight: 61
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl packs delete <pack> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

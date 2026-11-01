@@ -103,9 +103,9 @@ func TestStatusReasonMasked(t *testing.T) {
 	if v, ok := mgr.HealthCheckOne(ctx, "live"); !ok || v.Status != StatusDegraded {
 		t.Fatalf("recheck after the upstream closed = %+v, want degraded", v)
 	}
-	_, liveCall := mgr.Call(ctx, "live", "echo", nil, nil)
-	_, noHostCall := mgr.Call(ctx, "nohost", "echo", nil, nil)
-	_, crashCall := mgr.Call(ctx, "crashy", "echo", nil, nil)
+	_, liveCall := mgr.Call(ctx, "live", "echo", nil, nil, nil)
+	_, noHostCall := mgr.Call(ctx, "nohost", "echo", nil, nil, nil)
+	_, crashCall := mgr.Call(ctx, "crashy", "echo", nil, nil, nil)
 	liveProbe := mgr.ProbeWith(ctx, "live", nil)
 	noHostProbe := mgr.ProbeWith(ctx, "nohost", nil)
 	_, parse := Parse([]byte("apiVersion: straza.dev/v1beta1\nkind: App\nmetadata: {name: ftp}\nserver: {name: straza.test/ftp, version: \"1.0.0\"}\n" +

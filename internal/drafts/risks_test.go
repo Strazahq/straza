@@ -2,10 +2,12 @@ package drafts
 
 import (
 	"cmp"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/strazahq/straza/internal/policy"
 )
@@ -246,59 +248,102 @@ func agentDraftOf(w World, items ...Item) Draft {
 	return d
 }
 
-// TestAgentGuardrail pins every case of the guardrail for an agent: a set
-// with a gate that binds it may not be removed, turned off, narrowed away
-// from it or changed but for added gates, added denies and reason text, and
-// a set the draft creates counts as changed.
-func TestAgentGuardrail(t *testing.T) {
-	t.Parallel()
-	fix := "Leave dev-access and your roles as they are. A person can change them."
-	refused := func(set, clause string) string {
-		return "agent.guardrail PolicySet/" + set + " " + set + " applies to you, and this draft " + clause + ". An agent's draft may not change what binds the agent."
+// inHours is checkNow moved by n hours, a bound of a RoleWindow.
+func inHours(n int) *time.Time {
+	t := checkNow.Add(time.Duration(n) * time.Hour)
+	return &t
+}
+
+// ciBotHolds leaves ci-bot with exactly the direct assignments rows, as
+// readHolders reads them at checkNow: a row in force lists ci-bot among the
+// holders of its role, and a row that starts or ends later is a window.
+func ciBotHolds(rows ...RoleWindow) func(*World) {
+	return func(w *World) {
+		for r, hs := range w.Holders {
+			w.Holders[r] = slices.DeleteFunc(slices.Clone(hs), func(h Holder) bool { return h.Username == ciBot.Username })
+		}
+		w.Windows = map[string][]RoleWindow{}
+		for _, row := range rows {
+			if row.holds(checkNow) {
+				w.Holders[row.Role] = append(w.Holders[row.Role], ciBot)
+			}
+			if (row.From != nil && row.From.After(checkNow)) || row.To != nil {
+				w.Windows[ciBot.Username] = append(w.Windows[ciBot.Username], row)
+			}
+		}
 	}
+}
+
+// gapWorld is gainWorld where the set gate binds team-a and team-b and
+// denies file.write, ops reaches every github tool, and ci-bot holds ops
+// and team-a now and team-b from a week on when nextWeek is set.
+func gapWorld(nextWeek bool) func(*World) {
+	return func(w *World) {
+		w.Policies = map[string]Policy{"gate": {Name: "gate", Text: gainSet("gate", "{ roles: [team-a, team-b] }",
+			"    - id: no-write\n      tools: [file.write]\n      effect: deny\n")}}
+		w.Roles["team-a"] = Role{ID: "r10", Name: "team-a", Kind: RoleKindBusiness, Plane: PlaneAccess}
+		w.Roles["team-b"] = Role{ID: "r11", Name: "team-b", Kind: RoleKindBusiness, Plane: PlaneAccess}
+		w.Roles["ops"] = Role{ID: "r12", Name: "ops", Kind: RoleKindApplication, Plane: PlaneAccess}
+		w.Access["ops"] = Access{ID: "b9", Server: "github", Tools: []string{"*"}}
+		rows := []RoleWindow{{Role: "ops"}, {Role: "team-a"}}
+		if nextWeek {
+			rows = append(rows, RoleWindow{Role: "team-b", From: inHours(7 * 24)})
+		}
+		ciBotHolds(rows...)(w)
+		for _, object := range []string{"Role/team-a", "Role/team-b", "Role/ops", "PolicySet/gate"} {
+			w.Fingerprints[object] = Fingerprint("fp-" + object)
+		}
+	}
+}
+
+// TestAgentGuardrailAtEveryInstant pins that the guardrail reads the
+// agent's roles at every instant they change: a set that binds the agent
+// only through a role it will hold may not be loosened without a person
+// typing its name, and neither may a draft take the agent out of a set for
+// the time before another role that the set binds starts. A direct route
+// refuses both.
+func TestAgentGuardrailAtEveryInstant(t *testing.T) {
+	t.Parallel()
+	readersAccess := gainSet("readers-access", "{ roles: [readers] }",
+		"    - id: hold-fetch\n      tools: [net.fetch]\n      mode: approve\n      effect: allow\n      approve: { roles: [sec-approvers] }\n")
+	withReadersAccess := func(rows map[string][]RoleWindow) func(*World) {
+		return func(w *World) {
+			w.Policies["readers-access"] = Policy{Name: "readers-access", Text: readersAccess}
+			w.Fingerprints["PolicySet/readers-access"] = "fp-PolicySet/readers-access"
+			w.Windows = rows
+		}
+	}
+	removeReadersAccess := []Item{{Kind: KindPolicySet, Name: "readers-access", Op: OpRemove}}
+	outOfGate := []string{guardLoosened("gate", "takes team-a out of the agent's roles, so the set no longer applies to it")}
+	outOfGateDirect := []string{guardRefusal("gate", "takes team-a out of your roles so that the set no longer applies to you")}
 	cases := []struct {
-		name  string
-		items []Item
-		want  []string
+		name   string
+		items  []Item
+		live   func(*World)
+		risks  []string
+		direct []string
 	}{
-		{"the set removed", []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpRemove}}, []string{refused("dev-access", "removes it")}},
-		{"the set turned off", []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpOff, Doc: devAccess}}, []string{refused("dev-access", "turns it off")}},
-		{"its match narrowed away from the agent", []Item{devAccessWith("roles: [dev]", "roles: [readers]")}, []string{refused("dev-access", "changes its match or priority")}},
-		{"its priority changed", []Item{devAccessWith("priority: 10", "priority: 20")}, []string{refused("dev-access", "changes its match or priority")}},
-		{"a role taken out of the agent's roles", []Item{gainRole("engineering", "    kind: business\n")},
-			[]string{refused("dev-access", "takes dev out of your roles so that the set no longer applies to you")}},
-		{"a gate changed", []Item{devAccessWith("timeoutSeconds: 120", "timeoutSeconds: 600")}, []string{refused("dev-access", "changes rule hold-push")}},
-		{"a gate removed", []Item{devAccessWith("    - id: no-delete\n      tools: [mcp.call]\n      toolNames: { deny: [delete_repo] }\n", "")},
-			[]string{refused("dev-access", "changes rule no-delete")}},
-		{"an allow rule added", []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: devAccess + "    - id: allow-shell\n      tools: [shell.exec]\n      effect: allow\n"}},
-			[]string{refused("dev-access", "adds or widens rule allow-shell")}},
-		{"a new set with an allow rule that binds the agent", []Item{{Kind: KindPolicySet, Name: "extra", Op: OpPut,
-			Doc: gainSet("extra", "{ roles: [dev] }", "    - id: allow-shell\n      tools: [shell.exec]\n      effect: allow\n")}},
-			[]string{refused("extra", "adds or widens rule allow-shell")}},
-		{"a gate added for a tool the deployment allows by default", []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: devAccess +
-			"    - id: hold-shell\n      tools: [shell.exec]\n      mode: approve\n      effect: allow\n      approve: { roles: [sec-approvers] }\n"}}, []string{}},
-		{"a deny added", []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: devAccess + "    - id: no-shell\n      tools: [shell.exec]\n      effect: deny\n"}}, []string{}},
-		{"reason text changed", []Item{devAccessWith("toolNames: { deny: [delete_repo] }\n", "toolNames: { deny: [delete_repo] }\n      reason: never delete\n")}, []string{}},
-		{"a new set with gates only", []Item{{Kind: KindPolicySet, Name: "extra", Op: OpPut,
-			Doc: gainSet("extra", "{ roles: [dev] }", "    - id: no-shell\n      tools: [shell.exec]\n      effect: deny\n")}}, []string{}},
-		{"a set that does not bind the agent", []Item{{Kind: KindPolicySet, Name: "readers-access", Op: OpPut,
-			Doc: gainSet("readers-access", "{ roles: [readers] }", "    - id: allow-shell\n      tools: [shell.exec]\n      effect: allow\n")}}, []string{}},
+		{"the agent will hold the role the set binds", removeReadersAccess, withReadersAccess(map[string][]RoleWindow{ciBot.Username: {{Role: "readers", From: inHours(24)}}}),
+			[]string{guardLoosened("readers-access", "removes it")}, []string{guardRefusal("readers-access", "removes it")}},
+		{"another user will hold the role the set binds", removeReadersAccess, withReadersAccess(map[string][]RoleWindow{"erin": {{Role: "readers", From: inHours(24)}}}), nil, nil},
+		{"a role the set binds removed while the agent holds no other", []Item{{Kind: KindRole, Name: "team-a", Op: OpRemove}}, gapWorld(false), outOfGate, outOfGateDirect},
+		{"a role the set binds removed before another it binds starts", []Item{{Kind: KindRole, Name: "team-a", Op: OpRemove}}, gapWorld(true), outOfGate, outOfGateDirect},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			w := gainWorld()
-			v := Check(w, agentDraftOf(w, tc.items...), CheckInput{Proposer: ciBot, Now: checkNow})
-			got := findingLines(v.Refused)
-			if got == nil {
-				got = []string{}
+			tc.live(&w)
+			d := agentDraftOf(w, tc.items...)
+			v := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow})
+			if len(v.Refused) > 0 {
+				t.Fatalf("refused: %q", findingLines(v.Refused))
 			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("Refused\n got %q\nwant %q", got, tc.want)
+			if got := only(riskLines(v.Risks), codeAgentGuardrail); !sameLines(got, tc.risks) {
+				t.Errorf("Risks\n got %q\nwant %q", got, tc.risks)
 			}
-			for _, f := range v.Refused {
-				if f.Code == codeAgentGuardrail && strings.HasPrefix(f.Sentence, "dev-access") && f.Fix != fix {
-					t.Errorf("Fix = %q, want %q", f.Fix, fix)
-				}
+			direct := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow, Direct: true})
+			if got := findingLines(direct.Refused); !sameLines(got, tc.direct) {
+				t.Errorf("Refused on a direct route\n got %q\nwant %q", got, tc.direct)
 			}
 		})
 	}
@@ -528,24 +573,48 @@ func TestGuardrailRisks(t *testing.T) {
 }
 
 // TestAgentOwnReach pins agent.own-reach: an agent's draft may narrow what
-// its roles reach, and may not widen it.
+// its roles reach, and may not widen it at any instant the agent's roles
+// change. A role the agent will hold counts once its assignment starts,
+// directly or through a business role that implies it, and a role whose
+// assignment ends no longer lends its reach after that end.
 func TestAgentOwnReach(t *testing.T) {
 	t.Parallel()
 	tickets := gainRole("jira-tickets", "    kind: application\n    server: jira\n    bindings:\n        - app: jira\n          tools: [create_issue]\n")
+	readersEvery := gainRole("readers", "    kind: application\n    bindings:\n        - app: github\n          tools: ['*']\n")
+	readersWidened := []string{"agent.own-reach App/github This draft would let you run delete_repo and push_files on github with no approval, which widens your own reach. An agent's draft may not."}
 	cases := []struct {
 		name  string
 		items []Item
+		live  func(*World)
 		want  []string
 	}{
-		{"a role the agent holds reaches a new tool", []Item{tickets, gainRole("engineering", "    kind: business\n    implies: [dev, jira-tickets]\n")}, []string{
+		{"a role the agent holds reaches a new tool", []Item{tickets, gainRole("engineering", "    kind: business\n    implies: [dev, jira-tickets]\n")}, nil, []string{
 			"agent.own-reach App/jira This draft would let you run create_issue on jira with no approval, which widens your own reach. An agent's draft may not."}},
-		{"a role the agent does not hold may widen", []Item{tickets, gainRole("readers", "    kind: application\n    bindings:\n        - app: github\n          tools: ['*']\n")}, []string{}},
-		{"a role the agent holds may narrow", []Item{gainRole("dev", "    kind: application\n    bindings:\n        - app: github\n          tools: [get_me]\n")}, []string{}},
+		{"a role the agent does not hold may widen", []Item{tickets, readersEvery}, nil, []string{}},
+		{"a role the agent holds may narrow", []Item{gainRole("dev", "    kind: application\n    bindings:\n        - app: github\n          tools: [get_me]\n")}, nil, []string{}},
+		{"a role the agent will hold reaches new tools", []Item{readersEvery}, ciBotHolds(RoleWindow{Role: "readers", From: inHours(24)}), readersWidened},
+		{"a business role the agent will hold implies a role that reaches new tools", []Item{readersEvery}, func(w *World) {
+			ciBotHolds(RoleWindow{Role: "engineering", From: inHours(24)})(w)
+			w.Implies["engineering"] = []string{"readers"}
+		}, readersWidened},
+		{"a role the agent will hold may be removed", []Item{{Kind: KindRole, Name: "readers", Op: OpRemove}}, ciBotHolds(RoleWindow{Role: "readers", From: inHours(24)}), []string{}},
+		{"a role the agent will hold and the draft leaves alone", []Item{tickets}, ciBotHolds(RoleWindow{Role: "readers", From: inHours(24)}), []string{}},
+		{"a role that starts after a wider role ends", []Item{readersEvery},
+			ciBotHolds(RoleWindow{Role: "engineering", To: inHours(1)}, RoleWindow{Role: "readers", From: inHours(2)}), readersWidened},
+		{"a role with no end widened to the reach of a role that ends", []Item{readersEvery},
+			ciBotHolds(RoleWindow{Role: "engineering", To: inHours(1)}, RoleWindow{Role: "readers"}), readersWidened},
+		{"a role that ends and starts again reads once", []Item{readersEvery},
+			ciBotHolds(RoleWindow{Role: "readers", From: inHours(-1), To: inHours(1)}, RoleWindow{Role: "readers", From: inHours(2)}), readersWidened},
+		{"a role that starts beside a wider role with no end", []Item{readersEvery},
+			ciBotHolds(RoleWindow{Role: "engineering"}, RoleWindow{Role: "readers", From: inHours(24)}), []string{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, refusalsOnly := range []bool{false, true} {
 				w := gainWorld()
+				if tc.live != nil {
+					tc.live(&w)
+				}
 				v := Check(w, agentDraftOf(w, tc.items...), CheckInput{Proposer: ciBot, Now: checkNow, RefusalsOnly: refusalsOnly})
 				got := findingLines(v.Refused)
 				if got == nil {
@@ -556,6 +625,110 @@ func TestAgentOwnReach(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestAgentOwnReachReadsTheCoversLine pins agent.own-reach on a server that
+// pins an object type: an agent whose role covers two repos may not make it
+// reach every repo or another repo, through its covers line, a re-pin, a
+// moved argument, an unpin, or a glob that meets a tool the pinned block
+// names. It may name a covered repo by its new name, narrow its role, keep
+// the pinned block as it is, and widen a role it does not hold.
+func TestAgentOwnReachReadsTheCoversLine(t *testing.T) {
+	t.Parallel()
+	line := func(words string) []string { return []string{"agent.own-reach App/ghapp " + ownReach(words)} }
+	every, more := line("reach pr_create on every repo of ghapp"), line("reach pr_create on repos of ghapp that your roles do not cover today")
+	two := "{objects: [Strazahq/pay-api, Strazahq/pay-web]}"
+	payments := func(tools, covers string) []Item {
+		return []Item{coversRole("ghapp-write-payments", "ghapp", tools, covers)}
+	}
+	held := func(tools ...string) func(World) {
+		return func(w World) {
+			acc := w.Access["ghapp-write-payments"]
+			acc.Tools = tools
+			w.Access["ghapp-write-payments"] = acc
+		}
+	}
+	unlisted := func(w World) {
+		app := w.Apps["ghapp"]
+		app.Offered = nil
+		w.Apps["ghapp"] = app
+	}
+	cases := []struct {
+		name  string
+		items []Item
+		pin   func(*PinnedObjects) *PinnedObjects
+		live  func(World)
+		want  []string
+	}{
+		{"widen to every repo", payments("[pr_create]", "every"), nil, nil, every},
+		{"add a third repo", payments("[pr_create]", "{objects: [Strazahq/pay-api, Strazahq/pay-web, Strazahq/site]}"), nil, nil, more},
+		{"an App put that re-pins pr_create to none", nil, func(p *PinnedObjects) *PinnedObjects { p.Reach["pr_create"] = reachNone; return p }, nil, every},
+		{"an App put that moves pr_create's argument", nil, func(p *PinnedObjects) *PinnedObjects { p.Argument["pr_create"] = "head"; return p }, nil, every},
+		{"an unpin", nil, func(*PinnedObjects) *PinnedObjects { return nil }, nil, every},
+		{"a new tool on every repo reads as the new tool", payments("[issue_create, pr_create]", "every"), nil, nil,
+			append(line("run issue_create on ghapp with no approval"), every...)},
+		{"widen to every repo on a server nobody has listed", payments("[pr_create]", "every"), nil, unlisted, every},
+		{"a glob row and an App put that pins pr_merge none", nil, func(p *PinnedObjects) *PinnedObjects { p.Reach["pr_merge"] = reachNone; return p },
+			held("pr_*"), line("reach pr_merge on every repo of ghapp")},
+		{"a glob row and an App put that pins pr_merge as an argument tool", nil, func(p *PinnedObjects) *PinnedObjects {
+			p.Reach["pr_merge"], p.Argument["pr_merge"] = reachArgument, "repo"
+			return p
+		}, held("pr_*"), line("reach pr_merge on repos of ghapp that your roles do not cover today")},
+		{"a row that comes to match a tool the live block pins none", payments("['pr_*']", two), nil, func(w World) { w.Apps["ghapp"].Pinned.Reach["pr_merge"] = reachNone },
+			line("reach pr_merge on every repo of ghapp")},
+		{"a star row widened to every repo on a server nobody has listed", payments("['*']", "every"), nil, func(w World) { held("*")(w); unlisted(w) },
+			line("reach tools matching * on every repo of ghapp")},
+		{"the same repo by a new name", payments("[pr_create]", "{objects: [Strazahq/pay-api-v2, Strazahq/pay-web]}"), nil, func(w World) {
+			w.Apps["ghapp"].Pinned.IDs = map[string]string{"Strazahq/pay-api-v2": "101", "Strazahq/pay-web": "102", "Strazahq/site": "103"}
+		}, []string{}},
+		{"narrow to one repo", payments("[pr_create]", "{objects: [Strazahq/pay-api]}"), nil, nil, []string{}},
+		{"an App put that keeps the pinned block", nil, func(p *PinnedObjects) *PinnedObjects { return p }, nil, []string{}},
+		{"widen a role the agent does not hold", []Item{coversRole("ghapp-legacy", "ghapp", "[get_me, pr_create]", "every")}, nil, nil, []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, refusalsOnly := range []bool{false, true} {
+				w := coversWorld()
+				w.Holders["ghapp-write-payments"] = []Holder{ciBot}
+				w.Apps["ghapp"].Pinned.Argument = map[string]string{"pr_create": "repo", "issue_create": "repo"}
+				acc := w.Access["ghapp-write-payments"]
+				acc.Covers = &Scope{Objects: []ObjectRef{{Value: "Strazahq/pay-api", ID: "101"}, {Value: "Strazahq/pay-web", ID: "102"}}}
+				w.Access["ghapp-write-payments"] = acc
+				if tc.live != nil {
+					tc.live(w)
+				}
+				items, in := tc.items, CheckInput{Proposer: ciBot, Now: checkNow, RefusalsOnly: refusalsOnly}
+				if tc.pin != nil {
+					app := w.Apps["ghapp"]
+					next := *app.Pinned
+					next.Reach, next.Argument = maps.Clone(next.Reach), maps.Clone(next.Argument)
+					app.Manifest, app.Pinned = `{"after":true}`, tc.pin(&next)
+					items, in.Apps = append([]Item{appPut("ghapp")}, items...), map[string]App{"ghapp": app}
+				}
+				v := Check(w, agentDraftOf(w, items...), in)
+				got := findingLines(v.Refused)
+				if got == nil {
+					got = []string{}
+				}
+				if !reflect.DeepEqual(got, tc.want) {
+					t.Errorf("RefusalsOnly %v: Refused\n got %q\nwant %q", refusalsOnly, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestReachKeySeesTheArgument pins that two pinned blocks whose argument
+// tool reads the object from another argument differ for who gains.
+func TestReachKeySeesTheArgument(t *testing.T) {
+	t.Parallel()
+	pin := func(argument string) *PinnedObjects {
+		return &PinnedObjects{Type: "repo", Reach: map[string]string{"pr_create": reachArgument, "get_me": reachNone}, Argument: map[string]string{"pr_create": argument}}
+	}
+	repo, again, head := pin("repo").reachKey(), pin("repo").reachKey(), pin("head").reachKey()
+	if repo != again || repo == head {
+		t.Errorf("reachKey %q, again %q, head %q", repo, again, head)
 	}
 }
 

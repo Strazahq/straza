@@ -72,7 +72,9 @@ func TestRefusalStatus(t *testing.T) {
 // role, prefix and manifest facts, owned roles by their server's name, an
 // owned role and a row whose server is gone, the edges, the access rows,
 // the direct holders in force with agents and service accounts marked and
-// their typology, accountable sponsor and devices, a holder count for every
+// their typology, accountable sponsor and devices, the window of every
+// assignment that starts or ends later, nothing of an assignment that
+// ended, a holder count for every
 // role equal to the store's own count, the knowledge packs of a role, the
 // providers of the config, the local tool default, the push lane as the
 // approval service reads it, and docker on this host.
@@ -110,19 +112,24 @@ func TestReadWorld(t *testing.T) {
 	team, err := app.store.Roles().Create(ctx, store.Role{Name: "w-team"})
 	must(err)
 	must(app.store.Roles().AddImplication(ctx, team.ID, dev.ID))
-	assign := func(name, userType, sponsor, roleID string, until *time.Time) store.User {
+	assign := func(name, userType, sponsor, roleID string, from, until *time.Time) store.User {
 		u, err := app.store.Users().Create(ctx, store.User{Username: name, Email: name + "@x.io", UserType: userType, Sponsor: sponsor,
 			AgencyMode: map[string]string{store.UserTypeAgent: "autonomous"}[userType]})
 		must(err)
-		_, err = app.store.Roles().Assign(ctx, store.RoleAssignment{SubjectKind: store.SubjectUser, SubjectID: u.ID, RoleID: roleID, ValidTo: until})
+		_, err = app.store.Roles().Assign(ctx, store.RoleAssignment{SubjectKind: store.SubjectUser, SubjectID: u.ID, RoleID: roleID, ValidFrom: from, ValidTo: until})
 		must(err)
 		return u
 	}
-	ended := time.Now().Add(-time.Hour)
-	ann := assign("w-ann", store.UserTypeHuman, "", team.ID, nil)
-	assign("w-bot", store.UserTypeAgent, "w-ann", dev.ID, nil)
-	assign("w-svc", store.UserTypeService, "w-bot", dev.ID, nil)
-	assign("w-cal", store.UserTypeHuman, "", readers.ID, &ended)
+	ended, started, ends, starts := time.Now().Add(-time.Hour), time.Now(), time.Now().Add(time.Hour), time.Now().Add(24*time.Hour)
+	ann := assign("w-ann", store.UserTypeHuman, "", team.ID, nil, nil)
+	assign("w-bot", store.UserTypeAgent, "w-ann", dev.ID, nil, nil)
+	assign("w-svc", store.UserTypeService, "w-bot", dev.ID, nil, nil)
+	assign("w-cal", store.UserTypeHuman, "", readers.ID, nil, &ended)
+	later, err := app.store.Roles().Create(ctx, store.Role{Name: "w-later"})
+	must(err)
+	assign("w-fay", store.UserTypeHuman, "", later.ID, &starts, nil)
+	assign("w-gus", store.UserTypeHuman, "", later.ID, &started, nil)
+	assign("w-hal", store.UserTypeHuman, "", later.ID, nil, &ends)
 	_, err = app.store.Approvers().InsertDevice(ctx, store.ApproverDevice{UserID: ann.ID, Name: "phone", Platform: "android", PublicKey: "key"})
 	must(err)
 	pack, err := app.store.Packs().Create(ctx, store.KnowledgePack{Name: "w-pack", Version: "1", Content: "use gofmt", Checksum: "c"})
@@ -182,10 +189,29 @@ func TestReadWorld(t *testing.T) {
 			{Username: "w-svc", Agent: true, UserType: store.UserTypeService},
 		}},
 		{"w-remote-readers", nil},
+		{"w-later", []drafts.Holder{{Username: "w-gus", UserType: store.UserTypeHuman}, {Username: "w-hal", UserType: store.UserTypeHuman}}},
 	}
 	for _, tc := range holderCases {
 		if got := w.Holders[tc.role]; !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("direct holders of %s = %+v, want %+v", tc.role, got, tc.want)
+		}
+	}
+	sameInstant := func(got, want *time.Time) bool {
+		return (got == nil) == (want == nil) && (got == nil || got.Sub(*want).Abs() < time.Millisecond)
+	}
+	windowCases := []struct {
+		user     string
+		from, to *time.Time
+	}{
+		{"w-fay", &starts, nil},
+		{"w-hal", nil, &ends},
+	}
+	if len(w.Windows) != len(windowCases) {
+		t.Errorf("windows = %+v, want rows of w-fay and w-hal alone, none for w-gus, whose row has no end, or w-cal, whose row ended", w.Windows)
+	}
+	for _, tc := range windowCases {
+		if got := w.Windows[tc.user]; len(got) != 1 || got[0].Role != "w-later" || !sameInstant(got[0].From, tc.from) || !sameInstant(got[0].To, tc.to) {
+			t.Errorf("windows of %s = %+v, want one row of w-later from %v to %v", tc.user, got, tc.from, tc.to)
 		}
 	}
 	for name, ro := range w.Roles {

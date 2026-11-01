@@ -140,7 +140,7 @@ type hookLayer struct{ layer, path string }
 // tries the dead commands on every governed event.
 func wiredLayers(harness string) []hookLayer {
 	var out []hookLayer
-	if p, err := managedHookPath(harness); err == nil && fileMentionsStraz(p) {
+	if p, err := ManagedHookPath(harness); err == nil && fileMentionsStraz(p) {
 		out = append(out, hookLayer{"managed", p})
 	}
 	if p, err := SettingsPath(harness); err == nil && fileMentionsStraz(p) {
@@ -159,7 +159,7 @@ func wiredLayer(harness string) (layer, path string) {
 	return layers[0].layer, layers[0].path
 }
 
-// The managed hook file doctor reads resolves through managedHookPath
+// The managed hook file doctor reads resolves through ManagedHookPath
 // (managed.go): the SAME resolver install writes through and attestation
 // hashes through, so the three surfaces cannot diverge by construction.
 

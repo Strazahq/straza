@@ -5,8 +5,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/strazahq/straza/internal/policy"
 )
 
 // TestTranscriptDeltaNeverCapturesToolInputs probes whether a drafting tool's
@@ -16,9 +14,9 @@ import (
 // then a user record whose tool_result block carries the answer. The codex
 // rows follow the rollout file: a function_call payload and its output beside
 // the assistant messages. The reader keeps only text and output_text blocks,
-// so the document and the token in it never reach captureContent, whichever
-// mode is in force. The last row is the positive control: the same token in a
-// text block is stored under verbatim and masked under redact, so a reader
+// so the document and the token in it never reach the Straza background
+// service, which applies the capture mode. The last row is the positive
+// control: the same token in a text block does reach the delta, so a reader
 // that started to keep tool inputs would fail this test.
 func TestTranscriptDeltaNeverCapturesToolInputs(t *testing.T) {
 	const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
@@ -31,7 +29,6 @@ func TestTranscriptDeltaNeverCapturesToolInputs(t *testing.T) {
 		name  string
 		lines []any
 		want  string // the delta the reader must produce
-		leak  bool   // the token sits in a text block: verbatim keeps it, redact masks it
 	}{
 		{
 			name: "claude-jsonl draft_submit call beside the assistant's text",
@@ -73,7 +70,6 @@ func TestTranscriptDeltaNeverCapturesToolInputs(t *testing.T) {
 					map[string]any{"type": "text", "text": "the token is " + token}}}},
 			},
 			want: "the token is " + token,
-			leak: true,
 		},
 	} {
 		store, path := captureFixture(t)
@@ -91,28 +87,6 @@ func TestTranscriptDeltaNeverCapturesToolInputs(t *testing.T) {
 		}
 		if delta != tc.want {
 			t.Errorf("%s: delta = %q, want %q", tc.name, delta, tc.want)
-		}
-		for _, mode := range []string{policy.CaptureModeVerbatim, policy.CaptureModeRedact} {
-			stored, _, _ := captureContent(delta, mode)
-			for _, s := range []string{"kind: App", "documents", "draft_submit"} {
-				if strings.Contains(stored, s) {
-					t.Errorf("%s, mode %s: the stored turn carries %q from the tool input: %q", tc.name, mode, s, stored)
-				}
-			}
-			switch {
-			case tc.leak && mode == policy.CaptureModeVerbatim:
-				if !strings.Contains(stored, token) {
-					t.Errorf("%s, mode %s: the positive control lost the token: %q", tc.name, mode, stored)
-				}
-			case tc.leak:
-				if strings.Contains(stored, token) || !strings.Contains(stored, redactedMark) {
-					t.Errorf("%s, mode %s: the token survived redaction: %q", tc.name, mode, stored)
-				}
-			default:
-				if strings.Contains(stored, token) {
-					t.Errorf("%s, mode %s: the stored turn carries the token: %q", tc.name, mode, stored)
-				}
-			}
 		}
 	}
 }

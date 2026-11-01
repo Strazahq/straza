@@ -220,17 +220,17 @@ export function Overview() {
   const [follow, setFollow] = React.useState<boolean>(readFollow);
   const [live, setLive] = React.useState<LiveState>(LIVE_START);
   const [hour, setHour] = React.useState<HourState | null>(null);
-  const [strazad, setStrazad] = React.useState("");
+  const [serverCommit, setServerCommit] = React.useState("");
   const [tick, setTick] = React.useState(0);
   const [tab, setTab] = React.useState("summary");
   const systemTrigger = React.useRef<HTMLButtonElement>(null);
   const openSystem = () => { setTab("system"); systemTrigger.current?.focus(); };
 
-  // The version the sidebar prints is the one a box's client build is
-  // measured against, so it is read from the same place, once.
+  // A box's client build is measured against the commit of the build the
+  // sidebar prints, so it is read from the same place, once.
   React.useEffect(() => {
     let alive = true;
-    void readVersion().then((v) => { if (alive && v) setStrazad(v.version); });
+    void readVersion().then((v) => { if (alive && v) setServerCommit(v.commit); });
     return () => { alive = false; };
   }, []);
 
@@ -444,7 +444,7 @@ export function Overview() {
               {stale(SUBJECT_CONFIG) && <p className="overview-stale">Configuration last read {stale(SUBJECT_CONFIG)}. Values may be outdated.</p>}
               <Posture rows={rows} denied={state.configDenied} expanded />
               {stale(SUBJECT_SESSIONS) && <p className="overview-stale">Sessions last read {stale(SUBJECT_SESSIONS)}. Values may be outdated.</p>}
-              <SignedIn rows={state.sessions} denied={state.sessionsDenied} strazad={strazad} expanded />
+              <SignedIn rows={state.sessions} denied={state.sessionsDenied} serverCommit={serverCommit} expanded />
             </div> : tab === "activity" ? <div className="overview-activity">
               {state.chain.word === "broken" && attention}
               <Changed rows={state.changed} denied={state.auditDenied} stale={stale(SUBJECT_CHANGES)} />

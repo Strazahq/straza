@@ -28,14 +28,14 @@ func recordHookBoundary(args []string, err error) {
 }
 
 // logsCmd prints the client error log: the local, size-capped record of hook,
-// spool, and drain failures (event name + error + timestamp, never payload
-// content). One canonical form, no flags, no env:
+// capture and MCP bridge failures (event name + error + timestamp, never
+// payload content). One canonical form, no flags, no env:
 // the log is bounded by rotation, so the whole thing is always printable, and
 // filtering is the shell's job. An empty log is a healthy answer, not an error.
 func logsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logs",
-		Short: "Print the client error log (hook/spool/drain failures; never payload content)",
+		Short: "Print the client error log (hook, capture and MCP bridge failures; never payload content)",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			store, err := agentguard.OpenStore()

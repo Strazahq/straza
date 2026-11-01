@@ -3,12 +3,15 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/strazahq/straza/internal/approval"
 	"github.com/strazahq/straza/internal/authn"
+	"github.com/strazahq/straza/internal/manager"
 	"github.com/strazahq/straza/internal/policy"
 )
 
@@ -19,7 +22,7 @@ import (
 // and handleToolCall dispatches them here, not to the manager.
 //
 //   - approval_request(action, reason) opens (or dedupes onto) a TICKET for a
-//     DESCRIBED concrete call, evaluated against the caller's own snapshot.
+//     DESCRIBED concrete call, decided as the real call would be decided.
 //     The fingerprint is computed server-side (EventKey, the same key the PEP
 //     binds), never from the client: free text is rejected, no advisory mode.
 //   - approval_status(ref) reads one ticket the caller owns.
@@ -44,6 +47,24 @@ const (
 	// agent cannot pin a gateway goroutine for the day-scale ticketTTL.
 	awaitDefaultSeconds = 30
 	awaitMaxSeconds     = 60
+
+	// nativeObjectArgsMsg refuses a described call that names no object on
+	// a tool whose pinned reach is argument: the tool, the server, the type
+	// and the argument.
+	nativeObjectArgsMsg = "Straza: %[1]s on %[2]s works on one %[3]s per call, and an approval covers one %[3]s, so approval_request needs action.args with the %[3]s in the argument %[4]s. Add action.args with the exact arguments of the later call, then request again"
+
+	// nativeUnknownToolMsg refuses a described MCP call whose tool this
+	// session cannot call: no access row admits it, its server is missing
+	// or stopped, or the session's policy hides it. The four read the same,
+	// so the answer cannot tell them apart. It names the server and the
+	// tool, each cut by cutUnresolved.
+	nativeUnknownToolMsg = "Straza: %s:%s is not a tool this session can call, so no approval can be requested for it. Check the app and tool name, or ask an admin for access to the tool."
+
+	// nativeMCPNotConcreteMsg refuses an mcp.call action that does not name
+	// its server and tool, and nativeMCPNoCommandMsg one that also carries a
+	// command or argv.
+	nativeMCPNotConcreteMsg = "Straza: approval_request needs action.app and action.tool_name for an mcp.call: the server and the tool of the later real call. Add both, then request again."
+	nativeMCPNoCommandMsg   = "Straza: an mcp.call action takes no action.command or action.argv, because the later real call is an MCP tool call and carries neither. Remove them, then request again."
 )
 
 // nativeTool is a built-in catalog entry: a bare (un-namespaced) tool the
@@ -169,10 +190,10 @@ func (a *App) appendNativeCatalog(c *sessionCatalog, roles []string) {
 // callNativeStraza dispatches a governed tools/call for the built-in app to its
 // native handler. The PDP has already allowed the call (and any approve gate has
 // resolved) upstream in handleToolCall; this only originates the tool result.
-func (a *App) callNativeStraza(ctx context.Context, tool string, args json.RawMessage, claims authn.Claims, sub policy.Subject) *mcp.CallToolResult {
+// approval_request is not dispatched here: the gateway runs its two steps,
+// describeApprovalRequest and openApprovalTicket, on either side of its record.
+func (a *App) callNativeStraza(ctx context.Context, tool string, args json.RawMessage, claims authn.Claims) *mcp.CallToolResult {
 	switch tool {
-	case nativeToolApprovalRequest:
-		return a.nativeApprovalRequest(ctx, args, claims, sub)
 	case nativeToolApprovalStatus:
 		return a.nativeApprovalStatus(ctx, args, claims)
 	case nativeToolApprovalAwait:
@@ -196,24 +217,29 @@ type nativeAction struct {
 	Argv     []string        `json:"argv"`
 }
 
-// event builds the policy Event for the described call, or (_, false) when the
-// action is not a CONCRETE call, meaning a tool plus at least one identity
-// field (app+tool_name for mcp.call, or a command/argv). Free-text or a bare
-// tool is rejected, never opened as an advisory ticket.
-func (act nativeAction) event() (policy.Event, bool) {
-	if act.Tool == "" {
-		return policy.Event{}, false
-	}
-	concrete := (act.App != "" && act.ToolName != "") || act.Command != "" || len(act.Argv) > 0
-	if !concrete {
-		return policy.Event{}, false
+// event builds the policy Event for the described call, or the sentence that
+// refuses an action that is not a CONCRETE call, meaning a tool plus at least
+// one identity field (app+tool_name for mcp.call, or a command/argv). An
+// mcp.call needs app and tool_name, because its decision resolves the tool by
+// both, and takes no command or argv, because the key would bind them and a
+// real MCP call never carries them: such a request could only reopen a
+// denied call under a key no real call matches. Free-text or a bare tool is
+// rejected, never opened as an advisory ticket.
+func (act nativeAction) event() (policy.Event, string) {
+	switch {
+	case act.Tool == policy.ToolMCPCall && (act.App == "" || act.ToolName == ""):
+		return policy.Event{}, nativeMCPNotConcreteMsg
+	case act.Tool == policy.ToolMCPCall && (act.Command != "" || act.Argv != nil):
+		return policy.Event{}, nativeMCPNoCommandMsg
+	case act.Tool == "" || ((act.App == "" || act.ToolName == "") && act.Command == "" && len(act.Argv) == 0):
+		return policy.Event{}, "Straza: a concrete call is required. approval_request needs action.tool plus an app+tool_name, a command, or argv (free-text requests are rejected)"
 	}
 	ev := policy.Event{
 		Kind: policy.EventToolPre, Tool: act.Tool, App: act.App, ToolName: act.ToolName,
 		Command: act.Command, Argv: act.Argv, Args: act.Args,
 	}
 	tagInterpreter(&ev) // recompute the interpreter tag server-side, as the PEP does
-	return ev, true
+	return ev, ""
 }
 
 type nativeApprovalRequestArgs struct {
@@ -221,51 +247,63 @@ type nativeApprovalRequestArgs struct {
 	Reason string       `json:"reason"`
 }
 
-// nativeApprovalRequest opens (or dedupes onto) an approval ticket for a
-// described concrete call. It resolves the caller's identity from the session
-// subject, evaluates the CURRENT policy snapshot for the described call, and
-// requires the gating rule to be class=ticket: a plain allow needs no approval,
-// a plain deny is refused, and a hold rule is refused (holds are interactive).
-// The fingerprint (EventKey) is computed server-side and the ticket rides the
-// same dedupe path the PEP uses, so a later real call binds to it. Fail closed.
-func (a *App) nativeApprovalRequest(ctx context.Context, args json.RawMessage, claims authn.Claims, sub policy.Subject) *mcp.CallToolResult {
+// describeApprovalRequest is the first step of approval_request, which
+// runs before the call's record is written: it reads the described call,
+// decides it as its real call would be decided, and answers the ticket
+// request to open, or the sentence that refuses the call and opens nothing.
+// A described MCP call meets the gateway's own decision (decideDescribed).
+// The gating rule must be class=ticket: a plain allow needs no approval, a
+// plain deny is refused, and a hold rule is refused (holds are interactive).
+// A ticket a person denied whose window is still open refuses the same call,
+// as the real call's lane does, so approval_request cannot reopen it. A
+// ticket nobody could decide is refused with the cause and the fix, and a
+// database that cannot be read for either lookup is refused with the
+// sentence that says to retry, so neither record says allow. The fingerprint
+// (EventKey) is computed server-side, so a later real call binds to the
+// ticket. Fail closed.
+func (a *App) describeApprovalRequest(ctx context.Context, args json.RawMessage, claims authn.Claims, sub policy.Subject) (ticket approval.RequestInput, refusal string) {
 	var in nativeApprovalRequestArgs
 	if err := json.Unmarshal(args, &in); err != nil {
-		return nativeToolError("Straza: approval_request arguments are not valid JSON")
+		return ticket, "Straza: approval_request arguments are not valid JSON"
 	}
-	ev, ok := in.Action.event()
-	if !ok {
-		return nativeToolError("Straza: a concrete call is required. approval_request needs action.tool plus an app+tool_name, a command, or argv (free-text requests are rejected)")
+	ev, refusal := in.Action.event()
+	if refusal != "" {
+		return ticket, refusal
 	}
-
-	// A described drafting call carries the granted fact the gateway would
-	// give it, so a holder is not told that a call it may make is denied.
-	if ev.Tool == policy.ToolMCPCall && draftingTool(gwTarget{app: ev.App, tool: ev.ToolName}) {
-		ev.Granted = a.hasAccess(sub.Roles, ev.App, ev.ToolName)
-	}
-	d := a.snapshots.Current().Engine.Evaluate(ev, sub)
+	d, obj, refusal := a.decideDescribed(ctx, ev, claims, sub)
 	switch {
+	case refusal != "":
+		return ticket, refusal
 	case d.Effect != policy.EffectAllow:
-		reason := d.Reason
+		reason := a.describedReason(ev, sub, d)
 		if reason == "" {
 			reason = "no rule allows it"
 		}
-		return nativeToolError("Straza: denied by policy. The described call would be denied (" + reason + "); an approval ticket cannot override a deny")
+		return ticket, "Straza: denied by policy. The described call would be denied (" + reason + "); an approval ticket cannot override a deny"
 	case d.Approve == nil:
-		return nativeToolError("Straza: no approval needed. The described call is already allowed by policy; just make the call")
+		return ticket, "Straza: no approval needed. The described call is already allowed by policy; just make the call"
 	case d.Approve.Class != policy.ClassTicket:
-		return nativeToolError("Straza: that action is gated by an interactive approval (a hold), not a ticket. A hold is decided in-line while the real call blocks. Make the real call and a person is prompted; approval_request opens day-scale tickets only")
+		return ticket, "Straza: that action is gated by an interactive approval (a hold), not a ticket. A hold is decided in-line while the real call blocks. Make the real call and a person is prompted; approval_request opens day-scale tickets only"
 	}
 
 	// Fingerprint v2 taxonomy: under a call-bound rule (the default), a
 	// described mcp action MUST carry the exact args: a tool-scoped key here
 	// would never match the later real call, a footgun the model cannot see.
 	if ev.Tool == policy.ToolMCPCall && ev.Args == nil && d.Approve.Binding != policy.ApproveBindingTool {
-		return nativeToolError("Straza: this rule's approval covers the exact call. approval_request needs action.args (the exact tool arguments the later real call will use); without them the approved ticket could never be consumed")
+		return ticket, "Straza: this rule's approval covers the exact call. approval_request needs action.args (the exact tool arguments the later real call will use); without them the approved ticket could never be consumed"
 	}
-	key, err := approval.EventKeyV2(ev, d.Approve.Binding)
+	key, err := approval.EventKeyObject(ev, d.Approve.Binding, obj)
 	if err != nil {
-		return nativeToolError("Straza: " + fingerprintUnavailableReason(err))
+		return ticket, "Straza: " + fingerprintUnavailableReason(err)
+	}
+	// Terminal deny-final, as resolveTicketGateway and resolveTicketHook
+	// check it: a ticket that opened here and was approved would let the
+	// real call run, because a grant is used before the denial is read.
+	if rec, denied, err := a.approval.DeniedTicketWithinWindow(ctx, claims.Subject, d.RuleID, key); err != nil {
+		a.failClosed(ctx, "native", d.RuleID, err)
+		return ticket, approvalStoreDownReason
+	} else if denied {
+		return ticket, ticketDeniedFinalReason(rec)
 	}
 
 	username := claims.Subject
@@ -279,7 +317,7 @@ func (a *App) nativeApprovalRequest(ctx context.Context, args json.RawMessage, c
 	if ev.Tool == policy.ToolMCPCall && ev.Args != nil {
 		prev = a.callPreview(ev.App, ev.ToolName, ev.Args)
 	}
-	rec, err := a.approval.Request(ctx, approval.RequestInput{
+	req := approval.RequestInput{
 		SessionID: claims.Session, UserID: claims.Subject, Username: username,
 		RuleID: d.RuleID, SetName: d.SetName,
 		ArgvHash: key, Lane: "gateway",
@@ -287,9 +325,58 @@ func (a *App) nativeApprovalRequest(ctx context.Context, args json.RawMessage, c
 		ArgsPreview: prev.preview, ArgsTruncated: prev.truncated, ArgsBytes: prev.bytes,
 		Spec:    *d.Approve,
 		Confirm: d.Confirm,
-	})
-	if err != nil {
+	}
+	if err := a.approval.Routable(ctx, req); err != nil {
 		a.failClosed(ctx, "native", d.RuleID, err)
+		var un *approval.UnroutableError
+		if errors.As(err, &un) {
+			return ticket, a.approveRequestDenyReason(err)
+		}
+		return ticket, approvalStoreDownReason
+	}
+	return req, ""
+}
+
+// decideDescribed decides the call ev that an approval_request of the
+// session claims, held by sub, describes, and answers the decision, the
+// object an approval key binds, or the sentence that refuses the call. A
+// described MCP call meets every step of its real call's decision through
+// the engine and the schema check (decideCall in describe mode), so the
+// tool must be one this session can call. A described command meets the
+// engine alone, because the hook lane's own steps already ran for it.
+func (a *App) decideDescribed(ctx context.Context, ev policy.Event, claims authn.Claims, sub policy.Subject) (policy.Decision, approval.Object, string) {
+	if ev.Tool != policy.ToolMCPCall {
+		return a.snapshots.Current().Engine.Evaluate(ev, sub), approval.Object{}, ""
+	}
+	v := a.decideCall(ctx, gatewayCall{claims: claims, sub: sub, name: ev.App + "__" + ev.ToolName, args: ev.Args,
+		describe: &describeMode{app: ev.App, tool: ev.ToolName}})
+	if v.refusal == "" {
+		return v.decision, approvalObject(v.gate), ""
+	}
+	// The gate refuses a call that names no object on a tool whose reach is
+	// argument, and approval_request then says where the object goes.
+	if v.gate.Refusal != "" && ev.Args == nil {
+		if oc, ok := a.manager.ObjectsFor(ev.App, ev.ToolName); ok && oc.Reach.Reach == manager.ReachArgument {
+			return policy.Decision{}, approval.Object{}, fmt.Sprintf(nativeObjectArgsMsg, ev.ToolName, ev.App, oc.Type, oc.Reach.Argument)
+		}
+	}
+	return policy.Decision{}, approval.Object{}, v.refusal
+}
+
+// openApprovalTicket is the second step of approval_request, which runs
+// once the call's record is queued: it opens the ticket in, or joins the
+// one already pending for the same call, and answers its ref, state and
+// decision window. A service error fails closed.
+func (a *App) openApprovalTicket(ctx context.Context, in approval.RequestInput) *mcp.CallToolResult {
+	rec, err := a.approval.Request(ctx, in)
+	if err != nil {
+		// describeApprovalRequest checked the route before the record, so an
+		// error here comes at write time: the insert failed, the store
+		// faulted after the check, the sponsor changed in between, or the
+		// pending ticket the check found expired or was decided in between.
+		// The record already says allow, so the failClosed Error line, or the
+		// unroutable counter for a route that changed, is the trail.
+		a.failClosed(ctx, "native", in.RuleID, err)
 		return nativeToolError(a.approveRequestDenyReason(err))
 	}
 	return nativeToolOK(map[string]any{

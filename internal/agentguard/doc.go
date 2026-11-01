@@ -1,16 +1,16 @@
-// Package agentguard is the client kit: everything that runs on the operator's
-// or the agent's machine beside a harness (Claude Code, Codex, Gemini CLI, the
-// python SDKs) and keeps it inside policy. It is one package by design, because
-// the hook, the MCP proxy, the daemon and the doctor share state and config, so
-// the concerns live in file prefixes rather than sub-packages.
+// Package agentguard is the client kit's thin client: everything that runs
+// beside a harness (Claude Code, Codex, Gemini CLI, the python SDKs) as the
+// person or agent who runs it. It holds no key and no token: sessions,
+// decisions and the audit spool live in `straza service` (the service
+// sub-package), reached over the local API (localapi). The user's straza
+// home keeps only the trace setting, the journal, the error log, the trace
+// log and the capture watermarks.
 //
-//   - Decisions: hook.go, flows.go, normalize.go, localpdp.go, adapter.go,
-//     exec.go, mcpproxy.go, mcpproxy_redial.go.
-//   - Session: client.go, enroll.go, state.go, headless.go, daemon.go,
-//     heartbeat.go, pushedge.go.
+//   - Thin clients: hook.go, flows.go, normalize.go, adapter.go, exec.go,
+//     mcpproxy*.go, enroll.go, serviceclient.go, capture.go, state.go.
+//   - The strazad client the service uses: client.go, spool/, trace/.
 //   - Install: install*.go, managed*.go, render.go, codextrust.go,
-//     geminitrust.go, drain_spawn*.go, managed_unix.go, managed_windows.go.
-//   - Diagnostics: doctor*.go, errorlog.go, tracelog.go, conformance.go,
-//     capture.go, spoolwrite.go. The trace writer and readers live in the
-//     trace sub-package, and the audit buffer lives in the spool sub-package.
+//     geminitrust.go.
+//   - Diagnostics: doctor*.go, errorlog.go, tracelog.go, journal.go,
+//     conformance.go, coverage.go.
 package agentguard

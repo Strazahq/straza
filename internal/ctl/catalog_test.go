@@ -16,7 +16,7 @@ func TestCatalogPreviewWire(t *testing.T) {
 	rec := &wireRecorder{}
 	srv := httptest.NewServer(http.HandlerFunc(rec.handle))
 	t.Cleanup(srv.Close)
-	c := loggedInClient(t, srv.URL)
+	c := tokenClient(t, srv.URL)
 	ctx := context.Background()
 
 	// url.Values.Encode sorts keys, so app < role < user is canonical; values
@@ -170,10 +170,68 @@ func TestCatalogPreviewErrorSurfaces(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"at least one of role or user is required"}`))
 	}))
 	t.Cleanup(srv.Close)
-	c := loggedInClient(t, srv.URL)
+	c := tokenClient(t, srv.URL)
 
 	_, err := c.CatalogPreview(context.Background(), nil, "", "")
 	if err == nil || err.Error() != "at least one of role or user is required" {
 		t.Fatalf("err = %v, want the server's 400 message surfaced verbatim", err)
+	}
+}
+
+// TestRenderCatalogPreviewObject pins the object sentence after the hint on
+// a tool of a server that pins an object type: which repos the subject's
+// roles reach through the tool, or that the repo check refuses every call.
+// A row with no object member reads as before.
+func TestRenderCatalogPreviewObject(t *testing.T) {
+	p := CatalogPreview{
+		Subject: CatalogSubject{Roles: []string{"ghapp-write"}},
+		Entries: []CatalogEntry{
+			{App: "ghapp", Tool: "pr_create", Status: "visible", Hint: "has access, no policy gates it",
+				Object: &CatalogObject{Type: "repo", Reach: "argument", Covers: "some"}},
+			{App: "ghapp", Tool: "repo_search", Status: "visible", Hint: "has access, no policy gates it",
+				Object: &CatalogObject{Type: "repo", Reach: "all", Covers: "every"}},
+			{App: "ghapp", Tool: "repo_create", Status: "visible", Hint: "has access, no policy gates it",
+				Object: &CatalogObject{Type: "repo", Reach: "all", Covers: "none"}},
+			{App: "ghapp", Tool: "get_me", Status: "visible", Hint: "has access, no policy gates it"},
+		},
+	}
+	var out strings.Builder
+	if err := RenderCatalogPreview(&out, p); err != nil {
+		t.Fatalf("RenderCatalogPreview: %v", err)
+	}
+	reasons := map[string]string{}
+	for _, line := range strings.Split(out.String(), "\n") {
+		f := strings.Fields(line)
+		if len(f) > 3 && f[0] == "ghapp" {
+			reasons[f[1]] = strings.Join(f[3:], " ")
+		}
+	}
+	want := map[string]string{
+		"pr_create":   "has access, no policy gates it. It reaches each repo a role names, and no other.",
+		"repo_search": "has access, no policy gates it. It reaches every repo through a role on every repo.",
+		"repo_create": "has access, no policy gates it. The repo check refuses every call to it under these roles. A tool that reaches every repo needs a role on every repo, and a role with no covers line on this server needs one.",
+		"get_me":      "has access, no policy gates it",
+	}
+	for tool, w := range want {
+		if reasons[tool] != w {
+			t.Errorf("%s reason = %q, want %q", tool, reasons[tool], w)
+		}
+	}
+}
+
+// TestCatalogPreviewObjectWire pins the object member as the client decodes
+// it from the preview answer.
+func TestCatalogPreviewObjectWire(t *testing.T) {
+	rec := &wireRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(rec.handle))
+	t.Cleanup(srv.Close)
+	c := tokenClient(t, srv.URL)
+	rec.script(`{"subject":{"user":"","roles":["ghapp-write"]},"entries":[{"app":"ghapp","tool":"pr_create","status":"visible","reason":"","hint":"h","object":{"type":"repo","reach":"argument","covers":"some"}}]}`)
+	p, err := c.CatalogPreview(context.Background(), []string{"ghapp-write"}, "", "ghapp")
+	if err != nil {
+		t.Fatalf("CatalogPreview: %v", err)
+	}
+	if len(p.Entries) != 1 || p.Entries[0].Object == nil || *p.Entries[0].Object != (CatalogObject{Type: "repo", Reach: "argument", Covers: "some"}) {
+		t.Errorf("entries = %+v", p.Entries)
 	}
 }

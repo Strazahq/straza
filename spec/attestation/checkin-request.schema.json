@@ -2,18 +2,32 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://straza.dev/attestation/v1beta1/checkin-request.schema.json",
   "title": "Straza check-in request (v1beta1)",
-  "description": "POST /v1/checkin body. Exactly one of id_token (fresh login), device_token (enrolled device starting a session), or session_token (refresh) is required. v1beta1 (2026-09-09): client added, the calling build's version and commit, recorded on the session. v1beta1: id stabilized, no wire changes from v1alpha3. v1alpha3: device_token added, the long-lived enroll credential; its device binding is authoritative, so device_id is ignored alongside it. v1alpha2: attestation.platform added; managed level verified against the expected-hash registry (SPEC.md).",
+  "description": "POST /v1/checkin body. Exactly one credential lane: id_token (fresh login), device_token (a device credential, which the server refuses since 2026-11-01), session_token (refresh), or the key lane, device_id plus counter with no token in the body, which the request's DPoP header proves (RFC 9449). v1beta1 (2026-11-01): strazactl no longer signs in, so a check-in under the harness name strazactl and a device_token on a human row are refused, and with the kit lane retired before, every device_token is refused. The shape is unchanged. v1beta1 (2026-10-31): harness.name, harness.version and client.version hold at most 256 bytes, and a longer one answers 400 before the server writes anything. v1beta1 (2026-10-21): the straza client's device_token lane is retired, so device_token is for the human clients' devices only, and an AI agent's id_token check-in may carry a DPoP proof. The shape is unchanged. v1beta1 (2026-10-20): counter and the key lane added. v1beta1 (2026-09-09): client added, the calling build's version and commit, recorded on the session. v1beta1: id stabilized, no wire changes from v1alpha3. v1alpha3: device_token added, the long-lived enroll credential; its device binding is authoritative, so device_id is ignored alongside it. v1alpha2: attestation.platform added; managed level verified against the expected-hash registry (SPEC.md).",
   "type": "object",
   "properties": {
     "id_token": { "type": "string", "minLength": 1 },
     "device_token": { "type": "string", "minLength": 1 },
     "session_token": { "type": "string", "minLength": 1 },
     "device_id": { "type": "string" },
+    "counter": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Key lane only: the check-in counter the device key holder keeps, higher than the last one the server accepted for the device. The request's DPoP proof signs it as ctr. A counter at or below that one, under a valid proof, means the key was copied, and the server revokes the device."
+    },
     "harness": {
       "type": "object",
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "version": { "type": "string" }
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "v1beta1 (2026-10-31): at most 256 bytes, or the check-in answers 400. The server counts bytes, and maxLength counts characters, so a name of multi-byte characters is refused sooner than the schema shows."
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "v1beta1 (2026-10-31): at most 256 bytes, or the check-in answers 400, counted in bytes as harness.name is."
+        }
       },
       "required": ["name"]
     },
@@ -37,15 +51,31 @@
       "type": "object",
       "description": "The straza client build making the check-in (additive, 2026-09-09): its version stamp and commit. Older clients omit it; the server records it on the session.",
       "properties": {
-        "version": { "type": "string" },
+        "version": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "v1beta1 (2026-10-31): at most 256 bytes, or the check-in answers 400, counted in bytes as harness.name is."
+        },
         "commit": { "type": "string" }
       }
     }
   },
   "required": ["harness", "attestation"],
   "oneOf": [
-    { "required": ["id_token"] },
-    { "required": ["device_token"] },
-    { "required": ["session_token"] }
+    { "required": ["id_token"], "not": { "required": ["counter"] } },
+    { "required": ["device_token"], "not": { "required": ["counter"] } },
+    { "required": ["session_token"], "not": { "required": ["counter"] } },
+    {
+      "description": "The key lane: the device enrolled with a key, and the request carries a DPoP header with a proof signed by that key (htm POST, htu the server's /v1/checkin, the server's nonce, ctr equal to counter, no ath). The body carries no token.",
+      "required": ["device_id", "counter"],
+      "properties": { "device_id": { "minLength": 1 } },
+      "not": {
+        "anyOf": [
+          { "required": ["id_token"] },
+          { "required": ["device_token"] },
+          { "required": ["session_token"] }
+        ]
+      }
+    }
   ]
 }

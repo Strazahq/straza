@@ -2,7 +2,7 @@
 title: strazactl roles list
 description: List roles
 pagetype: reference
-weight: 85
+weight: 81
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl roles list [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

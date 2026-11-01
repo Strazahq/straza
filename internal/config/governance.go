@@ -34,6 +34,51 @@ func AttestationRank(level string) int {
 	}
 }
 
+// Custody kinds of an enrolled machine key, ordered user < account. Kind
+// account is a key the Straza background service holds under its own OS
+// account, and kind user is a key kept in the person's own account.
+const (
+	CustodyUser    = "user"
+	CustodyAccount = "account"
+)
+
+// CustodyRank orders custody kinds for the governance.minCustody gate. Any
+// other kind, the empty one included, ranks below user, so a key row without
+// a known custody fails every setting (fail closed).
+func CustodyRank(kind string) int {
+	switch kind {
+	case CustodyUser:
+		return 1
+	case CustodyAccount:
+		return 2
+	default:
+		return 0
+	}
+}
+
+// Sign-in kinds of a person's key enrollment, ordered code < browser. Kind
+// browser is a sign-in in a browser on the enrolling machine whose ID token
+// names the enrolling key, and kind code is a sign-in code approved on any
+// device.
+const (
+	SignInCode    = "code"
+	SignInBrowser = "browser"
+)
+
+// SignInRank orders sign-in kinds for the governance.minSignIn gate. Any
+// other kind, the empty one included, ranks 0, below code, so a lane strazad
+// does not know fails every setting (fail closed).
+func SignInRank(kind string) int {
+	switch kind {
+	case SignInCode:
+		return 1
+	case SignInBrowser:
+		return 2
+	default:
+		return 0
+	}
+}
+
 // Governance holds the profile-differentiated enforcement knobs.
 type Governance struct {
 	// OfflineGraceTTL bounds how long a client may keep deciding from a valid
@@ -53,18 +98,39 @@ type Governance struct {
 	// hashes verify against the expected-hash registry; standalone
 	// default is "none".
 	MinAttestation string `yaml:"minAttestation"`
-	// DeviceTokenTTL is the lifetime of the enroll credential: the
-	// long-lived, device-bound token /v1/enroll returns so that enrolling is
-	// once per device, not once per ID-token lifetime. Revocable at any time
-	// via user disable or device revoke. Zero means the built-in default
-	// (720h / 30 days, authn.DefaultDeviceTokenTTL); negative fails boot.
+	// MinCustody is the lowest custody kind a person's machine key needs for
+	// its enrollment, its key check-ins and the refreshes of its sessions:
+	// "user" or "account", as the client reports it at enrollment. An
+	// agent's key carries no custody and is not checked. Enterprise default
+	// is "account", which needs the Straza background service to hold the
+	// key; standalone default is "user".
+	MinCustody string `yaml:"minCustody"`
+	// MinSignIn is the lowest sign-in kind a person's machine key needs for
+	// its enrollment, its key check-ins and the refreshes of its sessions:
+	// "code" or "browser", as strazad judged it at enrollment. A key enrolled
+	// before the kind was recorded counts as code. The enterprise default is
+	// "browser", and the standalone default is "code".
+	MinSignIn string `yaml:"minSignIn"`
+	// DeviceTokenTTL is the lifetime of the device credential that strazactl
+	// and older Straza clients received from /v1/enroll. strazad no longer
+	// issues one and refuses each one it issued, and a retiring signing key
+	// keeps verifying for this long so that such a credential still gets the
+	// sentence that says why. Zero means the built-in default (720h / 30
+	// days, authn.DefaultDeviceTokenTTL); negative fails boot.
 	DeviceTokenTTL time.Duration `yaml:"deviceTokenTTL"`
 	// SessionMaxLifetime is the longest a session row stays active from its
-	// start, refreshed or not. After it the janitor closes the row and the
-	// client starts a fresh session from its device credential without any
-	// human action, so it bounds how long a stolen session token stays
-	// useful. Zero means the default (12h); negative fails boot.
+	// start, refreshed or not. After it the janitor closes the row and a
+	// fresh session starts without any human action, so it bounds how long a
+	// stolen session token stays useful. The Straza background service
+	// starts the kit's sessions again through the key lane. Zero means the
+	// default (12h); negative fails boot.
 	SessionMaxLifetime time.Duration `yaml:"sessionMaxLifetime"`
+	// SignInMaxAge is how long a key enrollment lasts from the person's last
+	// IdP sign-in on that machine. It is absolute, use never renews it, and
+	// it applies to key enrollments only: a key check-in or the refresh of a
+	// key-bound session past it is refused until the person enrolls again.
+	// Zero means the default (168h); negative fails boot.
+	SignInMaxAge time.Duration `yaml:"signInMaxAge"`
 	// CaptureRetention bounds the conversation-turns read model: the janitor
 	// purges turns older than this. Deliberately SHORTER than anything
 	// governing the audit chain: transcripts are bulkier and more sensitive.
@@ -99,35 +165,39 @@ type Governance struct {
 	Sentinel Sentinel `yaml:"sentinel"`
 }
 
-// reacquireSlack bounds how late a client presents its device credential
-// after its session's lifetime: the janitor's minute tick, one 300 s session
-// token life before the refused refresh, and the verifier's 30 s skew,
-// rounded up.
-const reacquireSlack = 7 * time.Minute
-
-// lifetimeNotice returns the boot warning for a device credential lifetime
-// too short for the session lifetime, or "" when the pair is safe. A client
-// presents its device credential only when a session starts and after the
-// janitor has closed one, and the credential is renewed at those check-ins
-// only when it is past half its life, so the worst case is a credential just
-// under half its life old at a session start: the half it has left must
-// cover the whole session lifetime plus reacquireSlack.
-func (c *Config) lifetimeNotice() string {
-	device := c.Governance.DeviceTokenTTL
-	if device == 0 {
-		device = 30 * 24 * time.Hour
+// defaultGovernance returns the governance defaults of profile. Enterprise
+// gets a literal of its own, so no standalone value carries over to it.
+func defaultGovernance(profile string) Governance {
+	if profile == ProfileEnterprise {
+		return Governance{
+			OfflineGraceTTL:          0,
+			LocalToolDefault:         EffectDeny,
+			AuditBackpressure:        BackpressureBlock,
+			MinAttestation:           AttestationManaged,
+			MinCustody:               CustodyAccount,
+			MinSignIn:                SignInBrowser,
+			DeviceTokenTTL:           30 * 24 * time.Hour,
+			SessionMaxLifetime:       12 * time.Hour,
+			SignInMaxAge:             168 * time.Hour,
+			AuditIngestBacklogLimit:  50_000,
+			AuditIngestPerSessionRPS: 5,
+			Sentinel:                 defaultSentinel(),
+		}
 	}
-	session := c.EffectiveSessionMaxLifetime()
-	least := 2 * (session + reacquireSlack)
-	if device >= least {
-		return ""
+	return Governance{
+		OfflineGraceTTL:          15 * time.Minute,
+		LocalToolDefault:         EffectAllow,
+		AuditBackpressure:        BackpressureDrop,
+		MinAttestation:           AttestationNone,
+		MinCustody:               CustodyUser,
+		MinSignIn:                SignInCode,
+		DeviceTokenTTL:           30 * 24 * time.Hour,
+		SessionMaxLifetime:       12 * time.Hour,
+		SignInMaxAge:             168 * time.Hour,
+		AuditIngestBacklogLimit:  50_000,
+		AuditIngestPerSessionRPS: 5,
+		Sentinel:                 defaultSentinel(),
 	}
-	return fmt.Sprintf("governance.deviceTokenTTL %s is shorter than twice governance.sessionMaxLifetime %s plus %s. "+
-		"A client presents its device credential only when a session starts and after the janitor has closed one, "+
-		"up to about seven minutes past the lifetime, and renews it only when it is past half its life at that moment, "+
-		"so a session that runs its full lifetime can end with an expired credential and a machine locked out until "+
-		"someone signs in on it again. Raise deviceTokenTTL to at least %s, or lower sessionMaxLifetime.",
-		device, session, reacquireSlack, least)
 }
 
 // validateBounds holds the governance numeric-bound checks Validate runs
@@ -140,6 +210,9 @@ func (g Governance) validateBounds() error {
 	}
 	if g.SessionMaxLifetime < 0 {
 		return fmt.Errorf("governance.sessionMaxLifetime must be a positive duration (e.g. 12h)")
+	}
+	if g.SignInMaxAge < 0 {
+		return fmt.Errorf("governance.signInMaxAge must be a positive duration, such as 168h for seven days")
 	}
 	if g.CaptureRetention < 0 {
 		return fmt.Errorf("governance.captureRetention must be a positive duration (e.g. 720h)")
@@ -172,6 +245,16 @@ func (g Governance) validateModes() error {
 		return fmt.Errorf("unknown governance.minAttestation %q: expected none|advisory|managed",
 			g.MinAttestation)
 	}
+	if CustodyRank(g.MinCustody) == 0 {
+		return fmt.Errorf("governance.minCustody must be %s or %s, not %q. Set %s to accept only machine keys the Straza "+
+			"background service holds, or %s to also accept a key kept in the person's own account",
+			CustodyAccount, CustodyUser, g.MinCustody, CustodyAccount, CustodyUser)
+	}
+	if SignInRank(g.MinSignIn) == 0 {
+		return fmt.Errorf("governance.minSignIn must be %s or %s, not %q. Set %s to accept only a sign-in in a browser on "+
+			"the machine that enrolls, or %s to also accept a sign-in code approved on another device",
+			SignInBrowser, SignInCode, g.MinSignIn, SignInBrowser, SignInCode)
+	}
 	return nil
 }
 
@@ -181,6 +264,8 @@ func (g Governance) validateModes() error {
 func applyEnvGovernance(cfg *Config, getenv func(string) string) {
 	set := envSet(getenv)
 	set("STRAZA_MIN_ATTESTATION", func(v string) { cfg.Governance.MinAttestation = v })
+	set("STRAZA_MIN_CUSTODY", func(v string) { cfg.Governance.MinCustody = v })
+	set("STRAZA_MIN_SIGN_IN", func(v string) { cfg.Governance.MinSignIn = v })
 	set("STRAZA_DEVICE_TOKEN_TTL", func(v string) {
 		// An unparseable value must fail boot loudly (Validate rejects the
 		// sentinel), never fall back silently to the previous credential TTL.
@@ -196,6 +281,13 @@ func applyEnvGovernance(cfg *Config, getenv func(string) string) {
 			d = -1 // Validate rejects the sentinel: fail boot, never fall back silently
 		}
 		cfg.Governance.SessionMaxLifetime = d
+	})
+	set("STRAZA_SIGN_IN_MAX_AGE", func(v string) {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			d = -1 // Validate rejects the sentinel: fail boot, never fall back silently
+		}
+		cfg.Governance.SignInMaxAge = d
 	})
 	set("STRAZA_CAPTURE_RETENTION", func(v string) {
 		d, err := time.ParseDuration(v)
@@ -232,4 +324,14 @@ func applyEnvGovernance(cfg *Config, getenv func(string) string) {
 		}
 		cfg.Governance.AuditIngestPerSessionRPS = f
 	})
+}
+
+// EffectiveSignInMaxAge returns governance.signInMaxAge with the built-in
+// default (168h) applied. Pointer receiver for the same reason as
+// EffectiveCaptureRetention in config.go.
+func (c *Config) EffectiveSignInMaxAge() time.Duration {
+	if c.Governance.SignInMaxAge == 0 {
+		return 168 * time.Hour
+	}
+	return c.Governance.SignInMaxAge
 }

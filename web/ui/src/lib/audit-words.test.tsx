@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Row, actionLabel, ceRow, rowLabel, csvOf, effectTone, effectWord, foldAdjacent, parseCE, shortType, typeMatches, whyOf } from "./audit-words";
+import { type Row, actionLabel, ceRow, objectOf, rowLabel, csvOf, effectTone, effectWord, foldAdjacent, parseCE, shortType, typeMatches, whyOf } from "./audit-words";
 import type { AuditRow } from "./api";
 
 // The readers of the Audit screen, read once here so the screen and its
@@ -228,7 +228,7 @@ const ACTIONS = [
   "nhi-key.set", "oauth.connect", "oauth.connect.refused", "attestation-hash.registered", "attestation-hash.removed",
   "user.killed", "user.reactivated", "user.lift.blocked",
   "session.start", "enroll", "renew", "breakglass.login", "approver-enroll", "approver-self-enroll-token", "approver-device-revoked",
-  "enroll-token.create", "approver.enroll", "approver.revoke",
+  "enroll-token.create", "enroll-token.refused", "approver.enroll", "approver.revoke",
   "token.connect", "oauth.disconnect", "connection.agents", "identity.created", "identity.updated", "identity.deactivated", "policy.updated",
   "revocation.session", "revocation.sessions", "revocation.user", "revocation.device", "revocation.lift",
 ];
@@ -248,6 +248,7 @@ describe("actionLabel", () => {
     ["user.create", "Created a user"],
     ["user.update", "Changed a user"],
     ["enroll-token.create", "Started enrolling an approver phone or browser"],
+    ["enroll-token.refused", "Refused enrolling an approver phone or browser for someone"],
     ["approver.enroll", "Enrolled an approver phone or browser"],
     ["approver.revoke", "Revoked an approver phone or browser with its user"],
     ["nhi-key.set", "Registered an AI agent's key"],
@@ -274,5 +275,26 @@ describe("rowLabel", () => {
     ["a revocation with no action", call("straza.revocation.session", { session: "s-1" }), "Revoked a session"],
   ])("reads %s", (_, row, want) => {
     expect(rowLabel(row)).toBe(want);
+  });
+});
+
+describe("the object a gateway record names", () => {
+  const call = (object: Record<string, unknown> | undefined, extra: Record<string, unknown> = {}) =>
+    rec(1, { type: "straza.audit.mcp", time: "2026-10-19T10:45:01Z", data: { app: "ghapp", toolName: "pr_create", effect: "allow", ...extra, ...(object ? { object } : {}) } });
+
+  it.each([
+    ["a listed repo after the tool", call({ type: "repo", reach: "argument", value: "Strazahq/pay-api", id: "9012332" }, { arguments: "{\"repo\":\"Strazahq/pay-api\"}" }), "ghapp.pr_create on Strazahq/pay-api · {\"repo\":\"Strazahq/pay-api\"}"],
+    ["a refused call on a repo the list does not hold", call({ type: "repo", reach: "argument", value: "Strazahq/old" }, { effect: "deny" }), "ghapp.pr_create on Strazahq/old"],
+    ["a call that names no repo as before", call({ type: "repo", reach: "credential" }), "ghapp.pr_create"],
+    ["a record from before the field as before", call(undefined), "ghapp.pr_create"],
+  ])("reads %s", (_, r, want) => {
+    expect(ceRow(r).what).toBe(want);
+  });
+
+  it("reads the type, the value, the id and a cut value's hash for the record sheet", () => {
+    expect(objectOf(parseCE(call({ type: "repo", reach: "argument", value: "Strazahq/pay-api", id: "9012332" }).ce))).toEqual({ type: "repo", value: "Strazahq/pay-api", id: "9012332", sha256: "" });
+    expect(objectOf(parseCE(call({ type: "repo", reach: "argument", value: "a".repeat(512), valueTruncated: true, valueSha256: "0f1e2d3c4b5a69788796a5b4c3d2e1f0" }).ce))).toEqual({ type: "repo", value: "a".repeat(512), id: "", sha256: "0f1e2d3c4b5a69788796a5b4c3d2e1f0" });
+    expect(objectOf(parseCE(call({ type: "repo", reach: "credential" }).ce))).toBeNull();
+    expect(objectOf(parseCE(call(undefined).ce))).toBeNull();
   });
 });

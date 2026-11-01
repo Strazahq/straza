@@ -76,13 +76,14 @@ The route label is the route pattern strazad matched, such as `GET /version`, `P
 |---|---|
 | `straza_pdp_decisions_total` | By `effect`. Decisions strazad makes itself, `allow` or `deny`. They come from `POST /v1/decide`, which a client calls for a rule that needs a person's approval or a server check, and from the MCP gateway. A hook that decides from its local snapshot does not count here. |
 | `straza_pdp_decision_seconds` | By `effect`. How long those decisions took, as a histogram from 20 microseconds to 100 milliseconds. |
-| `straza_failclosed_total` | By `lane`. Internal failures answered as a deny, with `hook` for `/v1/decide` and `gateway` for `/mcp`. A failed approval service, fingerprint or classifier counts, and so does a record the full audit queue refused under `block`. Policy denies and approval outcomes never count. |
+| `straza_failclosed_total` | By `lane`. Internal failures answered as a deny, with `hook` for `/v1/decide`, `gateway` for a call to an MCP server on `/mcp`, and `native` for Straza's own tools on `/mcp`, such as `straza__approval_request`. A failed approval service, fingerprint or classifier counts, and so does a record the full audit queue refused under `block`. Policy denies and approval outcomes never count. |
 | `straza_gateway_throttled_total` | By `app`. Tool calls the gateway refused because one session called one MCP server faster than the server's `straza.limits.rps` allows. A server whose manifest sets no rate has no limit. The drafting tools of the built-in `straza` server have their own limits: two calls a second for one session, and one submitted draft every ten seconds for one person. |
 | `straza_gateway_catalog_oversize_total` | Catalog builds with more tools than `apps.catalog.warnSize`, 100 by default. The warning in the log names the role. |
-| `straza_approvals_unroutable_total` | Approval requests denied at once because nobody could decide them: no approver role resolved to a person and no sponsor could answer. |
+| `straza_approvals_unroutable_total` | Approval requests denied at once because nobody could decide them: the rule names no approver role, and no person behind the requester can decide, such as for an agent with no sponsor or a disabled one. A rule whose approver role has no holder is not counted here, because its request still opens and waits. |
 | `straza_audit_lost_total` | Audit records strazad took in and could not confirm as written to the database. It starts at zero in each process. |
 | `straza_audit_dropped_total` | Audit records dropped because the in-memory audit queue was full, under `governance.auditBackpressure: drop-with-counter`. |
 | `straza_audit_refused_total` | Records a client uploaded that `POST /v1/audit/batch` refused, because the session they name is unknown, belongs to another user or device, or is past the cap of 1000 sessions in one upload. The client has deleted them. |
+| `straza_outbox_set_aside_total` | Rows of the database outbox that the relay set aside, because the event bus refused them as larger than its maximum message size, 1 MiB by default. Such a row stays in the outbox, and its record never reaches the chain or the sinks, while every later record is published. strazad cuts each record to 256 KiB when it writes it, so only an external NATS server whose `max_payload` is below 256 KiB, or a row written past strazad, counts here. It starts at zero in each process. |
 | `straza_sink_deadletter_total` | By `sink`. Deliveries a sink parked, because the receiver refused the event or a failure outlived its retries. Parked events are kept for a replay. |
 | `straza_sink_duplicates_total` | By `sink`. Deliveries the receiver answered with 409, which means it already held the event. |
 | `straza_sink_replayed_total` | By `sink`. Parked events that an operator's replay delivered and took off the parked list. |
@@ -101,9 +102,10 @@ Each row below is a condition that the metric's own help text calls an alert, or
 |---|---|
 | `straza_audit_lost_total` or `straza_audit_dropped_total` rises | A decision ran and its audit record never reached the chain. Read the strazad log for `audit record lost`, as [Doctor and logs]({{< relref "guides/operate/doctor-and-logs.md#read-the-server-log" >}}) explains, and look at the database. |
 | `straza_audit_refused_total` rises | A client's uploaded records were refused, and the log line is their only trace. Read the warn line that starts `audit batch:`, which names the session and the reason. |
+| `straza_outbox_set_aside_total` rises | A record can never be published, so it is missing from the chain and the sinks. Read the error line `outbox row set aside`, which names the row's id, subject and size and the bus's `max_payload`. When `max_payload` is below 262144, raise it on the NATS server to its 1 MiB default, then run `UPDATE events_outbox SET attempts = 0 WHERE attempts = -1` so the relay publishes the rows it set aside. Otherwise read the row in `events_outbox` and report the line to the Straza project. |
 | `straza_failclosed_total` rises | An internal failure turned a call into a deny. Find the error line `fail-closed: internal failure answered as a deny` and its `correlation_id`. |
 | `straza_http_errors_total` rises | strazad answered a request with a server-side failure. Each count has one error line in the log, with its `correlation_id` and route. |
-| `straza_approvals_unroutable_total` rises | An approval rule names approvers who resolve to nobody. Read the deny reason or the warn line, then give the approver role a holder or fix the sponsor. |
+| `straza_approvals_unroutable_total` rises | An approval rule that names no approver role found no person behind the requester who can decide. Read the deny reason or the warn line `approval unroutable; denied at request`, then set the agent's sponsor to an active person in your identity manager, or add an approver role to the rule. |
 | `straza_sink_deadletter_total` rises | A sink receiver refuses events or has been down past its retries. Run `strazactl sinks list`, fix the receiver, then `strazactl sinks replay <sink>`, as [Sinks and SIEM]({{< relref "guides/audit/sinks-and-siem.md" >}}) shows. |
 | `straza_sink_duplicates_total` grows steadily | The receiver is not removing duplicates by event id. Check the receiver's pipeline. One 409 after a redelivery is normal. |
 | `straza_gateway_throttled_total` keeps climbing | An agent calls one MCP server in a tight loop. Find the session in the gateway's deny records, which name the rate. |
@@ -111,7 +113,7 @@ Each row below is a condition that the metric's own help text calls an alert, or
 | `straza_data_disk_free_bytes` runs low | The data directory's disk is filling. Free or grow the disk. In the enterprise profile the database disk belongs to Postgres, so watch it there too. |
 
 
-These rules turn four of the rows into Prometheus alerts. The windows and the disk threshold are examples, so set them to your own on-call habits.
+These rules turn five of the rows into Prometheus alerts. The windows and the disk threshold are examples, so set them to your own on-call habits.
 
 ```yaml
 groups:
@@ -121,6 +123,10 @@ groups:
         expr: increase(straza_audit_lost_total[10m]) > 0 or increase(straza_audit_dropped_total[10m]) > 0
         annotations:
           summary: strazad lost or dropped audit records. Read its log for "audit record lost".
+      - alert: StrazaOutboxRowSetAside
+        expr: increase(straza_outbox_set_aside_total[10m]) > 0
+        annotations:
+          summary: A record can never be published. Read the strazad log for "outbox row set aside".
       - alert: StrazaFailClosed
         expr: increase(straza_failclosed_total[10m]) > 0
         annotations:

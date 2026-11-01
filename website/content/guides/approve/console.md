@@ -1,12 +1,12 @@
 ---
 title: Approve in the console
-description: You approve a held call from the console or with strazactl, and the agent's retry runs on your decision.
+description: You approve a held call from the console, and the agent's retry runs on your decision. strazactl lists the requests and reads the decisions.
 pagetype: how-to
 weight: 10
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: The CLI form on a throwaway standalone server in a Linux container, where the admin decided a hook hold and a ticket that dana's machine raised and revoked the session that asked. The console form and the gateway retry were walked in headless Chromium against the demo stack on v1.1.0 on 2026-09-28 and not again, because deciding there writes to the shared stack. That walk's held call was the agent joe's gateway call to demo-tools get-sum, and the denied one his get-env ticket
+  platform: The CLI form on a throwaway standalone server in a Linux container, where the admin decided a hook hold and a ticket that dana's machine raised and revoked the session that asked. Those decisions came from strazactl, which no longer decides. The console form and the gateway retry were walked in headless Chromium against the demo stack on v1.1.0 on 2026-09-28 and not again, because deciding there writes to the shared stack. That walk's held call was the agent joe's gateway call to demo-tools get-sum, and the denied one his get-env ticket. The console's browser sign-in was written from the code on 2026-10-22 and not walked
   date: 2026-10-06
 applies_to: both
 keywords: console approve hold retry
@@ -18,7 +18,7 @@ mode_default: console
 ---
 
 
-You decide the calls a policy holds for a person, as an admin, in the console or with `strazactl`. Every call a `mode: approve` rule holds waits on the Requests tab of the Approvals area, whatever other channels the deployment has. By the end of this page you have approved one, watched the agent's retry run, and read the record your decision left.
+You decide the calls a policy holds for a person, as an admin, in the console. `strazactl` lists the requests and reads the decisions, and it does not decide, because it runs on an admin API token, which is not a person, and a decision must name the person who made it. Every call a `mode: approve` rule holds waits on the Requests tab of the Approvals area, whatever other channels the deployment has. By the end of this page you have approved one, watched the agent's retry run, and read the record your decision left.
 
 A held gateway call runs the moment you approve, and a decision made here is final for that request. An unanswered request expires into a deny.
 
@@ -39,11 +39,11 @@ A person who is not an admin decides on the self-service page at `/self-service/
 
 {{< console >}}
 
-Open the console at your server's address, `http://localhost:8420/console/` on the demo stack, and press **Sign in with a code**. The line under the button says who the console is for: `Admin roles only. Anyone else lands on the self-service page, still signed in.`
+Open the console at your server's address, `http://localhost:8420/console/` on the demo stack, and press **Sign in**. The line above the button says where you sign in, such as `You sign in at your identity provider, localhost:8480, and come back to this page.` On a standalone host it names the server's own sign-in page instead. The line under the button says who the console is for: `Admin roles only. Anyone else lands on the self-service page, still signed in.`
 
-A code appears under `Enter this code at your identity provider:`. Press **Open the sign-in page**, sign in at your identity provider in the new tab, and grant the request. The card says `Waiting for authorization` until you do. On a standalone host the same button opens the server's own sign-in page.
+Your identity provider opens in the same tab. Sign in there, and the provider sends the tab back to the console, which says `Signing you in` and opens the page you started on. When the browser is still signed in at the provider, it can send you straight back without asking for your password.
 
-{{< shot name="signin-code" caption="Press Open the sign-in page. Your code is different." >}}
+{{< shot name="signin" caption="The console's sign-in card on a standalone server." >}}
 
 {{< see >}}The console lands on Overview, the first area in the sidebar.{{< /see >}}
 
@@ -53,15 +53,16 @@ Your session token lives in this tab only, so a closed tab means a fresh sign-in
 
 {{< cli >}}
 
+strazactl has no sign-in of its own. It runs on an admin API token that a person mints in the console under **Settings**, **API tokens**, as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows. For this page the token needs `approvals:read`, `audit:read` and `sessions:write`, and 30 days is the lifetime to pick. Hand it to strazactl in your terminal:
+
 {{< command terminal="Terminal" purpose="administration" >}}
 ```sh
-strazactl login --server http://localhost:8420
+export STRAZA_SERVER=http://localhost:8420
+read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
 ```
 {{< /command >}}
 
-strazactl prints an address to open and a code to confirm. Open the address, check that the code matches, and sign in.
-
-{{< see >}}`Logged in as`, followed by your name.{{< /see >}}
+`read -rs` reads the token you paste without showing it and keeps it out of the shell history. Never put the token where an agent runs as you, such as a shell profile or a file an agent can read, because whoever holds it acts with its scope until it expires or is revoked.
 {{< /cli >}}
 
 ## Find the request
@@ -171,26 +172,18 @@ Deny asks in the same shape. On the example's ticket row it asked `Deny get-env 
 
 {{< cli >}}
 
-{{< command terminal="Terminal" purpose="administration" >}}
-```sh
-strazactl approvals approve <id> --reason "The change window is open until 18:00"
-```
-{{< /command >}}
-
-{{< see >}}One line, `approved <id> (by <your name>)`.{{< /see >}}
-
-`strazactl approvals deny <id>` denies in the same shape and answers `denied <id> (by <your name>)`. A reason is optional and at most 500 bytes.
+strazactl does not decide. Decide in the console as its form of this step shows, on the self-service page, or on your phone. `strazactl approvals list` names the same places.
 {{< /cli >}}
 
 
-The console and `strazactl approvals` reach the same admin endpoint, so the record names the channel `console` either way.
+A decision in the console goes through the admin endpoint, and the record names the channel `console`.
 
 
 The server checks every decision when it arrives, whatever surface sent it:
 
 - The request must still be pending and inside its window.
 - You must be a decider it names at that moment. By default that is the person behind the agent, or a holder of one of the approver roles the rule names.
-- A decision on your own request counts only from an enrolled phone or browser, never from the console or `strazactl`, unless the operator sets `approval.unsignedOwnDecisions`. When approver roles carry your own request, the rule must also set `selfApproval`.
+- A decision on your own request counts only from an enrolled phone or browser, never from the console, unless the operator sets `approval.unsignedOwnDecisions`. When approver roles carry your own request, the rule must also set `selfApproval`.
 - An AI agent is refused whatever roles it was given.
 
 Repeating a verdict that already landed changes nothing. The opposite verdict on a resolved request is refused.

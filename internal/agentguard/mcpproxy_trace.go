@@ -6,6 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/agentguard/trace"
 )
 
@@ -58,13 +59,13 @@ func (p *mcpProxy) journalCall(tool string, out *mcp.CallToolResult, err error, 
 }
 
 // debugSession writes the "mcp.session" debug record for the governed session
-// the proxy runs under (id, snapshot, seconds left); nothing at journal level.
-func (p *mcpProxy) debugSession(ses Session) {
+// the proxy starts under (id, snapshot, reused); nothing at journal level.
+func (p *mcpProxy) debugSession(ses localapi.SessionAnswer) {
 	if !p.tr.DebugOn() {
 		return
 	}
 	p.tr.Debug("mcp.session",
 		slog.String("session", trace.Short(ses.SessionID, 64)),
 		slog.String("snapshot", trace.Short(ses.SnapshotID, 96)),
-		slog.Int64("expires_in_s", int64(time.Until(ses.ExpiresAt).Seconds())))
+		slog.Bool("reused", ses.Reused))
 }

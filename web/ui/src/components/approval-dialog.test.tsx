@@ -29,6 +29,8 @@ import {
   UNVERIFIED,
   WINDOW_CLOSED,
   approveDoes,
+  decideBody,
+  decideHelp,
   decidedWhere,
   denyDoes,
   doesLine,
@@ -38,6 +40,7 @@ import {
   sponsoredWords,
   whoLine,
 } from "@/lib/approval-words";
+import { absTime } from "@/lib/words";
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
@@ -351,6 +354,25 @@ describe("what a yes and a no do", () => {
     ["a denied ticket runs nothing", row({ class: "ticket" }), "Nothing runs. The agent is told who said no."],
   ])("%s", (_what, r, sentence) => {
     expect(denyDoes(r)).toBe(sentence);
+  });
+
+  it.each([
+    ["a denied hold refuses the one call, and the next try asks again", row({}),
+      "A denied hold refuses this one call, and the same call later raises a new request. The audit chain records who denied it and the reason."],
+    ["a denied ticket keeps the person's call refused in every session until its window closes", row({ class: "ticket", expiresAt: "2026-10-28T12:00:00Z" }),
+      "A denied ticket keeps the same call from joe-java-developer-agent refused in every session until " + absTime("2026-10-28T12:00:00Z") +
+      ", and no new request opens for it. The audit chain records who denied it and the reason."],
+  ])("the deny help: %s", (_what, r, sentence) => {
+    expect(decideHelp("deny", r)).toBe(sentence);
+  });
+
+  it.each([
+    ["a ticket names its requester, whose every session may use it", row({ class: "ticket" }),
+      "The next get-sum call by joe-java-developer-agent, in any of their sessions, within the grant window runs, once."],
+    ["a ticket of a requester with no name names the user id", row({ class: "ticket", username: "" }),
+      "The next get-sum call by u-joe, in any of their sessions, within the grant window runs, once."],
+  ])("the approve body: %s", (_what, r, sentence) => {
+    expect(decideBody("approve", r)).toBe(sentence);
   });
 
   it("joins both outcomes into the one line a screen reader hears", () => {

@@ -108,7 +108,7 @@ func TestEnterpriseBootstrapAdmin(t *testing.T) {
 	checkinAs := func(idToken string) (int, map[string]any) {
 		return postJSON(t, platformBase+"/v1/checkin", map[string]any{
 			"id_token":    idToken,
-			"harness":     map[string]string{"name": "strazactl", "version": "dev"},
+			"harness":     map[string]string{"name": "console", "version": "dev"},
 			"attestation": map[string]any{"managed": false, "hashes": map[string]string{}},
 		})
 	}

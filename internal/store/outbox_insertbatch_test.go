@@ -35,7 +35,7 @@ func TestOutboxInsertBatch(t *testing.T) {
 				t.Fatalf("InsertBatch = (%d, %v), want (%d, nil)", n, err, len(batch))
 			}
 			var got []string
-			if _, err := s.Outbox().DrainClaimed(ctx, false, 10, func(e OutboxEvent) error {
+			if _, _, err := s.Outbox().DrainClaimed(ctx, false, 10, func(e OutboxEvent) error {
 				got = append(got, e.CE)
 				return nil
 			}); err != nil {
@@ -63,7 +63,7 @@ func TestOutboxInsertBatch(t *testing.T) {
 			}
 			var first, last string
 			count := 0
-			if _, err := s.Outbox().DrainClaimed(ctx, false, total+10, func(e OutboxEvent) error {
+			if _, _, err := s.Outbox().DrainClaimed(ctx, false, total+10, func(e OutboxEvent) error {
 				if count == 0 {
 					first = e.CE
 				}

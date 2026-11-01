@@ -4,12 +4,14 @@ import "fmt"
 
 // AccessCreateRefusal refuses a new access row that gives role the tools on
 // the server named server, or answers nil. tools is the matcher list as the
-// row would store it. It reads w.Roles and w.Access, and w.HolderCounts of
+// row would store it, and every says the row covers every object where the
+// role's live row did not. It reads w.Roles and w.Access, w.HolderCounts of
 // role only when a server admin changes a role of the server, where a count
-// it lacks answers RefusalUnread. The role must exist and be an application
-// role, the server-owned rules hold, the role has no row yet, on this
-// server or another, and a server owns it.
-func AccessCreateRefusal(w World, st Standing, role, server string, tools []string) *Refusal {
+// it lacks answers RefusalUnread, and w.Apps for the server's pinned type.
+// The role must exist and be an application role, the server-owned rules
+// hold, the role has no row yet, on this server or another, and a server
+// owns it.
+func AccessCreateRefusal(w World, st Standing, role, server string, tools []string, every bool) *Refusal {
 	ro, ok := w.Roles[role]
 	if !ok {
 		return refused(RefusalMissing, UnknownRoleMessage(role))
@@ -18,6 +20,9 @@ func AccessCreateRefusal(w World, st Standing, role, server string, tools []stri
 		return refused(RefusalInvalid, msg)
 	}
 	if ref := ownedAccessRefusal(w, st, ro, server, tools, true); ref != nil {
+		return ref
+	}
+	if ref := coverEveryRefusal(w, st, role, server, every); ref != nil {
 		return ref
 	}
 	if ref := accessRowTaken(w, role, server); ref != nil {
@@ -65,7 +70,8 @@ func AccessRemoveRefusal(w World, st Standing, role, server string) *Refusal {
 // owned role reaches only its own server, a server admin gives and takes
 // access only for the roles their server owns, only a full standing gives
 // an owned role the every-tool matcher, and a server admin cannot change
-// the tools of a role anyone holds.
+// the tools of a role anyone holds, nor its covers line on a server that
+// pins an object type in w.
 func ownedAccessRefusal(w World, st Standing, ro Role, server string, tools []string, create bool) *Refusal {
 	if create && ro.Owned && ro.Owner != server {
 		owner := "another server"
@@ -88,8 +94,12 @@ func ownedAccessRefusal(w World, st Standing, ro Role, server string, tools []st
 				"Straza did not count who holds %s, so it cannot tell whether its tools may change. Try again, and read the strazad log if it keeps failing.", ro.Name))
 		}
 		if n > 0 {
+			what := "Its tools"
+			if p := w.Apps[server].Pinned; p != nil {
+				what = "Its tools and the " + p.Plural + " it covers"
+			}
 			return refused(RefusalConflict, fmt.Sprintf(
-				"the role %s has %s. Its tools change only by the global admin or by a new role", ro.Name, HoldersPhrase(n)))
+				"the role %s has %s. %s change only by the global admin or by a new role", ro.Name, HoldersPhrase(n), what))
 		}
 	}
 	return nil
@@ -115,4 +125,18 @@ func accessRowTaken(w World, role, server string) *Refusal {
 	return refused(RefusalConflict, fmt.Sprintf(
 		"%s already reaches %s. An application role reaches one server: make a role for %s and compose both from a business role.",
 		role, other, server))
+}
+
+// coverEveryRefusal refuses a server admin's row that makes role newly
+// cover every object of the pinned type of server while
+// admin.serverAdminsCoverEvery is off, as only a global admin gives a role
+// every tool, or answers nil. every says the row newly covers every object.
+func coverEveryRefusal(w World, st Standing, role, server string, every bool) *Refusal {
+	p := w.Apps[server].Pinned
+	if st.Full || !every || w.ServerAdminsCoverEvery || p == nil {
+		return nil
+	}
+	return refused(RefusalInvalid, fmt.Sprintf(
+		"On this deployment only a global admin may make %s cover every %s, including the %s %s lists later. Name the %s it covers, or ask a global admin.",
+		role, p.Type, p.Plural, server, p.Plural))
 }

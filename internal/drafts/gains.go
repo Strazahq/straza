@@ -117,11 +117,12 @@ func (c *check) changedRoles() map[string]bool {
 }
 
 // rowChanged reports whether role's access row differs between w and
-// after: added, removed, or naming another server or other tools.
+// after: added, removed, or naming another server, other tools or another
+// covers line by id.
 func rowChanged(w, after World, role string) bool {
 	rw, rowW := w.Access[role]
 	ra, rowA := after.Access[role]
-	return rowW != rowA || rw.Server != ra.Server || !slices.Equal(sortedCopy(rw.Tools), sortedCopy(ra.Tools))
+	return rowW != rowA || rw.Server != ra.Server || !slices.Equal(sortedCopy(rw.Tools), sortedCopy(ra.Tools)) || rw.Covers.Key() != ra.Covers.Key()
 }
 
 // changedSets names the sets whose text differs between live state and
@@ -142,13 +143,14 @@ func (c *check) changedSets() map[string]bool {
 }
 
 // changedApps names the servers whose existence, runtime, address,
-// exposure or tool list differs between the worlds.
+// exposure, tool list or pinned reach differs between the worlds.
 func (c *check) changedApps() map[string]bool {
 	out := map[string]bool{}
 	for _, name := range appNames(c.w, c.after) {
 		a, okA := c.w.Apps[name]
 		b, okB := c.after.Apps[name]
-		if okA != okB || !sameRuntime(a, b) || !slices.Equal(sortedCopy(a.Exposure), sortedCopy(b.Exposure)) || !slices.Equal(a.Offered, b.Offered) {
+		if okA != okB || !sameRuntime(a, b) || !slices.Equal(sortedCopy(a.Exposure), sortedCopy(b.Exposure)) || !slices.Equal(a.Offered, b.Offered) ||
+			a.Pinned.reachKey() != b.Pinned.reachKey() {
 			out[name] = true
 		}
 	}
@@ -211,7 +213,7 @@ func (g *gainer) reach(sub [2]policy.Subject) []reached {
 				if !matchAnyGlob(mw[s], t) {
 					continue
 				}
-				if p := g.eval(false, sub[0], s, t, true); outcomeRank[p.outcome] > outcomeRank[best.outcome] {
+				if p := g.eval(false, sub[0], s, t, objectGranted(c.w, sub[0].Roles, s, t)); outcomeRank[p.outcome] > outcomeRank[best.outcome] {
 					best = p
 				}
 			}
@@ -219,7 +221,7 @@ func (g *gainer) reach(sub [2]policy.Subject) []reached {
 			continue
 		}
 		for _, t := range unionSorted(bList, aList) {
-			cl := call{server: s, tool: t, granted: [2]bool{true, true}}
+			cl := call{server: s, tool: t, granted: [2]bool{objectGranted(c.w, sub[0].Roles, s, t), objectGranted(c.after, sub[1].Roles, s, t)}}
 			cl.reach[0] = reachOf(mw[s], bList, bKnown, t)
 			cl.reach[1] = reachOf(ma[s], aList, aKnown, t)
 			out = append(out, reached{cl, g.pair(cl, sub)})

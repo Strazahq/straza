@@ -136,11 +136,11 @@ type leavingSessions struct {
 	s *leavingStore
 }
 
-func (l leavingSessions) SetStatusIfChanged(ctx context.Context, id, status string) (bool, error) {
+func (l leavingSessions) Revoke(ctx context.Context, ids []string, reason string, event func([]string) (store.OutboxEvent, error)) ([]string, error) {
 	if err := l.s.run(ctx, beforeRevoke); err != nil {
-		return false, err
+		return nil, err
 	}
-	return l.SessionRepo.SetStatusIfChanged(ctx, id, status)
+	return l.SessionRepo.Revoke(ctx, ids, reason, event)
 }
 
 // testAppLeaving boots a full standalone strazad over a leavingStore that
@@ -346,13 +346,14 @@ func stallOnce() func(context.Context) error {
 // expired context, or a 5xx. Each answer leaves exactly one Error record
 // with its correlation id and one count in straza_http_errors_total. The
 // kill switch of a lock still completes after the bound, because its writes
-// run on afterCommit's context, and a stand-down finishes the session write
-// in flight and starts no other. It shrinks the bound, so it does not run in
-// parallel.
+// run on afterCommit's context, and a stand-down finishes the transaction in
+// flight, which ends the whole set of up to 1000 sessions, and starts no
+// other. It shrinks the bound, so it does not run in parallel.
 func TestAdminWriteOnAHungStore(t *testing.T) {
 	old := adminWriteBound
 	adminWriteBound = 300 * time.Millisecond
 	t.Cleanup(func() { adminWriteBound = old })
+	var boundSession string // the target of the single session revoke row
 	cases := []struct {
 		name   string
 		point  string
@@ -421,16 +422,16 @@ func TestAdminWriteOnAHungStore(t *testing.T) {
 						live++
 					}
 				}
-				if err != nil || len(rows) != 3 || live != 2 {
-					t.Errorf("ada's sessions: %d, %d of them active (%v), want 3 with one revoked", len(rows), live, err)
+				if err != nil || len(rows) != 3 || live != 0 {
+					t.Errorf("ada's sessions: %d, %d of them active (%v), want 3 all revoked", len(rows), live, err)
 				}
 				got := outboxDataFor(t, app, "straza.revocation.sessions")
 				var named []any
 				if len(got) == 1 {
 					named, _ = got[0]["sessions"].([]any)
 				}
-				if len(got) != 1 || len(named) != 1 {
-					t.Errorf("straza.revocation.sessions events: %v, want one naming the one revoked session", got)
+				if len(got) != 1 || len(named) != 3 {
+					t.Errorf("straza.revocation.sessions events: %v, want one naming the three revoked sessions", got)
 				}
 			},
 		},
@@ -441,6 +442,25 @@ func TestAdminWriteOnAHungStore(t *testing.T) {
 			body:   func(store.User, store.Role) string { return `{"status":"disabled"}` },
 			status: http.StatusInternalServerError,
 			words:  []string{"update failed", "deadline exceeded"},
+		},
+		{
+			name: "session revoke whose write answers after the bound", point: beforeRevoke,
+			answer: stallOnce(),
+			method: http.MethodPost, route: "POST /v1/admin/sessions/{id}/revoke",
+			path:   func(store.User) string { return "/v1/admin/sessions/" + boundSession + "/revoke" },
+			body:   func(store.User, store.Role) string { return "" },
+			status: http.StatusInternalServerError,
+			words:  []string{"was not revoked", "deadline exceeded"},
+			setup: func(t *testing.T, app *App, ada store.User) {
+				s, err := app.store.Sessions().Create(context.Background(), store.Session{UserID: ada.ID, HarnessName: "console"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				boundSession = s.ID
+			},
+			check: func(t *testing.T, app *App, ada store.User) {
+				requireRevokeWrites(t, app, revokeTarget{session: boundSession, user: ada}, 0, 0)
+			},
 		},
 	}
 	for _, tc := range cases {

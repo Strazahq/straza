@@ -7,7 +7,10 @@
 // the spec examples and conformance fixtures directly.
 package policy
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"slices"
+)
 
 // Canonical event kinds (spec/hook-profile).
 const (
@@ -201,6 +204,13 @@ type Rule struct {
 	Obligations  []string      `yaml:"obligations,omitempty" json:"obligations,omitempty"`
 }
 
+// NamesHarnessTools reports whether r names harness tools by their own
+// name (spec/policyset revision 26): it lists other in tools and sets
+// toolNames.
+func (r Rule) NamesHarnessTools() bool {
+	return r.ToolNames != nil && slices.Contains(r.Tools, ToolOther)
+}
+
 // ApproveSpec configures a `mode: approve` rule (spec/policyset §2.8): a
 // winning allow needs a human decision before the effect is final. Empty
 // Roles with no Deciders and no SelfApproval defaults to `deciders: [sponsor]`,
@@ -281,7 +291,7 @@ type Event struct {
 	Kind     string   `json:"kind" yaml:"kind"`
 	Tool     string   `json:"tool,omitempty" yaml:"tool"`
 	App      string   `json:"app,omitempty" yaml:"app"`           // mcp.call: app name
-	ToolName string   `json:"toolName,omitempty" yaml:"toolName"` // mcp.call: upstream tool
+	ToolName string   `json:"toolName,omitempty" yaml:"toolName"` // mcp.call: upstream tool; other: the harness's own name
 	Command  string   `json:"command,omitempty" yaml:"command"`   // shell.exec: raw command
 	Argv     []string `json:"argv,omitempty" yaml:"argv"`         // shell.exec: parsed argv (optional)
 	// Args carries the mcp.call tools/call arguments verbatim (spec/hook-profile
@@ -308,6 +318,11 @@ type Event struct {
 	// With no rule firing a granted mcp.call allows and an ungranted one
 	// denies; a rule that fires wins either way.
 	Granted bool `json:"granted,omitempty" yaml:"granted"`
+	// NativeTool is the harness's own name for a classified local tool, such
+	// as Bash for shell.exec. The decide request carries it beside the
+	// canonical event, which stays harness-neutral, and only a rule that
+	// names harness tools reads it (spec/policyset revision 26).
+	NativeTool string `json:"-" yaml:"nativeTool"`
 }
 
 // Subject is the session identity the evaluator decides for.

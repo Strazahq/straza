@@ -2,37 +2,21 @@ package ctl
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// viewClient builds a client logged into srv with a throwaway credentials
-// file, so tests never touch the developer's ~/.straza.
+// viewClient builds a client for srv on the test token.
 func viewClient(t *testing.T, srv *httptest.Server) *Client {
 	t.Helper()
-	c := NewClient(srv.URL)
-	c.CredsPath = filepath.Join(t.TempDir(), "credentials.json")
-	body := fmt.Sprintf(`{"server":%q,"session_token":"stok-1","session_id":"ses-1"}`, srv.URL)
-	if err := os.WriteFile(c.CredsPath, []byte(body), 0o600); err != nil {
-		t.Fatalf("write creds: %v", err)
-	}
-	return c
+	return tokenClient(t, srv.URL)
 }
 
-// viewMux is a fake strazad with the checkin lane every call walks (the
-// test token is opaque, so the client always refreshes first).
+// viewMux is a fake strazad that each test gives its routes.
 func viewMux() *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
-	return mux
+	return http.NewServeMux()
 }
 
 func TestPolicyByNameDecodesDetail(t *testing.T) {

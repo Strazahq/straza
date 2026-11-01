@@ -7,9 +7,10 @@ module github.com/strazahq/straza
 // hangs approval pushes. TestGoDirectiveRequires126 gates the directive.
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/golang-migrate/migrate/v4 v4.19.1
@@ -27,10 +28,10 @@ require (
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.60.0
+	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.60.1
-	rsc.io/qr v0.2.0
 )
 
 require (
@@ -41,7 +42,7 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/gobwas/glob v1.0.0 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
@@ -93,7 +94,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect

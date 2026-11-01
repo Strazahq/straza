@@ -3,6 +3,7 @@ package oidcflow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -232,14 +233,111 @@ func TestDiscoverErrors(t *testing.T) {
 			t.Fatalf("error %q does not say what to do next: %q", err, next)
 		}
 	})
-	t.Run("issuer without device grant is actionable", func(t *testing.T) {
+	t.Run("issuer without device grant is actionable on the code lane", func(t *testing.T) {
 		idp := idpServer(t, false)
 		wd := strazadServer(t, http.StatusOK, map[string]string{"issuer": idp.URL})
-		_, err := Discover(context.Background(), http.DefaultClient, wd.URL, "straza")
-		if err == nil || !strings.Contains(err.Error(), "device_authorization_endpoint") {
+		flow, err := Discover(context.Background(), http.DefaultClient, wd.URL, "straza")
+		if err != nil {
+			t.Fatalf("Discover needs the token endpoint alone, got %v", err)
+		}
+		if err := flow.CheckDevice(); err == nil || !strings.Contains(err.Error(), "device_authorization_endpoint") {
 			t.Fatalf("want device-grant hint, got %v", err)
 		}
 	})
+	t.Run("issuer without a token endpoint", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]string{"issuer": "x", "authorization_endpoint": "https://x/auth"})
+		})
+		bare := httptest.NewServer(mux)
+		t.Cleanup(bare.Close)
+		wd := strazadServer(t, http.StatusOK, map[string]string{"issuer": bare.URL})
+		_, err := Discover(context.Background(), http.DefaultClient, wd.URL, "straza")
+		if err == nil || !strings.Contains(err.Error(), "token_endpoint") {
+			t.Fatalf("want token_endpoint error, got %v", err)
+		}
+	})
+}
+
+// TestDiscoverBrowserFields pins what the browser lane reads: the
+// authorization endpoint from the provider, and loopback_port and
+// min_sign_in from idp.json, which an older server leaves out.
+func TestDiscoverBrowserFields(t *testing.T) {
+	mux := http.NewServeMux()
+	var idp *httptest.Server
+	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer": idp.URL, "token_endpoint": idp.URL + "/token", "authorization_endpoint": idp.URL + "/authorize",
+			"code_challenge_methods_supported": []string{"S256"},
+		})
+	})
+	idp = httptest.NewServer(mux)
+	t.Cleanup(idp.Close)
+	cases := []struct {
+		name     string
+		doc      string
+		wantPort int
+		wantMin  string
+		wantErr  string
+	}{
+		{name: "both fields", doc: `{"issuer":%q,"client_id":"straza","loopback_port":53682,"min_sign_in":"browser"}`, wantPort: 53682, wantMin: "browser"},
+		{name: "an older server", doc: `{"issuer":%q,"client_id":"straza"}`},
+		{name: "a port that is no port", doc: `{"issuer":%q,"loopback_port":70000,"min_sign_in":"code"}`,
+			wantErr: "the server's idp.json names loopback_port 70000, which is not a port number. Ask your Straza admin to check oidc.loopbackPort"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, tc.doc, idp.URL)
+			}))
+			t.Cleanup(wd.Close)
+			flow, err := Discover(context.Background(), http.DefaultClient, wd.URL, "straza")
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			if flow.AuthorizeURL != idp.URL+"/authorize" || flow.DeviceAuthURL != "" || flow.TokenURL != idp.URL+"/token" {
+				t.Errorf("flow = %+v", flow)
+			}
+			if flow.LoopbackPort != tc.wantPort || flow.MinSignIn != tc.wantMin {
+				t.Errorf("port %d, min %q, want %d, %q", flow.LoopbackPort, flow.MinSignIn, tc.wantPort, tc.wantMin)
+			}
+			if err := flow.CheckBrowser("straza enroll"); err != nil {
+				t.Errorf("CheckBrowser: %v", err)
+			}
+		})
+	}
+}
+
+// TestDiscoverIssuer pins the break-glass browser lane's discovery: the
+// server's own OIDC discovery, with idp.json never read.
+func TestDiscoverIssuer(t *testing.T) {
+	var idpReads int
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("GET /.well-known/straza/idp.json", func(w http.ResponseWriter, _ *http.Request) {
+		idpReads++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"issuer": srv.URL, "token_endpoint": srv.URL + "/oidc/token", "authorization_endpoint": srv.URL + "/oidc/authorize",
+		})
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	flow, err := DiscoverIssuer(context.Background(), http.DefaultClient, srv.URL+"/", "strazactl")
+	if err != nil {
+		t.Fatalf("DiscoverIssuer: %v", err)
+	}
+	if flow.AuthorizeURL != srv.URL+"/oidc/authorize" || flow.ClientID != "strazactl" || flow.Issuer != srv.URL || idpReads != 0 {
+		t.Fatalf("flow = %+v, idp.json reads %d", flow, idpReads)
+	}
 }
 
 // TestNHIOfferLazyResolve pins the split that keeps lane choice independent

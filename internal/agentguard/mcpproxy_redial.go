@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/strazahq/straza/internal/sameorigin"
 	"github.com/strazahq/straza/internal/version"
 )
 
@@ -42,18 +41,19 @@ const (
 
 // newGatewayDialer builds the gateway transport and returns the dial factory
 // that BOTH the boot path and revival use: one factory, so a revived session
-// is wired exactly like the boot one (same auth transport, same list_changed
-// handler). The transport carries no http.Client.Timeout, deliberately: a
-// client-level deadline also guillotines the standalone SSE stream (forcing a
-// silent stream cycle every period) and races the gateway's approval hold,
-// which may legally take the full decision window before answering. Connect
-// and TLS are bounded by DefaultTransport; per-call ceilings ride the
-// caller's context; dialBounded guards the handshake itself. endpoint is the
-// full gateway URL to dial (gatewayEndpoint).
-func newGatewayDialer(p *mcpProxy, store *Store, client *Client, harness, endpoint string) func(context.Context) (*mcp.ClientSession, error) {
+// is wired exactly like the boot one (same HTTP client, same list_changed
+// handler). httpClient reaches the Straza background service, which adds the
+// session token and its proof and streams the gateway's answer back. It
+// carries no Timeout, deliberately: a client-level deadline also
+// guillotines the standalone SSE stream (forcing a silent stream cycle every
+// period) and races the gateway's approval hold, which may legally take the
+// full decision window before answering. Per-call ceilings ride the caller's
+// context; dialBounded guards the handshake itself. endpoint is the service
+// route to dial (gatewayEndpoint).
+func newGatewayDialer(p *mcpProxy, httpClient *http.Client, endpoint string) func(context.Context) (*mcp.ClientSession, error) {
 	transport := &mcp.StreamableClientTransport{
 		Endpoint:   endpoint,
-		HTTPClient: gatewayHTTPClient(store, client, harness),
+		HTTPClient: httpClient,
 	}
 	return func(ctx context.Context) (*mcp.ClientSession, error) {
 		return mcp.NewClient(&mcp.Implementation{Name: "straza-mcp", Version: version.Version},
@@ -64,15 +64,6 @@ func newGatewayDialer(p *mcpProxy, store *Store, client *Client, harness, endpoi
 				},
 			}).Connect(ctx, transport, nil)
 	}
-}
-
-// gatewayHTTPClient is the gateway lane's HTTP client. sessionAuthTransport
-// puts the session token on every request it sends, so every redirect
-// answers to sameorigin.Check.
-func gatewayHTTPClient(store *Store, client *Client, harness string) *http.Client {
-	return &http.Client{CheckRedirect: sameorigin.Check, Transport: &sessionAuthTransport{
-		base: http.DefaultTransport, store: store, client: client, harness: harness,
-	}}
 }
 
 // session returns the live gateway client session.

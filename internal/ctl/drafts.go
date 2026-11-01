@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // DraftBody is the body of createDraft and checkDraft: one YAML stream of
@@ -28,17 +27,6 @@ type DraftUpdate struct {
 	Revision  int      `json:"revision"`
 	Documents []string `json:"documents"`
 	Note      *string  `json:"note,omitempty"`
-}
-
-// DraftPublish is the body of publishDraft: the revision and risk digest the
-// publisher reviewed, the key of every risk acknowledged, tick and typed, and
-// the text typed for each typed risk by key. Every key is a finding's own
-// key as the server answered it.
-type DraftPublish struct {
-	Revision   int               `json:"revision"`
-	RiskDigest string            `json:"risk_digest"`
-	Ticked     []string          `json:"ticked"`
-	Typed      map[string]string `json:"typed"`
 }
 
 // DraftItem is one object of a draft as the drafts routes answer it.
@@ -93,7 +81,9 @@ type DraftRevision struct {
 // cut for the reader, and a publish echoes it. Before and After are what the
 // line is about today and after publishing, in words that carry no value.
 // Document is the number of the sent document a refusal of reading it
-// names, counted across every text, and 0 when it names none.
+// names, counted across every text, and 0 when it names none. Group, on a
+// risk only, names the risks a publisher confirms together, and is empty on
+// a risk confirmed on its own and on every line of a server before 0.149.0.
 type DraftFinding struct {
 	Key      string `json:"key"`
 	Code     string `json:"code"`
@@ -105,7 +95,33 @@ type DraftFinding struct {
 	Before   string `json:"before"`
 	After    string `json:"after"`
 	Typed    string `json:"typed"`
+	Group    string `json:"group"`
 	Document int    `json:"document"`
+}
+
+// DraftObjectName is one object of a server: the id Straza resolved and the
+// value a role file writes for it.
+type DraftObjectName struct {
+	ID    string `json:"id"`
+	Value string `json:"value"`
+}
+
+// DraftCoverage is what one role reaches on one server that pins an object
+// type, today and after publishing. Type and Plural are the server's own
+// words for its objects. EveryBefore and EveryAfter say the role covers
+// every object, those listed later included; otherwise Before and After
+// name the covered objects. Holders follows DraftGain.
+type DraftCoverage struct {
+	Role         string            `json:"role"`
+	Server       string            `json:"server"`
+	Type         string            `json:"type"`
+	Plural       string            `json:"plural"`
+	Holders      []string          `json:"holders"`
+	HoldersCount int               `json:"holders_count"`
+	EveryBefore  bool              `json:"every_before"`
+	EveryAfter   bool              `json:"every_after"`
+	Before       []DraftObjectName `json:"before"`
+	After        []DraftObjectName `json:"after"`
 }
 
 // DraftGain is one row of who gains what, with the gate in words when the
@@ -131,17 +147,19 @@ type DraftNeed struct {
 }
 
 // DraftVerdict is the server's reading of one revision against live state.
+// Objects is empty from a server before 0.149.0.
 type DraftVerdict struct {
-	CheckedAt  string         `json:"checked_at"`
-	Refused    []DraftFinding `json:"refused"`
-	Risks      []DraftFinding `json:"risks"`
-	Warnings   []DraftFinding `json:"warnings"`
-	Unchecked  []DraftFinding `json:"unchecked"`
-	Passed     []DraftFinding `json:"passed"`
-	Info       []DraftFinding `json:"info"`
-	Gains      []DraftGain    `json:"gains"`
-	Needs      []DraftNeed    `json:"needs"`
-	RiskDigest string         `json:"risk_digest"`
+	CheckedAt  string          `json:"checked_at"`
+	Refused    []DraftFinding  `json:"refused"`
+	Risks      []DraftFinding  `json:"risks"`
+	Warnings   []DraftFinding  `json:"warnings"`
+	Unchecked  []DraftFinding  `json:"unchecked"`
+	Passed     []DraftFinding  `json:"passed"`
+	Info       []DraftFinding  `json:"info"`
+	Gains      []DraftGain     `json:"gains"`
+	Objects    []DraftCoverage `json:"objects"`
+	Needs      []DraftNeed     `json:"needs"`
+	RiskDigest string          `json:"risk_digest"`
 }
 
 // DraftAnswer is what create, update and revert answer: the draft and its
@@ -214,24 +232,6 @@ type DraftPage struct {
 	NextCursor string         `json:"next_cursor"`
 }
 
-// DraftServer is one server a publish created, changed or removed, with its
-// status after the apply and, in Detail, the start's error or the health
-// reason.
-type DraftServer struct {
-	Name   string `json:"name"`
-	Change string `json:"change"`
-	Status string `json:"status"`
-	Detail string `json:"detail"`
-}
-
-// DraftPublished is what a publish answers.
-type DraftPublished struct {
-	Draft    Draft         `json:"draft"`
-	Snapshot string        `json:"snapshot"`
-	Servers  []DraftServer `json:"servers"`
-	Next     []string      `json:"next"`
-}
-
 // DraftRefused is the body of a 409 or 422 that carries detail: the
 // sentence, the findings of a refusal at intake, the verdict when it is the
 // reason, and the fields a Check again needs a pick for.
@@ -260,44 +260,16 @@ type DraftRebase struct {
 	Picks    map[string]string `json:"picks,omitempty"`
 }
 
-// DraftContacted is what a contact of a proposed server answers: the host
-// Straza dialed, when, the server's name and version, and its tools, all in
-// the server's own words.
-type DraftContacted struct {
-	Object      string `json:"object"`
-	Host        string `json:"host"`
-	ContactedAt string `json:"contacted_at"`
-	Server      struct {
-		Name    string `json:"name"`
-		Version string `json:"version"`
-	} `json:"server"`
-	Tools []DraftContactedTool `json:"tools"`
-}
-
-// DraftContactedTool is one tool a contacted server listed.
-type DraftContactedTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	ReadOnly    bool   `json:"read_only"`
-}
-
 // draftsPage is the largest page the drafts list gives, which strazactl asks
 // for in one call.
 const draftsPage = 200
 
-// publishTimeout bounds a publish, which checks the draft again, writes it in
-// one transaction and then waits for every server it starts, each for up to
-// 20 seconds, so it can outlast the client's own timeout. A test shortens it.
-var publishTimeout = 2 * time.Minute
-
-// draftsCall sends one call of the drafts routes through sendCode, with body
-// as JSON or no body when it is nil, and answers the body and the status as
+// draftsCall sends one call of the drafts routes, with body as JSON or no
+// body when it is nil, and answers the body and the status as
 // the server sent them, so a verb can print the verdict or the findings of a
 // refusal. A route strazad does not serve is an error, as served says.
 func (c *Client) draftsCall(ctx context.Context, method, path string, body any) ([]byte, int, error) {
-	buf, code, err := c.sendCode(ctx, method, path, func(bearer string) ([]byte, int, error) {
-		return c.doRaw(ctx, method, path, bearer, body)
-	})
+	buf, code, err := c.doRaw(ctx, method, path, body)
 	return served(method, path, buf, code, err)
 }
 
@@ -311,28 +283,7 @@ func served(method, path string, buf []byte, code int, err error) ([]byte, int, 
 	}
 	route, _, _ := strings.Cut(path, "?")
 	return nil, 0, fmt.Errorf("strazad answered HTTP %d with no sentence of its own, which it does when it does not serve %s %s. "+
-		"Upgrade strazad, or check that --server or your login points at strazad", code, method, route)
-}
-
-// errNoPublishRoute is the answer of CheckPublishRoute on a strazad that
-// serves no publish route.
-var errNoPublishRoute = errors.New("this strazad serves no publish route yet, so the draft stays open. " +
-	"Upgrade strazad to a version with drafts publish, and publish again")
-
-// CheckPublishRoute answers errNoPublishRoute when strazad serves no publish
-// route for draft id, so publish can say so before it asks any question. It
-// sends a GET of the publish path, which a strazad that serves the route, a
-// POST, answers with 405 and one without it with 404, so it never
-// publishes. Any other answer counts as served, and the publish decides.
-func (c *Client) CheckPublishRoute(ctx context.Context, id string) error {
-	path := draftPath(id) + "/publish"
-	_, code, err := c.sendCode(ctx, http.MethodGet, path, func(bearer string) ([]byte, int, error) {
-		return c.doRaw(ctx, http.MethodGet, path, bearer, nil)
-	})
-	if err == nil && code == http.StatusNotFound {
-		return errNoPublishRoute
-	}
-	return err
+		"Upgrade strazad, or check that --server or STRAZA_SERVER points at strazad", code, method, route)
 }
 
 // draftPath is the path of the draft id.
@@ -349,10 +300,8 @@ func (c *Client) CheckDraft(ctx context.Context, b DraftBody) ([]byte, int, erro
 // second create would make a second draft.
 func (c *Client) CreateDraft(ctx context.Context, b DraftBody) ([]byte, int, error) {
 	const path = "/v1/admin/drafts"
-	buf, code, err := c.sendCode(ctx, http.MethodPost, path, func(bearer string) ([]byte, int, error) {
-		buf, code, err := c.doRaw(ctx, http.MethodPost, path, bearer, b)
-		return storedLost("drafts create", "the draft", "send it again", buf, code, err)
-	})
+	buf, code, err := c.doRaw(ctx, http.MethodPost, path, b)
+	buf, code, err = storedLost("drafts create", "the draft", "send it again", buf, code, err)
 	return served(http.MethodPost, path, buf, code, err)
 }
 
@@ -375,51 +324,6 @@ func (c *Client) GetDraft(ctx context.Context, id string) ([]byte, int, error) {
 // UpdateDraft replaces an open draft's documents with a new revision.
 func (c *Client) UpdateDraft(ctx context.Context, id string, b DraftUpdate) ([]byte, int, error) {
 	return c.draftsCall(ctx, http.MethodPut, draftPath(id), b)
-}
-
-// PublishDraft publishes a draft, waiting up to publishTimeout. A request
-// whose answer was lost after it went out, its timeout included, and a
-// proxy's 502, 503 or 504 with no sentence of strazad's answer an error
-// that says the publish may have landed, because the server may have
-// written it and only the answer was lost. A dial that failed sent nothing
-// and keeps the transport's error.
-func (c *Client) PublishDraft(ctx context.Context, id string, b DraftPublish) ([]byte, int, error) {
-	if b.Ticked == nil {
-		b.Ticked = []string{}
-	}
-	if b.Typed == nil {
-		b.Typed = map[string]string{}
-	}
-	long := *c
-	h := *c.HTTP
-	h.Timeout = publishTimeout
-	long.HTTP = &h
-	path := draftPath(id) + "/publish"
-	buf, code, err := long.sendCode(ctx, http.MethodPost, path, func(bearer string) ([]byte, int, error) {
-		buf, code, err := long.doRaw(ctx, http.MethodPost, path, bearer, b)
-		return publishLost(id, buf, code, err)
-	})
-	return served(http.MethodPost, path, buf, code, err)
-}
-
-// publishLost answers the publish of draft id as it came back, unless the
-// answer does not say what happened: then the error says it may have
-// landed.
-func publishLost(id string, buf []byte, code int, err error) ([]byte, int, error) {
-	cause, timedOut, lost := lostCause(err)
-	if timedOut {
-		return nil, 0, fmt.Errorf("strazad did not answer the publish of draft %s within 2 minutes, so it may have landed. "+
-			"Read it with strazactl drafts show %s before you publish again", id, id)
-	}
-	gateway := code == http.StatusBadGateway || code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout
-	if err == nil && gateway && sentenceOf(buf) == "" {
-		cause, lost = fmt.Sprintf("a proxy answered HTTP %d", code), true
-	}
-	if !lost {
-		return buf, code, err
-	}
-	return nil, 0, fmt.Errorf("strazad's answer to the publish of draft %s was lost (%s), so it may have landed. "+
-		"Read it with strazactl drafts show %s before you publish again", id, cause, id)
 }
 
 // storedLost answers a call that stores a new draft as it came back, unless
@@ -489,10 +393,8 @@ func (c *Client) RevertDraft(ctx context.Context, id, note string) ([]byte, int,
 	body := struct {
 		Note string `json:"note,omitempty"`
 	}{note}
-	buf, code, err := c.sendCode(ctx, http.MethodPost, path, func(bearer string) ([]byte, int, error) {
-		buf, code, err := c.doRaw(ctx, http.MethodPost, path, bearer, body)
-		return storedLost("drafts revert", "the undo draft", "revert again", buf, code, err)
-	})
+	buf, code, err := c.doRaw(ctx, http.MethodPost, path, body)
+	buf, code, err = storedLost("drafts revert", "the undo draft", "revert again", buf, code, err)
 	return served(http.MethodPost, path, buf, code, err)
 }
 
@@ -500,10 +402,4 @@ func (c *Client) RevertDraft(ctx context.Context, id, note string) ([]byte, int,
 // keeps the fields the draft changed and takes every other field from live.
 func (c *Client) RebaseDraft(ctx context.Context, id string, b DraftRebase) ([]byte, int, error) {
 	return c.draftsCall(ctx, http.MethodPost, draftPath(id)+"/rebase", b)
-}
-
-// ContactDraftServer contacts the remote server the draft id proposes as
-// server once, with no credential, and reads its tool names.
-func (c *Client) ContactDraftServer(ctx context.Context, id, server string) ([]byte, int, error) {
-	return c.draftsCall(ctx, http.MethodPost, draftPath(id)+"/contact", map[string]string{"object": "App/" + server})
 }

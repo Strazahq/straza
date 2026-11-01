@@ -121,6 +121,10 @@ func (c *countingStore) Approvers() store.ApproverRepo {
 	return c.inner.Approvers()
 }
 func (c *countingStore) Drafts() store.DraftRepo { c.bump("drafts"); return c.inner.Drafts() }
+func (c *countingStore) ObjectLists() store.ObjectListRepo {
+	c.bump("object_lists")
+	return c.inner.ObjectLists()
+}
 
 // repoLane says where a repo is allowed to be touched.
 type repoLane int
@@ -167,6 +171,7 @@ var storeRepoLanes = map[string]repoRule{
 	"settings":           {laneForbidden, "settings are read at boot (approval token key, pod identity)"},
 	"conversations":      {laneForbidden, "capture is a read model written by the spine consumer and read by admin surfaces only"},
 	"approvers":          {laneForbidden, "approver devices and push targets belong to the enrol/notify lanes"},
+	"object_lists":       {laneForbidden, "object lists load into memory on the objects loop's own tick, and a request reads only that copy"},
 	"drafts":             {laneForbidden, "a decision never reads a draft, and the drafting tools read and write their own rows by id on their own calls, named at the call site like the approve lane"},
 	// approvals is forbidden on every plain lane. The approve escalation lane
 	// is the one documented exception and names itself at the call site; see
@@ -344,8 +349,8 @@ func TestCountingStoreInstrumentsEveryRepo(t *testing.T) {
 			t.Errorf("storeRepoLanes classifies %q but store.Store has no such repo getter (stale entry)", repo)
 		}
 	}
-	if len(seen) != 20 {
-		t.Errorf("instrumented %d repos, store.Store carried 20 at the last re-baseline; update this pin deliberately", len(seen))
+	if len(seen) != 21 {
+		t.Errorf("instrumented %d repos, store.Store carried 21 at the last re-baseline; update this pin deliberately", len(seen))
 	}
 }
 

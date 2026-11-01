@@ -56,9 +56,19 @@ FROM ${BASE_IMAGE}
 # Non-root agent user, uid 65532 (house convention, distroless "nonroot").
 # Login shell is /bin/sh, which this image makes the governed wrapper, so
 # even an interactive `docker exec agent sh` session is a Straza decision.
+# straza-service (uid 64000) runs the Straza background service from this
+# image in a container of its own (compose.yaml). Its passwd line lets the
+# shim check that the socket belongs to the service, and Docker copies the
+# two directories' owner and mode into the empty socket and state volumes
+# the first time a container mounts them.
 RUN groupadd --gid 65532 agent \
  && useradd --uid 65532 --gid 65532 --create-home --home-dir /home/agent \
-      --shell /bin/sh agent
+      --shell /bin/sh agent \
+ && groupadd --system --gid 64000 straza-service \
+ && useradd --system --uid 64000 --gid 64000 --no-create-home \
+      --home-dir /var/lib/straza-service --shell /usr/sbin/nologin straza-service \
+ && install -d -o 64000 -g 64000 -m 0755 /run/straza-service \
+ && install -d -o 64000 -g 64000 -m 0700 /var/lib/straza-service
 
 # The shim, root-owned at a fixed path the wrapper scripts reference
 # absolutely (never via PATH, so nothing under agent control can shadow it).
@@ -85,7 +95,7 @@ RUN set -eux; \
     python3 -m pip uninstall -y pip || true; \
     rm -rf /usr/local/lib/python*/ensurepip /usr/local/bin/pip*; \
     # ---- stash the real POSIX shell where only the shim invokes it ----
-    mkdir -p /straza/bin /straza/real /straza/enroll; \
+    mkdir -p /straza/bin /straza/real; \
     SH_REAL="$(readlink -f /bin/sh)"; \
     install -m 0755 "$SH_REAL" /straza/real/sh; \
     # ---- the governed shell replaces /bin/sh and /bin/bash ----
@@ -148,16 +158,16 @@ RUN set -eux; \
     /straza/real/sh -c 'echo "real sh ok"'; \
     sh -c 'echo "wrapper root-passthrough ok"'
 
-# The agent sees exactly one directory of executables. HOME and the straza
-# home are tmpfs mounts at runtime (compose); the rootfs itself stays ro.
+# The agent sees exactly one directory of executables. HOME is a tmpfs mount
+# at runtime (compose); the rootfs itself stays ro. STRAZA_HOME stays unset,
+# so the shim talks to the service at its system socket.
 ENV PATH=/straza/bin \
-    HOME=/home/agent \
-    STRAZA_HOME=/run/straza
+    HOME=/home/agent
 USER 65532:65532
 WORKDIR /home/agent
 
-# entrypoint.py: verifies the enrollment mount (fails loudly with the remedy),
-# stages config+identity into the tmpfs home, then exec()s the agent command.
+# entrypoint.py: asks the service whether this account is enrolled (fails
+# loudly with the remedy), then exec()s the agent command.
 ENTRYPOINT ["/straza/entrypoint"]
 # Default: an interactive governed REPL (compose overrides with your agent).
 CMD ["python3"]

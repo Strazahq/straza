@@ -20,7 +20,7 @@ Pick the row that matches how you run Straza, then read what that row rests on. 
 | Enterprise, each strazad replica | An organization that runs the Helm chart | Request 100m, limit 1 | Request 128Mi, limit 512Mi | None, because Postgres and NATS hold the state | Chart default. Up to about 1,000 connected agents per replica is an estimate |
 | Enterprise, the bundled Postgres | The same organization | Request 100m | Request 256Mi, limit 1Gi | 20Gi, then the audit growth below | Chart default |
 | Enterprise, the bundled NATS | The same organization | Request 50m | Request 64Mi, limit 256Mi | 5Gi, of which the audit stream takes up to 2 GiB | Chart default |
-| The client on each agent machine | Every workstation or host that runs a governed agent | Under 0.1 percent of one core on average | About 12 MiB resident, 46 MiB at its peak | About 25 to 27 MB for the `straza` binary | Measured |
+| The client on each agent machine | Every workstation or host that runs a governed agent | Not measured yet | Not measured yet | About 25 to 27 MB for the `straza` binary, plus the state directory of `straza service`, whose audit spool holds up to 32 MiB for each enrolled user while uploads fail | The binary size is measured |
 | The demo stack | Someone trying the whole product on one machine | 4 cores | 8 GB, with swap on | 20 GB free before the first boot, and the disk kept under 85 percent full | Measured at idle. The first boot was not measured |
 
 ## What each row rests on
@@ -58,7 +58,9 @@ The audit stream on NATS keeps a copy of each audit record for 60 days, and at m
 ### The client
 
 
-The demo agent's `straza daemon` held 11.7 MiB resident, with a peak of 46 MiB since it started, and used 0.8 seconds of CPU over 25 minutes. A hook is a short process that starts for each tool call, decides and exits. The load harness holds it to a budget of 25 ms from start to exit at the 95th percentile on Linux, which this page did not measure.
+`straza service`, the Straza background service, runs for as long as the machine governs agents and holds every session of the machine, and this page has not measured its memory or CPU yet. A hook is a short process that starts for each tool call, asks the service for the decision over a local socket, or a named pipe on Windows, and exits. The load harness holds it to a budget of 25 ms from start to exit at the 95th percentile on Linux, which this page did not measure.
+
+On a Mac, the release's `straza` needs macOS 12 or later, the floor that its Go toolchain writes into the binary. The Managed Login Items profile that keeps the service switched on, which the Jamf Pro and Intune recipes install, needs macOS 13 or later.
 
 ### The demo stack
 
@@ -100,16 +102,20 @@ To size the database, multiply the audit records a day by 1 KB. An agent that ma
 ## Tested with
 
 
-This table records what the docs and the tests ran on, and it makes no promise of support for each version.
+This table records what the docs and the tests ran on, and it makes no promise of support for each version. `straza service` runs on Linux, macOS and Windows. On Windows an administrator installs the service from the Straza MSI, as [Install]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) shows. On macOS an administrator installs it from the Straza package for macOS, which releases from 2.0.0 carry signed and notarized, or from the same package built on a Mac from the source tree, as [Install]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) shows. The MSI and package rows below say what ran. The other macOS rows were run before the service reached macOS, and the Windows rows other than the service and MSI rows before it reached Windows.
 
 | Component | Version | How it was tested |
 |---|---|---|
 | `strazad`, `strazactl` and `straza` on Linux amd64 | Rocky Linux 10.1 and Alpine 3.20 | The install walk ran in an Alpine 3.20 container on 2026-10-06, and the runs on this page on a Rocky Linux 10.1 host on 2026-10-07. |
+| The `straza` deb and rpm packages on Linux amd64 | Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13, UBI 9 and 10, Rocky Linux 9 and 10 | Installed, upgraded with 15 open sessions and removed on 2026-10-21 in containers with systemd as PID 1, each against a standalone strazad. The containers ran on one host's 6.12 kernel, so the distributions' own kernels were not run. |
 | The Go test suite on Windows amd64 | Windows with Go 1.26.6 | The full suite passed natively on 2026-09-22, and the three binaries were built in release shape on 2026-10-07. |
+| `straza service` on Windows amd64 | Windows 10, not enrolled in Intune | On 2026-10-22 the service ran under its own OS account, a person enrolled and ran a Claude Code session through it, 30 sessions started in two bursts of 15 around a restart, and it was upgraded while a session was open. It was installed with the commands of that version, before the MSI existed. Windows 11, Intune and App Control were not run. |
+| The Straza MSI on Windows amd64 | Windows 10 | MSIs built from the source tree at v1.0.0-1600-g3c02a286 were installed, upgraded while hooks ran, refused as a downgrade, uninstalled and purged on 2026-10-26 by a test script. |
+| The Straza package for macOS | macOS 26.6.2 | A test script installed, upgraded, uninstalled and purged an unsigned package built at v1.0.0-1610-g366fac50 in a virtual machine on 2026-10-26. On 2026-10-27 it did the same with a package built at v1.0.0-1615-g272946e5, signed with the Developer ID and notarized by Apple, which spctl accepted as Notarized Developer ID on the Mac that built it. |
 | The Go test suite and `straza` on macOS | One Mac with Docker Desktop 29.7.2 | The commit checks, which run the suite, passed on 2026-10-01, and `straza` served Claude Desktop the same day. |
 | The other release builds | Linux arm64, macOS amd64 and arm64, Windows arm64 | Built in release shape with `CGO_ENABLED=0` on 2026-10-07, and not run. |
 | The container image | linux/amd64 | Built from `deploy/Dockerfile` and run as the demo stack's strazad. The release also publishes linux/arm64, which was not run. |
-| Go, for a build from source | 1.26.9 | The version every build and run on this page used. `go.mod` requires Go 1.26 and names go1.26.9 as its toolchain, which the go command fetches when the installed one is older. |
+| Go, for a build from source | 1.26.10 | `go.mod` requires Go 1.26 and names go1.26.10 as its toolchain, which the go command fetches when the installed one is older. The builds and runs on this page used 1.26.9. |
 | PostgreSQL | 16.13 | The demo stack's database for the enterprise profile. The chart's bundled Postgres uses the `postgres:16` image. |
 | NATS | 2.14.3 | The demo stack's event bus. The chart's bundled NATS uses the `nats:2` image. |
 | Keycloak | 26.0.8 | The demo stack's OIDC login provider. |
@@ -117,7 +123,7 @@ This table records what the docs and the tests ran on, and it makes no promise o
 | Elasticsearch and Kibana | 8.14.3 | The demo stack's SIEM overlay. |
 | Docker Engine and Docker Compose | Engine 29.4.0, Compose 5.1.3 | The demo stack and the runs on this page. |
 | kind, kubectl and Kubernetes | kind 0.33.0, kubectl 1.37.0, node image v1.37.0 | The chart walk on a kind cluster on 2026-09-19. |
-| Helm | 3.16.4 | Rendered and linted chart 1.1.0 on 2026-10-06, and installed the chart in the kind walk. |
+| Helm | 3.16.4 | Rendered and linted chart 1.1.0 on 2026-10-06 and chart 2.0.0 on 2026-11-01, and installed the chart in the kind walk. |
 | Chromium | 151.0.7922.34, the headless shell, driven by Playwright 1.62.1 | The console walks. |
 
 ## What these numbers leave out

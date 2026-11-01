@@ -20,7 +20,7 @@ const maxUserAgentBytes = 256
 // authnFields are the when-known payload fields; zero values are omitted
 // from the wire entirely.
 type authnFields struct {
-	Via     string // login only: id-token|session-token|device-token|password
+	Via     string // login only: id-token|session-token|device-token|device-key|password
 	User    string // username
 	UserID  string
 	Session string

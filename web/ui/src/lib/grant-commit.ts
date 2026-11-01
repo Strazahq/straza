@@ -1,4 +1,4 @@
-// The stepwise commit behind the server page's Add role and Edit tools
+// The stepwise commit behind the server page's Add role and Edit access
 // sheet: create the role when it is new,
 // remove the access row the save replaces, write the new one, and, when
 // the rules change, write them into the role's own policy set. The steps
@@ -9,8 +9,11 @@
 // so a hand-written comment or key in it survives a save. The save makes
 // the set's rules for one server what the plan says and leaves every other
 // rule where it was.
+import { pinnedOf } from "./access-covers";
+import { coversClause } from "./access-object-words";
 import { type OwnRule, type Plan, type Shape, SPONSOR, callSentence, grantMatchers, ownRuleOf, readOwnRules, rulesFor, sameRules } from "./access-plan";
 import { type ApiError, type AppRow, type BindingRow, type PolicyDoc, type RoleRow, type ToolRow, applyPolicy, createBinding, createRole, deactivatePolicy, deletePolicy, getPolicy, removeBinding } from "./api";
+import { nounsOf } from "./object-words";
 import { type Doc, type Plain, addRule, docProblems, docText, moveRule, newPolicyDoc, openDoc, readSet, removeRule, rulesOf, setApprove, setClass, setNames, setReason, uniqueId } from "./policy-model";
 import { ROW_REMOVE, UNREACHABLE_STEP, accessSetDescription, approveGroupReason, accessSetName, retireHalf, retireKept, rowCreate, rowGrant, rowPublish, rowRetire, setMismatch, setUnparsed, setUnreadable, toolsWords } from "./role-words";
 import { refused } from "./say";
@@ -52,17 +55,20 @@ export type GrantResult = { rows: CommitRow[]; role?: RoleRow; published?: Publi
 const names = (tools: ToolRow[]) => tools.map((t) => t.name);
 
 // planRows is what the save will do, before it does any of it: the review
-// step and the sheet both draw this list.
+// step and the sheet both draw this list. The row's line names its covers
+// line on a server that pins a type.
 export function planRows(input: GrantInput): CommitRow[] {
   const all = names(input.tools);
   const app = input.app.name;
   const role = input.role.name;
   const matchers = grantMatchers(input.plan, all);
+  const pinned = pinnedOf(input.app);
+  const clause = pinned ? coversClause(app, nounsOf(pinned), input.plan.covers) : "";
   const rules = input.before ? !sameRules(input.before, input.plan, app, all, role) : rulesFor(input.plan, app, all, role).length > 0;
   const rows: CommitRow[] = [];
   if (input.role.create) rows.push({ key: "create", label: rowCreate(role), state: "pending" });
   if (input.replace) rows.push({ key: "remove", label: ROW_REMOVE, state: "pending" });
-  if (!input.keep) rows.push({ key: "grant", label: rowGrant(toolsWords(matchers, all.length)), state: "pending" });
+  if (!input.keep) rows.push({ key: "grant", label: rowGrant(toolsWords(matchers, all.length) + (clause ? ", " + clause : "")), state: "pending" });
   if (rules) rows.push({ key: "publish", label: rowPublish(accessSetName(role), callSentence(input.plan, app, all, role)), state: "pending" });
   return rows;
 }

@@ -2,7 +2,7 @@
 title: strazactl apps import
 description: Convert an MCP registry server.json into an App manifest, by the registry import rules of the app manifest specification
 pagetype: reference
-weight: 20
+weight: 17
 draft: false
 sources:
   - cmd/strazactl
@@ -26,7 +26,7 @@ strazactl apps import <server.json> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

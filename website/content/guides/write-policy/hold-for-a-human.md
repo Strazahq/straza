@@ -6,7 +6,7 @@ weight: 20
 draft: false
 tested:
   version: v1.1.0
-  platform: Linux, against the enterprise demo stack under the enterprise profile, with the hook events fed to straza hook by hand in a Linux container enrolled as dana. The waiting row was read in the console and on the self-service page in a headless browser, and the approver decided with strazactl from her own login, which reaches the endpoint the console decides on
+  platform: Linux, against the enterprise demo stack under the enterprise profile, with the hook events fed to straza hook by hand in a Linux container enrolled as dana. The waiting row was read in the console and on the self-service page in a headless browser, and the approver decided with strazactl from her own login, which reaches the endpoint the console decides on. strazactl no longer signs in or decides, so a person now decides in the console, on the self-service page or on a phone
   date: 2026-09-28
 applies_to: both
 keywords: approve hold approver timeout confirm
@@ -25,7 +25,7 @@ A hold is an allow that needs approval first. A rule with `mode: approve` lets t
 ## Before you start {.nostep}
 
 
-- An administrator's login, in the console or with `strazactl`.
+- An administrator's console sign-in, or `strazactl` on an admin API token that holds read and write on the `identity` and `policy` areas and read on the `approvals` and `audit` areas, minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows.
 - The `local-tools` allow rule from [Your first deny]({{< relref "guides/write-policy/first-deny.md" >}}) live for your role, and an enrolled machine held by a user of that role, here `dana`.
 - A person who decides, here `lena`.
 
@@ -149,7 +149,7 @@ An MCP tool call through the gateway behaves differently: the gateway holds the 
 ## Decide
 
 
-This step is lena's. The console, the self-service page, an enrolled phone and `strazactl` decide the same record, and the first decision wins.
+This step is lena's. The console, the self-service page and an enrolled phone decide the same record, and the first decision wins.
 
 {{< console >}}
 An approver who is also an administrator decides in the console. Approvals opens on the Waiting filter, and a row opens the request with its parameters and who decides.
@@ -178,15 +178,8 @@ strazactl approvals list --wide
   preview only; this approval covers the exact call (sha256:d43b1452c5b4)
 ```
 
-This listing is trimmed to dana's request. The approver decides from their own `strazactl` login:
 
-{{< command terminal="lena's terminal" purpose="approver" >}}
-```sh
-strazactl approvals approve 01a0e996-3036-7f10-8c30-b2317bb9f09c
-```
-{{< /command >}}
-
-{{< see >}}`approved 01a0e996-3036-7f10-8c30-b2317bb9f09c (by lena)`{{< /see >}}
+This listing is trimmed to dana's request. strazactl does not decide, because a decision must name the person who made it and a token is not one. lena decides in the console under **Approvals**, on the Requests tab of the self-service page, or on her phone, as the console form of this step shows.
 {{< /cli >}}
 
 ## Retry the call
@@ -208,7 +201,7 @@ exit 0
 ```
 
 
-The approval writes a record of its own for each phase: the request, the resolution and the retry that used it. That retry also writes its allow. The resolution names the decider and the channel, and a decision made with `strazactl` is recorded under the channel `console`.
+The approval writes a record of its own for each phase: the request, the resolution and the retry that used it. That retry also writes its allow. The resolution names the decider and the channel, and a decision made in the console is recorded under the channel `console`.
 
 {{< console >}}
 {{< clicks "Audit" "Lens" "approvals" >}}
@@ -294,7 +287,7 @@ A request that is still waiting is denied from its row with **Deny**, then **Den
 {{< /console >}}
 
 {{< cli >}}
-`strazactl policy deactivate kubectl-apply-hold` turns the set off and compiles the snapshot again. A request that is still pending can be denied with `strazactl approvals deny <id>`, which is final for that request.
+`strazactl policy deactivate kubectl-apply-hold` turns the set off and compiles the snapshot again. A request that is still pending is denied in the console under **Approvals**, which is final for that request.
 {{< /cli >}}
 
 ## Limits {.nostep}
@@ -304,7 +297,7 @@ Five limits apply before the first real use:
 
 - On a rule that names roles, the requester never decides their own request unless the rule says `selfApproval: true`, and an autonomous agent never gets that right whatever the rule says.
 - An AI agent never decides anything, even if an approver role was assigned to it by mistake.
-- A person who may decide their own request decides it on their enrolled phone, or on the self-service page under This browser, because those sign the decision with the device's own key. The console and strazactl refuse it and say where to go, unless the operator set `approval.unsignedOwnDecisions` to true in the server config and accepted that an agent on the person's machine can then approve its own calls. When the person may enroll an approval device, an agent that can read their `strazactl` login can enroll a device of its own and decide with it, as [Known limits]({{< relref "security/known-limits.md" >}}) says.
+- A person who may decide their own request decides it on their enrolled phone, or on the self-service page under This browser, because those sign the decision with the device's own key. The console refuses it and says where to go, unless the operator set `approval.unsignedOwnDecisions` to true in the server config and accepted that an agent on the person's machine can then approve its own calls. An agent that can read an admin API token holding `approvals:write` can mint an enroll token for the person and decide with a device of its own, which is one more reason never to put a token where an agent runs, as [Known limits]({{< relref "security/known-limits.md" >}}) says.
 - A session that a coding harness checked in never decides a request for anybody.
 - An approve rule only ever marks an allow. A deny from any set still wins, so a command that another set denies is denied, and no request opens.
 

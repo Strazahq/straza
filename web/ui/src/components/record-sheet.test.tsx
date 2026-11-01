@@ -164,10 +164,38 @@ describe("the record sheet", () => {
       .toEqual({ user: "joe-java-developer-agent", lane: "mcp", app: "midpoint", tool: "assign_role", command: "", path: "" });
   });
 
+  it.each([
+    ["the repo it named", { type: "repo", reach: "argument", value: "Strazahq/pay-api", id: "9012332" }, { value: "Strazahq/pay-api", id: "9012332" }],
+    ["no repo when the record cut the value", { type: "repo", reach: "argument", value: "x".repeat(512), valueTruncated: true, valueSha256: "0f1e" }, undefined],
+  ])("opens Test a call with %s", async (_, object, want) => {
+    show(row({ ...MCP, app: "ghapp", toolName: "pr_create", object }, "straza.audit.mcp"));
+    await userEvent.click(screen.getByRole("button", { name: "Test this call" }));
+    const prefill = JSON.parse((document.querySelector("[data-policy-test]") as HTMLElement).textContent || "{}");
+    expect(prefill.object).toEqual(want);
+    expect(prefill.tool).toBe("pr_create");
+  });
+
   it("offers no test on a record that decided no call", () => {
     show(SENTINEL_ROW);
     expect(screen.queryByRole("button", { name: "Test this call" })).toBeNull();
     expect(document.querySelector("[data-policy-test]")).toBeNull();
+  });
+
+  it.each([
+    { name: "a listed repo", object: { type: "repo", reach: "argument", value: "Strazahq/pay-api", id: "9012332" }, fact: "Strazahq/pay-api id 9012332" },
+    { name: "a repo the list does not hold", object: { type: "repo", reach: "argument", value: "Strazahq/old" }, fact: "Strazahq/old not in the repo list" },
+    { name: "a cut value", object: { type: "repo", reach: "argument", value: "x".repeat(512), valueTruncated: true, valueSha256: "0f1e2d3c4b5a69788796a5b4c3d2e1f0" }, fact: "x".repeat(512) + " not in the repo list, cut at 512 bytes, SHA-256 0f1e2d3c4b5a…" },
+  ])("names $name on a fact row under the call, labelled by the server's type", ({ object, fact }) => {
+    show(row({ ...MCP, app: "ghapp", toolName: "pr_create", effect: "allow", object }, "straza.audit.mcp"));
+    const why = document.querySelector("[data-why]") as HTMLElement;
+    const label = within(why).getByText("Repo");
+    expect(label.tagName).toBe("DT");
+    expect((label.nextElementSibling as HTMLElement).textContent).toBe(fact);
+  });
+
+  it("shows no fact row for a call that names no repo", () => {
+    show(row({ ...MCP, object: { type: "repo", reach: "credential" } }, "straza.audit.mcp"));
+    expect(document.querySelector("[data-why] [data-facts]")).toBeNull();
   });
 
   it("closes on the footer's Close", async () => {

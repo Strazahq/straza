@@ -6,38 +6,19 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/strazahq/straza/internal/agentguard/spool"
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/policy"
 )
 
-// execFixture boots a local store with a signed snapshot and a live session
-// (the same shape the hook flow tests use) so Exec decides offline against
-// the verified snapshot, with no server involved.
-func execFixture(t *testing.T, policyYAML string) *Store {
+// execFixture starts a fake service that decides with policyYAML, the same
+// shape the hook flow tests use, so Exec decides through it with no server
+// involved.
+func execFixture(t *testing.T, policyYAML string) *fakeService {
 	t.Helper()
-	priv, keys := testSnapshotKey(t)
-	signed, id := testSignedPolicy(t, priv, policyYAML)
-	t.Setenv("STRAZA_HOME", t.TempDir())
-	store, err := OpenStore()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SaveConfig(Config{ServerURL: "http://127.0.0.1:0", SnapshotKeys: keys}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SaveSnapshot(signed); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SaveSession(Session{
-		SessionID: "s-exec", SessionToken: "tok", SnapshotID: id,
-		User: "bob", Roles: []string{"dev"}, Harness: "exec-wrapper/test",
-		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return store
+	svc := newFakeService(t)
+	svc.engine = compilePolicy(t, policyYAML)
+	return svc
 }
 
 const execDenyPolicy = `
@@ -66,7 +47,7 @@ func shellExit(code string) []string {
 }
 
 func TestExecDenyBlocksAndAudits(t *testing.T) {
-	store := execFixture(t, execDenyPolicy)
+	svc := execFixture(t, execDenyPolicy)
 	var errOut bytes.Buffer
 	code := Exec(context.Background(), []string{"rm", "-rf", "/tmp/x"}, &errOut)
 	if code != execDenyExit {
@@ -75,13 +56,16 @@ func TestExecDenyBlocksAndAudits(t *testing.T) {
 	if errOut.String() != "Straza: destructive delete blocked\n" {
 		t.Errorf("deny line = %q, want the reason behind one Straza marker", errOut.String())
 	}
-	// The decision is spooled for async audit like any hook decision.
-	recs, err := spool.ReadRecords(store.SpoolPath())
-	if err != nil {
-		t.Fatal(err)
+	// The wrapper starts its own session first, then the service decides
+	// (and records) one canonical shell.exec event under that harness.
+	want := localapi.Harness{Name: execHarness}
+	if starts := svc.started(); len(starts) != 1 || starts[0].Harness != want {
+		t.Fatalf("session starts = %+v, want one for %+v", starts, want)
 	}
-	if len(recs) != 1 || !strings.Contains(string(recs[0]), "no-rm-rf") {
-		t.Fatalf("audit spool = %v", recs)
+	got := svc.decided()
+	if len(got) != 1 || got[0].Harness != want || got[0].Event.Tool != policy.ToolShellExec ||
+		strings.Join(got[0].Event.Argv, " ") != "rm -rf /tmp/x" {
+		t.Fatalf("decide requests = %+v", got)
 	}
 }
 
@@ -94,6 +78,7 @@ func TestExecDenyLineKeepsOneMarker(t *testing.T) {
 	}{
 		{"colon marker", "Straza: destructive delete blocked", "Straza: destructive delete blocked"},
 		{"starter policy", "Straza starter policy: recursive force-delete is blocked.", "Straza starter policy: recursive force-delete is blocked."},
+		{"service sentence", "Straza's background service isn't running on this machine.", "Straza's background service isn't running on this machine."},
 		{"bare reason", "recursive force-delete is blocked", "Straza: recursive force-delete is blocked"},
 		{"lowercase is not the marker", "straza says no", "Straza: straza says no"},
 		{"empty reason", "", "Straza: denied by policy"},
@@ -132,16 +117,32 @@ func TestExecSpawnFailure(t *testing.T) {
 }
 
 func TestExecNoSessionFailsClosed(t *testing.T) {
-	// No enrollment, no session, unreachable server: the wrapper must refuse
-	// to run ANYTHING (fail closed) with an actionable remedy.
-	t.Setenv("STRAZA_HOME", t.TempDir())
-	var errOut bytes.Buffer
-	code := Exec(context.Background(), shellExit("0"), &errOut)
-	if code != execDenyExit {
-		t.Fatalf("no-session exit = %d, want %d (fail closed)", code, execDenyExit)
+	// No service, or a service that refuses the session: the wrapper must
+	// refuse to run ANYTHING (fail closed) with an actionable remedy.
+	tests := []struct {
+		name   string
+		seed   func(t *testing.T)
+		remedy string
+	}{
+		{"no service", func(t *testing.T) { noService(t) }, "Start it with `straza service`"},
+		{"not enrolled", func(t *testing.T) {
+			newFakeService(t).refuse = "This machine isn't enrolled for you yet. Run `straza enroll` and sign in with your work account."
+		}, "Run `straza enroll`"},
 	}
-	if !strings.Contains(errOut.String(), "enroll") {
-		t.Errorf("no-session error carries no remedy: %q", errOut.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.seed(t)
+			var errOut bytes.Buffer
+			code := Exec(context.Background(), shellExit("0"), &errOut)
+			if code != execDenyExit {
+				t.Fatalf("exit = %d, want %d (fail closed)", code, execDenyExit)
+			}
+			if !strings.HasPrefix(errOut.String(), "Straza") || strings.HasPrefix(errOut.String(), "Straza: Straza") ||
+				!strings.Contains(errOut.String(), tt.remedy) ||
+				!strings.HasSuffix(errOut.String(), " Refusing to run.\n") {
+				t.Errorf("refusal = %q, want the marker, the remedy %q and the refusal", errOut.String(), tt.remedy)
+			}
+		})
 	}
 }
 
@@ -157,8 +158,8 @@ func TestExecEmptyArgv(t *testing.T) {
 // command yields the same decision whether it arrives as a claude-code hook
 // payload or through the exec wrapper (the engine sees one canonical event).
 func TestExecDecisionParityWithHooks(t *testing.T) {
-	store := execFixture(t, execDenyPolicy)
-	d := liveDecider{store: store}
+	svc := execFixture(t, execDenyPolicy)
+	d := serviceDecider{store: svc.store(t), svc: NewServiceClient()}
 	n := Normalized{
 		HarnessName: "claude-code",
 		Event: policy.Event{

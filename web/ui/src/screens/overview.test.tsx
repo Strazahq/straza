@@ -82,6 +82,10 @@ import { absTime, relTimeText } from "@/lib/words";
 
 const STRAZAD = "v1.0.0-1137";
 const OLD_CLIENT = "v1.0.0-1105";
+// SERVER_COMMIT is what /version names. The snapshot row spells its
+// version another way and carries the same commit at another length.
+const SERVER_COMMIT = "abc1234";
+const SNAPSHOT = "1.0.0-SNAPSHOT-abc12345";
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60000).toISOString();
 
@@ -135,11 +139,11 @@ const DECISIONS: DecisionsBlock = {
   since: "2026-09-12T12:00:00Z",
   buckets: HOURS.map((allowed, i) => ({ start: new Date(Date.parse("2026-09-12T12:00:00Z") + i * 3600000).toISOString(), allowed, approval: HELD[i], denied: REFUSED[i], catalog: i < 2 ? 110 : 0 })),
   stopped: [
-    { app: "demo-tools", tool: "get-env", outcome: "denied", count: 23, reason: "dumps the process environment: dev-guardrails, rule no-env" },
-    { app: "demo-tools", tool: "get-sum", outcome: "approval", count: 18, reason: "held for sec-approvers" },
-    { app: "demo-tools", tool: "read-file", outcome: "denied", count: 9, reason: "a path outside the workspace" },
-    { app: "scout-tools", tool: "export", outcome: "denied", count: 5, reason: "no role of the session reaches scout-tools" },
-    { app: "demo-tools", tool: "list-files", outcome: "denied", count: 4, reason: "dev-guardrails, rule workspace-only" },
+    { app: "demo-tools", tool: "get-env", outcome: "denied", count: 23, reason: "dumps the process environment: dev-guardrails, rule no-env", seq: 4301 },
+    { app: "demo-tools", tool: "get-sum", outcome: "approval", count: 18, reason: "held for sec-approvers", seq: 4302 },
+    { app: "demo-tools", tool: "read-file", outcome: "denied", count: 9, reason: "a path outside the workspace", seq: 4303 },
+    { app: "scout-tools", tool: "export", outcome: "denied", count: 5, reason: "no role of the session reaches scout-tools", seq: 4304 },
+    { app: "demo-tools", tool: "list-files", outcome: "denied", count: 4, reason: "dev-guardrails, rule workspace-only", seq: 4305 },
   ],
 };
 
@@ -186,9 +190,9 @@ const STRICT_CONFIG: ConfigAnswer = {
 };
 
 const SESSIONS: SessionRow[] = [
-  { id: "s-joe", user_id: "u-joe", username: "joe", harness: "codex/1.2", client_version: STRAZAD, attestation: "advisory", status: "active", started_at: ago(60), last_seen: ago(4), wiring_status: "allowed" },
+  { id: "s-joe", user_id: "u-joe", username: "joe", harness: "codex/1.2", client_version: SNAPSHOT, client_commit: "abc12345", attestation: "advisory", status: "active", started_at: ago(60), last_seen: ago(4), wiring_status: "allowed" },
   { id: "s-ivan", user_id: "u-ivan", username: "ivan", harness: "gemini/0.9", client_version: STRAZAD, attestation: "managed", status: "active", started_at: ago(90), last_seen: ago(12), wiring_status: "current" },
-  { id: "s-sam", user_id: "u-sam", username: "agent-sam", harness: "claude-code/2.0", client_version: OLD_CLIENT, attestation: "none", status: "active", started_at: ago(120), last_seen: ago(31), wiring_status: "unmeasured" },
+  { id: "s-sam", user_id: "u-sam", username: "agent-sam", harness: "claude-code/2.0", client_version: OLD_CLIENT, client_commit: "0ff1ce5", attestation: "none", status: "active", started_at: ago(120), last_seen: ago(31), wiring_status: "unmeasured" },
   { id: "s-alice", user_id: "u-alice", username: "alice", harness: "console/1", attestation: "none", status: "active", started_at: ago(30), last_seen: ago(0) },
 ];
 
@@ -275,7 +279,7 @@ describe("the Overview screen", () => {
     vi.mocked(listApps).mockResolvedValue(APPS);
     vi.mocked(listRoles).mockResolvedValue(ROLES);
     vi.mocked(replaySink).mockResolvedValue({ sink: "elastic", replayed: 1204, remaining: 0 });
-    vi.mocked(readVersion).mockResolvedValue({ version: STRAZAD, commit: "abc1234", go: "go1.25.1", profile: "enterprise" });
+    vi.mocked(readVersion).mockResolvedValue({ version: STRAZAD, commit: SERVER_COMMIT, go: "go1.25.1", profile: "enterprise" });
     vi.mocked(listDrafts).mockResolvedValue({ items: [], next_cursor: "" });
     window.localStorage.clear();
   });
@@ -357,13 +361,17 @@ describe("the Overview screen", () => {
     expect((posture.querySelector("[data-notes-line]") as HTMLElement).textContent).toBe(notesLine(postureOf(rows).notes));
 
     // Who is signed in: the fleet line over the governed rows, the console
-    // marked as an admin harness, the older box marked.
+    // marked as an admin harness, and only the box of another commit
+    // marked. The snapshot row spells its version another way and runs the
+    // server's commit, and the row with no commit is never marked.
     const fleet = panel("signed-in");
     expect((fleet.querySelector("[data-fleet-line]") as HTMLElement).textContent)
       .toBe(fleetLine(3, { allowed: 1, current: 1, unmeasured: 1 }, 1));
     expect(fleet.querySelectorAll("[data-session]").length).toBe(4);
     expect(within(fleet).getByText("admin")).toBeTruthy();
-    expect(fleet.querySelectorAll("[data-version-differs]").length).toBe(1);
+    expect(Array.from(fleet.querySelectorAll("[data-build-differs]")).map((m) => m.closest("[data-session]")?.getAttribute("data-session")))
+      .toEqual(["s-sam"]);
+    expect(within(fleet).getByText(SNAPSHOT)).toBeTruthy();
 
     // What changed: the newest control-plane records, merged from the
     // three type reads.
@@ -732,6 +740,18 @@ describe("the Overview screen", () => {
     expect(panel("signed-in").textContent).toContain(STRAZAD);
     const outside = document.body.textContent?.split(panel("signed-in").textContent || "").join("");
     expect(outside).not.toContain(STRAZAD);
+  });
+
+  it("marks no client build while /version names no commit", async () => {
+    vi.mocked(readVersion).mockResolvedValue(null);
+    mount();
+    await settled();
+    await showTab("System details");
+    const fleet = panel("signed-in");
+    expect(fleet.querySelectorAll("[data-session]").length).toBe(4);
+    expect(fleet.querySelectorAll("[data-build-differs]").length).toBe(0);
+    expect((fleet.querySelector("[data-fleet-line]") as HTMLElement).textContent)
+      .toBe(fleetLine(3, { allowed: 1, current: 1, unmeasured: 1 }, 0));
   });
 
   it("gives every tile its detail from the words module, in one grammar", async () => {

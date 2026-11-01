@@ -1,0 +1,4 @@
+# The system account of the Straza background service, installed as
+# /usr/lib/sysusers.d/straza-service.conf. The package's pre-install script
+# feeds the same line to systemd-sysusers before this file is on disk.
+u straza-service - "Straza background service" /var/lib/straza-service

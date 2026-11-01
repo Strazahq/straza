@@ -46,17 +46,45 @@ export function shortType(t: string | undefined): string {
 // stays whole.
 const id8 = (v: unknown) => { const s = String(v); return s.length > 8 ? s.slice(0, 8) + "…" : s; };
 
+// ObjectFact is the object a gateway record names (spec/events revision
+// 44): the server's type, the value the call named, the list id, empty when
+// the list did not hold the value, and the SHA-256 of a value the record
+// cut at 512 bytes, empty when it was kept whole.
+export type ObjectFact = { type: string; value: string; id: string; sha256: string };
+
+// objectOf reads the object a gateway record names, and answers null for a
+// record whose call named no value, such as a call whose tool reaches its
+// objects through the credential, or a record written before the field.
+export function objectOf(ce: CE | null): ObjectFact | null {
+  const o = ce && ce.data && ce.data.object;
+  if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+  const f = o as Record<string, unknown>;
+  if (!f.value) return null;
+  return { type: String(f.type || ""), value: String(f.value), id: String(f.id || ""), sha256: f.valueTruncated ? String(f.valueSha256 || "") : "" };
+}
+
+// objectLabel names the record sheet's object row by the server's type,
+// such as Repo.
+export const objectLabel = (o: ObjectFact) => o.type.charAt(0).toUpperCase() + o.type.slice(1);
+
+// objectNote is the muted part of that row: the list id, or that the list
+// did not hold the value, and the hash of a value the record cut.
+export const objectNote = (o: ObjectFact) =>
+  [o.id ? "id " + o.id : "not in the " + o.type + " list", o.sha256 ? "cut at 512 bytes, SHA-256 " + o.sha256.slice(0, 12) + "…" : ""].filter(Boolean).join(", ");
+
 // ceWhat is the exact thing that happened (command, target paths, upstream
-// tool and arguments), never displaced by the reason. A capture record
-// reads as a reference row, size, mode and hash, never the text, even an
-// old record that still carries data.content on the chain.
+// tool, the object it named and its arguments), never displaced by the
+// reason. A capture record reads as a reference row, size, mode and hash,
+// never the text, even an old record that still carries data.content on the
+// chain.
 export function ceWhat(ce: CE | null): string {
   if (!ce) return "(unreadable record)";
   const d = ce.data || {};
   const bits: string[] = [];
   if (d.command) bits.push(String(d.command));
   if (Array.isArray(d.paths) && d.paths.length) bits.push(d.paths.map(String).join(" "));
-  if (d.toolName) bits.push((d.app ? String(d.app) + "." : "") + String(d.toolName));
+  const obj = objectOf(ce);
+  if (d.toolName) bits.push((d.app ? String(d.app) + "." : "") + String(d.toolName) + (obj ? " on " + obj.value : ""));
   if (d.arguments) bits.push(String(d.arguments).slice(0, 160));
   if (d.contentHash || d.content) {
     const bytes = d.contentBytes != null ? Number(d.contentBytes) : d.content != null ? String(d.content).length : null;
@@ -231,6 +259,7 @@ export const matchWords = (n: number) => n.toLocaleString("en-US") + (n === 1 ? 
 export const EMPTY_CHAIN = "Nothing has been decided or changed yet. The first check-in or admin action writes the first record.";
 export const EMPTY_LENS = "Nothing in the loaded tail under this lens. The search box, the effect and the user filter search the whole chain.";
 export const EMPTY_SEARCH = "No record in the chain matches this search.";
+export const recordMissing = (seq: number) => "Record " + seq + " is not in the audit chain, so it cannot open. Open the call again from the Overview.";
 export const revokeBody = (session: string, detector: string) =>
   "The sentinel is alert-only: it never revokes on its own, and revoking is your call. Confirming denies every agent action in session " + session.slice(0, 13) + "…" +
   (detector ? " (flagged by " + detector + ")" : "") + " within seconds. A session revoke is a stand-down, not a ban: the device can check in again as a new session, and a hard cut-off is a device revoke or a user lock.";
@@ -293,6 +322,7 @@ const ACTION_LABEL: Record<string, string> = {
   "approver-enroll": "Enrolled an approver phone or browser", "approver-self-enroll-token": "Started enrolling an approver phone or browser",
   "approver-device-revoked": "Revoked an approver phone or browser",
   "enroll-token.create": "Started enrolling an approver phone or browser", "approver.enroll": "Enrolled an approver phone or browser",
+  "enroll-token.refused": "Refused enrolling an approver phone or browser for someone",
   "approver.revoke": "Revoked an approver phone or browser with its user",
   "revocation.session": "Revoked a session", "revocation.sessions": "Revoked sessions", "revocation.user": "Revoked a user's access",
   "revocation.device": "Revoked a machine", "revocation.lift": "Lifted a user's revocation",

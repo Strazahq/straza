@@ -37,6 +37,38 @@ regexes = ['''8f742231b10c8538a610bffdff6d825b''']
 regexTarget = "match"
 condition = "AND"
 
+[[allowlists]]
+description = """RFC 8037 appendix A.3 JWK thumbprint of the Ed25519 example key \
+of appendix A.1, PRINTED IN THE RFC. A store test uses it as a device's key \
+thumbprint; it is a hash of a published public key, not a secret."""
+paths = ['''internal/store/repo_devices_key_test\.go''']
+regexes = ['''kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k''']
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """spec/session-token example DPoP proofs. Each is a one-request \
+signature made from the fixed seeds the example states (Ed25519 seeds of 32 \
+bytes 0x07 and 0x09, nonce key 0x00 to 0x1f), not a credential: it opens no \
+door without the server's nonce of 2026-10-20T12:00Z, long stale, and the \
+access token it hashes is the literal example-session-token."""
+paths = ['''spec/session-token/examples/[a-z0-9-]+\.json''']
+
+[[allowlists]]
+description = """spec/session-token example ID tokens of the built-in issuer. \
+Each is signed with the issuer key made from the fixed Ed25519 seed of 32 \
+bytes 0x0a, for the example issuer https://straza.example, and expired 10 \
+minutes after 2026-10-27T12:00Z, so it is not a credential for any server."""
+paths = ['''spec/session-token/examples/id-token/[a-z0-9-]+\.json''']
+
+[[allowlists]]
+description = """spec/grant example git grants. Each is signed with a key from \
+the fixed seeds the example states (Ed25519 seeds of 32 bytes 0x0a and 0x09, \
+the machine key 0x07), not a credential: it names the audience \
+https://ghapp.example, it expired two minutes after 2026-10-24T12:00Z, and it \
+opens nothing without a proof from the seed 0x07 key."""
+paths = ['''spec/grant/examples/[a-z0-9-]+\.json''']
+
 # --- leak-detector positive controls ---------------------------------------
 
 [[allowlists]]
@@ -149,6 +181,7 @@ outside that stack has ever used it."""
 paths = [
   '''website/content/get-started/enterprise-demo-stack\.md''',
   '''website/content/guides/connect-identity/midpoint\.md''',
+  '''website/content/guides/serve-mcp-apps/limit-a-role-to-some-objects\.md''',
 ]
 regexes = ['''administrator:StrazaEval5ecr3t!''']
 regexTarget = "match"
@@ -206,6 +239,36 @@ paths = ['''website/content/guides/connect-identity/nhi-provisioning\.md''']
 regexes = [
   '''bXmguXE5dlBj2u5E5lfS4PfOSD/CWupFYWbghVKD3lo=''',
   '''YNw6V5UQxROrLSHGY4eiRCOY4POchjr60rZev41NsQ8=''',
+]
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """Repository names in a table test of the object list: \
+"Strazahq/pay-api" followed by "Strazahq/docs" reads to the generic key rule \
+as an api key because the first name ends in api. Both are made-up repository \
+names in a fake listing tool's answer, and the list holds no credential."""
+paths = ['''internal/server/api_apps_objects_test\.go''']
+regexes = ['''pay-api", "Strazahq/docs''']
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """Ed25519 public keys after the label "Public key:", which the \
+generic key rule reads as an api key. straza keygen prints the public half so \
+an admin can register it with strazactl users nhi-key set, so it is meant to \
+be published and opens nothing. The test value decodes to the text \
+"public-key", and the two page values are the public halves of agent keys on \
+throwaway walk servers that no longer exist."""
+paths = [
+  '''internal/agentguard/enroll_test\.go''',
+  '''website/content/guides/connect-identity/nhi-provisioning\.md''',
+  '''website/content/guides/govern-an-agent/headless-agents\.md''',
+]
+regexes = [
+  '''cHVibGljLWtleQ==''',
+  '''pzXwnoH6Vcc/cs\+T/gxsrZ/SGMzU7J7nQSgfKWy5AUg=''',
+  '''huw3t4\+Vrf69fExt1wBKWkQB9bZMD\+eSAVsCs03\+cTc=''',
 ]
 regexTarget = "match"
 condition = "AND"

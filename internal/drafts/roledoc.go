@@ -43,11 +43,13 @@ type RoleDocSpec struct {
 	Packs       []string      `yaml:"packs,omitempty"`
 }
 
-// RoleBinding is an access row: the server by name and the tool matchers,
-// where ["*"] is every tool and an empty list grants nothing.
+// RoleBinding is an access row: the server by name, the tool matchers,
+// where ["*"] is every tool and an empty list grants nothing, and the
+// objects of the server's pinned type it covers, nil when it says none.
 type RoleBinding struct {
-	App   string   `yaml:"app"`
-	Tools []string `yaml:"tools"`
+	App    string   `yaml:"app"`
+	Tools  []string `yaml:"tools"`
+	Covers *Scope   `yaml:"covers,omitempty"`
 }
 
 // docTypeWords names the Go types of the documents this package decodes
@@ -77,7 +79,7 @@ func (d RoleDoc) Marshal() ([]byte, error) {
 	d.Spec.Packs = sortedCopy(d.Spec.Packs)
 	bindings := make([]RoleBinding, len(d.Spec.Bindings))
 	for i, b := range d.Spec.Bindings {
-		bindings[i] = RoleBinding{App: b.App, Tools: sortedCopy(b.Tools)}
+		bindings[i] = RoleBinding{App: b.App, Tools: sortedCopy(b.Tools), Covers: b.Covers}
 	}
 	sort.SliceStable(bindings, func(i, j int) bool { return bindings[i].App < bindings[j].App })
 	if len(bindings) > 0 {
@@ -125,6 +127,9 @@ func ParseRole(doc string) (RoleDoc, error) {
 	if name := repeated(d.Spec.Implies); name != "" {
 		return RoleDoc{}, fmt.Errorf("spec.implies lists %s twice", visible(name))
 	}
+	if err := nullCovers(doc, d); err != nil {
+		return RoleDoc{}, err
+	}
 	for i, b := range d.Spec.Bindings {
 		if b.App == "" {
 			return RoleDoc{}, fmt.Errorf("spec.bindings[%d].app is empty", i)
@@ -151,8 +156,8 @@ func repeated(list []string) string {
 
 // RoleDocOf is the canonical document of the role name as w holds it, and
 // false when w holds no such role. Its binding is the role's access row,
-// each tool once, and a row whose server is gone is left out, as the export
-// leaves it out.
+// each tool once, with the covers line and its stored values, and a row
+// whose server is gone is left out, as the export leaves it out.
 func RoleDocOf(w World, name string) (RoleDoc, bool) {
 	ro, ok := w.Roles[name]
 	if !ok {
@@ -168,7 +173,7 @@ func RoleDocOf(w World, name string) (RoleDoc, bool) {
 	// A row stored before the document parser refused a repeated tool keeps
 	// each tool once here, so the document of every live role parses.
 	if acc, ok := w.Access[name]; ok && acc.Server != "" {
-		d.Spec.Bindings = []RoleBinding{{App: acc.Server, Tools: slices.Compact(sortedCopy(acc.Tools))}}
+		d.Spec.Bindings = []RoleBinding{{App: acc.Server, Tools: slices.Compact(sortedCopy(acc.Tools)), Covers: acc.Covers.clone()}}
 	}
 	return d, true
 }

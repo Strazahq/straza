@@ -267,3 +267,29 @@ func startNoDBUpstream(t *testing.T) *httptest.Server {
 	t.Cleanup(s.Close)
 	return s
 }
+
+// TestGatewayNoDBObjectGate extends the no-DB rule to the object gate: on a
+// server that pins an object type, a call a partial role covers, a call
+// through a role on every object, a refusal of an uncovered object and a
+// refusal of unreadable arguments read the pinned declaration, the
+// compiled covers lines and the in-memory object list only. Each object is
+// listed, so no call asks the loop for a listing inside the window.
+func TestGatewayNoDBObjectGate(t *testing.T) {
+	t.Parallel()
+	r := newGHRig(t)
+	ep := ghEndpoints[0]
+	before := r.cs.snapshot()
+	if text, isErr := r.call(t, ep, "pam", "pr_create", `{"repo":"Strazahq/pay-api"}`, ""); isErr {
+		t.Fatalf("covered call = %q", text)
+	}
+	if text, isErr := r.call(t, ep, "eve", "pr_create", `{"repo":"Strazahq/site"}`, ""); isErr {
+		t.Fatalf("every call = %q", text)
+	}
+	if text, isErr := r.call(t, ep, "pam", "pr_create", `{"repo":"Strazahq/site"}`, ""); !isErr || !strings.Contains(text, "covers that repo") {
+		t.Fatalf("uncovered call = %q", text)
+	}
+	if text, isErr := r.call(t, ghEndpoints[1], "pam", "pr_create", `{"repo":"a","repo":"b"}`, ""); !isErr || !strings.Contains(text, "a key appears twice") {
+		t.Fatalf("unreadable call = %q", text)
+	}
+	assertNoRepoAccess(t, r.cs, "object gate", before)
+}

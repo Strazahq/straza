@@ -295,7 +295,7 @@ func codexRegisteredEvents(path string) map[string]bool {
 //     the operator's trust hash, so it stays omitted.
 //  2. SessionEnd carries an explicit timeout: codex defaults to 600 s for most
 //     events but ONE SECOND for SessionEnd (3 s maximum), and SessionEnd is
-//     where straza drains the audit spool.
+//     where straza hands the turn's reply to the background service.
 //
 // Nothing invented: HooksFile is deny_unknown_fields, so an unknown key does
 // not degrade, it makes codex skip the whole file.

@@ -20,10 +20,6 @@ type sinksServer struct {
 func (s *sinksServer) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("GET /v1/admin/sinks", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"name":"elastic","type":"webhook","target":"http://elasticsearch:9200/straza-events/_doc","batch":0,"subjects":["straza.audit.>"],"parked":414,` +
@@ -59,7 +55,7 @@ func TestSinksList(t *testing.T) {
 	s := &sinksServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	credsPath := writeCreds(t, srv.URL)
+	credsPath := onToken(t, srv.URL)
 
 	stdout, _, err := runCLI(t, credsPath, "sinks", "list")
 	if err != nil {
@@ -94,7 +90,7 @@ func TestSinksReplay(t *testing.T) {
 	s := &sinksServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	credsPath := writeCreds(t, srv.URL)
+	credsPath := onToken(t, srv.URL)
 
 	stdout, _, err := runCLI(t, credsPath, "sinks", "replay", "elastic", "--limit", "400")
 	if err == nil || !strings.Contains(err.Error(), "replay stopped") || !strings.Contains(err.Error(), "HTTP 400") {
@@ -160,10 +156,6 @@ func TestSinksListLastErrorTime(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()
-			mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-			})
 			mux.HandleFunc("GET /v1/admin/sinks", func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`[{"name":"s","type":"webhook","target":"http://receiver/in","parked":0,"streams":` + tc.streams + `}]`))
@@ -172,7 +164,7 @@ func TestSinksListLastErrorTime(t *testing.T) {
 			t.Cleanup(srv.Close)
 			t.Setenv("STRAZA_SERVER", "")
 
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "sinks", "list")
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), "sinks", "list")
 			if err != nil {
 				t.Fatalf("sinks list: %v", err)
 			}

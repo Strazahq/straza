@@ -2,7 +2,7 @@
 title: strazactl unassign
 description: Take a role away from a user
 pagetype: reference
-weight: 104
+weight: 100
 draft: false
 sources:
   - cmd/strazactl
@@ -31,7 +31,7 @@ strazactl unassign <role> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

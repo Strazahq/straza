@@ -72,10 +72,18 @@ export function decidersLine(d: Decision): string {
 
 const stripDot = (s: string) => s.replace(/\.$/, "");
 
+// Gate is the sentence of a check that refused a call before any policy
+// ran, such as the object check: its lead and the reason the agent reads.
+export type Gate = { lead: string; reason: string };
+
 // Provenance is the one sentence that says what decided the call. A
 // simulate answer always carries the set name field, so the record-age
-// branch of the audit reader is not needed here.
-function Provenance({ d, profile }: { d: Decision; profile: string }) {
+// branch of the audit reader is not needed here. A deny no rule made that a
+// gate refused reads as the gate's sentence, never as a profile default.
+function Provenance({ d, profile, gate }: { d: Decision; profile: string; gate?: Gate }) {
+  if (!d.ruleId && d.effect === "deny" && gate) {
+    return <span data-gate><b className="font-semibold text-foreground">{gate.lead}</b>{" " + gate.reason}</span>;
+  }
   if (!d.ruleId) {
     if (d.approve || confirms(d) || d.serverCheck || d.classify || !["allow", "deny"].includes(d.effect)) {
       return <span>No policy rule was identified in the response.{d.reason ? " " + d.reason : ""}</span>;
@@ -145,15 +153,18 @@ export type WhyCardProps = {
   context?: React.ReactNode;
   wire?: string;
   tone?: CardTone;
+  // gate is the sentence of a check that refused the call before any
+  // policy ran, read in place of the no-rule sentence on a deny.
+  gate?: Gate;
 };
 
 // WhyCard frames one decision.
-export function WhyCard({ d, profile, mark, caption, head, context, wire, tone = "plain" }: WhyCardProps) {
+export function WhyCard({ d, profile, mark, caption, head, context, wire, tone = "plain", gate }: WhyCardProps) {
   return (
     <div role="status" data-why-card={mark} className={cn("flex flex-col gap-1.5 rounded-md border bg-card px-4 py-3 text-sm", BORDER[tone])}>
       {caption && <span className="text-[12px] font-semibold uppercase tracking-[.06em] text-muted-foreground">{caption}</span>}
       <div className="flex flex-wrap items-center gap-2">{head}</div>
-      <p className="leading-relaxed text-text-2"><Provenance d={d} profile={profile} /></p>
+      <p className="leading-relaxed text-text-2"><Provenance d={d} profile={profile} gate={gate} /></p>
       {context && <p className="text-[13px] leading-relaxed text-muted-foreground">{context}</p>}
       {wire && <EngineFields line={wire} />}
     </div>

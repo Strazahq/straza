@@ -71,17 +71,17 @@ func TestCheckStale(t *testing.T) {
 			map[string]LastChange{"Role/dev": {Draft: 40, Publisher: "bob", At: time.Date(2026, 9, 24, 9, 5, 59, 0, time.FixedZone("CEST", 7200))}},
 			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/dev",
 				Sentence: "Role/dev changed after this draft was checked, when bob published draft 40 at 2026-09-24 07:05 UTC.",
-				Fix:      "Check the draft again with Check again on the console or strazactl drafts rebase 41. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
+				Fix:      "Check the draft again with Check again on the console under Drafts. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
 		{"a moved object with no publish on record", Draft{ID: "41", Items: []Item{moved}}, nil,
 			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/dev", Sentence: "Role/dev changed after this draft was checked.",
-				Fix: "Check the draft again with Check again on the console or strazactl drafts rebase 41. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
+				Fix: "Check the draft again with Check again on the console under Drafts. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
 		{"an object created since the draft named it absent, and the check reads no further", Draft{ID: "41", Items: []Item{
 			{Kind: KindRole, Name: "ops", Op: OpRemove}, created}}, nil,
 			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/ops", Sentence: "Role/ops changed after this draft was checked.",
-				Fix: "Check the draft again with Check again on the console or strazactl drafts rebase 41. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
+				Fix: "Check the draft again with Check again on the console under Drafts. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
 		{"a draft not stored yet names no number", Draft{Items: []Item{moved}}, nil,
 			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/dev", Sentence: "Role/dev changed after this draft was checked.",
-				Fix: "Check the draft again with Check again on the console or strazactl drafts rebase <id>. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
+				Fix: "Check the draft again with Check again on the console under Drafts. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

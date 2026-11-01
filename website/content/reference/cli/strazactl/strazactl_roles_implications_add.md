@@ -2,7 +2,7 @@
 title: strazactl roles implications add
 description: 'Compose one role into another: holding the first also holds the second'
 pagetype: reference
-weight: 83
+weight: 79
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl roles implications add <role> <implied> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

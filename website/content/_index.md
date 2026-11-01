@@ -1,6 +1,7 @@
 ---
 title: Straza docs
 description: Open source runtime governance for AI agents.
+seo_description: Open source runtime governance for AI agents. These docs cover deployment, identity, policy, approvals, the MCP gateway, audit, security and the CLI.
 pagetype: landing
 draft: false
 keywords: straza docs runtime governance agents identity manager control plane

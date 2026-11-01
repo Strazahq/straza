@@ -9,6 +9,7 @@ import (
 
 	"github.com/strazahq/straza/internal/server/catalogcache"
 	"github.com/strazahq/straza/internal/server/ratelimit"
+	"github.com/strazahq/straza/internal/store"
 )
 
 // gwBinding is one tool_bindings row resolved to names (role/app ids are
@@ -18,6 +19,7 @@ type gwBinding struct {
 	App      string
 	Role     string
 	Matchers []string
+	Scope    *store.ObjectScope
 }
 
 // listChangedNotification is the tools/list_changed JSON-RPC notification the
@@ -145,8 +147,10 @@ func (g *gateway) dropOverlay(sessionID string) {
 }
 
 // refreshBindings resolves tool_bindings rows to (role name, app name)
-// pairs and swaps the gateway's in-memory table. Control plane only (boot +
-// binding CRUD).
+// pairs with their covers lines and swaps the gateway's in-memory table.
+// A row whose covers line cannot be read is left out, so it grants
+// nothing, and its sentence is logged. Control plane only (boot + binding
+// CRUD).
 func (a *App) refreshBindings(ctx context.Context) error {
 	rows, err := a.store.ToolBindings().List(ctx)
 	if err != nil {
@@ -179,7 +183,11 @@ func (a *App) refreshBindings(ctx context.Context) error {
 		if role == "" || app == "" {
 			continue
 		}
-		out = append(out, gwBinding{ID: b.ID, App: app, Role: role, Matchers: matchers})
+		if b.ScopeFault != "" {
+			a.log.Error(b.ScopeFault, "component", "gateway")
+			continue
+		}
+		out = append(out, gwBinding{ID: b.ID, App: app, Role: role, Matchers: matchers, Scope: b.Scope})
 	}
 	a.gateway.SetBindings(out)
 	return nil

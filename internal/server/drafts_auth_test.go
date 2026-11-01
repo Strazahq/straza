@@ -110,8 +110,8 @@ func TestDraftsAccess(t *testing.T) {
 // TestRequireDrafts pins the wrapper of the drafts routes against real
 // credentials: who passes, the refusal everyone else reads, and the author
 // and door a pass hands on. The door comes from the credential, never the
-// request: a console session is console, a strazactl session strazactl,
-// and a login, a self-service session and an admin API token api. An agent
+// request: a console session is console, and a login, a self-service
+// session and an admin API token api. An agent
 // is refused before its standing is read, whatever role it holds, because
 // only a person uses the admin API.
 func TestRequireDrafts(t *testing.T) {
@@ -169,7 +169,6 @@ func TestRequireDrafts(t *testing.T) {
 	}{
 		{"root's login", kimLogin, http.MethodPost, http.StatusNoContent, "", kimAs(laneLogin, clientLogin, drafts.DoorAPI)},
 		{"root's console session", session("console"), http.MethodPost, http.StatusNoContent, "", kimAs(laneSession, "console", drafts.DoorConsole)},
-		{"root's strazactl session", session("strazactl"), http.MethodPost, http.StatusNoContent, "", kimAs(laneSession, "strazactl", drafts.DoorStrazactl)},
 		{"root's self-service session", session("self-service"), http.MethodPost, http.StatusNoContent, "", kimAs(laneSession, "self-service", drafts.DoorAPI)},
 		{"root's coding harness session", session("claude-code"), http.MethodGet, http.StatusForbidden, `coding harness "claude-code"`, nil},
 		{"a person with identity:read, reading", login("ada"), http.MethodGet, http.StatusNoContent, "", nil},
@@ -391,9 +390,9 @@ func TestPublisherRefusal(t *testing.T) {
 		{"a disabled person", disabled, "The user dora is disabled, so it cannot publish a draft. Ask an administrator to enable it again."},
 		{"a locked person", locked, "The user lars is locked, so it cannot publish a draft. An administrator lifts the lock with strazactl users unlock lars."},
 		{"an admin API token", adminAPICaller("ci", "drafts:write"),
-			"An admin API token carries no person and cannot publish a draft. It may create drafts. A person publishes them on the console or with strazactl."},
+			"An admin API token carries no person and cannot publish a draft. It may create drafts. A person publishes them on the console under Drafts."},
 		{"an agent holding root", rootAgent,
-			"This identity is an agent, and an agent cannot publish a draft, even with an administrator role. A person with standing over every object in the draft publishes it on the console or with strazactl."},
+			"This identity is an agent, and an agent cannot publish a draft, even with an administrator role. A person with standing over every object in the draft publishes it on the console under Drafts."},
 		{"a person", personCaller("ada"), ""},
 	}
 	for _, tc := range cases {

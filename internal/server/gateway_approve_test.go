@@ -766,7 +766,7 @@ func TestGatewayApproveOutcome(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			o := vapp.gateApprove(ctx, row.gate, claims, sub, ev, row.d, "", nil, row.awaitListed)
+			o := vapp.gateApprove(ctx, row.gate, claims, sub, ev, row.d, "", nil, approval.Object{}, row.awaitListed)
 			if o.run || o.reason == "" {
 				t.Fatalf("outcome = %+v, want a refusal", o)
 			}

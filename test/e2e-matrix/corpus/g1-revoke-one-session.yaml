@@ -9,9 +9,9 @@
 # roles, apps, users and devices answer 200 with a status field, a policy
 # delete answers 204, and the bare approvals list is an object with an
 # approvals array.
-# The daemon starts after the first session.start of its identity: the
-# daemon keeps a session fresh and holds its push stream, so it refuses to
-# run before one exists [live].
+# Each identity runs its own straza service, which holds the push stream of
+# every session it starts, and the runner waits for that stream after each
+# session start that is allowed [doc].
 id: g1-revoke-one-session
 group: G1
 title: The admin revokes one session and the next hook and gateway calls are refused
@@ -86,15 +86,13 @@ steps:
             path: members
             value: [{value: "${bobId}"}]
     want: {status: 200}
-  - name: bob enrolls and starts his daemon
+  - name: bob enrolls
     enroll: {as: bob}
   - name: bob starts a session
     hook:
       as: bob
       event: {kind: session.start}
     want: {decision: allow}
-  - name: bob's daemon holds the push stream
-    daemon: {as: bob, action: start}
   - name: a benign command is allowed by the standalone default
     hook:
       as: bob
@@ -119,7 +117,7 @@ steps:
       method: POST
       path: /v1/admin/sessions/${sessionId}/revoke
     want: {status: 200}
-  - name: the next hook decision is refused, daemon connected
+  - name: the next hook decision is refused, with the service's push stream connected
     hook:
       as: bob
       event: {kind: tool.pre, tool: shell.exec, command: "git status"}
@@ -151,8 +149,6 @@ steps:
       tool: g1-one-tools__echo
       args: {text: after-restart}
     want: {result: after-restart}
-  - name: bob's daemon is stopped
-    daemon: {as: bob, action: stop}
   - name: the admin deletes the role before its server, which would take it along
     admin:
       method: DELETE

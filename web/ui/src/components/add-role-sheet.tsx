@@ -5,13 +5,16 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { AccessEditor } from "@/components/access-editor";
 import { type Built, RoleSaves, liveExport } from "@/components/role-saves";
 import { Field, HINT } from "@/components/wizard/parts";
+import { coversKey, coversOf, pinnedOf, uncovered } from "@/lib/access-covers";
+import { fileCommands, missingCovers } from "@/lib/access-object-words";
 import { type Plan, emptyPlan, grantMatchers, sameRules } from "@/lib/access-plan";
 import { type AccessRead, accessRead, mayWritePolicy, readSetText, retires } from "@/lib/access-read";
 import { type AppRow, type BindingRow, type PreviewEntry, type RoleRow, type ToolRow, catalogPreview, listRoles } from "@/lib/api";
 import { type GrantInput, storedRules } from "@/lib/grant-commit";
 import { heldSets } from "@/lib/held-kinds";
-import { accessItems, newRoleItems, readOwnSet } from "@/lib/role-draft";
-import { CANCEL, NAME_MISSING, NOTHING_CHANGED, PICK_ANOTHER, PICK_A_TOOL, READING_POLICY, UNCHANGED_TOOLS, accessSetName, accessToast, isGlob, liveRole, nameTaken } from "@/lib/role-words";
+import { nounsOf } from "@/lib/object-words";
+import { accessItems, newRoleItems, readOwnSet, roleFile } from "@/lib/role-draft";
+import { CANCEL, NAME_MISSING, NOTHING_CHANGED, PICK_ANOTHER, PICK_A_TOOL, READING_POLICY, UNCHANGED_TOOLS, accessSetName, accessToast, isGlob, liveRole, nameTaken, roleFileName } from "@/lib/role-words";
 import { NOTHING_SAVED, REMOVE_SET, removeSetBody, removeSetTitle, savedEdit } from "@/lib/save-words";
 import {
   ADD_LEDE,
@@ -34,7 +37,7 @@ import { cn } from "@/lib/utils";
 // the name with the server's prefix fixed and only the suffix typed, the
 // live preview of what is stored, and the same access editor as New role.
 // Only a global admin gives a role every tool and tools added later, so a
-// server admin names its tools. Edit tools opens the same sheet with the
+// server admin names its tools. Edit access opens the same sheet with the
 // name fixed. Both end in Save draft and Save and publish, so the role's
 // document and its own set go live together in one
 // draft or not at all.
@@ -65,7 +68,7 @@ export type AddRoleSheetProps = {
 
 const NEW_READ: AccessRead = { initial: emptyPlan(), fixed: {}, taken: [], unread: { own: false, others: false }, text: null };
 
-// readFor reads what Edit tools opens on: the role's own set, the server's
+// readFor reads what Edit access opens on: the role's own set, the server's
 // preview of the role, and the other sets that hold one of its tools.
 // saved says the own set holds a saved edit nobody published.
 async function readFor(role: RoleRow, app: AppRow, names: string[], row: BindingRow): Promise<{ read: AccessRead; saved: boolean }> {
@@ -141,6 +144,10 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
   const preview = previewParts(name);
   const before = binding ? (isGlob(binding.tools) ? ["*"] : (binding.tools || []).slice().sort()) : null;
   const sameTools = !!before && JSON.stringify(before) === JSON.stringify(matchers);
+  // sameRow says the access row stays as stored: its tools and its covers
+  // line, which a save writes with the row.
+  const sameRow = sameTools && coversKey(coversOf(binding?.covers)) === coversKey(plan.covers);
+  const pinned = pinnedOf(app);
   const sameCalls = !!read && sameRules(read.initial, plan, app.name, names, name);
   const retiring = !!read && retires(read, plan, app.name, names, name);
   // A new role's sentence and rules wait for its name.
@@ -152,8 +159,9 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
   // set, so the fold shows the kept ids and reasons.
   const written = read && typeof read.text === "string" ? storedRules(read.text, plan, app.name, names, name) : undefined;
   // changed says a save would store something the sheet did not open on: a
-  // new role's name or description, its tools, or what a call does.
-  const changed = !!read && ((!editing && !!(suffix.trim() || description.trim())) || !sameCalls || JSON.stringify(grantMatchers(read.initial, names)) !== JSON.stringify(matchers));
+  // new role's name or description, its tools, its covers line, or what a
+  // call does.
+  const changed = !!read && ((!editing && !!(suffix.trim() || description.trim())) || !sameCalls || JSON.stringify(grantMatchers(read.initial, names)) !== JSON.stringify(matchers) || coversKey(read.initial.covers) !== coversKey(plan.covers));
 
   const close = () => { if (!busy) onOpenChange(false); };
 
@@ -174,24 +182,28 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
       setNote(PICK_A_TOOL);
       return null;
     }
+    if (pinned && uncovered(app, plan.covers)) {
+      setNote(missingCovers(nounsOf(pinned)));
+      return null;
+    }
     const input: GrantInput = { role: { name, id: role ? role.id : undefined }, app, tools, plan };
     if (!role) {
       const made = await newRoleItems({ name, kind: "application", description: description.trim(), implies: [] }, input);
       return "error" in made ? { tone: "refused", lines: [NOTHING_SAVED, made.error] } : made.items;
     }
-    if (sameTools && sameCalls) {
+    if (sameRow && sameCalls) {
       setNote(NOTHING_CHANGED);
       return null;
     }
     if (!confirmed && retiring) return "ask";
-    const text = sameTools ? "" : await liveExport(role);
+    const text = sameRow ? "" : await liveExport(role);
     if (typeof text !== "string") return text;
-    const answer = await accessItems({ ...input, replace: sameTools ? null : binding, keep: sameTools, before: read.initial }, text);
+    const answer = await accessItems({ ...input, replace: sameRow ? null : binding, keep: sameRow, before: read.initial }, text);
     return "error" in answer ? { tone: "refused", lines: [NOTHING_SAVED, answer.error] } : answer.items;
   };
 
   // The toasts after a publish are New role's and the role page's.
-  const toast = !editing ? liveRole(name) : sameTools ? undefined : accessToast(name, app.name);
+  const toast = !editing ? liveRole(name) : sameRow ? undefined : accessToast(name, app.name);
 
   return (
     <Sheet open={open} onOpenChange={(o) => { if (!o) close(); }}>
@@ -225,7 +237,13 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
             <p className={cn(HINT, "m-0")} data-name-preview>
               {preview.lead}<span className={CODE}>{preview.stored}</span>{preview.mid}<span className={CODE}>{preview.ar}</span>{preview.end}
               <br />
-              <span className="font-mono text-xs">{cliCreateRole(name, app.name, matchers)}</span>
+              {pinned ? (
+                <span className="block font-mono text-xs whitespace-pre-wrap" data-role-file>
+                  {fileCommands(roleFile({ name, kind: "application", description: description.trim(), implies: [] }, { role: { name }, app, tools, plan }), roleFileName(name))}
+                </span>
+              ) : (
+                <span className="font-mono text-xs">{cliCreateRole(name, app.name, matchers)}</span>
+              )}
             </p>
           </Field>
 
@@ -258,7 +276,7 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
           )}
           {note ? (
             <p role="status" className="m-0 text-[13px] text-danger" data-save-note>{note}</p>
-          ) : sameTools && read && !sameCalls && !retiring ? (
+          ) : sameRow && read && !sameCalls && !retiring ? (
             <p role="status" className="m-0 text-[13px] text-muted-foreground" data-save-note>{UNCHANGED_TOOLS}</p>
           ) : null}
         </div>

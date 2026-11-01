@@ -105,7 +105,7 @@ func TestTransportErrorTellsATimeoutFromNoConnection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			base := tc.base(t)
-			c := loggedInClient(t, base)
+			c := tokenClient(t, base)
 			c.HTTP.Timeout = 300 * time.Millisecond
 			if tc.dialHangs {
 				c.HTTP.Transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {

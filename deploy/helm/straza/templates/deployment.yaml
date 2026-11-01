@@ -134,6 +134,10 @@ spec:
             - name: STRAZA_OIDC_CLIENT_ID
               value: {{ .Values.oidc.clientId | quote }}
             {{- end }}
+            {{- if .Values.oidc.loopbackPort }}
+            - name: STRAZA_OIDC_LOOPBACK_PORT
+              value: {{ .Values.oidc.loopbackPort | quote }}
+            {{- end }}
             {{- if .Values.apps.manifests }}
             - name: STRAZA_APPS_DIR
               value: /etc/straza/apps

@@ -154,9 +154,10 @@
         "tools": { "path": "ext:tools", "multivalued": true },
         "policies": { "path": "ext:policies", "multivalued": true },
         "administers": { "path": "ext:administers", "multivalued": true },
+        "covers": { "path": "ext:covers", "multivalued": true },
         "server": { "path": "ext:server" }
       },
-      "//syncNote": "A role change or a membership change emits a role event. A binding change reshapes the projection's apps and tools without an own role event, so the class re-emits on it.",
+      "//syncNote": "A role change or a membership change emits a role event. A binding change reshapes the projection's apps, tools and covers without an own role event, so the class re-emits on it.",
       "sync": {
         "requestTypes": ["role", "binding"],
         "self": ["role"],

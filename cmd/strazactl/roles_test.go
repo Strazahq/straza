@@ -51,10 +51,6 @@ func (s *rolesServer) writes() []rolesRequest {
 func (s *rolesServer) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("GET /v1/admin/roles", func(w http.ResponseWriter, r *http.Request) {
 		s.record(r, nil)
 		w.Header().Set("Content-Type", "application/json")
@@ -228,7 +224,7 @@ func TestRolesCreateKind(t *testing.T) {
 			s := &rolesServer{}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			credsPath := writeCreds(t, srv.URL)
+			credsPath := onToken(t, srv.URL)
 
 			_, _, err := runCLI(t, credsPath, tc.args...)
 			switch {
@@ -319,7 +315,7 @@ func TestRolesCreateServerOwned(t *testing.T) {
 			s := &rolesServer{}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			credsPath := writeCreds(t, srv.URL)
+			credsPath := onToken(t, srv.URL)
 
 			stdout, _, err := runCLI(t, credsPath, tc.args...)
 			switch {
@@ -384,10 +380,6 @@ func TestRolesListServerColumn(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()
-			mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-			})
 			mux.HandleFunc("GET /v1/admin/roles", func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(tc.list))
@@ -395,7 +387,7 @@ func TestRolesListServerColumn(t *testing.T) {
 			srv := httptest.NewServer(mux)
 			t.Cleanup(srv.Close)
 			t.Setenv("STRAZA_SERVER", "")
-			credsPath := writeCreds(t, srv.URL)
+			credsPath := onToken(t, srv.URL)
 
 			stdout, _, err := runCLI(t, credsPath, "roles", "list")
 			if err != nil {
@@ -485,7 +477,7 @@ func TestRolesImplicationsWiring(t *testing.T) {
 			s := &rolesServer{}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			credsPath := writeCreds(t, srv.URL)
+			credsPath := onToken(t, srv.URL)
 
 			stdout, _, err := runCLI(t, credsPath, tc.args...)
 			switch {
@@ -575,7 +567,7 @@ func TestAssignWiring(t *testing.T) {
 			s := &rolesServer{}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), tc.args...)
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), tc.args...)
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("%v: %v", tc.args, err)
@@ -635,7 +627,7 @@ func TestRolesDeleteNamesTheSetsTurnedOff(t *testing.T) {
 			s := &rolesServer{}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), tc.args...)
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), tc.args...)
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("%v: %v", tc.args, err)

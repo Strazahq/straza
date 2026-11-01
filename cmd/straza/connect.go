@@ -10,10 +10,7 @@ import (
 )
 
 func connectCmd() *cobra.Command {
-	var (
-		expires     string
-		allowAgents bool
-	)
+	var expires string
 	cmd := &cobra.Command{
 		Use:   "connect [server]",
 		Short: "Connect your own account to an MCP server; no server lists your connections",
@@ -23,22 +20,16 @@ your credentials page, where you sign in and finish. On a token server it asks f
 token with the input hidden.
 
 The token also reads from stdin when stdin is not a terminal, and never from an
-argument. straza disconnect takes a connection away. An administrator or a sponsor
-stores another user's token with strazactl connect. A sign-in is stored only by the
+argument. straza disconnect takes a connection away. Letting the agents you sponsor
+use a connection, and setting an agent's token, happen on the Credentials tab of the
+self-service page, where you sign in in your browser. A sign-in is stored only by the
 person who signs in.`,
 		Example: `  straza connect
   straza connect midpoint
   straza connect github --expires 2026-12-31`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := agentguard.OpenStore()
-			if err != nil {
-				return err
-			}
-			api, err := agentguard.NewSessionAPI(store)
-			if err != nil {
-				return err
-			}
+			api := agentguard.NewSessionAPI()
 			o := connect.Options{
 				Tool: "straza", Expires: expires,
 				In: os.Stdin, Out: os.Stdout, Err: os.Stderr,
@@ -46,14 +37,10 @@ person who signs in.`,
 			if len(args) == 1 {
 				o.Server = args[0]
 			}
-			if cmd.Flags().Changed("allow-agents") {
-				o.AllowAgents = &allowAgents
-			}
 			return connect.Run(cmd.Context(), api, o)
 		},
 	}
 	cmd.Flags().StringVar(&expires, "expires", "", "the date the token stops working, as YYYY-MM-DD")
-	cmd.Flags().BoolVar(&allowAgents, "allow-agents", false, "let the agents you sponsor use this connection (=false takes it back)")
 	return cmd
 }
 
@@ -67,14 +54,7 @@ until you connect again. Run straza connect to see your connections.`,
 		Example: "  straza disconnect midpoint",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := agentguard.OpenStore()
-			if err != nil {
-				return err
-			}
-			api, err := agentguard.NewSessionAPI(store)
-			if err != nil {
-				return err
-			}
+			api := agentguard.NewSessionAPI()
 			o := connect.Options{Tool: "straza", Out: os.Stdout}
 			if len(args) == 1 {
 				o.Server = args[0]

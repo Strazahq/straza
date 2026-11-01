@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/strazahq/straza/internal/approval"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -61,13 +62,15 @@ func TestApproverLockedUserDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 	app.resolver.Bump()
+	grantRole(t, app, lee.ID, EnrollMobileRole)
 
-	// Enroll lee's phone.
+	// lee enrolls their own phone on the self route.
 	var mint struct {
 		EnrollToken string `json:"enroll_token"`
 	}
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "lee"}, &mint); code != http.StatusOK {
+	leeTok := loginDeviceFlow(t, base, "lee", "hunter2!")
+	if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", leeTok,
+		map[string]any{"channel": "mobile"}, &mint); code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d", code)
 	}
 	priv, spki := genApproverKey(t)
@@ -104,13 +107,12 @@ func TestApproverLockedUserDenied(t *testing.T) {
 	}
 
 	// Minted while lee is still active: a spare enroll token and a refresh
-	// challenge; the lock must render both unusable.
-	var mint2 struct {
-		EnrollToken string `json:"enroll_token"`
-	}
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "lee"}, &mint2); code != http.StatusOK {
-		t.Fatalf("mint second enroll-token = %d", code)
+	// challenge; the lock must render both unusable. The spare comes from the
+	// approval service, because the self route's per-user cooldown refuses
+	// a second mint this soon.
+	mint2, err := app.approval.MintEnrollToken(ctx, lee.ID, approval.EnrollChannelMobile)
+	if err != nil {
+		t.Fatalf("mint second enroll-token: %v", err)
 	}
 	var refCh struct {
 		Challenge string `json:"challenge"`
@@ -153,7 +155,7 @@ func TestApproverLockedUserDenied(t *testing.T) {
 		// Enroll keeps its single coarse 401 (spent/expired/disabled all read
 		// "enroll token invalid"; no oracle for WHY a token died).
 		{"enroll", "POST", "/v1/approver/enroll", "", map[string]any{
-			"enroll_token": mint2.EnrollToken,
+			"enroll_token": mint2.Token,
 			"device": map[string]any{
 				"name": "lee-pixel-2", "platform": "android", "key_alg": "ecdsa-p256",
 				"public_key": spki2, "key_security_level": "strongbox",

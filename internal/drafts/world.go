@@ -1,5 +1,7 @@
 package drafts
 
+import "time"
+
 // World is live state as the checks see it, every config object keyed by
 // name, because a draft's documents name objects and never carry row ids.
 // The server reads a World once per check. Overlay lays a draft on top, and
@@ -20,6 +22,13 @@ type World struct {
 	// Holders maps a role to the users who hold it directly, from the
 	// assignments in force when the World was read.
 	Holders map[string][]Holder
+	// Windows maps a username to the direct assignments of that user that
+	// start or end after the World was read, sorted by role. A role Holders
+	// lists the user under and Windows gives no row of is held with no end,
+	// because the store keeps one row per user and role. Only the checks of
+	// the proposer's own reach and guardrail read it, at each instant the
+	// proposer's roles change.
+	Windows map[string][]RoleWindow
 	// HolderCounts maps a role to the number of subjects that hold it
 	// through any path: its own assignments and those of every role whose
 	// implication closure reaches it, validity windows included, each
@@ -50,6 +59,10 @@ type World struct {
 	// RefuseCommand is true when this server refuses command servers, as it
 	// does under the enterprise profile.
 	RefuseCommand bool
+	// ServerAdminsCoverEvery is admin.serverAdminsCoverEvery: true lets a
+	// server admin make a role their server owns cover every object of the
+	// server's pinned type.
+	ServerAdminsCoverEvery bool
 	// roleDocs holds, by name, the Role documents Overlay read for the
 	// draft it laid on, so a check reads each Role document once.
 	roleDocs map[string]RoleDoc
@@ -103,6 +116,10 @@ type App struct {
 	// ReadOnly lists the offered tools whose upstream annotations say
 	// readOnlyHint.
 	ReadOnly []string
+	// Destructive holds each offered tool whose upstream annotations set
+	// destructiveHint, with the value they set. A tool it leaves out sets
+	// no hint.
+	Destructive map[string]bool
 	// SharedSecret is true when the server's own secret is stored,
 	// RoleSecrets names the roles with a secret of their own, and
 	// UserCredentials counts the users with a credential of their own. The
@@ -110,6 +127,30 @@ type App struct {
 	SharedSecret    bool
 	RoleSecrets     []string
 	UserCredentials int
+	// Objects is what the server read of an App item's straza.objects
+	// block against its running server, nil when the block is absent.
+	Objects *ObjectsReview
+	// Pinned is the server's pinned object type after the draft, nil when
+	// it pins none.
+	Pinned *PinnedObjects
+}
+
+// PinnedObjects is what a draft check needs of a server's pinned object
+// type. Reach maps a tool to argument, credential, all or none, and a tool
+// it does not name reads all. Argument maps each argument tool to the
+// argument whose value names the object. ListTool is the listing tool.
+// Credential is the listing credential's state: set, missing or
+// not-needed. IDs maps a value the draft's role puts name to its id in the
+// object list, for the values the list holds. LiveType is the type the
+// live manifest pins, empty when it pins none.
+type PinnedObjects struct {
+	Type, Plural string
+	Reach        map[string]string
+	Argument     map[string]string
+	ListTool     string
+	Credential   string
+	IDs          map[string]string
+	LiveType     string
 }
 
 // Role is one role. Owner is the name of the server that owns an owned
@@ -128,12 +169,17 @@ type Role struct {
 }
 
 // Access is an application role's access row: its id, the server it
-// reaches and the tool matchers as stored. Server is empty when the row's
-// server is gone.
+// reaches, the tool matchers as stored and the objects it covers on a
+// server that pins an object type, nil when the row says none. Server is
+// empty when the row's server is gone. Fault says why the stored covers
+// line cannot be read, empty when it can: such a row grants nothing, and
+// no draft keeps it as it is.
 type Access struct {
 	ID     string
 	Server string
 	Tools  []string
+	Covers *Scope
+	Fault  string
 }
 
 // Policy is a set as the active snapshot carries it.
@@ -155,6 +201,19 @@ type Holder struct {
 	SwarmID    string
 	Sponsor    string
 	Devices    int
+}
+
+// RoleWindow is a direct assignment of Role that holds from From,
+// inclusive, to To, exclusive, as the identity resolver reads it. A nil
+// bound is open.
+type RoleWindow struct {
+	Role     string
+	From, To *time.Time
+}
+
+// holds reports whether the window holds at t.
+func (r RoleWindow) holds(t time.Time) bool {
+	return (r.From == nil || !t.Before(*r.From)) && (r.To == nil || t.Before(*r.To))
 }
 
 // Provider is an OAuth provider the server's config names.

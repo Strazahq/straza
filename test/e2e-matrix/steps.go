@@ -73,11 +73,11 @@ func (s *scenarioRun) runStep(ctx context.Context, st *step) {
 	case "scim":
 		try = func() (attempt, error) { return s.httpStep(ctx, args, want, s.stack.server.idm) }
 	case "enroll":
-		try = func() (attempt, error) { return attempt{ok: true}, s.clients[st.str("as")].enroll(ctx) }
+		try = func() (attempt, error) {
+			return attempt{ok: true}, s.clients[st.str("as")].enroll(ctx, st.str("signIn"))
+		}
 	case "approver":
 		try = func() (attempt, error) { return s.approverStep(ctx, args, want) }
-	case "daemon":
-		try = func() (attempt, error) { return s.daemonStep(st) }
 	case "server":
 		try = func() (attempt, error) { return s.serverStep(ctx, st) }
 	case "hook":
@@ -267,8 +267,8 @@ func wantInt(m map[string]any, key string) (int, bool) {
 }
 
 // hookStep spawns the real straza hook once, times it, and judges the
-// answer under the run's harness. A session.start that passes has the
-// client remember the token it opened, for a gateway call after a revoke.
+// answer under the run's harness. A session.start of a canonical event that
+// passes waits until the service holds the session's revocation stream.
 func (s *scenarioRun) hookStep(ctx context.Context, st *step, want map[string]any, payload []byte) (attempt, error) {
 	c := s.clients[st.str("as")]
 	o, err := c.hook(ctx, s.harness, payload)
@@ -282,10 +282,19 @@ func (s *scenarioRun) hookStep(ctx context.Context, st *step, want map[string]an
 		s.r.hookTime(s.harness, st.eventKind(), o.Elapsed)
 	}
 	ok, detail := judgeHook(s.harness, want, o)
-	if ok && st.eventKind() == "session.start" {
-		_, _ = c.sessionToken()
+	if ok && st.eventKind() == "session.start" && want["decision"] == "allow" {
+		if err := c.waitPush(ctx, s.harness, s.window(st.str("as"))); err != nil {
+			return attempt{}, err
+		}
 	}
 	return attempt{ok: ok, detail: detail}, nil
+}
+
+// window is the harness session id every canonical hook event of the
+// identity as carries in this run, the window its service keys the
+// session by.
+func (s *scenarioRun) window(as string) string {
+	return "e2e-" + s.sc.ID + "-" + as + "-" + s.harness
 }
 
 // hookPayload encodes the hook's stdin: the canonical event rendered for the
@@ -304,7 +313,7 @@ func (s *scenarioRun) hookPayload(args map[string]any) ([]byte, error) {
 		return nil, err
 	}
 	as, _ := args["as"].(string)
-	p, err := renderPayload(s.harness, ev, "e2e-"+s.sc.ID+"-"+as+"-"+s.harness)
+	p, err := renderPayload(s.harness, ev, s.window(as))
 	if err != nil {
 		return nil, err
 	}

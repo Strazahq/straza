@@ -56,7 +56,12 @@ func TestAdminChangesFeed(t *testing.T) {
 	insert("straza.identity.created", fmt.Sprintf(`{"data":{"id":%q,"origin":"scim"}}`, user.ID))
 	insert("straza.identity.updated", fmt.Sprintf(`{"data":{"id":%q}}`, role.ID))                            // role CRUD + wire-group membership ride the identity channel
 	insert("straza.identity.updated", fmt.Sprintf(`{"data":{"action":"session.start","user":%q}}`, user.ID)) // noise
-	insert("straza.identity.updated", `{"data":{"id":"01ffffff-dead-7000-8000-000000000000"}}`)              // hard-deleted
+	// An identity event that names no object is never a record: prod's
+	// boot-time hash registration, then any other such action. A record with
+	// an empty id stopped midPoint's liveSync with "Uid value must not be blank".
+	insert("straza.identity.updated", `{"data":{"via":"harness-config render","action":"attestation-hash.registered","harness":"claude-code","artifact":"hooks.claude-code","platform":"linux/amd64"}}`)
+	insert("straza.identity.updated", `{"data":{"action":"some.future.action"}}`)
+	insert("straza.identity.updated", `{"data":{"id":"01ffffff-dead-7000-8000-000000000000"}}`) // hard-deleted
 	// Real emission shapes (manager.go): deployed/removed/drift carry the app
 	// UID in `app` (+ `name`); apps.updated binding events carry the app NAME.
 	insert("straza.apps.deployed", `{"data":{"app":"01aaaaaa-0000-7000-8000-000000000001","name":"midpoint","version":"0.2.1"}}`)

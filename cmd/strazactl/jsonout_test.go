@@ -15,10 +15,6 @@ func jsonServer(t *testing.T, bodies map[string]string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/v1/checkin" {
-			_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-			return
-		}
 		body, ok := bodies[r.Method+" "+r.URL.Path]
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
@@ -48,7 +44,6 @@ func indented(t *testing.T, body string) string {
 // TestJSONPrintsTheServerAnswer pins --json on the five inventory reads: the
 // server's answer, indented, is the only thing on stdout, with every member
 // kept, number literals and escapes included, so openapi stays the schema.
-// A token run keeps its notice on stderr.
 func TestJSONPrintsTheServerAnswer(t *testing.T) {
 	tools := `[{"id":"demo-tools:echo","app":"demo-tools","name":"echo","description":"Echoes",` + futureFields + `},` +
 		`{"id":"midpoint:get_user","app":"midpoint","name":"get_user","description":"Reads a user"},` +
@@ -63,7 +58,6 @@ func TestJSONPrintsTheServerAnswer(t *testing.T) {
 	tests := []struct {
 		name       string
 		args       []string
-		token      string
 		wantStdout string
 		wantStderr string
 	}{
@@ -84,20 +78,12 @@ func TestJSONPrintsTheServerAnswer(t *testing.T) {
 			wantStdout: "[]\n",
 			wantStderr: noToolsFor("nosuch") + "\n",
 		},
-		{
-			name:       "a token run keeps stdout to the document",
-			args:       []string{"roles", "list", "--json"},
-			token:      "wat_abc",
-			wantStdout: indented(t, bodies["GET /v1/admin/roles"]),
-			wantStderr: "note: strazactl uses the admin API token in STRAZA_API_TOKEN for ",
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := jsonServer(t, bodies)
 			t.Setenv("STRAZA_SERVER", "")
-			t.Setenv(apiTokenEnv, tc.token)
-			stdout, stderr, err := runCLI(t, writeCreds(t, srv.URL), tc.args...)
+			stdout, stderr, err := runCLI(t, onToken(t, srv.URL), tc.args...)
 			if err != nil {
 				t.Fatalf("%v: %v", tc.args, err)
 			}
@@ -119,7 +105,7 @@ func TestJSONPrintsTheServerAnswer(t *testing.T) {
 func TestJSONRefusesAnAnswerThatIsNotJSON(t *testing.T) {
 	srv := jsonServer(t, map[string]string{"GET /v1/admin/roles": "<html>sign in</html>"})
 	t.Setenv("STRAZA_SERVER", "")
-	stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "roles", "list", "--json")
+	stdout, _, err := runCLI(t, onToken(t, srv.URL), "roles", "list", "--json")
 	if err == nil || !strings.Contains(err.Error(), "the server's answer is not JSON") {
 		t.Fatalf("err = %v, want the not-JSON refusal", err)
 	}

@@ -18,12 +18,12 @@ strazactl devices [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
 * [strazactl](/reference/cli/strazactl/): Straza admin CLI
 * [strazactl devices list](/reference/cli/strazactl/strazactl_devices_list/): List a user's enrolled devices
-* [strazactl devices revoke](/reference/cli/strazactl/strazactl_devices_revoke/): Revoke a device enrollment (its device credential stops minting sessions)
+* [strazactl devices revoke](/reference/cli/strazactl/strazactl_devices_revoke/): Revoke a device enrollment (it stops starting sessions)
 

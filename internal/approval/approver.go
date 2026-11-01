@@ -22,7 +22,7 @@ import (
 
 // Durations for the mobile approver surface.
 const (
-	// EnrollTokenTTL bounds an admin-minted one-time enroll token: long enough
+	// EnrollTokenTTL bounds a one-time enroll token: long enough
 	// to scan a QR, short enough that a lifted token goes stale fast.
 	EnrollTokenTTL = 10 * time.Minute
 	// ChallengeTTL bounds a decision or refresh challenge to at most 5
@@ -41,6 +41,9 @@ const (
 var (
 	// ErrEnrollTokenInvalid: the enroll token is unknown, expired, or already used (→401).
 	ErrEnrollTokenInvalid = errors.New("approval: enroll token invalid, expired, or already used")
+	// ErrBadEnrollChannel: a mint named a channel other than mobile or
+	// browser, so the token would enroll no platform or any platform.
+	ErrBadEnrollChannel = errors.New("approval: enroll channel must be mobile or browser")
 	// ErrBadKey: the device public key is not an ECDSA P-256 SPKI key (→400).
 	ErrBadKey = errors.New("approval: device public key must be an ECDSA P-256 SPKI DER key")
 	// ErrBadSignature: the decision signature did not verify against the enrolled key (→401).
@@ -93,9 +96,9 @@ type EnrollTokenGrant struct {
 	ExpiresAt time.Time
 }
 
-// Enroll-token channel scopes: a self-minted
-// token is stamped with the channel its role authorized and consume refuses a
-// platform outside it. The empty channel is the admin lane: unscoped.
+// Enroll-token channel scopes: every token is stamped with the channel its
+// role authorized and consume refuses a platform outside it. No other
+// channel is minted, and consume refuses a token stamped with any other.
 const (
 	EnrollChannelMobile  = "mobile"
 	EnrollChannelBrowser = "browser"
@@ -171,9 +174,13 @@ type SignedDecision struct {
 
 // MintEnrollToken creates a one-time, short-TTL enroll token bound to userID.
 // It returns the opaque secret ONCE; only its hash is stored. channel scopes
-// what the token may enroll (EnrollChannelMobile|EnrollChannelBrowser for the
-// self-service lane; "" for the admin lane, unscoped).
+// what the token may enroll and must be EnrollChannelMobile or
+// EnrollChannelBrowser. Any other channel, the empty one included, is
+// refused with ErrBadEnrollChannel before anything is read or stored.
 func (s *Service) MintEnrollToken(ctx context.Context, userID, channel string) (EnrollTokenGrant, error) {
+	if channel != EnrollChannelMobile && channel != EnrollChannelBrowser {
+		return EnrollTokenGrant{}, ErrBadEnrollChannel
+	}
 	u, err := s.st.Users().GetByID(ctx, userID)
 	if err != nil {
 		return EnrollTokenGrant{}, err // ErrNotFound → 404
@@ -215,12 +222,12 @@ func (s *Service) Enroll(ctx context.Context, in EnrollInput) (EnrollResult, err
 	if err != nil || u.Status != store.UserActive || s.userBlocked(u.ID) {
 		return EnrollResult{}, ErrEnrollTokenInvalid
 	}
-	// Channel scope: a scoped token enrolls
-	// only its channel's platforms; an unknown stamp fails closed. The token
-	// is already spent by the CAS above, so a mismatch burns it, matching
-	// every other post-consume failure, and answers the same coarse 401.
+	// Channel scope: a token enrolls only its channel's platforms. Any other
+	// stamp fails closed, the empty one of an unscoped token minted before
+	// every token had a channel included. The token is already spent by the
+	// CAS above, so a mismatch burns it, matching every other post-consume
+	// failure, and answers the same coarse 401.
 	switch tok.Channel {
-	case "": // admin-minted: any platform
 	case EnrollChannelMobile:
 		if surfaceForPlatform(in.Platform) != "phone" {
 			return EnrollResult{}, ErrEnrollTokenInvalid

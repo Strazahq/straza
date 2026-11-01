@@ -3,6 +3,8 @@ package approval
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -55,6 +57,64 @@ func TestRequestNeutralizesHostileIntakeText(t *testing.T) {
 	if rec.Summary != got.Summary || rec.Justification != got.Justification {
 		t.Errorf("returned record differs from stored: summary %q vs %q, justification %q vs %q",
 			rec.Summary, got.Summary, rec.Justification, got.Justification)
+	}
+}
+
+// TestRequestCapsLongIntakeText pins the intake cap on the summary and the
+// justification: past displayMax bytes each is stored cut on a rune
+// boundary, with its full length after it, and the one request record of
+// the ticket carries the same cut text, so a long reason cannot make the
+// record large.
+func TestRequestCapsLongIntakeText(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	in := req("s-long", "u-long", "tox", policy.ApproveSpec{Roles: []string{"sec-approvers"}})
+	in.Lane = "gateway"
+	in.Summary = "other: " + strings.Repeat("<", 200<<10)
+	// The é takes bytes 4095 and 4096, so the cut falls before it.
+	in.Justification = strings.Repeat("a", 4095) + "é" + strings.Repeat("<", 200<<10)
+	wantSummary := in.Summary[:4096] + fmt.Sprintf("... (%d bytes)", len(in.Summary))
+	wantJustification := strings.Repeat("a", 4095) + fmt.Sprintf("... (%d bytes)", len(in.Justification))
+
+	rec, err := h.svc.Request(ctx, in)
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	got, err := h.st.Approvals().GetByID(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Summary != wantSummary || rec.Summary != wantSummary {
+		t.Errorf("summary is %d bytes stored and %d returned, want the %d-byte cut", len(got.Summary), len(rec.Summary), len(wantSummary))
+	}
+	if got.Justification != wantJustification || rec.Justification != wantJustification {
+		t.Errorf("justification is %d bytes stored and %d returned, want the %d-byte cut", len(got.Justification), len(rec.Justification), len(wantJustification))
+	}
+
+	evs, err := h.st.Outbox().ListUnpublished(ctx, 100)
+	if err != nil {
+		t.Fatalf("Outbox: %v", err)
+	}
+	var records []string
+	for _, e := range evs {
+		if e.Subject == auditSubject && strings.Contains(e.CE, `"phase":"request"`) && strings.Contains(e.CE, rec.ID) {
+			records = append(records, e.CE)
+		}
+	}
+	if len(records) != 1 {
+		t.Fatalf("%d request records of the ticket, want exactly 1", len(records))
+	}
+	var ce struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(records[0]), &ce); err != nil {
+		t.Fatal(err)
+	}
+	if ce.Data["summary"] != wantSummary || ce.Data["justification"] != wantJustification {
+		t.Error("the request record does not carry the cut summary and justification")
+	}
+	if len(records[0]) >= 64<<10 {
+		t.Errorf("the request record is %d bytes, want under 64 KiB", len(records[0]))
 	}
 }
 

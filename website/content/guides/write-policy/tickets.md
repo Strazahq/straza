@@ -6,7 +6,7 @@ weight: 30
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server in a Linux container, with the admin steps on an admin API token, the hook events fed to straza hook by hand on a machine enrolled as dana, and lena deciding with strazactl from her own login. The console form was not walked in a browser, and its words were read at source
+  platform: A throwaway standalone server in a Linux container, with the admin steps on an admin API token, the hook events fed to straza hook by hand on a machine enrolled as dana, and lena deciding with strazactl from her own login. strazactl no longer signs in or decides, so lena now decides in the console, on the self-service page or on her phone. The console form was not walked in a browser, and its words were read at source
   date: 2026-10-06
 applies_to: both
 keywords: ticket grant consume window
@@ -25,7 +25,7 @@ A ticket is an approval that outlives the moment it was asked for. The agent's c
 
 - The approver role `release-approvers` from [Hold a call for a person]({{< relref "guides/write-policy/hold-for-a-human.md" >}}), held by lena.
 - The `local-tools` allow rule from [Your first deny]({{< relref "guides/write-policy/first-deny.md" >}}), live for your role, and a machine enrolled as dana.
-- For a decision from a terminal, a `strazactl` login of the approver's own, on their own machine or under their own operating system account, because `strazactl` keeps one login per home directory.
+- A place where lena decides: the console under **Approvals** when she holds an admin role that covers it, otherwise the Requests tab of the self-service page or her phone.
 
 ## Write the rule
 
@@ -146,13 +146,7 @@ Type the reason under `Reason, optional` before **Approve request**.
 {{< /console >}}
 
 {{< cli >}}
-{{< command terminal="lena's terminal" purpose="approver" >}}
-```sh
-strazactl approvals approve 01a1130c-7854-7176-a31c-5b737b0361fa --reason "Change window CR-2041 is open until 18:00"
-```
-{{< /command >}}
-
-{{< see >}}`approved 01a1130c-7854-7176-a31c-5b737b0361fa (by lena)`{{< /see >}}
+strazactl does not decide, because a decision must name the person who made it and a token is not one. lena approves in the console under **Approvals**, on the Requests tab of the self-service page, or on her phone, as the console form of this step shows, and types the reason there.
 {{< /cli >}}
 
 ## Consume the grant
@@ -191,13 +185,7 @@ Next, the approver denies the second ticket. The next identical call is denied w
 {{< /console >}}
 
 {{< cli >}}
-{{< command terminal="lena's terminal" purpose="approver" >}}
-```sh
-strazactl approvals deny 01a1130c-95b0-7716-8150-a521bffdfa95 --reason "No second apply in this window"
-```
-{{< /command >}}
-
-{{< see >}}`denied 01a1130c-95b0-7716-8150-a521bffdfa95 (by lena)`{{< /see >}}
+lena denies it where she approved the first, in the console, on the self-service page or on her phone, as the console form of this step shows.
 {{< /cli >}}
 
 After the denial, the hook answers the same `terraform apply -auto-approve` call with:
@@ -209,7 +197,7 @@ Straza: ticket 01a1130c-95b0-7716-8150-a521bffdfa95 was denied by lena; this cal
 ## Read the audit log
 
 
-A ticket writes a request phase, a resolution phase and, once cashed, a consumed phase that names the consuming session. The decider's words ride the resolution. A decision made with `strazactl` is recorded under the channel `console`.
+A ticket writes a request phase, a resolution phase and, once cashed, a consumed phase that names the consuming session. The decider's words ride the resolution. A decision made in the console is recorded under the channel `console`.
 
 {{< console >}}
 {{< clicks "Audit" "Lens" "approvals" >}}

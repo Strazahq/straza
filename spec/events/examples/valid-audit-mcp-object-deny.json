@@ -1,0 +1,33 @@
+{
+  "data": {
+    "app": "objects-demo",
+    "arguments": "{\"repo\":\"Strazahq/docs-site\"}",
+    "default": false,
+    "effect": "deny",
+    "event": "tool.pre",
+    "granted": false,
+    "harness": "claude-code/2.1.0",
+    "object": {
+      "id": "7730016",
+      "reach": "argument",
+      "type": "repo",
+      "value": "Strazahq/docs-site"
+    },
+    "reason": "Straza: repo_read on Strazahq/docs-site was refused: none of your roles on objects-demo covers that repo. Your roles cover repo_read on Strazahq/straza and Strazahq/straza-mobile. If the repo is new, Straza refreshes the list within a minute, so try again then.",
+    "rolesChecked": [
+      "objects-demo-s2fire"
+    ],
+    "ruleId": "",
+    "session": "01a1531d-b5c0-7e56-a7b0-dcd18e4b03a1",
+    "setName": "",
+    "snapshot": "c8837d2191d5a2924052e3a54718f4ca8a04694b74b51977e89f66ec2ab22f30",
+    "tool": "mcp.call",
+    "toolName": "repo_read",
+    "user": "01a11576-a110-74c5-82ba-d900a6256ece"
+  },
+  "id": "13bb12ee-0d5c-474a-a2d9-02e45190b51a",
+  "source": "strazad",
+  "specversion": "1.0",
+  "time": "2026-10-19T07:43:59.563475905Z",
+  "type": "straza.audit.mcp"
+}

@@ -41,9 +41,9 @@ straza:
       provider: keycloak
       scopes: [openid]
     # An agent with no connection of its own runs on its SPONSOR's
-    # connection once the sponsor opted in (PATCH /v1/connect/midpoint
-    # {"allow_agents": true}, or strazactl connect midpoint --allow-agents):
-    # midPoint then acts as the sponsor, and the gateway record names the
+    # connection once the sponsor opted in, by turning on My agents may use
+    # this in the Credentials tab of the self-service page. midPoint then
+    # acts as the sponsor, and the gateway record names the
     # agent plus credentialSource/credentialOwner (spec/app-manifest
     # revision 4). In the demo, joe works alice's approval inbox as alice,
     # and deciding an item waits for alice.

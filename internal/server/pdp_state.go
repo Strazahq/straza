@@ -30,12 +30,15 @@ type subjectCache struct {
 }
 
 // cachedSubject is one session's subject, what check-in knew of the
-// session beside it, and the time its roles stop being true: the next
-// window edge of the user's assignments, zero when none.
+// session beside it, the time its roles stop being true, which is the next
+// window edge of the user's assignments or zero when none, and rolesHash,
+// the authn.RolesHash of its roles' ids that the token the check-in minted
+// carries as its rol claim.
 type cachedSubject struct {
-	sub   policy.Subject
-	facts sessionFacts
-	until time.Time
+	sub       policy.Subject
+	facts     sessionFacts
+	until     time.Time
+	rolesHash string
 }
 
 // sessionFacts is what check-in records beside a session's subject, which
@@ -63,20 +66,20 @@ func (c *subjectCache) put(sessionID string, s policy.Subject, until time.Time) 
 	return prev.sub, ok
 }
 
-// putIf caches s with facts for the session as put does, but only while ok
-// holds, judged under the cache's lock, and answers the subject it
-// replaced, whether there was one, and whether it cached s. An apply drops
-// sessions under the same lock after it bumped the resolution epoch, so a
-// check-in whose ok compares the epoch it resolved in never caches roles
-// that an apply dropped while they were read.
-func (c *subjectCache) putIf(sessionID string, s policy.Subject, facts sessionFacts, until time.Time, ok func() bool) (policy.Subject, bool, bool) {
+// putIf caches e for the session as put does, but only while ok holds,
+// judged under the cache's lock, and answers the subject it replaced,
+// whether there was one, and whether it cached e. An apply drops sessions
+// under the same lock after it bumped the resolution epoch, so a check-in
+// whose ok compares the epoch it resolved in never caches roles that an
+// apply dropped while they were read.
+func (c *subjectCache) putIf(sessionID string, e cachedSubject, ok func() bool) (policy.Subject, bool, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !ok() {
 		return policy.Subject{}, false, false
 	}
 	prev, had := c.m[sessionID]
-	c.m[sessionID] = cachedSubject{sub: s, facts: facts, until: until}
+	c.m[sessionID] = e
 	return prev.sub, had, true
 }
 
@@ -95,6 +98,20 @@ func (c *subjectCache) lookup(sessionID string) (cachedSubject, bool) {
 	e, ok := c.m[sessionID]
 	c.mu.RUnlock()
 	if !ok || (!e.until.IsZero() && !c.now().Before(e.until)) {
+		return cachedSubject{}, false
+	}
+	return e, true
+}
+
+// forToken returns the cache entry of the session claims names, under the
+// edge rule of get, only while the entry holds the roles the token's rol
+// claim hashes. A token minted for other roles, by a check-in on another
+// replica after a role changed, reads as missing, so the request path
+// answers its check-in-again 401 and never serves roles the token does not
+// carry.
+func (c *subjectCache) forToken(claims authn.Claims) (cachedSubject, bool) {
+	e, ok := c.lookup(claims.Session)
+	if !ok || e.rolesHash != claims.RolesHash {
 		return cachedSubject{}, false
 	}
 	return e, true

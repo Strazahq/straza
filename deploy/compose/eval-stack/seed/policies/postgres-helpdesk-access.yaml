@@ -1,0 +1,33 @@
+# postgres-helpdesk-access: the gates for postgres-helpdesk, the role the
+# postgres server owns over the helpdesk database. The developer business
+# role composes it, so joe's calls land here. The typed tools and the
+# helpdesk team's two named tools have no rule and run, because access comes
+# from the access row and the role covers helpdesk alone. Free SQL that
+# changes rows is the one gate: execute_sql needs the agent's sponsor to
+# approve the exact statement within two minutes, and the audit names who
+# approved it.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: postgres-helpdesk-access
+  description: Gates for the role postgres-helpdesk, written from the role page
+spec:
+  priority: 100
+  match:
+    roles: [postgres-helpdesk]
+  rules:
+    - id: postgres-execute-sql-approve
+      # binding call: the approval covers this exact statement on this
+      # database, so a changed statement is a new hold.
+      tools: [mcp.call]
+      apps: [postgres]
+      toolNames:
+        allow: ["execute_sql"]
+      effect: allow
+      mode: approve
+      approve:
+        deciders: [sponsor]
+        timeoutSeconds: 120
+        retryTTLSeconds: 120
+        binding: call
+      reason: "Straza: execute_sql changes rows with free SQL, so the person behind this agent approves the exact statement first"

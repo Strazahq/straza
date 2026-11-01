@@ -226,6 +226,7 @@ func (r outboxRepo) Insert(ctx context.Context, e OutboxEvent) (OutboxEvent, err
 		e.ID = newID()
 	}
 	e.CreatedAt = now()
+	e.CE = boundRecord(e.CE)
 	_, err := r.s.exec(ctx, `INSERT INTO events_outbox (id, subject, ce, published, attempts, created_at)
 		VALUES ($1, $2, $3, FALSE, 0, $4)`,
 		e.ID, e.Subject, e.CE, r.s.tArg(e.CreatedAt))

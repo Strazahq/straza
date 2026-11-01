@@ -87,9 +87,7 @@ func TestEnableTraceRefusedByConfigOff(t *testing.T) {
 	now := time.Now()
 	t.Run("user config", func(t *testing.T) {
 		store := testErrorStore(t)
-		if err := store.SaveConfig(Config{ServerURL: "http://x", Trace: "off"}); err != nil {
-			t.Fatal(err)
-		}
+		writeUserConfig(t, store, Config{ServerURL: "http://x", Trace: "off"})
 		_, err := EnableTrace(store, time.Hour, now)
 		if err == nil || !strings.Contains(err.Error(), "trace: off") || !strings.Contains(err.Error(), store.configPath()) {
 			t.Fatalf("refusal must name the deciding file and the setting, got %v", err)
@@ -105,9 +103,7 @@ func TestEnableTraceRefusedByConfigOff(t *testing.T) {
 		store := testErrorStore(t)
 		managed := writeManagedConfig(t, "serverUrl: http://x\ntrace: off\n")
 		// The user's own file says nothing; the managed file decides.
-		if err := store.SaveConfig(Config{ServerURL: "http://x"}); err != nil {
-			t.Fatal(err)
-		}
+		writeUserConfig(t, store, Config{ServerURL: "http://x"})
 		_, err := EnableTrace(store, time.Hour, now)
 		if err == nil || !strings.Contains(err.Error(), managed) {
 			t.Fatalf("refusal must name the managed file %s, got %v", managed, err)
@@ -142,9 +138,7 @@ func TestManagedOffBeatsUserOn(t *testing.T) {
 
 func TestConfigDebugForcesDebug(t *testing.T) {
 	store := testErrorStore(t)
-	if err := store.SaveConfig(Config{ServerURL: "http://x", Trace: "debug"}); err != nil {
-		t.Fatal(err)
-	}
+	writeUserConfig(t, store, Config{ServerURL: "http://x", Trace: "debug"})
 	if store.Trace().Level() != trace.Debug {
 		t.Fatalf("level = %s, want debug", store.Trace().Level())
 	}
@@ -184,19 +178,13 @@ func TestTraceCheckStates(t *testing.T) {
 			}
 		}, checkWarn, []string{"debug expired 1h ago", "file"}, true},
 		{"config off", func(t *testing.T, store *Store) {
-			if err := store.SaveConfig(Config{ServerURL: "http://x", Trace: "off"}); err != nil {
-				t.Fatal(err)
-			}
+			writeUserConfig(t, store, Config{ServerURL: "http://x", Trace: "off"})
 		}, checkOK, []string{"journal off (", "config.yaml: trace: off)"}, false},
 		{"config debug", func(t *testing.T, store *Store) {
-			if err := store.SaveConfig(Config{ServerURL: "http://x", Trace: "debug"}); err != nil {
-				t.Fatal(err)
-			}
+			writeUserConfig(t, store, Config{ServerURL: "http://x", Trace: "debug"})
 		}, checkOK, []string{"debug forced on by "}, false},
 		{"config unknown", func(t *testing.T, store *Store) {
-			if err := store.SaveConfig(Config{ServerURL: "http://x", Trace: "loud"}); err != nil {
-				t.Fatal(err)
-			}
+			writeUserConfig(t, store, Config{ServerURL: "http://x", Trace: "loud"})
 		}, checkWarn, []string{`trace: "loud"`, "not off, journal or debug"}, true},
 	}
 	for _, c := range cases {
@@ -229,13 +217,12 @@ func TestLocalChecksIncludeTrace(t *testing.T) {
 		}
 		return -1
 	}
-	checks := localChecks(store, Session{}, false)
-	ti, si := index(checks, "trace"), index(checks, "audit-spool")
-	if ti < 0 || si < 0 || ti < si {
-		t.Fatalf("trace row must follow audit-spool: trace=%d audit-spool=%d (%v)", ti, si, names(checks))
+	checks := localChecks(store, nil)
+	if ti := index(checks, "trace"); ti != len(checks)-1 {
+		t.Fatalf("trace row must close the local checks: trace=%d of %d (%v)", ti, len(checks), names(checks))
 	}
 	store.logClientError(ClientError{Kind: "hook", Err: "boom"})
-	checks = localChecks(store, Session{}, false)
+	checks = localChecks(store, nil)
 	ti, ci := index(checks, "trace"), index(checks, "client-errors")
 	if ci < 0 || ti < ci {
 		t.Fatalf("trace row must follow client-errors: trace=%d client-errors=%d (%v)", ti, ci, names(checks))

@@ -2,7 +2,7 @@
 title: strazactl users set-password
 description: Set a user's built-in-issuer password (rotation, or a credential for SCIM-born users)
 pagetype: reference
-weight: 115
+weight: 111
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl users set-password <username> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

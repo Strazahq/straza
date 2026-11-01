@@ -17,7 +17,8 @@ import (
 // enrollment. A user or device hit judges the identity, so it sends the
 // person to an administrator. Every status stays what the kit keys on:
 // decide answers a 200 deny, the gateway and the audit batch route a 403.
-// Decide also writes exactly one decision record per revoked call.
+// Decide also writes exactly one decision record per revoked call. It runs on
+// bearer sessions that name a device, which need no proof on these routes.
 func TestRevokedRefusalNamesTheNextStep(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -51,12 +52,7 @@ func TestRevokedRefusalNamesTheNextStep(t *testing.T) {
 	revokedSessions := map[string]string{} // session id -> the reason decide gave
 	for _, hit := range hits {
 		t.Run(hit.name, func(t *testing.T) {
-			_, deviceToken := mintDevice(t, app, kim.ID, store.DeviceClientKit, "sha256:revoked-"+hit.name)
-			code, body := checkinDeviceAs(t, base, deviceToken, "claude-code", "2.1.0")
-			if code != http.StatusOK {
-				t.Fatalf("device checkin = %d %v", code, body)
-			}
-			token := body["session_token"].(string)
+			token, _ := deviceBearerSession(t, app, base, kim.ID, "sha256:revoked-"+hit.name)
 			claims, err := app.tokens.Verify(token)
 			if err != nil || claims.Device == "" || claims.JTI == "" {
 				t.Fatalf("claims = %+v, %v: the table needs a device and a token id", claims, err)
@@ -96,13 +92,8 @@ func TestRevokedRefusalNamesTheNextStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, leeDevice := mintDevice(t, app, lee.ID, store.DeviceClientKit, "sha256:revoked-marker")
-	code, body := checkinDeviceAs(t, base, leeDevice, "claude-code", "2.1.0")
-	if code != http.StatusOK {
-		t.Fatalf("marker checkin = %d %v", code, body)
-	}
-	markerSession := body["session_id"].(string)
-	if code, dec := decide(t, base, body["session_token"].(string), ls); code != http.StatusOK {
+	markerToken, markerSession := deviceBearerSession(t, app, base, lee.ID, "sha256:revoked-marker")
+	if code, dec := decide(t, base, markerToken, ls); code != http.StatusOK {
 		t.Fatalf("marker decide = %d %v", code, dec)
 	}
 	records := decisionRecordsUntil(t, app, markerSession)
@@ -121,6 +112,29 @@ func TestRevokedRefusalNamesTheNextStep(t *testing.T) {
 			t.Errorf("session %s: record %v, want user %s, a deny and the reason %q", session, d, kim.ID, reason)
 		}
 	}
+}
+
+// deviceBearerSession answers the token and id of a bearer session of the
+// user that names a device: a session stored on a kit row that holds a key,
+// refreshed once, so the refresh mints the token and caches the subject the
+// decide route reads.
+func deviceBearerSession(t *testing.T, app *App, base, userID, fingerprint string) (string, string) {
+	t.Helper()
+	d, _ := mintDevice(t, app, userID, store.DeviceClientKit, fingerprint)
+	d.KeyThumbprint = "thumbprint-of-" + fingerprint
+	if _, err := app.store.Devices().Update(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	_, stored := storedSession(t, app, userID, d.ID, "claude-code")
+	code, body := postJSON(t, base+"/v1/checkin", map[string]any{
+		"session_token": stored,
+		"harness":       map[string]string{"name": "claude-code", "version": "2.1.0"},
+		"attestation":   map[string]any{"managed": false, "hashes": map[string]string{}},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("refresh of the device session = %d %v", code, body)
+	}
+	return body["session_token"].(string), body["session_id"].(string)
 }
 
 // decisionRecordsUntil waits until a straza.audit.tool record of the marker

@@ -3,18 +3,22 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/strazahq/straza/internal/drafts"
 	"github.com/strazahq/straza/internal/store"
 )
 
-// bindingPayload is the admin API tool-binding representation.
+// bindingPayload is the admin API tool-binding representation. Covers is
+// the row's covers line with each object's id and its value now, absent
+// when the row has none.
 type bindingPayload struct {
-	ID    string   `json:"id"`
-	App   string   `json:"app"`
-	Role  string   `json:"role"`
-	Tools []string `json:"tools"`
+	ID     string        `json:"id"`
+	App    string        `json:"app"`
+	Role   string        `json:"role"`
+	Tools  []string      `json:"tools"`
+	Covers *drafts.Scope `json:"covers,omitempty"`
 }
 
 // handleAppBindingCreate exposes a subset of an app's tools to a role
@@ -27,10 +31,15 @@ func (a *App) handleAppBindingCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Role  string   `json:"role"`
-		Tools []string `json:"tools"`
+		Role   string        `json:"role"`
+		Tools  []string      `json:"tools"`
+		Covers *drafts.Scope `json:"covers"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Role == "" {
+	err = json.NewDecoder(r.Body).Decode(&req)
+	if refusedCovers(w, err) {
+		return
+	}
+	if err != nil || req.Role == "" {
 		apiError(w, http.StatusBadRequest, "role is required")
 		return
 	}
@@ -44,12 +53,12 @@ func (a *App) handleAppBindingCreate(w http.ResponseWriter, r *http.Request) {
 				apiError(w, http.StatusNotFound, "unknown server")
 				return directChange{}, false
 			}
-			if ref := drafts.AccessCreateRefusal(live, st, req.Role, row.Name, req.Tools); ref != nil {
+			if ref := drafts.AccessCreateRefusal(live, st, req.Role, row.Name, req.Tools, req.Covers != nil && req.Covers.Every); ref != nil {
 				refuseAccessRow(w, live, req.Role, ref)
 				return directChange{}, false
 			}
 			doc, _ := drafts.RoleDocOf(live, req.Role)
-			doc.Spec.Bindings = []drafts.RoleBinding{{App: row.Name, Tools: onceEach(req.Tools)}}
+			doc.Spec.Bindings = []drafts.RoleBinding{{App: row.Name, Tools: onceEach(req.Tools), Covers: req.Covers}}
 			return a.roleChange(w, r, doc, "the access row could not be created")
 		},
 		bodyStatus: http.StatusBadRequest,
@@ -58,11 +67,22 @@ func (a *App) handleAppBindingCreate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id := ""
+	out := bindingPayload{App: row.Name, Role: req.Role, Tools: req.Tools}
 	if added := res.Item.BindingsAdded; len(added) > 0 {
-		id = added[0].ID
+		out.ID, out.Covers = added[0].ID, draftScope(added[0].Scope)
 	}
-	writeJSON(w, http.StatusCreated, bindingPayload{ID: id, App: row.Name, Role: req.Role, Tools: req.Tools})
+	writeJSON(w, http.StatusCreated, out)
+}
+
+// refusedCovers answers 400 with the words of a covers object err refused,
+// and reports whether it did.
+func refusedCovers(w http.ResponseWriter, err error) bool {
+	var bad *drafts.CoversError
+	if !errors.As(err, &bad) {
+		return false
+	}
+	apiError(w, http.StatusBadRequest, bad.Reason+".")
+	return true
 }
 
 // refuseAccessRow answers a refused access row. A row the role has on this
@@ -100,7 +120,9 @@ func (a *App) handleBindingsList(w http.ResponseWriter, r *http.Request) {
 	st := standingFrom(r.Context())
 	out := make([]bindingPayload, 0, len(rows))
 	for _, b := range rows {
-		if !st.Full && !st.Apps[b.AppID] {
+		// A row whose covers line cannot be read grants nothing, so it is
+		// left out here as the gateway leaves it out.
+		if (!st.Full && !st.Apps[b.AppID]) || b.ScopeFault != "" {
 			continue
 		}
 		p := bindingPayload{ID: b.ID}
@@ -108,8 +130,13 @@ func (a *App) handleBindingsList(w http.ResponseWriter, r *http.Request) {
 		if role, err := a.store.Roles().GetByID(r.Context(), b.RoleID); err == nil {
 			p.Role = role.Name
 		}
-		if app, err := a.store.Apps().GetByID(r.Context(), b.AppID); err == nil {
+		app, err := a.store.Apps().GetByID(r.Context(), b.AppID)
+		if err == nil {
 			p.App = app.Name
+		}
+		if p.Covers, err = a.currentCovers(r.Context(), b, app.Manifest); err != nil {
+			a.fail(w, r, http.StatusInternalServerError, "the access rows could not be listed", err)
+			return
 		}
 		out = append(out, p)
 	}

@@ -34,10 +34,16 @@ This script sketches the operator steps; the automated, assertion-backed
 version is `go test ./internal/agentguard -run TestM2Demo`. Run that for the
 authoritative demo. Manual steps from here:
 
-  1. strazactl login --server http://127.0.0.1:8420   (device flow as admin)
+  1. Sign in to http://127.0.0.1:8420/console/ as admin with the password
+     above. Under Settings, API tokens, mint a token: pick Custom, set
+     policy to read and write and audit to read, and keep the lifetime
+     short. strazactl runs on that token. The second line waits for you to
+     paste it, unshown:
+       export STRAZA_SERVER=http://127.0.0.1:8420
+       read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
   2. strazactl policy apply -f spec/policyset/examples/valid-finance.yaml
      strazactl policy activate finance-tools
-  3. straza enroll --server http://127.0.0.1:8420
+  3. straza enroll --server http://127.0.0.1:8420   (browser sign-in; --use-device-code with no display)
   4. straza install           (writes Claude Code hooks)
   5. In Claude Code: a `rm -rf` Bash call is blocked with the policy reason;
      the role-bound knowledge pack appears in the session context.

@@ -2,7 +2,7 @@
 title: strazactl sinks replay
 description: Re-deliver a sink's parked events to its receiver, oldest first
 pagetype: reference
-weight: 97
+weight: 93
 draft: false
 sources:
   - cmd/strazactl
@@ -32,7 +32,7 @@ strazactl sinks replay <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

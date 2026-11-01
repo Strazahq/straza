@@ -288,7 +288,7 @@ describe("the Add role sheet of a server", () => {
 
   it("edits the tools with the name fixed, sending the live export with the one row changed", async () => {
     mount(readers, binding);
-    expect(screen.getByText("Edit the tools of demo-tools-readers")).toBeTruthy();
+    expect(screen.getByText("Edit the access of demo-tools-readers")).toBeTruthy();
     expect(screen.getByText("The name cannot change. Its tools can, until someone holds it.")).toBeTruthy();
     expect(screen.queryByLabelText("role name suffix")).toBeNull();
     await editorOpen();

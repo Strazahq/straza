@@ -6,7 +6,7 @@ weight: 105
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server in an Alpine 3.20 container on Linux, beside the demo stack's MCP reference server registered as demo-tools, with the admin's strazactl and the team-wiki registration on an admin API token minted in the console, so the registration ran as that token and not as dave. In headless Chromium, carol's check-in answer, server list, sidebar and Server administration card were read, and her refusal outside the MCP servers area came from strazactl on her own login. The refusals of a write by carol were checked against the code, because the coding-agent guard keeps strazactl from sending them on her login, and the server prefix and admin role refusals were run as the root admin. The four roles were read on the demo stack as alice, and the Add role sheet and the Remove server dialog were not clicked
+  platform: A throwaway standalone server in an Alpine 3.20 container on Linux, beside the demo stack's MCP reference server registered as demo-tools, with the admin's strazactl and the team-wiki registration on an admin API token minted in the console, so the registration ran as that token and not as dave. In headless Chromium, carol's check-in answer, server list, sidebar and Server administration card were read. Her refusal outside the MCP servers area came from strazactl on her own login in that run, and strazactl no longer signs in. The refusals of a write by carol were checked against the code and not run, and the server prefix and admin role refusals were run as the root admin. The four roles were read on the demo stack as alice, and the Add role sheet and the Remove server dialog were not clicked
   date: 2026-10-06
 applies_to: both
 who: You, as the global MCP admin, and the server admins you hand a server to
@@ -18,7 +18,7 @@ keywords: delegated admin mcp server admin role global mcp admin
 ---
 
 
-You let the people who own one MCP server administer it, as the global MCP admin who registers servers for teams. You work in the console or with strazactl, and the server admins you hand a server to then define who reaches it. At the end a holder of the server's admin role changes that server and no other, without the root role `straza-admin`.
+You let the people who own one MCP server administer it, as the global MCP admin who registers servers for teams. You work in the console or with strazactl on an admin API token. The server admins you hand a server to then define who reaches it in the console, because their server admin role opens the console and a token carries the scopes it was minted with, never a role. At the end a holder of the server's admin role changes that server and no other, without the root role `straza-admin`.
 
 Every MCP server names one Straza role when it is registered, its server admin role. Your identity manager decides who holds it, like every other membership. To hand out an area of the admin plane instead, such as reading the audit chain, see [Delegated admin]({{< relref "guides/operate/delegated-admin.md" >}}).
 
@@ -177,6 +177,9 @@ The **Name** field fixes the prefix `demo-tools-`, so you type only the suffix, 
 {{< /console >}}
 
 {{< cli >}}
+
+strazactl runs on an admin API token. A token holds scopes and never your server admin role, so a server admin without such a token uses the console form of this step. On a token that may create it, the command is:
+
 {{< command terminal="Terminal" purpose="administration" >}}
 ```bash
 strazactl roles create demo-tools-probes \
@@ -204,7 +207,7 @@ You name the tools one at a time. Only a global admin gives a role of your serve
 {"error":"a server-owned role lists the tools it reaches by name. Only a global admin may give it every tool, and the tools the server adds later, with the * matcher"}
 ```
 
-While nobody holds a role that a global admin gave the glob, you may narrow it to the tools you tick. The editor shows Every tool, and tools added later as chosen and greyed, and you never choose it again. On the **Server roles** tab, **Edit tools** on a role's row changes its tools and **Delete** removes it, while nobody holds it.
+While nobody holds a role that a global admin gave the glob, you may narrow it to the tools you tick. The editor shows Every tool, and tools added later as chosen and greyed, and you never choose it again. On the **Server roles** tab, **Edit access** on a role's row changes its tools and **Delete** removes it, while nobody holds it.
 
 `strazactl roles list` grows a SERVER column as soon as one role in the answer names an owning server, so a role of yours reads apart from the roles that belong to no server.
 
@@ -221,6 +224,15 @@ What you cannot do follows from the same line. You never assign or unassign anyo
 ```
 
 The way forward is a second role carrying the tools you want, which people are then assigned and certified on in the open. Your role also composes no other role, whoever asks, so its reach cannot walk out of your server. You give access to no role but your own, and on no server but yours. Each refusal names whose step it is.
+
+## Say which repositories your roles cover {#covers .nostep}
+
+
+A server that reaches many separate objects with one credential, such as ghapp with the repositories of a GitHub organization, can pin them in its manifest, as [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md#objects" >}}) shows. The routes that pin a server's objects, store its listing credential and ask for a listing open to the server's own admin role, so you do all three on your server. Each of your roles then says which repositories it covers, and you name them with `covers: {objects: [...]}`, picked from the list Straza fetched.
+
+`covers: every` on a role your server owns is yours too while `admin.serverAdminsCoverEvery` is true, the default in both profiles. Set to false, it leaves that line to a global admin, as the glob for every tool is, and a draft of yours that writes it is refused with `On this deployment only a global admin may make ghapp-readers cover every repo, including the repos ghapp lists later. Name the repos it covers, or ask a global admin.` The console's **Every repo** card is then off for you and carries the same sentence. Once someone holds your role, its covers line is frozen for you as its tools are.
+
+Two changes to the pin itself stay with a global admin while a role names repositories on the server: removing the pinned type or changing it, and pinning `none` as the reach of a tool such a role holds. Each would let those roles reach every repository, so the draft is refused with the roles named, as in `Only a global admin may remove ghapp's pinned repos while a role names repos on it, because it would then reach every repo: ghapp-write-payments. Ask a global admin to publish this draft.`
 
 ## Retire a server admin role {.nostep}
 

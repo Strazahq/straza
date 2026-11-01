@@ -21,8 +21,8 @@ func policyCmd(client func() *ctl.Client) *cobra.Command {
 		Use:   "validate",
 		Short: "Validate PolicySet YAML files locally against the v1beta1 spec",
 		Long: "Validates PolicySet YAML files offline against the v1beta1 spec, with no server\n" +
-			"and no login. `strazactl drafts check -f` runs the server's checks against live state.",
-		Annotations: local, // purely offline: no server, no login needed
+			"and no token. `strazactl drafts check -f` runs the server's checks against live state.",
+		Annotations: local, // purely offline: no server, no token needed
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if len(files) == 0 {
 				return fmt.Errorf("at least one -f file is required")

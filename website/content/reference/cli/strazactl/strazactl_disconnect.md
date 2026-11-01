@@ -1,6 +1,6 @@
 ---
 title: strazactl disconnect
-description: 'Remove a connection to a server: your own, or another user''s with --user'
+description: Remove a user's connection to a server
 pagetype: reference
 weight: 48
 draft: false
@@ -13,30 +13,30 @@ keywords: strazactl, disconnect
 
 ## Synopsis
 
-Remove a connection to a server that gives each caller their own credential.
+Remove another user's connection to a server that gives each caller their own credential.
 
 Straza forgets the credential at once, and the next call by that user to the server
-is refused until they connect again. strazactl connect lists the connections.
+is refused until they connect again. strazactl connect --user lists the connections.
 
---user names an agent you sponsor, or any user when you are an administrator.
-
-disconnect acts as a person with your strazactl login, so it refuses to run while
-STRAZA_API_TOKEN is set.
+strazactl runs on an admin API token, which is no user, so --user names the user
+whose connection goes, and the command refuses to run without it. The token needs
+apps:write. A person removes their own connection with straza disconnect, or on
+the Credentials tab of the self-service page at /self-service/credentials.
 
 ```
-strazactl disconnect <server> [flags]
+strazactl disconnect <server> --user <name> [flags]
 ```
 
 ## Options
 
 ```
-      --user string   act for this user: an agent you sponsor, or anyone when you are an administrator
+      --user string   the user whose connection goes (required)
 ```
 
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -1,0 +1,33 @@
+{
+  "provenance": "doc RFC 9449 and spec/session-token/SPEC.md 2026-10-20 (generated, not captured from a client: proof key from the Ed25519 seed of 32 bytes 0x07, other key from 32 bytes 0x09, nonce key the 32 bytes 0x00 to 0x1f, signed at 2026-10-20T12:00:30Z)",
+  "description": "INVALID (semantic): the proof signed counter 7 and the body says 8, as when a captured proof is replayed with a changed counter.",
+  "at": "2026-10-20T12:00:30Z",
+  "request": {
+    "method": "POST",
+    "path": "/v1/checkin",
+    "origins": [
+      "https://straza.example",
+      "http://127.0.0.1:8420"
+    ],
+    "counter": 8
+  },
+  "proof": "eyJhbGciOiJFZERTQSIsImp3ayI6eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IjZrcHNZLUtjVWdxLTlWQjdFeTdGLVpWSGRxNi12bnVTUWg3cWFSUkcwaXcifSwidHlwIjoiZHBvcCtqd3QifQ.eyJjdHIiOjcsImh0bSI6IlBPU1QiLCJodHUiOiJodHRwczovL3N0cmF6YS5leGFtcGxlL3YxL2NoZWNraW4iLCJpYXQiOjE3OTI0OTc2MzAsImp0aSI6Ijk0M2VlOTY3MTZlMTk4ZTgwNTUzZGJjMjBkMTZmN2RkIiwibm9uY2UiOiJBQUFBQUFISDJ4QUhScl84WkNQMVhKRnIxLVlWZWY5OVdqT2VyTUhRbG9oZ015WEJVbFV6VncifQ.IUJpbrsuBvK_Ag70-x2u95mjr6sJ9eRqZMOZF9LkeGgCCroYbFHeTnpB-RpQAwjdm0mZC3C_EjEFBW4ml1YSCA",
+  "header": {
+    "alg": "EdDSA",
+    "jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+    },
+    "typ": "dpop+jwt"
+  },
+  "claims": {
+    "ctr": 7,
+    "htm": "POST",
+    "htu": "https://straza.example/v1/checkin",
+    "iat": 1792497630,
+    "jti": "943ee96716e198e80553dbc20d16f7dd",
+    "nonce": "AAAAAAHH2xAHRr_8ZCP1XJFr1-YVef99WjOerMHQlohgMyXBUlUzVw"
+  },
+  "reason": "ctr does not match the check-in counter"
+}

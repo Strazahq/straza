@@ -8,8 +8,11 @@ import { HelpTip } from "@/components/help-tip";
 import { KindGlyph, RoleKindBadge } from "@/components/role-kind";
 import { ListRow, Section } from "@/components/sheet-parts";
 import { CAPS, CardGroup, Code, Field, Fold, HINT, OptionCard, ProblemBlock } from "@/components/wizard/parts";
+import { pinnedOf } from "@/lib/access-covers";
+import { coversClause, missingCovers } from "@/lib/access-object-words";
 import { type Choice, type FixedRule, type Plan, choiceOf, emptyPlan, grantMatchers, inGrant, policyWord } from "@/lib/access-plan";
 import type { AppRow, PackRow, RoleRow, ToolRow } from "@/lib/api";
+import { nounsOf } from "@/lib/object-words";
 import {
   AFTER_CREATE_HELP,
   APPROVER_NEXT,
@@ -350,17 +353,21 @@ type AccessProps = {
   roleName: string;
   // readOnly is set for a session that may not publish policy.
   readOnly: boolean;
-  // missing says Next found no tool given.
+  // missing says Next found no tool given, and uncovered that it found no
+  // covers line on a server that pins a type.
   missing: boolean;
+  uncovered?: boolean;
 };
 
 // AccessStep is the tools of the one server picked on the first step: the
 // line that names it and where it changes, then the access editor.
-export function AccessStep({ draft, app, toolsOf, onPlan, fixed, approvers, roleName, readOnly, missing }: AccessProps) {
+export function AccessStep({ draft, app, toolsOf, onPlan, fixed, approvers, roleName, readOnly, missing, uncovered }: AccessProps) {
+  const pinned = pinnedOf(app);
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <p className="m-0 max-w-[80ch] text-sm text-text-2" data-access-server>{accessReaches(roleName, app.name)}</p>
       {missing && <p role="alert" className="m-0 text-[13px] leading-snug text-danger" data-access-miss>{PICK_A_TOOL}</p>}
+      {uncovered && pinned && <p role="alert" className="m-0 text-[13px] leading-snug text-danger" data-covers-miss>{missingCovers(nounsOf(pinned))}</p>}
       <AccessEditor
         role={roleName}
         app={app}
@@ -499,12 +506,14 @@ function ReachTable({ draft, apps, toolsOf, fixed }: Pick<ReviewProps, "draft" |
             const plan = planOf(draft, a.name);
             const matchers = grantMatchers(plan, names);
             const glob = isGlob(matchers);
+            const pinned = pinnedOf(a);
+            const clause = pinned ? coversClause(a.name, nounsOf(pinned), plan.covers) : "";
             return (
               <React.Fragment key={a.name}>
                 <TableRow className="bg-card" data-server-band={a.name}>
                   <TableCell colSpan={3} className="whitespace-normal">
                     <b className="font-mono text-[13px] font-semibold text-foreground">{a.name}</b>
-                    <span className="ml-2 text-[13px] text-muted-foreground">{glob ? reviewEvery(names.length) : reviewCount(matchers.length, names.length)}</span>
+                    <span className="ml-2 text-[13px] text-muted-foreground" data-review-reach>{(glob ? reviewEvery(names.length) : reviewCount(matchers.length, names.length)) + (clause ? ", " + clause : "")}</span>
                   </TableCell>
                 </TableRow>
                 {tools.filter((t) => inGrant(plan, t.name)).map((t) => (

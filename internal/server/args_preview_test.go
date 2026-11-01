@@ -118,6 +118,15 @@ func TestApproveSummaryShellClamped(t *testing.T) {
 	if mcp != "mcp.call midpoint:disable_user" {
 		t.Errorf("mcp summary changed: %q", mcp)
 	}
+	// An unclassified harness tool is named, so the approver sees which one.
+	for ev, want := range map[*policy.Event]string{
+		{Tool: policy.ToolOther, ToolName: "SubagentHandback"}: "other: SubagentHandback",
+		{Tool: policy.ToolOther}:                               "other",
+	} {
+		if got := approveSummary(*ev); got != want {
+			t.Errorf("other summary = %q, want %q", got, want)
+		}
+	}
 }
 
 // TestApprovalPayloadPreviewPairing: the admin payload emits argsPreview and its

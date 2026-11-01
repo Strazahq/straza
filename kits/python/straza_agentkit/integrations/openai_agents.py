@@ -202,7 +202,7 @@ def straza_tool_guardrail(
                 message=f"Straza: tool call blocked - {err}; failing closed",
                 output_info=info,
             )
-        decision = straza.check(canonical, **_check_kwargs(canonical, args))
+        decision = straza.check(canonical, tool_name=tool_name or None, **_check_kwargs(canonical, args))
         info["allowed"] = decision.allowed
         if decision.allowed:
             return agents_sdk.ToolGuardrailFunctionOutput.allow(output_info=info)
@@ -486,7 +486,7 @@ def _build_hooks_type(agents_sdk):
                 name = getattr(context, "tool_name", "") or getattr(tool, "name", "") or ""
                 canonical = self._map.get(name, self._default)
                 args, err = _parse_arguments(getattr(context, "tool_arguments", ""))
-                straza.tool_result(canonical, **({} if err else _check_kwargs(canonical, args)))
+                straza.tool_result(canonical, tool_name=name or None, **({} if err else _check_kwargs(canonical, args)))
             except Exception:  # noqa: BLE001
                 pass
 

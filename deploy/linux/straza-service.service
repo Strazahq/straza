@@ -1,0 +1,53 @@
+# The Straza background service. It holds each local user's keys and
+# sessions in /var/lib/straza-service and answers the straza thin clients on
+# the socket that straza-service.socket passes it. The socket starts it, so
+# this unit has no [Install] section. Its one RuntimeDirectory is the git
+# folder inside the socket's directory, where it writes the git host file
+# that every local user's git reads. systemd keeps that folder when the
+# service stops, so the file survives a restart. A RuntimeDirectory of the
+# socket's directory itself would delete the socket at every stop.
+
+[Unit]
+Description=Straza background service
+Documentation=https://straza.ai
+Requires=straza-service.socket
+After=straza-service.socket
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/straza service
+User=straza-service
+Group=straza-service
+StateDirectory=straza-service
+StateDirectoryMode=0700
+RuntimeDirectory=straza-service/git
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+UMask=0077
+Restart=on-failure
+LimitCORE=0
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RemoveIPC=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes

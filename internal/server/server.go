@@ -23,6 +23,7 @@ import (
 	"github.com/strazahq/straza/internal/events"
 	"github.com/strazahq/straza/internal/identity"
 	"github.com/strazahq/straza/internal/manager"
+	"github.com/strazahq/straza/internal/objects"
 	"github.com/strazahq/straza/internal/policy"
 	"github.com/strazahq/straza/internal/secrets"
 	"github.com/strazahq/straza/internal/sentinel"
@@ -49,6 +50,7 @@ type App struct {
 	store     store.Store
 	bus       *events.Bus
 	tokens    *authn.TokenService
+	proofs    *authn.ProofVerifier    // DPoP nonces and proofs of key-bound tokens
 	external  *authn.ExternalVerifier // nil unless oidc.issuer is configured
 	resolver  *identity.Resolver
 	snapKeys  *authn.SnapshotKeys
@@ -118,6 +120,7 @@ type App struct {
 	runtimes   []string // the app runtimes this host can run, for /version
 	watcher    *manager.Watcher
 	broker     *secrets.Broker
+	objects    *objects.Lists
 	gateway    *gateway
 	// configMu serializes every apply of config on this replica with every
 	// publish and write that reads live state for one (drafts_apply.go).
@@ -238,6 +241,8 @@ func (a *App) routeTable() []route {
 		{"POST", "/v1/enroll", a.handleEnroll},
 		{"POST", "/v1/checkin", a.handleCheckin},
 		{"POST", "/v1/decide", a.handleDecide},
+		{"POST", "/v1/grants/resolve", a.handleGrantResolve},
+		{"POST", "/v1/grants", a.handleGrant},
 		{"POST", "/v1/audit/batch", a.handleAuditBatch},
 		{"GET", "/v1/push", a.handlePushSubscribe},
 		{"GET", "/v1/snapshot", a.handleSnapshot},
@@ -246,12 +251,12 @@ func (a *App) routeTable() []route {
 		// session may end ITSELF (the token names the only touchable target).
 		{"POST", "/v1/session/revoke", a.handleSessionSelfRevoke},
 
-		{"GET", "/v1/connect", a.requireUser(a.handleConnectList)},
+		{"GET", "/v1/connect", a.requireConnect(a.handleConnectList)},
 		{"GET", "/v1/connect/callback", a.handleConnectCallback},
 		{"POST", "/v1/connect/callback", a.requireUser(a.handleConnectFinish)},
-		{"POST", "/v1/connect/{app}", a.requireUser(a.handleConnectStart)},
-		{"PATCH", "/v1/connect/{app}", a.requireUser(a.handleConnectAgents)},
-		{"DELETE", "/v1/connect/{app}", a.requireUser(a.handleConnectDelete)},
+		{"POST", "/v1/connect/{app}", a.requireConnect(a.handleConnectStart)},
+		{"PATCH", "/v1/connect/{app}", a.requireConnect(a.handleConnectAgents)},
+		{"DELETE", "/v1/connect/{app}", a.requireConnect(a.handleConnectDelete)},
 
 		{"GET", "/v1/admin/policies", admin(a.handlePolicyList)},
 		{"PUT", "/v1/admin/policies", admin(a.handlePolicyApply)},
@@ -338,6 +343,11 @@ func (a *App) routeTable() []route {
 		{"GET", "/v1/admin/apps/{id}/secrets", serverAdmin(a.handleAppSecretsList)},
 		{"DELETE", "/v1/admin/apps/{id}/secrets", serverAdmin(a.handleAppSecretDelete)},
 		{"DELETE", "/v1/admin/apps/{id}/secrets/{role}", serverAdmin(a.handleAppRoleSecretDelete)},
+		{"GET", "/v1/admin/apps/{id}/objects", serverAdmin(a.handleAppObjects)},
+		{"POST", "/v1/admin/apps/{id}/objects/refresh", serverAdmin(a.handleAppObjectsRefresh)},
+		{"POST", "/v1/admin/apps/{id}/objects/draft", serverAdmin(a.handleAppObjectsDraft)},
+		{"POST", "/v1/admin/apps/{id}/objects/credential", serverAdmin(a.handleAppListingCredentialSet)},
+		{"DELETE", "/v1/admin/apps/{id}/objects/credential", serverAdmin(a.handleAppListingCredentialDelete)},
 		{"POST", "/v1/admin/apps/{id}/bindings", serverAdmin(a.handleAppBindingCreate)},
 		{"GET", "/v1/admin/bindings", serverAdmin(a.handleBindingsList)},
 		{"DELETE", "/v1/admin/bindings/{id}", serverAdmin(a.handleBindingDelete)},
@@ -504,16 +514,20 @@ func (a *App) routes() http.Handler {
 	// profiles, and the token endpoint in enterprise, where the NHI grant
 	// is judged (standalone's token endpoint stays unthrottled: the
 	// device-code poll is legitimately frequent; the break-glass poll in
-	// enterprise sits under the limit at the advertised interval). All
-	// inert at zero.
+	// enterprise sits under the limit at the advertised interval). Device
+	// sign-in starts carry the same rate from a budget of their own in both
+	// profiles. All inert at zero.
 	var h http.Handler = mux
 	h = loginLimit(ratelimit.New(), a.cfg.Server.LoginPerIPRPS, h)
+	h = deviceStartLimit(ratelimit.New(), a.cfg.Server.LoginPerIPRPS, h)
 	if a.cfg.Profile == config.ProfileEnterprise {
 		h = grantLimit(ratelimit.New(), a.cfg.Server.LoginPerIPRPS, h)
 	}
 	// Browser hardening baseline: global, both
 	// listeners. The full resource CSP is not set here.
 	h = securityHeaders(h)
+	// Every answer to a request with a DPoP proof brings the next nonce.
+	h = a.withDPoPNonce(h)
 	// Request correlation (middleware.go): requestID outermost so every
 	// answer, a recovered panic included, carries X-Request-Id; accessLog
 	// (accesslog.go) inside it so the record carries the correlation id and

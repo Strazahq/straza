@@ -6,7 +6,7 @@ weight: 30
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: Helm 3.16.4 rendering and linting chart 1.1.0 from the repository on a Linux host with no cluster, for the render and its object list, the trimmed Deployment, the values tables, the chart's release notes and the render refusals. The Secrets, the install, the port-forward, the upgrade and the rollback were not run for want of a cluster, the /readyz body is the one a standalone strazad at the same build returned, and the rollback's pod was built offline from the rendered Deployment with the page's jq program
+  platform: Helm 3.16.4 rendering and linting chart 1.1.0 from the repository on a Linux host with no cluster, for the render and its object list, the trimmed Deployment, the values tables, the chart's release notes and the render refusals. The Secrets, the install, the port-forward, the upgrade and the rollback were not run for want of a cluster, the /readyz body is the one a standalone strazad at the same build returned, and the rollback's pod was built offline from the rendered Deployment with the page's jq program. On 2026-11-01 the render of the trimmed Deployment ran again with chart 2.0.0, Helm 3.16.4, and only its image tag had changed
   date: 2026-10-06
 applies_to: enterprise
 who: You, as the operator of the cluster
@@ -29,6 +29,9 @@ Four values make the smallest real install:
 - your identity provider's issuer
 - a Secret holding a 32-byte key-encryption key at the data key `kek`
 - a `kubernetes.io/tls` Secret for the listener
+
+
+At the identity provider, Straza's client, `oidc.clientId`, takes two redirects. The console and the self-service page return to the address people open the console at, normally `publicUrl`, followed by `/console/signin`. `straza enroll` returns to `http://127.0.0.1/callback` on a port each sign-in picks, or on the port `oidc.loopbackPort` fixes for a provider that matches ports exactly. [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}), [Okta login]({{< relref "guides/connect-identity/okta-login.md" >}}) and [Keycloak login]({{< relref "guides/connect-identity/keycloak-login.md" >}}) show where each provider takes them.
 
 The key-encryption key seals stored credentials, and every replica needs the same one, so the chart mounts it at `/etc/straza/secret.key`. Without it each pod mints an ephemeral key in its own empty data directory, and secrets stop surviving a restart. Create the namespace and three Secrets first, the third holding the password of the bundled database at the data key `password`.
 
@@ -89,7 +92,7 @@ The Deployment is where the runtime footprint is decided. Trimmed to the lines t
         runAsUser: 65532
       containers:
         - name: strazad
-          image: ghcr.io/strazahq/straza:1.1.2
+          image: ghcr.io/strazahq/straza:2.0.0
           args: ["serve", "--profile", "enterprise", "--listen", "0.0.0.0:8420"]
           env:
             - name: STRAZA_PUBLIC_URL
@@ -206,9 +209,9 @@ Two replicas, the default, can start together on a new database. The store keeps
 `helm upgrade` with a newer chart or `image.tag` rolls the Deployment, and each new pod migrates the store at start, as [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md" >}}) describes. The chart keeps the default rolling update, so for a moment an old pod and a new pod serve side by side.
 
 
-A rollback moves the schema down with the newer image before the older one starts, because an older strazad refuses a database that a newer one migrated. Set the shell variable `TARGET` to the newest migration of the release you return to. This release has one migration, 37, so it has no step to move down, and the way back from it is a restore of the database.
+A rollback moves the schema down with the newer image before the older one starts, because an older strazad refuses a database that a newer one migrated. Set the shell variable `TARGET` to the newest migration of the release you return to. This release carries migrations 37 to 41, and [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md#roll-back" >}}) lists what each step down gives up. A release older than migration 37 comes back only through a restore of the database.
 
-For a later release, take three steps:
+Take three steps:
 
 1. Scale the Deployment to zero.
 2. Run `strazad migrate --to "$TARGET"` once in a pod built from the release's own pod spec, so that it reads the same database settings and passes the same NetworkPolicy.

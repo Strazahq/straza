@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>session start · Straza</title>
 <style>
@@ -246,27 +247,27 @@ var SCENE = {
     {
       "pane": "main",
       "speaker": "ag",
-      "text": "To authorize this device, open:\n  http://localhost:8420/oidc/device?user_code=K7QP-3F2M\nand confirm code K7QP-3F2M",
+      "text": "Straza opened your browser to sign in at http://localhost:8420. If no browser opened, open this link on this computer:\n  http://localhost:8420/oidc/authorize?client_id=straza&code_challenge=…",
       "charMs": 0,
       "ms": 420,
       "runtime": [
-        "K7QP-3F2M",
-        "K7QP-3F2M"
+        "http://localhost:8420/oidc/authorize?client_id=straza&code_challenge=…"
       ],
       "prov": "V(1)"
     },
     {
       "pane": "main",
       "speaker": "ag",
-      "text": "waiting for approval in the browser…",
+      "text": "(bob signs in at the server's sign-in page. The browser hands the answer to 127.0.0.1 on this computer, and straza service redeems it with its PKCE verifier.)",
       "charMs": 0,
       "ms": 900,
-      "prov": "V(1)"
+      "dim": true,
+      "prov": "I"
     },
     {
       "pane": "main",
       "speaker": "ag",
-      "text": "Enrolled as bob (device dev-a1b2c3).",
+      "text": "Enrolled as bob (device dev-a1b2c3). The Straza background service holds this machine's key.",
       "charMs": 0,
       "ms": 760,
       "runtime": [
@@ -294,7 +295,7 @@ var SCENE = {
     {
       "pane": "main",
       "speaker": "STRAZA",
-      "text": "🛡 Straza governance active: bob (dev) @ http://localhost:8420 · policy 3f9c1a2b7de4 · attestation none · conversation capture verbatim",
+      "text": "🛡 Straza governance active: bob (dev) @ http://localhost:8420 · policy 3f9c1a2b7de4 · attestation advisory · conversations recorded word for word",
       "charMs": 0,
       "ms": 220,
       "runtime": [
@@ -315,7 +316,7 @@ var SCENE = {
     {
       "pane": "ctx",
       "speaker": "STRAZA",
-      "text": "Straza governance is active for this session. You are operating as \"bob\" (roles: dev) against http://localhost:8420; policy snapshot 3f9c1a2b7de4, attestation none. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial. Conversation capture is ACTIVE (mode verbatim): prompts and responses in this session are recorded to the audit system by policy.",
+      "text": "Straza governance is active for this session. You are operating as \"bob\" (roles: dev) against http://localhost:8420; policy snapshot 3f9c1a2b7de4, attestation advisory. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial. Recording is on: by policy, the prompts and responses of this session are recorded word for word to the audit system.",
       "charMs": 0,
       "ms": 500,
       "dim": true,

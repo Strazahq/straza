@@ -57,9 +57,9 @@ type ClientError struct {
 	// TS is the failure time, UTC.
 	TS time.Time `json:"ts"`
 	// Kind names the failing surface: "hook" (the governed hook path),
-	// "spool" (audit spool append), "drain" (audit upload), "mcp" (the
-	// stdio proxy's gateway lane, e.g. session revival breadcrumbs),
-	// "identity" (persisting a renewed device credential).
+	// "capture" (handing conversation text to the Straza background
+	// service), "mcp" (the stdio proxy's gateway lane, e.g. session revival
+	// breadcrumbs).
 	Kind string `json:"kind"`
 	// Harness is the dialect in play, when known (claude-code|codex|gemini).
 	Harness string `json:"harness,omitempty"`
@@ -123,24 +123,6 @@ func (s *Store) logClientError(e ClientError) {
 	}
 	_, _ = f.Write(append(line, '\n'))
 	_ = f.Close()
-}
-
-// logSpoolError records a failed audit-spool append for the event it was
-// carrying. nil is a no-op, so call sites stay one line.
-func (s *Store) logSpoolError(n Normalized, err error) {
-	if err == nil {
-		return
-	}
-	s.logClientError(ClientError{Kind: "spool", Harness: n.HarnessName, Event: n.NativeEvent, Err: err.Error()})
-}
-
-// logDrainError records a failed audit drain (upload attempted and failed;
-// callers gate out the no-session/no-config states, which are not errors).
-func (s *Store) logDrainError(err error) {
-	if err == nil {
-		return
-	}
-	s.logClientError(ClientError{Kind: "drain", Err: err.Error()})
 }
 
 // RecordHookFailure is the cmd-layer safety net for the exit-1 class: errors

@@ -370,6 +370,7 @@ func TestInstallManagedCodexWritesRequirements(t *testing.T) {
 	t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", filepath.Join(sysDir, "harness"))
 	t.Setenv("STRAZA_MANAGED_BIN_DIR", filepath.Join(sysDir, "bin"))
 	t.Setenv("STRAZA_HOME", t.TempDir())
+	placeManagedBinary(t, "")
 	t.Setenv("CODEX_HOME", t.TempDir())
 
 	var out strings.Builder
@@ -389,15 +390,6 @@ func TestInstallManagedCodexWritesRequirements(t *testing.T) {
 	}
 	if strings.Contains(body, `"hooks": {`) {
 		t.Errorf("JSON was written into a TOML file:\n%s", body)
-	}
-
-	// The measured artifact must be the file codex actually loads.
-	hash, err := fileSHA256(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := measureAttestation("codex").Hashes["hooks.codex"]; got != hash {
-		t.Errorf("hooks.codex measures %q, not the requirements file straza wrote", got)
 	}
 
 	// And the operator is told the two things that make this lane different.

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/strazahq/straza/internal/policy"
 )
@@ -14,11 +15,13 @@ import (
 // turned on or off, a Rego module, a require predicate loosened, a
 // hook-lane allow where the deployment denies by default, a set that
 // selects by user or identity, and every loosening of a gate, typed
-// where the loosening is or where its set applies to the proposer.
+// where the loosening is or where its set applies to the proposer. On an
+// agent's draft it also answers agent.guardrail for each set that binds
+// the agent and that the draft loosens.
 func (c *check) policyRisks() []Finding {
 	var out []Finding
 	ops := setOps(c.d)
-	subj := c.proposerSubjects()
+	subjs := c.proposerSubjects()
 	for _, name := range sortedKeys(c.changedSets()) {
 		b, hadB := c.docsW[name]
 		a, hasA := c.docsA[name]
@@ -55,13 +58,14 @@ func (c *check) policyRisks() []Finding {
 		}
 		out = append(out, c.identityScoped(name, ops[name])...)
 	}
-	if !agentDraft(c.d, c.in.Proposer) {
-		_, guard := c.guardrail()
-		out = append(out, guard...)
+	_, loosened, guard := c.guardrail()
+	if agentDraft(c.d, c.in.Proposer) {
+		out = append(out, loosened...)
 	}
+	out = append(out, guard...)
 	for _, l := range c.loosenings() {
 		f := risk(codeGuardrail, "PolicySet/"+l.object, "", l.sentence, l.before, l.after)
-		if l.typed || c.binds(l.changed, subj) {
+		if l.typed || slices.ContainsFunc(subjs, func(subj [2]policy.Subject) bool { return c.binds(l.changed, subj) }) {
 			f.Ack, f.Typed = AckTyped, l.object
 		}
 		out = append(out, f)
@@ -162,19 +166,38 @@ func localKinds(r policy.Rule) []string {
 	return slices.DeleteFunc(kinds, func(k string) bool { return !slices.Contains(localTools, k) })
 }
 
-// guardrail applies the agent guardrail, that a draft may not loosen a set
-// that binds its proposer, to every set of either world, with the proposer's
-// roles in each, and answers the cases where the draft loosens a set that
-// binds the proposer: as agent.guardrail refusals, and as the
-// policy.guardrail-changed risks the same cases raise for a person. A set
-// with only a Rego module counts as a gate. For an agent's draft it also
-// refuses each set-level loosening whose set binds the agent before or
-// after, and each approval that starts to apply to the agent and takes
-// over a stricter one on its local tools. A set whose text does not parse
-// is left to its parse refusal.
-func (c *check) guardrail() (refused, risks []Finding) {
-	subj := c.proposerSubjects()
+// guardrail answers guardrailOf for each subject of the proposer, so the
+// guardrail holds at every instant the proposer's roles change, each
+// finding once.
+func (c *check) guardrail() (refused, loosened, risks []Finding) {
+	for _, subj := range c.proposerSubjects() {
+		r, l, k := c.guardrailOf(subj)
+		refused, loosened, risks = append(refused, r...), append(loosened, l...), append(risks, k...)
+	}
+	return dedupe(refused), dedupe(loosened), dedupe(risks)
+}
+
+// guardrailOf applies the agent guardrail, that a draft may not loosen a
+// set that binds its proposer, to every set of either world, with the
+// proposer's subject subj in each, and answers the cases where the draft
+// changes a set that binds the proposer: each as guardFinding answers it,
+// an agent.guardrail refusal or a loosening, and the policy.guardrail-changed
+// risks the same cases raise for a person. A set with only a Rego module
+// counts as a gate. For an agent's draft it also reads each set-level
+// loosening whose set binds the agent before or after, and refuses each
+// approval that starts to apply to the agent and takes over a stricter one
+// on its local tools. A set whose text does not parse is left to its parse
+// refusal.
+func (c *check) guardrailOf(subj [2]policy.Subject) (refused, loosened, risks []Finding) {
 	ops := setOps(c.d)
+	agent := agentDraft(c.d, c.in.Proposer)
+	guard := func(name, clause, them string, takeover bool) {
+		if f, refuse := c.guardFinding(name, clause, them, takeover); refuse {
+			refused = append(refused, f)
+		} else {
+			loosened = append(loosened, f)
+		}
+	}
 	for _, name := range sortedKeys(c.docsW, c.docsA) {
 		b, hadB := c.docsW[name]
 		a, hasA := c.docsA[name]
@@ -182,15 +205,14 @@ func (c *check) guardrail() (refused, risks []Finding) {
 			continue
 		}
 		object := "PolicySet/" + name
-		add := func(clause string, parts ...Finding) {
-			refused = append(refused, refusal(codeAgentGuardrail, object,
-				visible(fmt.Sprintf("%s applies to you, and this draft %s. An agent's draft may not change what binds the agent.", name, clause)),
-				fmt.Sprintf("Leave %s and your roles as they are. A person can change them.", name)))
+		bound := func(clause, them string, parts ...Finding) {
+			guard(name, clause, them, false)
 			for _, f := range parts {
 				f.Ack, f.Typed = AckTyped, name
 				risks = append(risks, f)
 			}
 		}
+		add := func(clause string, parts ...Finding) { bound(clause, clause, parts...) }
 		gates := gatesOf(b)
 		appB, appA := hadB && appliesTo(b.Spec.Match, subj[0]), hasA && appliesTo(a.Spec.Match, subj[1])
 		refs := refsOf(gates)
@@ -208,8 +230,12 @@ func (c *check) guardrail() (refused, risks []Finding) {
 			if i := slices.IndexFunc(a.Spec.Match.Roles, func(r string) bool { return slices.Contains(subj[0].Roles, r) && !slices.Contains(subj[1].Roles, r) }); i >= 0 {
 				role = a.Spec.Match.Roles[i]
 			}
-			add(fmt.Sprintf("takes %s out of your roles so that the set no longer applies to you", role), risk(codeGuardrail, object, "",
-				fmt.Sprintf("%s will stop applying to you, because this draft takes %s out of your roles.", name, role), refs, "unbound"))
+			stops := fmt.Sprintf("%s will stop applying to you, because this draft takes %s out of your roles.", name, role)
+			if agent {
+				stops = fmt.Sprintf("%s will stop applying to the agent that wrote this draft, because this draft takes %s out of its roles.", name, role)
+			}
+			bound(fmt.Sprintf("takes %s out of your roles so that the set no longer applies to you", role),
+				fmt.Sprintf("takes %s out of the agent's roles, so the set no longer applies to it", role), risk(codeGuardrail, object, "", stops, refs, "unbound"))
 		default:
 			add("changes its match or priority", gateRisks(name, gates, "changes its match or priority", "unbound")...)
 		}
@@ -224,14 +250,12 @@ func (c *check) guardrail() (refused, risks []Finding) {
 			changedWhileBinding(name, base, hadBase, a, c.w.LocalToolDefault, add)
 		}
 	}
-	if !agentDraft(c.d, c.in.Proposer) {
-		return refused, risks
+	if !agent {
+		return refused, loosened, risks
 	}
 	for _, l := range c.loosenings() {
 		if l.lane == "" && c.binds(l.changed, subj) {
-			refused = append(refused, refusal(codeAgentGuardrail, "PolicySet/"+l.changed,
-				visible(fmt.Sprintf("%s applies to you, and this draft %s. An agent's draft may not change what binds the agent.", l.changed, l.clause)),
-				fmt.Sprintf("Leave %s and your roles as they are. A person can change them.", l.changed)))
+			guard(l.changed, l.clause, l.clause, l.takeover)
 		}
 	}
 	for _, t := range c.subjectTakeovers(subj) {
@@ -239,14 +263,39 @@ func (c *check) guardrail() (refused, risks []Finding) {
 			"%s applies to you, and this draft lets its rule %s take over from the stricter rule %s of %s. An agent's draft may not change what binds the agent.",
 			t.x.set, t.x.rule.ID, t.y.rule.ID, t.y.set)), fmt.Sprintf("Leave %s and your roles as they are. A person can change them.", t.x.set)))
 	}
-	return refused, risks
+	return refused, loosened, risks
+}
+
+// widensRule begins the guardrail clause of a rule that a draft adds to a
+// set that binds the proposer, or changes so that it allows more, which
+// widens the proposer's own reach.
+const widensRule = "adds or widens rule "
+
+// guardFinding is the agent.guardrail finding of a draft that changes the
+// set name, which binds its proposer, as clause says, and them says of the
+// agent in the third person. A clause that adds or widens a rule widens
+// the agent's own reach, so it is refused, as is a takeover, and every
+// clause on a direct route, which publishes with no review, and on a check
+// that reads no risks, where nothing would show it. Otherwise the change
+// loosens the set, and refused is false: a risk a person confirms by
+// typing the set's name. Its sentence names no agent, because the reader
+// is the publisher.
+func (c *check) guardFinding(name, clause, them string, takeover bool) (f Finding, refused bool) {
+	object := "PolicySet/" + name
+	if takeover || strings.HasPrefix(clause, widensRule) || c.in.Direct || c.in.RefusalsOnly {
+		return refusal(codeAgentGuardrail, object, visible(fmt.Sprintf("%s applies to you, and this draft %s. An agent's draft may not change what binds the agent.", name, clause)),
+			fmt.Sprintf("Leave %s and your roles as they are. A person can change them.", name)), true
+	}
+	return risk(codeAgentGuardrail, object, name, fmt.Sprintf("%s binds the agent that wrote this draft, and this draft %s.", name, them), "", ""), false
 }
 
 // changedWhileBinding calls add for each change of a set that applies to
 // the proposer after the draft, other than added deny rules, added gates
 // that let through no call the deployment denies by default, and reason
 // text. A set the draft creates counts as changed, so an allow rule
-// in it is added too.
+// in it is added too. A gate kept by its id widens when it comes to let
+// through calls it held or refused: it allows where it could not, fires
+// on more calls or stops gating, unless it can only tighten the set.
 func changedWhileBinding(name string, b policy.Document, hadB bool, a policy.Document, localDefault string, add func(string, ...Finding)) {
 	if hadB && !sameMatch(b, a) {
 		var parts []Finding
@@ -264,16 +313,20 @@ func changedWhileBinding(name string, b policy.Document, hadB bool, a policy.Doc
 			add("changes rule " + rb.ID)
 		case sameRule(rb, a.Spec.Rules[i]):
 		case isGate(rb):
-			add("changes rule "+rb.ID, gateRisk(name, rb, "changes the rule", ruleRef(a.Spec.Rules[i])))
+			clause, ra := "changes rule "+rb.ID, a.Spec.Rules[i]
+			if !tightens(ra, localDefault) && (!canAllow(rb) || firesMore(rb, ra) || (gateMode(rb) && !gateMode(ra))) {
+				clause = widensRule + rb.ID
+			}
+			add(clause, gateRisk(name, rb, "changes the rule", ruleRef(ra)))
 		case tightens(a.Spec.Rules[i], localDefault):
 			add("changes rule " + rb.ID)
 		default:
-			add("adds or widens rule " + rb.ID)
+			add(widensRule + rb.ID)
 		}
 	}
 	for _, ra := range a.Spec.Rules {
 		if ruleIndex(b, ra.ID) < 0 && !tightens(ra, localDefault) {
-			add("adds or widens rule " + ra.ID)
+			add(widensRule + ra.ID)
 		}
 	}
 }
@@ -404,24 +457,66 @@ func ruleIndex(doc policy.Document, id string) int {
 }
 
 // proposerSubjects answers the proposer as the policy engine sees them in
-// live state and after the draft: the roles they hold directly, each
-// closed over its world's implications, and their typology.
-func (c *check) proposerSubjects() [2]policy.Subject {
+// live state and after the draft, once for each set of roles
+// proposerRoleSets answers: the roles of the set, each closed over its
+// world's implications, and their typology. On the after side a role the
+// draft removes drops out.
+func (c *check) proposerSubjects() [][2]policy.Subject {
 	p := c.in.Proposer
-	return [2]policy.Subject{subjectOf(p, c.clW.union(heldDirect(c.w, p.Username))), subjectOf(p, c.clA.union(heldDirect(c.after, p.Username)))}
+	var out [][2]policy.Subject
+	for _, set := range c.proposerRoleSets() {
+		kept := slices.DeleteFunc(slices.Clone(set), func(r string) bool {
+			_, live := c.w.Roles[r]
+			_, stays := c.after.Roles[r]
+			return live && !stays
+		})
+		out = append(out, [2]policy.Subject{subjectOf(p, c.clW.union(set)), subjectOf(p, c.clA.union(kept))})
+	}
+	return out
 }
 
-// heldDirect answers the roles whose holders in w list username, sorted.
-func heldDirect(w World, username string) []string {
+// proposerRoleSets answers each distinct set of roles the proposer holds
+// directly, sorted, at in.Now and at every later instant one of its
+// windows starts or ends, in time order. A role Holders lists the proposer
+// under with no window is in every set. A proposer with no username holds
+// no role.
+func (c *check) proposerRoleSets() [][]string {
+	username := c.in.Proposer.Username
 	if username == "" {
-		return nil
+		return [][]string{nil}
 	}
-	var out []string
-	for role, hs := range w.Holders {
-		if slices.ContainsFunc(hs, func(h Holder) bool { return h.Username == username }) {
-			out = append(out, role)
+	windows := c.w.Windows[username]
+	bounded := map[string]bool{}
+	instants := []time.Time{c.in.Now}
+	for _, r := range windows {
+		bounded[r.Role] = true
+		for _, b := range []*time.Time{r.From, r.To} {
+			if b != nil && b.After(c.in.Now) {
+				instants = append(instants, *b)
+			}
 		}
 	}
-	sort.Strings(out)
+	slices.SortFunc(instants, time.Time.Compare)
+	var always []string
+	for role, hs := range c.w.Holders {
+		if !bounded[role] && slices.ContainsFunc(hs, func(h Holder) bool { return h.Username == username }) {
+			always = append(always, role)
+		}
+	}
+	var out [][]string
+	seen := map[string]bool{}
+	for _, t := range instants {
+		set := slices.Clone(always)
+		for _, r := range windows {
+			if r.holds(t) && !slices.Contains(set, r.Role) {
+				set = append(set, r.Role)
+			}
+		}
+		sort.Strings(set)
+		if key := strings.Join(set, "\x00"); !seen[key] {
+			seen[key] = true
+			out = append(out, set)
+		}
+	}
 	return out
 }

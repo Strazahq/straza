@@ -18,8 +18,11 @@ import (
 // The scan is deliberately broad: every "STRAZA_..." string literal in the
 // non-test Go sources of cmd/straza and internal/agentguard counts, whether
 // it is read through os.Getenv, os.LookupEnv or an environ map, so a new
-// read shape cannot slip past it. The docs side matches each name as
-// backtick-wrapped code, which is the only form the page lists them in.
+// read shape cannot slip past it. The internal/agentguard root covers its
+// sub-packages, among them the local API (localapi) and `straza service`
+// (service), and the scan fails if it did not walk them. The docs side
+// matches each name as backtick-wrapped code, which is the only form the
+// page lists them in.
 func TestClientEnvDocumented(t *testing.T) {
 	roots := []string{
 		filepath.Join("..", "..", "cmd", "straza"),
@@ -27,12 +30,17 @@ func TestClientEnvDocumented(t *testing.T) {
 	}
 	lit := regexp.MustCompile(`"(STRAZA_[A-Z0-9_]+)"`)
 	names := map[string]string{}
+	walked := map[string]bool{}
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			if d.IsDir() {
+				walked[path] = true
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
 			src, err := os.ReadFile(path) // #nosec G304 -- test walks its own package tree
@@ -52,6 +60,11 @@ func TestClientEnvDocumented(t *testing.T) {
 	}
 	if len(names) == 0 {
 		t.Fatal("no STRAZA_* literals found; the scan roots are wrong")
+	}
+	for _, sub := range []string{"localapi", "service"} {
+		if !walked[sub] {
+			t.Fatalf("the scan did not walk internal/agentguard/%s, so its environment reads go unchecked; add it as a root", sub)
+		}
 	}
 
 	pagePath := filepath.Join("..", "..", "website", "content", "reference", "client-environment.md")

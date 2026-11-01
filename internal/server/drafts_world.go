@@ -51,11 +51,14 @@ func (a *App) liveWorld(ctx context.Context) (drafts.World, error) {
 // fingerprints of d's items and of the objects its removals take with
 // them, the last publish of every item that went stale, the facts of every
 // App d puts, extracted from the item's manifest by manager.Parse and the
-// same extractor readWorld uses for live rows, the credential facts of the
-// servers d names and the proposer's user row.
+// same extractor readWorld uses for live rows, the credential and pinned
+// object facts of the servers d names and the proposer's user row.
 func (a *App) worldFor(ctx context.Context, w drafts.World, d drafts.Draft) (drafts.World, drafts.CheckInput, error) {
-	in := drafts.CheckInput{Apps: a.itemFacts(d), Advisories: a.policyAdvisories, Now: time.Now()}
+	in := drafts.CheckInput{Apps: a.itemFacts(d), Advisories: a.policyAdvisories, HarnessTools: harnessTools, Now: time.Now()}
 	if err := a.readCredentialFacts(ctx, &w, d); err != nil {
+		return drafts.World{}, drafts.CheckInput{}, err
+	}
+	if err := a.readObjectFacts(ctx, w, d, in.Apps); err != nil {
 		return drafts.World{}, drafts.CheckInput{}, err
 	}
 	var err error
@@ -127,13 +130,14 @@ func (a *App) liveFingerprints(ctx context.Context, w drafts.World, d drafts.Dra
 
 // roleConfig is the role name as w holds it, in the store's words for its
 // fingerprint: the row, the name of the live server that owns it, the
-// server and tools of its access row, and the roles it implies. An owner or
-// an access row whose server is gone reads as no server.
+// server, tools and covers line of its access row, and the roles it
+// implies. An owner or an access row whose server is gone reads as no
+// server.
 func roleConfig(w drafts.World, name string) store.RoleConfig {
 	ro, acc := w.Roles[name], w.Access[name]
 	return store.RoleConfig{
 		Role:  store.Role{ID: ro.ID, Name: ro.Name, Description: ro.Description, Kind: ro.Kind, Plane: ro.Plane},
-		Owner: ro.Owner, Server: acc.Server, Tools: acc.Tools, Implies: w.Implies[name],
+		Owner: ro.Owner, Server: acc.Server, Tools: acc.Tools, Scope: storeScope(acc.Covers), Implies: w.Implies[name],
 	}
 }
 
@@ -229,12 +233,13 @@ func holderOf(u store.User, sponsor string, devices int) drafts.Holder {
 // readWorld reads live state into one drafts.World: every live server with
 // its manifest facts and what the manager knows of it, every role with its
 // knowledge packs, the implication edges, the access rows, the direct
-// holders in force, the holder count of every role, the OAuth providers of
-// the config, the sets of the active policy snapshot with the text each
-// was published with, the local tool default, whether a push lane or Slack
-// reaches approvers, and whether this host can start containers. The credential
-// facts of the servers are left to draftWorld, which reads them for the
-// servers a draft names. Any failed read fails the whole read.
+// holders in force, the windows of the assignments that start or end
+// later, the holder count of every role, the OAuth providers of the config, the sets of the
+// active policy snapshot with the text each was published with, the local
+// tool default, whether a push lane or Slack reaches approvers, and whether
+// this host can start containers. The credential facts of the servers are
+// left to draftWorld, which reads them for the servers a draft names. Any
+// failed read fails the whole read.
 func (a *App) readWorld(ctx context.Context) (drafts.World, error) {
 	w, err := a.readRoleTable(ctx)
 	if err != nil {
@@ -246,7 +251,7 @@ func (a *App) readWorld(ctx context.Context) (drafts.World, error) {
 			return drafts.World{}, fmt.Errorf("the stored manifest of %s cannot be read: %w", name, err)
 		}
 		if v, ok := a.manager.View(name); ok {
-			app.Status, app.Offered, app.Detail, app.ReadOnly = v.Status, v.Offered, v.Detail, readOnlyTools(v.Tools)
+			app.Status, app.Offered, app.Detail, app.ReadOnly, app.Destructive = v.Status, v.Offered, v.Detail, readOnlyTools(v.Tools), destructiveTools(v.Tools)
 		}
 		app.Paused = a.manager.IsPaused(name)
 		app.File = a.filePath(name)
@@ -268,6 +273,7 @@ func (a *App) readWorld(ctx context.Context) (drafts.World, error) {
 	w.Slack = a.cfg.Approval.Channels.Slack.Enabled
 	w.DockerOnPath = manager.DockerOnPath()
 	w.RefuseCommand = a.cfg.Profile == config.ProfileEnterprise
+	w.ServerAdminsCoverEvery = a.cfg.Admin.ServerAdminsCoverEvery
 	return w, nil
 }
 
@@ -337,13 +343,18 @@ func serverWorld(row store.App) drafts.World {
 }
 
 // withManifest fills the facts of app that its stored manifest says, and
-// fails when that manifest cannot be decoded.
+// fails when that manifest cannot be decoded. The pinned type it reads is
+// the live one.
 func withManifest(app drafts.App) (drafts.App, error) {
 	mf, err := manager.FromJSON(app.Manifest)
 	if err != nil {
 		return app, err
 	}
-	return manifestFacts(app, mf), nil
+	app = manifestFacts(app, mf)
+	if app.Pinned != nil {
+		app.Pinned.LiveType = app.Pinned.Type
+	}
+	return app, nil
 }
 
 // idNames maps the id of every role and every server in w to its name.
@@ -387,9 +398,9 @@ func (a *App) readAccessRows(ctx context.Context, w *drafts.World) error {
 		}
 		var tools []string
 		_ = json.Unmarshal([]byte(b.ToolMatcher), &tools)
-		w.Access[role] = drafts.Access{ID: b.ID, Server: apps[b.AppID], Tools: tools}
+		w.Access[role] = drafts.Access{ID: b.ID, Server: apps[b.AppID], Tools: tools, Covers: draftScope(b.Scope), Fault: b.ScopeFault}
 	}
-	return nil
+	return a.readCurrentValues(ctx, w)
 }
 
 // readImplications reads every implication edge into w.Implies by role
@@ -450,11 +461,13 @@ func (a *App) readHolderCounts(ctx context.Context, w *drafts.World) error {
 
 // readHolders reads the users who hold each role directly, from the
 // assignments in force now, into w.Holders, each user once per role and
-// sorted by username. A holder is an agent when it is not a person, as
-// personUser reads both non-person signals, and carries its identity
-// typology, the sponsor who answers for it, and its approver devices.
+// sorted by username, and each user's assignments that start or end later
+// into w.Windows, sorted by role. Every row is read against one instant,
+// and an ended one is in neither. A holder is an agent when it is not a
+// person, as personUser reads both non-person signals, and carries its
+// identity typology, the sponsor who answers for it, and approver devices.
 func (a *App) readHolders(ctx context.Context, w *drafts.World) error {
-	pairs, err := a.store.Roles().AssignmentPairsInForce(ctx, time.Now())
+	rows, err := a.store.Roles().ListAllAssignments(ctx)
 	if err != nil {
 		return err
 	}
@@ -482,12 +495,20 @@ func (a *App) readHolders(ctx context.Context, w *drafts.World) error {
 		return store.User{}, store.ErrNotFound
 	}
 	roles, _ := idNames(*w)
+	now := time.Now()
 	seen := map[[2]string]bool{}
-	w.Holders = map[string][]drafts.Holder{}
-	for _, p := range pairs {
-		role, ok := roles[p.RoleID]
-		u, known := byID[p.SubjectID]
-		if !ok || !known || seen[[2]string{role, u.ID}] {
+	w.Holders, w.Windows = map[string][]drafts.Holder{}, map[string][]drafts.RoleWindow{}
+	for _, asg := range rows {
+		role, ok := roles[asg.RoleID]
+		u, known := byID[asg.SubjectID]
+		if !ok || !known {
+			continue
+		}
+		inForce, later := assignmentAt(asg, now)
+		if later || (inForce && asg.ValidTo != nil) {
+			w.Windows[u.Username] = append(w.Windows[u.Username], drafts.RoleWindow{Role: role, From: asg.ValidFrom, To: asg.ValidTo})
+		}
+		if !inForce || seen[[2]string{role, u.ID}] {
 			continue
 		}
 		seen[[2]string{role, u.ID}] = true
@@ -501,7 +522,19 @@ func (a *App) readHolders(ctx context.Context, w *drafts.World) error {
 	for _, hs := range w.Holders {
 		sort.Slice(hs, func(i, j int) bool { return hs[i].Username < hs[j].Username })
 	}
+	for _, rs := range w.Windows {
+		sort.Slice(rs, func(i, j int) bool { return rs[i].Role < rs[j].Role })
+	}
 	return nil
+}
+
+// assignmentAt reports whether asg is in force at now and whether it starts
+// after now, valid_from inclusive and valid_to exclusive as the identity
+// resolver reads a window. A row that has ended is neither.
+func assignmentAt(asg store.RoleAssignment, now time.Time) (inForce, later bool) {
+	ended := asg.ValidTo != nil && !now.Before(*asg.ValidTo)
+	later = !ended && asg.ValidFrom != nil && now.Before(*asg.ValidFrom)
+	return !ended && !later, later
 }
 
 // readPolicies reads the sets the active policy snapshot carries, with the

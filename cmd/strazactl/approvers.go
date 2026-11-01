@@ -60,7 +60,7 @@ func approversCmd(client func() *ctl.Client) *cobra.Command {
 		Long: "Deletes the approver-device enrollment (the apd_ id from `approvers list`).\n" +
 			"Row-backed and immediate: the phone's use=approver token fails on its very\n" +
 			"next call, and its push registrations stop routing. The user is untouched:\n" +
-			"re-enrolling takes a fresh one-time QR (`approvals enroll-token <username>`).",
+			"re-enrolling is the person's own act, on their self-service page.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := client().RevokeApproverDevice(cmd.Context(), args[0]); err != nil {

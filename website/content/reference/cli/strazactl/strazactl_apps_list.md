@@ -2,7 +2,7 @@
 title: strazactl apps list
 description: List MCP servers with live status, the reason behind it and the roles that reach each
 pagetype: reference
-weight: 22
+weight: 19
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl apps list [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -1,8 +1,8 @@
 ---
 title: straza enroll
-description: 'Log in via the OIDC device flow and enroll this device (--headless: an AI agent with no browser)'
+description: 'Sign in through your browser and enroll this machine with the background service (--use-device-code: sign in with a code, --headless: an AI agent)'
 pagetype: reference
-weight: 8
+weight: 7
 draft: false
 sources:
   - cmd/straza
@@ -18,9 +18,10 @@ straza enroll [flags]
 ## Options
 
 ```
-      --headless        enroll an AI agent or a service account with no browser: with its own key at the built-in issuer, or with STRAZA_CLIENT_ID and STRAZA_CLIENT_SECRET at an external identity provider. Its sessions carry no device
-      --server string   strazad base URL
-      --user string     the username the local key is registered under (headless, standalone; default: the name straza keygen stored)
+      --headless          enroll an AI agent or a service account with no browser: with the key straza keygen made, or with the client secret at your identity provider that an administrator gave the Straza background service. Its sessions carry no device
+      --server string     strazad base URL
+      --use-device-code   sign in with a code that you confirm in a browser on another device, for a machine with no display. Your Straza admin can turn this off
+      --user string       the username the agent's key is registered under (headless; default: the name straza keygen stored)
 ```
 
 ## See also

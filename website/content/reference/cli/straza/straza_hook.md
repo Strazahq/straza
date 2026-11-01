@@ -2,7 +2,7 @@
 title: straza hook
 description: 'Hook entrypoint: normalize a harness payload and decide (reads stdin)'
 pagetype: reference
-weight: 10
+weight: 9
 draft: false
 sources:
   - cmd/straza

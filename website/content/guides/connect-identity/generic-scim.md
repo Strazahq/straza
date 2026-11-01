@@ -25,7 +25,7 @@ Straza implements a strict, documented subset of SCIM 2.0. Your client creates, 
 
 ## Before you start {.nostep}
 
-- A Straza administrator login for `strazactl`, or a console session that holds the tokens area.
+- `strazactl` with `STRAZA_SERVER` and an admin API token in `STRAZA_API_TOKEN`, or a console session that holds the tokens area. The steps mint another token, which takes `tokens:write`, a root-equivalent grant, so mint a **Full root** token for 30 days in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows, and revoke it when you are done.
 - `curl` and `jq` on a machine that reaches strazad.
 
 The examples ran against the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) at `http://localhost:8420`.
@@ -202,6 +202,13 @@ The extension is `urn:straza:params:scim:schemas:extension:2.0:Group`. Straza co
 | `policies` | The active PolicySets whose `match.roles` names the role or a role it composes. A set that matches every session is left out, because the list says what holding this role adds. |
 | `administers` | The MCP servers whose admin role the role holds, directly or through composition. |
 | `server` | The MCP server that owns the role, on a server-owned application role only. Tell such roles apart by this attribute, never by their name. |
+| `covers` | What the role covers on each server that pins an object type, through every role it composes: `<server>:<type>` and then `every`, one named object in quotes, or `none`. |
+
+
+A `covers` value says which objects one access row reaches. `every` covers every object of the type, and `none` stands for an access row without `covers` or with one Straza could not read, which covers nothing. An access row that names objects gives one value per object, each name a JSON string. A row on two repos gives `objects-demo:repo "Strazahq/docs-site"` and `objects-demo:repo "Strazahq/straza"`, and a repo named every reads `"every"`, so it never passes for every repo. Straza drops duplicate values and sorts the rest, and it never merges two rows, so a role that composes one row with `every` and another with a name shows both. Outside a failed read, Straza never leaves `covers` out on a role with access to a server with a pinned type, because your client would read a missing value as every object. If Straza cannot read what the role reaches, it leaves `covers` out together with `apps` and `tools`, and it renders the rest of the group. Like the rest of the extension, `covers` is read-only, and a PATCH on it answers `400` with `scimType` `mutability`.
+
+
+A value changes when Straza publishes a change, or when a listing renames an object: a draft that changes the role's covers line, a draft that changes what a business role composes, or one that changes the object type a server pins, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md#covers" >}}) shows. Each value is the name the server's object list holds now. A rename that a listing picks up changes the value, and Straza puts the role and every role that composes it on the change feed. An object the list no longer holds keeps the name it had when the role was published.
 
 
 Membership is role assignment. A members add creates the direct assignment, a remove deletes it, and a PUT converges the set. Each write is idempotent, so sending it twice changes nothing.

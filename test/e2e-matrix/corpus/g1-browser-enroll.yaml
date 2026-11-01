@@ -1,0 +1,57 @@
+# A person enrolls her machine by the browser sign-in. The runner sets
+# BROWSER to a helper that hands it the link the client opens, signs in on
+# the built-in issuer's page with her password the way her browser would,
+# and follows the redirect to the loopback port of her straza service. The
+# server's sign-in floor is raised to browser in plain sight, so a sign-in
+# the server judged a code would be refused at enrollment and at the session
+# start. The chain records the enrollment once, with the lane the server
+# judged from the nonce that names her key.
+# Every other scenario enrolls people by the code lane, which the runner
+# picks with --use-device-code.
+id: g1-browser-enroll
+group: G1
+title: A person enrolls by the browser sign-in under a browser floor and starts a session
+provenance: >-
+  doc spec/events/SPEC.md (straza.audit.identity with the action
+  device.enrolled and its signIn, events revision 47);
+  website/content/reference/configuration.md (governance.minSignIn ranks
+  code below browser);
+  website/content/reference/cli/straza/straza_enroll.md (the browser lane
+  opens BROWSER with the link and prints it, and --use-device-code picks
+  the code lane);
+  spec/scim-profile/SPEC.md §3 and conformance/scim users-lifecycle.
+  suspect: the form fields of the built-in issuer's authorization page,
+  which the runner reads from the page instead of naming them.
+harnesses: [claude-code]
+governance:
+  minSignIn: browser
+identities:
+  erin: {kind: human, password: "Walk-2026!"}
+steps:
+  - name: the IdM provisions erin over SCIM
+    scim:
+      method: POST
+      path: /scim/v2/Users
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: idm-g1-erin
+        userName: erin
+        displayName: Erin Browser
+        active: true
+    want: {status: 201}
+    save: {erinId: id}
+  - name: the admin sets erin's password
+    admin:
+      method: PATCH
+      path: /v1/admin/users/${erinId}
+      body: {password: "Walk-2026!"}
+    want: {status: 200}
+  - name: erin enrolls her laptop by the browser sign-in
+    enroll: {as: erin, signIn: browser}
+  - name: the chain records the enrollment once with the browser lane
+    audit: {subject: erin, kind: straza.audit.identity, action: device.enrolled, signIn: browser, count: 1}
+  - name: erin starts a session under the browser floor
+    hook:
+      as: erin
+      event: {kind: session.start}
+    want: {decision: allow}

@@ -65,7 +65,7 @@ type approvalPayload struct {
 // (`ses` claim, session still active) or a login/ID token, and hands the
 // handler the user id. It deliberately accepts more principals than
 // requireUser (which is session-token-only, built for the connect flow):
-// approvers decide from the console or strazactl, whose credential is a login
+// approvers decide from the console, whose credential is a login
 // token, not an agent session. `wat_` admin API tokens are rejected: they carry no
 // user identity ("no user, no roles"), and an approval decision must bind to
 // a person (the service still validates approver roles per record).
@@ -118,15 +118,19 @@ func (a *App) requirePersonClient(next func(w http.ResponseWriter, r *http.Reque
 // active session row, judged by judgeSession as a refresh judges it; a login
 // token leaves the row zero. It writes the refusal itself and reports false.
 func (a *App) identify(w http.ResponseWriter, r *http.Request) (store.User, store.Session, bool) {
-	raw := bearerToken(r)
+	raw, scheme := sessionCredential(r)
 	if raw == "" {
 		apiError(w, http.StatusUnauthorized, "missing bearer token")
 		return store.User{}, store.Session{}, false
 	}
-	if claims, err := a.tokens.Verify(raw); err == nil && claims.Session != "" {
+	claims, err := a.verifySessionToken(w, r, raw, scheme)
+	if errors.Is(err, errAnswered) {
+		return store.User{}, store.Session{}, false
+	}
+	if err == nil && claims.Session != "" {
 		return a.judgeSession(w, r, claims, "approvals bearer", claims.Harness)
 	}
-	u, err := a.verifyLogin(r, raw)
+	u, err := a.verifyBearerLogin(r, raw, scheme)
 	if err == nil {
 		return u, store.Session{}, true
 	}
@@ -264,7 +268,7 @@ func (a *App) handleApprovalGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleApprovalApprove/Deny serve POST /v1/admin/approvals/{id}/approve|deny
-// (requirePersonClient: a person's session from the console, strazactl or the
+// (requirePersonClient: a person's session from the console or the
 // self-service page, OR a login token; a coding-harness session is refused.
 // The service validates approver roles, so a non-admin approver can decide).
 // Channel = "console".
@@ -278,8 +282,8 @@ func (a *App) handleApprovalDeny(w http.ResponseWriter, r *http.Request, userID 
 
 func (a *App) decideApproval(w http.ResponseWriter, r *http.Request, userID, verdict string) {
 	// Optional body {"reason": "..."} (0.63.0). The endpoint predates the
-	// field, so an absent/empty body stays legal: console builds and strazactl
-	// that send nothing keep working. The service validates the words.
+	// field, so an absent/empty body stays legal: console builds that send
+	// nothing keep working. The service validates the words.
 	var body struct {
 		Reason string `json:"reason"`
 	}
@@ -330,11 +334,11 @@ func approvalErrorStatus(err error) int {
 	}
 }
 
-// unsignedOwnDecisionMessage is what the console and strazactl show a person
+// unsignedOwnDecisionMessage is what the console shows a person
 // who tries to decide their own request: what was refused, why, where to go,
 // and the config key an operator sets to accept the risk.
 func (a *App) unsignedOwnDecisionMessage() string {
-	return "this is your own request, and the console and strazactl cannot decide it, because an agent on your machine could do the same. " +
+	return "this is your own request, and the console cannot decide it, because an agent on your machine could do the same. " +
 		"Confirm it on your enrolled phone, or on the self-service page under This browser (" + a.selfServicePage() + "). " +
 		"An operator who accepts that risk sets approval.unsignedOwnDecisions to true in the server config"
 }

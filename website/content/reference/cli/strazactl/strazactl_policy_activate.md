@@ -2,7 +2,7 @@
 title: strazactl policy activate
 description: Publish one PolicySet's stored text after the server's checks, leaving every other set as published
 pagetype: reference
-weight: 69
+weight: 65
 draft: false
 sources:
   - cmd/strazactl
@@ -26,7 +26,7 @@ strazactl policy activate <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

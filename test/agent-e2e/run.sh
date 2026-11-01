@@ -17,13 +17,15 @@ DC="docker compose"
 FRESH="${STRAZA_E2E_FRESH:-1}"
 
 if [ "$FRESH" = "1" ]; then
-  # Fresh = an empty Straza store, so the first boot prints a new admin password. The
-  # ollama model cache volume deliberately survives (~1 GB per re-pull).
+  # Fresh = an empty Straza store, so the first boot prints a new admin password,
+  # and an empty service state, so no key or enrollment of an earlier store
+  # survives. The ollama model cache volume deliberately survives (~1 GB per
+  # re-pull).
   $DC down --remove-orphans 2>/dev/null || true
-  docker volume rm -f straza-agent-e2e_straza-data >/dev/null 2>&1 || true
+  docker volume rm -f straza-agent-e2e_straza-data straza-agent-e2e_service-state >/dev/null 2>&1 || true
   rm -f .admin-password
 fi
-$DC up -d --build strazad ollama
+$DC up -d --build strazad ollama straza-service
 
 # The bootstrap password is printed exactly once, on the first boot,
 # and a container recreate (image rebuild) wipes the log buffer, so persist

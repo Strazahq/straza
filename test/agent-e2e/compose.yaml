@@ -44,7 +44,7 @@ services:
       - ollama-models:/root/.ollama # model cache survives runs
 
   runner:
-    build:
+    build: &runner-build
       context: ../..
       dockerfile: test/agent-e2e/runner/Dockerfile
     profiles: ["runner"] # started explicitly by run.sh via `compose run`
@@ -54,10 +54,43 @@ services:
       E2E_MODEL: ${STRAZA_E2E_MODEL:-qwen2.5:1.5b}
       STRAZA_ADMIN_PASSWORD: ${STRAZA_ADMIN_PASSWORD:-}
       STRAZA_E2E_INTERACTIVE: ${STRAZA_E2E_INTERACTIVE:-}
+    volumes:
+      # the socket directory of the runner's service, its only way to Straza
+      - service-socket:/run/straza-service
+    depends_on:
+      strazad:
+        condition: service_started
+      ollama:
+        condition: service_started
+      straza-service:
+        condition: service_healthy
+
+  straza-service:
+    # The runner's straza service: the runner image and binary, run as
+    # `straza service` under straza-service (uid 64000), which the runner
+    # never uses. It alone mounts the state volume with the e2e NHI's key,
+    # enrollment and audit spool, and it shares only the socket directory
+    # with the runner, so keygen, enroll and every kit hook reach Straza
+    # through it. STRAZA_HOME stays unset, so it uses the system paths
+    # /run/straza-service/service.sock and /var/lib/straza-service.
+    build: *runner-build
+    user: "64000:64000"
+    entrypoint: ["/usr/local/bin/straza", "service"]
+    volumes:
+      - service-socket:/run/straza-service
+      - service-state:/var/lib/straza-service
     depends_on:
       - strazad
-      - ollama
+    healthcheck:
+      # healthy once the service accepts a connection on its socket
+      test: ["CMD", "python3", "-c", "import socket; socket.socket(socket.AF_UNIX).connect('/run/straza-service/service.sock')"]
+      interval: 30s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
 
 volumes:
   straza-data: {}
   ollama-models: {}
+  service-socket: {} # the socket directory the runner and its service share
+  service-state: {} # the service's NHI key, enrollment and audit spool

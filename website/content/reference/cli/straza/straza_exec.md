@@ -2,7 +2,7 @@
 title: straza exec
 description: Run a command through Straza policy, for an agent that has no hooks
 pagetype: reference
-weight: 9
+weight: 8
 draft: false
 sources:
   - cmd/straza
@@ -14,8 +14,8 @@ keywords: straza, exec
 ## Synopsis
 
 The execution shim for agents that have no hook surface: the command is
-decided as a canonical shell.exec event against the local signed snapshot
-(same engine, spool, and fail-closed semantics as the harness hooks), then run
+decided as a canonical shell.exec event by the Straza background service
+(same policy, audit, and fail-closed semantics as the harness hooks), then run
 with inherited stdio and exit-code passthrough. Denials print the rule reason
 and exit 2. Advisory on an open machine; boundary-grade inside a sandbox
 profile where this shim is the only exec surface.

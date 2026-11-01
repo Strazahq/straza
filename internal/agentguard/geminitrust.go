@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 )
 
 // Gemini hook HONESTY, read from outside gemini: what cannot be read answers
@@ -130,7 +132,7 @@ func geminiTrustStorePath() (string, error) {
 // start, because all three holes above kill the lane while the file reads
 // perfect. cwd is a parameter for testability; the doctor wrapper passes the
 // process working directory.
-func geminiHooksCheck(ses Session, haveSession bool, cwd string) *Check {
+func geminiHooksCheck(sessions []localapi.SessionStatus, cwd string) *Check {
 	layers := wiredLayers("gemini")
 	if len(layers) == 0 {
 		return nil // gemini is simply not in use on this machine
@@ -139,7 +141,7 @@ func geminiHooksCheck(ses Session, haveSession bool, cwd string) *Check {
 	if err != nil {
 		return nil
 	}
-	managedPath, _ := managedHookPath("gemini")
+	managedPath, _ := ManagedHookPath("gemini")
 	user := readGeminiSettings(userPath)
 
 	// Hole 3: the env redirect. When set and pointing away from the managed
@@ -204,9 +206,9 @@ func geminiHooksCheck(ses Session, haveSession bool, cwd string) *Check {
 
 	// Positive evidence: a gemini session that checked in proves the
 	// SessionStart hook ran at least once.
-	if haveSession && strings.HasPrefix(ses.Harness, "gemini/") {
+	if label, ok := checkedIn(sessions, "gemini"); ok {
 		return &Check{"gemini-hooks", checkOK,
-			"wiring present and a gemini session checked in (" + ses.Harness + "), so gemini is running the hooks", ""}
+			"wiring present and a gemini session checked in (" + label + "), so gemini is running the hooks", ""}
 	}
 	detail := "wiring present; no kill switch, no settings redirect"
 	if featureActive {

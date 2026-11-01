@@ -1,13 +1,24 @@
 {{- define "line" }}- [{{ .Title }}]({{ .Permalink }}){{ with .Description }}: {{ . }}{{ end }}
 {{ end -}}
+{{- /* The generated command line reference, one page per command, is listed
+last under Optional: the llms.txt section a reader may skip when its context
+is short, so the sections above stay a readable map of the docs. */ -}}
+{{- $cli := site.GetPage "/reference/cli" -}}
+{{- if not $cli }}{{ errorf "llms.txt: there is no /reference/cli section to list under Optional. Update layouts/index.llms.txt." }}{{ end -}}
 # {{ site.Title }}
 
-> {{ site.Home.Description }}
+> {{ site.Home.Params.seo_description | default site.Home.Description }}
 {{ range site.Home.Sections.ByWeight }}
 ## {{ .Title }}
 
 {{ template "line" . }}
+{{- range .Pages.ByWeight }}{{ if ne . $cli }}{{ template "line" . }}
 {{- range .Pages.ByWeight }}{{ template "line" . }}
 {{- range .Pages.ByWeight }}{{ template "line" . }}
+{{- end }}{{ end }}{{ end }}{{ end }}{{ end }}
+## Optional
+
+{{ template "line" $cli }}
+{{- range $cli.Pages.ByWeight }}{{ template "line" . }}
 {{- range .Pages.ByWeight }}{{ template "line" . }}
-{{- end }}{{ end }}{{ end }}{{ end }}
+{{- end }}{{ end }}

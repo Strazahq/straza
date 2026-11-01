@@ -1,8 +1,8 @@
 ---
 title: strazactl users nhi-key unset
-description: Revoke the agent identity's key (the next token request fails; running sessions die via the kill switch)
+description: Revoke the agent identity's key, which ends its running sessions and refuses its next token request
 pagetype: reference
-weight: 114
+weight: 110
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl users nhi-key unset <username> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

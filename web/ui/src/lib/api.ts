@@ -127,8 +127,24 @@ export type ManifestDoc = {
     credential?: Credential;
     exposure?: { tools?: string[] };
     limits?: { cpu?: string; mem?: string; rps?: number; timeoutSeconds?: number };
+    objects?: ObjectsBlock;
   };
 };
+
+// ObjectsBlock is the straza.objects block of app-manifest revision 7: the
+// type of the objects a server's tools reach, its plural, the tool that
+// lists them with the attributes kept, and each named tool's reach, the
+// word all, none or credential, or the argument that names the object.
+export type ObjectsBlock = {
+  type: string;
+  plural?: string;
+  list: { tool: string; attributes?: ObjectAttribute[] };
+  tools?: Record<string, string | { argument: string }>;
+};
+
+// ObjectAttribute is one attribute a listing keeps. setBy is org or object,
+// and empty reads as object.
+export type ObjectAttribute = { name: string; setBy?: string };
 
 export type AppRow = {
   id: string;
@@ -158,11 +174,19 @@ export type AppRow = {
   admin_role?: string;
   admin_role_id?: string;
   may_change?: boolean;
+  // may_cover_every says on list rows whether the caller may write covers
+  // every on a role this server owns. Absent from an older server.
+  may_cover_every?: boolean;
 };
 
 export type ToolRow = { id: string; app: string; app_id: string; name: string; description?: string };
 
-export type BindingRow = { id: string; app: string; role: string; tools?: string[] };
+// CoversLine is a binding's covers line on a server that pins an object
+// type (openapi 0.142.0): every object of the type, or these objects, each
+// by its id and value. Absent on a binding of a server that pins no type.
+export type CoversLine = { every?: boolean; objects?: { value: string; id: string }[] };
+
+export type BindingRow = { id: string; app: string; role: string; tools?: string[]; covers?: CoversLine };
 
 // SecretRow is one sealed credential row as the secrets list returns it:
 // scope app is the server's shared row, scope role an override for one
@@ -205,18 +229,25 @@ export type ChangeRow = { cursor: string; type: string; op: string; id: string; 
 export type LogEntry = { t: string; line: string };
 export type LogsAnswer = { app: string; lines: string[]; entries?: LogEntry[] };
 
-export type PreviewEntry = { app: string; tool: string; status: string; reason: string; ruleId?: string; setName?: string; default?: boolean; hint?: string };
+// PreviewEntry is one tool of a catalog preview. object says, on a server
+// that pins an object type, whether the role's covers lines reach every
+// object, some of them or none for that tool.
+export type PreviewEntry = { app: string; tool: string; status: string; reason: string; ruleId?: string; setName?: string; default?: boolean; hint?: string; object?: { type: string; reach: string; covers: "every" | "some" | "none" } };
 export type PreviewAnswer = { entries: PreviewEntry[]; notes?: string[] };
 
 export type Decision = { effect: string; ruleId?: string; setName?: string; reason?: string; obligations?: string[]; serverCheck?: boolean; classify?: boolean; approve?: unknown; default?: boolean };
 export type SimulateRequest = {
-  event: { kind: string; tool: string; app?: string; toolName?: string; command?: string; paths?: string[] };
+  event: { kind: string; tool: string; app?: string; toolName?: string; command?: string; paths?: string[]; args?: Record<string, unknown> };
   subject: { user?: string; roles?: string[]; attestation?: string };
   // draft is PolicySet YAML overlaid in place of its same-named stored set,
   // so a page with unpublished edits can ask what they would decide.
   draft?: string;
 };
-export type SimulateAnswer = { active: Decision; draft?: Decision; subject: { user?: string; roles?: string[] }; snapshot: string };
+// SimObject is the object check of a simulated call to a server that pins
+// an object type: the object the call names, whether a held role covers
+// it, the covering role, or the sentence the gateway would refuse with.
+export type SimObject = { type: string; reach: string; value?: string; id?: string; covered: boolean; role?: string; refusal?: string };
+export type SimulateAnswer = { active: Decision; draft?: Decision; subject: { user?: string; roles?: string[] }; snapshot: string; object?: SimObject };
 
 export type DryRunAnswer = { name: string; runtime: string; credential: string; tools: string[] };
 export type ImportAnswer = { manifest: string; name: string; runtime: string };
@@ -229,6 +260,53 @@ export const enableApp = (id: string) => post<AppRow>("/v1/admin/apps/" + enc(id
 export const disableApp = (id: string) => post<AppRow>("/v1/admin/apps/" + enc(id) + "/disable");
 export const removeApp = (id: string) => del<{ id: string; status: string }>("/v1/admin/apps/" + enc(id));
 export const appLogs = (id: string) => get<LogsAnswer>("/v1/admin/apps/" + enc(id) + "/logs");
+
+// ObjectsAnswer is GET /v1/admin/apps/{id}/objects (openapi 0.141.0): the
+// pinned and the declared block, the state of the listing, and one page of
+// the object list the answering replica holds, sorted by value. total
+// counts the list after the q filter. next is the after of the next page,
+// absent on the last. A server that pins no type answers type "".
+export type ObjectsAnswer = {
+  app: string;
+  type: string;
+  plural?: string;
+  attributes?: ObjectAttribute[];
+  pinned?: ObjectsBlock | null;
+  declared?: ObjectsBlock | null;
+  declaredFaults?: string[];
+  drift?: boolean;
+  listing?: ObjectListing;
+  objects: ObjectRow[];
+  total: number;
+  next?: string;
+};
+
+// ObjectListing is the state of a server's listing: credential is set,
+// missing or not-needed, outcome never, ok or failed, reason the stored
+// sentence of a failed one, joined and left the counts of the last change.
+export type ObjectListing = {
+  tool: string;
+  credential: string;
+  outcome: string;
+  reason?: string;
+  version: number;
+  count: number;
+  joined?: number;
+  left?: number;
+  listedAt?: string;
+  attemptedAt?: string;
+  dueAt?: string;
+};
+
+// ObjectRow is one listed object: new says it joined at the current
+// version, coveredBy names the roles that reach it today, and drafts the
+// open drafts the reader may read that would add or drop a role on it.
+export type ObjectDraft = { draft: string; role: string; change: "adds" | "drops" };
+export type ObjectRow = { value: string; id: string; title?: string; attributes?: Record<string, string | string[]>; new?: boolean; coveredBy?: string[]; drafts?: ObjectDraft[] };
+
+// appObjects reads one page of a server's object list. q is the query
+// string of the q, after and limit parameters.
+export const appObjects = (id: string, q = "") => get<ObjectsAnswer>("/v1/admin/apps/" + enc(id) + "/objects" + (q ? "?" + q : ""));
 
 // installApp posts the app.yaml text; dryRunApp stops after validation and
 // answers what the manifest declares, the check the wizard runs as you type.
@@ -274,8 +352,9 @@ export const simulate = (body: SimulateRequest) => post<SimulateAnswer>("/v1/adm
 // catalog and counts those reads in allowed.
 export type DecisionBucket = { start: string; allowed: number; approval: number; denied: number; catalog?: number };
 // StoppedRow is one of the tools stopped most in the window, with the
-// reason that fired most often for it. app is "" for a hook-lane tool.
-export type StoppedRow = { app: string; tool: string; outcome: "denied" | "approval"; count: number; reason: string };
+// reason that fired most often for it and seq, the newest record that
+// carries that reason (openapi 0.153.0). app is "" for a hook-lane tool.
+export type StoppedRow = { app: string; tool: string; outcome: "denied" | "approval"; count: number; reason: string; seq: number };
 // DecisionsBlock is the server's count of the last 24 hour-aligned hours
 // (openapi 0.102.0): since is the start of the oldest bucket, buckets are
 // oldest first and always 24, stopped is at most five rows by count.
@@ -391,6 +470,7 @@ export type SessionRow = {
   username?: string;
   harness: string;
   client_version?: string;
+  client_commit?: string;
   attestation: string;
   status: string;
   started_at: string;
@@ -624,7 +704,6 @@ export type EnrollTokenAnswer = {
   tls_spki_pin?: string;
   qr_payload?: string;
 };
-export const mintEnrollToken = (userID: string) => post<EnrollTokenAnswer>("/v1/admin/approvers/enroll-token", { user_id: userID });
 
 // ChannelRow is one notification channel's status (openapi
 // ApprovalChannelStatus); devices and registrations ride the push row.
@@ -805,6 +884,7 @@ export type DraftFinding = {
   before?: string;
   after?: string;
   typed?: string;
+  group?: string;
   key: string;
 };
 
@@ -823,6 +903,22 @@ export type DraftGain = {
   after_words?: string;
 };
 
+// DraftCoverage is what one role reaches on one server that pins an object
+// type, now and after publishing; type and plural are the server's words.
+export type DraftObjectName = { id: string; value: string };
+export type DraftCoverage = {
+  role: string;
+  server: string;
+  type: string;
+  plural: string;
+  holders?: string[];
+  holders_count: number;
+  every_before: boolean;
+  every_after: boolean;
+  before: DraftObjectName[];
+  after: DraftObjectName[];
+};
+
 export type DraftNeed = { object: string; standing: string };
 
 // DraftVerdict is the server's reading of one revision, computed on every
@@ -839,6 +935,7 @@ export type DraftVerdict = {
   passed: DraftFinding[];
   info: DraftFinding[];
   gains: DraftGain[];
+  objects?: DraftCoverage[];
   needs: DraftNeed[];
   risk_digest: string;
 };

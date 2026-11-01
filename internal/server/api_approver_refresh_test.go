@@ -31,15 +31,17 @@ func signApproverRefresh(t *testing.T, priv *ecdsa.PrivateKey, deviceID, challen
 	return base64.StdEncoding.EncodeToString(sig)
 }
 
-// enrollApproverDevice drives the HTTP enroll flow and returns the device id,
-// its freshly minted token, and the private key that signs for it.
-func enrollApproverDevice(t *testing.T, base, adminTok string) (deviceID, deviceToken string, priv *ecdsa.PrivateKey) {
+// enrollApproverDevice drives the HTTP enroll flow for the person whose
+// session or login token bearer is: it mints an enroll token on the self
+// route, enrolls a phone with it, and returns the device id, its freshly
+// minted token, and the private key that signs for it.
+func enrollApproverDevice(t *testing.T, base, bearer string) (deviceID, deviceToken string, priv *ecdsa.PrivateKey) {
 	t.Helper()
 	var mint struct {
 		EnrollToken string `json:"enroll_token"`
 	}
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "kim"}, &mint); code != http.StatusOK {
+	if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", bearer,
+		map[string]any{"channel": "mobile"}, &mint); code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d", code)
 	}
 	priv, spki := genApproverKey(t)

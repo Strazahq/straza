@@ -17,9 +17,9 @@ Straza decides the actions that pass through its hooks, its MCP gateway or its e
 
 Straza checks the actions that pass through its installed hooks or its MCP gateway. Policy can deny destructive commands, restrict which tools a session reaches, or require a person's approval. The gateway also enforces the rate limits you configure.
 
-Session tokens expire and can be revoked, and a holder can refresh an active session until the session's lifetime ends. A stolen device credential can start new sessions until you revoke the device or disable the user. [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) explains refresh and revocation, and [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#sessions-and-the-client" >}}) lists each limit.
+Session tokens expire and can be revoked, and a holder can refresh an active session until the session's lifetime ends. On Linux, `straza service`, the Straza background service, holds each machine's key under its own OS account, so a session token copied from it works nowhere else and the person's own files hold no Straza credential of the client. strazactl keeps no sign-in either. It runs on an admin API token that a person mints, a bearer secret that whoever holds it can use with its scope until it expires or is revoked, so no admin credential sits on a machine unless someone puts a token there. [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) explains refresh and revocation, and [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#sessions-and-the-client" >}}) lists each limit.
 
-Clients verify policy snapshots against keys pinned at enrollment. A snapshot that fails verification is never enforced, and the client keeps the last verified one until its session time runs out, then denies. Managed installations also measure the binary, its configuration and the hook wiring, so the server can check them against its registry at check-in.
+Clients verify policy snapshots against keys pinned at enrollment. A snapshot that fails verification is never enforced, and the client keeps the last verified one until its session time runs out, then denies. `straza service` also measures its own binary and, on a managed install, the root-owned configuration and hook wiring, so the server can check them against its registry at check-in.
 
 The gateway supplies stored credentials without returning them to the agent. Secrets are sealed at rest, and the audit chain can be checked for tampering. [The security model]({{< relref "security/security-model.md" >}}) describes each check and its limits.
 
@@ -30,9 +30,11 @@ Straza relies on these, and its own checks do not cover them:
 
 - Your identity manager is right about who holds which role. It is the system your organization already audits, and a wrong assignment there is a wrong decision here.
 - The operating system boundary of a managed install holds. The enforcement files are root-owned, and an admin with sudo on an endpoint owns every process on it. That stays a documented residual risk.
+- The custody the client reports when it enrolls a person's machine key is true. `governance.minCustody` checks that report, and strazad cannot see who holds the key.
 - Transport between the client and strazad is sound. The enterprise profile warns loudly when it serves plain HTTP, and no setting anywhere skips certificate checks.
 - The operator who writes server manifests is trusted, because an install is a privileged act and a remote address is the operator's to review.
 - A deployment's own claim that a session came from the sandbox image is trusted, because the server cannot verify that from the wire yet. Keep requiring attested `managed` sessions for a sensitive role anyway.
+- An MCP server whose roles cover only some of its objects keeps three promises about what its tools touch, which [the section on the object check](#what-the-object-check-trusts) states.
 
 ## Three enforcement lanes and what each is worth
 
@@ -47,10 +49,29 @@ Straza relies on these, and its own checks do not cover them:
 
 The hook is wired by `straza install` into Claude Code, Codex CLI or Gemini CLI. A user-mode install on an open machine is advisory, because an agent that can run anything can run around it, and its sessions attest as `advisory` at best. A managed install is root-owned and hash-checked at check-in, so its sessions attest as `managed`, and policy can deny anything less for a sensitive role. The Python kit sits on the same path with the same caveat. It governs the tool calls the framework routes through it, never the computation inside the process.
 
-The gateway cannot see what the agent does outside MCP, so a deployment with the gateway alone governs MCP servers and leaves local commands ungoverned. The admin command line, the console and the self-service page can get a session below the attestation minimum, so an admin can always sign in. Such a session still cannot call MCP tools, because the gateway checks the minimum again from the token on every call.
+The gateway cannot see what the agent does outside MCP, so a deployment with the gateway alone governs MCP servers and leaves local commands ungoverned. The console and the self-service page can get a session below the attestation minimum, so an admin can always sign in, and the admin command line runs on an admin API token without a session. Such a session still cannot call MCP tools, because the gateway checks the minimum again from the token on every call.
 
 
 On an open machine, `straza exec` is exactly as advisory as a user-mode hook. Inside the documented sandbox image it becomes the process's only way to make the kernel run anything. Two paths stay open there, as [Hookless processes]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}) states. Computation inside the interpreter is ungoverned, because the interpreter is the agent. Every binary on the image's allowlist runs without a decision, so a per-argument rule holds at the boundary only for a tool that is absent from the image. A tool whose arguments must be enforced belongs behind the gateway, where its credential stays on the server as well.
+
+## What the object check trusts
+
+
+A role can cover some objects of an MCP server, such as some repositories of a GitHub organization, and the gateway then checks the object each call names. It decides from the server's pinned declaration, which gives every tool one of four reaches. With `argument`, the declaration names the argument that carries the object, and the gateway checks its value against the roles the caller holds. `all` marks a tool that can reach every object at once, and only a role on every object may call it. A tool marked `none` touches no object, so any role that binds it may call it. `credential` marks a tool whose calls do not name the object and leave the limit to the credential they carry. Today only a role on every object may call such a tool, because Straza does not check what a role's own login reaches.
+
+
+The gateway reads that one argument and cannot see what the server does with it. Every declaration, whether the server's own marks or a person wrote it, therefore carries three promises that Straza cannot check:
+
+1. The call touches only the object its argument names.
+2. Its value names exactly one object at the time of the call, with no rename redirect, alias or case folding.
+3. The server accepts calls only from the gateway, or checks a credential only the gateway can obtain.
+
+A server's author reads them, with the marks and the listing, in [Object marks for server authors]({{< relref "reference/object-marks.md#promises" >}}).
+
+Breaking any one of them breaks the object boundary, and no setting in Straza repairs that. A tool that follows a renamed repository to its new name, or that acts on a second repository named in another argument, does something the gateway never checked. Agents that can reach the server around the gateway skip the check altogether. Mark a tool `all` when its author does not make the first two promises, so it stays with roles on every object, and let the server take calls from the gateway alone.
+
+
+Only the gateway runs the object check. A hook's decision on the agent's machine never reads a covers line, so an MCP server a person adds to their own harness has no object boundary at all.
 
 ## No AI in the product
 

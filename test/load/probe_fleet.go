@@ -607,7 +607,7 @@ spec:
 			Observed: fmt.Sprintf("p99 = %s (p50 %s, %d refreshes, %d unexpected errors)", checkinLat.percentile(99).Round(time.Millisecond), checkinLat.percentile(50).Round(time.Millisecond), checkinLat.count(), checkinErrs.Load()),
 			Value:    checkinLat.percentile(99).Seconds(), Limit: 0.5,
 			Pass:   checkinLat.percentile(99) < 500*time.Millisecond && checkinErrs.Load() == 0,
-			Detail: "the 30s-poll control lane every daemon rides; errors exclude deliberately killed members",
+			Detail: "the checkin refresh lane every live session rides, at the fleet-poll interval; errors exclude deliberately killed members",
 		},
 		{
 			Name:     "fleet-gateway-p99",

@@ -55,10 +55,11 @@ func TestApproverAutoMintBootE2E(t *testing.T) {
 	}
 
 	// The QR a phone would scan: names the approver URL and the minted pin.
-	seedIdentity(t, app) // user "kim"
-	body, _ := json.Marshal(map[string]string{"username": "kim"})
+	kim := seedIdentity(t, app)
+	grantRole(t, app, kim.ID, EnrollMobileRole)
+	body, _ := json.Marshal(map[string]string{"channel": "mobile"})
 	w := httptest.NewRecorder()
-	app.handleApproverEnrollToken(w, httptest.NewRequest(http.MethodPost, "/v1/admin/approvers/enroll-token", bytes.NewReader(body)))
+	app.handleSelfEnrollToken(w, httptest.NewRequest(http.MethodPost, "/v1/approvals/self/enroll-token", bytes.NewReader(body)), kim.ID)
 	if w.Code != http.StatusOK {
 		t.Fatalf("enroll-token = %d: %s", w.Code, w.Body.String())
 	}

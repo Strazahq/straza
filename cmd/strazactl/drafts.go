@@ -18,22 +18,19 @@ import (
 	"github.com/strazahq/straza/internal/ctl"
 )
 
-// draftsLong is the help of the drafts group: what a draft is, the exit
-// status every verb speaks, and what runs inside a coding agent.
+// draftsLong is the help of the drafts group: what a draft is, where it is
+// published, and the exit status every verb speaks.
 const draftsLong = "A draft holds App, Role, PolicySet and Removal documents that publish together\n" +
 	"or not at all. Straza checks every draft against live state, and nothing in a\n" +
-	"draft changes live state until a person publishes it with strazactl drafts publish.\n\n" +
+	"draft changes live state until a person publishes it in the console under Drafts.\n" +
+	"strazactl runs on an admin API token, which is not a person, so it never publishes.\n\n" +
 	"Exit status: 0 when the command did its job and, for check, create, update,\n" +
-	"revert, rebase and publish, the documents can be published as they stand. 1 when\n" +
-	"the server looked and said no: the verdict refuses, the server refused an update,\n" +
-	"a revert, a rebase, a contact or a publish, or a contacted server did not answer.\n" +
+	"revert and rebase, the documents can be published as they stand. 1 when the\n" +
+	"server looked and said no: the verdict refuses, or the server refused an update,\n" +
+	"a revert or a rebase.\n" +
 	"2 when the command could not do its job, for usage, a file, the credential, a\n" +
 	"refusal of the caller, the network or the server. list, show and discard never\n" +
-	"exit 1.\n\n" +
-	"Inside a coding agent on your strazactl login, check, list and show run, and the\n" +
-	"verbs that change a draft refuse to run. With STRAZA_API_TOKEN set they run as\n" +
-	"that token, and publish then meets the server's refusal, because only a person\n" +
-	"publishes."
+	"exit 1."
 
 // draftsCmd is `strazactl drafts`, the verbs of config drafts. Each prints
 // the server's own sentences, and exitCode in main.go gives every failure
@@ -41,7 +38,7 @@ const draftsLong = "A draft holds App, Role, PolicySet and Removal documents tha
 func draftsCmd(client func() *ctl.Client) *cobra.Command {
 	drafts := &cobra.Command{
 		Use:   "drafts",
-		Short: "Check, store, review and publish drafts of changes to MCP servers, roles, access rows and policy sets",
+		Short: "Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets",
 		Long:  draftsLong,
 		// The group runs only to refuse a verb it does not have, which exits
 		// 2, and to print its help when it is given no verb.
@@ -49,8 +46,8 @@ func draftsCmd(client func() *ctl.Client) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	drafts.AddCommand(draftsCheckCmd(client), draftsCreateCmd(client), draftsUpdateCmd(client),
-		draftsListCmd(client), draftsShowCmd(client), draftsPublishCmd(client),
-		draftsDiscardCmd(client), draftsRevertCmd(client), draftsRebaseCmd(client), draftsContactCmd(client))
+		draftsListCmd(client), draftsShowCmd(client), draftsPublishCmd(),
+		draftsDiscardCmd(client), draftsRevertCmd(client), draftsRebaseCmd(client), draftsContactCmd())
 	return drafts
 }
 
@@ -63,9 +60,8 @@ func draftsCheckCmd(client func() *ctl.Client) *cobra.Command {
 		Short: "Check documents against live state and print the verdict, storing nothing",
 		Long: "Sends the documents to strazad, which checks them against live state and answers\n" +
 			"the verdict: what it refuses, what widens access, what does not work yet and what\n" +
-			"it could not check. Nothing is stored, so check also runs inside a coding agent\n" +
-			"on your login. A file is read as it is, a directory gives its top-level .yaml and\n" +
-			".yml files by name, and - reads stdin.",
+			"it could not check. Nothing is stored. A file is read as it is, a directory gives\n" +
+			"its top-level .yaml and .yml files by name, and - reads stdin.",
 		Args: noOperands("check"),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			docs, names, err := bundleOf(cmd, files, "check", "check -f github.yaml")
@@ -130,7 +126,7 @@ func draftsCreateCmd(client func() *ctl.Client) *cobra.Command {
 				printItems(w, a.Draft.Items)
 				printVerdict(w, a.Verdict, nil)
 			}
-			return draftEnd(w, asJSON, a, c.APIToken != "", fileArgs(files))
+			return draftEnd(w, asJSON, a, c.Base, fileArgs(files))
 		},
 	}
 	bundleFlags(cmd, &files, &note, &asJSON)
@@ -154,9 +150,6 @@ func draftsUpdateCmd(client func() *ctl.Client) *cobra.Command {
 				return err
 			}
 			c := client()
-			if err := c.GuardChange(); err != nil {
-				return err
-			}
 			w := cmd.OutOrStdout()
 			raw, code, err := c.GetDraft(cmd.Context(), args[0])
 			if err != nil {
@@ -187,7 +180,7 @@ func draftsUpdateCmd(client func() *ctl.Client) *cobra.Command {
 				printLeft(w, d.Draft.Items, a.Draft.Items)
 				printVerdict(w, a.Verdict, nil)
 			}
-			return draftEnd(w, asJSON, a, c.APIToken != "", fileArgs(files))
+			return draftEnd(w, asJSON, a, c.Base, fileArgs(files))
 		},
 	}
 	bundleFlags(cmd, &files, &note, &asJSON)
@@ -250,7 +243,7 @@ func draftsShowCmd(client func() *ctl.Client) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "Draft %s, revision %d, %s: %s\n", d.Draft.ID, d.Draft.Revision, d.Draft.State, d.Draft.Title)
-			return printDetail(w, d, c.APIToken != "")
+			return printDetail(w, d, c.Base)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, jsonFlagUsage)
@@ -270,9 +263,6 @@ func draftsDiscardCmd(client func() *ctl.Client) *cobra.Command {
 				return errJSONNeedsYes("discard", "Pass --yes to discard without the question")
 			}
 			c := client()
-			if err := c.GuardChange(); err != nil {
-				return err
-			}
 			if !yes && !confirm(cmd, "Discard draft "+id+"? Nothing live changes.") {
 				return errAborted()
 			}
@@ -326,7 +316,7 @@ func draftsRevertCmd(client func() *ctl.Client) *cobra.Command {
 				fmt.Fprintf(w, "Created draft %s, which undoes draft %s. Nothing changes until a person publishes it.\n", a.Draft.ID, args[0])
 				printVerdict(w, a.Verdict, nil)
 			}
-			return draftEnd(w, asJSON, a, c.APIToken != "", " -f <path>")
+			return draftEnd(w, asJSON, a, c.Base, " -f <path>")
 		},
 	}
 	cmd.Flags().StringVar(&note, "note", "", "your own words for whoever reviews the undo, at most 2,000 bytes")
@@ -506,7 +496,7 @@ func draftAnswer(w io.Writer, asJSON bool, raw []byte, code, no int, out any) er
 		}
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("strazad's answer is not the JSON a drafts route sends (%v). Check that --server or your login points at strazad", err)
+		return fmt.Errorf("strazad's answer is not the JSON a drafts route sends (%v). Check that --server or STRAZA_SERVER points at strazad", err)
 	}
 	return nil
 }
@@ -563,11 +553,6 @@ func verdictEnd(w io.Writer, asJSON bool, v ctl.DraftVerdict, yes, no string) er
 	}
 	fmt.Fprintln(w, no)
 	return exitCodeErr{code: 1}
-}
-
-// publishHint is the last line of a draft that can be published.
-func publishHint(id string) string {
-	return "The draft can be published: strazactl drafts publish " + id
 }
 
 // updateHint is the last line of a draft its check refuses, with the -f

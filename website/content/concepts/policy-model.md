@@ -1,5 +1,6 @@
 ---
 title: Policies
+seo_title: "Policy model: rules, sets and outcomes"
 description: See how a rule matches a call, how matching sets combine into one decision, and how a policy reaches every machine.
 pagetype: explanation
 weight: 30
@@ -101,6 +102,9 @@ When no rule fires, the call takes a default:
 [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#no-rule" >}}) names the setting that changes the local tool default.
 
 
+On a server that pins an object type, such as a server for a GitHub organization's repositories, access also says which objects a role covers. The gateway checks that before any rule runs. A call on an object that none of the session's roles covers is refused there, so no allow rule can let it through and no approval is spent on it. No rule key names an object, so a rule that matches a tool on such a server applies to that tool on every object the session's roles cover. To keep a write tool to some repositories, narrow the covers line of the role that binds it. [MCP servers and the gateway]({{< relref "concepts/mcp-apps-and-the-gateway.md#the-objects-a-role-covers" >}}) explains the covers line.
+
+
 Straza checks the roles a set names when you validate it and again when you activate it. The roles in `match` must be application roles, the kind that carries access, so naming one covers every way a person holds it. The roles an approve rule names must be approver roles or the admin role, so an application role never doubles as the authority to decide. A name that is no role yet stays legal in `match`, and it matches nobody until the role exists.
 
 ## Where the policy comes from
@@ -116,7 +120,7 @@ Activation compiles every live set into one snapshot, signs it and names it by a
 ## Simulate before you activate
 
 
-Validation runs the same parser the snapshot compiler uses, so the console and a set imported from git get the same refusal at the same moment. Simulation takes one call and one subject, a user or a list of roles, and evaluates it against the active snapshot. It can lay a set from a local file over the stored set of the same name, so you see what activation would change before anything changes. The answer names the effect, the deciding rule with its reason, and the snapshot the verdict came from. [Simulate a call]({{< relref "guides/write-policy/simulate-and-coverage.md" >}}) walks it.
+Validation runs the same parser the snapshot compiler uses, so the console and a set imported from git get the same refusal at the same moment. Simulation takes one call and one subject, a user or a list of roles, and evaluates it against the active snapshot. It can lay a set from a local file over the stored set of the same name, so you see what activation would change before anything changes. The answer names the effect, the deciding rule with its reason, and the snapshot the verdict came from. On a server that pins an object type, simulation runs the object check first, as the gateway does, and a refusal there is the answer, with no rule evaluated. [Simulate a call]({{< relref "guides/write-policy/simulate-and-coverage.md" >}}) walks it.
 
 ![Replay: strazactl policy simulate answers for one call with the outcome, the deciding rule and its reason, and the snapshot the verdict came from](../../static/replays/policy-simulate.png)
 
@@ -143,7 +147,7 @@ Activation sorts every live set by name, compiles them into one CBOR document, s
 
 The detailed view below shows how live clients pull a new snapshot after an activation.
 
-![Diagram: activating a PolicySet compiles and signs one snapshot, and live clients pull it over three lanes within about 30 seconds](../../static/diagrams/snapshot-distribution.png)
+![Diagram: activating a PolicySet compiles and signs one snapshot, and live sessions pull it over three lanes: a busy session within about 30 seconds, an idle session through its next call, and a new session at check-in](../../static/diagrams/snapshot-distribution.png)
 {{< /details >}}
 
 Read next: [Approvals]({{< relref "concepts/approvals-model.md" >}}) explains what happens when a rule asks for a person.

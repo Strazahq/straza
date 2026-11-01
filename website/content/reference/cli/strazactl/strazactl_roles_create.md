@@ -2,7 +2,7 @@
 title: strazactl roles create
 description: Create a role
 pagetype: reference
-weight: 79
+weight: 75
 draft: false
 sources:
   - cmd/strazactl
@@ -27,7 +27,7 @@ strazactl roles create <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

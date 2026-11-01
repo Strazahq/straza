@@ -1,6 +1,6 @@
 ---
 title: straza status
-description: Show enrollment and session status
+description: Show enrollment, sessions and the audit spool the background service holds for you
 pagetype: reference
 weight: 15
 draft: false

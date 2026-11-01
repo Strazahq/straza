@@ -43,6 +43,10 @@ type Admin struct {
 	// default in both profiles. The publish route and the direct routes
 	// enforce it.
 	SecondPerson bool `yaml:"secondPerson"`
+	// ServerAdminsCoverEvery lets a server admin make a role their server
+	// owns cover every object of the server's pinned type. False leaves that
+	// to a global admin. Default true in both profiles.
+	ServerAdminsCoverEvery bool `yaml:"serverAdminsCoverEvery"`
 }
 
 // Secrets configures the credential plane.
@@ -70,4 +74,14 @@ func (s SCIM) validate() error {
 func applyEnvSecrets(cfg *Config, getenv func(string) string) {
 	set := envSet(getenv)
 	set("STRAZA_SECRETS_KEK_FILE", func(v string) { cfg.Secrets.KEKFile = v })
+}
+
+// applyEnvAdmin binds the admin section's one env face. Only false or 0
+// turns the setting off, so an unrelated value never changes who may write
+// covers: every.
+func applyEnvAdmin(cfg *Config, getenv func(string) string) {
+	set := envSet(getenv)
+	set("STRAZA_ADMIN_SERVER_ADMINS_COVER_EVERY", func(v string) {
+		cfg.Admin.ServerAdminsCoverEvery = v != "false" && v != "0"
+	})
 }

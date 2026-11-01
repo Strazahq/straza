@@ -64,7 +64,7 @@ describe("the drafts wrappers", () => {
 
 describe("the error bodies a drafts screen reads", () => {
   it("keeps a 409's parsed body on the error", async () => {
-    const body = { error: "Publish refused: something. Acknowledge it and publish again.", verdict: { risks: [] } };
+    const body = { error: "Publish refused: something. Confirm it, then publish again.", verdict: { risks: [] } };
     answer = { status: 409, body };
     const err = (await publishDraft("41", { revision: 1, risk_digest: "", ticked: [], typed: {} }).catch((e) => e)) as ApiError;
     expect(err).toBeInstanceOf(ApiError);

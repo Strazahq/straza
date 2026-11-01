@@ -159,7 +159,7 @@ func TestManagerInstallLifecycle(t *testing.T) {
 		t.Errorf("logs = %v", logs)
 	}
 
-	res, err := mgr.Call(ctx, "helperapp", "echo", mustJSON(t, map[string]string{"text": "hi"}), nil)
+	res, err := mgr.Call(ctx, "helperapp", "echo", mustJSON(t, map[string]string{"text": "hi"}), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestManagerDriftDetection(t *testing.T) {
 	if err := os.WriteFile(toggle, []byte("1"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.Call(ctx, "driftapp", "die", nil, nil); err != nil {
+	if _, err := mgr.Call(ctx, "driftapp", "die", nil, nil, nil); err != nil {
 		t.Logf("die call: %v", err)
 	}
 

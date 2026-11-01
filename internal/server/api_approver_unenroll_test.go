@@ -117,8 +117,11 @@ func TestApproverSelfUnenroll(t *testing.T) {
 	}
 
 	// 4. The admin lane emits the same action attributed via=admin, so the two
-	// initiators stay distinguishable on the audit record.
-	devB, tokB, _ := enrollApproverDevice(t, base, adminTok)
+	// initiators stay distinguishable on the audit record. The device is
+	// lin's, because the self route's per-user cooldown refuses kim a second
+	// mint this soon.
+	mkHuman(t, app, "lin", EnrollMobileRole)
+	devB, tokB, _ := enrollApproverDevice(t, base, loginDeviceFlow(t, base, "lin", "hunter2!"))
 	if code := adminReq(t, "DELETE", base+"/v1/admin/approvers/"+devB, adminTok, nil, nil); code != http.StatusOK {
 		t.Fatalf("admin revoke = %d", code)
 	}

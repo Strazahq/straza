@@ -15,6 +15,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 )
 
 // `straza mcp <server>` is the one-server bridge. It fronts the gateway's
@@ -28,14 +30,18 @@ import (
 const uiExtension = "io.modelcontextprotocol/ui"
 
 // serverNameRe is the App manifest's server name rule, a copy of nameRe in
-// internal/manager/manifest.go. The operand must match it before it becomes a
-// path segment, because "." and ".." would otherwise be cleaned by the
-// gateway's mux into the combined /mcp or the site root.
+// internal/manager/manifest.go.
 var serverNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
+
+// ValidServerName reports whether name follows the App manifest's server
+// name rule. A name must pass it before it becomes a path segment, because
+// "." and ".." would otherwise be cleaned by a mux into the combined /mcp or
+// the site root. The bridge and the service's MCP proxy share it.
+func ValidServerName(name string) bool { return serverNameRe.MatchString(name) }
 
 // checkServerName refuses an operand that cannot be a server name.
 func checkServerName(server string) error {
-	if serverNameRe.MatchString(server) {
+	if ValidServerName(server) {
 		return nil
 	}
 	return fmt.Errorf("the server name %q is not valid. A server name has only lowercase letters, digits and hyphens, "+
@@ -74,13 +80,14 @@ func catalogRefused(err error) bool {
 	return rpcErr != nil && rpcErr.Code == jsonrpc.CodeInvalidParams
 }
 
-// gatewayEndpoint returns the gateway URL the proxy dials: the combined /mcp
-// when server is empty, else the per-server endpoint /mcp/<server>.
-func gatewayEndpoint(serverURL, server string) string {
+// gatewayEndpoint returns the service route the proxy dials: the gateway's
+// combined /mcp when server is empty, else its per-server endpoint
+// /mcp/<server>.
+func gatewayEndpoint(server string) string {
 	if server == "" {
-		return serverURL + "/mcp"
+		return localapi.BaseURL + localapi.RouteMCP
 	}
-	return serverURL + "/mcp/" + url.PathEscape(server)
+	return localapi.BaseURL + localapi.RouteMCP + "/" + url.PathEscape(server)
 }
 
 // proxyServerOptions returns the stdio server's options. The combined bridge
@@ -104,14 +111,14 @@ func proxyServerOptions(server string) *mcp.ServerOptions {
 // failure worth retrying. A catalog refusal is the gateway's own answer that
 // no server of that name is in the caller's catalog. A 404 means the gateway
 // has no per-server endpoint at all, which is an older strazad.
-func serverRefusal(server, endpoint string, err error) error {
+func serverRefusal(server string, err error) error {
 	switch {
 	case catalogRefused(err):
 		said := strings.TrimRight(strings.TrimSpace(gatewayAnswered(err).Message), ".")
 		return fmt.Errorf("%s. If the server name %q is wrong, fix the argument after mcp in this chat app's MCP configuration, then restart the chat app", said, server)
 	case errors.Is(err, mcp.ErrSessionMissing):
-		return fmt.Errorf("Straza: the gateway has no endpoint for one server at %s, so it likely runs an older Straza server. "+ //nolint:staticcheck // ST1005: deliberate brand prefix, as on the other bridge exits
-			"Ask your administrator to upgrade it, or remove %q after mcp in this chat app's MCP configuration to use all your servers through one endpoint, without views", endpoint, server)
+		return fmt.Errorf("Straza: the gateway has no endpoint for one server, so it likely runs an older Straza server. "+ //nolint:staticcheck // ST1005: deliberate brand prefix, as on the other bridge exits
+			"Ask your administrator to upgrade it, or remove %q after mcp in this chat app's MCP configuration to use all your servers through one endpoint, without views", server)
 	}
 	return nil
 }

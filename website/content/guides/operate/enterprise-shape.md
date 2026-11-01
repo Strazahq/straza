@@ -6,7 +6,7 @@ weight: 25
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: Alpine 3.20 container running one enterprise strazad from this page's config, with a local Postgres 16, a local NATS server with JetStream and the built-in issuer of a second, standalone strazad standing in for the identity provider, for the boot lines, the break-glass line, /readyz, strazactl status, the refusal of a key that is not 32 bytes, the missing-issuer sentence, STRAZA_EVENTS_URL on its own and the auditBackpressure values. The kubectl commands, the load balancer, the several-replica claims and the database outage were not run, because this host has no cluster and the walk stayed at one replica, and the console sentence was not clicked
+  platform: Alpine 3.20 container running one enterprise strazad from this page's config, with a local Postgres 16, a local NATS server with JetStream and the built-in issuer of a second, standalone strazad standing in for the identity provider, for the boot lines, the break-glass line, /readyz, strazactl status, the refusal of a key that is not 32 bytes, the missing-issuer sentence, STRAZA_EVENTS_URL on its own and the auditBackpressure values. The kubectl commands, the load balancer, the several-replica claims and the database outage were not run, because this host has no cluster and the walk stayed at one replica, and the console sentence was not clicked. The section that gives agents their local tools was walked on 2026-11-01 on the enterprise demo stack at v1.0.0-1676-g9d9ad66e, with the same commands and PolicySet under scratch names and a token holding exactly identity:read, identity:write and policy:write. Every command printed the line this page quotes, and strazactl policy simulate for a subject holding only the application role allowed ls, a file read, a fetch, a subagent and the three approval tools, and denied rm -rf and a write to .env.local with the set's two reasons. A user who held the business role was denied rm -rf through the implication. The roles, the set and the assignment were removed afterwards, and no harness session ran under the set
   date: 2026-10-06
 applies_to: enterprise
 who: You, as the operator who outgrew one host
@@ -16,7 +16,7 @@ keywords: enterprise replicas postgres nats kek stateless
 ---
 
 
-You run strazad as several identical replicas behind one load balancer, as the operator who has outgrown one host. You write one shared config for every replica and check the boot with kubectl or docker. At the end every replica boots against the same database, event bus and key, and answers ready through the load balancer.
+You run strazad as several identical replicas behind one load balancer, as the operator who has outgrown one host. You write one shared config for every replica and check the boot with kubectl or docker. At the end every replica boots against the same database, event bus and key, answers ready through the load balancer, and gives the agents of your developers their local tools.
 
 In the enterprise profile a strazad process keeps no state of its own that a request depends on. Users, roles, policy, sessions, the signing keys and the audit chain live in one Postgres database. Every revocation, policy change and audit event travels over one NATS server with JetStream, the event bus, so any replica can serve any session and a replica that dies loses nothing. The one file every replica must hold is the key that seals stored credentials, and the cost of the shape is three moving parts to run and back up instead of one directory.
 
@@ -90,7 +90,7 @@ kubectl -n straza logs -l app.kubernetes.io/name=straza,app.kubernetes.io/instan
 ## Verify from the outside
 
 
-Every replica answers `/readyz` with the two components it depends on. Ask through the load balancer, and let `strazactl status` ask the server you logged into.
+Every replica answers `/readyz` with the two components it depends on. Ask through the load balancer, and let `strazactl status` ask the server that `STRAZA_SERVER` names, on an admin API token in `STRAZA_API_TOKEN` that a person minted in the console.
 
 {{< command terminal="Terminal" purpose="administration" >}}
 ```sh
@@ -108,6 +108,89 @@ In the console, **Settings**, then **Configuration**, shows **Store** as `postgr
 
 
 A session that lands on a replica which has never seen it gets one 401 and the client checks in again with the same token, so a rolling restart behind the load balancer costs one bounce per session and no re-login. A kill switch pulled on one replica reaches the others over the event bus, which is why the bus is required above one replica and why the Helm chart refuses to render several replicas without it.
+
+## Give agents their local tools
+
+
+The first boot of an enterprise server creates the break-glass admin and the product roles, and no PolicySet. Its profile denies every local tool that no rule allows, so an agent on an enrolled machine runs no shell command, reads no file and calls none of the built-in approval tools until a policy allows them. This step adds a starter: an application role `local-tools` that a PolicySet matches, a business role `developer` that carries it, and the PolicySet `agent-guardrails`. Everyone who holds `developer`, a person or an AI agent, then gets the local tools, with destructive commands and secret-file writes denied.
+
+Put an admin API token that holds `identity:read`, `identity:write` and `policy:write` in `STRAZA_API_TOKEN`, minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows. Create the two roles, and let `developer` carry `local-tools`:
+
+{{< command terminal="Terminal" purpose="administration" >}}
+```sh
+strazactl roles create local-tools --kind application --description "Local tools of a developer's agents"
+strazactl roles create developer --kind business --description "A developer and the agents that work for them"
+strazactl roles implications add developer local-tools
+```
+{{< /command >}}
+
+{{< see >}}`created role local-tools` and `created role developer`, each with its id, then `added: holding developer now also holds local-tools`.{{< /see >}}
+
+Save the PolicySet as `agent-guardrails.yaml`:
+
+```yaml
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: agent-guardrails
+  description: Local tools and the built-in approval tools for every holder of local-tools
+spec:
+  match:
+    roles: [local-tools]
+  rules:
+    - id: straza-approval-tools
+      events: [tool.pre]
+      tools: [mcp.call]
+      apps: [straza]
+      toolNames:
+        allow: ["approval_request", "approval_status", "approval_await"]
+      effect: allow
+    - id: local-tools
+      events: [tool.pre]
+      tools: [shell.exec, file.read, file.write, file.edit, net.fetch, task.spawn]
+      effect: allow
+    - id: no-destructive-commands
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns: ["rm -rf *", "git push --force*", "curl * | *sh*"]
+      effect: deny
+      reason: "Straza: the agent guardrails deny recursive deletes, force pushes and a download piped into a shell. Run a narrower command, or ask an admin to change the agent-guardrails PolicySet."
+    - id: protect-secrets
+      events: [tool.pre]
+      tools: [file.write, file.edit]
+      paths:
+        deny: ["**/.env*", "**/id_rsa*", "**/credentials.json"]
+      effect: deny
+      reason: "Straza: the agent guardrails deny writing secret files such as .env files, SSH keys and credentials.json. Ask a person to change the file, or ask an admin to change the agent-guardrails PolicySet."
+```
+
+The first rule lets an agent request, check and wait for its own approvals through the built-in `straza` app. No access row reaches that app, so only a rule does, and deciding is never one of its tools, so the rule gives no approver power. The second rule gives back the local tools: shell commands, reading, writing and editing files, fetching URLs and starting subagents. Keep `file.read`, because it also covers the harness's search tools, such as Glob and Grep in Claude Code. The two deny rules hold whatever else allows, because a deny wins over every allow. The [PolicySet grammar]({{< relref "reference/policyset-grammar.md" >}}) lists every key, and a harness tool that Straza does not classify stays denied until you allow it by name, as [Harness tools by name]({{< relref "reference/policyset-grammar.md#harness-tools-by-name" >}}) shows.
+
+Check the file, store it and make it live:
+
+{{< command terminal="Terminal" purpose="administration" >}}
+```sh
+strazactl policy validate -f agent-guardrails.yaml
+strazactl policy apply -f agent-guardrails.yaml
+strazactl policy activate agent-guardrails
+```
+{{< /command >}}
+
+{{< see >}}`agent-guardrails.yaml: PolicySet "agent-guardrails" OK (4 rules, priority 0)` with a note that the server judges the roles the set names, then `applied agent-guardrails (Off, ...)` with its id, then `published agent-guardrails, it is live now; new snapshot` and the snapshot's id.{{< /see >}}
+
+
+For a first test, give one person the role, here alice, whom your identity manager has provisioned:
+
+{{< command terminal="Terminal" purpose="administration" >}}
+```sh
+strazactl assign developer --user alice
+```
+{{< /command >}}
+
+{{< see >}}`assigned developer to alice`{{< /see >}}
+
+Then alice starts a harness session on her enrolled machine, as [Claude Code]({{< relref "guides/govern-an-agent/claude-code.md" >}}) shows, and its destructive command is denied with this set's reason. Once your identity manager assigns `developer`, assign it there instead, because the identity manager's next full write of that role's membership removes an assignment made with strazactl.
 
 ## When the database is down {.nostep}
 

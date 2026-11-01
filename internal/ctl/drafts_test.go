@@ -2,12 +2,13 @@ package ctl
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -19,7 +20,7 @@ func TestDraftCallsWireShapes(t *testing.T) {
 	rec := &wireRecorder{}
 	srv := httptest.NewServer(http.HandlerFunc(rec.handle))
 	t.Cleanup(srv.Close)
-	c := loggedInClient(t, srv.URL)
+	c := tokenClient(t, srv.URL)
 	ctx := context.Background()
 	empty := ""
 
@@ -76,23 +77,6 @@ func TestDraftCallsWireShapes(t *testing.T) {
 			body: `{"revision":2,"documents":["a"]}`,
 		},
 		{
-			name: "publish sends ticked and typed even when empty",
-			call: func() ([]byte, int, error) {
-				return c.PublishDraft(ctx, "41", DraftPublish{Revision: 2, RiskDigest: "d1"})
-			},
-			method: http.MethodPost, uri: "/v1/admin/drafts/41/publish",
-			body: `{"revision":2,"risk_digest":"d1","ticked":[],"typed":{}}`,
-		},
-		{
-			name: "publish sends the keys and the typed texts",
-			call: func() ([]byte, int, error) {
-				return c.PublishDraft(ctx, "41", DraftPublish{Revision: 2, RiskDigest: "d1",
-					Ticked: []string{"k1", "k2"}, Typed: map[string]string{"k2": "api.example.com"}})
-			},
-			method: http.MethodPost, uri: "/v1/admin/drafts/41/publish",
-			body: `{"revision":2,"risk_digest":"d1","ticked":["k1","k2"],"typed":{"k2":"api.example.com"}}`,
-		},
-		{
 			name:   "discard without a reason sends an empty object",
 			call:   func() ([]byte, int, error) { return c.DiscardDraft(ctx, "41", "") },
 			method: http.MethodPost, uri: "/v1/admin/drafts/41/discard",
@@ -109,12 +93,6 @@ func TestDraftCallsWireShapes(t *testing.T) {
 			call:   func() ([]byte, int, error) { return c.RevertDraft(ctx, "41", "undo the rollout") },
 			method: http.MethodPost, uri: "/v1/admin/drafts/41/revert",
 			body: `{"note":"undo the rollout"}`,
-		},
-		{
-			name:   "contact names the server as an App object",
-			call:   func() ([]byte, int, error) { return c.ContactDraftServer(ctx, "41", "github") },
-			method: http.MethodPost, uri: "/v1/admin/drafts/41/contact",
-			body: `{"object":"App/github"}`,
 		},
 		{
 			name:   "rebase without picks sends the revision alone",
@@ -169,7 +147,7 @@ func TestDraftCallsKeepTheRefusalBody(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 			}))
 			t.Cleanup(srv.Close)
-			raw, got, err := loggedInClient(t, srv.URL).CreateDraft(context.Background(), DraftBody{Documents: []string{"a"}})
+			raw, got, err := tokenClient(t, srv.URL).CreateDraft(context.Background(), DraftBody{Documents: []string{"a"}})
 			if err != nil || got != code || string(raw) != body {
 				t.Errorf("answer = %d %s %v, want %d %s and no error", got, raw, err, code, body)
 			}
@@ -177,130 +155,35 @@ func TestDraftCallsKeepTheRefusalBody(t *testing.T) {
 	}
 }
 
-// TestPublishDraftWaits pins publish's own timeout: a publish may take longer
-// than the client's timeout, because it waits for the servers it starts, and
-// a publish that outlasts its own timeout says it may have landed.
-func TestPublishDraftWaits(t *testing.T) {
-	tests := []struct {
-		name          string
-		client, delay time.Duration
-		publish       time.Duration
-		wantErr       string
+// TestDraftCallsSendTheToken pins that the drafts calls share the one
+// authenticated path: each sends the admin API token as its bearer.
+func TestDraftCallsSendTheToken(t *testing.T) {
+	ctx := context.Background()
+	calls := []struct {
+		name string
+		call func(c *Client) error
 	}{
-		{name: "a publish slower than the client's timeout is answered", client: 50 * time.Millisecond, delay: 300 * time.Millisecond, publish: 5 * time.Second},
-		{
-			name: "a publish past its own timeout may have landed", client: 5 * time.Second, delay: 2 * time.Second, publish: 100 * time.Millisecond,
-			wantErr: "strazad did not answer the publish of draft 41 within 2 minutes, so it may have landed. " +
-				"Read it with strazactl drafts show 41 before you publish again",
-		},
+		{"check", func(c *Client) error {
+			_, _, err := c.CheckDraft(ctx, DraftBody{Documents: []string{"a"}})
+			return err
+		}},
+		{"create", func(c *Client) error {
+			_, _, err := c.CreateDraft(ctx, DraftBody{Documents: []string{"a"}})
+			return err
+		}},
+		{"revert", func(c *Client) error {
+			_, _, err := c.RevertDraft(ctx, "41", "")
+			return err
+		}},
 	}
-	for _, tc := range tests {
+	for _, tc := range calls {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// A read body lets the server see the client leave, which
-				// ends the wait below.
-				_, _ = io.Copy(io.Discard, r.Body)
-				select {
-				case <-time.After(tc.delay):
-				case <-r.Context().Done():
-					return
-				}
-				_, _ = w.Write([]byte(`{"snapshot":"s1"}`))
-			}))
-			t.Cleanup(srv.Close)
-			was := publishTimeout
-			publishTimeout = tc.publish
-			t.Cleanup(func() { publishTimeout = was })
-			c := loggedInClient(t, srv.URL)
-			c.HTTP.Timeout = tc.client
-			_, code, err := c.PublishDraft(context.Background(), "41", DraftPublish{Revision: 1, RiskDigest: "d"})
-			switch {
-			case tc.wantErr == "" && (err != nil || code != http.StatusOK):
-				t.Errorf("publish = %d %v, want 200", code, err)
-			case tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr):
-				t.Errorf("err = %v, want %q", err, tc.wantErr)
+			s := &bearerServer{}
+			if err := tc.call(tokenClient(t, s.start(t).URL)); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
 			}
-			if c.HTTP.Timeout != tc.client {
-				t.Errorf("the client's timeout moved to %v", c.HTTP.Timeout)
-			}
-		})
-	}
-}
-
-// TestDraftCallsGoThroughTheGuard pins that the drafts calls share the one
-// authenticated path: inside a coding agent, on a login whose session needs
-// renewing, create is refused before anything is sent, the renewal
-// included, and check goes out on the login.
-func TestDraftCallsGoThroughTheGuard(t *testing.T) {
-	s := &bearerServer{}
-	c := loggedInClient(t, s.start(t).URL)
-	if err := c.saveCreds(credentials{Server: c.Base, SessionToken: "expiring", SessionID: "ses-1"}); err != nil {
-		t.Fatal(err)
-	}
-	c.AgentMarker = "CLAUDECODE"
-	if _, _, err := c.CreateDraft(context.Background(), DraftBody{Documents: []string{"a"}}); err == nil ||
-		!strings.Contains(err.Error(), "CLAUDECODE is set, so strazactl runs inside a coding agent") {
-		t.Fatalf("create inside an agent: %v, want the guard's refusal", err)
-	}
-	if _, _, err := c.ContactDraftServer(context.Background(), "41", "github"); err == nil || !strings.Contains(err.Error(), "CLAUDECODE is set") {
-		t.Fatalf("contact inside an agent: %v, want the guard's refusal", err)
-	}
-	if _, _, err := c.RebaseDraft(context.Background(), "41", DraftRebase{Revision: 1}); err == nil || !strings.Contains(err.Error(), "CLAUDECODE is set") {
-		t.Fatalf("rebase inside an agent: %v, want the guard's refusal", err)
-	}
-	if got := s.requests(); len(got) != 0 {
-		t.Fatalf("the refused calls sent %q", got)
-	}
-	if _, _, err := c.CheckDraft(context.Background(), DraftBody{Documents: []string{"a"}}); err != nil {
-		t.Fatalf("check inside an agent: %v", err)
-	}
-	if got := s.requests(); len(got) != 2 || got[0] != "POST /v1/checkin " || !strings.HasPrefix(got[1], "POST /v1/admin/drafts/check ") {
-		t.Errorf("requests = %q, want the renewal and the one check", got)
-	}
-}
-
-// TestPublishDraftLostAnswer pins the words of a publish whose answer does
-// not say what happened: after the request went out it may have landed,
-// whether the connection dropped or a proxy answered a 502, 503 or 504
-// with no sentence of strazad's. A dial that failed sent nothing and keeps
-// the transport's own error, and strazad's own sentence comes back as it
-// is.
-func TestPublishDraftLostAnswer(t *testing.T) {
-	const lost = "so it may have landed. Read it with strazactl drafts show 41 before you publish again"
-	tests := []struct {
-		name     string
-		handler  http.HandlerFunc
-		gone     bool
-		wantErr  string
-		wantCode int
-	}{
-		{name: "a dropped connection may have landed", handler: dropConnection,
-			wantErr: "strazad's answer to the publish of draft 41 was lost (EOF), " + lost},
-		{name: "a proxy's 502 may have landed", handler: answer(http.StatusBadGateway, "<html>502 Bad Gateway</html>"),
-			wantErr: "strazad's answer to the publish of draft 41 was lost (a proxy answered HTTP 502), " + lost},
-		{name: "a proxy's 503 may have landed", handler: answer(http.StatusServiceUnavailable, "<html>503</html>"),
-			wantErr: "strazad's answer to the publish of draft 41 was lost (a proxy answered HTTP 503), " + lost},
-		{name: "a proxy's 504 may have landed", handler: answer(http.StatusGatewayTimeout, "<html>504 Gateway Time-out</html>"),
-			wantErr: "strazad's answer to the publish of draft 41 was lost (a proxy answered HTTP 504), " + lost},
-		{name: "strazad's own 503 comes back as it is", wantCode: http.StatusServiceUnavailable,
-			handler: answer(http.StatusServiceUnavailable, `{"error":"Straza could not publish draft 41, because the database turned the change away three times while other changes were written. Nothing was published. Publish again in a moment."}`)},
-		{name: "a 500 with no sentence comes back as it is", handler: answer(http.StatusInternalServerError, "oops"), wantCode: http.StatusInternalServerError},
-		{name: "a failed dial sent nothing", gone: true, wantErr: "strazad unreachable at "},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewServer(tc.handler)
-			if tc.gone {
-				srv.Close()
-			} else {
-				t.Cleanup(srv.Close)
-			}
-			_, code, err := loggedInClient(t, srv.URL).PublishDraft(context.Background(), "41", DraftPublish{Revision: 1, RiskDigest: "d"})
-			switch {
-			case tc.wantErr == "" && (err != nil || code != tc.wantCode):
-				t.Errorf("answer = %d %v, want %d and no error", code, err, tc.wantCode)
-			case tc.wantErr != "" && (err == nil || !strings.HasPrefix(err.Error(), tc.wantErr)):
-				t.Errorf("err = %v, want it to start with %q", err, tc.wantErr)
+			if got := s.requests(); len(got) != 1 || !strings.HasSuffix(got[0], " Bearer "+testToken) {
+				t.Errorf("requests = %q, want one call on the token", got)
 			}
 		})
 	}
@@ -359,7 +242,7 @@ func TestNewDraftUnknownOutcome(t *testing.T) {
 			} else {
 				t.Cleanup(srv.Close)
 			}
-			c := loggedInClient(t, srv.URL)
+			c := tokenClient(t, srv.URL)
 			c.HTTP.Timeout = 200 * time.Millisecond
 			_, code, err := tc.call(c)
 			switch {
@@ -390,9 +273,6 @@ func TestDraftCallsNameAMissingRoute(t *testing.T) {
 		{"PUT /v1/admin/drafts/41", func(c *Client) ([]byte, int, error) { return c.UpdateDraft(ctx, "41", DraftUpdate{Revision: 2}) }},
 		{"POST /v1/admin/drafts/41/discard", func(c *Client) ([]byte, int, error) { return c.DiscardDraft(ctx, "41", "") }},
 		{"POST /v1/admin/drafts/41/revert", func(c *Client) ([]byte, int, error) { return c.RevertDraft(ctx, "41", "") }},
-		{"POST /v1/admin/drafts/41/publish", func(c *Client) ([]byte, int, error) {
-			return c.PublishDraft(ctx, "41", DraftPublish{Revision: 2, RiskDigest: "d"})
-		}},
 	}
 	for _, code := range []int{http.StatusNotFound, http.StatusMethodNotAllowed} {
 		for _, tc := range calls {
@@ -400,8 +280,8 @@ func TestDraftCallsNameAMissingRoute(t *testing.T) {
 				srv := httptest.NewServer(answer(code, http.StatusText(code)+"\n"))
 				t.Cleanup(srv.Close)
 				want := fmt.Sprintf("strazad answered HTTP %d with no sentence of its own, which it does when it does not serve %s. "+
-					"Upgrade strazad, or check that --server or your login points at strazad", code, tc.route)
-				if _, _, err := tc.call(loggedInClient(t, srv.URL)); err == nil || err.Error() != want {
+					"Upgrade strazad, or check that --server or STRAZA_SERVER points at strazad", code, tc.route)
+				if _, _, err := tc.call(tokenClient(t, srv.URL)); err == nil || err.Error() != want {
 					t.Errorf("err = %v, want %q", err, want)
 				}
 			})
@@ -411,59 +291,32 @@ func TestDraftCallsNameAMissingRoute(t *testing.T) {
 		const body = `{"error":"There is no draft 41. List the drafts with strazactl drafts list, or open Drafts on the console."}`
 		srv := httptest.NewServer(answer(http.StatusNotFound, body))
 		t.Cleanup(srv.Close)
-		raw, code, err := loggedInClient(t, srv.URL).GetDraft(ctx, "41")
+		raw, code, err := tokenClient(t, srv.URL).GetDraft(ctx, "41")
 		if err != nil || code != http.StatusNotFound || string(raw) != body {
 			t.Errorf("answer = %d %s %v, want 404 with the body and no error", code, raw, err)
 		}
 	})
 }
 
-// TestCheckPublishRoute pins the check a publish makes before any question:
-// one GET of the publish path, which strazad's router answers with 405 when
-// it serves the publish route, a POST, and with 404 when it does not, so
-// the check can never publish.
-func TestCheckPublishRoute(t *testing.T) {
-	tests := []struct {
-		name    string
-		served  bool
-		gone    bool
-		wantErr string
-	}{
-		{name: "a strazad that serves the publish route", served: true},
-		{name: "a strazad that does not", wantErr: "this strazad serves no publish route yet, so the draft stays open. " +
-			"Upgrade strazad to a version with drafts publish, and publish again"},
-		{name: "a strazad that cannot be reached", gone: true, wantErr: "strazad unreachable at "},
+// TestDraftVerdictReadsGroupsAndCoverage pins the fields of openapi 0.149.0
+// a verdict carries: the group of a risk and the coverage list, in a
+// server's own words for an object type no strazactl code names.
+func TestDraftVerdictReadsGroupsAndCoverage(t *testing.T) {
+	const raw = `{"risks":[{"key":"k1","code":"role.covers-wider","class":"risk","ack":"tick","object":"Role/desk-eu",` +
+		`"sentence":"desk-eu will reach more tickets on helpdesk: T-2.","group":"role.covers-wider"}],` +
+		`"objects":[{"role":"desk-eu","server":"helpdesk","type":"ticket","plural":"tickets","holders":["alice"],"holders_count":1,` +
+		`"every_before":false,"every_after":false,"before":[{"id":"t1","value":"T-1"}],"after":[{"id":"t1","value":"T-1"},{"id":"t2","value":"T-2"}]}]}`
+	var v DraftVerdict
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var mu sync.Mutex
-			var seen []string
-			mux := http.NewServeMux()
-			mux.HandleFunc("GET /v1/admin/drafts/{id}", answer(http.StatusOK, `{}`))
-			if tc.served {
-				mux.HandleFunc("POST /v1/admin/drafts/{id}/publish", func(http.ResponseWriter, *http.Request) { t.Error("the check published") })
-			}
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				mu.Lock()
-				seen = append(seen, r.Method+" "+r.URL.RequestURI())
-				mu.Unlock()
-				mux.ServeHTTP(w, r)
-			}))
-			if tc.gone {
-				srv.Close()
-			} else {
-				t.Cleanup(srv.Close)
-			}
-			err := loggedInClient(t, srv.URL).CheckPublishRoute(context.Background(), "41")
-			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.HasPrefix(err.Error(), tc.wantErr)) {
-				t.Errorf("err = %v, want %q", err, tc.wantErr)
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			if !tc.gone && (len(seen) != 1 || seen[0] != "GET /v1/admin/drafts/41/publish") {
-				t.Errorf("requests = %q, want one GET of the publish path", seen)
-			}
-		})
+	if len(v.Risks) != 1 || v.Risks[0].Group != "role.covers-wider" {
+		t.Errorf("risks = %+v, want one line of the group role.covers-wider", v.Risks)
+	}
+	want := []DraftCoverage{{Role: "desk-eu", Server: "helpdesk", Type: "ticket", Plural: "tickets", Holders: []string{"alice"}, HoldersCount: 1,
+		Before: []DraftObjectName{{ID: "t1", Value: "T-1"}}, After: []DraftObjectName{{ID: "t1", Value: "T-1"}, {ID: "t2", Value: "T-2"}}}}
+	if !reflect.DeepEqual(v.Objects, want) {
+		t.Errorf("objects = %+v, want %+v", v.Objects, want)
 	}
 }
 

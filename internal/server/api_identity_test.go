@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -185,34 +186,21 @@ func TestEnrollAndCheckinFlow(t *testing.T) {
 	user := seedIdentity(t, app)
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
 
-	// Enroll a device; same fingerprint re-enrolls idempotently.
-	code, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "windows", "fingerprint": "sha256:fp1"},
-	})
-	if code != http.StatusOK || enroll["device_id"] == "" || enroll["user_id"] != user.ID {
-		t.Fatalf("enroll = %d %v", code, enroll)
+	// Enroll a machine key; a new key on the same fingerprint takes over the
+	// same device.
+	enroll := newKeyHolder(t, base).enroll(idToken, "sha256:fp1")
+	if enroll["device_id"] == "" || enroll["user_id"] != user.ID {
+		t.Fatalf("enroll = %v", enroll)
 	}
-	code2, enroll2 := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "windows", "fingerprint": "sha256:fp1"},
-	})
-	if code2 != http.StatusOK || enroll2["device_id"] != enroll["device_id"] {
-		t.Fatalf("re-enroll not idempotent: %v vs %v", enroll2, enroll)
+	h := newKeyHolder(t, base)
+	if again := h.enroll(idToken, "sha256:fp1"); again["device_id"] != enroll["device_id"] {
+		t.Fatalf("re-enroll took another device: %v vs %v", again, enroll)
 	}
-	deviceID := enroll["device_id"].(string)
+	deviceID := h.device
 
 	// Checkin: session starts, roles resolve (dev + implied reader), the
 	// reader-bound pack arrives, attestation caps at advisory.
-	code, checkin := postJSON(t, base+"/v1/checkin", map[string]any{
-		"id_token":  idToken,
-		"device_id": deviceID,
-		"harness":   map[string]string{"name": "claude-code", "version": "2.1.0"},
-		"attestation": map[string]any{
-			"managed": false,
-			"hashes":  map[string]string{"self": "sha256:abc123"},
-		},
-	})
+	code, checkin := h.checkin()
 	if code != http.StatusOK {
 		t.Fatalf("checkin = %d %v", code, checkin)
 	}
@@ -243,9 +231,11 @@ func TestEnrollAndCheckinFlow(t *testing.T) {
 		t.Errorf("token claims = %+v", claims)
 	}
 
-	// Refresh via session token keeps the same session.
-	code, refresh := postJSON(t, base+"/v1/checkin", map[string]any{
-		"session_token": checkin["session_token"],
+	// Refresh via session token, with a proof from the key, keeps the same
+	// session.
+	token := checkin["session_token"].(string)
+	code, refresh := h.call("/v1/checkin", token, map[string]any{
+		"session_token": token,
 		"harness":       map[string]string{"name": "claude-code", "version": "2.1.0"},
 		"attestation":   map[string]any{"managed": false, "hashes": map[string]string{"self": "sha256:abc123"}},
 	})
@@ -255,8 +245,9 @@ func TestEnrollAndCheckinFlow(t *testing.T) {
 
 	// Revoked session refuses refresh.
 	_ = app.store.Sessions().SetStatus(context.Background(), sessionID, store.SessionRevoked)
-	code, body := postJSON(t, base+"/v1/checkin", map[string]any{
-		"session_token": refresh["session_token"],
+	token = refresh["session_token"].(string)
+	code, body := h.call("/v1/checkin", token, map[string]any{
+		"session_token": token,
 		"harness":       map[string]string{"name": "claude-code", "version": "2.1.0"},
 		"attestation":   map[string]any{"managed": false, "hashes": map[string]string{}},
 	})
@@ -299,26 +290,14 @@ func TestRefreshPreservesDeviceAndAttestation(t *testing.T) {
 	_ = seedIdentity(t, app)
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
 
-	_, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "windows", "fingerprint": "sha256:fp-refresh"},
-	})
-	deviceID := enroll["device_id"].(string)
+	h := newKeyHolder(t, base)
+	h.enroll(idToken, "sha256:fp-refresh")
+	deviceID := h.device
+	token, sessionID := h.mustCheckin()
 
-	code, checkin := postJSON(t, base+"/v1/checkin", map[string]any{
-		"id_token":    idToken,
-		"device_id":   deviceID,
-		"harness":     map[string]string{"name": "claude-code", "version": "2.1.0"},
-		"attestation": map[string]any{"managed": false, "hashes": map[string]string{"self": "sha256:abc123"}},
-	})
-	if code != http.StatusOK {
-		t.Fatalf("checkin = %d %v", code, checkin)
-	}
-	sessionID := checkin["session_id"].(string)
-
-	// Refresh exactly as the daemon does: session token only, empty attestation.
-	code, refresh := postJSON(t, base+"/v1/checkin", map[string]any{
-		"session_token": checkin["session_token"],
+	// Refresh exactly as the client does: session token only, empty attestation.
+	code, refresh := h.call("/v1/checkin", token, map[string]any{
+		"session_token": token,
 		"harness":       map[string]string{"name": "claude-code", "version": "2.1.0"},
 		"attestation":   map[string]any{"managed": false, "hashes": map[string]string{}},
 	})
@@ -352,40 +331,35 @@ func TestRefreshPreservesDeviceAndAttestation(t *testing.T) {
 }
 
 // TestCheckinContractFixtures replays the spec/attestation examples verbatim
-// (contract tests come from spec fixtures, not private copies).
+// (contract tests come from spec fixtures, not private copies). The examples
+// that name a device replay against the kit row without a key and the device
+// token that a straza client from before the key lane holds, so the three
+// bearer examples assert the retired lane's refusal.
 func TestCheckinContractFixtures(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
-	_ = seedIdentity(t, app)
+	kim := seedIdentity(t, app)
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
-
-	// The managed example verifies against these registry rows;
-	// hashes mirror spec/attestation/examples/checkin-valid-managed.json.
-	for artifact, h := range map[string]string{
-		"self":              "sha256:4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a",
-		"config":            "sha256:dbc1b4c900ffe48d575b5da5c638040125f65db0fe3e24494b76ea986457d986",
-		"hooks.claude-code": "sha256:084fed08b978af4d7d196a7446a86b58009e636b611db16211b65a9aadff29c5",
-	} {
-		if _, err := app.store.AttestationHashes().Create(context.Background(), store.AttestationHash{
-			Artifact: artifact, Platform: "linux/amd64", Hash: h,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	legacy, legacyToken := mintDevice(t, app, kim.ID, store.DeviceClientKit, "sha256:fx")
 
 	fixtureDir := filepath.Join("..", "..", "spec", "attestation", "examples")
 	cases := []struct {
 		file        string
 		wantCode    int
 		wantAttest  string
+		wantError   string
 		needsDevice bool
 	}{
-		{"checkin-valid-advisory.json", http.StatusOK, "advisory", true},
-		{"checkin-valid-managed.json", http.StatusOK, "managed", true},
-		{"checkin-valid-none.json", http.StatusOK, "none", false},
-		{"checkin-valid-device-token.json", http.StatusOK, "advisory", true},
-		{"checkin-valid-client.json", http.StatusOK, "none", false},
-		{"checkin-invalid-no-auth.json", http.StatusBadRequest, "", false},
+		{"checkin-valid-advisory.json", http.StatusForbidden, "", wantOldClientMsg, true},
+		{"checkin-valid-managed.json", http.StatusForbidden, "", wantOldClientMsg, true},
+		{"checkin-valid-none.json", http.StatusOK, "none", "", false},
+		{"checkin-valid-device-token.json", http.StatusForbidden, "", wantOldClientMsg, true},
+		{"checkin-valid-client.json", http.StatusOK, "none", "", false},
+		{"checkin-invalid-no-auth.json", http.StatusBadRequest, "", "", false},
+		{"checkin-invalid-harness-name-long.json", http.StatusBadRequest, "", fmt.Sprintf(harnessNameTooLongMsg, 257, checkinTextMax), false},
+		{"checkin-valid-key.json", http.StatusUnauthorized, "", "", true},
+		{"checkin-invalid-key-counter-zero.json", http.StatusBadRequest, "", "", true},
+		{"checkin-invalid-key-with-token.json", http.StatusBadRequest, "", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {
@@ -395,12 +369,8 @@ func TestCheckinContractFixtures(t *testing.T) {
 			}
 			payload := strings.ReplaceAll(string(raw), "${ID_TOKEN}", idToken)
 			if tc.needsDevice {
-				_, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-					"id_token": idToken,
-					"device":   map[string]string{"name": "fx", "platform": "linux", "fingerprint": "sha256:fx"},
-				})
-				payload = strings.ReplaceAll(payload, "${DEVICE_ID}", enroll["device_id"].(string))
-				payload = strings.ReplaceAll(payload, "${DEVICE_TOKEN}", enroll["device_token"].(string))
+				payload = strings.ReplaceAll(payload, "${DEVICE_ID}", legacy.ID)
+				payload = strings.ReplaceAll(payload, "${DEVICE_TOKEN}", legacyToken)
 			}
 			resp, err := http.Post(base+"/v1/checkin", "application/json", strings.NewReader(payload))
 			if err != nil {
@@ -415,70 +385,28 @@ func TestCheckinContractFixtures(t *testing.T) {
 			if tc.wantAttest != "" && body["attestation"] != tc.wantAttest {
 				t.Errorf("attestation = %v, want %s", body["attestation"], tc.wantAttest)
 			}
+			if tc.wantError != "" && body["error"] != tc.wantError {
+				t.Errorf("error = %v, want %q", body["error"], tc.wantError)
+			}
 		})
 	}
 }
 
-// TestDeviceTokenCheckin pins the device credential: enroll mints a
-// long-lived, purpose-scoped device credential; sessions start with it long
-// after the 10-minute login token dies (enroll is once per device); it
-// opens no other door; and both revocation paths (user/device status in the
-// store, in-memory denylist push) kill it.
-func TestDeviceTokenCheckin(t *testing.T) {
+// TestDeviceTokenOpensNoDoor pins that a device credential strazactl holds
+// from before it stopped signing in opens no door: check-in refuses it with
+// the strazactl sentence, a disabled user's or a denylisted device's
+// credential is refused for that first, and the admin API and the gateway
+// refuse it.
+func TestDeviceTokenOpensNoDoor(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
 	u := seedIdentity(t, app)
-	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
+	d, devTok := mintDevice(t, app, u.ID, store.DeviceClientHuman, "host:kim-laptop")
+	checkin := func() (int, map[string]any) { return checkinDeviceAs(t, base, devTok, "strazactl", "2.1.0") }
 
-	// Enroll returns the device credential alongside the device id.
-	code, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "windows", "fingerprint": "host:kim-laptop"},
-	})
-	if code != http.StatusOK {
-		t.Fatalf("enroll = %d %v", code, enroll)
+	if code, body := checkin(); code != http.StatusForbidden || body["error"] != wantStrazactlMsg {
+		t.Fatalf("device_token checkin = %d %v, want 403 with the strazactl sentence", code, body)
 	}
-	devTok, _ := enroll["device_token"].(string)
-	devID, _ := enroll["device_id"].(string)
-	if devTok == "" || devID == "" {
-		t.Fatalf("enroll response missing device credential: %v", enroll)
-	}
-	if ttl, _ := enroll["device_token_expires_in"].(float64); ttl < 3600 {
-		t.Errorf("device_token_expires_in = %v, want a long-lived credential", ttl)
-	}
-
-	checkinWith := func(auth map[string]any) (int, map[string]any) {
-		body := map[string]any{
-			"harness":     map[string]string{"name": "claude-code", "version": "2.1.0"},
-			"attestation": map[string]any{"managed": false, "hashes": map[string]string{"self": "sha256:aaaaaa"}},
-		}
-		for k, v := range auth {
-			body[k] = v
-		}
-		return postJSON(t, base+"/v1/checkin", body)
-	}
-
-	// THE case the device credential exists for: the login credential is dead
-	// (10-minute TTL in real life; minted past expiry+skew here), yet the
-	// device credential still starts sessions.
-	expired, err := app.tokens.MintIDToken(u.ID, "straza", -31*time.Second, "kim", "kim@x.io")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code, body := checkinWith(map[string]any{"id_token": expired}); code != http.StatusUnauthorized {
-		t.Fatalf("expired id_token checkin = %d %v, want 401", code, body)
-	}
-	code, body := checkinWith(map[string]any{"device_token": devTok})
-	if code != http.StatusOK {
-		t.Fatalf("device_token checkin = %d %v", code, body)
-	}
-	// The session is bound to the enrolled device from the token claims.
-	ses, err := app.store.Sessions().GetByID(context.Background(), body["session_id"].(string))
-	if err != nil || ses.DeviceID != devID {
-		t.Errorf("session device = %q (%v), want %q", ses.DeviceID, err, devID)
-	}
-
-	// The device credential opens no other door.
 	if code := adminReq(t, "GET", base+"/v1/admin/users", devTok, nil, nil); code != http.StatusUnauthorized && code != http.StatusForbidden {
 		t.Errorf("admin API with device token = %d, want refusal", code)
 	}
@@ -498,8 +426,8 @@ func TestDeviceTokenCheckin(t *testing.T) {
 	if _, err := app.store.Users().Update(context.Background(), u); err != nil {
 		t.Fatal(err)
 	}
-	if code, body := checkinWith(map[string]any{"device_token": devTok}); code != http.StatusForbidden {
-		t.Fatalf("disabled-user device checkin = %d %v, want 403", code, body)
+	if code, body := checkin(); code != http.StatusForbidden || body["error"] != "user is disabled. Contact your administrator" {
+		t.Fatalf("disabled-user device checkin = %d %v, want 403 for the disabled user", code, body)
 	}
 	u.Status = store.UserActive
 	if _, err := app.store.Users().Update(context.Background(), u); err != nil {
@@ -508,9 +436,9 @@ func TestDeviceTokenCheckin(t *testing.T) {
 
 	// Kill-switch path: an in-memory device denylist entry is enforced
 	// before any store read (push → instant).
-	app.denylist.RevokeDevice(devID)
-	if code, body := checkinWith(map[string]any{"device_token": devTok}); code != http.StatusForbidden {
-		t.Fatalf("denylisted-device checkin = %d %v, want 403", code, body)
+	app.denylist.RevokeDevice(d.ID)
+	if code, body := checkin(); code != http.StatusForbidden || body["error"] != revokedIdentityMsg {
+		t.Fatalf("denylisted-device checkin = %d %v, want 403 for the revocation", code, body)
 	}
 }
 

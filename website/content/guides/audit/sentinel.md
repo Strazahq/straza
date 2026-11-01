@@ -23,7 +23,7 @@ The sentinel looks for patterns across a session that one decision alone cannot 
 ## Before you start {.nostep}
 
 - Access to strazad's config file and a way to restart strazad.
-- A console sign-in that holds the `audit` area, or `strazactl` logged in as an admin.
+- A console sign-in that holds the `audit` area, or `strazactl` on an admin API token that holds `audit:read`, plus `sessions:write` to revoke a session.
 
 ## Turn it on
 

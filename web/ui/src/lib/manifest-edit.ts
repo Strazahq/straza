@@ -4,6 +4,7 @@
 // server record included, stays exactly as installed. A field left as it
 // was keeps its installed value, so a read then a write with no change
 // gives back the same document. No React here.
+import { PINNED_TYPE, TOOL_MARKS, marksMoved, pinnedWords } from "./access-object-words";
 import type { Credential, ManifestDoc } from "./api";
 import { HTTP_SENT, SENT_AS } from "./manifest";
 import { KIND_NAME, exposeWords, rpsWords, sentWords, timeoutWords, transportWords } from "./server-words";
@@ -287,6 +288,8 @@ const envWords = (env: EnvPair[]) => env.map((e) => e.name + "=" + e.value).join
 // changeRows lists the fields that differ between the installed manifest
 // and the edited one, in the order the cards draw them. Runtime fields
 // show for the kind after saving, and serverWide names the default timeout.
+// The pinned type and the tools whose marks moved close the list, so a
+// draft that pins a type or changes a mark is not an empty change.
 export function changeRows(before: ManifestDoc, after: ManifestDoc, serverWide: number | null = null): ChangeRow[] {
   const rows: ChangeRow[] = [];
   const add = (label: string, was: string, now: string) => { if (was !== now) rows.push([label, was, now]); };
@@ -317,5 +320,9 @@ export function changeRows(before: ManifestDoc, after: ManifestDoc, serverWide: 
   add("Tools exposed", exposeWords(before.straza?.exposure?.tools), exposeWords(after.straza?.exposure?.tools));
   add("Rate limit", rpsWords(before.straza?.limits?.rps), rpsWords(after.straza?.limits?.rps));
   add("Per-call timeout", timeoutWords(before.straza?.limits?.timeoutSeconds, serverWide), timeoutWords(after.straza?.limits?.timeoutSeconds, serverWide));
+  add(PINNED_TYPE, pinnedWords(before.straza?.objects, NONE), pinnedWords(after.straza?.objects, NONE));
+  const oa = before.straza?.objects;
+  const ob = after.straza?.objects;
+  if (oa?.type && ob?.type) add(TOOL_MARKS, ...marksMoved(oa, ob));
   return rows;
 }

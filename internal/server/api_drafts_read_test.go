@@ -190,7 +190,7 @@ func TestListDrafts(t *testing.T) {
 	if code, _ := f.call(t, http.MethodPost, "/v1/admin/drafts/"+d2+"/discard", f.root, nil); code != http.StatusOK {
 		t.Fatalf("discard = %d", code)
 	}
-	code, w := f.call(t, http.MethodPost, "/v1/admin/drafts", f.strazactl, map[string]any{"working": true,
+	code, w := f.call(t, http.MethodPost, "/v1/admin/drafts", f.console, map[string]any{"working": true,
 		"items": []map[string]string{{"kind": "App", "name": "linear", "op": "put", "doc": draftApp("linear", "https://linear.example/mcp", "Four.")}}})
 	if code != http.StatusCreated {
 		t.Fatalf("working = %d %q", code, w.Error)
@@ -213,7 +213,7 @@ func TestListDrafts(t *testing.T) {
 		{"a holder of drafts:read", f.ada, "state=all", strings.Join([]string{d5, d4, d3, d2, d1}, ",")},
 		{"mine", f.erin, "mine=true", d3},
 		{"one object", f.root, "state=all&object=App/jira", d2},
-		{"one door", f.root, "door=strazactl", d4},
+		{"one door", f.root, "door=console", d4},
 		{"the working draft", f.root, "working=true", d4},
 		{"a set's saved edit", f.root, "policy_edit=guard", d5},
 		{"a token's working draft, which it cannot have", f.token, "working=true", ""},
@@ -1227,7 +1227,7 @@ func TestGetDraftCutsGainsOnRolesTheReaderCannotRead(t *testing.T) {
 		}
 		return strings.Join(names, ","), hidden
 	}
-	want := "1 row of who gains what names a role or a server you cannot read, so this view leaves it out. Ask an administrator for the grant that reads it."
+	want := "1 row under Access after publishing names a role or a server you cannot read, so this view leaves it out. Ask an administrator for the grant that reads it."
 	if roles, hidden := read(f.erin); roles != "github-readers" || !reflect.DeepEqual(hidden, []string{want}) {
 		t.Errorf("erin reads the gains of %s and %q, want github-readers alone and %q", roles, hidden, want)
 	}

@@ -57,6 +57,11 @@ func TestScenarioValidation(t *testing.T) {
 		{"governance posture knob", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\ngovernance: {localToolDefault: deny}\nsteps:\n  - name: s\n    server: {action: stop}\n", "governance.localToolDefault is not one of"},
 		{"governance bad duration", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\ngovernance: {deviceTokenTTL: soon}\nsteps:\n  - name: s\n    server: {action: stop}\n", "positive duration"},
 		{"governance zero lifetime", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\ngovernance: {sessionMaxLifetime: 0s}\nsteps:\n  - name: s\n    server: {action: stop}\n", "positive duration"},
+		{"governance custody of another word", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\ngovernance: {minCustody: root}\nsteps:\n  - name: s\n    server: {action: stop}\n", "governance.minCustody must be account or user"},
+		{"governance sign-in floor of another word", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\ngovernance: {minSignIn: device-code}\nsteps:\n  - name: s\n    server: {action: stop}\n", "governance.minSignIn must be code or browser"},
+		{"enroll by another sign-in", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nidentities:\n  a: {kind: human, password: p}\nsteps:\n  - name: s\n    enroll: {as: a, signIn: phone}\n", "enroll signIn must be code or browser"},
+		{"enroll an NHI by a sign-in", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nidentities:\n  bot: {kind: nhi}\nsteps:\n  - name: s\n    enroll: {as: bot, signIn: browser}\n", "an NHI enrolls headless with its key"},
+		{"daemon action retired", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nidentities:\n  a: {kind: human, password: p}\nsteps:\n  - name: s\n    daemon: {as: a, action: start}\n", "has no action"},
 		{"wait without a duration", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nsteps:\n  - name: s\n    wait: soon\n", "wait must be a positive duration"},
 		{"wait of zero", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nsteps:\n  - name: s\n    wait: 0s\n", "wait must be a positive duration"},
 		{"wait that polls", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nsteps:\n  - name: s\n    wait: 5s\n    within: 10s\n", "a wait records nothing"},
@@ -69,6 +74,11 @@ func TestScenarioValidation(t *testing.T) {
 		{"approver decide with a bad verdict", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nidentities:\n  a: {kind: human, password: p}\n  bot: {kind: nhi}\nsteps:\n  - name: s\n    approver: {as: a, action: decide, request: r, verdict: maybe}\n", "verdict approve or deny"},
 		{"approver decide that polls", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nidentities:\n  a: {kind: human, password: p}\n  bot: {kind: nhi}\nsteps:\n  - name: s\n    approver: {as: a, action: decide, request: r, verdict: approve}\n    within: 10s\n", "takes no within"},
 		{"as on a scim step", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nidentities:\n  a: {kind: human, password: p}\nsteps:\n  - name: s\n    scim: {method: GET, path: /scim/v2/Users, as: a}\n", "as belongs on an admin step"},
+		{"audit object of an unknown field", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nsteps:\n  - name: s\n    audit: {object: {repo: acme/payments}}\n", "audit object.repo is not one of"},
+		{"audit object id unquoted", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nsteps:\n  - name: s\n    audit: {object: {id: 1001}}\n", "quote a number"},
+		{"audit object not a map", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nsteps:\n  - name: s\n    audit: {object: acme/payments}\n", "audit object must be a map"},
+		{"audit with a misspelled key", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nsteps:\n  - name: s\n    audit: {subject: a, objcet: {value: acme/payments}}\n", "audit.objcet is not one of subject, kind, action, decision, reasonContains, object, signIn, count"},
+		{"audit without a key", "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\nsteps:\n  - name: s\n    audit: {}\n", "audit needs at least one of"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -113,11 +123,11 @@ func TestDecideAsAndWaitParse(t *testing.T) {
 	}
 }
 
-// TestGovernanceFile pins that a scenario's lifetimes reach the server as
-// its config file, zero grace included, and that no file is written when a
-// scenario declares none.
+// TestGovernanceFile pins that a scenario's lifetimes and custody floor
+// reach the server as its config file, zero grace included, and that no
+// file is written when a scenario declares none.
 func TestGovernanceFile(t *testing.T) {
-	doc := "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\ngovernance: {offlineGraceTTL: 0s, sessionMaxLifetime: 3m30s}\nsteps:\n  - name: s\n    server: {action: stop}\n"
+	doc := "id: x-one\ngroup: X\ntitle: t\nprovenance: doc t\ngovernance: {offlineGraceTTL: 0s, sessionMaxLifetime: 3m30s, minCustody: account}\nsteps:\n  - name: s\n    server: {action: stop}\n"
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "x-one.yaml"), []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
@@ -126,7 +136,7 @@ func TestGovernanceFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(governanceYAML(corpus[0].Governance)); got != "governance:\n  offlineGraceTTL: 0s\n  sessionMaxLifetime: 3m30s\n" {
+	if got := string(governanceYAML(corpus[0].Governance)); got != "governance:\n  minCustody: account\n  offlineGraceTTL: 0s\n  sessionMaxLifetime: 3m30s\n" {
 		t.Errorf("governance file:\n%s", got)
 	}
 	s, err := newStrazad("strazad", dir, corpus[0].Governance)
@@ -300,5 +310,108 @@ func TestLookupAndExpand(t *testing.T) {
 	}
 	if _, err := expand("${nope}", nil); err == nil {
 		t.Error("unknown placeholder accepted")
+	}
+}
+
+// TestAuditObjectMatcher pins the audit step's object matcher against the
+// object member of an mcp record: every named field must be present with
+// the same value, and a record without an object matches no matcher.
+func TestAuditObjectMatcher(t *testing.T) {
+	record := map[string]any{"type": "repo", "reach": "argument", "value": "acme/payments", "id": "1001"}
+	cases := []struct {
+		name string
+		want map[string]any
+		got  map[string]any
+		pass bool
+	}{
+		{"no matcher, no object", nil, nil, true},
+		{"no matcher, an object", nil, record, true},
+		{"the same value and id", map[string]any{"value": "acme/payments", "id": "1001"}, record, true},
+		{"every field", record, record, true},
+		{"another value", map[string]any{"value": "acme/site"}, record, false},
+		{"another id", map[string]any{"id": "1004"}, record, false},
+		{"an id the record lacks", map[string]any{"id": "1004"}, map[string]any{"type": "repo", "reach": "all"}, false},
+		{"a record without an object", map[string]any{"type": "repo"}, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := objectMatches(tc.want, tc.got); got != tc.pass {
+				t.Fatalf("objectMatches(%v, %v) = %v, want %v", tc.want, tc.got, got, tc.pass)
+			}
+		})
+	}
+}
+
+// TestUpstreamPaths pins the two paths of the hermetic upstream: /mcp lists
+// exactly its three tools, so the scenarios that bind every tool there see
+// the inventory they always saw, and /mcp-objects pages its seven repos
+// through nextCursor and echoes the ai.straza/object-id a call carried.
+func TestUpstreamPaths(t *testing.T) {
+	u, err := startUpstream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer u.stop()
+	rpc := func(url, method string, params any) map[string]any {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+		code, body, err := httpCall(t.Context(), "POST", url, "", "application/json", raw)
+		if err != nil || code != 200 {
+			t.Fatalf("%s %s: %d %v", url, method, code, err)
+		}
+		var out struct {
+			Result map[string]any `json:"result"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil || out.Result == nil {
+			t.Fatalf("%s %s: %s", url, method, body)
+		}
+		return out.Result
+	}
+	names := func(res map[string]any) []string {
+		var out []string
+		for _, tl := range res["tools"].([]any) {
+			out = append(out, tl.(map[string]any)["name"].(string))
+		}
+		return out
+	}
+	if got := strings.Join(names(rpc(u.URL, "tools/list", nil)), ","); got != "echo,get-sum,get-env" {
+		t.Errorf("/mcp tools %s", got)
+	}
+	if got := strings.Join(names(rpc(u.ObjectsURL, "tools/list", nil)), ","); got != "repo_list,repo_read,search_code,calls_seen" {
+		t.Errorf("/mcp-objects tools %s", got)
+	}
+	var values []string
+	args := map[string]any{}
+	for page := 1; ; page++ {
+		sc := rpc(u.ObjectsURL, "tools/call", map[string]any{"name": "repo_list", "arguments": args})["structuredContent"].(map[string]any)
+		for _, o := range sc["objects"].([]any) {
+			values = append(values, o.(map[string]any)["value"].(string))
+		}
+		next, _ := sc["nextCursor"].(string)
+		if next == "" {
+			if page != 3 {
+				t.Errorf("the listing took %d pages, want 3", page)
+			}
+			break
+		}
+		args = map[string]any{"cursor": next}
+	}
+	if len(values) != 7 || values[0] != "acme/payments" || values[6] != "acme/ledger" {
+		t.Errorf("listed %v", values)
+	}
+	text := func(res map[string]any) string {
+		return res["content"].([]any)[0].(map[string]any)["text"].(string)
+	}
+	withID := map[string]any{"name": "repo_read", "arguments": map[string]any{"repo": "acme/payments"}, "_meta": map[string]any{metaObjectID: "1001"}}
+	if got := text(rpc(u.ObjectsURL, "tools/call", withID)); got != "repo_read on acme/payments with ai.straza/object-id 1001." {
+		t.Errorf("repo_read with an id: %q", got)
+	}
+	noID := map[string]any{"name": "repo_read", "arguments": map[string]any{"repo": "acme/site"}}
+	if got := text(rpc(u.ObjectsURL, "tools/call", noID)); got != "repo_read on acme/site with no ai.straza/object-id." {
+		t.Errorf("repo_read without an id: %q", got)
+	}
+	seen := text(rpc(u.ObjectsURL, "tools/call", map[string]any{"name": "calls_seen", "arguments": map[string]any{}}))
+	if !strings.HasPrefix(seen, "repo_read calls: 2. repo_read on acme/payments with ai.straza/object-id 1001.") {
+		t.Errorf("calls_seen %q", seen)
 	}
 }

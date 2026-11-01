@@ -77,10 +77,17 @@ func CodexMCPConfigPath() (string, error) {
 // the one file no operator wants written. Under sudo this resolves $SUDO_USER's
 // home. $CODEX_HOME still wins (an operator who sets it means it), and a user
 // the CGO-free os/user cannot resolve falls back to the current home rather
-// than failing an otherwise-good install.
+// than failing an otherwise-good install. Run as the Windows LocalSystem
+// account without $CODEX_HOME, it returns an empty path, because SYSTEM's
+// profile is no person's, and the caller writes nothing and says so. Run on
+// macOS as root that no person started through sudo, as Jamf runs it, it
+// does the same, because root's home is no person's either.
 func CodexMCPConfigPathForInvoker() (string, error) {
 	if os.Getenv(installs["codex"].envDir) != "" {
 		return CodexMCPConfigPath()
+	}
+	if asLocalSystem() || macRootWithoutPerson() {
+		return "", nil
 	}
 	home := invokingUserHome()
 	if home == "" {
@@ -89,6 +96,21 @@ func CodexMCPConfigPathForInvoker() (string, error) {
 	rel := installs["codex"].relPath
 	return filepath.Join(append(append([]string{home}, rel[:len(rel)-1]...), codexConfigFile)...), nil
 }
+
+// asLocalSystem reports whether the process runs as the Windows LocalSystem
+// account. Tests swap it to pose as that account.
+var asLocalSystem = runsAsLocalSystem
+
+// macRootWithoutPerson reports whether the process runs on macOS as root
+// with no person behind it: not under sudo, or under sudo from root itself.
+// Linux keeps its fallback to the current home.
+func macRootWithoutPerson() bool {
+	sudoUser := os.Getenv("SUDO_USER")
+	return osName() == "darwin" && geteuid() == 0 && (sudoUser == "" || sudoUser == "root")
+}
+
+// geteuid is os.Geteuid. Tests swap it to pose as root.
+var geteuid = os.Geteuid
 
 // invokingUserHome returns the home directory of the user behind a sudo
 // invocation, or "" when there is none to speak of: not under sudo, sudo from

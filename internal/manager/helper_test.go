@@ -115,6 +115,15 @@ func runHelperServer() {
 			})
 	}
 
+	// STRAZA_HELPER_META adds a tool that answers the _meta of its call.
+	if os.Getenv("STRAZA_HELPER_META") == "1" {
+		srv.AddTool(&mcp.Tool{Name: "meta", Description: "the call's _meta", InputSchema: map[string]any{"type": "object"}},
+			func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				meta, _ := json.Marshal(req.Params.Meta)
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(meta)}}}, nil
+			})
+	}
+
 	// STRAZA_HELPER_VIEWS adds a tool that answers the capabilities of the
 	// client's initialize, and a tool that links a view the helper serves.
 	if os.Getenv("STRAZA_HELPER_VIEWS") == "1" {

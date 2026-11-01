@@ -1,11 +1,14 @@
 package authn
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 
 	"github.com/strazahq/straza/internal/config"
+	"github.com/strazahq/straza/internal/dpop"
 	"github.com/strazahq/straza/internal/store"
 	"github.com/strazahq/straza/internal/store/storetest"
 )
@@ -751,5 +755,369 @@ func TestApproverTokenLifecycle(t *testing.T) {
 	}
 	if _, err := svc.VerifyApproverToken(old); err == nil {
 		t.Error("expired approver token accepted")
+	}
+}
+
+// TestMintIDTokenForLoginFacts pins the login facts of a built-in ID token:
+// nonce is a string claim and auth_time a NumericDate in whole seconds, each
+// minted only when set, and VerifyIDToken reads both back. MintIDToken keeps
+// minting neither.
+func TestMintIDTokenForLoginFacts(t *testing.T) {
+	svc := testService(t, 0)
+	signedIn := time.Date(2026, 10, 22, 9, 30, 15, 700_000_000, time.UTC)
+	cases := []struct {
+		name  string
+		facts LoginFacts
+	}{
+		{name: "nonce and auth_time", facts: LoginFacts{Nonce: "jkt-part.random-part", AuthTime: signedIn}},
+		{name: "nonce only", facts: LoginFacts{Nonce: "jkt-part.random-part"}},
+		{name: "auth_time only", facts: LoginFacts{AuthTime: signedIn}},
+		{name: "neither"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := svc.MintIDTokenFor("user-1", "straza", time.Hour, "kim", "kim@x.io", tc.facts)
+			if err != nil {
+				t.Fatalf("MintIDTokenFor: %v", err)
+			}
+			payload := payloadOf(t, raw)
+			nonce, hasNonce := payload["nonce"]
+			if hasNonce != (tc.facts.Nonce != "") || (hasNonce && nonce != tc.facts.Nonce) {
+				t.Errorf("payload nonce = %v (present %v), want %q", nonce, hasNonce, tc.facts.Nonce)
+			}
+			authTime, hasAuthTime := payload["auth_time"]
+			if hasAuthTime != !tc.facts.AuthTime.IsZero() {
+				t.Errorf("payload auth_time present = %v, want %v", hasAuthTime, !tc.facts.AuthTime.IsZero())
+			}
+			if hasAuthTime && authTime != float64(tc.facts.AuthTime.Unix()) {
+				t.Errorf("payload auth_time = %v, want the whole second %d", authTime, tc.facts.AuthTime.Unix())
+			}
+
+			got, err := svc.VerifyIDToken(raw, "straza")
+			if err != nil {
+				t.Fatalf("VerifyIDToken: %v", err)
+			}
+			if got.Subject != "user-1" || got.Username != "kim" || got.Email != "kim@x.io" {
+				t.Errorf("claims = %+v, want user-1, kim, kim@x.io", got)
+			}
+			if got.Nonce != tc.facts.Nonce {
+				t.Errorf("Nonce = %q, want %q", got.Nonce, tc.facts.Nonce)
+			}
+			if want := tc.facts.AuthTime.Truncate(time.Second); !got.AuthTime.Equal(want) {
+				t.Errorf("AuthTime = %s, want %s", got.AuthTime, want)
+			}
+		})
+	}
+
+	plain, err := svc.MintIDToken("user-1", "straza", time.Hour, "kim", "kim@x.io")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, claim := range []string{"nonce", "auth_time"} {
+		if _, ok := payloadOf(t, plain)[claim]; ok {
+			t.Errorf("MintIDToken minted the %s claim", claim)
+		}
+	}
+}
+
+// TestVerifyIDTokenRefusesMalformedAuthTime signs ID tokens with the
+// service's own key, so only auth_time, nonce or straza_jkt is wrong, and
+// checks that VerifyIDToken refuses each one rather than reading it as
+// absent.
+func TestVerifyIDTokenRefusesMalformedAuthTime(t *testing.T) {
+	svc := testService(t, 0)
+	cases := []struct {
+		name  string
+		claim string
+		value any
+	}{
+		{"auth_time is a word", "auth_time", "yesterday"},
+		{"auth_time is an object", "auth_time", map[string]any{"at": 1}},
+		{"nonce is a number", "nonce", 7},
+		{"straza_jkt is a number", "straza_jkt", 7},
+		{"straza_jkt is the cnf object", "straza_jkt", map[string]any{"jkt": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"}},
+		{"straza_jkt is an array", "straza_jkt", []string{"kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"}},
+		{"straza_jkt is empty", "straza_jkt", ""},
+		{"straza_jkt is null", "straza_jkt", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			tok, err := jwt.NewBuilder().
+				Issuer("https://straza.local").Subject("user-1").Audience([]string{"straza"}).
+				IssuedAt(now).Expiration(now.Add(time.Minute)).
+				Claim(tc.claim, tc.value).Build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc.mu.RLock()
+			key := svc.active
+			svc.mu.RUnlock()
+			signed, err := jwt.Sign(tok, jwt.WithKey(jwa.EdDSA(), key))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := payloadOf(t, string(signed))[tc.claim]; !ok {
+				t.Fatalf("the test token carries no %s member", tc.claim)
+			}
+			if c, err := svc.VerifyIDToken(string(signed), "straza"); err == nil {
+				t.Fatalf("VerifyIDToken accepted a malformed %s and returned %+v", tc.claim, c)
+			}
+		})
+	}
+}
+
+// TestIDTokenKeyStamp pins the straza_jkt claim of a built-in ID token: the
+// thumbprint string from LoginFacts.KeyThumbprint, minted only when it is
+// set and beside the other login facts, and read back by VerifyIDToken.
+func TestIDTokenKeyStamp(t *testing.T) {
+	svc := testService(t, 0)
+	stamp := dpop.Thumbprint(testProofKey(0x07).Public().(ed25519.PublicKey))
+	signedIn := time.Date(2026, 10, 27, 9, 30, 15, 0, time.UTC)
+	cases := []struct {
+		name  string
+		facts LoginFacts
+	}{
+		{name: "an agent token names its key", facts: LoginFacts{KeyThumbprint: stamp}},
+		{name: "the stamp rides beside nonce and auth_time", facts: LoginFacts{Nonce: "n-1", AuthTime: signedIn, KeyThumbprint: stamp}},
+		{name: "a token minted without a key names none", facts: LoginFacts{Nonce: "n-1"}},
+		{name: "a token with no facts names none"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := svc.MintIDTokenFor("user-1", "straza", time.Hour, "ci-bot", "", tc.facts)
+			if err != nil {
+				t.Fatalf("MintIDTokenFor: %v", err)
+			}
+			got, present := payloadOf(t, raw)["straza_jkt"]
+			if present != (tc.facts.KeyThumbprint != "") || (present && got != tc.facts.KeyThumbprint) {
+				t.Errorf("payload straza_jkt = %v (present %v), want %q", got, present, tc.facts.KeyThumbprint)
+			}
+			if _, ok := payloadOf(t, raw)["cnf"]; ok {
+				t.Error("an ID token carries cnf, which a Bearer verifier refuses")
+			}
+			claims, err := svc.VerifyIDToken(raw, "straza")
+			if err != nil {
+				t.Fatalf("VerifyIDToken: %v", err)
+			}
+			if claims.KeyThumbprint != tc.facts.KeyThumbprint || claims.Nonce != tc.facts.Nonce {
+				t.Errorf("verified KeyThumbprint %q nonce %q, want %q and %q", claims.KeyThumbprint, claims.Nonce, tc.facts.KeyThumbprint, tc.facts.Nonce)
+			}
+		})
+	}
+	plain, err := svc.MintIDToken("user-1", "straza", time.Hour, "kim", "kim@x.io")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := payloadOf(t, plain)["straza_jkt"]; ok {
+		t.Error("MintIDToken minted the straza_jkt claim")
+	}
+}
+
+// The ID token examples come from fixed seeds and a fixed time, as the grant
+// examples do, so TestIDTokenExamples pins every byte of every file.
+var exampleIDTokenIat = time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+
+const exampleIDTokenProvenance = "doc spec/session-token/SPEC.md 2026-10-27 (generated by TestIDTokenExamples, " +
+	"not captured from strazad: the Straza session key from the Ed25519 seed of 32 bytes 0x0a with kid " +
+	exampleGrantKID + ", the agent key behind straza_jkt from 32 bytes 0x07, signed at 2026-10-27T12:00:00Z)"
+
+// idTokenExample is one file of spec/session-token/examples/id-token.
+type idTokenExample struct {
+	Provenance  string `json:"provenance"`
+	Description string `json:"description"`
+	At          string `json:"at"`
+	Verifier    struct {
+		Issuer   string `json:"issuer"`
+		Audience string `json:"audience"`
+	} `json:"verifier"`
+	Key     map[string]any `json:"key"`
+	IDToken string         `json:"id_token"`
+	Header  map[string]any `json:"header"`
+	Claims  map[string]any `json:"claims"`
+	Reason  string         `json:"reason,omitempty"`
+}
+
+// idTokenExampleCase is one example file: the subject and the claims beside
+// iss, sub, aud, iat and exp, which the built-in issuer always mints.
+type idTokenExampleCase struct {
+	file, description string
+	sub               string
+	claims            map[string]any
+	reason            string
+}
+
+func idTokenExampleDir() string {
+	return filepath.Join("..", "..", "spec", "session-token", "examples", "id-token")
+}
+
+const (
+	exampleAgentID  = "0199f3a2-5b7c-7d10-8e2f-3a4b5c6d7e09"
+	examplePersonID = "0199f3a2-5b7c-7d10-8e2f-3a4b5c6d7e01"
+	stampRefusal    = "straza_jkt is not a non-empty string"
+)
+
+var exampleAgentStamp = dpop.Thumbprint(testProofKey(exampleMachineSeed).Public().(ed25519.PublicKey))
+
+// agentClaims returns the claims of an agent's client_credentials ID token
+// with straza_jkt set to stamp.
+func agentClaims(stamp any) map[string]any {
+	return map[string]any{"preferred_username": "build-bot", "email": "", "straza_jkt": stamp}
+}
+
+var idTokenExampleCases = []idTokenExampleCase{
+	{file: "valid-agent-key-stamp.json", sub: exampleAgentID, claims: agentClaims(exampleAgentStamp),
+		description: "An AI agent's ID token from the built-in issuer's client_credentials grant. straza_jkt is the RFC 7638 thumbprint of the Ed25519 key that verified the agent's client assertion. A server that checks in this token compares straza_jkt with the key registered for the agent now, and with the key of the check-in's DPoP proof when one comes with it."},
+	{file: "valid-agent-no-stamp.json", sub: exampleAgentID, claims: map[string]any{"preferred_username": "build-bot", "email": ""},
+		description: "An AI agent's ID token minted before straza_jkt existed. It verifies as before, and a server checks it in without comparing a key."},
+	{file: "valid-person-sign-in.json", sub: examplePersonID,
+		claims: map[string]any{"preferred_username": "kim", "email": "kim@straza.example",
+			"nonce": exampleAgentStamp + ".q3xZr9bYw1Kc", "auth_time": exampleIDTokenIat.Add(-20 * time.Second).Unix()},
+		description: "A person's ID token from a browser sign-in, with nonce and auth_time. The built-in issuer stamps no key on a person's token. The thumbprint in the nonce names the machine key the person enrolls, which is another rule."},
+	{file: "invalid-stamp-number.json", sub: exampleAgentID, claims: agentClaims(7), reason: stampRefusal,
+		description: "straza_jkt is a number. A verifier refuses the token instead of reading the claim as absent, so a malformed stamp never skips the key comparison."},
+	{file: "invalid-stamp-empty.json", sub: exampleAgentID, claims: agentClaims(""), reason: stampRefusal,
+		description: "straza_jkt is an empty string, which names no key. A verifier refuses the token instead of reading the claim as absent."},
+	{file: "invalid-stamp-cnf-object.json", sub: exampleAgentID, claims: agentClaims(map[string]any{"jkt": exampleAgentStamp}), reason: stampRefusal,
+		description: "straza_jkt has the shape of cnf, an object with jkt. The claim is the bare thumbprint string, so a verifier refuses the object."},
+}
+
+// buildIDTokenExample signs one example with the example session key and
+// returns its file bytes.
+func buildIDTokenExample(t *testing.T, c idTokenExampleCase) []byte {
+	t.Helper()
+	priv, err := importPrivate(exampleKeyRecord(exampleStrazaSeed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := jwt.NewBuilder().Issuer(exampleGrantIssuer).Subject(c.sub).Audience([]string{"straza"}).
+		IssuedAt(exampleIDTokenIat).Expiration(exampleIDTokenIat.Add(10 * time.Minute))
+	for name, value := range c.claims {
+		b = b.Claim(name, value)
+	}
+	tok, err := b.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.EdDSA(), priv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := importPublic(exampleKeyRecord(exampleStrazaSeed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := idTokenExample{Provenance: exampleIDTokenProvenance, Description: c.description,
+		At: exampleIDTokenIat.Add(30 * time.Second).Format(time.RFC3339), Key: jsonMap(t, pub), IDToken: string(signed),
+		Header: headerOf(t, string(signed)), Claims: payloadOf(t, string(signed)), Reason: c.reason}
+	ex.Verifier.Issuer, ex.Verifier.Audience = exampleGrantIssuer, "straza"
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(ex); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// TestIDTokenExamples regenerates every spec/session-token/examples/id-token
+// file and compares bytes, then replays each file through VerifyIDToken at
+// the example's time against the key the file publishes. A valid-* example
+// must verify with the straza_jkt it shows, and an invalid-* one must be
+// refused for straza_jkt. Run it with STRAZA_UPDATE_SPEC_EXAMPLES=1 to write
+// the files after an intentional change.
+func TestIDTokenExamples(t *testing.T) {
+	update := os.Getenv("STRAZA_UPDATE_SPEC_EXAMPLES") == "1"
+	if update {
+		if err := os.MkdirAll(idTokenExampleDir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	known := map[string]bool{}
+	var valid, invalid int
+	for _, c := range idTokenExampleCases {
+		known[c.file] = true
+		path := filepath.Join(idTokenExampleDir(), c.file)
+		want := buildIDTokenExample(t, c)
+		if update {
+			if err := os.WriteFile(path, want, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s is missing. Regenerate the examples with STRAZA_UPDATE_SPEC_EXAMPLES=1: %v", c.file, err)
+		}
+		if !bytes.Equal(raw, want) {
+			t.Errorf("%s differs from what the generator signs today. Regenerate it on purpose and explain the change in CHANGELOG.md.", c.file)
+		}
+		if strings.HasPrefix(c.file, "valid-") {
+			valid++
+		} else {
+			invalid++
+		}
+		t.Run(c.file, func(t *testing.T) { replayIDTokenExample(t, c.file, raw) })
+	}
+	files, err := filepath.Glob(filepath.Join(idTokenExampleDir(), "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if !known[filepath.Base(f)] {
+			t.Errorf("no case generates %s. Add a case for it or remove the file.", filepath.Base(f))
+		}
+	}
+	if valid < 3 || invalid < 3 {
+		t.Fatalf("%d valid and %d invalid examples, the spec asks for at least 3 of each", valid, invalid)
+	}
+}
+
+// replayIDTokenExample checks one example file as a third party would:
+// its decoded header and claims match its token, and the verifier accepts
+// or refuses it as its name says.
+func replayIDTokenExample(t *testing.T, name string, raw []byte) {
+	var ex idTokenExample
+	if err := json.Unmarshal(raw, &ex); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.HasPrefix(ex.Provenance, "doc ") && !strings.HasPrefix(ex.Provenance, "live ") {
+		t.Errorf("provenance %q does not say doc or live", ex.Provenance)
+	}
+	if !reflect.DeepEqual(headerOf(t, ex.IDToken), ex.Header) || !reflect.DeepEqual(payloadOf(t, ex.IDToken), ex.Claims) {
+		t.Errorf("the token decodes to another header or claim set than the example shows")
+	}
+	keyJSON, err := json.Marshal(ex.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := jwk.ParseKey(keyJSON)
+	if err != nil {
+		t.Fatalf("parse the published key: %v", err)
+	}
+	set := jwk.NewSet()
+	if err := set.AddKey(key); err != nil {
+		t.Fatal(err)
+	}
+	at, err := time.Parse(time.RFC3339, ex.At)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &TokenService{issuer: ex.Verifier.Issuer, verify: set}
+	got, err := svc.verifyIDTokenAt(ex.IDToken, ex.Verifier.Audience, at)
+	switch {
+	case strings.HasPrefix(name, "valid-") && err != nil:
+		t.Fatalf("a valid example is refused: %v", err)
+	case strings.HasPrefix(name, "valid-"):
+		want, _ := ex.Claims["straza_jkt"].(string)
+		if got.KeyThumbprint != want {
+			t.Errorf("KeyThumbprint = %q, want %q", got.KeyThumbprint, want)
+		}
+	case ex.Reason == "":
+		t.Fatal("an invalid example states no reason")
+	case err == nil:
+		t.Fatalf("an invalid example verifies: %+v", got)
+	case !strings.Contains(err.Error(), "straza_jkt"):
+		t.Errorf("refused for %v, but the example's reason is %q", err, ex.Reason)
 	}
 }

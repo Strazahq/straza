@@ -6,7 +6,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Facts, Section } from "@/components/sheet-parts";
 import { PolicyTest, type PolicyTestPrefill } from "@/components/policy-test";
 import { EngineFields } from "@/components/why-card";
-import { COPIED, COPY_REFUSED, NOT_REHASHED, REHASHED, SENTINEL, type Row, parseCE, sevTone, shortType, whyOf } from "@/lib/audit-words";
+import { COPIED, COPY_REFUSED, NOT_REHASHED, REHASHED, SENTINEL, type Row, objectLabel, objectNote, objectOf, parseCE, sevTone, shortType, whyOf } from "@/lib/audit-words";
 import { TEST_THIS_CALL } from "@/lib/policy-words";
 import { notify } from "@/lib/notify";
 import { absTime, NONE } from "@/lib/words";
@@ -63,9 +63,10 @@ const idPrefix = (id: string) => (id ? id.slice(0, 13) + "…" : NONE);
 // names, so Test this call opens on the lane the call was made on.
 const LANE_OF: Record<string, PolicyTestPrefill["lane"]> = { "mcp.call": "mcp", "shell.exec": "shell", "net.fetch": "net" };
 
-// testPrefill is the call a decision record holds, ready for the Test a
-// call sheet. It answers null for a record that decided no call, such as an
-// approval or a sentinel verdict, which have nothing to test.
+// testPrefill is the call a decision record holds, with the object it
+// named, ready for the Test a call sheet. It answers null for a record that
+// decided no call, such as an approval or a sentinel verdict, which have
+// nothing to test.
 function testPrefill(row: Row, ce: ReturnType<typeof parseCE>): PolicyTestPrefill | null {
   if (!ce || !whyOf(ce)) return null;
   const d = ce.data || {};
@@ -73,7 +74,7 @@ function testPrefill(row: Row, ce: ReturnType<typeof parseCE>): PolicyTestPrefil
   const lane = LANE_OF[tool] || (tool.startsWith("file.") ? "files" : ce.type === "straza.audit.mcp" ? "mcp" : null);
   if (!lane) return null;
   const paths = Array.isArray(d.paths) ? d.paths.map(String) : [];
-  return {
+  const prefill: PolicyTestPrefill = {
     user: row.username || String(d.user || ""),
     lane,
     app: String(d.app || ""),
@@ -81,6 +82,11 @@ function testPrefill(row: Row, ce: ReturnType<typeof parseCE>): PolicyTestPrefil
     command: String(d.command || ""),
     path: paths[0] || "",
   };
+  // A value the record cut is not the value the call named, so the test
+  // asks for the object instead.
+  const obj = objectOf(ce);
+  if (obj && !obj.sha256) prefill.object = { value: obj.value, id: obj.id };
+  return prefill;
 }
 
 // pretty prints the record the way it is stored, indented. A record that
@@ -110,6 +116,7 @@ type Props = {
 export function RecordSheet({ row, open, onOpenChange, onRevoke, revoked, verified }: Props) {
   const ce = parseCE(row.raw);
   const why = whyOf(ce);
+  const obj = objectOf(ce);
   const prefill = testPrefill(row, ce);
   const [testing, setTesting] = React.useState(false);
   const tone = sevTone(row.severity);
@@ -153,6 +160,11 @@ export function RecordSheet({ row, open, onOpenChange, onRevoke, revoked, verifi
                   {row.tool && <span className="text-[13px] font-normal text-muted-foreground">{row.tool + " "}</span>}
                   {row.what}
                 </p>
+              )}
+              {obj && (
+                <div className="mt-2">
+                  <Facts rows={[[objectLabel(obj), <><span className="font-mono [overflow-wrap:anywhere]">{obj.value}</span>{" "}<span className="text-[13px] text-muted-foreground">{objectNote(obj)}</span></>]]} />
+                </div>
               )}
               <p className="mt-2 text-sm leading-relaxed text-text-2">{why.basis}</p>
               <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{why.context}</p>

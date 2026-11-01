@@ -188,6 +188,14 @@
                     </xsd:appinfo>
                 </xsd:annotation>
             </xsd:element>
+            <xsd:element name="strazaCovers" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Covers</a:displayName>
+                        <a:help>The objects this Straza role covers on each server that pins an object type, directly or through a role it composes. Straza writes it, and an edit in midPoint is replaced at the next sync. A value reads server:type and then every, one named object in quotes, or none. A line that names objects gives one value per object.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
         </xsd:sequence>
     </xsd:complexType>
 

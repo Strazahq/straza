@@ -3,6 +3,10 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # A maintainer starts a run by hand to rehearse the Apple steps. A dispatch
+  # runs only the macOS job, which signs and notarizes a test pkg, keeps it
+  # one day as a workflow artifact and publishes nothing.
+  workflow_dispatch:
 
 permissions:
   contents: write # create the GitHub release
@@ -10,7 +14,241 @@ permissions:
   id-token: write # keyless cosign (GitHub OIDC -> Fulcio)
 
 jobs:
+  # The macOS pkg, signed with the team's Developer ID identities, notarized
+  # by Apple and stapled. The job builds the two darwin straza binaries the
+  # way the goreleaser job does, and that job's post hook proves its own are
+  # byte for byte these two before it lists the pkg in checksums.txt. The
+  # signing secrets live in the macos-signing environment, which admits v*
+  # tags only, and each reaches the env of the one step that reads it. No
+  # step here runs with set -x, and no third-party action runs in this job.
+  macos-pkg:
+    runs-on: macos-26
+    environment: macos-signing
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    outputs:
+      pkg: ${{ steps.version.outputs.pkg }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # A vX.Y.Z tag gets a pkg. A prerelease tag gets none, as it gets no
+      # MSI, and every later step skips. A dispatch packages the commit it
+      # runs on under its git describe version.
+      - id: version
+        name: version and commit
+        run: |
+          set -eu
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            v=${GITHUB_REF_NAME#v}
+            pkg=false
+            if printf '%s' "$GITHUB_REF_NAME" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then pkg=true; fi
+          else
+            if ! d=$(git describe --tags --match 'v[0-9]*'); then
+              echo "git describe found no release tag below $(git rev-parse --short HEAD), so this dispatch has no version for the pkg and signs nothing. Run it on a branch or tag whose history holds a vX.Y.Z tag." >&2
+              exit 1
+            fi
+            v=${d#v}
+            pkg=true
+          fi
+          {
+            echo "version=$v"
+            echo "pkg=$pkg"
+            echo "commit=$(git rev-parse --short HEAD)"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$pkg" = false ]; then
+            echo "$GITHUB_REF_NAME is a prerelease tag, so it gets no macOS pkg, as it gets no MSI, and this job ends here."
+          fi
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        if: steps.version.outputs.pkg == 'true'
+        with:
+          go-version-file: go.mod
+          # Nothing restored from another run builds what this job signs.
+          cache: false
+      # The notices the pkg carries, then the two thin binaries with the
+      # flags of the straza build in .goreleaser.yaml. Their hashes go in the
+      # log, so a build of the same commit elsewhere can be compared.
+      - name: notices and the two darwin binaries
+        if: steps.version.outputs.pkg == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+        run: |
+          set -eu
+          sw_vers
+          xcodebuild -version
+          go version
+          go run ./tools/notices -release -version "$VERSION" -o build/notices/THIRD_PARTY_NOTICES.txt
+          ldflags="-s -w -X github.com/strazahq/straza/internal/version.Version=$VERSION -X github.com/strazahq/straza/internal/version.Commit=$COMMIT"
+          mkdir -p build/macos
+          for arch in arm64 amd64; do
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build -trimpath -ldflags "$ldflags" -o "build/macos/straza-darwin-$arch" ./cmd/straza
+          done
+          shasum -a 256 build/macos/straza-darwin-arm64 build/macos/straza-darwin-amd64
+      # A keychain of this job alone under RUNNER_TEMP, with a random
+      # password that never leaves this step. The private keys are imported
+      # non-extractable and open to codesign and productbuild only, never to
+      # every app as -A would make them. Apple's G2 intermediate is checked
+      # against its pinned sha256 so codesign can build the chain. The .p12
+      # is deleted as soon as it is imported, and the step before the upload
+      # deletes the keychain.
+      - id: keychain
+        name: signing keychain
+        if: steps.version.outputs.pkg == 'true'
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -eu
+          for s in APPLE_DEVELOPER_ID_P12 APPLE_DEVELOPER_ID_P12_PASSWORD; do
+            if [ -z "$(printenv "$s")" ]; then
+              echo "The secret $s of the GitHub environment macos-signing is empty or missing, so nothing was signed. Add it to that environment in the repository's settings, then rerun this job." >&2
+              exit 1
+            fi
+          done
+          dir=$RUNNER_TEMP/straza-signing
+          kc=$dir/signing.keychain-db
+          g2=f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a
+          umask 077
+          mkdir "$dir"
+          kcpw=$(openssl rand -base64 32)
+          security create-keychain -p "$kcpw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kcpw" "$kc"
+          curl -fsS --retry 3 --proto '=https' -o "$dir/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          got=$(shasum -a 256 "$dir/DeveloperIDG2CA.cer" | cut -d' ' -f1)
+          if [ "$got" != "$g2" ]; then
+            echo "Apple's Developer ID G2 intermediate from www.apple.com has sha256 $got, not the pinned $g2, so nothing was signed. Download it again from Apple's certificate authority page. If Apple replaced it, check the new file's subject and dates, then update the pin in .github/workflows/release.yml." >&2
+            exit 1
+          fi
+          security import "$dir/DeveloperIDG2CA.cer" -k "$kc"
+          trap 'rm -f "$dir/developer-id.p12"' EXIT
+          printf '%s' "$APPLE_DEVELOPER_ID_P12" | base64 --decode > "$dir/developer-id.p12"
+          security import "$dir/developer-id.p12" -k "$kc" -f pkcs12 -x -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild
+          rm -f "$dir/developer-id.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc" > /dev/null
+          # The job's keychain goes in front of the user's search list, which
+          # codesign and productbuild read to build the certificate chain.
+          set -- "$kc"
+          while IFS= read -r k; do
+            k=${k#*\"}
+            k=${k%\"*}
+            if [ -n "$k" ]; then set -- "$@" "$k"; fi
+          done <<EOF
+          $(security list-keychains -d user)
+          EOF
+          security list-keychains -d user -s "$@"
+          security list-keychains -d user
+          # Exactly one valid identity of each kind for team WMPWM57KYK. The
+          # binary is signed by SHA-1, and the pkg by common name, the only
+          # form productbuild takes.
+          ids=$(security find-identity -v -p basic "$kc")
+          pick() {
+            m=$(printf '%s\n' "$ids" | grep -E "^ *[0-9]+\) [0-9A-F]{40} \"Developer ID $1: .* \(WMPWM57KYK\)\"$" || true)
+            n=$(printf '%s' "$m" | grep -c . || true)
+            if [ "$n" != 1 ]; then
+              echo "The .p12 in the secret APPLE_DEVELOPER_ID_P12 gives $n valid Developer ID $1 identities of team WMPWM57KYK, and this job signs with exactly one, so nothing was signed. Export one .p12 with one Developer ID Application and one Developer ID Installer identity of that team, each with its private key and issued by the G2 authority, and store it base64 encoded in that secret of the macos-signing environment." >&2
+              exit 1
+            fi
+            printf '%s\n' "$m"
+          }
+          a=$(pick Application)
+          i=$(pick Installer)
+          app=$(printf '%s' "$a" | sed -E 's/^ *[0-9]+\) ([0-9A-F]{40}) .*$/\1/')
+          appname=$(printf '%s' "$a" | sed -E 's/^ *[0-9]+\) [0-9A-F]{40} "(.*)"$/\1/')
+          installer=$(printf '%s' "$i" | sed -E 's/^ *[0-9]+\) [0-9A-F]{40} "(.*)"$/\1/')
+          echo "The binary is signed by $appname, SHA-1 $app, and the pkg by $installer."
+          {
+            echo "keychain=$kc"
+            echo "app=$app"
+            echo "installer=$installer"
+          } >> "$GITHUB_OUTPUT"
+      # The notary profile, stored in the job's keychain after notarytool has
+      # checked the key with Apple. The .p8 file is deleted at once.
+      - name: notary profile
+        if: steps.version.outputs.pkg == 'true'
+        env:
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+        run: |
+          set -eu
+          for s in APPLE_NOTARY_KEY APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID; do
+            if [ -z "$(printenv "$s")" ]; then
+              echo "The secret $s of the GitHub environment macos-signing is empty or missing, so nothing was notarized. Add it to that environment in the repository's settings, then rerun this job." >&2
+              exit 1
+            fi
+          done
+          key=$RUNNER_TEMP/straza-signing/notary.p8
+          umask 077
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$APPLE_NOTARY_KEY" > "$key"
+          xcrun notarytool store-credentials straza-notary --key "$key" --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID" --keychain "$KEYCHAIN"
+          rm -f "$key"
+      # build-pkg.sh stops unless both certificates come from the G2
+      # authority and warns when one ends within 30 days. It signs the
+      # binary, proves with tools/machocmp that codesign added only the
+      # signature, signs the pkg, has Apple notarize it and staples it.
+      - name: signed and notarized pkg
+        if: steps.version.outputs.pkg == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          STRAZA_SIGN_APP: ${{ steps.keychain.outputs.app }}
+          STRAZA_SIGN_INSTALLER: ${{ steps.keychain.outputs.installer }}
+          STRAZA_SIGN_KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+          STRAZA_NOTARY_PROFILE: straza-notary
+          STRAZA_NOTARY_KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+        run: ./deploy/macos/build-pkg.sh "$VERSION" build/macos build/macos/straza-darwin-arm64 build/macos/straza-darwin-amd64
+      # The payload carries the licenses and the notices under
+      # /opt/straza/share/doc, and Gatekeeper's verdict on the pkg goes in
+      # the log.
+      - name: pkg carries the notices
+        if: steps.version.outputs.pkg == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          pkg=build/macos/straza_${VERSION}_darwin_universal.pkg
+          x=$RUNNER_TEMP/straza-pkg
+          pkgutil --expand-full "$pkg" "$x"
+          for f in LICENSE LICENSE-APACHE NOTICE THIRD_PARTY_NOTICES.txt; do
+            if [ -z "$(find "$x" -type f -path "*/Payload/opt/straza/share/doc/$f")" ]; then
+              echo "$pkg has no /opt/straza/share/doc/$f in its payload, so it would ship without its licenses and notices. Check the cp line of deploy/macos/build-pkg.sh, then run the release again." >&2
+              exit 1
+            fi
+          done
+          spctl -a -vvv -t install "$pkg"
+      # The keychain and every key file go on success, failure and cancel
+      # alike, before the upload.
+      - name: delete the signing keychain
+        if: always()
+        run: |
+          dir=$RUNNER_TEMP/straza-signing
+          status=0
+          if [ -e "$dir/signing.keychain-db" ]; then
+            security delete-keychain "$dir/signing.keychain-db" || status=1
+          fi
+          rm -rf "$dir" || status=1
+          exit "$status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.version.outputs.pkg == 'true'
+        with:
+          name: macos-pkg
+          path: |
+            build/macos/straza_${{ steps.version.outputs.version }}_darwin_universal.pkg
+            build/macos/straza-darwin-arm64
+            build/macos/straza-darwin-amd64
+          if-no-files-found: error
+          retention-days: 1
+
+  # A dispatch publishes nothing, so only a tag push reaches this job.
   goreleaser:
+    needs: macos-pkg
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -32,6 +270,36 @@ jobs:
           go run ./tools/uibuild
           git status --porcelain -- internal/server/console/dist
           test -z "$(git status --porcelain -- internal/server/console/dist)"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.macos-pkg.outputs.pkg == 'true'
+        with:
+          name: macos-pkg
+          path: build/macos
+      # A vX.Y.Z tag ships exactly one pkg, of its own version, and a
+      # prerelease ships none. goreleaser accepts an extra_files glob that
+      # matches nothing, so this check keeps a release from going out
+      # without its pkg.
+      - name: the macOS pkg is in place
+        env:
+          PKG_VERSION: ${{ needs.macos-pkg.outputs.version }}
+        run: |
+          set -eu
+          n=$(find build/macos -maxdepth 1 -name '*.pkg' 2>/dev/null | wc -l | tr -d ' ')
+          if printf '%s' "$GITHUB_REF_NAME" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            for f in "straza_${GITHUB_REF_NAME#v}_darwin_universal.pkg" straza-darwin-arm64 straza-darwin-amd64; do
+              if [ ! -f "build/macos/$f" ]; then
+                echo "build/macos/$f is missing, and the release of $GITHUB_REF_NAME ships the macOS job's pkg and compares that job's binaries, so goreleaser does not run. Check the macos-pkg job's upload, made for version $PKG_VERSION, then rerun the failed jobs." >&2
+                exit 1
+              fi
+            done
+            if [ "$n" != 1 ]; then
+              echo "build/macos holds $n pkg files, and the release of $GITHUB_REF_NAME ships exactly one, so goreleaser does not run. Check what the macos-pkg job uploaded, then rerun the failed jobs." >&2
+              exit 1
+            fi
+          elif [ "$n" != 0 ]; then
+            echo "build/macos holds a pkg file, and the prerelease $GITHUB_REF_NAME ships none, so goreleaser does not run. Check why the macos-pkg job uploaded a pkg for a prerelease tag, then rerun the failed jobs." >&2
+            exit 1
+          fi
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
@@ -39,16 +307,47 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Every archive carries the license files and the notices at its root,
-      # and the notices equal a fresh run over the tag's module graph.
-      - name: archives carry the notices
+          # goreleaser reads the version from the tags on the commit, not
+          # from the pushed ref, so a commit that also carries an rc tag
+          # would build the rc version. The pushed tag is the version.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          # The post hook on the straza build compares each darwin binary
+          # with the macOS job's. A prerelease has none, and the hook says so.
+          STRAZA_MACOS_PKG_DIR: ${{ needs.macos-pkg.outputs.pkg == 'true' && format('{0}/build/macos', github.workspace) || '' }}
+      # checksums.txt, the file cosign signs, lists the pkg of a vX.Y.Z tag.
+      - name: checksums.txt covers the macOS pkg
         run: |
           set -eu
-          for a in dist/*.tar.gz dist/*.zip; do
+          if printf '%s' "$GITHUB_REF_NAME" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            name=straza_${GITHUB_REF_NAME#v}_darwin_universal.pkg
+            if ! awk -v n="$name" '$2 == n { found = 1 } END { exit !found }' dist/checksums.txt; then
+              echo "dist/checksums.txt does not list $name, so cosign's signature does not cover the macOS pkg, and the draft release must not be published. Delete the draft, check the checksum extra_files glob in .goreleaser.yaml, then run the release again." >&2
+              exit 1
+            fi
+          fi
+      # Every archive carries the license files and the notices at its root,
+      # every deb and rpm package carries them under /usr/share/doc/straza,
+      # the MSI carries them in its File table, and the notices equal a fresh
+      # run over the tag's module graph.
+      - name: archives and packages carry the notices
+        run: |
+          set -eu
+          for a in dist/*.tar.gz dist/*.zip dist/*.deb dist/*.rpm dist/*.msi; do
             [ -f "$a" ] || continue
-            case "$a" in *.zip) list=$(unzip -Z1 "$a") ;; *) list=$(tar -tzf "$a") ;; esac
+            case "$a" in
+              *.zip) dir='' list=$(unzip -Z1 "$a") ;;
+              *.deb) dir=usr/share/doc/straza/ list=$(dpkg-deb -c "$a" | awk '{print $6}') ;;
+              *.rpm) dir=usr/share/doc/straza/ list=$(rpm -qlp "$a") ;;
+              # ubuntu-latest has no msitools, so the MSI's File table is read
+              # in the same digest-pinned alpine container the MSI is built in.
+              # The leaf names are short|long; keep the long one.
+              *.msi) dir='' list=$(docker run --rm -e A="$a" -v "$PWD:/w" \
+                       alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b \
+                       sh -c 'apk add --no-cache msitools=0.106-r0 >/dev/null 2>&1 && msiinfo export "/w/$A" File | tail -n +4 | tr -d "\r" | cut -f3 | sed "s/.*|//"') ;;
+              *) dir='' list=$(tar -tzf "$a") ;;
+            esac
             for f in THIRD_PARTY_NOTICES.txt NOTICE LICENSE LICENSE-APACHE; do
-              echo "$list" | grep -qxE "(\./)?$f" || { echo "$a lacks $f at its root" >&2; exit 1; }
+              echo "$list" | grep -qxE "(\./|/)?$dir$f" || { echo "$a lacks /$dir$f" >&2; exit 1; }
             done
           done
           tar -xzf dist/*_linux_amd64.tar.gz -C "$RUNNER_TEMP" THIRD_PARTY_NOTICES.txt

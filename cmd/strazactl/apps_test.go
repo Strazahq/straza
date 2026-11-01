@@ -59,9 +59,6 @@ func (s *appsServer) start(t *testing.T) *httptest.Server {
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(body))
 	}
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		jsonOut(w, http.StatusOK, `{"session_id":"ses-1","session_token":"stok-2"}`)
-	})
 	mux.HandleFunc("GET /v1/admin/apps", func(w http.ResponseWriter, r *http.Request) {
 		s.record(r, nil)
 		jsonOut(w, http.StatusOK, appsList)
@@ -140,6 +137,23 @@ func (s *appsServer) start(t *testing.T) *httptest.Server {
 		}
 		jsonOut(w, http.StatusOK, `{"id":"s2","status":"deleted"}`)
 	})
+	mux.HandleFunc("POST /v1/admin/apps/{id}/objects/credential", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		s.record(r, body)
+		if r.PathValue("id") == "demo-tools" {
+			jsonOut(w, http.StatusConflict, `{"error":"demo-tools takes no credential, so Straza lists its objects without one and keeps no listing credential for it."}`)
+			return
+		}
+		jsonOut(w, http.StatusCreated, `{"app":"scout-tools","fingerprint":"c3d9","setAt":"2026-10-18T08:00:00Z"}`)
+	})
+	mux.HandleFunc("DELETE /v1/admin/apps/{id}/objects/credential", func(w http.ResponseWriter, r *http.Request) {
+		s.record(r, nil)
+		if r.PathValue("id") == "demo-tools" {
+			jsonOut(w, http.StatusNotFound, `{"error":"demo-tools has no listing credential stored, so there is nothing to remove."}`)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /v1/admin/catalog/preview", func(w http.ResponseWriter, r *http.Request) {
 		s.record(r, nil)
 		if r.URL.Query().Get("role") == "scout-role" {
@@ -164,7 +178,7 @@ func runApps(t *testing.T, args ...string) (stdout string, s *appsServer, err er
 	s = &appsServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	stdout, _, err = runCLI(t, writeCreds(t, srv.URL), args...)
+	stdout, _, err = runCLI(t, onToken(t, srv.URL), args...)
 	return stdout, s, err
 }
 
@@ -465,6 +479,43 @@ func TestAppsSecretSetAndRemove(t *testing.T) {
 			wantReq: rolesRequest{method: http.MethodDelete, uri: "/v1/admin/apps/scout-tools/secrets/scout-role"},
 		},
 		{
+			name:    "--listing stores the server's listing credential",
+			env:     "s3cret",
+			args:    []string{"apps", "secret", "set", "scout-tools", "--listing"},
+			wantOut: "listing credential set for the MCP server scout-tools, fingerprint c3d9\n",
+			wantReq: rolesRequest{method: http.MethodPost, uri: "/v1/admin/apps/scout-tools/objects/credential", body: `{"value":"s3cret"}`},
+		},
+		{
+			name:    "a listing credential the server has no use for is refused by the server",
+			env:     "s3cret",
+			args:    []string{"apps", "secret", "set", "demo-tools", "--listing"},
+			wantErr: "demo-tools takes no credential, so Straza lists its objects without one and keeps no listing credential for it.",
+			wantReq: rolesRequest{method: http.MethodPost, uri: "/v1/admin/apps/demo-tools/objects/credential", body: `{"value":"s3cret"}`},
+		},
+		{
+			name:    "--listing with --role is refused before the wire",
+			env:     "s3cret",
+			args:    []string{"apps", "secret", "set", "scout-tools", "--listing", "--role", "scout-role"},
+			wantErr: "--listing and --role cannot be used together, because the listing credential belongs to the server and not to a role. Drop --role to set the listing credential, or drop --listing to set the role's override",
+		},
+		{
+			name:    "remove the listing credential",
+			args:    []string{"apps", "secret", "remove", "scout-tools", "--listing"},
+			wantOut: "removed the listing credential for the MCP server scout-tools\n",
+			wantReq: rolesRequest{method: http.MethodDelete, uri: "/v1/admin/apps/scout-tools/objects/credential"},
+		},
+		{
+			name:    "removing a listing credential that is not there surfaces the server's sentence",
+			args:    []string{"apps", "secret", "remove", "demo-tools", "--listing"},
+			wantErr: "demo-tools has no listing credential stored, so there is nothing to remove.",
+			wantReq: rolesRequest{method: http.MethodDelete, uri: "/v1/admin/apps/demo-tools/objects/credential"},
+		},
+		{
+			name:    "remove --listing with --role is refused before the wire",
+			args:    []string{"apps", "secret", "remove", "scout-tools", "--listing", "--role", "scout-role"},
+			wantErr: "--listing and --role cannot be used together, because the listing credential belongs to the server and not to a role. Drop --role to remove the listing credential, or drop --listing to remove the role's override",
+		},
+		{
 			name:    "removing a row that is not there surfaces the server's sentence",
 			args:    []string{"apps", "secret", "remove", "scout-tools", "--role", "ghost"},
 			wantErr: "no secret is stored for the MCP server scout-tools (role ghost)",
@@ -541,6 +592,8 @@ func TestAppsSecretSetPrompt(t *testing.T) {
 			wantBody: `{"value":"typed-secret"}`, wantPrompt: "Secret for the MCP server scout-tools (input hidden): ", wantReads: 1},
 		{name: "the prompt names the role", args: append(append([]string{}, set...), "--role", "scout-role"), terminal: true, typed: "typed-secret",
 			wantBody: `{"role":"scout-role","value":"typed-secret"}`, wantPrompt: "Secret for the MCP server scout-tools, role scout-role (input hidden): ", wantReads: 1},
+		{name: "the prompt names the listing credential", args: append(append([]string{}, set...), "--listing"), terminal: true, typed: "typed-secret",
+			wantBody: `{"value":"typed-secret"}`, wantPrompt: "Listing credential for the MCP server scout-tools (input hidden): ", wantReads: 1},
 		{name: "a non-terminal stdin refuses", args: set, terminal: false,
 			wantErr: "no secret value given: stdin is not a terminal, so strazactl cannot ask for it at a hidden prompt. Run the command in a terminal and type the value at the prompt, or in a script set STRAZA_SECRET_VALUE from a secret manager"},
 		{name: "an empty answer refuses", args: set, terminal: true, typed: "  ",
@@ -556,7 +609,7 @@ func TestAppsSecretSetPrompt(t *testing.T) {
 			s := &appsServer{}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			_, stderr, err := runCLI(t, writeCreds(t, srv.URL), tc.args...)
+			_, stderr, err := runCLI(t, onToken(t, srv.URL), tc.args...)
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("%v: %v", tc.args, err)

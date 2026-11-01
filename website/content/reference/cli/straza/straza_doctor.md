@@ -1,8 +1,8 @@
 ---
 title: straza doctor
-description: Diagnose enrollment, connectivity, snapshot, hook wiring, and the audit spool
+description: Diagnose the background service, enrollment, connectivity, hook wiring, and the audit spool
 pagetype: reference
-weight: 7
+weight: 6
 draft: false
 sources:
   - cmd/straza

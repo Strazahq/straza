@@ -35,7 +35,8 @@ spec:
 		sendTools  = "Send one of the known tools: file.edit, file.read, file.write, mcp.call, net.fetch, other, shell.exec, task.spawn."
 		madeUpTool = `Straza: denied, because the tool "lf-gi-made-up-tool" is not one Straza knows and policy cannot judge it. ` + sendTools
 		noTool     = "Straza: denied, because this tool.pre event names no tool and policy cannot judge it. " + sendTools
-		otherTool  = "Straza: other is not permitted by default in this profile. Ask an admin for a policy rule that allows it."
+		otherTool  = "Straza: this harness tool is one Straza does not classify, and the client sent no tool name, so no rule can allow it. " +
+			"Update the Straza client or the agent kit on this machine, then ask an admin to allow the tool by name."
 	)
 	rm := "rm -rf /tmp/lf-gi-probe"
 	cases := []struct {

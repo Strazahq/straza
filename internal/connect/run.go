@@ -19,9 +19,9 @@ const tokenStdinMax = 16 << 10
 
 // Options is one run of the connect or the disconnect verb. Tool is the
 // command name printed in hints, straza or strazactl. For connect an empty
-// Server lists the connections. User is another user a sponsor or an
-// administrator acts for, and only strazactl sets it. A nil AllowAgents
-// leaves the owner's opt-in alone.
+// Server lists the connections. User is the user whose connections change.
+// strazactl always sets it, because an admin API token is no user, and
+// straza never does. A nil AllowAgents leaves the owner's opt-in alone.
 type Options struct {
 	Tool        string
 	Server      string
@@ -55,7 +55,9 @@ func Run(ctx context.Context, api API, o Options) error {
 	status := statusOf(list, o.Server)
 	if status == nil || status.Kind != "token" {
 		if o.User != "" {
-			return fmt.Errorf("%s uses sign-in, which needs %s's own browser, so nobody can connect on their behalf", o.Server, o.User)
+			return fmt.Errorf("%s uses sign-in, which needs %s's own browser, so nobody can connect on their behalf. "+
+				"A person connects on the Credentials tab of the self-service page. An agent cannot sign in, "+
+				"so an administrator sets credential.agents on %s instead", o.Server, o.User, o.Server)
 		}
 		return SignIn(ctx, api, o.Server, o.Tool, o.Out)
 	}

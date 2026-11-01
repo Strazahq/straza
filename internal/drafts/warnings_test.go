@@ -49,7 +49,7 @@ func TestSetWarnings(t *testing.T) {
 				"ready.pool-empty PolicySet/readers-access No person who could decide rule hold of readers-access holds bot-approvers yet, so every request of that rule waits until it expires. | Assign bot-approvers to a person in your identity manager, or with strazactl assign bot-approvers --user <name>."}},
 		{"a pool a person holds", true, set("{ roles: [readers] }", hold("{ roles: [sec-approvers] }")), "ready.pool-empty", []string{}},
 		{"people who decide their own requests with no device", true, set("{ roles: [dev] }", hold("{ deciders: [sponsor] }")), "ready.decider-device", []string{
-			"ready.decider-device PolicySet/readers-access The requests of rule hold of readers-access go to people who have no enrolled phone or browser, and the console and strazactl cannot decide a person's own request. | Assign them straza-enroll-browser or straza-enroll-mobile, which let them enroll on the self-service page, or run strazactl approvals enroll-token <username> for each of them."}},
+			"ready.decider-device PolicySet/readers-access The requests of rule hold of readers-access go to people who have no enrolled phone or browser, and the console and strazactl cannot decide a person's own request. | Assign them straza-enroll-browser or straza-enroll-mobile, which let them enroll on the self-service page."}},
 		{"people with a device", true, set("{ roles: [readers] }", hold("{ deciders: [sponsor] }")), "ready.decider-device", []string{}},
 		{"no push lane", false, set("{ roles: [readers] }", hold("{ roles: [sec-approvers], timeoutSeconds: 600 }")), "ready.", []string{
 			"ready.no-push PolicySet/readers-access Rule hold of readers-access holds calls, and neither a push lane nor Slack is configured, so a person learns of a request only on the console. | Configure approval.push or approval.channels.slack, or keep someone watching Approvals."}},
@@ -78,7 +78,7 @@ func TestSetWarnings(t *testing.T) {
 			"ready.window-low PolicySet/readers-access Rule hold of readers-access sets approve.retryTTLSeconds to 5, the low end of its range, which a person rarely meets. | Raise it."}},
 		{"a set of one role under another name", true, []Item{{Kind: KindPolicySet, Name: "gate-readers", Op: OpPut,
 			Doc: gainSet("gate-readers", "{ roles: [readers] }", "    - id: d\n      tools: [shell.exec]\n      effect: deny\n")}}, "ready.set-name", []string{
-			"ready.set-name PolicySet/gate-readers gate-readers gates readers and is not named readers-access, so the console's role editor will not read it back. | Name it readers-access."}},
+			"ready.set-name PolicySet/gate-readers gate-readers gates readers and is not named readers-access, so the console's role editor will not read it back. | Rename the set to readers-access, so the role page can edit it."}},
 		{"the server's advisories", true, set("{ roles: [readers] }", "    - id: hold\n      tools: [mcp.call]\n      mode: approve\n      effect: allow\n"), "advisory.", []string{
 			`advisory.approve-unrouted PolicySet/readers-access rule "hold": no approver named, so each request routes to the person behind the agent: an agent's sponsor, or the person themself when they run their own agent. An agent with no usable sponsor is denied immediately. Give every agent this rule can match a sponsor, or name approve.roles / approve.deciders | `}},
 	}
@@ -91,6 +91,42 @@ func TestSetWarnings(t *testing.T) {
 				t.Fatalf("refused: %q", findingLines(v.Refused))
 			}
 			if got := only(warningLines(v.Warnings), tc.prefix); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Warnings\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPoolEmptyReadsHoldersInForce pins that an approver pool whose only
+// person is assigned from a later start reads as empty, because nobody
+// can decide its requests until that start.
+func TestPoolEmptyReadsHoldersInForce(t *testing.T) {
+	t.Parallel()
+	dana := Holder{Username: "dana", UserType: "human", Devices: 1}
+	cases := []struct {
+		name    string
+		holders []Holder
+		windows []RoleWindow
+		want    []string
+	}{
+		{"a person assigned from a later start", nil, []RoleWindow{{Role: "night-approvers", From: inHours(24)}}, []string{
+			"ready.pool-empty PolicySet/readers-access No person who could decide rule hold of readers-access holds night-approvers yet, so every request of that rule waits until it expires." +
+				" | Assign night-approvers to a person in your identity manager, or with strazactl assign night-approvers --user <name>."}},
+		{"a person who holds it now", []Holder{dana}, nil, []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := gainWorld()
+			w.Roles["night-approvers"] = Role{ID: "r9", Name: "night-approvers", Kind: RoleKindApprover, Plane: PlaneAccess}
+			w.Holders["night-approvers"] = tc.holders
+			w.Windows = map[string][]RoleWindow{"dana": tc.windows}
+			v := Check(w, stamped(w, Item{Kind: KindPolicySet, Name: "readers-access", Op: OpPut, Doc: gainSet("readers-access", "{ roles: [readers] }",
+				"    - id: hold\n      tools: [mcp.call]\n      toolNames: { allow: [get_me] }\n      mode: approve\n      approve: { roles: [night-approvers] }\n")}),
+				CheckInput{Now: checkNow})
+			if len(v.Refused) > 0 {
+				t.Fatalf("refused: %q", findingLines(v.Refused))
+			}
+			if got := only(warningLines(v.Warnings), "ready.pool-empty"); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("Warnings\n got %q\nwant %q", got, tc.want)
 			}
 		})
@@ -180,6 +216,70 @@ func TestNarrowingWarnings(t *testing.T) {
 				t.Fatalf("refused: %q", findingLines(v.Refused))
 			}
 			if got := only(warningLines(v.Warnings), tc.prefix); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Warnings\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDestructiveWarningReadsTheHintAndTheGate pins heuristic.destructive:
+// a tool warns when it runs with no approval after publishing and either
+// the server marks it destructive, or it sets no hint, does not say it is
+// read-only and its name says it destroys something. An explicit
+// destructiveHint false or a readOnlyHint silences the name, and a gate
+// the draft adds silences both. A server the draft puts keeps the hints of its live tools
+// while it runs the same way, and one that moves has its hints read once
+// it is live.
+func TestDestructiveWarningReadsTheHintAndTheGate(t *testing.T) {
+	t.Parallel()
+	readers := func(tools string) Item {
+		return gainRole("readers", "    kind: application\n    bindings:\n        - app: github\n          tools: "+tools+"\n")
+	}
+	gated := setPut("readers-access", gainSet("readers-access", "{ roles: [readers] }",
+		"    - id: hold\n      tools: [mcp.call]\n      toolNames: { allow: [push_files, delete_repo] }\n      mode: approve\n      approve: { roles: [sec-approvers] }\n"))
+	github := func(url string) *App {
+		return &App{Runtime: "remote", URL: url, Manifest: "{}", Credential: CredentialNone, Exposure: []string{"*"}, Destructive: map[string]bool{"push_files": true}}
+	}
+	marked := "heuristic.destructive App/github push_files runs with no approval, and github marks it as destructive. | Gate it with an approval rule, or leave it out of the role."
+	named := "heuristic.destructive App/github delete_repo on github does not say it is read-only, and its name says it deletes. | Gate it with an approval rule, or leave it out of the role."
+	cases := []struct {
+		name     string
+		hints    map[string]bool
+		readOnly []string
+		facts    *App
+		items    []Item
+		want     []string
+	}{
+		{"a tool the server marks destructive", map[string]bool{"push_files": true}, nil, nil, []Item{readers("[get_me, push_files]")}, []string{marked}},
+		{"two such tools", map[string]bool{"push_files": true, "delete_repo": true}, nil, nil, []Item{readers("[get_me, push_files, delete_repo]")}, []string{
+			"heuristic.destructive App/github delete_repo and push_files run with no approval, and github marks them as destructive. | Gate them with an approval rule, or leave them out of the role."}},
+		{"such a tool the draft gates", map[string]bool{"push_files": true}, nil, nil, []Item{readers("[get_me, push_files]"), gated}, nil},
+		{"a name that says it deletes", nil, nil, nil, []Item{readers("[get_me, delete_repo]")}, []string{named}},
+		{"such a name the draft gates", nil, nil, nil, []Item{readers("[get_me, delete_repo]"), gated}, nil},
+		{"such a name the server marks not destructive", map[string]bool{"delete_repo": false}, nil, nil, []Item{readers("[get_me, delete_repo]")}, nil},
+		{"such a name the server marks read-only", nil, []string{"get_me", "delete_repo"}, nil, []Item{readers("[get_me, delete_repo]")}, nil},
+		{"a server put on its live address", map[string]bool{"push_files": true}, nil, github("https://api.github.com/mcp"), []Item{appItem("github"), readers("[get_me, push_files]")}, []string{marked}},
+		{"a server moved to another address", nil, nil, github("https://copilot.github.com/mcp"), []Item{appItem("github"), readers("[get_me, push_files]")}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := gainWorld()
+			app := w.Apps["github"]
+			app.Destructive = tc.hints
+			if tc.readOnly != nil {
+				app.ReadOnly = tc.readOnly
+			}
+			w.Apps["github"] = app
+			in := CheckInput{Now: checkNow}
+			if tc.facts != nil {
+				in.Apps = map[string]App{"github": *tc.facts}
+				in.Contacted = map[string][]string{"App/github": {"delete_repo", "get_me", "push_files"}}
+			}
+			v := Check(w, stamped(w, tc.items...), in)
+			if len(v.Refused) > 0 {
+				t.Fatalf("refused: %q", findingLines(v.Refused))
+			}
+			if got := only(warningLines(v.Warnings), codeDestructive); !sameLines(got, tc.want) {
 				t.Errorf("Warnings\n got %q\nwant %q", got, tc.want)
 			}
 		})

@@ -385,8 +385,8 @@ input != null ? 'MCS:' + input : null
              delete, readOnly displayName), so the focus is a mirror with
              assignable membership, never a mastered object. The read-only
              projection (role, roleKind, plane, description, apps, tools,
-             policies, server, administers) is the role's OWN data: what
-             assigning it reaches, visible in certification. -->
+             policies, server, administers, covers) is the role's OWN data:
+             what assigning it reaches, visible in certification. -->
 
         <!-- ONE object type for every kind. The archetype comes from the
              inbound mapping on ri:roleKind below: Straza business role,
@@ -570,6 +570,23 @@ return (kind == 'business' ? 'BR:' : 'AR:') + input
             <attribute>
                 <ref>ri:tools</ref>
                 <displayName>Tools granted</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:covers</ref>
+                <displayName>Covers</displayName>
+                <!-- scim-profile revision 21: what the role covers on each
+                     server that pins an object type, one value per named
+                     object or one for every or none. Absent on such a role
+                     only when a read failed, and then apps and tools are
+                     too. Mapped into an extension item, never displayName,
+                     for the reason objects/README.md's displayName saga gives. -->
+                <inbound>
+                    <name>straza-wire-role-covers</name>
+                    <strength>strong</strength>
+                    <target>
+                        <path>extension/ext:strazaCovers</path>
+                    </target>
+                </inbound>
             </attribute>
             <attribute>
                 <ref>ri:policies</ref>

@@ -8,7 +8,7 @@ keywords: architecture overview decision flow control plane outcome snapshot
 ---
 
 
-When an agent asks to run a tool on its machine, the straza hook there decides before the tool runs. It decides from a signed copy of your policy that it already holds, so the decision does not wait on the network. A rule that allows or denies ends the call there, and a denied agent reads the rule's reason. A few rules ask for more first: a person's approval, the requester's own confirmation, a built-in check of the command, or a second decision on the server.
+When an agent asks to run a tool on its machine, the straza hook there asks `straza service`, the Straza background service on the same machine, and the service decides before the tool runs. It decides from a signed copy of your policy that it already holds, so the decision does not wait on the network. A rule that allows or denies ends the call there, and a denied agent reads the rule's reason. A few rules ask for more first: a person's approval, the requester's own confirmation, a built-in check of the command, or a second decision on the server.
 
 {{< diagram name="decision-flow" caption="A Claude Code call to `rm -rf /tmp/x`, decided under the standalone starter policy. Codex CLI and Gemini CLI go through the same steps with their own hook formats." >}}
 
@@ -31,7 +31,7 @@ Every outcome that needs something it cannot get, such as a server it cannot rea
 ## Where the policy comes from
 
 
-An admin activates a PolicySet. strazad compiles every active set into one snapshot and signs it. Each client fetches the snapshot, checks the signature against the keys it pinned when the machine enrolled, and uses it only after that check passes.
+An admin activates a PolicySet. strazad compiles every active set into one snapshot and signs it. The background service on each machine fetches the snapshot, checks the signature against the keys it pinned when the machine enrolled, and uses it only after that check passes.
 
 {{< diagram name="policy-distribution" caption="How one activation reaches every machine. Each client decides from its own verified copy, and a copy that fails the check is never used." >}}
 
@@ -49,6 +49,9 @@ Three paths lead to the same policy engine and the same snapshot format, so a ru
 An action that takes none of these paths is outside Straza's view. The [Trust model and limits]({{< relref "concepts/trust-model-and-non-goals.md" >}}) page says what each path is worth.
 
 
+At the gateway, one call passes its checks in a fixed order. strazad first finds the tool among the tools the session's roles reach, then applies the server's rate limit. On a server that pins an object type, such as the repositories behind one GitHub App, it next reads the object the call names from its arguments and looks for a role the caller holds that covers that object. That check runs before the policy decision on the call, so no rule can allow a call it refused, and nobody is asked to approve one. [MCP servers and the gateway]({{< relref "concepts/mcp-apps-and-the-gateway.md#the-objects-a-role-covers" >}}) explains which objects a role covers.
+
+
 The overview below shows the whole system around those paths, with strazad's stores and event bus, the identity feeds, the upstream MCP servers and phone approval around the client. Hover a part to light its connections.
 
 ![Diagram: the agent harnesses, the straza client and the parts of strazad, with the identity provider, the identity manager, upstream MCP servers and the approver phone around them](../../static/diagrams/architecture-overview.png)
@@ -56,26 +59,26 @@ The overview below shows the whole system around those paths, with strazad's sto
 ## When Straza cannot decide
 
 
-Straza fails closed, so an unknown state stops the agent instead of letting it run ungoverned. A missing binary, a snapshot that cannot be verified, a malformed hook payload, or an unreachable server on a call that needs it each end in a deny that names the cause and the next step.
+Straza fails closed, so an unknown state stops the agent instead of letting it run ungoverned. A missing binary, a background service that does not answer, a snapshot that cannot be verified, a malformed hook payload, or an unreachable server on a call that needs it each end in a deny that names the cause and the next step.
 
 When a client's token expires and the server is out of reach, a grace period sets how long the client keeps deciding from its cached snapshot. It is zero in the enterprise profile and 15 minutes in the standalone profile, as [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#sessions-and-the-client" >}}) lists with every other limit. The cost is real. A bad deploy of strazad halts every enterprise agent until it is fixed, and a laptop that loses its network mid-session stops after the grace period. Deciding from stale state or allowing on error would turn every outage into an ungoverned hour, and the audit record could no longer claim that every action was decided.
 
 {{< details summary="How it works inside" >}}
 
-A person's machine enrolls once, before its first call. `straza enroll` opens a device sign-in at the issuer that strazad advertises: your identity provider in the enterprise profile, or the built-in issuer in standalone. Enrolling registers the device and pins the keys that verify policy snapshots. The server returns a device credential that can only check in. A device credential lasts 30 days from its issue or its last renewal. A check-in renews it once it is past half that life, so a machine that stops checking in loses it 15 to 30 days after its last check-in.
+A person's machine enrolls before its first call. `straza enroll` asks the service, which makes an Ed25519 key that never leaves it and opens the person's browser at the issuer that strazad advertises: your identity provider in the enterprise profile, or the built-in issuer in standalone. The service receives the answer on a port of 127.0.0.1, and strazad registers the device with that key only when the browser sign-in names the key and is at most 10 minutes old. A machine with no display signs in with a code instead, which names no key, so the enterprise profile refuses it by default. Enrolling also pins the keys that verify policy snapshots. The enrollment lasts until its sign-in deadline, 7 days from the sign-in by default, and then the person runs `straza enroll` and signs in again.
 
-At session start the hook checks in. strazad verifies the device credential and consults its in-memory denylist before it reads anything from the store. It then measures the attestation level of the install, resolves the user's effective roles, and mints an Ed25519 session token. The token binds the user, the session, the device, the harness, the attestation level, a hash of the roles and the active snapshot id. It lives 300 seconds, and every server path that consumes it verifies it without a database read. The answer also carries the knowledge packs bound to the user's roles. The hook tells the agent in its own context that governance is active and that a denied call carries its reason.
-
-
-On the machine, the harness hands the hook its own event on standard input. An adapter for that harness turns it into one canonical event with a tool from a fixed list, and the engine evaluates it in memory against the verified snapshot. An allow exits 0 and the tool runs. A deny writes the reason to standard error and exits 2, so the harness does not run the tool and the model reads the reason. Gemini CLI reads a JSON decision on standard output instead and ignores the exit code.
-
-The extra steps of the outcomes table run like this. Classify runs the built-in heuristic on the machine with a one-second deadline. Approve asks strazad to open a request for a person, or to use one already decided. Confirm does the same with the requester as the only decider. With serverCheck, the client sends the call to strazad, which decides it again online.
+At session start the hook asks the service to check in. The service signs the check-in with the key, over a nonce from strazad and a counter above the last one, and sends the hashes it measured of its own binary and of a managed install's root-owned files. strazad verifies the proof against the key on the device row, checks its in-memory denylist, the user's status and the sign-in deadline, computes the attestation level of the install, resolves the user's effective roles, and mints an Ed25519 session token. The token binds the user, the session, the device, the harness, the attestation level, a hash of the roles, the active snapshot id and the key's thumbprint, so it works only with a fresh proof from that key. It lives 300 seconds, and every server path that consumes it verifies it without a database read. The answer also carries the knowledge packs bound to the user's roles. The hook tells the agent in its own context that governance is active and that a denied call carries its reason.
 
 
-A snapshot is built when a set is activated. Activation writes a CBOR document, signs it with the server's Ed25519 snapshot key, and names it by the SHA-256 of the signed bytes, so two identical policy states have the same id. The client verifies the signature against its pinned keys and checks that the id matches the bytes. A live client looks for a new snapshot after a decision, on the daemon's 30-second tick, when it renews its token, and when a policy push tells it to pull at once.
+On the machine, the harness hands the hook its own event on standard input. An adapter for that harness turns it into one canonical event with a tool from a fixed list, and the hook passes it to the service over the local socket, or the named pipe on Windows. The service's engine evaluates it in memory against the verified snapshot. An allow exits 0 and the tool runs. A deny writes the reason to standard error and exits 2, so the harness does not run the tool and the model reads the reason. Gemini CLI reads a JSON decision on standard output instead and ignores the exit code.
+
+The extra steps of the outcomes table run like this. Classify runs the built-in heuristic in the service with a one-second deadline. Approve asks strazad to open a request for a person, or to use one already decided. Confirm does the same with the requester as the only decider. With serverCheck, the service sends the call to strazad, which decides it again online.
 
 
-Audit delivery follows the decision. The client spools its records and uploads them in batches. Server records pass through an in-memory queue to a transactional outbox, then through the event stream into the hash chain. Records in the outbox are durable, while a crash can lose server records still in memory. A full enterprise queue can delay a request, and the client's spool is bounded. [Evidence and audit]({{< relref "concepts/evidence.md" >}}) explains the delivery path and its limits.
+A snapshot is built when a set is activated. Activation writes a CBOR document, signs it with the server's Ed25519 snapshot key, and names it by the SHA-256 of the signed bytes, so two identical policy states have the same id. The service verifies the signature against its pinned keys and checks that the id matches the bytes. It picks up a new snapshot when a session starts, when a session's token renews, at once when a policy push arrives on a session's stream, and after a decision once its last check for a newer snapshot is `snapshotLagSeconds` old, 30 seconds by default.
+
+
+Audit delivery follows the decision. The service spools the records of each user and uploads them in batches. Server records pass through an in-memory queue to a transactional outbox, then through the event stream into the hash chain. Records in the outbox are durable, while a crash can lose server records still in memory. A full enterprise queue can delay a request, and the client's spool is bounded. [Evidence and audit]({{< relref "concepts/evidence.md" >}}) explains the delivery path and its limits.
 
 The project's speed budget for the local decision is under 100 microseconds at the 99th percentile on a snapshot of 10,000 rules. For the whole hook, process start included, it is under 25 milliseconds at the 95th percentile. The load rig under `test/load` reproduces both numbers on your own hardware. Classify and approve are exempt, because they are meant for a few chosen calls.
 

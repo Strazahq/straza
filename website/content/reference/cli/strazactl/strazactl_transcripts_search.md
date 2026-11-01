@@ -2,7 +2,7 @@
 title: strazactl transcripts search
 description: 'Find who said what: substring scan and/or exact-value match'
 pagetype: reference
-weight: 103
+weight: 99
 draft: false
 sources:
   - cmd/strazactl
@@ -33,7 +33,7 @@ strazactl transcripts search [pattern] [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -54,6 +54,13 @@ services:
       # The enterprise profile requires an external IdP. Set your issuer:
       # STRAZA_OIDC_ISSUER: https://idp.example.com
       # STRAZA_OIDC_CLIENT_ID: straza
+      # Register two redirects for the client at the IdP, as the pages under
+      # docs.straza.ai/guides/connect-identity/ show: the address people open
+      # the console at plus /console/signin, and http://127.0.0.1/callback for
+      # straza enroll. An IdP that matches the port of that loopback redirect
+      # exactly needs a fixed port. Register it there and set it here, from
+      # 1024 to 65535:
+      # STRAZA_OIDC_LOOPBACK_PORT: "8765"
       # Phone approval delivery. The hosted relay is on, so the Straza
       # approver app on iOS and Android gets the request with no Apple or
       # Firebase account on your side. strazad mints an anonymous token into

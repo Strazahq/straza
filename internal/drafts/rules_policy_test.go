@@ -1,6 +1,7 @@
 package drafts
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -188,5 +189,69 @@ spec:
 				t.Errorf("violations = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestByNameViolations pins the write gate of a rule that names harness
+// tools: it lists only other, carries no other matcher and takes whole
+// names, and it allows a classified tool by name only when the published
+// set already did, so a set keeps that rule after a release classifies the
+// tool.
+func TestByNameViolations(t *testing.T) {
+	t.Parallel()
+	parse := func(t *testing.T, rules string) policy.Document {
+		t.Helper()
+		doc, err := policy.Parse([]byte("apiVersion: straza.dev/v1beta1\nkind: PolicySet\nmetadata: { name: by-name }\nspec:\n  rules:\n" + rules))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return doc
+	}
+	classified := func() (map[string]string, error) {
+		return map[string]string{"Bash": policy.ToolShellExec, "SubagentHandback": policy.ToolTaskSpawn}, nil
+	}
+	const handback = "    - id: handback\n      tools: [other]\n      toolNames: { allow: [SubagentHandback] }\n"
+	cases := []struct {
+		name, rules, live string
+		want              []string
+	}{
+		{"an unclassified name passes", "    - id: future\n      tools: [other]\n      toolNames: { allow: [FutureTool] }\n", "", nil},
+		{"a classified name on the deny side passes", "    - id: no-bash\n      tools: [other]\n      toolNames: { deny: [Bash] }\n", "", nil},
+		{"a toolNames rule without other is not a by-name rule", "    - id: mcp\n      toolNames: { allow: [\"read_*\"] }\n", "", nil},
+		{"a classified name the live set allowed stays", handback, handback, nil},
+		{"a classified name on the allow side is refused", "    - id: bash\n      tools: [other]\n      toolNames: { allow: [Bash] }\n", "", []string{
+			`rule "bash": toolNames.allow names Bash, which Straza already classifies as shell.exec. Allow it with a shell.exec rule, so the rules for that kind keep governing it.`}},
+		{"a newly added classified name is refused", handback, "    - id: handback\n      tools: [other]\n      toolNames: { deny: [SubagentHandback] }\n", []string{
+			`rule "handback": toolNames.allow names SubagentHandback, which Straza already classifies as task.spawn. Allow it with a task.spawn rule, so the rules for that kind keep governing it.`}},
+		{"a pattern is refused", "    - id: subs\n      tools: [other]\n      toolNames: { allow: [\"Sub*\"], deny: [\"re:Cron.*\"] }\n", "", []string{
+			`rule "subs": toolNames on the other tool takes exact tool names only, and "Sub*", "re:Cron.*" are patterns. Straza compares these names whole, so a pattern matches no tool. Write each name in full, for example SubagentHandback.`}},
+		{"another tool kind is refused", "    - id: mixed\n      tools: [other, shell.exec]\n      toolNames: { deny: [FutureTool] }\n", "", []string{
+			`rule "mixed": a rule that names harness tools in toolNames lists only other in tools, because the names pick the tools. Move the other tool kinds to a rule of their own.`}},
+		{"another matcher is refused", "    - id: extra\n      tools: [other]\n      toolNames: { deny: [FutureTool] }\n      command: { denyPatterns: [\"rm *\"] }\n", "", []string{
+			`rule "extra": a rule that names harness tools takes no command block, because it governs exactly the tools it names. Move that block to a rule of its own.`}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var live policy.Document
+			if tc.live != "" {
+				live = parse(t, tc.live)
+			}
+			if got := ByNameViolations(parse(t, tc.rules), live, classified); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("violations = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// The gate fails closed: a table it cannot read refuses a set with a
+	// by-name rule, and a set without one never reads it.
+	broken := func() (map[string]string, error) { return nil, errors.New("embedded mappings unreadable") }
+	future := parse(t, "    - id: future\n      tools: [other]\n      toolNames: { allow: [FutureTool] }\n")
+	for _, tools := range []func() (map[string]string, error){broken, nil} {
+		if got := ByNameViolations(future, policy.Document{}, tools); len(got) != 1 || !strings.Contains(got[0], "could not read its built-in tool mappings") {
+			t.Errorf("violations with no table = %q, want the one fail-closed refusal", got)
+		}
+	}
+	if got := ByNameViolations(parse(t, "    - id: plain\n      tools: [shell.exec]\n      effect: allow\n"), policy.Document{}, broken); got != nil {
+		t.Errorf("a set without a by-name rule read the table: %q", got)
 	}
 }

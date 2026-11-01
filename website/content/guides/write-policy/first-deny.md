@@ -23,7 +23,7 @@ A policy set is one YAML document that says what the sessions of a role may do. 
 ## Before you start {.nostep}
 
 
-You need an administrator's login, an application role, a user who holds it, and a machine enrolled as that user, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. This page uses the role `local-tools` and the user `dana`. The role reaches no MCP server and is there for policy rules only, and only the CLI makes such a role:
+You need an administrator's console sign-in, or an admin API token for `strazactl` in `STRAZA_API_TOKEN` minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows, an application role, a user who holds it, and a machine enrolled as that user, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. This page uses the role `local-tools` and the user `dana`. The role reaches no MCP server and is there for policy rules only, and only the CLI makes such a role:
 
 {{< command terminal="Terminal" purpose="administration" >}}
 ```sh
@@ -126,7 +126,7 @@ The listing is trimmed to the two sets that matter here.
 {{< /cli >}}
 
 
-A session that is already running picks up the new snapshot when its client next renews the five-minute session token, so it can decide from the old snapshot for a few minutes. To see the change at once, start a new session.
+A session that is already running picks up the new snapshot as soon as the server announces it on the session's push stream, because `straza service` then renews the session at once. When that stream is down, a session that keeps working picks it up within about one call plus 30 seconds, because after a decision the service asks the server for a newer snapshot at most every 30 seconds, or every `snapshotLagSeconds` of the managed config. An idle session picks it up at its first call back when that call renews the session, which it does once 120 seconds or less of its token remain, and otherwise from the call after it. To see the change at once, start a new session.
 
 ## Prove the deny through the hook
 
@@ -179,7 +179,7 @@ exit 0
 ## Read the audit record
 
 
-Each hook run spools its record and starts a detached background upload, the hidden `straza drain` command, so both decisions land in the audit log as soon as that upload completes.
+`straza service` spools the record of each decision and starts an upload at once, so both decisions land in the audit log as soon as that upload completes.
 
 {{< console >}}
 {{< clicks "Users" "dana" "open" >}}

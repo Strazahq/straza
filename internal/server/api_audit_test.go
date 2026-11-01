@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -92,6 +95,62 @@ func TestAuditChainEndToEnd(t *testing.T) {
 	}
 }
 
+// TestHookRecordOfAHugeCommandIsBounded pins that no hook record can stop
+// the chain: a decide whose command is 900 KiB of <, which the record
+// escapes into 5.4 MB, still answers its decision, its one record is cut to
+// the bound with the command's length and hash, the relay publishes it, and
+// the record of the next decision reaches the chain behind it.
+func TestHookRecordOfAHugeCommandIsBounded(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	seedIdentity(t, app)
+	token, _ := checkinToken(t, app, base)
+
+	command := strings.Repeat("<", 900<<10)
+	req, _ := http.NewRequest(http.MethodPost, base+"/v1/decide",
+		strings.NewReader(`{"event":{"kind":"tool.pre","tool":"shell.exec","command":"`+command+`"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	var answer struct{ Effect string }
+	if err := json.Unmarshal(raw, &answer); err != nil || resp.StatusCode != http.StatusOK || answer.Effect == "" {
+		t.Fatalf("decide = %d %.300s, want its decision", resp.StatusCode, raw)
+	}
+	decide(t, base, token, map[string]any{"kind": "tool.pre", "tool": "shell.exec", "command": "echo next"})
+	waitChainData(t, app, "echo next")
+
+	sum := sha256.Sum256([]byte(command))
+	mark := fmt.Sprintf("... (%d bytes, sha256 %s)", len(command), hex.EncodeToString(sum[:]))
+	recs, _ := app.store.Audit().List(context.Background(), 0, 1000)
+	var cut []store.AuditRecord
+	for _, rec := range recs {
+		var ce struct {
+			Data map[string]any `json:"data"`
+		}
+		_ = json.Unmarshal([]byte(rec.CE), &ce)
+		if got, _ := ce.Data["command"].(string); strings.HasPrefix(got, "<") {
+			if prefix, ok := strings.CutSuffix(got, mark); !ok || strings.Trim(prefix, "<") != "" {
+				t.Fatalf("chained command ends ...%s, want only < followed by %q", got[max(0, len(got)-120):], mark)
+			}
+			cut = append(cut, rec)
+		}
+	}
+	if len(cut) != 1 || len(cut[0].CE) > store.MaxRecordBytes {
+		t.Fatalf("the huge command has %d chain records, want one at or under %d bytes", len(cut), store.MaxRecordBytes)
+	}
+	rows, _ := app.store.Outbox().ListRecent(context.Background(), 50)
+	for _, row := range rows {
+		if row.CE == cut[0].CE && !row.Published {
+			t.Fatalf("the outbox row %s holds the chained record and is not marked published", row.ID)
+		}
+	}
+}
+
 // TestAuditAtLeastOnceDedup pins crash safety: the same CloudEvent
 // delivered twice (relay re-publish after a crash between publish and mark)
 // produces exactly one chain entry.
@@ -171,6 +230,40 @@ func TestAuditBatchIngest(t *testing.T) {
 	if !foundSpooled {
 		t.Error("spooled event did not reach the chain")
 	}
+}
+
+// TestAuditBatchRecordWithAHugeIdPublishes pins that a spooled record whose
+// client-chosen id is 1.2 MiB, over the bus's payload, still reaches the
+// chain: its id is cut with its length and hash, the record keeps its
+// command, and the record behind it publishes too.
+func TestAuditBatchRecordWithAHugeIdPublishes(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	seedIdentity(t, app)
+	token, _ := checkinToken(t, app, base)
+
+	id := strings.Repeat("i", 1200<<10)
+	batch := map[string]any{"events": []map[string]any{
+		{"id": id, "type": "straza.audit.tool", "data": map[string]any{"event": "tool.pre", "tool": "shell.exec", "command": "huge-id"}},
+		{"data": map[string]any{"event": "tool.pre", "tool": "shell.exec", "command": "after-huge-id"}},
+	}}
+	if code, resp := postJSONAuth(t, base+"/v1/audit/batch", token, batch); code != http.StatusOK || resp["accepted"] != float64(2) {
+		t.Fatalf("batch = %d %v", code, resp)
+	}
+	waitChainData(t, app, "after-huge-id")
+	waitChainData(t, app, "huge-id")
+	sum := sha256.Sum256([]byte(id))
+	mark := fmt.Sprintf("... (%d bytes, sha256 %s)", len(id), hex.EncodeToString(sum[:]))
+	recs, _ := app.store.Audit().List(context.Background(), 0, 1000)
+	for _, rec := range recs {
+		if got := ceIDOf([]byte(rec.CE)); strings.HasPrefix(got, "iii") {
+			if prefix, ok := strings.CutSuffix(got, mark); !ok || strings.Trim(prefix, "i") != "" || len(rec.CE) > store.MaxRecordBytes {
+				t.Fatalf("chained id ends ...%s in a record of %d bytes, want only i followed by %q", got[max(0, len(got)-120):], len(rec.CE), mark)
+			}
+			return
+		}
+	}
+	t.Fatal("no chained record carries the cut id")
 }
 
 // TestAuditBatchStoreFault pins the all-or-nothing ingest contract: the

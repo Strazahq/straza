@@ -44,20 +44,27 @@
   "clients": [
     {
       "clientId": "straza",
-      "name": "Straza (device flow)",
+      "name": "Straza",
+      "description": "Sign-in for straza enroll and the console: a browser on a loopback redirect with any port and PKCE S256, or a device code. Direct access grants serve the seed and the eval helpers.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
-      "standardFlowEnabled": false,
+      "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
-      "redirectUris": [],
+      "redirectUris": [
+        "http://127.0.0.1/callback",
+        "http://localhost:8420/console/signin",
+        "http://127.0.0.1:8420/console/signin"
+      ],
       "webOrigins": [
-        "http://localhost:8420"
+        "http://localhost:8420",
+        "http://127.0.0.1:8420"
       ],
       "attributes": {
-        "oauth2.device.authorization.grant.enabled": "true"
+        "oauth2.device.authorization.grant.enabled": "true",
+        "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
         {

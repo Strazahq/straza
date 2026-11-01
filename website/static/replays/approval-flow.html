@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>approval flow · Straza</title>
 <style>
@@ -192,7 +193,7 @@ button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accen
   <div class="pane" data-pane="approver">
     <div class="pane-top">
       <span class="lights"><i></i><i></i><i></i></span>
-      <span class="pane-title">security ▸ approvals</span>
+      <span class="pane-title">console ▸ approvals</span>
       <span class="pane-tag">mode: approve</span>
     </div>
     <div class="pane-body" data-body="approver"></div>
@@ -212,13 +213,12 @@ button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accen
 'use strict';
  
 var SCENE = {
-  title: "approve → a human decides → the retry runs",
+  title: "approve → a person decides in the console → the call runs",
   loop: false, autoplay: false,            
-  idleHint: "Press Play: an agent calls a gated tool, a human approves, the call completes. Toggle the approver channel.",
+  idleHint: "Press Play: an agent calls a gated tool, a person approves in the console, the call completes. Toggle the lane.",
   defaultVariant: "console",
   variants: [
-    { id:"console", label:"console approver" },
-    { id:"cli",     label:"strazactl approver" },
+    { id:"console", label:"gateway lane · held call" },
     { id:"hook",    label:"hook lane · retry" }
   ],
   timing: { pause:750, hold:2200, charMsUser:40, charMsModel:28, sweep:600 },
@@ -227,7 +227,7 @@ var SCENE = {
      
     { pane:"agent", speaker:"model", variant:"console", text:"I'll offboard the contractor's account.", action:"type", ms:480, prov:"I" },
     { pane:"agent", speaker:"cc", variant:"console", dim:true, charMs:0, ms:520, poster:true,
-      text:"gateway injects a required field _straza_justification, description: Required by Straza: briefly state why this call is needed; a human approver will read it.",
+      text:"gateway injects a required field _straza_justification, description: Required by Straza: briefly state why this call is needed; an approver will read it.",
       prov:"V16" },
     { pane:"agent", speaker:"model", variant:"console", text:"▸ straza · midpoint__disable_user", action:"type", charMs:28, ms:340, prov:"I" },
     { pane:"agent", speaker:"model", variant:"console", charMs:0, ms:560, poster:true,
@@ -236,24 +236,29 @@ var SCENE = {
     { pane:"agent", speaker:"STRAZA", variant:"console", id:"wait", charMs:0, ms:640,
       text:"⏳ waiting for approval…", prov:"I" },
     { action:"sweep", variant:"console", ms:900, target:"wait" },
-    { pane:"approver", speaker:"console", variant:"console", charMs:0, ms:760, poster:true,
-      text:"Console is the always-on approval channel; a firing mode: approve rule waits here. Timeout = deny.",
-      prov:"V17" },
-    { pane:"approver", speaker:"console", variant:"console", charMs:0, ms:440, poster:true,
-      text:"Requested action   mcp.call midpoint:disable_user", prov:"V17,a" },
+    { pane:"approver", speaker:"console", variant:"console", dim:true, charMs:0, ms:640, poster:true,
+      text:"Approvals ▸ Requests ▸ Waiting · 1 request waits, 1 yours to decide", prov:"V17" },
     { pane:"approver", speaker:"console", variant:"console", charMs:0, ms:400, poster:true,
-      text:"Requester          nova", runtime:["nova"], prov:"V17" },
+      text:"Who asked     nova", runtime:["nova"], prov:"V17" },
+    { pane:"approver", speaker:"console", variant:"console", charMs:0, ms:400, poster:true,
+      text:"Call          midpoint  disable_user", prov:"V17,a" },
+    { pane:"approver", speaker:"console", variant:"console", charMs:0, ms:400, poster:true,
+      text:"Who decides   alice  yours · nova's sponsor", runtime:["alice","nova"], prov:"V17" },
     { pane:"approver", speaker:"console", variant:"console", charMs:0, ms:440, poster:true,
-      text:"Approvers          [ straza-admin ]", prov:"V17" },
+      text:"State         hold · the agent is waiting now", prov:"V17" },
     { pane:"approver", speaker:"console", variant:"console", dim:true, charMs:0, ms:440, poster:true,
-      text:"agent's stated reason, model-generated and unverified", prov:"V17" },
+      text:"The agent's own words. Nobody checked them.", prov:"V17" },
     { pane:"approver", speaker:"console", variant:"console", charMs:0, ms:640, poster:true,
-      text:"  Offboarding contractor c-8842 per ticket OPS-5521; access end-dated today", prov:"I" },
+      text:"  “Offboarding contractor c-8842 per ticket OPS-5521; access end-dated today”", prov:"I" },
     { pane:"approver", speaker:"console", variant:"console", id:"btnrow", charMs:0, ms:620,
       text:"[ Deny ]   [ Approve ]", prov:"V17" },
     { action:"flash", variant:"console", ms:320, target:"btnrow" },
+    { pane:"approver", speaker:"console", variant:"console", charMs:0, ms:520,
+      text:"Approve disable_user for nova?", runtime:["nova"], prov:"V17" },
+    { pane:"approver", speaker:"console", variant:"console", dim:true, charMs:0, ms:620,
+      text:"The call runs now, once, and the agent's session gets the answer.", prov:"V17" },
     { pane:"approver", speaker:"console", variant:"console", accent:true, charMs:0, ms:820, poster:true,
-      text:"✓ approved · by alice · console", runtime:["alice"], prov:"I" },
+      text:"Approved. disable_user runs now for nova.", runtime:["nova"], prov:"V17" },
     { action:"flash", variant:"console", ms:320, target:"wait" },
     { pane:"agent", speaker:"STRAZA", variant:"console", charMs:0, ms:520, poster:true,
       text:"✓ approval granted: releasing the call", prov:"I" },
@@ -264,58 +269,35 @@ var SCENE = {
     { action:"hold", variant:"console", ms:2200 },
 
      
-    { pane:"agent", speaker:"model", variant:"cli", text:"I'll offboard the contractor's account.", action:"type", ms:480, prov:"I" },
-    { pane:"agent", speaker:"cc", variant:"cli", dim:true, charMs:0, ms:520,
-      text:"gateway injects a required field _straza_justification, description: Required by Straza: briefly state why this call is needed; a human approver will read it.",
-      prov:"V16" },
-    { pane:"agent", speaker:"model", variant:"cli", text:"▸ straza · midpoint__disable_user", action:"type", charMs:28, ms:340, prov:"I" },
-    { pane:"agent", speaker:"model", variant:"cli", charMs:0, ms:560,
-      text:"{ \"userId\": \"c-8842\",\n  \"_straza_justification\": \"Offboarding contractor c-8842 per ticket OPS-5521; access end-dated today\" }",
-      prov:"V16" },
-    { pane:"agent", speaker:"STRAZA", variant:"cli", id:"wait2", charMs:0, ms:640,
-      text:"⏳ waiting for approval…", prov:"I" },
-    { action:"sweep", variant:"cli", ms:900, target:"wait2" },
-    { pane:"approver", speaker:"strazactl", variant:"cli", action:"type", charMs:24, ms:420,
-      text:"strazactl approvals list", prov:"V18" },
-    { pane:"approver", speaker:"strazactl", variant:"cli", charMs:0, ms:440, poster:true,
-      text:"ID  STATE  REQUESTER  SUMMARY  ROLES  EXPIRES  DECIDED BY", prov:"V18" },
-    { pane:"approver", speaker:"strazactl", variant:"cli", charMs:0, ms:640, poster:true,
-      text:"7c1f…a9  pending  nova  mcp.call midpoint:disable_user  straza-admin  in 1m23s",
-      runtime:["7c1f…a9","nova","in 1m23s"], prov:"V18,a" },
-    { pane:"approver", speaker:"strazactl", variant:"cli", action:"type", charMs:24, ms:420,
-      text:"strazactl approvals approve 7c1f…a9", runtime:["7c1f…a9"], prov:"V18" },
-    { pane:"approver", speaker:"strazactl", variant:"cli", accent:true, charMs:0, ms:820, poster:true,
-      text:"approved 7c1f…a9 (by alice)", runtime:["7c1f…a9","alice"], prov:"V18" },
-    { action:"flash", variant:"cli", ms:320, target:"wait2" },
-    { pane:"agent", speaker:"STRAZA", variant:"cli", charMs:0, ms:520,
-      text:"✓ approval granted: releasing the call", prov:"I" },
-    { pane:"agent", speaker:"model", variant:"cli", charMs:0, ms:720,
-      text:"▸ midpoint__disable_user → { \"status\": \"disabled\", \"user\": \"c-8842\" }", prov:"I" },
-    { pane:"agent", speaker:"model", variant:"cli", action:"type", charMs:26, ms:600,
-      text:"Done; the account is disabled.", prov:"I" },
-    { action:"hold", variant:"cli", ms:2200 },
-
-     
     { pane:"agent", speaker:"model", variant:"hook", text:"I'll ship the release to production.", action:"type", ms:480, prov:"I" },
     { pane:"agent", speaker:"model", variant:"hook", text:"▸ Bash  make deploy-prod", action:"type", charMs:30, ms:420, prov:"I" },
     { pane:"agent", speaker:"ag", variant:"hook", dim:true, charMs:0, ms:360,
       text:"(normalize → shell.exec · request approval)", prov:"I" },
     { action:"sweep", variant:"hook", ms:600, target:"last" },
     { pane:"agent", speaker:"STRAZA", variant:"hook", accent:true, charMs:0, ms:1900,
-      text:"Straza: approval requested (notified roles [straza-admin]); a person decides on the self-service page (https://straza.internal/self-service/), the console, or an enrolled phone. Retry this exact call after approval (ref 7c1f…a9)",
-      runtime:["https://straza.internal/self-service/","7c1f…a9"], prov:"V13" },
+      text:"Straza: approval requested (notified alice); a person decides on the self-service page (https://straza.internal/self-service/), the console, or an enrolled phone. Retry this exact call after approval (ref 7c1f…a9)",
+      runtime:["alice","https://straza.internal/self-service/","7c1f…a9"], prov:"V13" },
     { action:"pause", variant:"hook", ms:640 },
-    { pane:"approver", speaker:"strazactl", variant:"hook", action:"type", charMs:24, ms:440,
-      text:"strazactl approvals approve 7c1f…a9", runtime:["7c1f…a9"], prov:"V18" },
-    { pane:"approver", speaker:"strazactl", variant:"hook", charMs:0, ms:760,
-      text:"approved 7c1f…a9 (by alice)", runtime:["7c1f…a9","alice"], prov:"V18" },
+    { pane:"approver", speaker:"console", variant:"hook", dim:true, charMs:0, ms:520,
+      text:"Approvals ▸ Requests ▸ Waiting · 1 request waits, 1 yours to decide", prov:"V17" },
+    { pane:"approver", speaker:"console", variant:"hook", charMs:0, ms:400,
+      text:"Who asked     nova", runtime:["nova"], prov:"V17" },
+    { pane:"approver", speaker:"console", variant:"hook", charMs:0, ms:400,
+      text:"Call          make deploy-prod", prov:"V17,a" },
+    { pane:"approver", speaker:"console", variant:"hook", charMs:0, ms:440,
+      text:"Who decides   alice  yours · nova's sponsor", runtime:["alice","nova"], prov:"V17" },
+    { pane:"approver", speaker:"console", variant:"hook", id:"btnrow2", charMs:0, ms:560,
+      text:"[ Deny ]   [ Approve ]", prov:"V17" },
+    { action:"flash", variant:"hook", ms:320, target:"btnrow2" },
+    { pane:"approver", speaker:"console", variant:"hook", accent:true, charMs:0, ms:760,
+      text:"Approved. make deploy-prod runs now for nova.", runtime:["nova"], prov:"V17" },
     { pane:"agent", speaker:"model", variant:"hook", dim:true, action:"type", charMs:26, ms:420,
       text:"Approved, re-running the deploy.", prov:"I" },
     { pane:"agent", speaker:"model", variant:"hook", text:"▸ Bash  make deploy-prod", action:"type", charMs:30, ms:420, prov:"I" },
     { pane:"agent", speaker:"STRAZA", variant:"hook", accent:true, charMs:0, ms:1700,
       text:"Straza: approved by alice (ref 7c1f…a9)", runtime:["alice","7c1f…a9"], prov:"V15" },
     { pane:"agent", speaker:"model", variant:"hook", action:"type", charMs:26, ms:2000,
-      text:"The deploy is running now that a human approved it.", prov:"I" },
+      text:"The deploy is running now that a person approved it.", prov:"I" },
     { action:"hold", variant:"hook", ms:2000 }
   ]
 };

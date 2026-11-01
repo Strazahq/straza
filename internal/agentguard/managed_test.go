@@ -3,6 +3,7 @@ package agentguard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -74,33 +75,185 @@ func TestLegacyManagedSettingsPath(t *testing.T) {
 	}
 }
 
-func TestMeasureAttestationUserMode(t *testing.T) {
-	t.Setenv("STRAZA_SYSTEM", filepath.Join(t.TempDir(), "absent"))
-	att := measureAttestation("claude-code")
-	if att.Managed {
-		t.Error("no managed layout must measure Managed=false")
+// TestManagedBinDir pins where the managed binary lives on each OS. On Linux
+// the straza package installs it at /usr/bin, because distribution packages
+// never write under /usr/local, and on macOS the Straza package installs it
+// at /opt/straza/bin, which only root can change. The served default render
+// must name the same path, or the default layout would never take the
+// server lane.
+func TestManagedBinDir(t *testing.T) {
+	tests := []struct {
+		goos, env, want string
+	}{
+		{goos: "linux", want: "/usr/bin"},
+		{goos: "darwin", want: "/opt/straza/bin"},
+		{goos: "linux", env: "/opt/straza/bin", want: "/opt/straza/bin"},
 	}
-	if !strings.HasPrefix(att.Hashes["self"], "sha256:") {
-		t.Errorf("self hash = %q, want sha256:*", att.Hashes["self"])
-	}
-	if att.Platform != runtime.GOOS+"/"+runtime.GOARCH {
-		t.Errorf("platform = %q", att.Platform)
-	}
-	if _, ok := att.Hashes["config"]; ok {
-		t.Error("user mode must not report a managed config measurement")
+	for _, tt := range tests {
+		t.Run(tt.goos+tt.env, func(t *testing.T) {
+			setOSName(t, tt.goos)
+			t.Setenv("STRAZA_MANAGED_BIN_DIR", tt.env)
+			if got := ManagedBinDir(); got != tt.want {
+				t.Fatalf("ManagedBinDir() = %q, want %q", got, tt.want)
+			}
+			if got, want := ManagedBinaryPath(""), filepath.Join(tt.want, "straza"); got != want {
+				t.Errorf("ManagedBinaryPath(\"\") = %q, want %q", got, want)
+			}
+			if tt.env == "" && defaultManagedBinaryPath(tt.goos) != tt.want+"/straza" {
+				t.Errorf("defaultManagedBinaryPath(%s) = %q, want %q", tt.goos, defaultManagedBinaryPath(tt.goos), tt.want+"/straza")
+			}
+		})
 	}
 }
 
-// TestInstallManagedAndMeasure exercises the managed install end to end on a relocated
-// system layout: managed config + binary + wiring written, measurements
-// returned, and measureAttestation subsequently claiming a managed install
-// whose hashes match the registered ones.
-func TestInstallManagedAndMeasure(t *testing.T) {
+// TestLockManagedRootExported pins the step the Straza MSI runs through `straza
+// installer lock`: it creates a missing managed root, and it takes a root
+// that already holds the binary as it is. With the STRAZA_SYSTEM seam set,
+// locking it to administrators is left out, as in install.
+func TestLockManagedRootExported(t *testing.T) {
+	for _, row := range []struct {
+		name   string
+		placed bool
+	}{
+		{"a missing root is created", false},
+		{"a root that holds the binary is kept", true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "straza")
+			t.Setenv("STRAZA_SYSTEM", root)
+			var bin string
+			if row.placed {
+				bin = placeManagedBinary(t, filepath.Join(root, "bin"))
+			}
+			if err := LockManagedRoot(); err != nil {
+				t.Fatalf("LockManagedRoot: %v", err)
+			}
+			if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+				t.Fatalf("managed root after the lock: %v", err)
+			}
+			if row.placed {
+				if raw, err := os.ReadFile(bin); err != nil || string(raw) != "packaged straza" {
+					t.Errorf("binary after the lock = %q, %v; want it untouched", raw, err)
+				}
+			}
+		})
+	}
+}
+
+// placeManagedBinary stands in for the straza package: it puts a binary at
+// ManagedBinaryPath(dir), which install --managed on Linux requires and never
+// writes. It returns the path.
+func placeManagedBinary(t *testing.T, dir string) string {
+	t.Helper()
+	path := ManagedBinaryPath(dir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("packaged straza"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestInstallManagedBinaryByOS pins who puts the managed binary in place. On
+// Linux the straza package installs it, on Windows the Straza MSI and on
+// macOS the Straza package for macOS, so install never writes it and
+// refuses before writing anything when the binary is missing, naming the
+// package or the MSI only for the default path it installs. On macOS a copy
+// written over the signed binary in place would crash it.
+func TestInstallManagedBinaryByOS(t *testing.T) {
+	const (
+		packageMissing = "`straza install --managed` found no %s, which the Straza package installs. " +
+			"Install the straza package for this distribution first, then run this command again."
+		customMissing = "`straza install --managed` found no straza binary at %s. " +
+			"Put the straza binary there, or leave out --bin-dir and STRAZA_MANAGED_BIN_DIR to use /usr/bin/straza from the straza package, then run this command again."
+		msiMissing = "`straza install --managed` found no %s, which the Straza MSI installs. " +
+			"Install the Straza MSI for Windows first, then run this command again."
+		customMissingWindows = "`straza install --managed` found no straza.exe at %s. " +
+			`Put straza.exe there, or leave out --bin-dir and STRAZA_MANAGED_BIN_DIR to use C:\ProgramData\straza\bin\straza.exe from the Straza MSI, then run this command again.`
+		pkgMissing = "`straza install --managed` found no %s, which the Straza package for macOS installs. " +
+			"Install the Straza package first, then run this command again."
+		customMissingDarwin = "`straza install --managed` found no straza binary at %s. " +
+			"Put the straza binary there, or leave out --bin-dir and STRAZA_MANAGED_BIN_DIR to use /opt/straza/bin/straza from the Straza package for macOS, then run this command again."
+	)
+	tests := []struct {
+		name        string
+		goos        string
+		defaultPath bool // binPath is the vendor default the package installs
+		placed      bool
+		wantErr     string // a format for binPath; "" means install succeeds
+	}{
+		{name: "linux default path without the package refuses", goos: "linux", defaultPath: true, wantErr: packageMissing},
+		{name: "linux custom path without a binary refuses", goos: "linux", wantErr: customMissing},
+		{name: "linux keeps the packaged binary", goos: "linux", defaultPath: true, placed: true},
+		{name: "linux keeps a binary at a custom path", goos: "linux", placed: true},
+		{name: "windows default path without the MSI refuses", goos: "windows", defaultPath: true, wantErr: msiMissing},
+		{name: "windows custom path without a binary refuses", goos: "windows", wantErr: customMissingWindows},
+		{name: "windows keeps the binary the MSI installed", goos: "windows", defaultPath: true, placed: true},
+		{name: "windows keeps a binary at a custom path", goos: "windows", placed: true},
+		{name: "darwin default path without the macOS package refuses", goos: "darwin", defaultPath: true, wantErr: pkgMissing},
+		{name: "darwin custom path without a binary refuses", goos: "darwin", wantErr: customMissingDarwin},
+		{name: "darwin keeps the binary the macOS package installed", goos: "darwin", defaultPath: true, placed: true},
+		{name: "darwin keeps a binary at a custom path", goos: "darwin", placed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setOSName(t, tt.goos)
+			sysDir := t.TempDir()
+			t.Setenv("STRAZA_SYSTEM", sysDir)
+			t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", filepath.Join(sysDir, "harness"))
+			t.Setenv("STRAZA_MANAGED_BIN_DIR", filepath.Join(sysDir, "bin"))
+			t.Setenv("STRAZA_HOME", t.TempDir())
+			binPath := ManagedBinaryPath("")
+			if tt.defaultPath {
+				old := vendorDefaultBinPath
+				vendorDefaultBinPath = func(string) string { return binPath }
+				t.Cleanup(func() { vendorDefaultBinPath = old })
+			}
+			if tt.placed {
+				placeManagedBinary(t, "")
+			}
+			wiring, err := ManagedHookPath("gemini")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = InstallManaged(context.Background(), ManagedInstallOptions{
+				Harnesses: []string{"gemini"}, ServerURL: snapshotKeyServer(t, map[string]string{"k1": "AAAA"}),
+			}, io.Discard)
+			if tt.wantErr != "" {
+				want := fmt.Sprintf(tt.wantErr, binPath)
+				if err == nil || err.Error() != want {
+					t.Fatalf("err = %v, want %q", err, want)
+				}
+				for _, p := range []string{ManagedConfigPath(), wiring, binPath} {
+					if _, statErr := os.Stat(p); !os.IsNotExist(statErr) {
+						t.Errorf("refusal wrote %s (stat err=%v), want nothing written", p, statErr)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("InstallManaged: %v", err)
+			}
+			if raw, err := os.ReadFile(binPath); err != nil || string(raw) != "packaged straza" {
+				t.Errorf("managed binary after install = %q, %v; want the one the package or the MSI installed, untouched", raw, err)
+			}
+		})
+	}
+}
+
+// TestInstallManaged exercises the managed install end to end on a
+// relocated system layout: managed config + wiring written beside the managed
+// binary, and the managed config shadowing the user's. The Straza background service
+// measures what install wrote; its own tests pin that measurement.
+func TestInstallManaged(t *testing.T) {
 	sysDir := t.TempDir()
 	t.Setenv("STRAZA_SYSTEM", sysDir)
 	t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", filepath.Join(sysDir, "harness"))
 	t.Setenv("STRAZA_MANAGED_BIN_DIR", filepath.Join(sysDir, "bin"))
 	t.Setenv("STRAZA_HOME", t.TempDir())
+	placeManagedBinary(t, "")
 
 	store, err := OpenStore()
 	if err != nil {
@@ -147,7 +300,7 @@ func TestInstallManagedAndMeasure(t *testing.T) {
 
 	// The whole managed layout must be readable by every user on the box, not
 	// just root: an unreadable file means other users' harnesses silently run
-	// ungoverned AND measureAttestation cannot hash what it cannot open, so the
+	// ungoverned AND the service's attestation cannot hash what it cannot open, so the
 	// fleet reports att=none. Asserted end-to-end (not just at the writer)
 	// because the call site matters too: managed install must never reach for
 	// the user-scope writer.
@@ -230,28 +383,6 @@ func TestInstallManagedAndMeasure(t *testing.T) {
 		t.Fatalf("LoadConfig after managed install = %+v, %v", cfg, err)
 	}
 
-	// Measurement now claims managed and hashes the files install wrote.
-	att := measureAttestation("claude-code")
-	if !att.Managed {
-		t.Fatal("managed layout must measure Managed=true")
-	}
-	for artifact, path := range map[string]string{"config": ManagedConfigPath(), "hooks.claude-code": wiring} {
-		want, err := fileSHA256(path)
-		if err != nil || att.Hashes[artifact] != want {
-			t.Errorf("measured %s = %q, on disk %q (%v)", artifact, att.Hashes[artifact], want, err)
-		}
-	}
-
-	// Tampering the wiring changes its measurement (the server then computes
-	// att=none; asserted end-to-end in the demo test). Whitespace keeps the
-	// JSON loadable so the uninstall below still parses it.
-	if err := os.WriteFile(wiring, append(raw, '\n'), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got := measureAttestation("claude-code").Hashes["hooks.claude-code"]; got == att.Hashes["hooks.claude-code"] {
-		t.Error("tampered wiring must change the measured hash")
-	}
-
 	// UninstallManaged removes the Straza entries again: hooks, the managed
 	// MCP registration, and any straza-authored retired-path leftover.
 	if err := os.WriteFile(legacy, []byte(`{"hooks":{"note":"straza leftover"}}`), 0o600); err != nil {
@@ -278,7 +409,7 @@ func TestInstallManagedAndMeasure(t *testing.T) {
 
 // TestManagedHookPathSharedResolver pins the one-resolver contract: install,
 // uninstall, attestation, and doctor all resolve a harness's managed hook
-// file through managedHookPath, and for codex that resolver follows
+// file through ManagedHookPath, and for codex that resolver follows
 // CodexManagedRequirementsPath, including a relocated %ProgramData%, so no
 // consumer can read a file install never wrote.
 // This pin keeps attestation out of the same hole: a consumer
@@ -329,14 +460,13 @@ func TestInstallManagedPinsOnlyTheNamedServer(t *testing.T) {
 			t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", filepath.Join(sysDir, "harness"))
 			t.Setenv("STRAZA_MANAGED_BIN_DIR", filepath.Join(sysDir, "bin"))
 			t.Setenv("STRAZA_HOME", t.TempDir())
+			placeManagedBinary(t, "")
 			store, err := OpenStore()
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := store.SaveConfig(Config{ServerURL: "http://rogue.example:8420",
-				SnapshotKeys: map[string]string{"k1": "Uk9HVUU="}}); err != nil {
-				t.Fatal(err)
-			}
+			writeUserConfig(t, store, Config{ServerURL: "http://rogue.example:8420",
+				SnapshotKeys: map[string]string{"k1": "Uk9HVUU="}})
 			opts := ManagedInstallOptions{Harnesses: []string{"claude-code", "gemini"}}
 			if tt.server {
 				opts.ServerURL = snapshotKeyServer(t, named)
@@ -371,19 +501,19 @@ func TestManagedHookPathSharedResolver(t *testing.T) {
 		t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", "") // the test seam would mask the vendor-path branch
 		relocated := t.TempDir()
 		t.Setenv("ProgramData", relocated)
-		got, err := managedHookPath("codex")
+		got, err := ManagedHookPath("codex")
 		if err != nil {
-			t.Fatalf("managedHookPath(codex): %v", err)
+			t.Fatalf("ManagedHookPath(codex): %v", err)
 		}
 		want, err := CodexManagedRequirementsPath()
 		if err != nil {
 			t.Fatalf("CodexManagedRequirementsPath: %v", err)
 		}
 		if got != want {
-			t.Errorf("managedHookPath(codex) = %q, want install's resolver %q", got, want)
+			t.Errorf("ManagedHookPath(codex) = %q, want install's resolver %q", got, want)
 		}
 		if !strings.HasPrefix(got, relocated) {
-			t.Errorf("managedHookPath(codex) = %q ignores the relocated ProgramData %q", got, relocated)
+			t.Errorf("ManagedHookPath(codex) = %q ignores the relocated ProgramData %q", got, relocated)
 		}
 		if vendor, _ := ManagedSettingsPath("codex"); got == vendor {
 			t.Errorf("relocated box still resolved the vendor default %q: the exact divergence this pin exists to catch", vendor)
@@ -391,64 +521,27 @@ func TestManagedHookPathSharedResolver(t *testing.T) {
 	})
 	t.Run("settings-dir seam keeps the resolvers coincident", func(t *testing.T) {
 		t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", t.TempDir())
-		got, err := managedHookPath("codex")
+		got, err := ManagedHookPath("codex")
 		if err != nil {
-			t.Fatalf("managedHookPath(codex): %v", err)
+			t.Fatalf("ManagedHookPath(codex): %v", err)
 		}
 		want, _ := ManagedSettingsPath("codex")
 		if got != want {
-			t.Errorf("under the seam managedHookPath(codex) = %q, want %q", got, want)
+			t.Errorf("under the seam ManagedHookPath(codex) = %q, want %q", got, want)
 		}
 	})
 	t.Run("non-codex resolves via ManagedSettingsPath", func(t *testing.T) {
 		for _, harness := range []string{"claude-code", "gemini"} {
-			got, err := managedHookPath(harness)
+			got, err := ManagedHookPath(harness)
 			want, werr := ManagedSettingsPath(harness)
 			if err != nil || werr != nil || got != want {
-				t.Errorf("managedHookPath(%s) = (%q, %v), want (%q, %v)", harness, got, err, want, werr)
+				t.Errorf("ManagedHookPath(%s) = (%q, %v), want (%q, %v)", harness, got, err, want, werr)
 			}
 		}
 	})
 }
 
 // TestAttestationMeasuresWhatInstallWrote mirrors doctor's
-// TestWiredLayerReadsWhatInstallWrites for the attestation surface: the
-// hooks.codex measurement must hash the exact file InstallCodexManagedHooks
-// wrote at the shared resolver's path, never a path of attestation's own
-// choosing. (The relocated-%ProgramData% branch itself is Windows-only and
-// covered by construction plus the resolver pin above; under the seam the
-// resolvers coincide, which is exactly what makes this assertable in CI.)
-func TestAttestationMeasuresWhatInstallWrote(t *testing.T) {
-	setOSName(t, "linux")
-	sysDir := t.TempDir()
-	t.Setenv("STRAZA_SYSTEM", sysDir)
-	t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", filepath.Join(sysDir, "harness"))
-	if err := os.MkdirAll(ManagedRoot(), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(ManagedConfigPath(), []byte("serverUrl: https://managed.test\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	path, err := managedHookPath("codex")
-	if err != nil {
-		t.Fatalf("managedHookPath(codex): %v", err)
-	}
-	if _, err := InstallCodexManagedHooks(path, "/usr/local/bin/straza"); err != nil {
-		t.Fatalf("InstallCodexManagedHooks: %v", err)
-	}
-	att := measureAttestation("codex")
-	if !att.Managed {
-		t.Fatal("managed layout present but Managed=false")
-	}
-	want, err := fileSHA256(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := att.Hashes["hooks.codex"]; got != want {
-		t.Errorf("hooks.codex = %q, want the hash of the file install wrote (%q at %s)", got, want, path)
-	}
-}
-
 // TestInstallManagedEndsAtTheWiring pins the install's closing contract:
 // in the default layout the person at the workstation gets the
 // files it wrote and nothing about the registry, which the server fills by
@@ -475,6 +568,7 @@ func TestInstallManagedEndsAtTheWiring(t *testing.T) {
 		f := newFetchFixture(t, "linux")
 		f.serve(t, "claude-code", "linux", map[string][]byte{"hooks.claude-code": []byte(`{"hooks":{"served":true}}`)})
 		custom := filepath.Join(t.TempDir(), "custom-bin")
+		placeManagedBinary(t, custom)
 		var out strings.Builder
 		if err := InstallManaged(context.Background(), ManagedInstallOptions{
 			Harnesses: []string{"claude-code"}, ServerURL: f.url, BinDir: custom,

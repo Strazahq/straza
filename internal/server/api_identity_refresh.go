@@ -13,16 +13,21 @@ import (
 // with judgeSession. On a refusal it answers the request itself and reports
 // false. On true the caller mints from the returned row, whose device
 // binding, attestation level and harness name are authoritative, so no
-// refresh payload can change the minted claims.
-func (a *App) refreshSession(w http.ResponseWriter, r *http.Request, req checkinRequest) (store.User, store.Session, bool) {
-	claims, err := a.tokens.Verify(req.SessionToken)
+// refresh payload can change the minted claims. A key-bound token needs a
+// proof from its key, and its cnf comes back for the caller to mint with.
+func (a *App) refreshSession(w http.ResponseWriter, r *http.Request, req checkinRequest) (store.User, store.Session, string, bool) {
+	claims, err := a.verifySessionToken(w, r, req.SessionToken, "")
+	if errors.Is(err, errAnswered) {
+		return store.User{}, store.Session{}, "", false
+	}
 	if err != nil {
 		a.emitAuthnLogin(r, "failure", authnFields{Via: "session-token",
 			Harness: harnessLabel(req.Harness), Reason: "session token rejected"})
 		apiError(w, http.StatusUnauthorized, "session token rejected: re-enroll or restart the session")
-		return store.User{}, store.Session{}, false
+		return store.User{}, store.Session{}, "", false
 	}
-	return a.judgeSession(w, r, claims, "session refresh", harnessLabel(req.Harness))
+	u, ses, ok := a.judgeSession(w, r, claims, "session refresh", harnessLabel(req.Harness))
+	return u, ses, claims.CNF, ok
 }
 
 // unreadSessionUserMsg is the 403 of a session whose user row could not be
@@ -35,10 +40,12 @@ const unreadSessionUserMsg = "Straza could not read your user record, so it refu
 // any store read (the push-fed kill switch bites first, as on the
 // device-token lane), then checks the session row and its user, so a
 // disabled or deleted user and a lock are refused on the next request even
-// when the session row stayed active. lane names the caller in the outage
-// log and harness is the label the refusal record carries. On a refusal it
-// writes one login failure record, answers the request itself and reports
-// false. A store outage answers 503 and writes no record.
+// when the session row stayed active. A session strazactl checked in is
+// refused with 403, because strazactl no longer signs in. lane names the
+// caller in the outage log and harness is the label the refusal record
+// carries. On a refusal it writes one login failure record, answers the
+// request itself and reports false. A store outage answers 503 and writes no
+// record.
 func (a *App) judgeSession(w http.ResponseWriter, r *http.Request, claims authn.Claims, lane, harness string) (store.User, store.Session, bool) {
 	const via = "session-token"
 	none := func() (store.User, store.Session, bool) { return store.User{}, store.Session{}, false }
@@ -50,8 +57,9 @@ func (a *App) judgeSession(w http.ResponseWriter, r *http.Request, claims authn.
 		return none()
 	}
 	// A user or device revoke judges the identity: 403, terminal for the
-	// daemon. A session revoke is a stand-down: 401, and the daemon starts a
-	// fresh session from its device credential with no human action.
+	// client. A session revoke is a stand-down: 401, and a fresh session
+	// starts with no human action. The Straza background service starts the
+	// kit's sessions again through the key lane.
 	if a.denylist.userBlocked(claims.Subject) || a.denylist.deviceBlocked(claims.Device) {
 		a.emitAuthnLogin(r, "failure", authnFields{Via: via,
 			UserID: claims.Subject, Session: claims.Session,
@@ -68,6 +76,10 @@ func (a *App) judgeSession(w http.ResponseWriter, r *http.Request, claims authn.
 	}
 	if err != nil || ses.Status != store.SessionActive {
 		return inactive()
+	}
+	if ses.HarnessName == strazactlHarness {
+		a.refuseStrazactl(w, r, authnFields{Via: via, UserID: ses.UserID, Session: ses.ID, Harness: harness})
+		return none()
 	}
 	u, err := a.store.Users().GetByID(r.Context(), ses.UserID)
 	if err != nil && a.answerOutage(w, r, lane, err) {

@@ -1,6 +1,6 @@
 ---
 title: strazactl approvals
-description: List and decide approval requests, and mint approver enroll tokens
+description: List approval requests
 pagetype: reference
 weight: 7
 draft: false
@@ -18,14 +18,11 @@ strazactl approvals [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
 * [strazactl](/reference/cli/strazactl/): Straza admin CLI
-* [strazactl approvals approve](/reference/cli/strazactl/strazactl_approvals_approve/): Approve a pending request
-* [strazactl approvals deny](/reference/cli/strazactl/strazactl_approvals_deny/): Deny a pending request
-* [strazactl approvals enroll-token](/reference/cli/strazactl/strazactl_approvals_enroll-token/): Mint a one-time mobile-approver enroll token for a user, and draw its QR
 * [strazactl approvals list](/reference/cli/strazactl/strazactl_approvals_list/): List approval requests (default: pending)
 

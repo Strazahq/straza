@@ -2,7 +2,7 @@
 title: strazactl policy show
 description: 'Print a stored PolicySet: its story on stderr, the YAML alone on stdout'
 pagetype: reference
-weight: 75
+weight: 71
 draft: false
 sources:
   - cmd/strazactl
@@ -25,7 +25,7 @@ strazactl policy show <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

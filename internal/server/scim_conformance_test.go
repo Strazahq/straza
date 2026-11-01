@@ -74,6 +74,27 @@ func TestSCIMConformance(t *testing.T) {
 		map[string]any{"name": "scim-tools-readers", "description": "Readers of scim-tools (conformance)", "server": "scim-tools", "tools": []string{"echo"}}, nil); code != http.StatusCreated {
 		t.Fatalf("seed role scim-tools-readers = %d", code)
 	}
+	// revision 21 pin: a role on a server that pins an object type renders
+	// its covers line (group-enrichment transcript), one role covering
+	// every repo and one naming two repos.
+	repos, err := app.store.Apps().Create(t.Context(), store.App{Name: "scim-repos", RuntimeKind: "remote", Status: "stopped",
+		Manifest: `{"straza":{"runtime":{"kind":"remote"},"objects":{"type":"repo","list":{"tool":"repo_list"}}}}`})
+	if err != nil {
+		t.Fatalf("seed server scim-repos: %v", err)
+	}
+	for name, scope := range map[string]*store.ObjectScope{
+		"scim-repos-every": {Every: true},
+		"scim-repos-pay":   {Objects: []store.CoveredObject{{ID: "101", Value: "Strazahq/pay-api"}, {ID: "102", Value: "Strazahq/pay-web"}}},
+	} {
+		ro, err := app.store.Roles().Create(t.Context(), store.Role{Name: name, Kind: store.RoleKindApplication, OwnerAppID: repos.ID})
+		if err != nil {
+			t.Fatalf("seed role %s: %v", name, err)
+		}
+		if _, err := app.store.ToolBindings().Create(t.Context(), store.ToolBinding{RoleID: ro.ID, AppID: repos.ID,
+			ToolMatcher: `["repo_get"]`, Effect: "allow", Scope: scope}); err != nil {
+			t.Fatalf("seed the access row of %s: %v", name, err)
+		}
+	}
 
 	dir := filepath.Join("..", "..", "spec", "conformance", "scim")
 	entries, err := os.ReadDir(dir)

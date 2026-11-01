@@ -87,6 +87,7 @@ tools:
   SendFeedback: net.fetch      # drafts feedback that leaves the machine once a person approves
   ArtifactComments: net.fetch  # reads and answers comments on a published page
   ArtifactData: net.fetch      # reads and writes a published page's shared database
+  ArtifactCheck: net.fetch    # renders a page or a local file for review
   Task: task.spawn
   Agent: task.spawn
   Workflow: task.spawn      # orchestrates subagent fleets
@@ -105,6 +106,7 @@ tools:
   CronList: task.spawn
   RemoteTrigger: task.spawn # launches a remote agent run
   EndConversation: task.spawn
+  SubagentHandback: task.spawn # returns a subagent's report to its parent
 # Per-canonical-tool: which tool_input keys hold the command / paths.
 toolInputs:
   shell.exec: { command: [command] }

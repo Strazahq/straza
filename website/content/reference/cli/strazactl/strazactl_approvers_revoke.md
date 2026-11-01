@@ -2,7 +2,7 @@
 title: strazactl approvers revoke
 description: Revoke an enrolled approver device (its approver credential fails on the next call)
 pagetype: reference
-weight: 14
+weight: 11
 draft: false
 sources:
   - cmd/strazactl
@@ -16,7 +16,7 @@ keywords: strazactl, approvers, revoke
 Deletes the approver-device enrollment (the apd_ id from `approvers list`).
 Row-backed and immediate: the phone's use=approver token fails on its very
 next call, and its push registrations stop routing. The user is untouched:
-re-enrolling takes a fresh one-time QR (`approvals enroll-token <username>`).
+re-enrolling is the person's own act, on their self-service page.
 
 ```
 strazactl approvers revoke <device-id> [flags]
@@ -25,7 +25,7 @@ strazactl approvers revoke <device-id> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

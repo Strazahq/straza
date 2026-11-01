@@ -18,8 +18,9 @@ TRADEMARKS.md says how the name may be used.
 This product includes third-party software under its own licenses. The copyright
 notices and license texts of that software, including the attribution notices from
 the NOTICE files of its Apache-2.0 components, are in THIRD_PARTY_NOTICES.txt. That
-file ships in every release archive and in the container image under /licenses/,
-and the console serves its own part at /console/THIRD_PARTY_NOTICES.txt. The source
+file ships in every release archive, in every deb and rpm package under
+/usr/share/doc/straza/ and in the container image under /licenses/, and the
+console serves its own part at /console/THIRD_PARTY_NOTICES.txt. The source
 tree also carries third-party source files, among them the QR encoder by Project
 Nayuki and the interface components generated from shadcn/ui, with their license
 notices in or beside them.

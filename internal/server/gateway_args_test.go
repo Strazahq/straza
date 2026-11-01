@@ -18,8 +18,9 @@ import (
 
 // TestSchemaMismatch pins the argument check an approval-gated call passes
 // before anyone is asked: a definite violation of the schema the server
-// published is reported, and a schema the check cannot use, or that points
-// outside itself, lets the call through as before.
+// published is reported, cut at schemaDetailMax bytes, and a schema the
+// check cannot use, or that points outside itself, lets the call through as
+// before.
 func TestSchemaMismatch(t *testing.T) {
 	t.Parallel()
 	var hits atomic.Int32
@@ -61,10 +62,14 @@ func TestSchemaMismatch(t *testing.T) {
 		{"draft-04 boolean exclusiveMaximum passes", map[string]any{
 			"type": "object", "properties": map[string]any{"n": map[string]any{"type": "number", "maximum": 5, "exclusiveMaximum": true}}, "required": []any{"n"},
 		}, `{}`, ""},
+		{"a long instance is cut", strict, `{"roleOid":"r1","roleName":["` + strings.Repeat("<", 64<<10) + `"]}`, " bytes)"},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			got := schemaMismatch(row.schema, json.RawMessage(row.args))
+			if len(got) > schemaDetailMax+len("... (1000000 bytes)") {
+				t.Fatalf("schemaMismatch is %d bytes, want it cut at %d", len(got), schemaDetailMax)
+			}
 			if row.want == "" && got != "" {
 				t.Fatalf("schemaMismatch = %q, want the call to pass", got)
 			}

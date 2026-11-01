@@ -13,7 +13,7 @@ func overlayWorld() World {
 		Apps: map[string]App{
 			"github": {ID: "app-gh", Name: "github", Status: "running", Detail: "ok", Paused: true, File: "/apps/github.yaml",
 				AdminRole: "mcp-admin-github", RolePrefix: "github-", Runtime: "remote", URL: "https://api.github.com/mcp",
-				Offered: []string{"get_me", "delete_repo"}, ReadOnly: []string{"get_me"}, SharedSecret: true, UserCredentials: 3},
+				Offered: []string{"get_me", "delete_repo"}, ReadOnly: []string{"get_me"}, Destructive: map[string]bool{"delete_repo": true}, SharedSecret: true, UserCredentials: 3},
 			"jira": {ID: "app-jira", Name: "jira", AdminRole: "mcp-admin-jira", RolePrefix: "jira-", Runtime: "remote", URL: "https://jira.example.com/mcp"},
 		},
 		Roles: map[string]Role{
@@ -51,7 +51,7 @@ func TestOverlayApp(t *testing.T) {
 		{"a changed manifest on the same address keeps the live tools", facts("https://api.github.com/mcp"), "github", App{
 			ID: "app-gh", Name: "github", Status: "running", Detail: "ok", Paused: true, File: "/apps/github.yaml", AdminRole: "mcp-admin-github",
 			RolePrefix: "github-", Runtime: "remote", URL: "https://api.github.com/mcp", Manifest: "{}", Credential: CredentialNone,
-			Offered: []string{"get_me", "delete_repo"}, ReadOnly: []string{"get_me"}, SharedSecret: true, UserCredentials: 3}},
+			Offered: []string{"get_me", "delete_repo"}, ReadOnly: []string{"get_me"}, Destructive: map[string]bool{"delete_repo": true}, SharedSecret: true, UserCredentials: 3}},
 		{"a moved address takes the tools a Contact read", facts("https://copilot.github.com/mcp"), "github", App{
 			ID: "app-gh", Name: "github", Status: "running", Detail: "ok", Paused: true, File: "/apps/github.yaml", AdminRole: "mcp-admin-github",
 			RolePrefix: "github-", Runtime: "remote", URL: "https://copilot.github.com/mcp", Manifest: "{}", Credential: CredentialNone,

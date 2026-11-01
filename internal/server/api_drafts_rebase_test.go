@@ -263,7 +263,7 @@ func TestRebaseRefusals(t *testing.T) {
 		{"no such draft", "999", f.root, map[string]any{"revision": 1}, http.StatusNotFound,
 			"There is no draft 999. List the drafts with strazactl drafts list, or open Drafts on the console."},
 		{"a token on another's draft", stale, f.token, map[string]any{"revision": 1}, http.StatusForbidden,
-			"An admin API token changes only the drafts it wrote, and draft " + stale + " was written by someone else. A person can revise it on the console or with strazactl."},
+			"An admin API token changes only the drafts it wrote, and draft " + stale + " was written by someone else. A person can revise it on the console under Drafts."},
 		{"a revision that moved", stale, f.root, map[string]any{"revision": 3}, http.StatusConflict,
 			"Draft " + stale + " changed after you read it: it is at revision 1, and you sent revision 3. Read it again and make your change on top of revision 1."},
 		{"a discarded draft", closed, f.root, map[string]any{"revision": 1}, http.StatusConflict,
@@ -298,7 +298,7 @@ func TestRebaseRefusals(t *testing.T) {
 	} {
 		code, a, raw := f.rebase(t, tc.id, f.root, tc.body)
 		want := "Every change of draft " + tc.id + " was already made on live state, so there is nothing left to check again. " +
-			"Discard the draft with strazactl drafts discard " + tc.id + "."
+			"Discard the draft on the console under Drafts, or with strazactl drafts discard " + tc.id + " when an admin API token wrote it."
 		if code != http.StatusConflict || a.Error != want {
 			t.Errorf("%s = %d %s\nwant 409 %q", tc.name, code, raw, want)
 		}
@@ -348,7 +348,7 @@ func TestRebaseKeepsWhatAStoredSecretMasks(t *testing.T) {
 }
 
 // TestStaleFixNamesCheckAgainOnEveryDoor pins draft.stale's fix after Check
-// again landed: the verdict of a draft of the strazactl door and of the api
+// again landed: the verdict of a draft of the console door and of the api
 // door, the verdict an agent reads, stored when the checker checks an
 // agent's revision of the straza app's door, and the publish route's
 // refusal all send the reader to Check again.
@@ -357,22 +357,20 @@ func TestStaleFixNamesCheckAgainOnEveryDoor(t *testing.T) {
 	f := newDraftsFixture(t, nil)
 	ctx := context.Background()
 	rob := seedAgent(t, f.app, "rob", "kim", DraftConfigRole)
-	fix := func(id string) string {
-		return "Check the draft again with Check again on the console or strazactl drafts rebase " + id +
-			". Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."
-	}
+	const fix = "Check the draft again with Check again on the console under Drafts. " +
+		"Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."
 	byAPI := f.create(t, f.root, draftApp("github", githubURL, "Words of the api door.")).Draft.ID
-	byCLI := f.create(t, f.strazactl, draftApp("github", githubURL, "Words of strazactl.")).Draft.ID
+	byConsole := f.create(t, f.console, draftApp("github", githubURL, "Words of the console.")).Draft.ID
 	byBot := f.agentDraft(t, rob, draftApp("jira", "https://jira.example/mcp", "Words of the agent."))
 	f.read(t, f.root, byBot)
 	putServer(t, f.app, limitedApp("github", githubURL, "The GitHub server.", "7"))
 	putServer(t, f.app, limitedApp("jira", "https://jira.example/mcp", "The Jira server.", "7"))
-	for _, id := range []string{byAPI, byCLI} {
-		if _, v := f.read(t, f.root, id); len(v.Refused) != 1 || v.Refused[0].Code != "draft.stale" || v.Refused[0].Fix != fix(id) {
+	for _, id := range []string{byAPI, byConsole} {
+		if _, v := f.read(t, f.root, id); len(v.Refused) != 1 || v.Refused[0].Code != "draft.stale" || v.Refused[0].Fix != fix {
 			t.Errorf("draft %s refused = %+v, want draft.stale with the Check again fix", id, v.Refused)
 		}
 	}
-	if code, a := f.publishAll(t, f.root, byAPI); code != http.StatusConflict || !strings.HasSuffix(a.Error, " "+fix(byAPI)) {
+	if code, a := f.publishAll(t, f.root, byAPI); code != http.StatusConflict || !strings.HasSuffix(a.Error, " "+fix) {
 		t.Errorf("publish = %d %q, want 409 ending in the fix", code, a.Error)
 	}
 	row, items := f.stored(t, byBot)
@@ -389,7 +387,7 @@ func TestStaleFixNamesCheckAgainOnEveryDoor(t *testing.T) {
 	if err := json.Unmarshal([]byte(row.AgentVerdict), &agent); err != nil {
 		t.Fatalf("agent verdict %q: %v", row.AgentVerdict, err)
 	}
-	if len(agent.Refused) != 1 || agent.Refused[0].Code != "draft.stale" || agent.Refused[0].Fix != fix(byBot) {
+	if len(agent.Refused) != 1 || agent.Refused[0].Code != "draft.stale" || agent.Refused[0].Fix != fix {
 		t.Errorf("the agent's refused = %+v, want draft.stale with the Check again fix", agent.Refused)
 	}
 }

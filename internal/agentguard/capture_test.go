@@ -1,72 +1,16 @@
 package agentguard
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/strazahq/straza/internal/agentguard/spool"
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/policy"
 )
-
-func TestRedactSecrets(t *testing.T) {
-	for _, tc := range []struct {
-		name, in string
-		wantGone string // substring that must NOT survive
-		wantKept string // substring that must survive
-	}{
-		{"aws key", "creds: AKIAIOSFODNN7EXAMPLE ok", "AKIAIOSFODNN7EXAMPLE", "creds:"},
-		{"github pat", "use ghp_abcdefghijklmnopqrstuvwxyz0123456789 here", "ghp_abcdef", "use"},
-		{"bearer header", "Authorization: Bearer eyJhbGciOiJFUzI1NiJ9.payload.sig", "eyJhbGci", "Authorization:"},
-		{"pem block", "key:\n-----BEGIN PRIVATE KEY-----\nMIIEvg==\n-----END PRIVATE KEY-----\ndone", "MIIEvg", "done"},
-		{"straza api token", "token wat_0123456789abcdefghijklmnopqrstuvwxyzABCDEF used", "wat_0123", "used"},
-		{"plain text untouched", "deploy the staging branch", "", "deploy the staging branch"},
-	} {
-		got := redactSecrets(tc.in)
-		if tc.wantGone != "" && strings.Contains(got, tc.wantGone) {
-			t.Errorf("%s: %q still contains %q", tc.name, got, tc.wantGone)
-		}
-		if !strings.Contains(got, tc.wantKept) {
-			t.Errorf("%s: %q lost surrounding text %q", tc.name, got, tc.wantKept)
-		}
-		if tc.wantGone != "" && !strings.Contains(got, redactedMark) {
-			t.Errorf("%s: no redaction marker in %q", tc.name, got)
-		}
-	}
-}
-
-func TestCaptureContent(t *testing.T) {
-	// Hash is of the FULL ORIGINAL, mode and cap applied after.
-	original := strings.Repeat("a", captureMaxBytes+50)
-	sum := sha256.Sum256([]byte(original))
-	wantHash := "sha256:" + hex.EncodeToString(sum[:])
-
-	stored, truncated, hash := captureContent(original, "verbatim")
-	if !truncated || len(stored) != captureMaxBytes || hash != wantHash {
-		t.Errorf("verbatim oversized: truncated=%v len=%d hash ok=%v", truncated, len(stored), hash == wantHash)
-	}
-
-	small := "the AWS key is AKIAIOSFODNN7EXAMPLE"
-	stored, truncated, _ = captureContent(small, "redact")
-	if truncated {
-		t.Error("small content must not truncate")
-	}
-	if strings.Contains(stored, "AKIAIOSFODNN7EXAMPLE") {
-		t.Error("redact mode stored the secret verbatim")
-	}
-	// The hash still witnesses the ORIGINAL (leak hunt by value works even
-	// when the stored content is masked).
-	_, _, hash = captureContent(small, "redact")
-	sum = sha256.Sum256([]byte(small))
-	if hash != "sha256:"+hex.EncodeToString(sum[:]) {
-		t.Error("redact mode must hash the pre-redaction content")
-	}
-}
 
 func TestTranscriptDelta(t *testing.T) {
 	dir := t.TempDir()
@@ -398,112 +342,82 @@ func TestTranscriptDeltaCodexRollout(t *testing.T) {
 	}
 }
 
-// TestCaptureFlowPolicyGated proves the hook-flow gating: a capture-enabled
-// snapshot spools prompt/reply CEs; a plain snapshot spools nothing.
+// TestCaptureFlowPolicyGated proves the hook-flow gating: under a capture
+// directive the prompt and the session.end reply reach the service as
+// captures, and without one nothing leaves the machine. The decide request
+// never carries the prompt. The service applies the mode and records both.
 func TestCaptureFlowPolicyGated(t *testing.T) {
-	priv, keys := testSnapshotKey(t)
-	captureOn, onID := testSignedPolicy(t, priv, `
-apiVersion: straza.dev/v1beta1
-kind: PolicySet
-metadata: {name: cap-on}
-spec:
-  match: {roles: [dev]}
-  capture: {conversations: true, mode: redact}
-  rules: [{id: r1, effect: deny, tools: [shell.exec], command: {denyPatterns: ["rm -rf *"]}}]
-`)
-	plain, plainID := testSignedPolicy(t, priv, `
-apiVersion: straza.dev/v1beta1
-kind: PolicySet
-metadata: {name: plain}
-spec:
-  rules: [{id: r1, effect: deny, tools: [shell.exec], command: {denyPatterns: ["rm -rf *"]}}]
-`)
-
 	transcript := filepath.Join(t.TempDir(), "t.jsonl")
 	if err := os.WriteFile(transcript,
 		[]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"the key is AKIAIOSFODNN7EXAMPLE"}]}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	setup := func(t *testing.T, signed []byte, id string) (*Store, liveDecider) {
-		t.Setenv("STRAZA_HOME", t.TempDir())
-		store, err := OpenStore()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := store.SaveConfig(Config{ServerURL: "http://127.0.0.1:0", SnapshotKeys: keys}); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.SaveSnapshot(signed); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.SaveSession(Session{
-			SessionID: "s-cap", SessionToken: "tok", SnapshotID: id,
-			User: "bob", Roles: []string{"dev"}, Harness: "claude-code/2.1",
-			IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
-		}); err != nil {
-			t.Fatal(err)
-		}
-		return store, liveDecider{store: store}
-	}
-
-	spooled := func(store *Store) []string {
-		recs, err := spool.ReadRecords(store.SpoolPath())
-		if err != nil {
-			t.Fatal(err)
-		}
-		out := make([]string, len(recs))
-		for i, r := range recs {
-			out[i] = string(r)
-		}
-		return out
-	}
-
-	// Capture on: prompt.submit spools a redacted prompt CE.
-	store, d := setup(t, captureOn, onID)
+	window := localapi.Harness{Name: "claude-code", Version: "2.1", Session: "w1"}
 	prompt := Normalized{Event: policy.Event{Kind: policy.EventPromptSubmit},
-		HarnessName: "claude-code", HarnessVersion: "2.1",
+		HarnessName: "claude-code", HarnessVersion: "2.1", SessionID: "w1",
 		Prompt: "use AKIAIOSFODNN7EXAMPLE for the deploy"}
+	end := Normalized{Event: policy.Event{Kind: policy.EventSessionEnd},
+		HarnessName: "claude-code", HarnessVersion: "2.1", SessionID: "w1", TranscriptPath: transcript}
+
+	// Capture on: the prompt, then the reply read from the transcript delta.
+	svc := newFakeService(t)
+	svc.capture = policy.CaptureDirective{Conversations: true, Mode: policy.CaptureModeRedact}
+	d := serviceDecider{store: svc.store(t), svc: NewServiceClient()}
 	if dec := d.Decide(prompt); dec.Effect != policy.EffectAllow {
 		t.Fatalf("prompt.submit decision = %+v", dec)
 	}
-	recs := spooled(store)
-	if len(recs) != 1 || !strings.Contains(recs[0], "straza.audit.prompt") {
-		t.Fatalf("prompt spool = %v", recs)
+	if got := svc.decided(); len(got) != 1 || got[0].Harness != window || got[0].Event.Kind != policy.EventPromptSubmit {
+		t.Fatalf("prompt.submit decide request = %+v", got)
 	}
-	if strings.Contains(recs[0], "AKIAIOSFODNN7EXAMPLE") || !strings.Contains(recs[0], redactedMark) {
-		t.Errorf("redact mode leaked the secret into the spool: %s", recs[0])
+	d.Decide(end)
+	caps := svc.captured()
+	want := []localapi.CaptureRequest{
+		{Harness: window, Kind: localapi.CapturePrompt, Text: prompt.Prompt},
+		{Harness: window, Kind: localapi.CaptureReply, Text: "the key is AKIAIOSFODNN7EXAMPLE"},
 	}
-
-	// Reply capture at session.end reads the transcript delta (redacted too).
-	d.captureReply(mustSession(t, store), Normalized{
-		Event:       policy.Event{Kind: policy.EventSessionEnd},
-		HarnessName: "claude-code", HarnessVersion: "2.1", TranscriptPath: transcript})
-	recs = spooled(store)
-	if len(recs) != 2 || !strings.Contains(recs[1], "straza.audit.reply") {
-		t.Fatalf("reply spool = %d records", len(recs))
-	}
-	if strings.Contains(recs[1], "AKIAIOSFODNN7EXAMPLE") {
-		t.Error("reply capture leaked the secret in redact mode")
+	if len(caps) != len(want) || caps[0] != want[0] || caps[1] != want[1] {
+		t.Fatalf("captures = %+v, want %+v", caps, want)
 	}
 
-	// Capture off: the same prompt spools nothing.
-	store, d = setup(t, plain, plainID)
+	// Capture off: no prompt and no reply leave the machine.
+	svc = newFakeService(t)
+	d = serviceDecider{store: svc.store(t), svc: NewServiceClient()}
 	if dec := d.Decide(prompt); dec.Effect != policy.EffectAllow {
 		t.Fatalf("plain decision = %+v", dec)
 	}
-	if recs := spooled(store); len(recs) != 0 {
-		t.Fatalf("capture-off spooled %d records: %v", len(recs), recs)
+	d.Decide(end)
+	if caps := svc.captured(); len(caps) != 0 {
+		t.Fatalf("capture-off sent %d captures: %+v", len(caps), caps)
 	}
 }
 
-func mustSession(t *testing.T, store *Store) Session {
-	t.Helper()
-	ses, err := store.LoadSession()
-	if err != nil {
-		t.Fatal(err)
+// TestPromptSubmitHandsOverOldestFirst pins the audit order when a governed
+// turn's session.end never fired: the next prompt.submit hands the orphaned
+// reply to the service before the new prompt, so the records stay in the
+// order the conversation happened.
+func TestPromptSubmitHandsOverOldestFirst(t *testing.T) {
+	svc := newFakeService(t)
+	svc.capture = policy.CaptureDirective{Conversations: true}
+	store := svc.store(t)
+	d := serviceDecider{store: store, svc: NewServiceClient()}
+	transcript := filepath.Join(t.TempDir(), "t.jsonl")
+	submit := func(text string) {
+		t.Helper()
+		d.Decide(Normalized{Event: policy.Event{Kind: policy.EventPromptSubmit},
+			HarnessName: "claude-code", TranscriptPath: transcript, Prompt: text})
 	}
-	return ses
+	submit("first prompt")
+	appendTranscript(t, transcript, assistantLine("orphaned reply")) // the turn's Stop never fired
+	submit("second prompt")
+
+	var got []string
+	for _, c := range svc.captured() {
+		got = append(got, c.Kind+": "+c.Text)
+	}
+	want := []string{"prompt: first prompt", "reply: orphaned reply", "prompt: second prompt"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("captures = %q, want %q", got, want)
+	}
 }
 
 // TestNormalizeSubagentFields pins the delegate-attribution extraction: the
@@ -583,53 +497,23 @@ func TestNormalizeSubagentFields(t *testing.T) {
 // OFF, the stop still seals the child watermark so a later flip-ON can never
 // reach backwards (the subagent analog of the prompt.submit pin).
 func TestSubagentStopCapture(t *testing.T) {
-	priv, keys := testSnapshotKey(t)
-	captureOn, onID := testSignedPolicy(t, priv, `
-apiVersion: straza.dev/v1beta1
-kind: PolicySet
-metadata: {name: cap-on}
-spec:
-  match: {roles: [dev]}
-  capture: {conversations: true}
-  rules: [{id: r1, effect: deny, tools: [shell.exec], command: {denyPatterns: ["rm -rf *"]}}]
-`)
-	plain, plainID := testSignedPolicy(t, priv, `
-apiVersion: straza.dev/v1beta1
-kind: PolicySet
-metadata: {name: plain}
-spec:
-  rules: [{id: r1, effect: deny, tools: [shell.exec], command: {denyPatterns: ["rm -rf *"]}}]
-`)
-
-	setup := func(t *testing.T, signed []byte, id string) (*Store, liveDecider) {
-		t.Setenv("STRAZA_HOME", t.TempDir())
-		store, err := OpenStore()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := store.SaveConfig(Config{ServerURL: "http://127.0.0.1:0", SnapshotKeys: keys}); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.SaveSnapshot(signed); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.SaveSession(Session{
-			SessionID: "s-cap", SessionToken: "tok", SnapshotID: id,
-			User: "bob", Roles: []string{"dev"}, Harness: "claude-code/2.1",
-			IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
-		}); err != nil {
-			t.Fatal(err)
-		}
-		return store, liveDecider{store: store}
+	// setup starts a fake service whose decide answers carry the capture
+	// directive on, and returns the thin client's decider over it.
+	setup := func(t *testing.T, on bool) (*fakeService, serviceDecider) {
+		svc := newFakeService(t)
+		svc.capture = policy.CaptureDirective{Conversations: on}
+		return svc, serviceDecider{store: svc.store(t), svc: NewServiceClient()}
 	}
-	spooled := func(t *testing.T, store *Store) []string {
-		recs, err := spool.ReadRecords(store.SpoolPath())
-		if err != nil {
-			t.Fatal(err)
-		}
-		out := make([]string, len(recs))
-		for i, r := range recs {
-			out[i] = string(r)
+	// spooled renders each capture the service received as JSON, so the
+	// assertions read its kind, text and attribution.
+	spooled := func(t *testing.T, svc *fakeService) []string {
+		var out []string
+		for _, c := range svc.captured() {
+			raw, err := json.Marshal(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, string(raw))
 		}
 		return out
 	}
@@ -652,30 +536,30 @@ spec:
 	}
 
 	t.Run("child delta captured, tagged, parent untouched", func(t *testing.T) {
-		store, d := setup(t, captureOn, onID)
+		svc, d := setup(t, true)
 		child := childFile(t, "delegate findings")
 		if dec := d.Decide(stopEvent(child, "done")); dec.Effect != policy.EffectAllow {
 			t.Fatalf("subagent.stop decision = %+v", dec)
 		}
-		recs := spooled(t, store)
-		if len(recs) != 1 || !strings.Contains(recs[0], "straza.audit.reply") {
+		recs := spooled(t, svc)
+		if len(recs) != 1 || !strings.Contains(recs[0], `"kind":"reply"`) {
 			t.Fatalf("spool = %v", recs)
 		}
 		if !strings.Contains(recs[0], "delegate findings") {
 			t.Errorf("child transcript text missing from capture: %s", recs[0])
 		}
-		if !strings.Contains(recs[0], `"agentType":"researcher"`) || !strings.Contains(recs[0], `"agentId":"a-1"`) {
+		if !strings.Contains(recs[0], `"agent_type":"researcher"`) || !strings.Contains(recs[0], `"agent_id":"a-1"`) {
 			t.Errorf("capture not tagged with delegate attribution: %s", recs[0])
 		}
 		// The delta lane wins over the payload lane: last_assistant_message
 		// is only the FINAL message; the transcript holds the whole output.
-		if strings.Contains(recs[0], `"content":"done"`) {
+		if strings.Contains(recs[0], `"text":"done"`) {
 			t.Errorf("payload reply won over the transcript delta: %s", recs[0])
 		}
 		// The parent's watermark must not move: its delta belongs to the
 		// session.end lane, and advancing it here would swallow the parent's
 		// own reply.
-		if _, err := os.Stat(watermarkPath(store, "/nonexistent-parent.jsonl")); !os.IsNotExist(err) {
+		if _, err := os.Stat(watermarkPath(d.store, "/nonexistent-parent.jsonl")); !os.IsNotExist(err) {
 			t.Error("subagent.stop touched the parent transcript watermark")
 		}
 
@@ -691,7 +575,7 @@ spec:
 		if dec := d.Decide(stopEvent(child, "")); dec.Effect != policy.EffectAllow {
 			t.Fatal("second stop denied")
 		}
-		recs = spooled(t, store)
+		recs = spooled(t, svc)
 		if len(recs) != 2 {
 			t.Fatalf("second stop: spool = %d records", len(recs))
 		}
@@ -701,11 +585,11 @@ spec:
 	})
 
 	t.Run("payload reply is the fallback when the child transcript is unavailable", func(t *testing.T) {
-		store, d := setup(t, captureOn, onID)
+		svc, d := setup(t, true)
 		if dec := d.Decide(stopEvent("", "handoff summary")); dec.Effect != policy.EffectAllow {
 			t.Fatal("stop denied")
 		}
-		recs := spooled(t, store)
+		recs := spooled(t, svc)
 		if len(recs) != 1 || !strings.Contains(recs[0], "handoff summary") {
 			t.Fatalf("payload fallback spool = %v", recs)
 		}
@@ -717,7 +601,7 @@ spec:
 		// agent_type. Captured, their ghost suggestion text would land in
 		// the transcript as reply rows. "Capture, tagged" means attribution
 		// is the entry ticket: no identity, no capture.
-		store, d := setup(t, captureOn, onID)
+		svc, d := setup(t, true)
 		child := childFile(t, "suggestion machinery output")
 		anon := Normalized{
 			Event:       policy.Event{Kind: policy.EventSubagentStop},
@@ -727,7 +611,7 @@ spec:
 		if dec := d.Decide(anon); dec.Effect != policy.EffectAllow {
 			t.Fatal("stop denied")
 		}
-		if recs := spooled(t, store); len(recs) != 0 {
+		if recs := spooled(t, svc); len(recs) != 0 {
 			t.Fatalf("unattributed sidechain was captured: %v", recs)
 		}
 	})
@@ -737,7 +621,7 @@ spec:
 		// agent_id but still no agent_type, so an id alone does not prove a
 		// user-visible delegate. The class tag is the entry ticket: no
 		// agent_type, no capture.
-		store, d := setup(t, captureOn, onID)
+		svc, d := setup(t, true)
 		child := childFile(t, "try get-tiny-image")
 		idOnly := Normalized{
 			Event:       policy.Event{Kind: policy.EventSubagentStop},
@@ -748,40 +632,33 @@ spec:
 		if dec := d.Decide(idOnly); dec.Effect != policy.EffectAllow {
 			t.Fatal("stop denied")
 		}
-		if recs := spooled(t, store); len(recs) != 0 {
+		if recs := spooled(t, svc); len(recs) != 0 {
 			t.Fatalf("id-only sidechain was captured: %v", recs)
 		}
 	})
 
 	t.Run("nothing to capture spools nothing", func(t *testing.T) {
-		store, d := setup(t, captureOn, onID)
+		svc, d := setup(t, true)
 		if dec := d.Decide(stopEvent("", "")); dec.Effect != policy.EffectAllow {
 			t.Fatal("stop denied")
 		}
-		if recs := spooled(t, store); len(recs) != 0 {
+		if recs := spooled(t, svc); len(recs) != 0 {
 			t.Fatalf("spool = %v", recs)
 		}
 	})
 
 	t.Run("capture off seals the child watermark so flip-on never reaches back", func(t *testing.T) {
-		store, d := setup(t, plain, plainID)
+		svc, d := setup(t, false)
 		child := childFile(t, "produced while capture was OFF")
 		if dec := d.Decide(stopEvent(child, "off-reply")); dec.Effect != policy.EffectAllow {
 			t.Fatal("stop denied")
 		}
-		if recs := spooled(t, store); len(recs) != 0 {
+		if recs := spooled(t, svc); len(recs) != 0 {
 			t.Fatalf("capture-off spooled: %v", recs)
 		}
 		// Flip capture ON mid-session, delegate produces more, stops again:
 		// only the post-flip text may be captured.
-		if err := store.SaveSnapshot(captureOn); err != nil {
-			t.Fatal(err)
-		}
-		ses := mustSession(t, store)
-		ses.SnapshotID = onID
-		if err := store.SaveSession(ses); err != nil {
-			t.Fatal(err)
-		}
+		svc.capture = policy.CaptureDirective{Conversations: true}
 		f, err := os.OpenFile(child, os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
 			t.Fatal(err)
@@ -793,7 +670,7 @@ spec:
 		if dec := d.Decide(stopEvent(child, "")); dec.Effect != policy.EffectAllow {
 			t.Fatal("post-flip stop denied")
 		}
-		recs := spooled(t, store)
+		recs := spooled(t, svc)
 		if len(recs) != 1 {
 			t.Fatalf("post-flip spool = %d records", len(recs))
 		}
@@ -805,20 +682,20 @@ spec:
 		}
 	})
 
-	t.Run("delegated tool decision is spooled with attribution", func(t *testing.T) {
-		store, d := setup(t, captureOn, onID)
+	t.Run("delegated tool decision carries attribution to the service", func(t *testing.T) {
+		svc, d := setup(t, true)
 		n := Normalized{
 			Event:       policy.Event{Kind: policy.EventToolPre, Tool: policy.ToolShellExec, Command: "ls"},
 			HarnessName: "claude-code", HarnessVersion: "2.1",
 			AgentID: "a-1", AgentType: "researcher",
 		}
 		d.Decide(n)
-		recs := spooled(t, store)
-		if len(recs) != 1 || !strings.Contains(recs[0], "straza.audit.tool") {
-			t.Fatalf("tool spool = %v", recs)
+		got := svc.decided()
+		if len(got) != 1 || got[0].Event.Kind != policy.EventToolPre {
+			t.Fatalf("decide requests = %+v", got)
 		}
-		if !strings.Contains(recs[0], `"agentType":"researcher"`) || !strings.Contains(recs[0], `"agentId":"a-1"`) {
-			t.Errorf("delegated tool audit lost attribution: %s", recs[0])
+		if got[0].AgentType != "researcher" || got[0].AgentID != "a-1" {
+			t.Errorf("delegated tool decision lost attribution: %+v", got[0])
 		}
 	})
 }

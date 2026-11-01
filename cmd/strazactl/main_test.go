@@ -10,20 +10,11 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-
-	"github.com/strazahq/straza/internal/ctl"
 )
 
-// TestMain runs the suite outside any coding agent and without an admin API
-// token, whatever the shell that runs go test holds. The suite drives writes
-// on a login, which the coding-agent guard would refuse. A test that needs a
-// marker or a token sets it with t.Setenv.
+// TestMain runs the suite without an admin API token, whatever the shell
+// that runs go test holds. A test that needs a token sets it with t.Setenv.
 func TestMain(m *testing.M) {
-	for marker := ctl.CodingAgentMarker(os.Getenv); marker != ""; marker = ctl.CodingAgentMarker(os.Getenv) {
-		if err := os.Unsetenv(marker); err != nil {
-			panic(err)
-		}
-	}
 	if err := os.Unsetenv(apiTokenEnv); err != nil {
 		panic(err)
 	}
@@ -69,10 +60,14 @@ func TestExitCode(t *testing.T) {
 }
 
 // TestDraftsFailureExitsTwoThroughMain runs main in a child process and pins
-// that main speaks exitCode: a drafts verb run without its -f exits 2 with
-// its sentence on stderr.
+// that main speaks exitCode: a drafts verb run on a token without its -f
+// exits 2 with its sentence on stderr.
 func TestDraftsFailureExitsTwoThroughMain(t *testing.T) {
 	if os.Getenv("STRAZACTL_TEST_MAIN") == "1" {
+		// TestMain unset the token in this child too, so it is set here.
+		if err := os.Setenv(apiTokenEnv, testToken); err != nil {
+			t.Fatal(err)
+		}
 		os.Args = []string{"strazactl", "--server", "http://127.0.0.1:1", "drafts", "check"}
 		main()
 		return

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -111,7 +112,11 @@ func (h *pushHub) fanout(subject string, data []byte) {
 // token's own claims, so a session can only ever hear about itself, its
 // user, its device, and the public policy nudge.
 func (a *App) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
-	claims, err := a.tokens.Verify(bearerToken(r))
+	raw, scheme := sessionCredential(r)
+	claims, err := a.verifySessionToken(w, r, raw, scheme)
+	if errors.Is(err, errAnswered) {
+		return
+	}
 	if err != nil || claims.Session == "" {
 		apiError(w, http.StatusUnauthorized, "session token rejected")
 		return

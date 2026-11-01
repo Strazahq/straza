@@ -66,8 +66,8 @@ const tlsRefusal = "Client sent an HTTP request to an HTTPS server."
 // got no answer is strazad unreachable at base. An answer that is not JSON
 // came from something other than strazad, and its error says what answered
 // and what to do. Only an http base that gets Go's TLS
-// refusal as the whole body is told to log in again over https; an https
-// base that relays it has a proxy in front, which the other sentence names.
+// refusal as the whole body is told to use https; an https base that
+// relays it has a proxy in front, which the other sentence names.
 func getJSON(ctx context.Context, client *http.Client, base, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
@@ -93,7 +93,7 @@ func getJSON(ctx context.Context, client *http.Client, base, path string, out an
 	if strings.HasPrefix(base, "http://") && resp.StatusCode == http.StatusBadRequest &&
 		string(bytes.TrimSpace(body)) == tlsRefusal {
 		return fmt.Errorf("the server at %s speaks HTTPS now, so it refused this plain http request. "+
-			"Log in again with `strazactl login --server https://%s`, which stores the https address for the commands that follow",
+			"Run the command again with --server https://%s, or set STRAZA_SERVER to that address for the commands that follow",
 			base, strings.TrimPrefix(base, "http://"))
 	}
 	return fmt.Errorf("%s answered HTTP %d with something that is not strazad's JSON, so a proxy or another program answers at that address. "+

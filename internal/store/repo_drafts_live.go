@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -28,7 +29,7 @@ func (r draftRepo) LiveState(ctx context.Context, liveSnapshot string) (LiveStat
 		if st.Apps, err = r.liveApps(ctx, tx); err != nil {
 			return err
 		}
-		if st.Access, err = r.liveAccess(ctx, tx); err != nil {
+		if st.Access, st.Unreadable, err = r.liveAccess(ctx, tx); err != nil {
 			return err
 		}
 		if st.Roles, err = r.liveRoles(ctx, tx, st.RoleIDs); err != nil {
@@ -59,31 +60,40 @@ func (r draftRepo) liveApps(ctx context.Context, tx *sql.Tx) ([]App, error) {
 	return out, rows.Err()
 }
 
-// liveAccess reads the access rows of live servers with their names. A row
-// whose tool matchers are empty or do not decode is left out, as the
-// gateway's own table leaves it out, so it grants nothing.
-func (r draftRepo) liveAccess(ctx context.Context, tx *sql.Tx) ([]LiveAccess, error) {
-	rows, err := tx.QueryContext(ctx, r.s.q(`SELECT b.id, ro.name, a.name, b.tool_matcher FROM tool_bindings b
+// liveAccess reads the access rows of live servers with their names and
+// covers lines. A row whose tool matchers are empty or do not decode is
+// left out, as the gateway's own table leaves it out, so it grants
+// nothing. A row whose covers line cannot be read is left out the same
+// way, and answered as one fault sentence each.
+func (r draftRepo) liveAccess(ctx context.Context, tx *sql.Tx) ([]LiveAccess, []string, error) {
+	rows, err := tx.QueryContext(ctx, r.s.q(`SELECT b.id, ro.name, a.name, b.tool_matcher, b.object_scope FROM tool_bindings b
 		JOIN roles ro ON ro.id = b.role_id
 		JOIN apps a ON a.id = b.app_id AND a.deleted_at IS NULL
 		ORDER BY b.created_at, b.id`))
 	if err != nil {
-		return nil, r.s.mapErr(err)
+		return nil, nil, r.s.mapErr(err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []LiveAccess
+	var faults []string
 	for rows.Next() {
 		var la LiveAccess
 		var matcher string
-		if err := rows.Scan(&la.ID, &la.Role, &la.App, &matcher); err != nil {
-			return nil, err
+		var scope sql.NullString
+		if err := rows.Scan(&la.ID, &la.Role, &la.App, &matcher, &scope); err != nil {
+			return nil, nil, err
 		}
 		if json.Unmarshal([]byte(matcher), &la.Matchers) != nil || len(la.Matchers) == 0 {
 			continue
 		}
+		var fault string
+		if la.Scope, fault = decodeScope(fmt.Sprintf("the access row %s of %s on %s", la.ID, la.Role, la.App), scope); fault != "" {
+			faults = append(faults, fault)
+			continue
+		}
 		out = append(out, la)
 	}
-	return out, rows.Err()
+	return out, faults, rows.Err()
 }
 
 // liveRoles answers every role name, sorted, and fills ids with each

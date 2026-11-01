@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 )
 
@@ -29,7 +28,7 @@ func TestDraftsRebase(t *testing.T) {
 		{name: "a mechanical Check again", reply: draftReply{body: fixAnswer("41", 3, "", "")},
 			wantBody: `{"revision":2}`,
 			wantOut: []string{"Checked draft 41 again against live state: it is at revision 3. Nothing changes until a person publishes it.\n",
-				"The draft can be published: strazactl drafts publish 41\n"}},
+				"Publish draft 41 in the console under Drafts: http://127.0.0.1:", "/console/drafts/41\n"}},
 		{name: "picks", args: []string{"--pick", "App/demo-tools straza.limits.rps=draft", "--pick", "App/demo-tools straza.exposure.tools=live"},
 			reply:    draftReply{body: fixAnswer("41", 3, "", "")},
 			wantBody: `{"revision":2,"picks":{"App/demo-tools straza.exposure.tools":"live","App/demo-tools straza.limits.rps":"draft"}}`,
@@ -52,7 +51,7 @@ func TestDraftsRebase(t *testing.T) {
 				"POST /v1/admin/drafts/41/rebase": tc.reply,
 			})
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", append([]string{"drafts", "rebase", "41"}, tc.args...)...)
+			stdout, _, code, err := runDrafts(t, onToken(t, srv.URL), "", append([]string{"drafts", "rebase", "41"}, tc.args...)...)
 			if code != tc.wantCode || errText(err) != tc.wantErr {
 				t.Errorf("exit %d, err %v, want exit %d, err %q", code, err, tc.wantCode, tc.wantErr)
 			}
@@ -72,7 +71,7 @@ func TestDraftsRebaseRefusesAPickItCannotRead(t *testing.T) {
 		t.Run(pick, func(t *testing.T) {
 			s, srv := newDraftsServer(t, nil)
 			t.Setenv("STRAZA_SERVER", "")
-			_, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", "drafts", "rebase", "41", "--pick", pick)
+			_, _, code, err := runDrafts(t, onToken(t, srv.URL), "", "drafts", "rebase", "41", "--pick", pick)
 			want := "--pick \"" + pick + "\" is not Kind/Name field=draft or Kind/Name field=live, such as --pick \"App/demo-tools straza.limits.rps=draft\""
 			if code != 2 || errText(err) != want {
 				t.Errorf("exit %d, err %v, want 2 %q", code, err, want)
@@ -82,16 +81,19 @@ func TestDraftsRebaseRefusesAPickItCannotRead(t *testing.T) {
 	}
 }
 
-// TestDraftsRebaseRefusedInsideACodingAgent pins the guard on rebase: on
-// the login inside a coding agent it refuses before its read.
-func TestDraftsRebaseRefusedInsideACodingAgent(t *testing.T) {
-	s, srv := newDraftsServer(t, map[string]draftReply{"GET /v1/admin/drafts/41": {body: fixDetail("open", "", "", true, "")}})
-	t.Setenv("STRAZA_SERVER", "")
-	t.Setenv("CLAUDECODE", "1")
-	t.Setenv(apiTokenEnv, "")
-	_, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", "drafts", "rebase", "41")
-	if code != 2 || !strings.HasPrefix(errText(err), "CLAUDECODE is set, so strazactl runs inside a coding agent") {
-		t.Errorf("exit %d, err %v, want 2 with the guard's refusal", code, err)
+// TestTermText pins how a server's own text is printed on one terminal line:
+// a line break or a tab reads as a space, and a character that prints
+// nothing, such as the escape that starts a terminal sequence, reads as its
+// code point.
+func TestTermText(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"Open an issue.", "Open an issue."},
+		{"Open an issue.\u001b[31m Red\nnext", "Open an issue.U+001B[31m Red next"},
+		{"a\tb\r\nc", "a b  c"},
 	}
-	assertCalls(t, s, 0)
+	for _, tc := range tests {
+		if got := termText(tc.in); got != tc.want {
+			t.Errorf("termText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }

@@ -66,6 +66,11 @@
       "required": [
         "runtime"
       ],
+      "dependentRequired": {
+        "git": [
+          "objects"
+        ]
+      },
       "additionalProperties": false,
       "properties": {
         "runtime": {
@@ -488,6 +493,138 @@
             "timeoutSeconds": {
               "type": "integer",
               "minimum": 0
+            }
+          }
+        },
+        "objects": {
+          "type": "object",
+          "description": "Revision 7. The one object type the server's tools act on, the read-only tool that lists the objects, and how each tool reaches them. A server's ai.straza/* tool marks only pre-fill a draft. This pinned copy is the only one the platform decides with.",
+          "required": [
+            "type",
+            "list"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,31}$",
+              "description": "One lowercase word for the kind of target, such as repo."
+            },
+            "plural": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,39}$",
+              "description": "The word people read for many objects, such as repos. Absent means the type plus s."
+            },
+            "list": {
+              "type": "object",
+              "required": [
+                "tool"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "tool": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+                  "description": "The server's read-only tool that lists the objects."
+                },
+                "attributes": {
+                  "type": "array",
+                  "maxItems": 16,
+                  "description": "The attributes the listing returns that the platform keeps. Names are unique.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+                      },
+                      "setBy": {
+                        "enum": [
+                          "org",
+                          "object"
+                        ],
+                        "description": "Who can set the value in the source system: org means only the organization's admins, object means the object's own admins too. Absent reads as object."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "tools": {
+              "type": "object",
+              "description": "How each tool reaches objects. A tool this mapping does not name reaches every object.",
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+              },
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "enum": [
+                      "all",
+                      "none",
+                      "credential"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "argument"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "argument": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$",
+                        "description": "The required top-level string argument that names the object."
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "git": {
+          "type": "object",
+          "description": "Revision 9. Lets agents run git against the git host at upstream through Straza: Straza decides each fetch or push as a call of the tool ops maps it to, and signs a short git grant for the resource server at url. Needs the objects block, and each mapped tool must be pinned there with {argument: <name>}, a rule the parser enforces and this schema cannot express.",
+          "required": [
+            "url",
+            "upstream",
+            "ops"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "pattern": "^([Hh][Tt][Tt][Pp][Ss]://[^/?#@:][^/?#@]*|[Hh][Tt][Tt][Pp]://([Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]|127(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}|\\[::1\\])(:[0-9]*)?)(/[^?#]*)?$",
+              "description": "The resource server's public base URL, the audience of every git grant. Absolute, https or http on a loopback host only, without userinfo, query or fragment. The platform stores it with the scheme and host in lower case, no default port and no trailing slash."
+            },
+            "upstream": {
+              "type": "string",
+              "pattern": "^([Hh][Tt][Tt][Pp][Ss]://[^/?#@:][^/?#@]*|[Hh][Tt][Tt][Pp]://([Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]|127(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}|\\[::1\\])(:[0-9]*)?)(/[^?#]*)?$",
+              "description": "The base URL of the git host the server's repos live on, such as https://github.com. The same rules and canonical form as url."
+            },
+            "ops": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "description": "Maps fetch, push or both to the server's tools.",
+              "properties": {
+                "fetch": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+                  "description": "The tool a fetch grant is decided as."
+                },
+                "push": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+                  "description": "The tool a push grant is decided as."
+                }
+              }
             }
           }
         }

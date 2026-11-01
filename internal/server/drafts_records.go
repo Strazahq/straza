@@ -3,13 +3,16 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/strazahq/straza/internal/drafts"
+	"github.com/strazahq/straza/internal/identity"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -17,7 +20,8 @@ import (
 // drafts route writes: the revision published and its items,
 // the risk digest now and the one the publisher reviewed, the keys of the
 // risks acknowledged by a tick and by typing, never a typed text, the
-// proposer, the client the publisher used, and the draft an undo reverses.
+// proposer, the client the publisher used, the draft an undo reverses, and
+// the sets whose agent.guardrail risk the publish confirmed.
 type publishFields struct {
 	Revision                   int
 	Items                      []drafts.Item
@@ -25,6 +29,25 @@ type publishFields struct {
 	Acknowledged, Typed        []string
 	Proposer                   store.DraftActor
 	Client, Reverts            string
+	AgentLoosened              []string
+}
+
+// agentGuardrailCode is the code of the risk an agent's draft raises when
+// it loosens a set that binds the agent.
+const agentGuardrailCode = "agent.guardrail"
+
+// agentLoosened answers the sorted names of the sets whose agent.guardrail
+// risk v holds, each once, from the risk's object PolicySet/<name>, or nil
+// when v holds none. A publish of v confirms every one of them.
+func agentLoosened(v drafts.Verdict) []string {
+	var out []string
+	for _, f := range v.Risks {
+		if name, ok := strings.CutPrefix(f.Object, string(drafts.KindPolicySet)+"/"); ok && f.Code == agentGuardrailCode && name != "" {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // recordContext is what the records of a publish read beside what Publish
@@ -230,7 +253,8 @@ func (b *recordBuilder) roleID(name string) string {
 // install records a server put as today's install route does: apps.install
 // with whether it updated a live server, the manifest paths it changed
 // when they could be compared, and its admin role, minted with a new
-// server.
+// server. A put that changed the pinned type names the roles it repinned
+// in identity events.
 func (b *recordBuilder) install(o store.ItemOutcome, it store.PlanItem) {
 	name := o.Ref.Name
 	data := map[string]any{"app": name, "update": !o.Created}
@@ -247,7 +271,38 @@ func (b *recordBuilder) install(o store.ItemOutcome, it store.PlanItem) {
 	if o.Created {
 		b.identity(o.AdminRole.ID)
 	}
+	b.repinned(o.Repinned)
 	b.apps = append(b.apps, name)
+}
+
+// repinned names in identity events each role id in ids and then, in name
+// order, each live role whose implication closure reaches one of them. A
+// first pin, an unpin or a type change rewrites in place what the SCIM
+// group of each such role renders under covers, with no access row record
+// and so no binding event, and an identity event makes midPoint's LiveSync
+// read the group again.
+func (b *recordBuilder) repinned(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	seed := map[string]bool{}
+	for name, r := range b.rc.w.Roles {
+		if slices.Contains(ids, r.ID) {
+			seed[name] = true
+		}
+	}
+	impliedBy := map[string][]string{}
+	for name, implied := range b.rc.w.Implies {
+		for _, target := range implied {
+			impliedBy[target] = append(impliedBy[target], name)
+		}
+	}
+	for _, id := range ids {
+		b.identity(id)
+	}
+	for _, name := range slices.Sorted(maps.Keys(identity.Closure(seed, impliedBy))) {
+		b.identity(b.rc.w.Roles[name].ID)
+	}
 }
 
 // removeServer records a server removal as today's removal does, as one
@@ -342,11 +397,11 @@ func (b *recordBuilder) putRole(o store.ItemOutcome, it store.PlanItem) {
 	}
 	for _, row := range o.BindingsRemoved {
 		server := b.rc.w.Access[name].Server
-		b.audit("apps.binding.delete", map[string]any{"app": server, "role": name, "tools": matchersOf(row), "bindingId": row.ID})
+		b.audit("apps.binding.delete", withCovers(map[string]any{"app": server, "role": name, "tools": matchersOf(row), "bindingId": row.ID}, row))
 		b.binding(server)
 	}
 	for _, row := range o.BindingsAdded {
-		b.audit("apps.binding.create", map[string]any{"app": cfg.Server, "role": name, "tools": matchersOf(row)})
+		b.audit("apps.binding.create", withCovers(map[string]any{"app": cfg.Server, "role": name, "tools": matchersOf(row)}, row))
 		b.binding(cfg.Server)
 	}
 	for _, implied := range o.ImpliesRemoved {
@@ -355,6 +410,17 @@ func (b *recordBuilder) putRole(o store.ItemOutcome, it store.PlanItem) {
 	for _, implied := range o.ImpliesAdded {
 		edge("roles.implication.create", implied)
 	}
+}
+
+// withCovers adds the access row's covers line to the data of its binding
+// record when the row has one. It is always the stored object form,
+// {"every":true} or the objects with id and value, so a SIEM maps covers to
+// one type across records.
+func withCovers(data map[string]any, row store.ToolBinding) map[string]any {
+	if row.Scope != nil {
+		data["covers"] = row.Scope
+	}
+	return data
 }
 
 // matchersOf answers the tool matchers of an access row, never nil.
@@ -392,7 +458,9 @@ func (b *recordBuilder) set(o store.ItemOutcome, it store.PlanItem) {
 }
 
 // publishData is the data of draft.publish from p: the keys acknowledged
-// and typed are always present, and reverts only on an undo.
+// and typed are always present, reverts only on an undo, and
+// agentLoosened only when the publish confirmed an agent's loosening of a
+// set that binds it.
 func (b *recordBuilder) publishData(p *publishFields) map[string]any {
 	items := make([]map[string]string, len(p.Items))
 	for i, it := range p.Items {
@@ -403,6 +471,9 @@ func (b *recordBuilder) publishData(p *publishFields) map[string]any {
 		"proposer": p.Proposer.Name, "proposerId": p.Proposer.ID, "proposerVia": p.Proposer.Via, "client": p.Client}
 	if p.Reverts != "" {
 		data["reverts"] = p.Reverts
+	}
+	if len(p.AgentLoosened) > 0 {
+		data["agentLoosened"] = p.AgentLoosened
 	}
 	return data
 }

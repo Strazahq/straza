@@ -18,8 +18,8 @@ import (
 
 // The sentences of Contact that name who may contact and what.
 const (
-	contactAdminAPIRefusal = "An admin API token carries no person and cannot contact a proposed server. A person contacts it on the console or with strazactl drafts contact."
-	contactAgentRefusal    = "This identity is an agent, and an agent cannot contact a proposed server, even with an administrator role. A person contacts it on the console or with strazactl drafts contact."
+	contactAdminAPIRefusal = "An admin API token carries no person and cannot contact a proposed server. A person contacts it on the console under Drafts."
+	contactAgentRefusal    = "This identity is an agent, and an agent cannot contact a proposed server, even with an administrator role. A person contacts it on the console under Drafts."
 	contactStandingRefusal = "Contacting a proposed server needs the scope apps:write or the role " + MCPAdminRole + ", because Straza dials the address the draft names."
 	contactBodyRefusal     = "The request body is not a contact: %s. Send object as JSON, such as App/github."
 	contactObjectRefusal   = "object must name a server of the draft as App/<name>, such as App/github."

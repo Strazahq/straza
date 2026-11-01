@@ -10,7 +10,8 @@
 // call" is one rule with no tool list, so it holds tools added later too.
 // The grammar has no exception to an approve rule, so under it a tool can be
 // denied or given its own approval, never allowed without one.
-import type { BindingRow, PreviewEntry } from "./api";
+import { type Covers, coversOf, deadTools, partial } from "./access-covers";
+import type { BindingRow, ObjectsBlock, PreviewEntry } from "./api";
 import { GRANT_DEFAULT, HOLD_DEFAULT, type Plain, TICKET_DEFAULT, docProblems, docText, newPolicyDoc, openDoc, readSet, ruleView, rulesOf, slug, uniqueId } from "./policy-model";
 import {
   EVERY_RULE_FIRST,
@@ -51,7 +52,9 @@ export type Shape = { pool: string; how: "hold" | "ticket"; hold: number; ticket
 
 // Plan is the draft of one role's access to one server. choice is read
 // under "per", and its deny entries also under "every". own holds the tools
-// that carry their own approval setting instead of the server's.
+// that carry their own approval setting instead of the server's. covers is
+// the row's covers line on a server that pins an object type, absent until
+// a card is picked.
 export type Plan = {
   reach: Reach;
   picked: Record<string, boolean>;
@@ -59,6 +62,7 @@ export type Plan = {
   choice: Record<string, Choice>;
   shape: Shape;
   own: Record<string, Shape>;
+  covers?: Covers;
 };
 
 // FixedRule is a rule the editor shows but does not change: one in another
@@ -158,6 +162,21 @@ export function narrowed(plan: Plan, tools: string[], tool: string): Plan {
 
 export const withCall = (plan: Plan, call: OnCall): Plan => ({ ...plan, call });
 
+// withCovers sets the covers line. A row on some objects cannot hold a
+// tool nothing keeps to them, nor the glob, so a pick of objects turns the
+// row into ticks without those tools: every tool the row reached stays
+// ticked but them. Under the glob a deny is what keeps a tool out, so a
+// denied tool is left unticked there, and every choice is kept, so a deny
+// never reads as an allow.
+export function withCovers(plan: Plan, covers: Covers, tools: string[], block: ObjectsBlock): Plan {
+  const dead = deadTools(block, tools);
+  if (!partial(covers) || (plan.reach !== "later" && !dead.some((t) => inGrant(plan, t)))) return { ...plan, covers };
+  const glob = plan.reach === "later";
+  const picked: Record<string, boolean> = {};
+  for (const t of tools) if (inGrant(plan, t) && !dead.includes(t) && !(glob && choiceOf(plan, t) === "deny")) picked[t] = true;
+  return { ...plan, reach: "tick", picked, covers };
+}
+
 export function withChoice(plan: Plan, tool: string, c: Choice): Plan {
   const own = { ...plan.own };
   if (c !== "approve") delete own[tool];
@@ -205,6 +224,8 @@ export function planFor(binding: BindingRow | null, tools: string[], own?: OwnRe
     }
   }
   if (own) Object.assign(plan, own.plan);
+  const covers = coversOf(binding?.covers);
+  if (covers) plan.covers = covers;
   return plan;
 }
 
@@ -519,16 +540,27 @@ function sentenceParts(plan: Plan, app: string, tools: string[], role: string): 
   };
 }
 
+// reachOnly is the first sentence of the plan sentence alone, the one on
+// what the row reaches.
+const reachOnly = (p: SentenceParts) => planSentenceParts({ ...p, call: "per", allowed: 0, shared: null, own: [], denied: [], newToolsRun: false });
+
 // planSentence is the one sentence under the editor: what the access row
-// reaches and what a call does, the approval shape named.
-export const planSentence = (plan: Plan, app: string, tools: string[], role: string): string => planSentenceParts(sentenceParts(plan, app, tools, role));
+// reaches, with clause, the covers line in words, joined to it, and what a
+// call does, the approval shape named.
+export function planSentence(plan: Plan, app: string, tools: string[], role: string, clause = ""): string {
+  const p = sentenceParts(plan, app, tools, role);
+  const full = planSentenceParts(p);
+  const reach = reachOnly(p);
+  if (!clause || (p.reach === "tick" && !p.ticked) || !full.startsWith(reach)) return full;
+  return reach.slice(0, -1) + ", " + clause + "." + full.slice(reach.length);
+}
 
 // callSentence is planSentence without its first sentence, the one on what
 // the row reaches: what a call does, for the publish row of a save.
 export function callSentence(plan: Plan, app: string, tools: string[], role: string): string {
   const p = sentenceParts(plan, app, tools, role);
   const full = planSentenceParts(p);
-  const reach = planSentenceParts({ ...p, call: "per", allowed: 0, shared: null, own: [], denied: [], newToolsRun: false });
+  const reach = reachOnly(p);
   return full.startsWith(reach) ? full.slice(reach.length).trimStart() : full;
 }
 

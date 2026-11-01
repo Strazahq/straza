@@ -2,7 +2,7 @@
 title: strazactl approvals list
 description: 'List approval requests (default: pending)'
 pagetype: reference
-weight: 11
+weight: 8
 draft: false
 sources:
   - cmd/strazactl
@@ -16,6 +16,8 @@ keywords: strazactl, approvals, list
 Prints one row per request, a held call and a ticket alike, with the columns ID,
 STATE, REQUESTER, SUMMARY, ROLES, EXPIRES and DECIDED BY. ROLES names the roles
 whose holders may decide it. --wide prints each request as a block instead.
+One line on stderr then says where a person decides: in the console, on the
+self-service page or on the phone.
 
 ```
 strazactl approvals list [flags]
@@ -38,10 +40,10 @@ strazactl approvals list [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
-* [strazactl approvals](/reference/cli/strazactl/strazactl_approvals/): List and decide approval requests, and mint approver enroll tokens
+* [strazactl approvals](/reference/cli/strazactl/strazactl_approvals/): List approval requests
 

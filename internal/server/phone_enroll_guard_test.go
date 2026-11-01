@@ -55,11 +55,10 @@ func TestPhoneEnrollGuardMessage(t *testing.T) {
 	}
 }
 
-// TestPhoneEnrollGuardEndpoints pins the guard on the two phone-destined
-// mint surfaces: the admin "Add mobile approver" mint and the self-service
-// mobile mint refuse a derived dud QR with the actionable message, while
-// the self-service browser mint (a browser on this machine dials loopback
-// just fine) stays open.
+// TestPhoneEnrollGuardEndpoints pins the guard on the phone-destined mint:
+// the self-service mobile mint refuses a derived dud QR with the actionable
+// message, while the self-service browser mint (a browser on this machine
+// dials loopback just fine) stays open.
 func TestPhoneEnrollGuardEndpoints(t *testing.T) {
 	t.Parallel()
 	app, base := testAppPreRun(t, []func(*App){func(a *App) {
@@ -74,24 +73,18 @@ func TestPhoneEnrollGuardEndpoints(t *testing.T) {
 	})
 	kim := seedIdentity(t, app)
 	grantAdmin(t, app, kim.ID)
-	adminTok, _ := checkinToken(t, app, base)
 
 	var refusal struct {
 		Error string `json:"error"`
 	}
-	if code := adminReq(t, http.MethodPost, base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"user_id": kim.ID}, &refusal); code != http.StatusConflict {
-		t.Fatalf("admin mint with derived dud QR = %d, want 409", code)
-	}
-	if !strings.Contains(refusal.Error, "STRAZA_APPROVER_TLS_PUBLIC_URL") || !strings.Contains(refusal.Error, "127.0.0.1") {
-		t.Errorf("admin refusal %q must name the env var and the loopback address", refusal.Error)
-	}
-
 	selfURL := base + "/v1/approvals/self/enroll-token"
 	loginTok := loginDeviceFlow(t, base, "kim", "hunter2!")
 	if code := adminReq(t, http.MethodPost, selfURL, loginTok,
 		map[string]any{"channel": "mobile"}, &refusal); code != http.StatusConflict {
 		t.Fatalf("self mobile mint with derived dud QR = %d, want 409", code)
+	}
+	if !strings.Contains(refusal.Error, "STRAZA_APPROVER_TLS_PUBLIC_URL") || !strings.Contains(refusal.Error, "127.0.0.1") {
+		t.Errorf("self mobile refusal %q must name the env var and the loopback address", refusal.Error)
 	}
 	if code := adminReq(t, http.MethodPost, selfURL, loginTok,
 		map[string]any{"channel": "browser"}, nil); code != http.StatusOK {
@@ -116,8 +109,8 @@ func TestPhoneEnrollConfiguredLoopbackMints(t *testing.T) {
 	var resp struct {
 		Servers []string `json:"servers"`
 	}
-	if code := adminReq(t, http.MethodPost, base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"user_id": kim.ID}, &resp); code != http.StatusOK {
+	if code := adminReq(t, http.MethodPost, base+"/v1/approvals/self/enroll-token", adminTok,
+		map[string]any{"channel": "mobile"}, &resp); code != http.StatusOK {
 		t.Fatalf("configured-loopback mint = %d, want 200 (the tunnel lane)", code)
 	}
 	if len(resp.Servers) != 1 || resp.Servers[0] != "https://127.0.0.1:8443" {

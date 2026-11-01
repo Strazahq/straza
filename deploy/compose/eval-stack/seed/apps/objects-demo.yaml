@@ -1,0 +1,46 @@
+# The eval stack's object-scope fixture: ten repos behind tools that carry
+# Straza's object marks, reached ONLY through strazad's gateway (its
+# container publishes no ports). The seeder sets two credentials: the
+# server's own secret, which every tool call carries, and its listing
+# credential, which only Straza's own listing of repo_list carries. The
+# straza.objects block pins what the marks declare, so the server page shows
+# no drift.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: objects-demo
+  namespace: ai.straza
+  description: Object-scope fixture (ten repos, marked tools) via streamable HTTP
+server:
+  name: ai.straza/objects-demo
+  description: Ten repos behind tools that carry Straza's object marks.
+  repository:
+    url: https://github.com/strazahq/straza
+    source: github
+  version: "1.0.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: http://objects-demo:3002/mcp
+  credential:
+    kind: static
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"
+  exposure:
+    tools: ["*"]
+  limits:
+    rps: 10
+  objects:
+    type: repo
+    list:
+      tool: repo_list
+      attributes:
+        - { name: area, setBy: org }
+    tools:
+      repo_read: { argument: repo }
+      issue_create: { argument: repo }
+      search_code: all
+      whoami: none

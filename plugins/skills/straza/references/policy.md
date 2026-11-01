@@ -1,6 +1,6 @@
 # Policy reference: what may an agent do
 
-This file is the agent's reference for Straza policy. It covers the PolicySet document, the authoring loop, how to explain a deny, how to write the approval choices of a role, and the two rules that keep an agent away from the strazactl login. Manifests, credentials, access rows and application roles are in `servers.md`. Validated examples sit beside it in `examples/`. The public pages are linked where a reader needs the full walk.
+This file is the agent's reference for Straza policy. It covers the PolicySet document, the authoring loop, how to explain a deny, how to write the approval choices of a role, and the gotchas. Manifests, credentials, access rows and application roles are in `servers.md`. Validated examples sit beside it in `examples/`. The public pages are linked where a reader needs the full walk.
 
 ## 1. The PolicySet document
 
@@ -46,6 +46,18 @@ A rule applies to a canonical event when all three hold.
 5. Multi-path events: the deny side fires when any path matches, the allow side only when every path matches.
 
 `reason` is the text the agent reads on a deny or a hold. When it is missing the engine writes one naming the set and the rule. `interpreters` is consulted only when the event carries a detected interpreter such as `python3` or `bash`, so `"*"` there never matches `git status`.
+
+### Harness tools by name
+
+A tool Straza does not classify, such as one a harness release added or a business tool of a LangChain agent, reaches policy as `other` with its own name. The enterprise profile denies it, and the reason names the tool and the rule that allows it. A rule that lists `other` in `tools` and names tools in `toolNames` governs exactly those tools:
+
+```yaml
+- id: allow-subagent-handback
+  tools: [other]
+  toolNames: { allow: [SubagentHandback] }
+```
+
+Names are exact and case-sensitive, and the server refuses a pattern. The rule governs only the tools it names, so its `require` reaches no other tool, and it keeps governing a tool after a Straza release classifies it, while a deny from that tool's kind still wins. The server refuses a new by-name allow of a tool Straza already classifies, such as `Bash`, because the rules of its kind would no longer narrow it, so allow that tool with a rule for its kind. A by-name deny of a classified tool works. The rule lists only `other` in `tools` and carries no `apps`, `command`, `paths` or `interpreters` block.
 
 ### Patterns
 
@@ -103,10 +115,10 @@ So an enterprise set for a role opens its lane with an allow rule for the local 
 
 ## 2. The authoring loop
 
-Follow these steps in order. The walks with every command are at https://docs.straza.ai/guides/write-policy/first-deny/ and https://docs.straza.ai/guides/write-policy/simulate-and-coverage/. Steps 2 to 5 and step 7 read or check and run on the person's login. Step 6 changes Straza, so the person runs it in their own terminal, as the SKILL.md section Reads, checks and changes says. The person reads the set in the draft before publishing it, because it may govern your own sessions.
+Follow these steps in order. The walks with every command are at https://docs.straza.ai/guides/write-policy/first-deny/ and https://docs.straza.ai/guides/write-policy/simulate-and-coverage/. You run step 2 yourself, offline. Steps 3 to 7 reach the server, so the person runs them in their own terminal on their admin API token and shares the output, as the SKILL.md section Reads, checks and changes says. The person reads the set in the draft before publishing it, because it may govern your own sessions.
 
 1. Write the document from the requirement. One rule per intent, one reason per rule, and the role in `match.roles` an application role. For the approval choices of one role, start from section 4.
-2. Validate offline. No login is needed.
+2. Validate offline. No server and no token are needed.
 
 ```sh
 strazactl policy validate -f local-tools-guardrails.yaml
@@ -119,7 +131,7 @@ note: validate refuses only the roles the product reserves, whose names start wi
 
    The offline check is the engine's own parser, so it catches shape errors and the rule-level refusals, such as an approve block without its mode or a ticket with hold knobs. It reads the document alone and cannot see the server's roles. It refuses a role the product reserves, a name that starts with straza- or mcp-admin-, in `match.roles`, and any of them but straza-admin in `approve.roles`, in the words activation uses. A business role in `match.roles`, and any other `approve.roles` name that is not an approver role or does not exist, pass it and are refused by the check of step 3.
 
-3. Check the local file against live state. The check stores nothing, contacts nothing and runs on the person's login. It runs the checks the offline validate cannot, such as a business role in `match.roles` or an `approve.roles` name that is not an approver role, and it names each line that widens access.
+3. Check the local file against live state. The check stores nothing and contacts nothing. It runs the checks the offline validate cannot, such as a business role in `match.roles` or an `approve.roles` name that is not an approver role, and it names each line that widens access.
 
 ```sh
 strazactl drafts check -f local-tools-guardrails.yaml
@@ -151,20 +163,19 @@ strazactl policy simulate --user dana --event-json recorded-event.json
 
    A record holds most of the event it judged: the kind, the tool, the command, the paths and the workspace, and for an MCP call the server and the tool name. It does not hold the argv, the interpreter, the attestation or the harness. Simulate detects the interpreter again from the command, as the live decision point does, so an `interpreters` rule answers in a replay as it did live unless the live event's argv named another program than its command. A rule that needs the argv, the attestation or the harness can answer differently in a replay. `--limit` counts records of every type, not only decisions, and a limit above 1000 is served as 100. A held call was recorded as a deny with a reference and replays as an allow with a gate line, which is the same outcome. The answer is today's verdict against the current snapshot, not a replay of the decision the record holds.
 
-6. The person creates and publishes the draft in their own terminal. The first command stores the draft and prints its check and its number, 41 here. The second checks it again, asks the person to acknowledge each line that widens access, then recompiles and signs the snapshot:
+6. The person creates the draft in their own terminal, and the command prints its check and its number, 41 here. When your user holds `straza-draft-config`, you submit the file with `straza__draft_submit` instead and read the check with `straza__draft_status`.
 
 ```sh
 strazactl drafts create -f local-tools-guardrails.yaml --note "Deny recursive force-deletes for the dev role"
-strazactl drafts publish 41
 ```
 
-   `strazactl policy list` then shows the set as Live. `strazactl drafts revert 41` makes a new draft that undoes a published one, which the person publishes the same way. A file cannot say off, so to turn a set off and keep it stored the person runs `strazactl policy deactivate local-tools-guardrails`, which recompiles the snapshot without the set, and `policy list` then shows it as Off. `strazactl policy list --json` spells the same state `"status": "draft"`, the wire's word for a set that is off. `strazactl policy apply` followed by `strazactl policy activate` still stores and publishes one set directly, and `apply` on the name of a live set saves the text as edits that `policy show` and `policy list` mark as `Live, edits not published` until `activate` publishes them. A session that is already running keeps deciding from the snapshot it checked in with until its next check-in. Start a new session to see the change at once. A running client picks up a new snapshot within about 30 seconds, so a call made right after activation can still be judged by the old one.
+   The person publishes it in the console under Drafts, which checks it again, asks them to confirm the lines that widen access, one block per kind, then recompiles and signs the snapshot. `strazactl policy list` then shows the set as Live. `strazactl drafts revert 41` makes a new draft that undoes a published one, which the person publishes the same way. A file cannot say off, so to turn a set off and keep it stored the person runs `strazactl policy deactivate local-tools-guardrails`, which recompiles the snapshot without the set, and `policy list` then shows it as Off. `strazactl policy list --json` spells the same state `"status": "draft"`, the wire's word for a set that is off. `strazactl policy apply` followed by `strazactl policy activate` still stores and publishes one set directly, and `apply` on the name of a live set saves the text as edits that `policy show` and `policy list` mark as `Live, edits not published` until `activate` publishes them. A session that is already running keeps deciding from the snapshot it checked in with until its next check-in. Start a new session to see the change at once. A running client picks up a new snapshot within about 30 seconds, so a call made right after activation can still be judged by the old one.
 
 7. Check the result. For an MCP gate, `strazactl catalog preview --role <role> --app <server>` shows each held tool as `approve_gated` with the set, the rule, the deciders and the wait, and each refused tool as `hidden_policy`.
 
 ## 3. Explaining a deny
 
-Start from the record. Every hook decision is one audit record of type `straza.audit.tool`, and every gateway call is one of type `straza.audit.mcp`.
+Start from the record. Every hook decision is one audit record of type `straza.audit.tool`, and every gateway call is one of type `straza.audit.mcp`. The person reads it in their own terminal and shares the line.
 
 ```sh
 strazactl audit tail --user dana --limit 2
@@ -177,9 +188,20 @@ strazactl audit tail --user dana --limit 2
 1. Read `effect`, `reason`, `ruleId` and `setName`. They name the reported rule, which is the highest-priority firing rule of the winning effect. Tell a policy decision by `ruleId` and `setName`, not by the text of the reason: an author writes any reason, and the standalone starter policy's reasons start with `Straza starter policy:`.
 2. Open that set's document with `strazactl policy show <set>` and find the rule. Another set may also have fired a deny. The record names one rule, and the deny stands as long as any active set denies the call.
 3. Replay the event with `--event-json` as in step 5 of section 2 to get today's answer, then again with `-f` to test the fix.
-4. An empty `ruleId` means no rule fired. The deny then came from a default: the enterprise profile denying a local tool no rule allows, or an `mcp.call` on a tool the subject's roles have no access to. A gateway refusal of an unknown tool name, a hidden tool or a throttled call is also a deny with no rule. The reason names the tool, or the server and the tool. The fix is an allow rule for the lane, or an access row, never a looser deny.
-5. A `straza.audit.mcp` deny can name a rule whose effect is allow. A later gate refused a call that rule allowed: a hold that was denied, expired or is still pending, or no credential the caller could use. The reason carries the refusal, so fix what it names, the decision or the caller's credential, and leave the rule alone.
-6. A classifier deny keeps the firing rule's id and its reason starts with `Straza: classifier:`. A held call answers the agent with a deny whose reason starts with `Straza: approval requested` or `Straza: approval ticket`, or, when a rule routes to the sponsor and the requester is a person with no sponsor, `Straza: this call needs the requester's confirmation`. Each writes an approval record of type `straza.audit.approval` with `phase` `request`, `resolution` and, for tickets, `consumed`. The walks are at https://docs.straza.ai/guides/write-policy/hold-for-a-human/ and https://docs.straza.ai/guides/write-policy/tickets/.
+4. A deny whose record has `tool` `other` names the harness tool in `toolName`, and the fix is a by-name rule as in Harness tools by name of section 1. Under the enterprise profile the agent reads the same fix in the reason, such as `Straza: SubagentHandback is a harness tool Straza does not classify, so this profile denies it. To allow it, an admin adds a policy rule with tools: [other] and toolNames: {allow: [SubagentHandback]}.` A record of `tool` `other` with no `toolName` came from a client too old to send the name, and the client needs an update first.
+5. An empty `ruleId` means no rule fired. The deny then came from a default: the enterprise profile denying a local tool no rule allows, or an `mcp.call` on a tool the subject's roles have no access to. A gateway refusal of an unknown tool name, a hidden tool or a throttled call is also a deny with no rule. The reason names the tool, or the server and the tool. The fix is an allow rule for the lane, or an access row, never a looser deny.
+6. A `straza.audit.mcp` deny can name a rule whose effect is allow. A later gate refused a call that rule allowed: a hold that was denied, expired or is still pending, or no credential the caller could use. The reason carries the refusal, so fix what it names, the decision or the caller's credential, and leave the rule alone.
+7. A classifier deny keeps the firing rule's id and its reason starts with `Straza: classifier:`. A held call answers the agent with a deny whose reason starts with `Straza: approval requested` or `Straza: approval ticket`, or, when a rule routes to the sponsor and the requester is a person with no sponsor, `Straza: this call needs the requester's confirmation`. Each writes an approval record of type `straza.audit.approval` with `phase` `request`, `resolution` and, for tickets, `consumed`. The walks are at https://docs.straza.ai/guides/write-policy/hold-for-a-human/ and https://docs.straza.ai/guides/write-policy/tickets/.
+8. A gateway refusal that names objects, such as `Straza: pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo.`, then what the caller's roles do cover when they cover some, comes from the object check of a server that pins its objects. That check runs before any policy, so no rule can allow the call. `servers.md` section 4, On a server that pins its objects, says when a retry helps and what the person changes.
+
+Git through Straza. When an MCP server's manifest maps git to its tools, Straza decides each clone, fetch and push of that server's repositories like a call of the mapped tool, and git prints Straza's sentences on its stderr. The walk is at https://docs.straza.ai/guides/serve-mcp-apps/git-through-straza/.
+
+- While a hold is open, git keeps waiting and prints a line at once and then every 5 seconds, such as `Straza: waiting for an approver to allow refs/heads/main on github.com/Strazahq/pay-api (295s left).` Let git wait. A denial ends the push with `Straza: approval denied by`, the approver's name and the request's reference, and a window with no decision ends it with `Straza: approval request expired after 300s with no decision` and the reference.
+- A rule with `class: ticket` refuses the push at once, names the pending ticket and says to run the same git command again once it is approved. Run it again only after the person says the ticket was approved.
+- A repository that none of the caller's roles covers is refused with the object sentence of item 8, naming the tool the git block maps, such as `git_push`. A caller whose roles lack the mapped tool reads `Straza refused this git push: none of your roles allows git_push on the MCP server ghapp. Ask an administrator for a role that allows git_push on ghapp, then run git again.`
+- A line that starts with `Straza: git cannot reach` means that `straza service` on the machine is down or missing, and `straza doctor` names the cause.
+
+Tell the person what a refusal says and stop. Never change the git remote, add a credential of your own or clear the git settings Straza put in your environment to get past one.
 
 A developer without admin rights cannot read the audit log. Their own machine keeps a journal of its hook decisions, and `straza trace show -n 10` prints the latest ones with the effect, the rule and the set, without the command text. Gateway calls are not in that journal.
 
@@ -202,7 +224,7 @@ Every gate rule has the same frame: `tools: [mcp.call]`, `apps: [<server>]`, `ef
 
 Put the rules that name tools first and a rule with no `toolNames` last. Among firing approve rules of one set the earlier rule decides, so a per-tool choice placed after the every-call rule never applies. `mode: confirm` makes the requester the only decider, root included, on their own device. It takes no `roles`, `deciders` or `selfApproval`, and on an autonomous agent it is a plain deny.
 
-One person cannot approve their own calls through an approver role. A person who creates an approver role, holds it and names it in `approve.roles` gets a hold that nobody else can decide, because `selfApproval` defaults to false, so the call ends in a deny when the wait runs out. For one person governing their own agent, use the bare approve block and enroll that person's phone as in `quickstart.md`. The console and strazactl refuse to decide a person's own request, because an agent on the same machine could do the same. The server setting `approval.unsignedOwnDecisions` removes that protection. It is an operator's risk decision, never a setup step.
+One person cannot approve their own calls through an approver role. A person who creates an approver role, holds it and names it in `approve.roles` gets a hold that nobody else can decide, because `selfApproval` defaults to false, so the call ends in a deny when the wait runs out. For one person governing their own agent, use the bare approve block and enroll that person's phone as in `quickstart.md`. The console refuses to decide a person's own request, because an agent on the same machine could reach it. The server setting `approval.unsignedOwnDecisions` removes that protection. It is an operator's risk decision, never a setup step.
 
 The built-in `straza` server has no access rows, so its tools `approval_request`, `approval_status` and `approval_await` need an explicit allow rule with `apps: [straza]`. An explicit allow rule for any other server adds nothing the access row does not already give. `examples/mcp-tool-gate.yaml` shows the same frame with a sponsor hold and a deny. The walk is at https://docs.straza.ai/guides/serve-mcp-apps/catalogs-per-role/.
 
@@ -215,26 +237,3 @@ The built-in `straza` server has no access rows, so its tools `approval_request`
 - Business roles are never matched. `match.roles` must name application roles, the kind that carries access rows. Name the application roles the business role composes, or use `match.identity` or `match.users`.
 - The approve block needs `mode: approve` or `mode: confirm`, and `class: ticket` rejects `timeoutSeconds` and `retryTTLSeconds`.
 - `apply` on the name of a live set saves unpublished edits and leaves the published version deciding. Only `strazactl policy activate <name>` publishes them, after the checks, as step 6 of section 2 says.
-
-## 6. Keep the strazactl login away from agents
-
-The person's strazactl login lives in `~/.straza/credentials.json`, and a program that reads it can act as that person on every admin route. strazactl already refuses to change Straza on that login inside a coding agent, and these two rules refuse the plain ways of reading or changing the file. Add them to the `rules:` of a set that applies to the agents' sessions, a set with no `match` on a standalone server or the set that matches the agents' application roles in an enterprise deployment, and hand the changed file to the person as a draft like any other. They only add denies, so the publish shows no line that widens access.
-
-```yaml
-    - id: protect-straza-login
-      events: [tool.pre]
-      tools: [file.read, file.write, file.edit]
-      paths:
-        deny: ["**/.straza/credentials.json"]
-      effect: deny
-      reason: "Straza: an agent may not read or change the strazactl login in ~/.straza/credentials.json. For automation, use an admin API token in STRAZA_API_TOKEN, and an agent proposes config changes through the built-in straza MCP server's drafting tools."
-    - id: protect-straza-login-shell
-      events: [tool.pre]
-      tools: [shell.exec]
-      command:
-        denyPatterns: ["*.straza/credentials.json*"]
-      effect: deny
-      reason: "Straza: an agent may not read or change the strazactl login in ~/.straza/credentials.json. For automation, use an admin API token in STRAZA_API_TOKEN, and an agent proposes config changes through the built-in straza MCP server's drafting tools."
-```
-
-The first rule refuses file.read, file.write and file.edit of the file, and the second refuses a shell command that names it with forward slashes. The pair refuses nothing else. A search tool run over the folder, a command run inside `~/.straza` such as `cat credentials.json`, and a path written with backslashes all reach the file, so the pair is a guardrail against a mistake, not a boundary.

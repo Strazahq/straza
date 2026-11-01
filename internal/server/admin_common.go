@@ -143,7 +143,8 @@ func (a *App) areaAllows(p adminPrincipal, r *http.Request) (bool, string) {
 // codingHarnessRefusal is the sentence a session that a coding harness
 // checked in reads on every admin route.
 const codingHarnessRefusal = "this session belongs to the coding harness %q, and a coding harness cannot use the admin API. " +
-	"Run strazactl from your own terminal after `strazactl login`, or use an admin API token (strazactl api-token create)."
+	"Use the console in your own browser, or run strazactl with STRAZA_API_TOKEN set to an admin API token, " +
+	"which a person mints in the console under Settings, API tokens."
 
 // refuseCodingHarness answers 403 and reports true when the principal is a
 // session that a coding harness checked in, whatever roles the user holds:
@@ -363,8 +364,8 @@ func (a *App) serverAdminRefusal(ctx context.Context, row store.App) string {
 // request itself on failure: 401 for a missing, unknown or dead credential
 // and 403 for a refused sign-in or a token whose stored scope no longer parses.
 func (a *App) authenticateAdmin(w http.ResponseWriter, r *http.Request) (adminPrincipal, bool) {
-	raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if raw == "" || raw == r.Header.Get("Authorization") {
+	raw, scheme := sessionCredential(r)
+	if raw == "" {
 		apiError(w, http.StatusUnauthorized, "missing bearer token: /v1/admin takes an admin session or ID token, or an admin API token (strazactl api-token create)")
 		return adminPrincipal{}, false
 	}
@@ -372,19 +373,12 @@ func (a *App) authenticateAdmin(w http.ResponseWriter, r *http.Request) (adminPr
 	// revocable, hashed at rest. No user, no roles: the scope on the
 	// token is the whole authorization: per-area grants or `full`
 	// (internal/tokenscopes). Scopes gate machine tokens ONLY; human admins
-	// (session/login lanes below) are gated by the role, not grants.
-	if strings.HasPrefix(raw, apiTokenPrefix) {
-		meta, ok := a.apiTokenAuthenticate(r.Context(), raw)
+	// (session/login lanes below) are gated by the role, not grants. Admin
+	// API tokens and ID tokens are bearer credentials, so only a session
+	// token may arrive under the DPoP scheme.
+	if strings.HasPrefix(raw, apiTokenPrefix) && scheme == schemeBearer {
+		meta, scope, ok := a.verifyAPIToken(w, r, raw)
 		if !ok {
-			apiError(w, http.StatusUnauthorized, "admin API token rejected: unknown, expired or revoked (strazactl api-token list)")
-			return adminPrincipal{}, false
-		}
-		scope, err := tokenscopes.Parse(meta.Scope)
-		if err != nil {
-			// A stored pre-grammar token (the retired `read` word) or a
-			// corrupted scope: refuse with the mint hint (fail closed,
-			// re-minting is the migration).
-			apiError(w, http.StatusForbidden, "token scope no longer valid: "+err.Error())
 			return adminPrincipal{}, false
 		}
 		return adminPrincipal{actor: auditActor{Name: meta.Name, ID: meta.ID, Via: "api-token"}, scope: scope, root: scope.Full}, true
@@ -396,14 +390,17 @@ func (a *App) authenticateAdmin(w http.ResponseWriter, r *http.Request) (adminPr
 	// Both are EdDSA under the same keys, so disambiguate by claim shape.
 	// The session lane judges the session as a refresh does on every
 	// request. Admin plane, so store reads allowed.
-	claims, err := a.tokens.Verify(raw)
+	claims, err := a.verifySessionToken(w, r, raw, scheme)
+	if errors.Is(err, errAnswered) {
+		return adminPrincipal{}, false
+	}
 	if err == nil && claims.Session != "" {
 		var ok bool
 		if u, ses, ok = a.judgeSession(w, r, claims, "admin bearer", claims.Harness); !ok {
 			return adminPrincipal{}, false
 		}
 		via, harness = "session", ses.HarnessName
-	} else if u, err = a.verifyLogin(r, raw); err == nil {
+	} else if u, err = a.verifyBearerLogin(r, raw, scheme); err == nil {
 		via = "login"
 	} else {
 		var refused *loginRefusal

@@ -19,7 +19,7 @@ func TestSimulatePolicyWire(t *testing.T) {
 	rec := &wireRecorder{}
 	srv := httptest.NewServer(http.HandlerFunc(rec.handle))
 	t.Cleanup(srv.Close)
-	c := loggedInClient(t, srv.URL)
+	c := tokenClient(t, srv.URL)
 	canned := `{"active":{"effect":"deny","ruleId":"no-rm-rf","setName":"dev-guardrails","reason":"x"},` +
 		`"subject":{"user":"bob","roles":["dev"],"attestation":""},"snapshot":"4f2a"}`
 
@@ -91,7 +91,7 @@ func TestOverviewLiteWire(t *testing.T) {
 	rec := &wireRecorder{}
 	srv := httptest.NewServer(http.HandlerFunc(rec.handle))
 	t.Cleanup(srv.Close)
-	c := loggedInClient(t, srv.URL)
+	c := tokenClient(t, srv.URL)
 	rec.script(`{"profile":"enterprise","snapshot_id":"4f2a9c01d7e6b3a8","extra":1}`)
 	ov, err := c.OverviewLite(context.Background())
 	if err != nil {
@@ -517,5 +517,151 @@ func TestSimVerdict(t *testing.T) {
 				t.Errorf("%q opens with neither pinned prefix, so the replay script cannot read it", got)
 			}
 		})
+	}
+}
+
+// TestRenderSimulationObject pins the object check's lines on a server that
+// pins an object type: the covering role keyed by the type, and the gate's
+// refusal in place of the decided-by sentence, since no policy ran. The
+// words are the console's in web/ui/src/components/test-a-call.tsx.
+func TestRenderSimulationObject(t *testing.T) {
+	granted := policy.Decision{Effect: "allow", Default: true, Reason: "allowed by role access. No policy rule gates this tool."}
+	const refusal = "Straza: pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. Check the repo's name, or ask an admin for a role that covers it."
+	refused := policy.Decision{Effect: "deny", Reason: refusal}
+	subj := policy.Subject{User: "dana", Roles: []string{"ghapp-write-payments"}}
+	tests := []struct {
+		name string
+		res  SimulateResult
+		want string
+	}{
+		{
+			name: "a partial role covers the repo",
+			res: SimulateResult{Active: granted, Subject: subj, Snapshot: simSnap,
+				Object: &SimObject{Type: "repo", Reach: "argument", Value: "Strazahq/pay-api", ID: "9012332", Covered: true, Role: "ghapp-write-payments"}},
+			want: `This call would be allowed.
+repo      ghapp-write-payments covers Strazahq/pay-api, id 9012332.
+No policy matched this call. Allowed by role access. No policy rule gates this tool.
+Simulated against the policies live right now, your file included if you passed one. This is today's answer, not a replay of any past decision.
+
+subject   dana · roles ghapp-write-payments · attestation none
+snapshot  4f2a9c01d7e6b3a8 (live)
+wire      effect=allow · ruleId=(none) · setName=(none) · snapshot=4f2a9c01
+note      this verdict applies once this snapshot reaches the client;
+          straza doctor proves a client is governed
+`,
+		},
+		{
+			name: "a role on every repo covers a tool that reaches every repo",
+			res: SimulateResult{Active: granted, Subject: subj, Snapshot: simSnap,
+				Object: &SimObject{Type: "repo", Reach: "all", Covered: true, Role: "ghapp-admin"}},
+			want: `This call would be allowed.
+repo      ghapp-admin covers every repo.
+No policy matched this call. Allowed by role access. No policy rule gates this tool.
+Simulated against the policies live right now, your file included if you passed one. This is today's answer, not a replay of any past decision.
+
+subject   dana · roles ghapp-write-payments · attestation none
+snapshot  4f2a9c01d7e6b3a8 (live)
+wire      effect=allow · ruleId=(none) · setName=(none) · snapshot=4f2a9c01
+note      this verdict applies once this snapshot reaches the client;
+          straza doctor proves a client is governed
+`,
+		},
+		{
+			name: "a role on every repo covers a repo the list does not hold",
+			res: SimulateResult{Active: granted, Subject: subj, Snapshot: simSnap,
+				Object: &SimObject{Type: "repo", Reach: "argument", Value: "Strazahq/new", Covered: true, Role: "ghapp-write"}},
+			want: `This call would be allowed.
+repo      ghapp-write covers every repo, Strazahq/new included.
+No policy matched this call. Allowed by role access. No policy rule gates this tool.
+Simulated against the policies live right now, your file included if you passed one. This is today's answer, not a replay of any past decision.
+
+subject   dana · roles ghapp-write-payments · attestation none
+snapshot  4f2a9c01d7e6b3a8 (live)
+wire      effect=allow · ruleId=(none) · setName=(none) · snapshot=4f2a9c01
+note      this verdict applies once this snapshot reaches the client;
+          straza doctor proves a client is governed
+`,
+		},
+		{
+			name: "the repo check refuses",
+			res: SimulateResult{Active: refused, Subject: subj, Snapshot: simSnap,
+				Object: &SimObject{Type: "repo", Reach: "argument", Value: "Strazahq/site", ID: "9012331", Refusal: refusal}},
+			want: `This call would be denied.
+The repo check refused this call before any policy ran. pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. Check the repo's name, or ask an admin for a role that covers it.
+Simulated against the policies live right now, your file included if you passed one. This is today's answer, not a replay of any past decision.
+
+subject   dana · roles ghapp-write-payments · attestation none
+snapshot  4f2a9c01d7e6b3a8 (live)
+wire      effect=deny · ruleId=(none) · setName=(none) · snapshot=4f2a9c01
+note      this verdict applies once this snapshot reaches the client;
+          straza doctor proves a client is governed
+`,
+		},
+		{
+			name: "the repo check refuses with a file",
+			res: SimulateResult{Active: refused, Draft: &refused, Subject: subj, Snapshot: simSnap,
+				Object: &SimObject{Type: "repo", Reach: "argument", Value: "Strazahq/site", ID: "9012331", Refusal: refusal}},
+			want: `live    DENY   The repo check refused this call before any policy ran. pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. Check the repo's name, or ask an admin for a role that covers it.
+file    DENY   The repo check refused this call before any policy ran. pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. Check the repo's name, or ask an admin for a role that covers it.
+
+live and file agree: DENY
+Simulated against the policies live right now, your file included if you passed one. This is today's answer, not a replay of any past decision.
+
+subject   dana · roles ghapp-write-payments · attestation none
+snapshot  4f2a9c01d7e6b3a8 (live)
+`,
+		},
+		{
+			name: "a covering role with a file",
+			res: SimulateResult{Active: granted, Draft: &denyRm, Subject: subj, Snapshot: simSnap,
+				Object: &SimObject{Type: "repo", Reach: "argument", Value: "Strazahq/pay-api", ID: "9012332", Covered: true, Role: "ghapp-write-payments"}},
+			want: `live    ALLOW  No policy matched this call. Allowed by role access. No policy rule gates this tool.
+file    DENY   Decided by rule no-rm-rf in policy dev-guardrails: Straza: destructive command blocked for role dev.
+repo      ghapp-write-payments covers Strazahq/pay-api, id 9012332.
+
+the live policy says ALLOW; this file says DENY
+Simulated against the policies live right now, your file included if you passed one. This is today's answer, not a replay of any past decision.
+
+subject   dana · roles ghapp-write-payments · attestation none
+snapshot  4f2a9c01d7e6b3a8 (live)
+`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var sb strings.Builder
+			if err := RenderSimulation(&sb, tc.res, simLive); err != nil {
+				t.Fatalf("RenderSimulation: %v", err)
+			}
+			if sb.String() != tc.want {
+				t.Errorf("output mismatch\n--- got ---\n%s\n--- want ---\n%s", sb.String(), tc.want)
+			}
+		})
+	}
+}
+
+// TestSimulateObjectWire pins the answer's object member as the client
+// decodes it, and the event args on the request.
+func TestSimulateObjectWire(t *testing.T) {
+	rec := &wireRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(rec.handle))
+	t.Cleanup(srv.Close)
+	c := tokenClient(t, srv.URL)
+	rec.script(`{"active":{"effect":"allow"},"subject":{"roles":["ghapp-write"]},"snapshot":"4f2a",` +
+		`"object":{"type":"repo","reach":"argument","value":"Strazahq/pay-api","id":"9012332","covered":true,"role":"ghapp-write"}}`)
+	res, err := c.SimulatePolicy(context.Background(), SimulateRequest{
+		Event:   policy.Event{Kind: "tool.pre", Tool: "mcp.call", App: "ghapp", ToolName: "pr_create", Args: []byte(`{"repo":"Strazahq/pay-api"}`)},
+		Subject: SimulateSubject{Roles: []string{"ghapp-write"}},
+	})
+	if err != nil {
+		t.Fatalf("SimulatePolicy: %v", err)
+	}
+	want := SimObject{Type: "repo", Reach: "argument", Value: "Strazahq/pay-api", ID: "9012332", Covered: true, Role: "ghapp-write"}
+	if res.Object == nil || *res.Object != want {
+		t.Errorf("object = %+v, want %+v", res.Object, want)
+	}
+	_, _, _, body := rec.last()
+	if !strings.Contains(string(body), `"args":{"repo":"Strazahq/pay-api"}`) {
+		t.Errorf("request body %s lacks the event args", body)
 	}
 }
