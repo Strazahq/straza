@@ -35,6 +35,13 @@ linters:
         linters:
           - gosec
           - unparam
+      # A test or the load harness may receive from a done channel only to
+      # wait for a goroutine to end. errcheck words that finding without a
+      # function name, so an unchecked call stays a finding everywhere.
+      - path: (_test\.go|^test/load/)
+        linters:
+          - errcheck
+        text: "^Error return value is not checked$"
 
 formatters:
   enable:

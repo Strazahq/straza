@@ -125,7 +125,7 @@ func (a *App) Run(ctx context.Context) error {
 			_ = a.approverHTTP.Shutdown(shutdownCtx)
 		}
 		for i := 0; i < serving-1; i++ {
-			<-errCh
+			<-errCh //nolint:errcheck // the sibling answers http.ErrServerClosed after the Shutdown above, and the first error is the one returned
 		}
 		stopAudit()
 		a.close()

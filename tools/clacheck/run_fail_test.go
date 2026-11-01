@@ -125,7 +125,6 @@ func TestRunFailsClosed(t *testing.T) {
 		{"version not a version", nil, func(c *config) { c.Version = "../1" }, "CLA_VERSION is"},
 		{"allowlist by name", nil, func(c *config) { c.AllowIDs = "4242,sample-maintainer" }, "CLA_ALLOWLIST_IDS holds \"sample-maintainer\""},
 		{"more than 250 commits", func(f *fakeGitHub) { f.pr["commits"] = 251 }, nil, "has 251 commits"},
-		{"diff refused", func(f *fakeGitHub) { f.diffCode = 406 }, nil, "Split it into smaller pull requests"},
 		{"workflow token refused", nil, func(c *config) { c.Token = "stale" }, "GitHub answered 401"},
 	}
 	for _, tc := range cases {
@@ -146,6 +145,100 @@ func TestRunFailsClosed(t *testing.T) {
 			}
 			if tc.name != "workflow token refused" {
 				wantStatus(t, f, "failure")
+			}
+		})
+	}
+}
+
+// TestRunFilesFallback runs the check on a pull request whose whole diff
+// GitHub refuses. The check then reads the added lines from the list of
+// changed files, reads whole each file that the list gives without a patch,
+// and fails when it cannot read them all.
+func TestRunFilesFallback(t *testing.T) {
+	const (
+		plain   = "@@ -1,2 +1,3 @@\n package x\n+// retry\n func f() {}"
+		marked  = "@@ -1,2 +1,3 @@\n package x\n+// Not a Contribution\n func f() {}"
+		removed = "@@ -1 +0,0 @@\n-// Not a Contribution"
+	)
+	cases := []struct {
+		name  string
+		setup func(f *fakeGitHub)
+		state string
+		place string
+		err   string
+		reads []string
+	}{
+		{name: "a refused diff is read from the patches", setup: func(f *fakeGitHub) {
+			f.addFile("internal/a.go", "modified", plain)
+			f.addFile("internal/b.go", "added", marked)
+		}, state: "failure", place: "- an added line in `internal/b.go`."},
+		{name: "a file without a patch is read whole and the words are found", setup: func(f *fakeGitHub) {
+			f.addFile("assets/big file.txt", "added", "")
+			f.contents["strazahq/straza:assets/big file.txt"] = "line one\nNot a\nContribution\n"
+		}, state: "failure", place: "- an added line in `assets/big file.txt`.", reads: []string{"strazahq/straza:assets/big file.txt"}},
+		{name: "a file without a patch and without the words passes", setup: func(f *fakeGitHub) {
+			f.addFile("internal/a.go", "modified", plain)
+			f.addFile("assets/big file.txt", "added", "")
+			f.contents["strazahq/straza:assets/big file.txt"] = "line one\nline two\n"
+		}, state: "success", reads: []string{"strazahq/straza:assets/big file.txt"}},
+		{name: "a removed file adds nothing and is not read", setup: func(f *fakeGitHub) {
+			f.addFile("old/gone.go", "removed", removed)
+			f.addFile("old/gone.bin", "removed", "")
+		}, state: "success"},
+		{name: "the list is read across its pages", setup: func(f *fakeGitHub) {
+			f.diffCode = 422
+			f.addFile("internal/a.go", "modified", plain)
+			f.addFile("internal/b.go", "modified", plain)
+			f.addFile("internal/c.go", "added", marked)
+		}, state: "failure", place: "- an added line in `internal/c.go`."},
+		{name: "more than 3,000 files are refused", setup: func(f *fakeGitHub) {
+			f.addFile("internal/a.go", "modified", plain)
+			f.pr["changed_files"] = 3001
+		}, state: "failure", err: "pull request #123 changes 3001 files, more than the 3000 that GitHub lists"},
+		{name: "a list that ends early is refused", setup: func(f *fakeGitHub) {
+			f.addFile("internal/a.go", "modified", plain)
+			f.addFile("internal/b.go", "modified", plain)
+			f.pr["changed_files"] = 3
+		}, state: "failure", err: "GitHub listed 2 of the 3 files that pull request #123 changes"},
+		{name: "a failed read of a file is refused and names the file", setup: func(f *fakeGitHub) {
+			f.addFile("assets/big.bin", "added", "")
+		}, state: "failure", err: "the check could not read `assets/big.bin` at the head commit c0ffee0 of pull request #123", reads: []string{"strazahq/straza:assets/big.bin"}},
+		{name: "a fork's file is read from the fork", setup: func(f *fakeGitHub) {
+			f.pr["head"].(map[string]any)["repo"] = map[string]any{"full_name": "alice/straza"}
+			f.addFile("vendor/x.txt", "added", "")
+			f.contents["alice/straza:vendor/x.txt"] = "Not a Contribution\n"
+		}, state: "failure", place: "- an added line in `vendor/x.txt`.", reads: []string{"alice/straza:vendor/x.txt"}},
+		{name: "a file name with a line break cannot pass for another file", setup: func(f *fakeGitHub) {
+			f.addFile("x\n+++ b/CLA.md", "added", marked)
+		}, state: "failure", place: "- an added line in `\"x\\n+++ b/CLA.md\"`."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(t)
+			f.addAccount(alice)
+			f.diffCode = 406
+			f.pr["head"].(map[string]any)["repo"] = map[string]any{"full_name": "strazahq/straza"}
+			tc.setup(f)
+			out, err := f.run(t, "workflow_dispatch", nil, nil)
+			if tc.err != "" && (err == nil || !strings.Contains(err.Error(), tc.err)) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.err)
+			}
+			if tc.err == "" && err != nil {
+				t.Fatalf("run failed: %v\n%s", err, out)
+			}
+			wantStatus(t, f, tc.state)
+			if tc.err != "" {
+				for _, s := range f.statuses {
+					if s.State == "success" {
+						t.Fatalf("a failed run set success: %+v", s)
+					}
+				}
+			}
+			if tc.place != "" {
+				wantIn(t, f.statusComment(), "#### Marked \"Not a Contribution\"", tc.place)
+			}
+			if !reflect.DeepEqual(f.rawReads, tc.reads) {
+				t.Fatalf("raw reads %q, want %q", f.rawReads, tc.reads)
 			}
 		})
 	}

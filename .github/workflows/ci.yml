@@ -37,7 +37,8 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
-          version: latest
+          # The Makefile's GOLANGCI_LINT_VERSION, which make lint checks.
+          version: v2.15.0
 
   # Known-vulnerability scan over the module graph + stdlib (call-graph
   # aware, so only reachable vulns fail). gosec runs as part of golangci-lint.

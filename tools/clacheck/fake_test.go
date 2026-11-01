@@ -63,6 +63,12 @@ type fakeGitHub struct {
 	edits     int
 	// statusBase is how many statuses a commit held before the test.
 	statusBase map[string]int
+	// files is the pull request's list of changed files. contents holds the
+	// files that GitHub serves raw, by "owner/repo:path", and rawReads lists
+	// the raw reads in that form.
+	files    []map[string]any
+	contents map[string]string
+	rawReads []string
 }
 
 // fakeFailure is an answer the fake gives once, for a method and a path.
@@ -103,6 +109,7 @@ func newFake(t *testing.T) *fakeGitHub {
 		lists: map[string][]map[string]any{}, history: map[string][]map[string]any{},
 		commits: commits, diff: string(fixture(t, "pull.diff")), published: testText, nextID: 2345678900,
 		clock: time.Date(2026, 10, 5, 12, 30, 0, 0, time.UTC), failPut: map[string]int{}, fail: map[string]fakeFailure{}, during: map[string]func(){}, statusBase: map[string]int{},
+		contents: map[string]string{},
 		records: map[string][]byte{
 			"v1.2/text/CLA.md":     []byte(testText),
 			"v1.2/text/SHA256SUMS": []byte(hex.EncodeToString(sum[:]) + "  CLA.md\n"),
@@ -116,6 +123,18 @@ func newFake(t *testing.T) *fakeGitHub {
 func (f *fakeGitHub) textSHA() string {
 	sum := sha256.Sum256([]byte(testText))
 	return hex.EncodeToString(sum[:])
+}
+
+// addFile adds an entry to the pull request's list of changed files and
+// counts it in changed_files. An empty patch leaves the patch out, as GitHub
+// does for a binary or a very large file.
+func (f *fakeGitHub) addFile(name, status, patch string) {
+	e := map[string]any{"filename": name, "status": status}
+	if patch != "" {
+		e["patch"] = patch
+	}
+	f.files = append(f.files, e)
+	f.pr["changed_files"] = len(f.files)
 }
 
 // setOpener makes a the account that opened the pull request.
