@@ -42,7 +42,16 @@ test:
 vet:
 	go vet ./...
 
+# GOLANGCI_LINT_VERSION is the one linter version for make lint, the commit
+# gate and CI, because a newer release adds checks and the three would
+# disagree. Move all three together.
+GOLANGCI_LINT_VERSION := 2.15.0
+
 lint:
+	@v=$$(golangci-lint version --short 2>/dev/null); [ "$$v" = "$(GOLANGCI_LINT_VERSION)" ] || { \
+		echo "STRAZA gate: golangci-lint is $${v:-unknown} here, and this repository lints with $(GOLANGCI_LINT_VERSION), the version CI pins. Install it with go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_VERSION)." >&2; exit 1; }
+	@grep -q "version: v$(GOLANGCI_LINT_VERSION)$$" .github/workflows/ci.yml || { \
+		echo "STRAZA gate: .github/workflows/ci.yml does not pin golangci-lint v$(GOLANGCI_LINT_VERSION), the version make lint uses. Set the lint job's version to v$(GOLANGCI_LINT_VERSION)." >&2; exit 1; }
 	golangci-lint run ./...
 
 # File-length ratchet (no Go source file over about 600 lines):

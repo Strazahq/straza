@@ -337,7 +337,7 @@ func (r *runner) check(ev event, head *string) error {
 		}
 	}
 	v := decide(verdictInput{Opener: opener, Commits: commits, HasAccount: has, AcceptedHere: here, Tools: aiTools, Allow: r.set.allow})
-	diff, err := r.diff(pr.Number)
+	diff, err := r.diff(pr)
 	if err != nil {
 		return err
 	}
