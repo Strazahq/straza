@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // statusContext is the commit status the rulesets require.
@@ -308,15 +309,112 @@ func (r *runner) commits(n int) ([]commit, error) {
 	return all, nil
 }
 
-// diff returns the pull request's diff. GitHub refuses the diff of a very
-// large pull request, and then the check cannot read the added lines.
-func (r *runner) diff(n int) (string, error) {
+// diff returns the pull request's diff. GitHub refuses the whole diff of a
+// very large pull request, and then the check builds it from the list of
+// changed files.
+func (r *runner) diff(pr pullRequest) (string, error) {
+	n := pr.Number
 	data, _, err := r.gh.do("GET", r.repoPath("/pulls/%d", n), diffAccept, nil)
 	if s := statusOf(err); s == 406 || s == 422 {
-		return "", fmt.Errorf("GitHub will not return the diff of pull request #%d, so the check cannot look for the words \"Not a Contribution\" in its added lines. %v. Split it into smaller pull requests", n, err)
+		return r.filesDiff(pr)
 	}
 	if err != nil {
 		return "", fmt.Errorf("the check could not read the diff of pull request #%d. %v. %s", n, err, r.again(n))
+	}
+	return string(data), nil
+}
+
+// maxFiles is the most files GitHub lists for one pull request.
+const maxFiles = 3000
+
+// changedFile is the part of an entry of GitHub's list of a pull request's
+// files that the check reads. GitHub leaves out the patch of a binary file
+// and of a file whose changes are too large.
+type changedFile struct {
+	Filename string `json:"filename"`
+	Status   string `json:"status"`
+	Patch    string `json:"patch"`
+}
+
+// filesDiff builds the unified diff that markedFiles reads from GitHub's list
+// of the pull request's changed files. A file listed without a patch is read
+// whole at the head commit, and every line of it counts as added. It fails
+// closed: a pull request with more files than GitHub lists, a list that ends
+// before every changed file, or a file it cannot read is an error.
+func (r *runner) filesDiff(pr pullRequest) (string, error) {
+	n := pr.Number
+	if pr.ChangedFiles > maxFiles {
+		return "", fmt.Errorf("pull request #%d changes %d files, more than the %d that GitHub lists, so the check cannot look for the words \"Not a Contribution\" in all its added lines. GitHub returns no whole diff this large either. Split it into smaller pull requests of at most %d files each", n, pr.ChangedFiles, maxFiles, maxFiles)
+	}
+	fmt.Fprintf(r.out, "GitHub returns no whole diff for pull request #%d, so the check reads the added lines of its %d changed files from the list of files.\n", n, pr.ChangedFiles)
+	var b strings.Builder
+	listed := 0
+	err := r.pages(r.repoPath("/pulls/%d/files?per_page=100", n), "changed files", n, func(raw json.RawMessage) error {
+		var f changedFile
+		if err := json.Unmarshal(raw, &f); err != nil || f.Filename == "" {
+			return fmt.Errorf("GitHub's list of the changed files of pull request #%d holds an entry without a file name, so the check cannot read its added lines. %s", n, r.again(n))
+		}
+		listed++
+		switch {
+		case f.Status == "removed":
+			// A removed file adds no lines and is gone at the head commit.
+		case f.Patch != "":
+			fmt.Fprintf(&b, "%s%s\n", fileHeader(f.Filename), f.Patch)
+		default:
+			text, err := r.headFile(pr, f.Filename)
+			if err != nil {
+				return err
+			}
+			b.WriteString(fileHeader(f.Filename) + addedWhole(text))
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if listed < pr.ChangedFiles {
+		return "", fmt.Errorf("GitHub listed %d of the %d files that pull request #%d changes, so the check cannot look for the words \"Not a Contribution\" in the added lines of the rest. %s, and split it into smaller pull requests if this repeats", listed, pr.ChangedFiles, n, r.again(n))
+	}
+	return b.String(), nil
+}
+
+// fileHeader starts the diff of one file. A name with a line break or another
+// control character is quoted, as git quotes it, so that the name cannot
+// write a diff line of its own and pass the added lines off as another file's.
+func fileHeader(name string) string {
+	if strings.ContainsFunc(name, unicode.IsControl) {
+		name = strconv.Quote(name)
+	}
+	return "diff --git a/" + name + " b/" + name + "\n+++ b/" + name + "\n"
+}
+
+// addedWhole writes text as one hunk that adds every line of it.
+func addedWhole(text string) string {
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	return fmt.Sprintf("@@ -0,0 +1,%d @@\n+%s\n", len(lines), strings.Join(lines, "\n+"))
+}
+
+// headFile reads the whole file name at the pull request's head commit from
+// the head repository, which is the fork for a pull request from a fork. The
+// client's cap on an answer applies, so a file larger than maxBody is an
+// error, never a cut text.
+func (r *runner) headFile(pr pullRequest, name string) (string, error) {
+	// A deleted fork leaves no head repository, and then the base repository
+	// still holds the head commit under the pull request's own ref.
+	repo := r.cfg.Repo
+	if pr.Head.Repo != nil && pr.Head.Repo.FullName != "" {
+		repo = pr.Head.Repo.FullName
+	}
+	segs := strings.Split(name, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	data, _, err := r.gh.do("GET", "/repos/"+repo+"/contents/"+strings.Join(segs, "/")+"?ref="+pr.Head.SHA, rawAccept, nil)
+	if err != nil {
+		return "", fmt.Errorf("the check could not read %s at the head commit %s of pull request #%d, so it cannot look for the words \"Not a Contribution\" in that file. GitHub lists the file without its changes, so the check reads it whole. %v. %s. A file larger than %d MiB cannot be read, so take such a file out of the pull request", code(name), shortOID(pr.Head.SHA), pr.Number, err, r.again(pr.Number), maxBody>>20)
 	}
 	return string(data), nil
 }

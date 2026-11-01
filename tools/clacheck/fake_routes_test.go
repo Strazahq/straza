@@ -130,6 +130,10 @@ func (f *fakeGitHub) serveRepo(w http.ResponseWriter, req *http.Request, path st
 			f.t.Errorf("published text read at %q with %q", req.URL.RawQuery, req.Header.Get("Accept"))
 		}
 		_, _ = w.Write([]byte(f.published))
+	case req.Method == "GET" && strings.Contains(path, "/contents/"):
+		f.serveContent(w, req, path)
+	case req.Method == "GET" && path == repo+"/pulls/123/files":
+		f.page(w, req, f.files)
 	case req.Method == "GET" && strings.HasPrefix(path, repo+"/commits/") && strings.HasSuffix(path, "/statuses"):
 		sha := strings.TrimSuffix(strings.TrimPrefix(path, repo+"/commits/"), "/statuses")
 		n := f.statusCount(sha)
@@ -179,6 +183,22 @@ func (f *fakeGitHub) serveRepo(w http.ResponseWriter, req *http.Request, path st
 		f.t.Errorf("unexpected request %s %s", req.Method, path)
 		reply(w, http.StatusNotFound, map[string]any{"message": "Not Found"})
 	}
+}
+
+// serveContent answers a raw read of a file at the pull request's head
+// commit from any repository, and 404 for a file it does not hold.
+func (f *fakeGitHub) serveContent(w http.ResponseWriter, req *http.Request, path string) {
+	if req.Header.Get("Accept") != rawAccept || req.URL.Query().Get("ref") != f.pr["head"].(map[string]any)["sha"] {
+		f.t.Errorf("file read at %q with %q", req.URL.RawQuery, req.Header.Get("Accept"))
+	}
+	repo, file, _ := strings.Cut(strings.TrimPrefix(path, "/repos/"), "/contents/")
+	f.rawReads = append(f.rawReads, repo+":"+file)
+	text, ok := f.contents[repo+":"+file]
+	if !ok {
+		reply(w, http.StatusNotFound, map[string]any{"message": "Not Found"})
+		return
+	}
+	_, _ = w.Write([]byte(text))
 }
 
 // serveGraphQL answers the commits query, the query for one commit's further

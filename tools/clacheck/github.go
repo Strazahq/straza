@@ -232,8 +232,13 @@ type pullRequest struct {
 		ID    int64  `json:"id"`
 		Login string `json:"login"`
 	} `json:"user"`
-	Head struct {
+	ChangedFiles int `json:"changed_files"`
+	Head         struct {
 		SHA string `json:"sha"`
+		// Repo is null when the head repository, such as a fork, was deleted.
+		Repo *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
