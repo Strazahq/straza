@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -169,6 +170,12 @@ func realAdmin(t *testing.T, base, token, method, path, contentType, body string
 // window until it starts again, every live window decides after a service
 // restart with no check-in, and no file in the state directory but the
 // saved sessions holds a token, where each is bound to the key beside it.
+// compactJWT matches a compact JWT: a base64url header that opens with {"
+// and two more segments joined by dots. A bare "eyJ" turns up by chance in
+// about one run of 1,600 inside the random base64url key, thumbprint and
+// binding values of the enrollment record.
+var compactJWT = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.`)
+
 func TestCredAgainstRealStrazad(t *testing.T) {
 	if testing.Short() {
 		t.Skip("boots a real strazad")
@@ -294,7 +301,7 @@ func TestCredAgainstRealStrazad(t *testing.T) {
 			return err
 		}
 		raw, err := os.ReadFile(path)
-		if err == nil && bytes.Contains(raw, []byte("eyJ")) {
+		if err == nil && compactJWT.Match(raw) {
 			t.Errorf("%s holds a token", path)
 		}
 		return err
