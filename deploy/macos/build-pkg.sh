@@ -30,12 +30,16 @@ dist=$2
 
 # The package version decides upgrade and downgrade. A tag vX.Y.Z gives
 # X.Y.Z, and a build between tags, vX.Y.Z-N-gHASH from git describe, gives
-# X.Y.Z.N, so it sorts above the tag it follows.
+# X.Y.Z.N, so it sorts above the tag it follows. A prerelease tag such as
+# vX.Y.Z-rc.1, which only the release workflow's hand-started rehearsal
+# packages, gives X.Y.Z, so the release pkg installs over it.
 base=${version%%-*}
 rest=${version#"$base"}
 pkgver=
 if printf '%s' "$base" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
 	if [ -z "$rest" ]; then
+		pkgver=$base
+	elif printf '%s' "$rest" | grep -qE '^-(alpha|beta|rc)\.[0-9]+$'; then
 		pkgver=$base
 	else
 		n=$(printf '%s' "$rest" | sed -nE 's/^-([0-9]+)-g[0-9a-fA-F]+(-dirty)?$/\1/p')
@@ -43,7 +47,7 @@ if printf '%s' "$base" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
 	fi
 fi
 if [ -z "$pkgver" ]; then
-	echo "build-pkg.sh needs a version X.Y.Z, or X.Y.Z-N-gHASH from git describe, and $1 is neither, so it built nothing. Run it again with a version such as 1.4.0." >&2
+	echo "build-pkg.sh needs a version X.Y.Z, X.Y.Z-rc.N or X.Y.Z-N-gHASH from git describe, and $1 is none of them, so it built nothing. Run it again with a version such as 1.4.0." >&2
 	exit 1
 fi
 

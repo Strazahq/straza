@@ -399,15 +399,18 @@ jobs:
       #     --certificate-identity-regexp '^https://github\.com/Strazahq/straza/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
       #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
       - run: cosign sign --yes ghcr.io/strazahq/straza@${{ steps.push.outputs.digest }}
-      # Only the checked and signed image gets the version and latest tags.
-      # With one index as its source, imagetools copies it unchanged, so both
+      # Only the checked and signed image gets the version tag, and only a
+      # vX.Y.Z tag also moves latest, so a prerelease never becomes latest.
+      # With one index as its source, imagetools copies it unchanged, so the
       # tags name the signed digest, which the last line proves.
       - name: tag the signed image
         run: |
           set -eu
-          docker buildx imagetools create \
-            -t ghcr.io/strazahq/straza:${{ steps.meta.outputs.version }} \
-            -t ghcr.io/strazahq/straza:latest \
+          tags=(-t "ghcr.io/strazahq/straza:${{ steps.meta.outputs.version }}")
+          if printf '%s' "$GITHUB_REF_NAME" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            tags+=(-t ghcr.io/strazahq/straza:latest)
+          fi
+          docker buildx imagetools create "${tags[@]}" \
             ghcr.io/strazahq/straza@${{ steps.push.outputs.digest }}
           d=$(docker buildx imagetools inspect ghcr.io/strazahq/straza:${{ steps.meta.outputs.version }} --format '{{json .Manifest.Digest}}' | tr -d '"')
           test "$d" = "${{ steps.push.outputs.digest }}" || { echo "the version tag names $d, not the signed ${{ steps.push.outputs.digest }}. Rerun the image job." >&2; exit 1; }
