@@ -30,10 +30,6 @@ func TestCheckinCarriesClientVersion(t *testing.T) {
 			_, err := c.Checkin(ctx, "idt", "", "claude-code", "2.1.0", Attestation{})
 			return err
 		},
-		"device token": func() error {
-			_, err := c.CheckinDevice(ctx, "dt", "claude-code", "2.1.0", Attestation{})
-			return err
-		},
 		"refresh": func() error {
 			_, err := c.Refresh(ctx, "st", "claude-code", "2.1.0", Attestation{})
 			return err

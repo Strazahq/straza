@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Straza Windows MSI. It installs C:\ProgramData\straza\bin\straza.exe and
+  its copy git-remote-straza.exe, registers the straza-service Windows service
+  and starts it. build-msi.sh builds this with wixl 0.106, then postprocess
+  adds the service recovery tables, the machine PATH entry for the bin folder,
+  the first lock from the Binary table (StrazaLockEarly at 3550) and moves
+  RemoveExistingProducts, which wixl cannot express.
+
+  wixl places a custom action's Before/After relative to a standard action at
+  the wrong sequence, so every custom action here carries an explicit
+  Sequence number instead. build-msi.sh asserts each one against the dump.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Straza" Language="1033" Version="$(var.ProductVersion)"
+           Manufacturer="Straza" UpgradeCode="2f1a17b7-ecf5-49eb-8cd2-2bd60811fba2">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64"
+             Description="Straza" Manufacturer="Straza"/>
+
+    <!--
+      The upgrade rule: straza.exe must never leave its path, because a Claude
+      Code hook that cannot start lets the tool call through, while a hook that
+      meets a stopped service is refused. So the exe is replaced in place.
+      Three things hold that. The StrazaExe component keeps one GUID across
+      versions, so the new package adopts the installed component. The shared
+      component is reference-counted and RemoveExistingProducts runs late
+      (postprocess moves it, because wixl hardcodes it early at 1401), so the
+      old product's removal never takes the exe or the service. The Go exe has
+      no version resource, so Windows compares the MsiFileHash wixl writes and
+      replaces it on a content change. AllowSameVersionUpgrades lets a dev
+      build whose fourth version field differs upgrade in place.
+    -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of Straza is already installed. Uninstall it first if you need this older version."/>
+    <Media Id="1" Cabinet="straza.cab" EmbedCab="yes"/>
+
+    <!-- PURGE deletes the keys and enrollment on uninstall. wixl drops the
+         Secure attribute, so postprocess lists it in SecureCustomProperties,
+         which a deferred action needs to read it. -->
+    <Property Id="PURGE" Secure="yes"/>
+    <!-- Intune counts a soft reboot (exit 3010) as success, so the restart
+         manager never closes the admin's windows mid-install. -->
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable"/>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="STRAZAROOT" Name="straza">
+          <Directory Id="BINDIR" Name="bin">
+            <!-- This GUID is frozen: an upgrade must adopt the installed
+                 component, not lay a second one, or the exe and service
+                 would churn. -->
+            <Component Id="StrazaExe" Guid="9125b44d-beba-4c50-bf35-04fa01bb14bb" Win64="yes">
+              <File Id="StrazaExe" Name="straza.exe" Source="straza.exe" KeyPath="yes"/>
+              <ServiceInstall Id="StrazaService" Name="straza-service"
+                              DisplayName="Straza background service"
+                              Description="Holds the Straza keys and sessions for every account on this machine."
+                              Type="ownProcess" Start="auto" ErrorControl="normal"
+                              Account="NT SERVICE\straza-service" Arguments="service" Vital="yes"/>
+              <!-- Stop on install and on uninstall: the stop at StopServices
+                   lets InstallFiles overwrite the running exe. -->
+              <ServiceControl Id="StrazaServiceControl" Name="straza-service"
+                              Start="install" Stop="both" Remove="uninstall" Wait="yes"/>
+            </Component>
+            <!-- git-remote-straza.exe is a second copy of straza.exe, which
+                 acts as git's remote helper when git starts it by that name.
+                 postprocess hangs the machine PATH entry for this folder on
+                 this component. This GUID is frozen: an upgrade must adopt
+                 the installed component, not lay a second one, or the late
+                 removal of the old product would take the helper and the
+                 PATH entry the new one just wrote. -->
+            <Component Id="GitRemote" Guid="588dc863-de07-4b24-b0de-0176ffbd4ff6" Win64="yes">
+              <File Id="GitRemoteExe" Name="git-remote-straza.exe" Source="straza.exe" KeyPath="yes"/>
+            </Component>
+          </Directory>
+          <!-- The license and notice texts, which the MSI carries the way the
+               deb carries them under /usr/share/doc/straza. The release
+               workflow checks the MSI's File table for all four names.
+               The GUID is frozen like StrazaExe's, because the late removal
+               of the old product would otherwise delete what the new one owns. -->
+          <Component Id="Notices" Guid="33563d84-1f3a-40ae-9c10-98d6f485b233" Win64="yes">
+            <File Id="License" Name="LICENSE" Source="LICENSE" KeyPath="yes"/>
+            <File Id="LicenseApache" Name="LICENSE-APACHE" Source="LICENSE-APACHE"/>
+            <File Id="Notice" Name="NOTICE" Source="NOTICE"/>
+            <File Id="ThirdParty" Name="THIRD_PARTY_NOTICES.txt" Source="THIRD_PARTY_NOTICES.txt"/>
+          </Component>
+        </Directory>
+      </Directory>
+      <!-- The Application event log source, the same values x/sys's
+           eventlog.InstallAsEventCreate writes, so the service's Open finds
+           it and the messages render. The GUID is frozen like StrazaExe's,
+           because the late removal of the old product would otherwise
+           delete what the new one owns. -->
+      <Component Id="EventSource" Guid="c18fc6c6-e6f2-49cd-8098-e411ac2e4047" Win64="yes">
+        <RegistryKey Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\straza-service">
+          <RegistryValue Name="EventMessageFile" Type="expandable" Value="%SystemRoot%\System32\EventCreate.exe" KeyPath="yes"/>
+          <RegistryValue Name="TypesSupported" Type="integer" Value="7"/>
+          <RegistryValue Name="CustomSource" Type="integer" Value="1"/>
+        </RegistryKey>
+      </Component>
+    </Directory>
+
+    <!--
+      Every step runs deferred as LocalSystem (Impersonate="no"). Lane C's
+      hidden `straza installer` group and `straza uninstall` own the
+      behavior; the MSI only calls them. The first lock, StrazaLockEarly at
+      3550, and the uninstall's unwire and purge run from a copy of
+      straza.exe in the Binary table; postprocess writes them, because wixl
+      drops a Binary-table exe action. The two below run the installed exe.
+    -->
+    <!-- Lock again once InstallFiles wrote the exe: sealManagedRoot must
+         re-own the files InstallFiles just placed. Running the installed exe
+         as SYSTEM is safe here only because StrazaLockEarly locked the root
+         to administrators before the exe landed, so no user could have
+         created the folder or swapped the exe. A non-zero exit
+         (Return="check") rolls the install back. -->
+    <CustomAction Id="StrazaLock" FileKey="StrazaExe" ExeCommand="installer lock"
+                  Execute="deferred" Impersonate="no" Return="check"/>
+    <!-- Set the service's restart-on-failure actions once InstallServices
+         made it. Windows Installer's own failure-actions table cannot: a
+         restart action needs start rights on the service, which
+         MsiConfigureServices does not ask for, so the table failed every
+         install with access denied. A non-zero exit rolls the install back. -->
+    <CustomAction Id="StrazaRecovery" FileKey="StrazaExe" ExeCommand="installer recovery"
+                  Execute="deferred" Impersonate="no" Return="check"/>
+    <InstallExecuteSequence>
+      <!-- After InstallFiles (4000), before StartServices (5900). -->
+      <Custom Action="StrazaLock" Sequence="5850">NOT REMOVE~="ALL"</Custom>
+      <!-- After InstallServices (5800) and the lock, before StartServices (5900). -->
+      <Custom Action="StrazaRecovery" Sequence="5860">NOT REMOVE~="ALL"</Custom>
+    </InstallExecuteSequence>
+
+    <Feature Id="Main" Level="1">
+      <ComponentRef Id="StrazaExe"/>
+      <ComponentRef Id="GitRemote"/>
+      <ComponentRef Id="Notices"/>
+      <ComponentRef Id="EventSource"/>
+    </Feature>
+  </Product>
+</Wix>

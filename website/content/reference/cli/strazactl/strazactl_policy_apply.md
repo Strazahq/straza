@@ -2,7 +2,7 @@
 title: strazactl policy apply
 description: 'Upload PolicySet YAML: a new set is stored off, and edits to a live set wait for policy activate'
 pagetype: reference
-weight: 70
+weight: 66
 draft: false
 sources:
   - cmd/strazactl
@@ -40,7 +40,7 @@ strazactl policy apply [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

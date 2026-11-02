@@ -32,6 +32,19 @@ const (
 // the alias stays within what was approved. An error (ambiguous or malformed
 // args) means NO key exists, and callers deny fail-closed.
 func EventKeyV2(ev policy.Event, binding string) (string, error) {
+	return EventKeyObject(ev, binding, Object{})
+}
+
+// Object is the object a call names, for the approval key: the server's
+// pinned type and the value the call's argument carries.
+type Object struct {
+	Type  string `json:"type"`
+	Value string `json:"value,omitempty"`
+}
+
+// EventKeyObject is EventKeyV2 with the object a call names, in both scopes. A
+// zero Object gives exactly EventKeyV2's key, so stored grants keep matching.
+func EventKeyObject(ev policy.Event, binding string, obj Object) (string, error) {
 	scope := policy.ApproveBindingCall
 	if ev.Tool == policy.ToolMCPCall && (binding == policy.ApproveBindingTool || (ev.Args == nil && ev.Command == "" && len(ev.Argv) == 0)) {
 		scope = policy.ApproveBindingTool
@@ -46,7 +59,11 @@ func EventKeyV2(ev policy.Event, binding string) (string, error) {
 		Command  string          `json:"command"`
 		Argv     []string        `json:"argv"`
 		Args     json.RawMessage `json:"args"`
+		Object   *Object         `json:"object,omitempty"`
 	}{V: 2, Binding: scope, Tool: ev.Tool, App: ev.App, ToolName: ev.ToolName}
+	if obj != (Object{}) {
+		pre.Object = &obj
+	}
 
 	prefix := keyPrefixV2Tool
 	if scope == policy.ApproveBindingCall {

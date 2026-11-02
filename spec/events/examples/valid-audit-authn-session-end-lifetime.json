@@ -9,6 +9,6 @@
     "outcome": "lifetime-closed",
     "userId": "0197fa3d-2222-7abc-9def-000000000002",
     "session": "0198a1c2-4c99-7e55-9abc-1f2e3d4c5b01",
-    "reason": "session older than the maximum lifetime of 12h0m0s; the client starts a new session from its device credential"
+    "reason": "session older than the maximum lifetime of 12h0m0s; the client starts a new session from its enrollment"
   }
 }

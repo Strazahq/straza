@@ -91,7 +91,10 @@ func TestTakeoverBehindAPatternGate(t *testing.T) {
 
 // TestRegoRemovalLoosens pins that a Rego module refuses calls, so a draft
 // that strips or changes it, or removes or turns off its set, loosens it:
-// a typed risk for a person, and agent.guardrail for an agent it binds.
+// a typed risk for a person, and for an agent it binds an agent.guardrail
+// risk, which a direct route refuses. An off item carries the set's text,
+// module included, which agent.rego refuses an agent whatever the
+// guardrail reads.
 func TestRegoRemovalLoosens(t *testing.T) {
 	t.Parallel()
 	rego := "  escape:\n    rego: |\n      package straza.ext\n      deny contains \"no pushing\" if { input.event.toolName == \"push_files\" }\n"
@@ -105,9 +108,6 @@ func TestRegoRemovalLoosens(t *testing.T) {
 	w := withSet(gainWorld(), "dev-access", devAccess+rego)
 	guard := gainSet("rego-guard", "{ roles: [dev] }", "    - id: noop\n      tools: [task.spawn]\n      effect: allow\n") + rego
 	w2 := withSet(gainWorld(), "rego-guard", guard)
-	refusal := func(set, clause string) string {
-		return "agent.guardrail PolicySet/" + set + " " + set + " applies to you, and this draft " + clause + ". An agent's draft may not change what binds the agent."
-	}
 	stop := func(set, cause, before, after string) []string {
 		return []string{"policy.guardrail-changed PolicySet/" + set + " (typed " + set + ") " + set + " will stop refusing calls through its Rego module as it does today, because this draft " +
 			cause + ". | " + before + " | " + after}
@@ -119,13 +119,21 @@ func TestRegoRemovalLoosens(t *testing.T) {
 		agent string
 		risks []string
 	}{
-		{"the module stripped", w, setPut("dev-access", devAccess), refusal("dev-access", "removes its Rego module"), stop("dev-access", "removes the module", module(devAccess+rego), "rego@removed")},
-		{"a module-only set removed", w2, Item{Kind: KindPolicySet, Name: "rego-guard", Op: OpRemove}, refusal("rego-guard", "removes it"), stop("rego-guard", "removes the set", module(guard), "removed")},
-		{"a module-only set turned off", w2, Item{Kind: KindPolicySet, Name: "rego-guard", Op: OpOff, Doc: guard}, refusal("rego-guard", "turns it off"), stop("rego-guard", "turns it off", module(guard), "off")},
+		{"the module stripped", w, setPut("dev-access", devAccess), "removes its Rego module", stop("dev-access", "removes the module", module(devAccess+rego), "rego@removed")},
+		{"a module-only set removed", w2, Item{Kind: KindPolicySet, Name: "rego-guard", Op: OpRemove}, "removes it", stop("rego-guard", "removes the set", module(guard), "removed")},
+		{"a module-only set turned off", w2, Item{Kind: KindPolicySet, Name: "rego-guard", Op: OpOff, Doc: guard}, "turns it off", stop("rego-guard", "turns it off", module(guard), "off")},
 	} {
-		agent := Check(tc.w, agentDraftOf(tc.w, tc.item), CheckInput{Proposer: ciBot, Now: checkNow})
-		if !slices.Contains(findingLines(agent.Refused), tc.agent) {
-			t.Errorf("%s: agent refused %q, want %q", tc.name, findingLines(agent.Refused), tc.agent)
+		set, d := tc.item.Name, agentDraftOf(tc.w, tc.item)
+		agent := Check(tc.w, d, CheckInput{Proposer: ciBot, Now: checkNow})
+		if tc.item.Op == OpOff {
+			if got := codesOf(agent.Refused); !reflect.DeepEqual(got, []string{codeAgentRego}) {
+				t.Errorf("%s: agent refused %q, want only %s", tc.name, findingLines(agent.Refused), codeAgentRego)
+			}
+		} else if !slices.Contains(riskLines(agent.Risks), guardLoosened(set, tc.agent)) {
+			t.Errorf("%s: agent refused %q, risks %q, want %q", tc.name, findingLines(agent.Refused), riskLines(agent.Risks), guardLoosened(set, tc.agent))
+		}
+		if direct := Check(tc.w, d, CheckInput{Proposer: ciBot, Now: checkNow, Direct: true}); !slices.Contains(findingLines(direct.Refused), guardRefusal(set, tc.agent)) {
+			t.Errorf("%s: a direct route refused %q, want %q", tc.name, findingLines(direct.Refused), guardRefusal(set, tc.agent))
 		}
 		if got := guardLines(Check(tc.w, stamped(tc.w, tc.item), erin)); !reflect.DeepEqual(got, tc.risks) {
 			t.Errorf("%s: person\n got %q\nwant %q", tc.name, got, tc.risks)
@@ -380,7 +388,8 @@ func TestTakeoverThroughARoleChange(t *testing.T) {
 // what another role implies, stops every set that matches it for the
 // holders who reached it that way, whoever they are, so each gate and
 // module of such a set is typed. An agent that no such set binds is not
-// refused, and one whose own roles lose a module-only set is.
+// refused, and one whose own roles lose a module-only set raises
+// agent.guardrail, which a direct route refuses.
 func TestRoleChangeStopsAGate(t *testing.T) {
 	t.Parallel()
 	gates := gainSet("extra-gates", "{ roles: [gatekeeper] }", "    - id: no-push\n      tools: [mcp.call]\n      apps: [github]\n      toolNames: { deny: [push_files, delete_repo] }\n")
@@ -432,11 +441,14 @@ func TestRoleChangeStopsAGate(t *testing.T) {
 		}
 	}
 	w := setup(strings.Replace(guard, "{ roles: [gatekeeper] }", "{ roles: [dev] }", 1))
-	agent := Check(w, agentDraftOf(w, gainRole("engineering", "    kind: business\n")), CheckInput{Proposer: ciBot, Now: checkNow})
-	want := "agent.guardrail PolicySet/rego-guard rego-guard applies to you, and this draft takes dev out of your roles so that the set no longer applies to you. " +
-		"An agent's draft may not change what binds the agent."
-	if !slices.Contains(findingLines(agent.Refused), want) {
-		t.Errorf("an agent whose own roles lose a module-only set: refused %q, want %q", findingLines(agent.Refused), want)
+	d := agentDraftOf(w, gainRole("engineering", "    kind: business\n"))
+	agent := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow})
+	if want := guardLoosened("rego-guard", "takes dev out of the agent's roles, so the set no longer applies to it"); !slices.Contains(riskLines(agent.Risks), want) {
+		t.Errorf("an agent whose own roles lose a module-only set: refused %q, risks %q, want %q", findingLines(agent.Refused), riskLines(agent.Risks), want)
+	}
+	direct := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow, Direct: true})
+	if want := guardRefusal("rego-guard", "takes dev out of your roles so that the set no longer applies to you"); !slices.Contains(findingLines(direct.Refused), want) {
+		t.Errorf("a direct route: refused %q, want %q", findingLines(direct.Refused), want)
 	}
 }
 

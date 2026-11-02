@@ -12,7 +12,8 @@ import (
 )
 
 // TestOutboxDrainClaimed pins the claimed drain: class filtering,
-// in-order publishing, publish-then-mark on partial failure.
+// in-order publishing, publish-then-mark on partial failure, and a row set
+// aside that no later drain claims.
 func TestOutboxDrainClaimed(t *testing.T) {
 	forEachStore(t, func(t *testing.T, s Store) {
 		ctx := context.Background()
@@ -30,7 +31,7 @@ func TestOutboxDrainClaimed(t *testing.T) {
 
 		// Control pass takes only the two control rows, in order.
 		var got []string
-		n, err := s.Outbox().DrainClaimed(ctx, true, 10, func(e OutboxEvent) error {
+		n, _, err := s.Outbox().DrainClaimed(ctx, true, 10, func(e OutboxEvent) error {
 			got = append(got, e.Subject)
 			return nil
 		})
@@ -43,7 +44,7 @@ func TestOutboxDrainClaimed(t *testing.T) {
 
 		// Bulk pass: fail the second publish; the first is still marked.
 		got = nil
-		n, err = s.Outbox().DrainClaimed(ctx, false, 10, func(e OutboxEvent) error {
+		n, _, err = s.Outbox().DrainClaimed(ctx, false, 10, func(e OutboxEvent) error {
 			got = append(got, e.Subject)
 			if len(got) == 2 {
 				return errors.New("stream full")
@@ -59,6 +60,33 @@ func TestOutboxDrainClaimed(t *testing.T) {
 		}
 		if len(left) != 1 || left[0].Subject != "straza.audit.prompt" {
 			t.Fatalf("leftover = %+v, want just straza.audit.prompt", left)
+		}
+
+		// The bus can never carry the prompt row: it is set aside, the row
+		// behind it publishes, and no later drain claims it again.
+		if _, err := s.Outbox().Insert(ctx, OutboxEvent{Subject: "straza.audit.reply", CE: `{"id":"reply"}`}); err != nil {
+			t.Fatalf("insert reply: %v", err)
+		}
+		got = nil
+		n, aside, err := s.Outbox().DrainClaimed(ctx, false, 10, func(e OutboxEvent) error {
+			got = append(got, e.Subject)
+			if e.Subject == "straza.audit.prompt" {
+				return fmt.Errorf("%w: maximum payload exceeded", ErrUnpublishable)
+			}
+			return nil
+		})
+		if err != nil || n != 1 || len(aside) != 1 || aside[0].Subject != "straza.audit.prompt" {
+			t.Fatalf("drain = (%d, %v, %v), want (1, the prompt row, nil); published %v", n, aside, err, got)
+		}
+		n, aside, err = s.Outbox().DrainClaimed(ctx, false, 10, func(e OutboxEvent) error {
+			t.Errorf("a later drain claimed %s", e.Subject)
+			return nil
+		})
+		if err != nil || n != 0 || len(aside) != 0 {
+			t.Fatalf("later drain = (%d, %v, %v), want nothing claimed", n, aside, err)
+		}
+		if left, _ := s.Outbox().ListUnpublished(ctx, 10); len(left) != 1 || left[0].Attempts != outboxSetAside {
+			t.Fatalf("leftover = %+v, want the prompt row unpublished and set aside", left)
 		}
 	})
 }
@@ -83,7 +111,7 @@ func TestOutboxDrainClaimedConcurrent(t *testing.T) {
 		seen := map[string]int{}
 		drain := func() error {
 			for {
-				n, err := s.Outbox().DrainClaimed(ctx, false, 8, func(e OutboxEvent) error {
+				n, _, err := s.Outbox().DrainClaimed(ctx, false, 8, func(e OutboxEvent) error {
 					mu.Lock()
 					seen[e.ID]++
 					mu.Unlock()

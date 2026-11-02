@@ -38,6 +38,33 @@ type CatalogEntry struct {
 	RuleID  string `json:"ruleId,omitempty"`
 	SetName string `json:"setName,omitempty"`
 	Default bool   `json:"default,omitempty"`
+	// Object is set on a tool of a server that pins an object type
+	// (0.142.0): which objects the subject's roles reach through it.
+	Object *CatalogObject `json:"object,omitempty"`
+}
+
+// CatalogObject is a preview row's object member: the server's pinned type,
+// the tool's reach, and covers, which is every, some or none.
+type CatalogObject struct {
+	Type   string `json:"type"`
+	Reach  string `json:"reach"`
+	Covers string `json:"covers"`
+}
+
+// objectWords says which objects a row's tool reaches for the subject,
+// and is empty for a row with no object member.
+func objectWords(o *CatalogObject) string {
+	switch {
+	case o == nil:
+		return ""
+	case o.Covers == "every":
+		return "It reaches every " + o.Type + " through a role on every " + o.Type + "."
+	case o.Covers == "some":
+		return "It reaches each " + o.Type + " a role names, and no other."
+	default:
+		return "The " + o.Type + " check refuses every call to it under these roles. A tool that reaches every " + o.Type +
+			" needs a role on every " + o.Type + ", and a role with no covers line on this server needs one."
+	}
 }
 
 // CatalogPreview is the admin catalog-preview response: the resolved subject
@@ -74,7 +101,8 @@ func (c *Client) CatalogPreview(ctx context.Context, roles []string, user, app s
 // RenderCatalogPreview writes a catalog preview to w: one subject line (user,
 // roles, and groups when present), one note line per server note, then an
 // APP/TOOL/STATUS/REASON table. REASON is the server's hint sentence for the
-// row, or the rule's reason text on a server that sends no hint. App-level
+// row, or the rule's reason text on a server that sends no hint, then the
+// object sentence on a tool of a server that pins an object type. App-level
 // rows render with an empty TOOL column.
 func RenderCatalogPreview(w io.Writer, p CatalogPreview) error {
 	for _, n := range p.Notes {
@@ -98,6 +126,9 @@ func RenderCatalogPreview(w io.Writer, p CatalogPreview) error {
 		reason := e.Hint
 		if reason == "" {
 			reason = e.Reason
+		}
+		if w := objectWords(e.Object); w != "" {
+			reason = strings.TrimSuffix(reason, ".") + ". " + w
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", e.App, e.Tool, e.Status, reason)
 	}

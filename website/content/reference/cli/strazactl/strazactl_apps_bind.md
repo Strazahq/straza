@@ -2,7 +2,7 @@
 title: strazactl apps bind
 description: Give a role the server owns access to its tools (a tool without access does not exist for the role)
 pagetype: reference
-weight: 16
+weight: 13
 draft: false
 sources:
   - cmd/strazactl
@@ -41,7 +41,7 @@ strazactl apps bind <server> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

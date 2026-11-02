@@ -332,22 +332,23 @@ steps:
       path: /v1/admin/roles/${readersRoleId}/export
     want: {status: 404}
   # The publish that removed the server drops every cached session whose
-  # roles lost reach, so tess's next gateway call says to check in again,
-  # and the fresh session resolves her roles without the server.
-  - name: the reach tess held through the closure ended with the server, so the session that held it is dropped and her next call says to check in again
+  # roles lost reach, so the gateway answers tess's next call with a 401
+  # that says to check in again. Her service renews the session on that
+  # 401, as straza mcp always did, so she never reads the sentence: the
+  # call succeeds on a session that resolves her roles without the server.
+  - name: the reach tess held through the closure ended with the server, so her next call through her service renews the dropped session and lists neither tool
     mcp:
       as: tess
       list: true
     want:
-      refused: true
-      reasonContains: "check in again"
+      notTools: [g7-alpha__echo, g7-alpha__get-sum]
     within: 20s
-  - name: tess checks in again
+  - name: tess's next session start is allowed
     hook:
       as: tess
       event: {kind: session.start}
     want: {decision: allow}
-  - name: her fresh catalog carries neither tool
+  - name: her catalog still carries neither tool
     mcp:
       as: tess
       list: true

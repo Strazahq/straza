@@ -364,7 +364,7 @@ describe("Save and publish", () => {
 
   it("opens the dialog on the verdict a 409 carries when a line appeared since the check", async () => {
     vi.mocked(createDraft).mockResolvedValue({ draft: draft("55"), verdict: EMPTY });
-    vi.mocked(publishDraft).mockRejectedValue(err(409, { error: "Publish refused: a new line. Acknowledge it and publish again.", verdict: { ...EMPTY, risks: VERDICT.risks } }));
+    vi.mocked(publishDraft).mockRejectedValue(err(409, { error: "Publish refused: a new line. Confirm it, then publish again.", verdict: { ...EMPTY, risks: VERDICT.risks } }));
     mount();
     await click("Save and publish");
     const d = await screen.findByRole("dialog");

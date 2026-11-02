@@ -6,7 +6,7 @@ weight: 30
 draft: false
 tested:
   version: v1.1.0
-  platform: A Linux container on the demo stack's host, with Keycloak 26.0 and the shipped realm import. The device flow ran from the container, and the browser step was driven headless as alice
+  platform: A Linux container on the demo stack's host, with Keycloak 26.0 and the shipped realm import. The device flow ran from the container, and the browser step was driven headless as alice. The client settings for the browser sign-in and its steps were written on 2026-10-22 from the code and from the shipped realm and were not walked. The console's browser sign-in, with its redirect address and web origin, was written from the code on 2026-10-22 and not walked
   date: 2026-09-28
 applies_to: enterprise
 who: You, as the Keycloak admin and the Straza admin
@@ -18,7 +18,7 @@ keywords: keycloak oidc login provider
 ---
 
 
-You make Keycloak the login provider of an enterprise Straza, as the admin of both. You work in the Keycloak admin console, in strazad's configuration file and in a terminal. At the end strazad trusts your realm, and you have signed in with your own Keycloak identity and seen the device that login enrolled.
+You make Keycloak the login provider of an enterprise Straza, as the admin of both. You work in the Keycloak admin console, in strazad's configuration file and in a terminal. At the end strazad trusts your realm, you have signed in to the console with your own Keycloak identity, and strazactl reads your account on an admin API token you minted there.
 
 
 In the enterprise profile a person signs in at Keycloak, and strazad verifies the ID token Keycloak minted against the realm's published keys. Straza holds no password, so passwords, second factors and session policy belong to Keycloak. Who exists still belongs to your identity manager, because a verified token opens a door only for an account that provisioning created. Keycloak is the login factor and never the source of record.
@@ -33,22 +33,31 @@ The examples ran against the [demo stack]({{< relref "get-started/enterprise-dem
 ## Create the client
 
 
-In your realm, create a client with the client id `straza` and these settings. The first four rows are what the demo stack's realm ships.
+In your realm, create a client with the client id `straza` and these settings. Every row but the last is what the demo stack's realm ships.
 
 | Setting | Value | Why |
 |---|---|---|
-| Client authentication | off | the CLI device flow has no secret to keep |
-| Standard flow | off | no browser redirect flow is used |
-| OAuth 2.0 Device Authorization Grant | on | the flow `strazactl login` and `straza enroll` speak |
-| Web origins | your strazad public URL | the console runs the same flow from the browser |
+| Client authentication | off | `straza enroll` runs on people's machines and the console in their browsers, and neither has a secret to keep |
+| Standard flow | on | the browser sign-in of `straza enroll` and of the console |
+| Valid redirect URIs | `http://127.0.0.1/callback` | the browser hands the answer to a port on the person's own machine. Registered without a port, the redirect matches any port in Keycloak 25 and 26 |
+| Valid redirect URIs | the address people open the console at, normally your strazad public URL, followed by `/console/signin`, such as `https://straza.example.com/console/signin` | Keycloak sends the console's and the self-service page's sign-in back to this address, which the browser builds from the origin it opened, so add one for each address people open the console at |
+| Proof Key for Code Exchange Code Challenge Method | S256 | Straza sends an S256 challenge with every browser sign-in |
+| OAuth 2.0 Device Authorization Grant | on | the sign-in with a code that `straza enroll --use-device-code` picks |
+| Web origins | the origin people open the console at, normally your strazad public URL, such as `https://straza.example.com` | the console redeems its sign-in at Keycloak from the browser |
 | Direct access grants | off | no Straza login uses a password grant |
 
-The demo stack's realm turns direct access grants on for its non-interactive seeder alone, and Straza itself never uses that grant. Keycloak signs with RS256 by default, and strazad accepts RS256, ES256 and EdDSA.
+On the demo stack the console addresses are `http://localhost:8420/console/signin` and `http://127.0.0.1:8420/console/signin`, with both origins under Web origins. The demo stack's realm turns direct access grants on for its non-interactive seeder alone, and Straza itself never uses that grant. Keycloak signs with RS256 by default, and strazad accepts RS256, ES256 and EdDSA. Keycloak puts `auth_time` in its ID tokens by default, and Straza needs that claim to accept a browser sign-in for a machine. No fixed port is needed here, so leave `oidc.loopbackPort` at 0.
 
 
 {{< fails >}}
 `identity provider ... does not advertise a device_authorization_endpoint. Enable the OAuth 2.0 device authorization grant for client "straza"`
-: `strazactl login` stops with this sentence when the device grant is off. Turn on OAuth 2.0 Device Authorization Grant on the client.
+: `straza enroll --use-device-code` stops with this sentence when the device grant is off. Turn on OAuth 2.0 Device Authorization Grant on the client.
+
+A sentence that starts `Your identity provider refused the sign-in and said:`
+: Keycloak refused the browser sign-in and sent its reason, which the sentence quotes. When Standard flow is off, turn it on.
+
+Keycloak shows an error about `redirect_uri` in the browser
+: The client has no loopback redirect, so Keycloak never sends the answer back and the command gives up after 5 minutes. Add `http://127.0.0.1/callback` under Valid redirect URIs.
 {{< /fails >}}
 
 ## Point strazad at the realm
@@ -94,14 +103,14 @@ Keep Keycloak usernames equal to the `userName` your identity manager provisions
 ## Sign in
 
 
-Clients never hardcode the identity provider. They ask strazad where to sign in, read the realm's discovery document, and run the device flow.
+Clients never hardcode the identity provider. They ask strazad where to sign in, read the realm's discovery document, and open the browser at the realm's sign-in page.
 
 {{< console >}}
-Open your strazad address followed by `/console/` and press **Sign in with a code**. Press **Open the sign-in page**, sign in at Keycloak as yourself, and confirm the code. The console admits a person who holds an admin role, and anyone else lands on the self-service page.
+Open your strazad address followed by `/console/` and press **Sign in**. The line above the button names the realm's host, such as `You sign in at your identity provider, localhost:8480, and come back to this page.` The tab goes to Keycloak. Sign in as yourself, and Keycloak sends the tab back to the console, which says `Signing you in`. When the browser is still signed in at Keycloak, it can send you straight back without asking for your password. The console admits a person who holds an admin role, and anyone else lands on the self-service page.
 
-{{< shot name="signin-code" caption="Press **Open the sign-in page**. Your code is different." >}}
+{{< shot name="signin" caption="The console's sign-in card, taken on a standalone server, where the line names the server's own sign-in page." >}}
 
-A console sign-in opens a session in the browser tab and enrolls no device. The device the next step reads comes from `strazactl login` on a workstation.
+A console sign-in opens a session in the browser tab and enrolls no device.
 {{< /console >}}
 
 {{< cli >}}
@@ -111,110 +120,81 @@ curl -s http://localhost:8420/.well-known/straza/idp.json
 ```
 {{< /command >}}
 
-{{< see >}}Your realm as `issuer` and `straza` as `client_id`.{{< /see >}}
+{{< see >}}Your realm as `issuer`, `straza` as `client_id`, and `browser` as `min_sign_in`, the lowest sign-in the server accepts for a person's machine.{{< /see >}}
 
-```text
-{"client_id":"straza","issuer":"http://localhost:8480/realms/straza","nhi_issuer":"http://localhost:8420"}
-```
+strazactl has no sign-in of its own. It runs on an admin API token that a person mints in the console, so sign in at `http://localhost:8420/console/` as the console form of this step shows, then open the mint sheet:
+
+{{< clicks "Settings" "API tokens" "New API token" >}}
+
+Pick `expires in 30 days`, then **Custom** under **The job**, and set the `identity` area to read, which the next step needs. [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) walks the sheet. Copy the token, which is shown once, and hand it to strazactl in your terminal:
 
 {{< command terminal="Terminal" purpose="your workstation" >}}
 ```sh
-strazactl login --server http://localhost:8420
+export STRAZA_SERVER=http://localhost:8420
+read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
 ```
 {{< /command >}}
 
-The command prints an address and a code, then waits. Open the address, sign in at Keycloak as yourself and confirm the code.
-
-{{< see >}}`Logged in as alice.` with your own username.{{< /see >}}
-
-```text
-Signing in at your identity provider: http://localhost:8480/realms/straza
-Open http://localhost:8480/realms/straza/device?user_code=XEFW
-and confirm code XEFW
-Logged in as alice.
-note: this login can change Straza's configuration. Keep it away from coding agents. Automation uses an admin API token in STRAZA_API_TOKEN, and an agent proposes config changes through the built-in straza MCP server.
-```
-
-The one-time code is cut after its first four characters. The example signed in as `alice`. On success strazad checks the token in, enrolls this workstation as a device, and stores a device credential, so later sessions start without a browser. [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md" >}}) says how long that credential lasts.
+`read -rs` reads the token you paste without showing it and keeps it out of the shell history. Never put the token where an agent runs as you, such as a shell profile or a file an agent can read. A token is a bearer credential, so whoever holds it acts with its scope until it expires or is revoked.
 {{< /cli >}}
 
 
 {{< fails >}}
-`login timed out (device code expired)`
-: The code was not confirmed in time. Run `strazactl login` again and confirm the new code.
-
 `Cookie not found`
 : Keycloak shows this when the browser lost its login cookie mid-flow. On the demo stack Keycloak binds the cookie to the name `localhost`, so a browser that opens the address as `127.0.0.1` loses it. Open the address exactly as printed.
+
+`The sign-in did not come back from your identity provider. If it showed an error about a redirect address, your administrator must add https://straza.example.com/console/signin to Straza's registration there. Press Sign in to try again.`
+: The console says this, with your server's address, after Keycloak refused its redirect address. Add that address to the client's Valid redirect URIs, as the client step shows.
+
+A sentence that starts `Your identity provider at` and goes on `did not let this page finish the sign-in.`
+: The browser could not redeem the sign-in at Keycloak, because the client's Web origins lack the console's origin. Add the origin people open the console at under Web origins.
 {{< /fails >}}
 
 ## Verify
 
 
-The login left a device on your account.
+Your Keycloak sign-in found your Straza account.
 
 {{< console >}}
 {{< clicks "Users" "alice" >}}
 
-{{< shot name="user-devices" caption="The **Devices** section of a user's sheet, here with a device named alice-laptop and the badge `active`." >}}
-
-{{< see >}}Under **Devices**, a row named `strazactl@` and the host name of your workstation, with the badge `active`.{{< /see >}}
-
-The section lists the machines that enrolled with `strazactl login` or `straza enroll`. It reads `No device is enrolled.` until one of them has.
+{{< see >}}Your own account's sheet. The console admitted you because your verified sign-in found that account and it holds an admin role.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
 {{< command terminal="Terminal" purpose="your workstation" >}}
 ```sh
-strazactl devices list alice
+strazactl users list
 ```
 {{< /command >}}
 
-{{< see >}}A device named `strazactl@` and the host name of your workstation.{{< /see >}}
-
-```table
-ID                                    NAME                      PLATFORM  STATUS  ENROLLED
-01a0e994-0de0-7513-84eb-3eac841ea38f  strazactl@workstation     linux     active  2026-09-28 19:53:09
-```
-
-The listing is trimmed to the new device, whose host name was `workstation` here. Keep its ID for the next step.
+{{< see >}}A row for `alice` with the status `active`, read on the token you minted after your Keycloak sign-in.{{< /see >}}
 {{< /cli >}}
 
 ## Undo
 
 
-Logging out ends the session, and the device credential stays valid until you revoke the device.
+Signing out ends the console's session, and revoking the token ends what strazactl can do with it.
 
 {{< console >}}
-**Sign out** in the header menu ends the console's tab session.
-
-{{< clicks "Users" "alice" "Revoke" "Revoke device" >}}
-
-Press **Revoke** on the device's row under **Devices**, then **Revoke device**. Getting the device back means enrolling again with a fresh sign-in.
+**Sign out** in the header menu ends the console's tab session. The card then says `Signed out. The session was revoked on the server. Your identity provider may still have you signed in, so on a shared computer sign out there too.`
 {{< /console >}}
 
 {{< cli >}}
-`strazactl logout` revokes the current session and deletes the local credentials file. Then revoke the device:
-
-{{< command terminal="Terminal" purpose="your workstation" >}}
-```sh
-strazactl devices revoke alice 01a0e994-0de0-7513-84eb-3eac841ea38f
-```
-{{< /command >}}
-
-{{< see >}}`its device credential is dead`.{{< /see >}}
-
-```text
-revoked device 01a0e994-0de0-7513-84eb-3eac841ea38f of alice: its device credential is dead; re-enrolling needs a fresh login
-```
+`unset STRAZA_API_TOKEN` takes the token out of your terminal. Then revoke it in the console, because the token holds no right to revoke itself:
 {{< /cli >}}
+
+{{< clicks "Settings" "API tokens" "Revoke" "Revoke token" >}}
+
+Press **Revoke** on the token's row, then **Revoke token**. The next call on it is refused.
 
 ## Caveats {.nostep}
 
 
-Disabling a person in Keycloak stops new logins and enrollments and nothing more. strazad verifies the Keycloak token at login only, and it verifies its own session tokens against its own keys. The identity manager's SCIM deactivation cuts running Straza sessions and device credentials. A leaver flow therefore triggers both: Keycloak for the authentication cut, and SCIM for the authorization cut.
+Disabling a person in Keycloak stops new logins and enrollments and nothing more. strazad verifies the Keycloak token at login only, and it verifies its own session tokens against its own keys. The identity manager's SCIM deactivation cuts running Straza sessions and every enrollment of the person, such as a machine key that `straza service` holds. A leaver flow therefore triggers both: Keycloak for the authentication cut, and SCIM for the authorization cut.
 
 
-While Keycloak is down, nobody signs in through it. The break-glass admin still signs in on Straza's own page, Emergency sign-in to Straza, and `strazactl login --break-glass` opens that page instead of your identity provider. [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#break-glass" >}}) shows the break-glass admin in both profiles.
+While Keycloak is down, nobody signs in through it. The break-glass admin still signs in through **Emergency sign-in** on the console's sign-in card, which opens Straza's own sign-in page instead of your identity provider, and mints a token there when strazactl is needed. [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#break-glass" >}}) shows the break-glass admin in both profiles.
 
 
 The demo stack's issuer is `http://localhost:8480/realms/straza`, the address your browser and the command-line tools use. Containers cannot reach that address, so strazad fetches the discovery document at `keycloak:8080` through `oidc.discoveryUrl`. Keycloak serves the token and key endpoints of that document on the internal address.
@@ -223,4 +203,5 @@ The demo stack's issuer is `http://localhost:8480/realms/straza`, the address yo
 
 - [midPoint]({{< relref "guides/connect-identity/midpoint.md" >}}) provisions the accounts that Keycloak logins then sign in to.
 - [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) signs a workstation in for an agent with `straza enroll`.
+- [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}) and [Okta login]({{< relref "guides/connect-identity/okta-login.md" >}}) set up the same sign-in at those providers.
 - [Identities and roles]({{< relref "concepts/identities.md" >}}) explains who exists and where each fact comes from.

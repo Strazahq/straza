@@ -23,6 +23,7 @@ type Set struct {
 	auditRefused    prometheus.Counter
 	dropped         prometheus.CounterFunc
 	lost            prometheus.CounterFunc
+	setAside        prometheus.Counter
 	transcriptBytes prometheus.Gauge
 	dataDiskFree    prometheus.Gauge
 	sinkParked      *prometheus.CounterVec
@@ -76,6 +77,10 @@ func New(auditDropped, auditLost func() float64) *Set {
 			Name: "straza_audit_lost_total",
 			Help: "Audit events the spool took in and could not confirm as written to the database: every retry failed, an attempt ended without an answer, or strazad stopped first. Each one leaves one Error log record: its own line with its type and id, or a place in the count of the one line a stop logs. The counter starts at zero in each strazad process, so the log is the only trace of a loss at stop.",
 		}, auditLost),
+		setAside: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "straza_outbox_set_aside_total",
+			Help: "Outbox rows the relay set aside because the event bus refused them as larger than its maximum message size, max_payload, 1 MiB by default. Such a row stays in events_outbox, unpublished, and its record never reaches the audit chain or the sinks, while every later row publishes. strazad cuts every record it writes to 256 KiB, so the likely cause is an external NATS server whose max_payload is below 256 KiB: raise it. Otherwise the row was written past strazad. Each one leaves one Error log record with the row's id, subject and size and the bus's max_payload.",
+		}),
 		transcriptBytes: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "straza_transcript_store_bytes",
 			Help: "Bytes the transcript recording occupies, measured on the hourly retention-janitor cadence. Dialect-honest, not dialect-identical: Postgres = pg_total_relation_size(conversation_turns); SQLite = the whole database file (page math). Pair with governance.transcriptBytesWatermark: the janitor WARNs while this sits above it.",
@@ -102,7 +107,7 @@ func New(auditDropped, auditLost func() float64) *Set {
 		}, []string{"route", "status"}),
 		failClosed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "straza_failclosed_total",
-			Help: "Internal failures the PEP answered as a fail-closed deny or a tool-level error (approval service, fingerprint, classifier, or an audit record that the full audit queue refused under block), by lane (hook = /v1/decide, gateway = /mcp). Each increment has exactly one Error log record carrying the correlation_id of the request; policy denies, pending/expired/denied approvals and unroutable approvals are decisions and never count here.",
+			Help: "Internal failures the PEP answered as a fail-closed deny or a tool-level error (approval service, fingerprint, classifier, or an audit record that the full audit queue refused under block), by lane (hook = /v1/decide, gateway = a call to an MCP server on /mcp, native = the built-in straza tools on /mcp). Each increment has exactly one Error log record carrying the correlation_id of the request; policy denies, pending/expired/denied approvals and unroutable approvals are decisions and never count here.",
 		}, []string{"lane"}),
 		httpRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "straza_http_requests_total",
@@ -116,7 +121,7 @@ func New(auditDropped, auditLost func() float64) *Set {
 	}
 	m.dataDiskFree.Set(-1)
 	reg.MustRegister(m.latency, m.decisions, m.throttled, m.catalogOver, m.unroutable, m.auditRefused,
-		m.dropped, m.lost, m.transcriptBytes, m.dataDiskFree, m.sinkParked, m.sinkDuplicates, m.sinkReplayed, m.httpErrors,
+		m.dropped, m.lost, m.setAside, m.transcriptBytes, m.dataDiskFree, m.sinkParked, m.sinkDuplicates, m.sinkReplayed, m.httpErrors,
 		m.failClosed, m.httpRequests, m.httpLatency)
 	return m
 }
@@ -127,6 +132,9 @@ func (m *Set) HTTPRequest(route, status string, d time.Duration) {
 	m.httpRequests.WithLabelValues(route, status).Inc()
 	m.httpLatency.WithLabelValues(route).Observe(d.Seconds())
 }
+
+// OutboxSetAside counts one outbox row the relay set aside.
+func (m *Set) OutboxSetAside() { m.setAside.Inc() }
 
 // FailClosed counts one internal failure the PEP answered as a fail-closed
 // deny or tool-level error on the given lane.

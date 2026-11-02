@@ -69,8 +69,8 @@ func assertionForm(t *testing.T, priv ed25519.PrivateKey, clientID, aud string) 
 
 // TestEnterpriseNHIGrant pins the enterprise assertion lane: the issuer
 // mount serves the client_credentials grant beside the emergency sign-in,
-// an NHI with a registered key mints a token and checks in deviceless, and
-// a device_code nobody approved is refused as unknown.
+// an NHI with a registered key mints a token and checks in deviceless with
+// a key proof, and a device_code nobody approved is refused as unknown.
 func TestEnterpriseNHIGrant(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t, func(cfg *config.Config) {
@@ -82,7 +82,7 @@ func TestEnterpriseNHIGrant(t *testing.T) {
 	}
 	nhi := seedNHIWithKey(t, app, "pod-bot", pub)
 
-	t.Run("discovery advertises both grants", func(t *testing.T) {
+	t.Run("discovery advertises the grants", func(t *testing.T) {
 		resp, err := http.Get(base + "/.well-known/openid-configuration")
 		if err != nil || resp.StatusCode != http.StatusOK {
 			t.Fatalf("discovery: %v (%d)", err, resp.StatusCode)
@@ -91,8 +91,9 @@ func TestEnterpriseNHIGrant(t *testing.T) {
 		_ = json.NewDecoder(resp.Body).Decode(&disc)
 		_ = resp.Body.Close()
 		grants, _ := disc["grant_types_supported"].([]any)
-		if len(grants) != 2 || grants[0] != "urn:ietf:params:oauth:grant-type:device_code" || grants[1] != "client_credentials" {
-			t.Errorf("grant_types_supported = %v, want the device_code and client_credentials grants", grants)
+		if len(grants) != 3 || grants[0] != "authorization_code" ||
+			grants[1] != "urn:ietf:params:oauth:grant-type:device_code" || grants[2] != "client_credentials" {
+			t.Errorf("grant_types_supported = %v, want the authorization_code, device_code and client_credentials grants", grants)
 		}
 		if disc["device_authorization_endpoint"] != base+"/oidc/device_authorization" {
 			t.Errorf("device_authorization_endpoint = %v, want the emergency sign-in flow", disc["device_authorization_endpoint"])
@@ -115,7 +116,11 @@ func TestEnterpriseNHIGrant(t *testing.T) {
 			t.Fatalf("grant = %d %v", code, body)
 		}
 		idToken, _ := body["id_token"].(string)
-		code, checkin := postJSON(t, base+"/v1/checkin", map[string]any{
+		// Enterprise takes an agent's id-token check-in only with a key proof,
+		// and the proof comes from the key the ID token was issued for.
+		h := newKeyHolder(t, base)
+		h.priv = priv
+		code, checkin := h.call("/v1/checkin", "", map[string]any{
 			"id_token":    idToken,
 			"harness":     map[string]string{"name": "exec-wrapper", "version": "1.0"},
 			"attestation": map[string]any{"managed": false, "hashes": map[string]string{}},

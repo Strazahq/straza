@@ -146,11 +146,11 @@ func jsonOf(t *testing.T, v any) string {
 
 func TestGatewayEndpoint(t *testing.T) {
 	for _, tc := range []struct{ server, want string }{
-		{"", "https://gw.example/mcp"},
-		{"everything", "https://gw.example/mcp/everything"},
-		{"a b/c", "https://gw.example/mcp/a%20b%2Fc"},
+		{"", "http://straza-service/local/v1/mcp"},
+		{"everything", "http://straza-service/local/v1/mcp/everything"},
+		{"a b/c", "http://straza-service/local/v1/mcp/a%20b%2Fc"},
 	} {
-		if got := gatewayEndpoint("https://gw.example", tc.server); got != tc.want {
+		if got := gatewayEndpoint(tc.server); got != tc.want {
 			t.Errorf("gatewayEndpoint(%q) = %q, want %q", tc.server, got, tc.want)
 		}
 	}
@@ -212,7 +212,7 @@ func TestMCPProxyServerModeCapabilities(t *testing.T) {
 		} else {
 			g = newViewsGateway(t, tc.server, srv, nil).fakeGateway
 		}
-		store := proxyTestStore(t, g.URL)
+		store := proxyTestStore(t, g)
 		_, _, harness := buildProxyFor(t, g, store, tc.server)
 		caps := harness.InitializeResult().Capabilities
 		_, ext := caps.Extensions[uiExtension]
@@ -226,7 +226,7 @@ func TestMCPProxyServerModeMirrorsToolsAndViews(t *testing.T) {
 	up := viewsUpstream(nil)
 	addView(up, panelURI, "Panel")
 	g := newViewsGateway(t, "demo", up, nil)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g.fakeGateway)
 	ctx, p, harness := buildProxyFor(t, g.fakeGateway, store, "demo")
 
 	tools, err := harness.ListTools(ctx, nil)
@@ -290,7 +290,7 @@ func TestMCPProxyServerModeMirrorsToolsAndViews(t *testing.T) {
 // unchanged, structured content and the decision slot included.
 func TestMCPProxyCallResultPassthrough(t *testing.T) {
 	g := newViewsGateway(t, "demo", viewsUpstream(nil), nil)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g.fakeGateway)
 	ctx, _, harness := buildProxyFor(t, g.fakeGateway, store, "demo")
 
 	out, err := harness.CallTool(ctx, &mcp.CallToolParams{Name: "show", Arguments: map[string]any{}})
@@ -348,7 +348,7 @@ func TestMCPProxyViewsListing(t *testing.T) {
 				}
 			}
 			g := newViewsGateway(t, "demo", up, intercept)
-			store := proxyTestStore(t, g.URL)
+			store := proxyTestStore(t, g.fakeGateway)
 			var mu sync.Mutex
 			var logged []string
 			ctx, p, harness := buildProxyFor(t, g.fakeGateway, store, "demo")
@@ -412,7 +412,7 @@ func TestMCPProxyViewRead(t *testing.T) {
 				intercept["resources/read"] = tc.read
 			}
 			g := newViewsGateway(t, "demo", up, intercept)
-			store := proxyTestStore(t, g.URL)
+			store := proxyTestStore(t, g.fakeGateway)
 			ctx, p, harness := buildProxyFor(t, g.fakeGateway, store, "demo")
 			p.jitterMax = 0
 			dials := countDials(p)
@@ -449,19 +449,19 @@ func TestMCPProxyServerRefusalExits(t *testing.T) {
 		{name: "a server not in the catalog", want: []string{
 			`Straza: no MCP server named "nope" is in your catalog. Check the name, or ask an administrator for access to it. If the server name "nope" is wrong, fix the argument after mcp in this chat app's MCP configuration, then restart the chat app`}},
 		{name: "a gateway without per-server endpoints", older: true, want: []string{
-			"Straza: the gateway has no endpoint for one server at ", "/mcp/nope, so it likely runs an older Straza server. ",
-			`Ask your administrator to upgrade it, or remove "nope" after mcp in this chat app's MCP configuration to use all your servers through one endpoint, without views`}},
+			"Straza: the gateway has no endpoint for one server, so it likely runs an older Straza server. " +
+				`Ask your administrator to upgrade it, or remove "nope" after mcp in this chat app's MCP configuration to use all your servers through one endpoint, without views`}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var url string
+			var gw *fakeGateway
 			var inits func() int64 // nil: the older gateway's 404 never reaches a handler
 			if tc.older {
-				url = newFakeGateway(t).URL
+				gw = newFakeGateway(t)
 			} else {
 				g := newViewsGateway(t, "demo", viewsUpstream(nil), nil)
-				url, inits = g.URL, g.inits.Load
+				gw, inits = g.fakeGateway, g.inits.Load
 			}
-			proxyTestStore(t, url)
+			proxyTestStore(t, gw)
 			_, st := mcp.NewInMemoryTransports()
 			start := time.Now()
 			err := runMCPProxy(context.Background(), "claude-code", "nope", st)
@@ -497,7 +497,7 @@ func TestMCPProxyServerStartupRetriesTransientFailure(t *testing.T) {
 			return false
 		},
 	})
-	proxyTestStore(t, g.URL)
+	proxyTestStore(t, g.fakeGateway)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ct, st := mcp.NewInMemoryTransports()
@@ -530,7 +530,7 @@ func TestMCPProxyServerStartupRetriesTransientFailure(t *testing.T) {
 func TestMCPProxyServerNameRule(t *testing.T) {
 	for _, name := range []string{".", "..", "Demo", "a/b", "-demo", "demo-", strings.Repeat("a", 65)} {
 		g := newFakeGateway(t)
-		proxyTestStore(t, g.URL)
+		proxyTestStore(t, g)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_, st := mcp.NewInMemoryTransports()
 		err := runMCPProxy(ctx, "claude-code", name, st)
@@ -552,7 +552,7 @@ func TestMCPProxyServerRefusedMidSession(t *testing.T) {
 	up := viewsUpstream(nil)
 	addView(up, panelURI, "Panel")
 	g := newViewsGateway(t, "demo", up, nil)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g.fakeGateway)
 	ctx, p, harness := buildProxyFor(t, g.fakeGateway, store, "demo")
 	p.retryPause = 0
 
@@ -580,7 +580,7 @@ func TestMCPProxyServerRefusedMidSession(t *testing.T) {
 func TestMCPProxyViewsSwitchedOnAfterConnect(t *testing.T) {
 	up := viewsUpstream(nil) // no resources: initialize advertises none
 	g := newViewsGateway(t, "demo", up, nil)
-	store := proxyTestStore(t, g.URL)
+	store := proxyTestStore(t, g.fakeGateway)
 	ctx, p, harness := buildProxyFor(t, g.fakeGateway, store, "demo")
 	if p.session().InitializeResult().Capabilities.Resources != nil {
 		t.Fatal("precondition: the gateway must not advertise resources at connect")

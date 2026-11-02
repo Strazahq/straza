@@ -19,23 +19,23 @@ keywords: claude code hooks enroll install harness
 You wire Claude Code to Straza on the workstation where it runs. At the end, Claude Code hands every tool call to Straza before it runs it, and you have seen a destructive command denied with a reason.
 
 
-Before Claude Code runs a tool, it passes the call to `straza hook`. The hook decides the call against a signed policy snapshot cached on the machine, with no network call in the common case. Its answer is an allow, or a deny with a reason that the model reads back.
+Before Claude Code runs a tool, it passes the call to `straza hook`. The hook hands it to `straza service`, the Straza background service on the machine, which decides the call against a signed policy snapshot it holds, with no network call in the common case. Its answer is an allow, or a deny with a reason that the model reads back.
 
 ## Before you start {.nostep}
 
 
 - Claude Code on this machine.
-- A role whose policy allows your local tools. The seeded `developer` role of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) is one. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
+- A role whose policy allows your local tools. A fresh enterprise server holds no PolicySet and denies every local tool that no rule allows, so an admin first sets up the role and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}) and gives you its `developer` role. The seeded `developer` role of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) is such a role already. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
 
 ## Enroll this machine
 
 
-Enroll the machine once, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. The machine is ready for the next step when `straza status` names your identity and `straza doctor` warns only about the session, the snapshot and the wiring.
+Enroll the machine once, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. The machine is ready for the next step when `straza status` names your identity and `straza doctor` warns only about the session and the wiring. Start Claude Code from a shell that exports the same `STRAZA_HOME` as a `straza service` you started yourself, because its hooks look for that service through it. On a machine with a system service or a managed install, the hooks ignore `STRAZA_HOME` and reach the system service. On an enterprise server the service also has to hold your key under its own OS account, as that page explains.
 
 ## Install the hook wiring
 
 
-Run the installer as yourself, on the machine where Claude Code runs. It takes no server address. The hooks use the server that `straza enroll --server` saved for you.
+Run the installer as yourself, on the machine where Claude Code runs. It takes no server address. The hooks reach `straza service`, which keeps the server that `straza enroll --server` named.
 
 {{< command terminal="Terminal" purpose="on the agent's machine" >}}
 ```sh
@@ -45,20 +45,20 @@ straza install claude-code
 
 {{< see >}}A line that starts `installed Straza hooks for claude-code into` and a line that starts `registered Straza MCP server for claude-code in`, each naming the file it changed.{{< /see >}}
 
-The installer merges the Straza hook entries into `~/.claude/settings.json` and registers the `straza mcp` gateway server in `~/.claude.json`. Everything else in both files stays as it was. Restart Claude Code so it loads the new settings.
+The installer merges the Straza hook entries into `~/.claude/settings.json` and registers the `straza mcp` gateway server in `~/.claude.json`. On Linux and macOS it also sets three git entries in the `env` table of the settings file, `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0` and `GIT_CONFIG_VALUE_0`, which point git in the processes Claude Code starts at the host file of `straza service`, and the managed install below sets the same entries in its managed settings file. On Windows only the managed install sets them, because git there needs the MSI's `git-remote-straza.exe`, and a git folder named before the service's own state folder exists could be created by any local user. The host file of `straza service` is `/run/straza-service/git/hosts.conf` on Linux, `/opt/straza/run/git/hosts.conf` on macOS and `C:\ProgramData\straza-service\git\hosts.conf` on Windows, the path that `GIT_CONFIG_VALUE_0` names. Everything else in both files stays as it was. [Git through Straza]({{< relref "guides/serve-mcp-apps/git-through-straza.md#how-git-reaches-straza" >}}) says what the git entries do. Restart Claude Code so it loads the new settings.
 
 
 {{< details summary="What the installer writes" >}}
-The wiring registers `straza hook --harness claude-code` on the seven Claude Code events Straza governs: SessionStart, PreToolUse, UserPromptSubmit, Stop, SessionEnd, SubagentStart and SubagentStop. Together they cover enforcement and conversation recording. A user-mode install points each entry at the `straza` binary you ran. The server renders the same entries for a managed install, where the binary sits in `/usr/local/bin`. Trimmed to two events, they read like this:
+The wiring registers `straza hook --harness claude-code` on the seven Claude Code events Straza governs: SessionStart, PreToolUse, UserPromptSubmit, Stop, SessionEnd, SubagentStart and SubagentStop. Together they cover enforcement and conversation recording. A user-mode install points each entry at the `straza` binary you ran. The server renders the same entries for a managed install, where the binary is the `straza` package's `/usr/bin/straza` on Linux and the Straza package's `/opt/straza/bin/straza` on macOS. On Linux, trimmed to two events, they read like this:
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
-      { "hooks": [ { "command": "/usr/local/bin/straza hook --harness claude-code", "type": "command" } ], "matcher": "*" }
+      { "hooks": [ { "command": "/usr/bin/straza hook --harness claude-code", "type": "command" } ], "matcher": "*" }
     ],
     "SessionStart": [
-      { "hooks": [ { "command": "/usr/local/bin/straza hook --harness claude-code", "type": "command" } ] }
+      { "hooks": [ { "command": "/usr/bin/straza hook --harness claude-code", "type": "command" } ] }
     ]
   }
 }
@@ -74,7 +74,7 @@ sudo straza install --managed --server https://straza.example.com claude-code
 ```
 {{< /command >}}
 
-`--server` names the server that the root-owned layout pins for every user of the machine, and the install refuses to run without it. Use your own address in place of the example. Each person still enrolls once as themselves, so every call is decided and audited as the person who made it.
+`--server` names the server that the root-owned layout pins for every user of the machine, and the install refuses to run without it. Use your own address in place of the example. Each person still enrolls once as themselves, so every call is decided and audited as the person who made it. The background service reads that server from the managed layout when a person enrolls, so after an administrator points the layout at another server, each person runs `straza enroll` again, as [Move a machine to another server]({{< relref "guides/govern-an-agent/enroll-a-machine.md#move-a-machine-to-another-server" >}}) shows. It reads the snapshot keys the layout pins each time it fetches a new policy and when it starts.
 
 | Install | Who can change the wiring | Sessions attest as |
 |---|---|---|
@@ -144,7 +144,7 @@ printf %s '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"com
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}
 ```
 
-A standalone server allows it too, because its default allows a local tool that no rule matches. Both decisions land in the session's audit trail, and `straza status` now shows the live session, its roles and the snapshot.
+A standalone server allows it too, because its default allows a local tool that no rule matches. Both decisions land in the session's audit trail, and `straza status` now shows the live session.
 
 {{< fails >}}
 `Straza: no active Straza session. Restart the session so straza can check in`
@@ -159,10 +159,15 @@ Run `straza uninstall claude-code` to remove the hook entries and the MCP regist
 ## When a hook seems silent {.nostep}
 
 
-Straza fails closed. When the snapshot is missing or the check-in fails, the hook denies with a reason and never lets the call through. If Claude Code still seems ungoverned, run `straza doctor` and the by-hand checks above. A Claude Code session that started before the install runs without the hooks until Claude Code reloads its settings, so restart it.
+Straza fails closed. When the background service does not answer, the snapshot is missing or the check-in fails, the hook denies with a reason and never lets the call through. If Claude Code still seems ungoverned, run `straza doctor` and the by-hand checks above. A Claude Code session that started before the install runs without the hooks until Claude Code reloads its settings, so restart it.
 
 
-When the server cannot be reached, the hook keeps deciding for the offline grace and then denies, as [Working offline]({{< relref "guides/govern-an-agent/enroll-a-machine.md#working-offline" >}}) explains.
+When the server cannot be reached, the service keeps deciding for the offline grace and then denies, as [Working offline]({{< relref "guides/govern-an-agent/enroll-a-machine.md#working-offline" >}}) explains.
+
+## When Claude Code adds a tool {.nostep}
+
+
+When a Claude Code release adds a tool that this Straza client does not know yet, the hook sends the tool as `other` with its own name. An enterprise server denies it with a reason that names the tool and the rule that allows it, and a standalone server allows it by default. An admin allows, holds or denies exactly that tool with a rule of `tools: [other]` and `toolNames: {allow: [<name>]}`, with no Straza release, as [Harness tools by name]({{< relref "reference/policyset-grammar.md#harness-tools-by-name" >}}) shows. A later Straza release puts the tool into its kind, and the rule keeps governing it.
 
 ## Next {.nostep}
 

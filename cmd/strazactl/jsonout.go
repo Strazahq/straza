@@ -21,7 +21,7 @@ func printServerJSON(w io.Writer, raw []byte) error {
 	var buf bytes.Buffer
 	if err := json.Indent(&buf, bytes.TrimSpace(raw), "", "  "); err != nil {
 		return fmt.Errorf("the server's answer is not JSON (%v), so --json has nothing to print. "+
-			"Check that --server or your login points at strazad, or run the command without --json", err)
+			"Check that --server or STRAZA_SERVER points at strazad, or run the command without --json", err)
 	}
 	buf.WriteByte('\n')
 	_, err := w.Write(buf.Bytes())
@@ -53,7 +53,7 @@ func printToolsJSON(cmd *cobra.Command, c *ctl.Client, app string) error {
 func toolsOfApp(raw []byte, name string) ([]byte, error) {
 	var all []json.RawMessage
 	if err := json.Unmarshal(raw, &all); err != nil {
-		return nil, fmt.Errorf("the server's tools list is not a JSON array (%v). Check that --server or your login points at strazad", err)
+		return nil, fmt.Errorf("the server's tools list is not a JSON array (%v). Check that --server or STRAZA_SERVER points at strazad", err)
 	}
 	kept := make([][]byte, 0, len(all))
 	for _, entry := range all {
@@ -61,7 +61,7 @@ func toolsOfApp(raw []byte, name string) ([]byte, error) {
 			App string `json:"app"`
 		}
 		if err := json.Unmarshal(entry, &tool); err != nil {
-			return nil, fmt.Errorf("an entry of the server's tools list is not a JSON object (%v). Check that --server or your login points at strazad", err)
+			return nil, fmt.Errorf("an entry of the server's tools list is not a JSON object (%v). Check that --server or STRAZA_SERVER points at strazad", err)
 		}
 		if tool.App == name {
 			kept = append(kept, entry)

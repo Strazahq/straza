@@ -1,0 +1,17 @@
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+    name: ghapp-write-payments
+spec:
+    kind: application
+    description: Write tools of ghapp on the payments repos
+    server: ghapp
+    bindings:
+        - app: ghapp
+          tools:
+            - get_me
+            - pr_create
+          covers:
+            objects:
+                - Strazahq/pay-api
+                - Strazahq/pay-web

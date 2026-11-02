@@ -40,7 +40,10 @@ type CheckInput struct {
 	Changed    map[string]LastChange
 	Proposer   Holder
 	Advisories func(policy.Document) []policy.Advisory
-	Now        time.Time
+	// HarnessTools answers each harness tool name the built-in mappings
+	// classify, with its kind, for the by-name gate of a PolicySet put.
+	HarnessTools func() (map[string]string, error)
+	Now          time.Time
 	// RefusalsOnly stops Check after its refusals, steps 1 to 4, with no
 	// who-gains table, risks, warnings or notes. A direct route sets
 	// it while admin.secondPerson is off, because nothing reads its risks
@@ -48,6 +51,10 @@ type CheckInput struct {
 	// every write. An agent's draft still reads who gains for the roles the
 	// agent holds, for agent.own-reach. The zero value runs every step.
 	RefusalsOnly bool
+	// Direct marks a check for a direct admin route, which publishes in
+	// the same request with no review, so an agent's loosening of a set
+	// that binds it stays a refusal there instead of a typed risk.
+	Direct bool
 }
 
 // check is one run of Check: its inputs, the World after the draft, the
@@ -133,11 +140,11 @@ func (c *check) run() {
 	c.docsW, errW = parseSets(c.w.Policies, nil, nil)
 	c.docsA, errA = parseSets(c.after.Policies, c.w.Policies, c.docsW)
 	c.clW, c.clA = newClosures(c.w.Implies), newClosures(c.after.Implies)
-	fs := checkRefusals(c.w, c.after, c.docsA, c.d, c.in.Apps)
+	fs := checkRefusals(c.w, c.after, c.docsW, c.docsA, c.d, c.in.Apps, c.in.HarnessTools)
 	agent := agentDraft(c.d, c.in.Proposer)
 	if agent {
 		fs = append(fs, agentRefusals(c.w, c.after, c.docsW, c.docsA, c.d, c.in.Proposer)...)
-		guard, _ := c.guardrail()
+		guard, _, _ := c.guardrail()
 		fs = append(fs, guard...)
 	}
 	if c.refuse(dedupe(fs)) {
@@ -151,11 +158,15 @@ func (c *check) run() {
 
 // signals takes steps 5 to 7: the refusal of an agent's draft that widens
 // the agent's own reach, read over the agent's whole subject, then who
-// gains, with every Rego module left out, the risks, and the
-// warnings, unchecked, passed and info lines. With RefusalsOnly it stops
-// after the agent's own reach.
+// gains, with every Rego module left out, what the roles cover, the risks,
+// and the warnings, unchecked, passed and info lines. With RefusalsOnly it
+// stops after the agent's own reach, with the coverage list empty.
 func (c *check) signals(agent bool) {
-	if agent && c.refuse(c.ownReach()) || c.in.RefusalsOnly {
+	if agent && c.refuse(c.ownReach()) {
+		return
+	}
+	c.v.Objects = []Coverage{}
+	if c.in.RefusalsOnly {
 		return
 	}
 	c.hW = holdingOf(c.w, c.clW)
@@ -170,6 +181,7 @@ func (c *check) signals(agent bool) {
 	for _, row := range rows {
 		c.v.Gains = append(c.v.Gains, row.Gain)
 	}
+	c.v.Objects = c.coverage()
 	var scanned []Finding
 	for _, it := range c.d.Items {
 		scanned = append(scanned, ScanSecrets(it)...)
@@ -201,11 +213,12 @@ func (c *check) refuse(fs []Finding) bool {
 
 // appFacts is the facts of every App the draft puts, each offering the
 // tools a Contact read for its document, so Overlay takes them where the
-// live list no longer describes the server.
+// live list no longer describes the server. A Contact keeps tool names
+// only, so none of them carries a read-only or destructive hint.
 func (c *check) appFacts() map[string]App {
 	apps := make(map[string]App, len(c.in.Apps))
 	for name, app := range c.in.Apps {
-		app.Offered, app.ReadOnly = slices.Clone(c.in.Contacted[string(KindApp)+"/"+name]), nil
+		app.Offered, app.ReadOnly, app.Destructive = slices.Clone(c.in.Contacted[string(KindApp)+"/"+name]), nil, nil
 		apps[name] = app
 	}
 	return apps

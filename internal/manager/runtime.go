@@ -63,6 +63,9 @@ type CallInput struct {
 	Args json.RawMessage
 	// Secret is the broker-resolved credential for this call (nil = none).
 	Secret *Secret
+	// Meta is the _meta Straza sets on the upstream call, such as
+	// ai.straza/object-id. The agent's own _meta never reaches it.
+	Meta map[string]any
 }
 
 // ErrNotReady is returned by calls while the upstream is down (fail
@@ -314,7 +317,7 @@ func (r *CommandRuntime) Call(ctx context.Context, in CallInput) (*mcp.CallToolR
 	if err != nil {
 		return nil, err
 	}
-	return callTool(ctx, s, in.Tool, in.Args)
+	return callTool(ctx, s, in)
 }
 
 // Ping checks child liveness over the session.
@@ -360,8 +363,8 @@ func listResources(ctx context.Context, s *mcp.ClientSession) ([]*mcp.Resource, 
 }
 
 // callTool invokes one tool passing raw JSON arguments through verbatim.
-func callTool(ctx context.Context, s *mcp.ClientSession, name string, args json.RawMessage) (*mcp.CallToolResult, error) {
-	return s.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: json.RawMessage(orEmptyArgs(args))})
+func callTool(ctx context.Context, s *mcp.ClientSession, in CallInput) (*mcp.CallToolResult, error) {
+	return s.CallTool(ctx, &mcp.CallToolParams{Name: in.Tool, Arguments: json.RawMessage(orEmptyArgs(in.Args)), Meta: in.Meta})
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) bool {

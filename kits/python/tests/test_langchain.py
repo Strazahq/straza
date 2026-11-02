@@ -110,6 +110,7 @@ class ToolMapExtractionTest(StubbedCase):
         mw = StrazaMiddleware(tool_map={"sh": "shell.exec"})
         p = self.decide(mw, "mystery_tool", {"whatever": 1})
         self.assertEqual(p["tool_name"], "other")
+        self.assertEqual(p["native_tool_name"], "mystery_tool")
         self.assertNotIn("tool_input", p)  # nothing extractable for `other`
 
     def test_constructor_rejects_non_canonical_kinds(self):
@@ -211,6 +212,7 @@ class EndToEndCreateAgentTest(StubbedCase):
         payloads = [i["payload"] for i in self.invocations()]
         self.assertEqual(payloads[0]["prompt"], "clean up temp")
         self.assertEqual(payloads[1]["tool_name"], "shell.exec")
+        self.assertEqual(payloads[1]["native_tool_name"], "run_shell")
         self.assertEqual(payloads[1]["tool_input"], {"command": "rm -rf /tmp/x"})
         self.assertEqual(payloads[2]["prompt_response"], "all done")
 

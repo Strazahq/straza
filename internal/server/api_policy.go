@@ -419,11 +419,12 @@ func (a *App) handlePolicyActivate(w http.ResponseWriter, r *http.Request) {
 		if found {
 			text = held[0].Doc
 		}
-		// Revisions 15, 16 and 18: a set starts governing only when its
+		// Revisions 15, 16, 18 and 26: a set starts governing only when its
 		// approve pools name approver roles, its match.roles application
-		// roles, and no rule carries the retired obligations list. A text
-		// that no longer parses is left to Check's compile.
-		if doc, perr := policy.Parse([]byte(text)); perr == nil && (!a.roleGates(w, r, doc) || !a.obligationsGate(w, doc)) {
+		// roles, no rule carries the retired obligations list and its
+		// by-name rules pass their gate. A text that no longer parses is
+		// left to Check's compile.
+		if doc, perr := policy.Parse([]byte(text)); perr == nil && (!a.roleGates(w, r, doc) || !a.obligationsGate(w, doc) || !a.byNameGate(w, r, doc)) {
 			return directChange{}, false
 		}
 		if !found {
@@ -494,8 +495,7 @@ func savedEditSecondPersonRefusal(d *directDraft) string {
 	}
 	id := strconv.FormatInt(d.Row.ID, 10)
 	return "This deployment needs a second person to publish a change that widens access (admin.secondPerson), and the saved edit of " + set +
-		" is draft " + id + ". Ask another administrator to review and publish draft " + id + ", with strazactl drafts publish " + id +
-		" or on the console under Drafts."
+		" is draft " + id + ". Ask another administrator to review and publish draft " + id + " on the console under Drafts."
 }
 
 // snapshotNoSessionMsg is the enterprise 401 of GET /v1/snapshot for a
@@ -548,12 +548,15 @@ func (a *App) snapshotSession(w http.ResponseWriter, r *http.Request) bool {
 	// anonymous caller has no actor to record. It is counted on
 	// straza_http_requests_total with status 401, and the Debug access log
 	// records each one.
-	raw := bearerToken(r)
+	raw, scheme := sessionCredential(r)
 	if raw == "" {
 		apiError(w, http.StatusUnauthorized, snapshotNoSessionMsg)
 		return false
 	}
-	claims, err := a.tokens.Verify(raw)
+	claims, err := a.verifySessionToken(w, r, raw, scheme)
+	if errors.Is(err, errAnswered) {
+		return false
+	}
 	if err != nil || claims.Session == "" {
 		apiError(w, http.StatusUnauthorized, snapshotBadSessionMsg)
 		return false

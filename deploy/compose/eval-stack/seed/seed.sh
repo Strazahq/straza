@@ -2,8 +2,9 @@
 # Zero-touch eval seeder. Runs once at `compose up` and is idempotent, so a
 # re-run converges instead of failing. It authenticates to Keycloak as the
 # transient seed-bootstrap actor, falling back on a re-run to alice, who is
-# the admin midPoint assigned by then. It then enrolls with strazad, mints the
-# admin API token, seeds the Straza-born roles, seeds the IGA layer into
+# the admin midPoint assigned by then. It then signs in to strazad the way the
+# console does, mints the short-lived admin API token it runs on and the one
+# midPoint holds, seeds the Straza-born roles, seeds the IGA layer into
 # midPoint, imports the Straza and Keycloak resources, imports the LiveSync
 # and recon tasks that materialize the Straza catalog, waits for the imported
 # roles, renders the three access packages from one template and imports them
@@ -32,11 +33,14 @@ ALICE_OID="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c4a" # the admin and dev-ops manager
 IVAN_OID="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c46" # the approval decider
 KC_RES_OID="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c04"
 KC_ACCOUNT_ROLE_OID="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c0e" # AR:Keycloak:Account
-# The working agents authenticate with an Ed25519 key: keygen happens in
-# each pod, the pod drops the PUBLIC half into the shared /keys volume, and
-# this seeder registers it via PUT /v1/admin/users/{id}/nhi-key. The
-# assertion subject is the username, so no pinned identity provider client
-# or externalId exists.
+# The working agents authenticate with an Ed25519 key: each pod's straza
+# service makes it, the pod drops the PUBLIC half into the shared /keys
+# volume, and this seeder registers it via PUT /v1/admin/users/{id}/nhi-key.
+# The assertion subject is the username, so no pinned identity provider
+# client or externalId exists. /keys is an eval convenience: an agent that
+# can write it could publish a key it holds itself and have this seeder
+# register it, so in production an admin registers the printed public key
+# by hand.
 JOE_USER=joe-java-developer-agent
 SAM_USER=sam-sre-agent
 KEYS_DIR=/keys
@@ -184,23 +188,21 @@ wait_url "$WD/healthz" "strazad" 60
 # exists). On re-runs the
 # actor is already demoted and locked, so the lane falls back to alice,
 # whose admin is by then the midPoint-granted AR:straza-admin membership.
-# Fail-closed: a candidate only wins with a PROVEN admin read.
+# Fail-closed: a candidate only wins with a PROVEN admin read. The sign-in is
+# the console's: a check-in with the person's ID token under the label
+# console, which starts a session with no device.
 admin_session() { # $1 username, $2 password -> sets ST on success
   ST=""
   IDT=$(curl -sf -d "grant_type=password&client_id=straza&username=$1&password=$2&scope=openid" \
     "$KC/realms/straza/protocol/openid-connect/token" | jq -r '.id_token // empty')
   [ -n "$IDT" ] || return 1
-  DT=$(curl -sf -X POST -H 'Content-Type: application/json' \
-    -d "{\"id_token\":\"$IDT\",\"client_kind\":\"human\",\"device\":{\"name\":\"eval-seed\",\"platform\":\"linux\",\"fingerprint\":\"eval-seed-fixed\"}}" \
-    "$WD/v1/enroll" | jq -r '.device_token // empty')
-  [ -n "$DT" ] || return 1
   ST=$(curl -sf -X POST -H 'Content-Type: application/json' \
-    -d "{\"device_token\":\"$DT\",\"harness\":{\"name\":\"strazactl\",\"version\":\"eval-seed\"}}" \
+    -d "{\"id_token\":\"$IDT\",\"harness\":{\"name\":\"console\",\"version\":\"eval-seed\"}}" \
     "$WD/v1/checkin" | jq -r '.session_token // empty')
   [ -n "$ST" ] || return 1
   curl -sfo /dev/null -H "Authorization: Bearer $ST" "$WD/v1/admin/api-tokens" || return 1
   BOOT_USER="$1"
-  say "$1 enrolled + checked in (admin session proven)"
+  say "$1 signed in (admin session proven)"
 }
 admin_session seed-bootstrap 'Seed-B00t!26' \
   || admin_session alice alice \
@@ -222,6 +224,27 @@ revoke_named_token() { # $1 kind (api-tokens), $2 name
     && say "$2: token left by an earlier seed run revoked (re-minting)"
   return 0
 }
+
+# The session token lives five minutes and the seed runs far longer while
+# midPoint provisions, so from here on ST is an admin API token the session
+# mints once. Its scope is full, because the seed installs servers, creates
+# roles a server owns over all of its tools, activates policy and demotes the
+# bootstrap actor. The seed revokes it when it exits, and it expires two
+# hours after the mint, so a killed seed cannot leave it alive for longer.
+revoke_named_token api-tokens eval-seed
+SEED_MINT=$(curl -sf -X POST -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
+  -d '{"name":"eval-seed","scope":"full","expires_in":7200}' "$WD/v1/admin/api-tokens")
+SEED_TOKEN_ID=$(echo "$SEED_MINT" | jq -r '.id // empty' 2>/dev/null)
+ST=$(echo "$SEED_MINT" | jq -r '.token // empty' 2>/dev/null)
+[ -n "$ST" ] && [ -n "$SEED_TOKEN_ID" ] \
+  || fail "$BOOT_USER could not mint the seed's admin API token eval-seed, so the seed has no credential for its later steps. Read the strazad log for the refusal, then re-run eval-seed."
+revoke_seed_token() {
+  curl -sf -o /dev/null -X DELETE -H "Authorization: Bearer $ST" "$WD/v1/admin/api-tokens/$SEED_TOKEN_ID" \
+    && say "admin API token eval-seed revoked, because the seed is done with it" \
+    || say "WARNING: revoking the admin API token eval-seed failed, so it lives until it expires two hours after the mint. Revoke it in the console under Settings, API tokens"
+}
+trap revoke_seed_token EXIT
+say "admin API token eval-seed minted for this run (scope full, expires in two hours, revoked when the seed exits)"
 
 # ONE credential for midPoint: an admin API token whose scope
 # carries scim:read and scim:write for the account and group classes over
@@ -269,7 +292,7 @@ seed_role() { # $1 name, $2 kind, $3 description
     *) fail "role $1 create answered HTTP $CODE" ;;
   esac
 }
-seed_role developer business "The developer role: composes demo-tools-sandbox, every tool of the demo-tools server, views-demo-tools, the MCP Apps example server, and midpoint-self-service, the midPoint reads plus request_role. joe holds it from midPoint."
+seed_role developer business "The developer role: composes demo-tools-sandbox, every tool of the demo-tools server, views-demo-tools, the MCP Apps example server, objects-demo-tools, the repo server, and midpoint-self-service, the midPoint reads plus request_role. joe holds it from midPoint."
 seed_role operator business "The operator role: composes demo-tools-readers, the read-only tools the demo-tools server's admin defined, and midpoint-operations, every midPoint tool with every write needing approval. sam holds it from midPoint."
 seed_role analyst business "The analyst role: composes demo-tools-readers and midpoint-self-service. Nobody holds it at boot; assign it to nina in midPoint and watch her land in Straza."
 seed_role sec-approvers approver "The deciders of approval requests for governed agents. Reaches no tools. The identity manager assigns and certifies its holders."
@@ -285,10 +308,6 @@ ensure_app() { # $1 manifest file name under /seed/apps
   # from the GitOps apps directory, so the console and strazactl can change
   # them. An install of a name that exists is a change,
   # recorded as such, so a re-run converges every server on its seed file.
-  ST=$(curl -sf -H 'Content-Type: application/json' \
-    -d "{\"device_token\":\"$DT\",\"harness\":{\"name\":\"strazactl\",\"version\":\"eval-seed\"}}" \
-    "$WD/v1/checkin" | jq -r '.session_token // empty')
-  [ -n "$ST" ] || { say "WARNING: seed re-checkin failed - install of $1 skipped"; return 0; }
   ANSWER=$(curl -s -X POST -H "Authorization: Bearer $ST" -H 'Content-Type: application/yaml' \
     --data-binary "@/seed/apps/$1" "$WD/v1/admin/apps")
   NAME=$(echo "$ANSWER" | jq -r '.name // empty' 2>/dev/null)
@@ -299,21 +318,39 @@ ensure_app() { # $1 manifest file name under /seed/apps
   fi
 }
 
-seed_server_role() { # $1 role name, $2 owning server, $3 tools JSON array, $4 description
+set_server_credentials() { # $1 app, $2 own secret variable, $3 listing token variable, $4 its objects, plural
+  # A server that lists objects takes two tokens from compose.yaml: its own
+  # secret, which every tool call carries, and its listing credential, which
+  # only Straza's listing carries. jq reads each value from the environment
+  # and curl reads the body from stdin, so neither lands in a process list. A
+  # re-run sets both again, which keeps them equal to the server's.
+  if [ -z "$(printenv "$2")" ] || [ -z "$(printenv "$3")" ]; then
+    say "WARNING: $2 or $3 is not set for the seeder, so $1 gets no credentials and Straza can neither call nor list it. Set both under eval-seed in compose.yaml, then run the seed again"
+    return 0
+  fi
+  CODE=$(jq -n --arg v "$2" '{value: env[$v]}' | curl -s -o /tmp/server-cred.out -w '%{http_code}' -X POST \
+    -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' --data-binary @- "$WD/v1/admin/apps/$1/secrets")
+  case "$CODE" in
+    201) say "$1's own secret set (fingerprint $(jq -r '.fingerprint' /tmp/server-cred.out))" ;;
+    *) say "WARNING: setting $1's own secret answered HTTP $CODE, so Straza cannot start it. Check that $1 installed above, then run the seed again. The answer was: $(head -c 300 /tmp/server-cred.out)" ;;
+  esac
+  CODE=$(jq -n --arg v "$3" '{value: env[$v]}' | curl -s -o /tmp/server-cred.out -w '%{http_code}' -X POST \
+    -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' --data-binary @- "$WD/v1/admin/apps/$1/objects/credential")
+  case "$CODE" in
+    201) say "$1's listing credential set (fingerprint $(jq -r '.fingerprint' /tmp/server-cred.out)), so Straza lists its $4 within 30 seconds" ;;
+    *) say "WARNING: setting $1's listing credential answered HTTP $CODE, so Straza cannot list its $4. Check that $1 installed above with its straza.objects block, then run the seed again. The answer was: $(head -c 300 /tmp/server-cred.out)" ;;
+  esac
+}
+
+seed_server_role() { # $1 role name, $2 owning server, $3 tools JSON array, $4 description, $5 covers JSON
   # One call creates the role owned by its server together with its access
   # row. $3 is that row's tool matcher: ["*"] is every tool and tools added
   # later, which only a global admin may give, and the seed is one. A list
   # narrows the role to its real surface, so the catalog lines up with what
-  # policy permits. A 409 means an earlier run made the role, and it stays.
-  # Re-checkin first: on a first boot midPoint provisioning takes minutes and
-  # alice's 5-minute session token is stale by the time this runs. The pull
-  # connector uses a durable API token for the same reason.
-  ST=$(curl -sf -H 'Content-Type: application/json' \
-    -d "{\"device_token\":\"$DT\",\"harness\":{\"name\":\"strazactl\",\"version\":\"eval-seed\"}}" \
-    "$WD/v1/checkin" | jq -r '.session_token // empty')
-  [ -n "$ST" ] || { say "WARNING: seed re-checkin failed - server-owned role $1 skipped"; return 0; }
-  BODY=$(jq -n --arg n "$1" --arg s "$2" --argjson t "$3" --arg d "$4" \
-    '{name:$n,kind:"application",server:$s,tools:$t,description:$d}')
+  # policy permits. $5 is the row's covers line, which a server that pins an
+  # object type requires. A 409 means an earlier run made the role, and it stays.
+  BODY=$(jq -n --arg n "$1" --arg s "$2" --argjson t "$3" --arg d "$4" --argjson c "${5:-null}" \
+    '{name:$n,kind:"application",server:$s,tools:$t,description:$d} + (if $c == null then {} else {covers:$c} end)')
   CODE=$(curl -s -o /tmp/server-role.out -w '%{http_code}' -X POST -H "Authorization: Bearer $ST" \
     -H 'Content-Type: application/json' -d "$BODY" "$WD/v1/admin/roles")
   case "$CODE" in
@@ -329,11 +366,6 @@ seed_server_role() { # $1 role name, $2 owning server, $3 tools JSON array, $4 d
 }
 
 ensure_implication() { # $1 composing role name, $2 implied role name (both Straza-born)
-  # Same stale-token hazard as seed_server_role: re-checkin first.
-  ST=$(curl -sf -H 'Content-Type: application/json' \
-    -d "{\"device_token\":\"$DT\",\"harness\":{\"name\":\"strazactl\",\"version\":\"eval-seed\"}}" \
-    "$WD/v1/checkin" | jq -r '.session_token // empty')
-  [ -n "$ST" ] || { say "WARNING: seed re-checkin failed - implication $1 -> $2 skipped"; return 0; }
   RID=$(curl -sf -H "Authorization: Bearer $ST" "$WD/v1/admin/roles" \
     | jq -r ".[] | select(.name==\"$1\") | .id")
   TID=$(curl -sf -H "Authorization: Bearer $ST" "$WD/v1/admin/roles" \
@@ -686,7 +718,7 @@ access_package() { # $1 business role, $2 package oid, $3 requestable, $4 what t
       /mp/objects/roles/role-br-straza-access.xml.tmpl > /tmp/access-package.xml
   import_mp roles /tmp/access-package.xml "role 'BR:Straza-$1-access'"
 }
-access_package developer "$DEVELOPER_PKG_OID" true "demo-tools-sandbox, every tool of the demo-tools server, views-demo-tools, the MCP Apps example server, and midpoint-self-service, the midPoint reads plus request_role. Requestable, so the self-service walk can ask for it."
+access_package developer "$DEVELOPER_PKG_OID" true "demo-tools-sandbox, every tool of the demo-tools server, views-demo-tools, the MCP Apps example server, objects-demo-tools, the repo server, and midpoint-self-service, the midPoint reads plus request_role. Requestable, so the self-service walk can ask for it."
 access_package operator "$OPERATOR_PKG_OID" false "demo-tools-readers, the read-only tools the demo-tools server's admin defined, and midpoint-operations, every midPoint tool with every write needing approval. Not requestable: operations rights are assigned, never self-requested."
 access_package analyst "$ANALYST_PKG_OID" true "demo-tools-readers and midpoint-self-service, the reads on both servers. Nobody holds it at boot: assign it in the GUI to watch an AI agent land in Straza."
 
@@ -844,8 +876,8 @@ say "$JOE_USER is in Straza (SCIM) ✔ (born in midPoint, landed everywhere)"
 # membership IS the (joe, developer) assignment row in Straza (revision 12), no
 # derivation layer involved. The servers install first, because each
 # application role belongs to the one server it reaches and is created on it
-# with its access row. demo-tools-sandbox and views-demo-tools take every tool
-# (both whole surfaces are sandbox demos), midpoint-self-service names the
+# with its access row. demo-tools-sandbox, views-demo-tools and objects-demo-tools
+# take every tool (each surface is a sandbox demo), midpoint-self-service names the
 # midPoint reads, the self-service pair and decide_work_item (its rule waits
 # for the person behind an agent), and midpoint-operations reaches the FULL
 # midPoint surface, so every function can be tried and a mutation costs a
@@ -857,10 +889,15 @@ say "$JOE_USER is in Straza (SCIM) ✔ (born in midPoint, landed everywhere)"
 ensure_app demo-tools.yaml
 ensure_app midpoint.app.yaml
 ensure_app views-demo.yaml
+ensure_app objects-demo.yaml
+set_server_credentials objects-demo OBJECTS_DEMO_APP_TOKEN OBJECTS_DEMO_LISTING_TOKEN repos
 seed_server_role demo-tools-sandbox demo-tools '["*"]' \
   "Every tool of the demo-tools server, tools added later included. Composed by the developer role; get-sum is a hold and get-env is a ticket in demo-tools-sandbox-access."
 seed_server_role views-demo-tools views-demo '["*"]' \
   "Every tool of the views-demo server, the MCP Apps example whose get-time opens a clock view. Composed by the developer role."
+seed_server_role objects-demo-tools objects-demo '["*"]' \
+  "Every tool of the objects-demo server, ten repos behind tools that name the repo they reach. Composed by the developer role." \
+  '{"every":true}'
 seed_server_role midpoint-self-service midpoint \
   '["whoami","ping","list_requestable_roles","request_role","decide_work_item","search_*","get_*","list_*"]' \
   "The midPoint reads plus the self-service pair whoami, ping, list_requestable_roles and request_role. Composed by the developer and analyst roles; request_role needs approval in midpoint-self-service-access."
@@ -868,9 +905,64 @@ seed_server_role midpoint-operations midpoint '["*"]' \
   "Every tool of the midPoint server. Composed by the operator role; every write waits for the person behind the call in midpoint-operations-access."
 ensure_implication developer demo-tools-sandbox
 ensure_implication developer views-demo-tools
+ensure_implication developer objects-demo-tools
 ensure_implication developer midpoint-self-service
 ensure_implication operator midpoint-operations
 ensure_implication analyst midpoint-self-service
+
+# --- postgres, adaptive-pg-mcp in front of the showcase databases on
+# midPoint's Postgres server. It runs only with the pg profile, so the
+# seeder installs it only when the server answers. curl exits 6 when the
+# name does not resolve, which is a stack without the profile or a server
+# whose container is not running, and any answer at all, a 401 included,
+# means the server runs. Its three roles name databases, which Straza
+# resolves to ids from its list, so they wait for the first listing.
+# playground is left to a person: no role covers it.
+PG_UP=false
+n=0
+while :; do
+  rc=0
+  curl -s -o /dev/null --max-time 3 http://adaptive-pg-mcp:8080/mcp || rc=$?
+  [ "$rc" -eq 0 ] && { PG_UP=true; break; }
+  if [ "$rc" -eq 6 ]; then
+    say "postgres skipped: adaptive-pg-mcp is not on this stack's network, because the pg profile is off or its container is not running. With COMPOSE_PROFILES=pg set, read docker compose logs pg-showcase-init adaptive-pg-mcp, then run the seed again"
+    break
+  fi
+  n=$((n + 1))
+  if [ "$n" -gt 30 ]; then
+    say "WARNING: adaptive-pg-mcp resolves but did not answer within 60s, so the postgres server and its roles were skipped. Read docker compose logs adaptive-pg-mcp pg-showcase-init, then run the seed again"
+    break
+  fi
+  sleep 2
+done
+if [ "$PG_UP" = true ]; then
+  ensure_app postgres.yaml
+  set_server_credentials postgres PG_SHOWCASE_APP_TOKEN PG_SHOWCASE_LISTING_TOKEN databases
+  n=0
+  until [ "$(curl -sf -H "Authorization: Bearer $ST" "$WD/v1/admin/apps/postgres/objects" | jq -r '.total // 0')" -ge 4 ]; do
+    n=$((n + 1))
+    if [ "$n" -gt 45 ]; then
+      say "WARNING: Straza has not listed postgres's four databases after 90s, so its roles, which name databases, may be refused below. Read why with strazactl apps objects postgres, then run the seed again"
+      break
+    fi
+    sleep 2
+  done
+  seed_server_role postgres-helpdesk postgres \
+    '["list_schemas","list_tables","describe_table","read_rows","aggregate","insert_rows","update_rows","delete_rows","query_sql","execute_sql","tickets_by_status","close_stale_tickets"]' \
+    "Reads and changes rows in the helpdesk database, with the helpdesk team's two named tools. Composed by the developer role; execute_sql waits for the sponsor in postgres-helpdesk-access." \
+    '{"objects":[{"value":"helpdesk"}]}'
+  seed_server_role postgres-sales-eu postgres \
+    '["list_schemas","list_tables","describe_table","read_rows","aggregate","query_sql","revenue_by_month"]' \
+    "Reads the sales_eu database, with read-only free SQL and revenue_by_month. The same tools on sales_us are refused. Composed by the analyst role." \
+    '{"objects":[{"value":"sales_eu"}]}'
+  seed_server_role postgres-readers postgres \
+    '["list_schemas","list_tables","describe_table","read_rows","aggregate","query_sql","tickets_by_status","revenue_by_month"]' \
+    "Reads helpdesk, sales_eu and sales_us, named one by one, so playground stays out until a person covers it. Composed by the operator role." \
+    '{"objects":[{"value":"helpdesk"},{"value":"sales_eu"},{"value":"sales_us"}]}'
+  ensure_implication developer postgres-helpdesk
+  ensure_implication analyst postgres-sales-eu
+  ensure_implication operator postgres-readers
+fi
 
 # --- demo-tools-readers, the demo's narrow server-owned role. It belongs to
 # the demo-tools server and reaches the tools of that server that only read
@@ -936,9 +1028,9 @@ done
 
 # --- sam, the working AI agent: HARD assertions, because the agent-sam
 # pod depends on this chain. First the SCIM landing, then the Ed25519 key
-# registration (the pod generated the pair at boot and dropped the public
-# half in /keys; enroll fails until the key is registered, and the pod's
-# ladder retries until then).
+# registration (sam's service made the pair at boot and the pod dropped the
+# public half in /keys; enroll fails until the key is registered, and the
+# pod's ladder retries until then).
 say "waiting for midPoint to provision $SAM_USER into Straza over SCIM..."
 n=0
 until [ "$(curl -sf -H "Authorization: Bearer $SCIM_TOKEN" \
@@ -1000,6 +1092,9 @@ for p in demo-tools-sandbox-access midpoint-self-service-access midpoint-operati
          demo-tools-readers-access agent-guardrails; do
   seed_policy "$p"
 done
+if [ "$PG_UP" = true ]; then
+  seed_policy postgres-helpdesk-access
+fi
 
 if [ -n "$KC_NS" ]; then
   say "waiting for $JOE_USER's Keycloak login (his explicit AR:Keycloak:Account grant)..."
@@ -1161,12 +1256,6 @@ EOF
   esac
 }
 wait_effective_role() { # $1 username, $2 Straza role name, $3 what the role grants
-  # Same stale-token hazard as seed_server_role: midPoint provisioning has been
-  # running for minutes by now, so re-checkin before reading the admin API.
-  ST=$(curl -sf -H 'Content-Type: application/json' \
-    -d "{\"device_token\":\"$DT\",\"harness\":{\"name\":\"strazactl\",\"version\":\"eval-seed\"}}" \
-    "$WD/v1/checkin" | jq -r '.session_token // empty')
-  [ -n "$ST" ] || { say "WARNING: seed re-checkin failed, so $1 holding $2 was not verified"; return 0; }
   n=0
   while :; do
     WHO_ID=$(curl -sf -H "Authorization: Bearer $ST" "$WD/v1/admin/users?q=$1&limit=10" \
@@ -1277,8 +1366,9 @@ wait_effective_role "$SAM_USER" operator "the operator role"
 
 # Demote + lock the transient actor, idempotently: on a first boot it holds
 # the admin the bootstrap knob gave it; on re-runs (alice fallback lane) it is already
-# locked and these lookups come back empty. Locking also revokes its own
-# live session, which is fine: the seed is done writing.
+# locked and these lookups come back empty. Locking also revokes the session it
+# signed in with. The seed's admin API token is no session, so it keeps
+# working until the seed revokes it on exit.
 if [ "$BOOT_USER" = "seed-bootstrap" ]; then
   SB_ID=$(curl -sf -H "Authorization: Bearer $ST" "$WD/v1/admin/users?q=seed-bootstrap&limit=10" \
     | users_jq '.[] | select(.username=="seed-bootstrap") | .id' | head -1)
@@ -1312,7 +1402,7 @@ say "Java developer agent, the harness identity and chat face, with an"
 say "explicit Keycloak login) holds the developer role and sam (autonomous"
 say "SRE agent, key lane only) the operator role. Both are sponsored by"
 say "alice: Straza sends their gated calls to her phone."
-say "Business roles: developer (joe) composes demo-tools-sandbox, views-demo-tools and midpoint-self-service,"
+say "Business roles: developer (joe) composes demo-tools-sandbox, views-demo-tools, objects-demo-tools and midpoint-self-service,"
 say "operator (sam) composes demo-tools-readers and midpoint-operations, and"
 say "analyst (nobody yet) composes demo-tools-readers and midpoint-self-service."
 say "Assign BR:Straza-analyst-access to nina-data-analyst-agent in midPoint to"

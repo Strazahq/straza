@@ -1,0 +1,14 @@
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+    name: ghapp-read
+spec:
+    kind: application
+    description: Read tools of ghapp on every repo
+    server: ghapp
+    bindings:
+        - app: ghapp
+          tools:
+            - get_me
+            - pr_list
+          covers: every

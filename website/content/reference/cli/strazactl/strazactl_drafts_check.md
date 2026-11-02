@@ -15,9 +15,8 @@ keywords: strazactl, drafts, check
 
 Sends the documents to strazad, which checks them against live state and answers
 the verdict: what it refuses, what widens access, what does not work yet and what
-it could not check. Nothing is stored, so check also runs inside a coding agent
-on your login. A file is read as it is, a directory gives its top-level .yaml and
-.yml files by name, and - reads stdin.
+it could not check. Nothing is stored. A file is read as it is, a directory gives
+its top-level .yaml and .yml files by name, and - reads stdin.
 
 ```
 strazactl drafts check -f <path>... [flags]
@@ -34,10 +33,10 @@ strazactl drafts check -f <path>... [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
-* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store, review and publish drafts of changes to MCP servers, roles, access rows and policy sets
+* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets
 

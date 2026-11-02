@@ -51,6 +51,7 @@ type Store interface {
 	Approvals() ApprovalRepo
 	Approvers() ApproverRepo
 	Drafts() DraftRepo
+	ObjectLists() ObjectListRepo
 }
 
 // UserRepo manages the users aggregate. Users are soft-deleted.
@@ -139,7 +140,23 @@ type DeviceRepo interface {
 	GetByID(ctx context.Context, id string) (Device, error)
 	ListByUser(ctx context.Context, userID string) ([]Device, error)
 	Update(ctx context.Context, d Device) (Device, error)
-	Delete(ctx context.Context, id string) error
+	// Revoke deletes the device and writes its revocation row with reason
+	// and the outbox event in one transaction. ErrNotFound when no such
+	// device exists. On any error nothing is written.
+	Revoke(ctx context.Context, id, reason string, event OutboxEvent) error
+	// AdvanceCounter raises the device's key counter to n only while the
+	// device still holds the key with thumbprint and its stored counter is
+	// below n, in one conditional write, and reports whether it moved.
+	// False means the row is gone, holds another key, or holds a counter at
+	// or above n.
+	AdvanceCounter(ctx context.Context, id, thumbprint string, n int64) (bool, error)
+	// SpendProof records the DPoP proof id jti of the key with thumbprint
+	// as spent until the given time, shared by every replica, and reports
+	// whether this call spent it. False means the proof was spent before.
+	// It first sweeps the records whose time has passed. A space joins the
+	// two into the record's key, and a thumbprint never holds one, so two
+	// different pairs never share a key.
+	SpendProof(ctx context.Context, thumbprint, jti string, until time.Time) (bool, error)
 }
 
 // SessionRepo manages sessions (first-class principals).
@@ -157,13 +174,12 @@ type SessionRepo interface {
 	LastSeenByUsers(ctx context.Context, userIDs []string) (map[string]time.Time, error)
 	Touch(ctx context.Context, id string, at time.Time) error
 	SetStatus(ctx context.Context, id, status string) error
-	// SetStatusIfChanged sets the status and reports whether the row actually
-	// transitioned; false when it already carried the target status. The
-	// idempotent-replay signal: revoke handlers fire their side effects
-	// (revocation row, control event, push) only on true, so replaying a
-	// revoke with a still-valid token cannot amplify writes. ErrNotFound when
-	// no such session exists.
-	SetStatusIfChanged(ctx context.Context, id, status string) (bool, error)
+	// Revoke ends the sessions of ids that are not revoked yet in one
+	// transaction, with one revocation row of reason each and the outbox event
+	// that event builds from the ended ids, and returns those ids in the order
+	// of ids. An unknown or revoked id is skipped, and when none ended nothing
+	// is written. On any error nothing is written. ids holds at most 1000 ids.
+	Revoke(ctx context.Context, ids []string, reason string, event func(ended []string) (OutboxEvent, error)) ([]string, error)
 	// CloseIdle bulk-closes active sessions not seen since cutoff (their
 	// tokens expired and can never refresh); returns the closed (id, user_id)
 	// pairs so the janitor can emit one authn session.end event per session
@@ -201,7 +217,7 @@ type PackRepo interface {
 	ListBindings(ctx context.Context) ([]PackBinding, error)
 }
 
-// OutboxRepo is the producer side of the event spine.
+// OutboxRepo is the producer side of the event spine. Every write bounds its record with boundCE.
 type OutboxRepo interface {
 	Insert(ctx context.Context, e OutboxEvent) (OutboxEvent, error)
 	// InsertBatch stores a whole accepted ingest batch in one transaction,
@@ -224,9 +240,9 @@ type OutboxRepo interface {
 	// DrainClaimed is the relay's drain: claim up to limit rows
 	// (FOR UPDATE SKIP LOCKED on Postgres, so pods take disjoint sets and
 	// SHARE the drain), publish each, mark the successes, one transaction.
-	// Returns the published count and any publish error (already-published
-	// rows stay marked either way).
-	DrainClaimed(ctx context.Context, controlOnly bool, limit int, publish func(OutboxEvent) error) (int, error)
+	// Returns the published count, the rows set aside for ErrUnpublishable,
+	// which no drain claims again, and any other publish error.
+	DrainClaimed(ctx context.Context, controlOnly bool, limit int, publish func(OutboxEvent) error) (int, []OutboxEvent, error)
 	// CountUnpublished counts unpublished rows up to ceil (bounded scan:
 	// the ingest backpressure gate needs "over the limit?", never the true
 	// depth of a huge backlog).

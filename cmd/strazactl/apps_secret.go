@@ -20,7 +20,8 @@ var (
 )
 
 // appsSecretCmd is `strazactl apps secret`: the server's own static secret
-// by default, a per-role override with --role. The value comes from --value,
+// by default, a per-role override with --role, and with --listing the
+// credential Straza lists the server's objects with. The value comes from --value,
 // then STRAZA_SECRET_VALUE, then a hidden prompt when stdin is a terminal, so
 // a person never has to type the secret into a command line that shell
 // history keeps. Reads return a fingerprint.
@@ -28,30 +29,46 @@ func appsSecretCmd(client func() *ctl.Client) *cobra.Command {
 	secret := &cobra.Command{Use: "secret", Short: "Manage a server's static secret (injected gateway-side, never client-visible)"}
 
 	var setRole, setValue string
+	var setListing bool
 	set := &cobra.Command{
 		Use:   "set <server>",
-		Short: "Store the server's own secret, or with --role the override one role uses instead",
+		Short: "Store the server's own secret, with --role the override one role uses instead, or with --listing the listing credential",
 		Long: "Stores a static secret the gateway injects into calls to the server and never shows\n" +
 			"a client. Run in a terminal, the command asks for the value at a hidden prompt. In a\n" +
 			"script, set STRAZA_SECRET_VALUE from a secret manager instead. --value also works, but\n" +
 			"it puts the secret in the process arguments and the shell history.\n\n" +
 			"The answer prints the secret's fingerprint, never its value, and setting it again\n" +
 			"replaces the stored value. A server whose manifest leaves no use for a static secret,\n" +
-			"such as one that declares no credential, refuses it and names the manifest change.",
+			"such as one that declares no credential, refuses it and names the manifest change.\n\n" +
+			"With --listing the value is the listing credential: Straza lists the server's objects\n" +
+			"with it every 10 minutes and never sends it on a tool call. Only a remote server whose\n" +
+			"manifest names a credential takes one.",
 		Example: "  strazactl apps secret set scout-tools\n" +
-			"  strazactl apps secret set scout-tools --role scout-role",
+			"  strazactl apps secret set scout-tools --role scout-role\n" +
+			"  strazactl apps secret set objects-demo --listing",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if setListing && setRole != "" {
+				return listingWithRole("set")
+			}
 			value := setValue
 			if value == "" {
 				value = os.Getenv("STRAZA_SECRET_VALUE")
 			}
 			if value == "" {
-				typed, err := promptSecret(cmd, args[0], setRole)
+				typed, err := promptSecret(cmd, args[0], setRole, setListing)
 				if err != nil {
 					return err
 				}
 				value = typed
+			}
+			if setListing {
+				row, err := client().SetListingCredential(cmd.Context(), args[0], value)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "listing credential set for the MCP server %s, fingerprint %s\n", args[0], row.Fingerprint)
+				return nil
 			}
 			row, err := client().SetAppSecret(cmd.Context(), args[0], setRole, value)
 			if err != nil {
@@ -70,15 +87,29 @@ func appsSecretCmd(client func() *ctl.Client) *cobra.Command {
 		},
 	}
 	set.Flags().StringVar(&setRole, "role", "", "store the override for this role instead of the server's own secret")
+	set.Flags().BoolVar(&setListing, "listing", false, "store the credential Straza lists the server's objects with instead of the server's own secret")
 	set.Flags().StringVar(&setValue, "value", "", "secret value; it shows in process arguments and shell history, so leave it out and type the value at the hidden prompt")
 	secret.AddCommand(set)
 
 	var removeRole string
+	var removeListing bool
 	remove := &cobra.Command{
 		Use:   "remove <server>",
-		Short: "Remove the server's own secret, or with --role the override one role uses",
-		Args:  cobra.ExactArgs(1),
+		Short: "Remove the server's own secret, with --role the override one role uses, or with --listing the listing credential",
+		Example: "  strazactl apps secret remove scout-tools --role scout-role\n" +
+			"  strazactl apps secret remove objects-demo --listing",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if removeListing && removeRole != "" {
+				return listingWithRole("remove")
+			}
+			if removeListing {
+				if err := client().RemoveListingCredential(cmd.Context(), args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "removed the listing credential for the MCP server %s\n", args[0])
+				return nil
+			}
 			if err := client().RemoveAppSecret(cmd.Context(), args[0], removeRole); err != nil {
 				return err
 			}
@@ -91,23 +122,34 @@ func appsSecretCmd(client func() *ctl.Client) *cobra.Command {
 		},
 	}
 	remove.Flags().StringVar(&removeRole, "role", "", "remove the override for this role instead of the server's own secret")
+	remove.Flags().BoolVar(&removeListing, "listing", false, "remove the credential Straza lists the server's objects with instead of the server's own secret")
 	secret.AddCommand(remove)
 	return secret
 }
 
+// listingWithRole refuses --listing beside --role on the secret verb verb,
+// set or remove, before anything reaches the server.
+func listingWithRole(verb string) error {
+	return fmt.Errorf("--listing and --role cannot be used together, because the listing credential belongs to the server and not to a role. "+
+		"Drop --role to %[1]s the listing credential, or drop --listing to %[1]s the role's override", verb)
+}
+
 // promptSecret asks for the secret at a hidden prompt on stderr that names
-// the server, and the role when one is given. It refuses, before anything
-// reaches the server, when stdin is not a terminal, when the read fails and
-// when nothing was typed.
-func promptSecret(cmd *cobra.Command, app, role string) (string, error) {
+// the server, and the role when one is given, or the listing credential when
+// listing is set. It refuses, before anything reaches the server, when stdin
+// is not a terminal, when the read fails and when nothing was typed.
+func promptSecret(cmd *cobra.Command, app, role string, listing bool) (string, error) {
 	if !secretStdinIsTerminal() {
 		return "", fmt.Errorf("no secret value given: stdin is not a terminal, so strazactl cannot ask for it at a hidden prompt. Run the command in a terminal and type the value at the prompt, or in a script set STRAZA_SECRET_VALUE from a secret manager")
 	}
-	target := "the MCP server " + app
+	what, target := "Secret", "the MCP server "+app
+	if listing {
+		what = "Listing credential"
+	}
 	if role != "" {
 		target += ", role " + role
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "Secret for %s (input hidden): ", target)
+	fmt.Fprintf(cmd.ErrOrStderr(), "%s for %s (input hidden): ", what, target)
 	raw, err := readSecretHidden()
 	fmt.Fprintln(cmd.ErrOrStderr())
 	if err != nil {

@@ -2,7 +2,7 @@
 title: strazactl roles
 description: Manage roles
 pagetype: reference
-weight: 78
+weight: 74
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl roles [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

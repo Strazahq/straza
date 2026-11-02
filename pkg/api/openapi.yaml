@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: Straza platform API
-  version: 0.140.0
+  version: 0.156.0
   description: >
     Control-plane API of strazad. This document is the source of
     truth for the /v1 wire surface AND the unauthenticated infra and discovery
@@ -26,7 +26,7 @@ tags:
   - name: Enrollment and check-in
     description: A client enrolls its device here, starts a session, and fetches the signed policy snapshot, the managed harness config and the push stream.
   - name: Decisions and audit ingest
-    description: The server decision endpoint and the ingest of client-spooled audit events.
+    description: The server decision endpoint, the git grants and the ingest of client-spooled audit events.
   - name: The calling user
     description: "What a signed-in person reads and does about themself: identity, OAuth connections and approver enrollment."
   - name: Users and devices
@@ -164,7 +164,12 @@ paths:
           description: >
             Issuer and client id. Standalone profile: strazad's own publicUrl
             issuer with empty client_id. Enterprise: the configured external
-            OIDC issuer.
+            OIDC issuer. nhi_issuer names where AI agents and service
+            accounts authenticate with their own key. Since 0.145.0 the
+            document also carries min_sign_in, the lowest sign-in lane the
+            server accepts for a person's machine key, and loopback_port
+            when the server fixes the port of the browser sign-in's
+            redirect.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/IdPDiscovery" }
@@ -181,8 +186,10 @@ paths:
       operationId: enroll
       tags: ["Enrollment and check-in"]
       summary: Enroll an authenticated identity on a device
+      parameters:
+        - $ref: "#/components/parameters/dpopProof"
       requestBody:
-        description: "The identity token from the sign-in, the device that is enrolling and the kind of client that holds the credential. A user typed agent or service is refused a human credential with 403."
+        description: "The identity token from the sign-in, the device that is enrolling and the kind of client that holds the credential. A user typed agent or service is refused a human credential with 403. Since 0.143.0 a key enrollment binds the device to an Ed25519 key instead of a device token: the request carries a DPoP header whose proof has htm POST, htu /v1/enroll under the origin the DPoP parameter names, the server's nonce, no ath and no ctr, and whose jwk is the key being enrolled, and the body adds custody, machine_binding and counter. It is for the straza client only, so client_kind human answers 400. The proof is checked before the ID token: a missing or stale nonce answers the nonce challenge, and another proof failure answers 401 with no audit record, because no user is known yet. Once the ID token verifies, the proof's jti is spent in the store that every replica shares, so a replayed proof answers 401 with no audit record. Only a person then enrolls a machine key, so an AI agent or a service account answers 403 with one login failure. Each key enrollment brings a new key: a re-enrollment of the same user, fingerprint and kind with a new key reuses only a row that already holds a key, replaces its key, custody and binding, starts its counter at 0 and restarts its sign-in deadline, and a key already enrolled for the user answers 409. A bearer enrollment never reuses a keyed row, and a key enrollment never converts a bearer row. Since 0.144.0 the straza client enrolls with a key only, and the bearer lane is for strazactl and the console, client_kind human. A request with client_kind kit or none and no DPoP header verifies the ID token as before, then answers 403 with a sentence that tells the person to update Straza and enroll again, and writes one login failure with the reason that the client's bearer device credential is retired. A key enrollment whose custody.kind ranks below the server's governance.minCustody answers 403 with one login failure as well. The kind user ranks below account, and the default is account on the enterprise profile and user on the standalone profile. custody.kind is what the client reports, and the server cannot prove it, so the setting refuses a client that reports a lower kind and does not stop one that reports a false kind. Since 0.145.0 a person's key enrollment is also judged on its sign-in, after the proof is spent and before the custody rule, in this order. First, on the built-in issuer, the ID token's audience must be straza, else 403 with one login failure, so a token minted for the console or for strazactl enrolls nothing there. Then the ID token's nonce claim must name the enrolling key. A nonce made of the RFC 7638 thumbprint of the key that signs the DPoP proof, a dot and at least 16 random bytes, both base64url without padding, marks a browser sign-in, and an absent or empty nonce marks a code sign-in. Any other nonce answers 403 with one login failure, so a browser sign-in made for strazactl or for another enrollment enrolls nothing. A device code sign-in names no key, so it enrolls as a code sign-in wherever governance.minSignIn is code, the standalone default: from the straza client on the built-in issuer, and from any Straza program at an external identity provider, whose programs share one client id. Then a browser sign-in must carry auth_time no more than 10 minutes old and no more than 1 minute ahead of the server's clock, else 403 with one login failure. Then the lane must rank at governance.minSignIn or above, else 403 with one login failure. The lane code ranks below browser, and the default is browser on the enterprise profile and code on the standalone profile, so on enterprise an older straza client, which signs in by device code only, cannot enroll. Then, on both lanes, an auth_time already older than governance.signInMaxAge answers 403 with one login failure. The server records the lane it judged beside the custody, and no request field can claim one. The sign-in deadline counts from auth_time when the ID token carries one no more than 1 minute ahead of the server's clock, and from the enrollment otherwise. A successful key enrollment writes one identity record with the action device.enrolled. These rules apply to a person's key enrollment only, so the enrollments of strazactl and the console, client_kind human, are unchanged. Since 0.155.0 strazactl no longer signs in, because its sign-in kept an administrator credential in a file that any program running as the person could copy, and it runs on an admin API token instead. An enrollment with client_kind human and no DPoP header verifies the ID token as before, then answers 403 with a sentence that names the admin API token, writes one login failure with the reason that strazactl no longer signs in, and writes no device row. Every bearer enrollment is now refused, so the 200 answers a key enrollment only and never carries device_token."
         required: true
         content:
           application/json:
@@ -190,11 +197,15 @@ paths:
       responses:
         "200":
           description: Enrolled (idempotent per device fingerprint)
+          headers:
+            DPoP-Nonce: { $ref: "#/components/headers/DPoPNonce" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/EnrollResponse" }
-        "401": { $ref: "#/components/responses/Error" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
 
   /v1/checkin:
@@ -202,8 +213,10 @@ paths:
       operationId: checkin
       tags: ["Enrollment and check-in"]
       summary: Start or refresh a session; returns session token and packs
+      parameters:
+        - $ref: "#/components/parameters/dpopProof"
       requestBody:
-        description: "One credential (an id token, device token or session token) plus the device, harness and attestation the client reports. Since 0.114.0 the harness names strazactl, console and self-service open a session only on a device enrolled with client_kind human and only for a person, and every other harness name only on a kit device; a mismatch is refused with 403 before the attestation minimum is judged."
+        description: "One credential (an id token, device token or session token) plus the device, harness and attestation the client reports. Since 0.114.0 the harness names strazactl, console and self-service open a session only on a device enrolled with client_kind human and only for a person, and every other harness name only on a kit device; a mismatch is refused with 403 before the attestation minimum is judged. Since 0.143.0 a device enrolled with a key checks in on the key lane: no token in the body, device_id and counter, and a DPoP header whose proof has htm POST, htu /v1/checkin under the origin the DPoP parameter names, the server's nonce, ctr equal to the body's counter and no ath. The proof signs the counter so that nobody without the key can change it. The server checks the nonce, the proof and its ctr, and that the proof key is the device's. Once the device is identified, it spends the proof's jti in the store that every replica shares, so a replayed proof answers 401 and writes one login failure on any replica. It then checks the denylists, the user, the sign-in deadline and the counter, which must be higher than the last one it accepted. A counter at or below it, under a valid proof, revokes the device and answers 403, so a client sends each counter at most once, records it before sending, resends it only after the nonce challenge with a fresh proof, and never runs two key check-ins for one device at once. The session token minted on the key lane carries cnf.jkt, so every request with it needs a proof from the same key, and its refresh sends session_token in the body with a proof whose ath hashes it. A body with a device_token and a DPoP header answers 400, and so does a body with a token and a counter. A person's verified id_token with a DPoP header answers 400 as well. A device enrolled with a key checks in only with its key, so an id_token check-in that names it, or its device_token, answers 403. Since 0.144.0 a device the straza client enrolled without a key, client_kind kit or none, is refused on every lane: its device_token, an id_token check-in that names it and the refresh of a session bound to it answer 403 with a sentence that tells the person to update Straza and enroll again, and write one login failure with the reason that the client's bearer device credential is retired. Under the harness names strazactl, console and self-service such a device gets the client binding refusal above instead. Devices of strazactl and the console, client_kind human, keep the device_token lane. An AI agent's deviceless id_token check-in without a DPoP header is unchanged and mints a session token without cnf, so an older client's agent keeps working, on the enterprise profile until 0.145.0 and on the standalone profile still. A key check-in, and the refresh of a session bound to a keyed device, answer 403 with one login failure when the custody the device reported at its enrollment ranks below governance.minCustody, so a stricter setting ends those sessions within 300 seconds. An id_token check-in of an AI agent or a service account, which names no device, may carry a DPoP header whose proof has htm POST, htu /v1/checkin, the server's nonce, no ath and no ctr. When it verifies, the session token carries cnf.jkt, the proof key's thumbprint, and every request with it needs a proof from that key, as on the key lane. Its proof's jti is spent in the store every replica shares. A stale nonce answers the nonce challenge, and another proof failure, a replayed proof included, answers 401 with one login failure. An id_token that does not verify, sent with a DPoP header, answers the login 401 with one login failure, where 0.143.0 answered 400 before it read the token. Since 0.145.0 the enterprise profile refuses two id_token check-ins with 403 and one login failure each. A person's id_token check-in under a coding harness name, any name but strazactl, console and self-service, is refused with a sentence that tells the person to install Straza and run straza enroll, because an ID token alone would start a session outside the Straza background service, with no device, key, custody or sign-in deadline. The door answers before the device checks, so such a check-in that names a kit device without a key gets the door's refusal and reason instead of the retired bearer credential's. An id_token check-in of an AI agent or a service account without a DPoP header is refused as well, so every agent session on enterprise is bound to the key that signed its check-in proof. strazad does not compare that key with a registered one, so a leaked agent credential still starts a session, bound to the key of whoever holds the credential. The standalone profile keeps both lanes. In the same version a key check-in, and the refresh of a session bound to a keyed device, answer 403 with one login failure when the sign-in lane the device's enrollment was judged on ranks below governance.minSignIn. A device enrolled before 0.145.0 counts as a code sign-in, so under the enterprise default its sessions end within 300 seconds of the upgrade, and the person enrolls again with a browser sign-in. Since 0.155.0 strazactl no longer signs in. A check-in under the harness name strazactl on any lane, and the device_token of a device enrolled with client_kind human under any harness name, answer 403 with a sentence that names the admin API token and write one login failure with the reason that strazactl no longer signs in, once the credential has named the user. The refresh of a session that strazactl started is refused the same way, so such sessions end at their next request. strazad issues no device_token any more: the lane answers the clients that still hold one with a refusal, and no answer carries device_token. The human clients are console and self-service."
         required: true
         content:
           application/json:
@@ -211,11 +224,13 @@ paths:
       responses:
         "200":
           description: Session token issued
+          headers:
+            DPoP-Nonce: { $ref: "#/components/headers/DPoPNonce" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CheckinResponse" }
         "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
 
@@ -224,9 +239,9 @@ paths:
       operationId: decide
       tags: ["Decisions and audit ingest"]
       summary: Evaluate one canonical event against the caller's session and return the decision
-      security: [{ sessionBearer: [] }]
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }]
       requestBody:
-        description: "The canonical event to decide and, for a delegate, the agent type and id the harness attributed it to."
+        description: "The canonical event to decide, for a delegate the agent type and id the harness attributed it to, and for a classified local tool the harness's own name of it."
         required: true
         content:
           application/json:
@@ -240,6 +255,9 @@ paths:
                 agentId:
                   type: string
                   description: The delegate instance id, absent for the main agent.
+                nativeTool:
+                  type: string
+                  description: The harness's own name of a classified local tool, such as Bash for shell.exec, which a policy rule that names harness tools reads. Since 0.148.0. The canonical event stays harness-neutral, so the name rides here and a nativeTool inside the event is not read.
               required: [event]
       responses:
         "200":
@@ -263,14 +281,14 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Decision" }
         "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
 
   /v1/audit/batch:
     post:
       operationId: auditBatch
       tags: ["Decisions and audit ingest"]
-      summary: Ingest a batch of client-spooled audit events (straza drain)
-      security: [{ sessionBearer: [] }]
+      summary: Ingest a batch of client-spooled audit events (`straza service` drains its spool here)
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }]
       requestBody:
         description: "The client-spooled audit records to ingest. A record's data.session names the session that decided it, which can be an earlier session of the caller's user on the caller's device."
         required: true
@@ -299,7 +317,7 @@ paths:
                   accepted: { type: integer, description: "The number of records stored for the audit chain." }
                   refused: { type: integer, description: "The number of records refused because the session they name is not a UUID, is unknown, belongs to another user or another device, or is past the cap of 1000 named sessions. An older client ignores it." }
         "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "429":
           description: >
             Ingest rate limited or backlog at capacity. RETRYABLE: the client
@@ -321,6 +339,144 @@ paths:
                 type: object
                 properties:
                   error: { type: string }
+
+  /v1/grants/resolve:
+    post:
+      operationId: resolveGitRepo
+      tags: ["Decisions and audit ingest"]
+      summary: Say whether Straza serves git for a repo URL, and name the server and the canonical repo
+      security: [{ sessionDPoP: [] }]
+      requestBody:
+        description: >
+          The URL git was given for a repo. Since 0.146.0 straza service asks
+          this before it answers git, so git for a repo Straza does not serve
+          goes to the git host as before. Straza takes every MCP server whose
+          straza.git.upstream followed by a slash prefixes the URL, reads the
+          owner and the name from the next two path segments with .git
+          removed, and looks the repo up without regard to case in each
+          server's object list. A server counts only when the session's
+          subject can see its fetch tool or its push tool, by the visibility
+          check /mcp runs. A session whose token is bound to no key is
+          refused with 403 and the sentence POST /v1/grants answers it with.
+          The route decides nothing and writes no audit record.
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitResolveRequest" }
+      responses:
+        "200":
+          description: >
+            Exactly one server lists the repo. The answer names the server,
+            the repo's canonical owner/name and the audience the server's git
+            grants carry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitResolveResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/GitRefusal" }
+        "409": { $ref: "#/components/responses/GitRefusal" }
+
+  /v1/grants:
+    post:
+      operationId: issueGitGrant
+      tags: ["Decisions and audit ingest"]
+      summary: Decide one git fetch or push of one repo and answer a short git grant for its resource server
+      security: [{ sessionDPoP: [] }]
+      requestBody:
+        description: >
+          The URL git was given, the operation, the ref updates of a push and
+          how long a hold may keep this request waiting. Since 0.146.0. Straza
+          resolves the repo as POST /v1/grants/resolve does, maps the
+          operation to a tool through the server's straza.git.ops, and
+          decides the grant with the decision a tools/call of that tool runs:
+          visibility, the session's policy overlay, the rate limit, the
+          object gate, the policy engine and the approval. The decision's
+          arguments are {"<pinned argument>": "<owner/name>"} for a fetch and
+          for a push without refs. A push with refs adds refs and, when
+          exactly one ref is under refs/heads/, branch, that ref's short
+          name, so an approval's fingerprint and card cover exactly that set
+          of updates. A grant skips the tool's input schema check, because no
+          tool runs, never names the await tool and resolves no credential.
+          A push without refs asks for the grant that opens the push
+          advertisement and skips the approval, so a person approves a push
+          once, on the grant that names its refs. The session token must be
+          bound to a key, and a session without cnf is refused with 403 and
+          a sentence that says to run git on a machine where straza service
+          runs. Each grant issued and each refusal of the decision writes
+          exactly one straza.audit.mcp record with the event grant (spec/events
+          revision 48). The record enters the audit queue before the answer
+          is written, and the grant's dec claim is its CloudEvents id. A 400,
+          which also answers a push that names more ref updates than one
+          grant can carry, a 403 for a session without a key or for an op the
+          server's git block maps to no tool, a 404 and a 409 write no such
+          record.
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitGrantRequest" }
+      responses:
+        "200":
+          description: >
+            The grant was issued. grant is a compact JWS of type
+            straza-grant+jwt, signed with the session key set and valid for
+            120 seconds, which the resource server at aud takes with a DPoP
+            proof from the session's key, as spec/grant describes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitGrantResponse" }
+        "202":
+          description: >
+            A hold, an approval that keeps the request waiting, holds the
+            grant and did not end within waitSeconds, or within
+            approval.gatewayHoldSeconds when waitSeconds is absent. Only a
+            hold answers 202, and an approval of the ticket class answers 403
+            at once. The answer names the approval request and when it
+            expires. Ask again with the same body until the approval ends:
+            the request after an approval answers 200 once, and the request
+            after a denial or an expiry answers 403 with the sentence. A 202
+            writes no straza.audit.mcp record, because the approval's request
+            record covers it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitGrantHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
+        "403":
+          description: >
+            Straza refused the grant, and the error is the refusal's
+            sentence. Every refusal of the decision answers 403 and writes its
+            one record: a tool the session cannot see, the session's policy
+            overlay, the rate limit, the object gate, the policy engine, and
+            an approval that ended without allowing the grant, such as one a
+            person denied or one that expired. An approval of the ticket class
+            that is still open is refused at once too, with the ticket's
+            sentence and one record, as on /mcp. The same git command after an
+            approver allows the ticket gets the grant. Two refusals before the
+            decision answer 403 with no record: a session whose token is bound
+            to no key, and an op that the server's git block maps to no tool.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+        "404": { $ref: "#/components/responses/GitRefusal" }
+        "409": { $ref: "#/components/responses/GitRefusal" }
+        "503":
+          description: >
+            The grant's audit record could not enter the queue, so no grant
+            was issued. The error says to try again in a moment.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  correlation_id: { type: string, description: "The correlation id of the answer, as the server log records it." }
+                required: [error]
 
   /v1/admin/audit:
     get:
@@ -583,11 +739,17 @@ paths:
         door by the caller, the role's live document with the row, so a
         secret-shaped value in the role's description answers 400 with the
         secret scan's sentence and fix.
+        Since 0.142.0 a row on a server that pins an object type carries
+        covers, which objects of that type the role reaches. The draft
+        check refuses a row there without covers, an object the server's
+        object list does not hold, and covers on a server that pins no
+        type, and those answer 409 with its sentence. A covers object of
+        another shape answers 400.
       security: [{ adminBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
-        description: "The role to give access and the tools it may reach on this MCP server; absent tools or a lone * means every tool."
+        description: "The role to give access, the tools it may reach on this MCP server, and on a server that pins an object type the objects it covers; absent tools or a lone * means every tool."
         required: true
         content:
           application/json:
@@ -596,6 +758,9 @@ paths:
               properties:
                 role: { type: string }
                 tools: { type: array, items: { type: string } }
+                covers:
+                  $ref: "#/components/schemas/Covers"
+                  description: "Which objects of the server's pinned type the role covers. Required on a server that pins an object type and refused on one that pins none. Added in 0.142.0."
               required: [role]
       responses:
         "201":
@@ -675,6 +840,14 @@ paths:
                         ruleId: { type: string, description: "The policy rule that produced this tool-level outcome; empty when no rule fired." }
                         setName: { type: string, description: "The policy set the rule lives in; empty when no rule fired." }
                         default: { type: boolean, description: "True when no rule mentions this call and the engine default applied, allow on a tool the role reaches. A different fact from a rule allowing or denying it on purpose." }
+                        object:
+                          type: object
+                          description: "How the subject's roles cover the objects this tool works on. Present on a tool row of a server that pins an object type when a role the subject holds binds the tool, unless the tool's reach is none and its mark has not drifted. Absent on a matcher_miss row and on a tool only an assume matcher admits. The status does not change with it. Added in 0.142.0."
+                          properties:
+                            type: { type: string, description: "The server's pinned object type, such as repo." }
+                            reach: { type: string, enum: [argument, credential, all, none], description: "How far one call of the tool reaches: the object one argument names, what the call's credential reaches, every object, or no object. A tool the pinned declaration does not name reads all." }
+                            covers: { type: string, enum: [every, some, none], description: "every when a role the subject holds covers every object and binds the tool. some when no such role binds it but a role on some objects does, the reach is argument, the server's mark on the tool has not drifted and apps.objects.enabled is on, so a call is allowed on those objects alone. none when the gateway would refuse every call of it." }
+                          required: [type, reach, covers]
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
@@ -822,6 +995,177 @@ paths:
                   id: { type: string }
                   status: { type: string, enum: [deleted] }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/admin/apps/{id}/objects:
+    get:
+      operationId: listAppObjects
+      tags: ["Apps, tools and bindings"]
+      summary: Read a server's object list, the last good listing with the roles that cover each entry, one page at a time
+      description: >
+        A server that pins an object type (straza.objects, app-manifest
+        revision 7) is listed by Straza every 10 minutes with its own listing
+        tool. The list comes from the answering replica's memory, sorted by
+        value, never from the database, together with the pinned block, the
+        block the server's live tool marks declare, and the state of the last
+        listing. A failed listing changes nothing: the last good list stays
+        and listing.reason says why. A server that pins no type answers 200
+        with type empty, pinned and listing null, no entries, and declared
+        filled when its tools carry ai.straza/object marks, so a client can
+        say what to pin. drift is true when declared is not null and differs
+        from pinned. Each entry's coveredBy names the roles that cover it as
+        the gateway decides: a role on every object that binds an exposed
+        tool whose pinned reach is not none, and a role that names the entry
+        and binds an exposed tool with reach argument whose mark has not
+        drifted, while apps.objects.enabled is on. A binding with no covers
+        line covers nothing. Each entry's drafts names the open drafts that
+        would add or drop a role on it, read from the stored drafts by
+        comparing each role's covers line in a draft with the live one, and
+        only those the caller may read in the drafts queue, so a draft the
+        caller may not read is never shown or counted. Reachable by the
+        server's own admin like the other app routes.
+      security: [{ adminBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: "The server's name or id" }
+        - { name: q, in: query, schema: { type: string }, description: "Keep entries whose value or title holds this text, ignoring case" }
+        - { name: after, in: query, schema: { type: string }, description: "Start after this value, the last value of the previous page" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 500 } }
+      responses:
+        "200":
+          description: One page of the object list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ObjectList" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/admin/apps/{id}/objects/refresh:
+    post:
+      operationId: refreshAppObjects
+      tags: ["Apps, tools and bindings"]
+      summary: Ask for a listing of a server's objects now instead of at the next 10-minute listing
+      description: >
+        Marks the server's listing due now. One replica claims and runs it,
+        and every replica holds the result within 30 seconds. The request
+        itself leaves no audit record; the listing it causes writes the
+        actorless straza.audit.admin record apps.objects.list. A server
+        listed or tried less than a minute ago answers 429 with "<app> was
+        listed <n> seconds ago. Refresh again in <m> seconds." A server that
+        pins no type answers 409 with "<app> pins no object type, so there
+        is nothing to list. Pin its objects first with strazactl apps
+        objects draft <app>, then publish the draft."
+      security: [{ adminBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "202":
+          description: The listing is due
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  app: { type: string }
+                  dueAt: { type: string, format: date-time }
+                required: [app, dueAt]
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /v1/admin/apps/{id}/objects/credential:
+    post:
+      operationId: setListingCredential
+      tags: ["Apps, tools and bindings"]
+      summary: Store the listing credential Straza lists a server's objects with (value never echoed; stored encrypted)
+      description: >
+        The listing credential is one static row per server, used for the
+        listing tool and nothing else: the broker never sends it on a tool
+        call, and a listing never falls back to the server's own secret or a
+        role's. Only a remote server whose manifest names a credential takes
+        one. Setting it rotates the value in place, makes the listing due at
+        once, writes straza.audit.admin apps.secret.set with scope listing,
+        and tells every replica to reload its credentials. Refused with 409
+        when the server pins no object type ("<app> pins no object type, so
+        a listing credential has no use. Pin its objects first with
+        strazactl apps objects draft <app>, then publish the draft."), when
+        it runs as a process ("<app> runs as one process with one identity,
+        so Straza lists its objects with that identity and keeps no listing
+        credential for it."), and when it takes no credential ("<app> takes
+        no credential, so Straza lists its objects without one and keeps no
+        listing credential for it."). An empty value answers 400 "value is
+        required". The response carries a fingerprint, never the value.
+      security: [{ adminBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        description: "The listing credential's value."
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value: { type: string }
+              required: [value]
+      responses:
+        "201":
+          description: Listing credential stored (ciphertext only)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListingCredential" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteListingCredential
+      tags: ["Apps, tools and bindings"]
+      summary: Remove the listing credential of a server
+      description: >
+        Makes the listing due at once, so the next listing fails with the
+        sentence that names the missing credential and the last good list
+        stays. Writes straza.audit.admin apps.secret.remove with scope
+        listing and tells every replica to reload its credentials. Answers
+        404 with "<app> has no listing credential stored, so there is nothing
+        to remove." when there is none.
+      security: [{ adminBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Listing credential removed }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/admin/apps/{id}/objects/draft:
+    post:
+      operationId: draftAppObjects
+      tags: ["Apps, tools and bindings"]
+      summary: Open a draft that pins the objects a server declares in its tool marks
+      description: >
+        Reads the server's live tools and opens one draft, through the api
+        door by the caller, whose one App item is the live manifest with
+        straza.objects set to the block the ai.straza/object and
+        ai.straza/lists-objects marks declare. The pinned plural, and any
+        pinned tool mark stricter than the declared one, stay as pinned.
+        Nothing changes until a person publishes the draft. Answers 200 with
+        unchanged true and a sentence when the pinned block already matches
+        the marks. Refused with 409 when the server is not running, when no
+        tool carries a mark, and when the marks break a rule, with the fault
+        and the fix.
+      security: [{ adminBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The pinned block already matches the marks, so no draft was opened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unchanged: { type: boolean, enum: [true] }
+                  sentence: { type: string }
+                required: [unchanged, sentence]
+        "201":
+          description: The new draft and its verdict
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DraftAnswer" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/admin/oauth/providers:
     get:
       operationId: listOAuthProviders
@@ -1096,9 +1440,11 @@ paths:
                     type: object
                     description: >
                       Fleet push health for the pod that answered this call.
-                      connected counts daemons holding a live edge
-                      subscription to this pod; active sessions minus
-                      connected is roughly the daemons riding the 30 s poll.
+                      connected counts the push streams held to this pod,
+                      one per session the Straza background service holds;
+                      active sessions minus connected is roughly the
+                      sessions that hear of a change only at their next
+                      renewal.
                       lane_up=false means this pod's straza.push.>
                       subscription failed and /v1/push answers 503.
                     properties:
@@ -1181,6 +1527,7 @@ paths:
                             outcome: { type: string, enum: [denied, approval] }
                             count: { type: integer }
                             reason: { type: string, description: "The reason sentence this group carried most often, verbatim from the record." }
+                            seq: { type: integer, format: int64, description: "The audit seq of the newest record in this group that carries reason, read back with GET /v1/admin/audit?after=<seq - 1>&limit=1 (0.153.0)." }
 
   /v1/admin/attestation-hashes:
     get:
@@ -1333,22 +1680,25 @@ paths:
       tags: ["Enrollment and check-in"]
       summary: Stream kill-switch revocations and policy refresh hints as server-sent events, scoped to the caller's own session, device and user
       description: >
-        Gateway-edge push stream (SSE): the daemon's kill-switch/policy-nudge
-        lane over the HTTPS channel it already authenticates to.
+        Gateway-edge push stream (SSE): the kill-switch and policy-nudge lane
+        of the Straza background service, one stream per session it holds,
+        over the HTTPS channel it already authenticates to.
         Events: ready (lane live), revocation (drop session state NOW),
         policy (refresh hint; the snapshot is still fetched and verified
         through the normal channel). Subjects derive from the session token's
         own claims (session/user/device + the policy broadcast), so a client
-        can only hear about itself. An accelerator by contract: daemons keep
-        poll-refresh regardless; 503 (lane down or pod cap
-        events.pushEdgeMaxConns reached) means "poll until a retry lands".
-      security: [{ sessionBearer: [] }]
+        can only hear about itself. An accelerator by contract: a session
+        still renews when a call finds it near expiry and checks the snapshot
+        after its decisions; 503 (lane down or pod cap
+        events.pushEdgeMaxConns reached) means "retry the stream with
+        backoff and rely on those meanwhile".
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }]
       responses:
         "200":
           description: Server-sent event stream (heartbeat comments every ~25 s)
           content:
             text/event-stream: {}
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "503": { $ref: "#/components/responses/Error" }
 
   /v1/snapshot:
@@ -1364,14 +1714,14 @@ paths:
         unless server.metricsToken is set. The standalone profile serves the
         snapshot without a token. The snapshot is signed, never encrypted, and
         every enrolled machine keeps a copy in its straza home.
-      security: [{ sessionBearer: [] }]
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }]
       responses:
         "200":
           description: Signed snapshot bytes
           content:
             application/cbor: {}
         "304": { description: Not modified (If-None-Match matched) }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "503": { $ref: "#/components/responses/Error" }
 
   /v1/harness-config:
@@ -1421,27 +1771,26 @@ paths:
         authenticated session may end ITSELF: the bearer token both
         authenticates the call and selects the only session it can touch, so
         there is no id parameter and no role gate. Per-target semantics match
-        POST /v1/admin/sessions/{id}/revoke exactly (stand-down, not lockout;
-        an enrolled device credential can start a fresh session). The response
+        POST /v1/admin/sessions/{id}/revoke exactly (stand-down, not lockout:
+        an enrolled device can start a fresh session). The response
         echoes the revoked session id because the caller named none.
         Idempotent: a verifying token whose session is already dead still
         answers 200, and a replay fires no new revocation row, control event,
         or push (the revoked session's token stays verifiable for its whole
         TTL, so replays are free; only a real state transition emits), and
-        deliberately never a 404: a 404 from this path tells `strazactl
-        logout` it is talking to a pre-0.41.0 server and must fall back to
-        the admin route. An expired token answers 401 with a sentence chosen
-        by its kind. An expired session token hears that it cannot end a
+        deliberately never a 404, which strazactl logout read as a server
+        older than 0.41.0 while strazactl still signed in. An expired token
+        answers 401 with a sentence chosen by its kind. An expired session token hears that it cannot end a
         session, that its session ends by itself once no client refreshes it
         or at its lifetime limit, or at once through the session token that
-        is live now or an administrator's revoke, and that strazactl login
-        starts a new session. An expired ID token or device credential hears
-        that it names no session, and the ID token's answer tells a person to
-        run strazactl login and an AI agent to request a new token with a
-        fresh client assertion. A live ID token, an admin API token and a
+        is live now or an administrator's revoke, and, since 0.155.0, that
+        signing in again starts a new session. An expired ID token or device
+        credential hears that it names no session, and the ID token's answer
+        tells a person to sign in again and an AI agent to request a new token
+        with a fresh client assertion. A live ID token, an admin API token and a
         malformed token answer 401 with the sentence that only a session
         token can end its own session.
-      security: [{ sessionBearer: [] }]
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }]
       responses:
         "200":
           description: The caller's session is revoked
@@ -1452,7 +1801,13 @@ paths:
                 properties:
                   status: { type: string }
                   session: { type: string, description: id of the session the token named }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
+        "500":
+          $ref: "#/components/responses/Error"
+          description: >
+            The database refused the revoke, so nothing changed and the
+            session stays active. The server that answered refuses it
+            already, and sending the same request again is safe.
 
   /v1/connect:
     get:
@@ -1466,9 +1821,13 @@ paths:
         failure record, and a store outage answers 503.
         An AI agent's own session is admitted, because straza connect lists
         the agent's connections here.
-      security: [{ sessionBearer: [] }]
+        Since 0.155.0 an admin API token may call this route when its
+        scope holds apps:read or full. It must name the user in user,
+        else the answer is 400, and any user it names is read. A token
+        whose scope lacks apps:read answers 403 and writes no record.
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }, { adminAPIToken: [] }]
       parameters:
-        - { name: user, in: query, schema: { type: string }, description: "Act for this user (username or id): allowed for the user's sponsor and for administrators (0.96.0)" }
+        - { name: user, in: query, schema: { type: string }, description: "Act for this user (username or id): allowed for the user's sponsor and for administrators (0.96.0). Required of an admin API token since 0.155.0." }
       responses:
         "200":
           description: One entry per managed caller-kind MCP server
@@ -1477,7 +1836,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/ConnectStatus" }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
@@ -1527,7 +1886,7 @@ paths:
         failure record, and a store outage answers 503.
         An AI agent's own session is admitted, as on the other connect
         routes.
-      security: [{ sessionBearer: [] }]
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }]
       requestBody:
         required: true
         content:
@@ -1551,7 +1910,7 @@ paths:
                   kind: { type: string, description: the literal oauth }
                   allow_agents: { type: boolean, description: the owner's opt-in kept across a reconnect }
         "400": { description: "The body lacks code or state, the state is invalid or older than 10 minutes, or the MCP server is gone or no longer uses sign-in; nothing was stored" }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { description: "Another user started this sign-in; nothing was redeemed or stored, and the refusal is recorded" }
         "409": { description: "The provider is no longer configured on this Straza server, or the MCP server was removed and added again while the sign-in was finishing; nothing was stored" }
         "500": { description: "The grant could not be stored" }
@@ -1580,11 +1939,28 @@ paths:
         failure record, and a store outage answers 503.
         An AI agent's own session is admitted, because straza connect pastes
         the agent's own token here.
-      security: [{ sessionBearer: [] }]
+        A write for another user from a session that a machine enrollment started, which the
+        background service or strazactl's login holds, is refused with 403 and one
+        straza.identity.updated connection.refused record since 0.154.0, because an agent running
+        as the person can use that session. The person's own browser sign-in makes it.
+        Since 0.155.0 an admin API token whose scope holds apps:write or
+        full may paste a token for the user it names in user, which it
+        must send, else the answer is 400. Any user may be named, and the
+        machine-session rule above never applies to a token. A token never
+        starts a provider sign-in, because a sign-in is stored only for the
+        person who finishes it in a browser: on an oauth-kind server it
+        answers 403 with a sentence that sends the person to the
+        Credentials tab, or for an agent names the credential.agents values
+        that give it a credential. The stored row names the token as its
+        setter, set_by reads the token's name followed by (admin API
+        token), and the straza.identity.updated token.connect record
+        carries setBy, the token's id, and actorVia api-token. A token
+        whose scope lacks apps:write answers 403 and writes no record.
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }, { adminAPIToken: [] }]
       parameters:
         - { name: app, in: path, required: true, schema: { type: string } }
       requestBody:
-        description: "On a token-kind server, the pasted token, its expiry and optionally the user to act for; on an oauth-kind server, no body at all."
+        description: "On a token-kind server, the pasted token, its expiry and optionally the user to act for; on an oauth-kind server, no body at all. An admin API token must name the user."
         required: false
         content:
           application/json:
@@ -1593,7 +1969,7 @@ paths:
               properties:
                 token: { type: string, description: The pasted token (token-kind servers only, at most 8192 bytes) }
                 expires_at: { type: string, format: date-time, description: When the token stops working, as the provider shows it; refused when already past }
-                user: { type: string, description: Act for this user (username or id), for a sponsor or an administrator }
+                user: { type: string, description: "Act for this user (username or id), for a sponsor or an administrator. Required of an admin API token since 0.155.0." }
       responses:
         "200":
           description: The authorization URL (oauth kind) or the stored token's fingerprint (token kind)
@@ -1611,10 +1987,10 @@ paths:
                   kind: { type: string, description: token kind only, the literal token }
                   fingerprint: { type: string, description: token kind only, first hex characters of the token's SHA-256 }
                   expires_at: { type: string, format: date-time }
-                  set_by: { type: string, description: token kind only, the acting user's username when it was not the owner }
+                  set_by: { type: string, description: "token kind only, the acting user's username when it was not the owner. Since 0.155.0 a row an admin API token set reads as the token's name followed by (admin API token)." }
                   allow_agents: { type: boolean, description: token kind only, the owner's opt-in kept across a re-paste }
         "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
@@ -1633,9 +2009,19 @@ paths:
         who is disabled, deleted or locked, a revoked session and a revoked
         device are refused with 403 or 401 and one straza.audit.authn login
         failure record, and a store outage answers 503.
-        An AI agent's own session is admitted, because straza connect
-        --allow-agents calls it on the caller's session.
-      security: [{ sessionBearer: [] }]
+        Turning the opt-in on, or any change for another user, from a session that a machine
+        enrollment started, which the background service or strazactl's login holds, is refused
+        with 403 and one straza.identity.updated connection.refused record since 0.154.0, because
+        an agent running as the person can use that session. The Credentials tab of the
+        self-service page, on the person's own browser sign-in, makes it. Turning it off is
+        admitted from any session.
+        Since 0.155.0 an admin API token whose scope holds apps:write or
+        full may turn the opt-in on or off for the user it names in user,
+        which it must send, else the answer is 400. The machine-session
+        rule never applies to a token, and the connection.agents record
+        carries setBy, the token's id, and actorVia api-token. A token
+        whose scope lacks apps:write answers 403 and writes no record.
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }, { adminAPIToken: [] }]
       parameters:
         - { name: app, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -1648,7 +2034,7 @@ paths:
               required: [allow_agents]
               properties:
                 allow_agents: { type: boolean }
-                user: { type: string, description: Act for this user, for a sponsor or an administrator }
+                user: { type: string, description: "Act for this user, for a sponsor or an administrator. Required of an admin API token since 0.155.0." }
       responses:
         "200":
           description: The opt-in as stored
@@ -1661,7 +2047,7 @@ paths:
                   user: { type: string }
                   allow_agents: { type: boolean }
         "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
@@ -1676,10 +2062,20 @@ paths:
         failure record, and a store outage answers 503.
         An AI agent's own session is admitted, because straza disconnect
         removes the agent's own connection here.
-      security: [{ sessionBearer: [] }]
+        A write for another user from a session that a machine enrollment started, which the
+        background service or strazactl's login holds, is refused with 403 and one
+        straza.identity.updated connection.refused record since 0.154.0, because an agent running
+        as the person can use that session. The person's own browser sign-in makes it.
+        Since 0.155.0 an admin API token whose scope holds apps:write or
+        full may disconnect the user it names in user, which it must send,
+        else the answer is 400. The machine-session rule never applies to a
+        token, and the token.disconnect or oauth.disconnect record carries
+        setBy, the token's id, and actorVia api-token. A token whose scope
+        lacks apps:write answers 403 and writes no record.
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }, { adminAPIToken: [] }]
       parameters:
         - { name: app, in: path, required: true, schema: { type: string } }
-        - { name: user, in: query, schema: { type: string }, description: "Act for this user, for a sponsor or an administrator (0.96.0)" }
+        - { name: user, in: query, schema: { type: string }, description: "Act for this user, for a sponsor or an administrator (0.96.0). Required of an admin API token since 0.155.0." }
       responses:
         "200":
           description: Disconnected (idempotent)
@@ -1691,7 +2087,7 @@ paths:
                   app: { type: string }
                   user: { type: string }
                   status: { type: string }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
@@ -2047,11 +2443,11 @@ paths:
     post:
       operationId: publishDraft
       tags: ["Drafts"]
-      summary: Publish a draft whole in one transaction, as a person with standing over every item and the acknowledgments of its risks
+      summary: Publish a draft whole in one transaction, as a person with standing over every item who confirmed its risks
       description: >
         Refused for an admin API token, an agent, a coding-harness session and
         a user record that cannot be read. The verdict is computed again, and
-        every risk it holds must be acknowledged in ticked or, for a typed
+        every risk it holds must be confirmed in ticked or, for a typed
         risk, in typed. An object that changed since the draft's check refuses
         the publish, and nothing is written. A client whose answer was lost
         reads the draft before it publishes again: a published draft answers
@@ -2059,7 +2455,7 @@ paths:
       security: [{ userBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       requestBody:
-        description: "The revision reviewed, its risk digest, and the acknowledgments."
+        description: "The revision reviewed, its risk digest, and the confirmations."
         required: true
         content:
           application/json:
@@ -2338,7 +2734,7 @@ paths:
               type: object
               required: [event]
               properties:
-                event: { type: object, description: "canonical policy event (kind, tool, command, paths, app, toolName, workspace). A granted field in the body is ignored: for an mcp.call the server recomputes it from the in-memory access rows before evaluating, so the answer never reads allow for a tool the subject has no access to. For a shell.exec event with no interpreter field, the server detects the interpreter from the command and argv before evaluating, as /v1/decide does, and an interpreter the body names is kept." }
+                event: { type: object, description: "canonical policy event (kind, tool, command, paths, app, toolName, workspace, args). A granted field in the body is ignored: for an mcp.call the server recomputes it from the in-memory access rows before evaluating, so the answer never reads allow for a tool the subject has no access to. For a shell.exec event with no interpreter field, the server detects the interpreter from the command and argv before evaluating, as /v1/decide does, and an interpreter the body names is kept. Since 0.142.0 args is the call's arguments as a JSON object, for an mcp.call to a server that pins an object type: the server reads the object the tool's argument names from it as the gateway does, and a call without it names no object." }
                 subject:
                   type: object
                   properties:
@@ -2360,6 +2756,9 @@ paths:
                   draft:
                     $ref: "#/components/schemas/EngineDecision"
                     description: "decision with the draft overlaid (present only when a draft was sent)"
+                  object:
+                    $ref: "#/components/schemas/SimObject"
+                    description: "The object check the gateway runs before the policy engine. Present for an mcp.call to a server that pins an object type when a role the subject holds binds the tool and the tool's reach is not none, or when its reach is none, its mark drifted and the check refuses. When it refuses, active and draft are a deny with its sentence as the reason and no rule, and the engine is not consulted. Added in 0.142.0."
                   subject: { type: object }
                   snapshot: { type: string }
         "400": { $ref: "#/components/responses/Error" }
@@ -2603,8 +3002,8 @@ paths:
         untouched, so a user the identity manager disabled stays disabled on that lane.
         Sessions already revoked stay revoked. Once the user's status is active, a
         device the user enrolled opens a new session at its next check-in with no new
-        enrollment, unless that device was revoked on its own or its device credential
-        expired meanwhile, and such a device needs a fresh enrollment.
+        enrollment, unless that device was revoked on its own or its sign-in deadline
+        passed meanwhile, and such a device needs a fresh enrollment.
       security: [{ adminBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
@@ -2641,17 +3040,18 @@ paths:
     delete:
       operationId: revokeUserDevice
       tags: ["Users and devices"]
-      summary: Revoke a device enrollment, so its device token stops minting sessions
+      summary: Revoke a device enrollment, so the machine's key starts no more sessions
       description: >
         Row-backed revocation, like the approver-device delete: the device row
-        is removed, so the long-lived device credential fails closed at
-        /v1/checkin on both lanes (starting a session, and refreshing one that
-        carries this device binding), and live enforcement kits on the device
-        get the target-scoped revocation push. The id pair is a belongs-to
-        check: a device that exists under a different user answers the same
-        404 as an unknown id. Re-enrolling the machine needs a fresh
-        interactive login and mints a new row; a revoked enrollment is never
-        resurrected.
+        is removed, so the machine's enrolled key fails closed at /v1/checkin
+        on both lanes (starting a session, and refreshing one that carries
+        this device binding), and live enforcement kits on the device get the
+        target-scoped revocation push. strazad has issued no device token
+        since 0.155.0, so the row is the whole enrollment. The id pair is a
+        belongs-to check: a device that exists under a different user answers
+        the same 404 as an unknown id. Enrolling the machine again needs a
+        fresh sign-in with straza enroll and mints a new row. A revoked
+        enrollment is never resurrected.
       security: [{ adminBearer: [] }]
       parameters:
         - { $ref: "#/components/parameters/id" }
@@ -2659,6 +3059,13 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Status" }
         "404": { $ref: "#/components/responses/Error" }
+        "500":
+          $ref: "#/components/responses/Error"
+          description: >
+            The database refused the revoke, or the lookup before it failed,
+            so nothing changed and the device stays enrolled. After a refused
+            revoke the server that answered refuses the device already.
+            Sending the same request again is safe.
 
   /v1/admin/sinks:
     get:
@@ -2805,7 +3212,13 @@ paths:
         built-in issuer's client_credentials grant verifies client assertions
         against. One key per agent identity, so a PUT overwrites (rotation). Refused for
         people: a person signs in interactively, and a stolen key must
-        never become a password-equivalent bypass.
+        never become a password-equivalent bypass. A key that replaces a
+        different one ends every active session of the agent, with one
+        session.end record each, and the check-in then refuses with 401 the
+        ID tokens issued for the old key, because each names its key in
+        straza_jkt. The first key and the same key again end nothing. When
+        the key is stored but a session could not be ended, the answer is
+        500 with a sentence that says how to end the rest.
       security: [{ adminBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       requestBody:
@@ -2822,20 +3235,26 @@ paths:
         "200": { $ref: "#/components/responses/Status" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteNHIKey
       tags: ["Users and devices"]
       summary: Revoke an agent's headless assertion key
       description: >
-        The next client_credentials grant fails; running sessions die through
-        the normal session/user kill-switch lanes. A user who holds no key
-        answers 404 with a sentence that says there is nothing to remove, and
-        no record is written, because nothing changed.
+        The next client_credentials grant fails. Every active session of the
+        agent ends, with one session.end record each, and the check-in
+        refuses with 401 the ID tokens issued for the removed key, because
+        each names its key in straza_jkt. When the key is removed but a
+        session could not be ended, the answer is 500 with a sentence that
+        says how to end the rest. A user who holds no key answers 404 with a
+        sentence that says there is nothing to remove, and no record is
+        written, because nothing changed.
       security: [{ adminBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "200": { $ref: "#/components/responses/Status" }
         "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /v1/admin/roles:
     get:
@@ -2920,7 +3339,11 @@ paths:
         byte-stable. application/yaml with a download disposition; one
         server serializer feeds strazactl and the console Download button.
         A server admin exports the roles their server owns and no other,
-        and a global role answers 403 to them.
+        and a global role answers 403 to them. Since 0.142.0 a binding on a
+        server that pins an object type carries covers, spec/objects
+        revision 7: every, or the objects it names by their current
+        values, so a file exported after an upstream rename names the new
+        value.
       security: [{ adminBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
@@ -3278,6 +3701,12 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Status" }
         "404": { $ref: "#/components/responses/Error" }
+        "500":
+          $ref: "#/components/responses/Error"
+          description: >
+            The database refused the revoke, or the read that tells an
+            unknown id from an ended session, so this call changed nothing.
+            Sending the same request again is safe.
 
   /v1/admin/sessions/revoke:
     post:
@@ -3314,6 +3743,14 @@ paths:
                 properties:
                   revoked: { type: integer }
         "400": { $ref: "#/components/responses/Error" }
+        "500":
+          $ref: "#/components/responses/Error"
+          description: >
+            The database refused the write for some or all of the set, or the
+            lookup before it failed. A refused write opens the error with how
+            many sessions did end, and the rest stay active. Sending the same
+            request again is safe, because it ends only the sessions still
+            active.
 
   /v1/admin/signing-keys/rotate:
     post:
@@ -3737,31 +4174,33 @@ paths:
     post:
       operationId: mintApproverEnrollToken
       tags: ["Approvals"]
-      summary: Mint a one-time approver enroll token (rendered as a QR) for a user
+      summary: Refuse every caller, because an approver phone or browser enrolls only on the self route
+      description: >
+        This route refuses every caller with 403 and mints nothing, as of
+        0.156.0. An approver phone or browser enrolls only through POST
+        /v1/approvals/self/enroll-token, for the account signed in there, so
+        an admin API token or an administrator's session is refused whoever
+        the body names, the caller included. No admin route enrolls a device
+        for someone else. Whoever can sign in as the person can still enroll
+        a device as that person, which on the standalone profile includes a
+        credential that may set the person's password. The 403 names the
+        self-service page, where the person chooses Add a phone, which needs the role straza-enroll-mobile, or
+        Enable this browser, which needs straza-enroll-browser. The route stays for one release so an older
+        client reads that sentence instead of a 404. Each request that reaches
+        it writes one straza.audit.admin record with the action
+        enroll-token.refused (spec/events revision 56). A credential the admin
+        plane refuses first, such as an admin API token without the approvals
+        area, keeps its 401 or 403 and writes no record.
       security: [{ adminBearer: [] }]
       requestBody:
-        description: "The user to mint the enroll token for, by id or username."
-        required: true
+        description: "Read only to name the user in the refusal record, by id or username."
+        required: false
         content:
           application/json:
             schema: { $ref: "#/components/schemas/ApproverEnrollTokenRequest" }
       responses:
-        "200":
-          description: >
-            The one-time enroll token plus everything a client needs to render
-            the enroll QR verbatim: the server base-URL list, the
-            TLS SPKI pin (only when strazad serves its own TLS, absent on
-            plaintext/ingress-terminated deployments, where public-CA trust is
-            assumed), the deployment's public Firebase app config (BYO-Firebase,
-            only when configured; see FCMAppConfig), the WebPush VAPID advert
-            (only when that lane is configured, see WebPushAdvert; since
-            0.42.0 the QR carries the same object the enroll 201 returns), and
-            qr_payload, the exact JSON string to encode.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ApproverEnrollTokenResponse" }
-        "400": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
 
   /v1/approvals/self/enroll-token:
     post:
@@ -3769,18 +4208,18 @@ paths:
       tags: ["The calling user"]
       summary: Mint a one-time approver enroll token for the CALLING user (self-service)
       description: >
-        The self-service twin of the admin mint, added for the browser
+        The only mint of an approver enroll token, added for the browser
         approvals surface (0.57.0): any authenticated USER identity (session
         token or login token; wat_ admin API tokens are refused, they carry no user)
         mints an enroll token bound to themself. Since 0.81.0 the body carries
         exactly one field, the required channel; every OTHER body field stays
-        deliberately ignored, self-scoping is by construction and minting for
-        another user stays the admin surface. The caller must be a person
+        deliberately ignored, self-scoping is by construction, and since
+        0.156.0 no route mints for another user. The caller must be a person
         holding the channel's enrollment role (straza-enroll-mobile or
         straza-enroll-browser) or straza-admin; agent and service identities
         are refused. The minted token is channel-scoped and enrolls only a
         matching device platform (mobile takes ios and android, browser takes
-        browser); admin-minted tokens stay unscoped. Answers 429 with
+        browser). Answers 429 with
         Retry-After inside the per-user cooldown window; a 403 refusal does
         not consume the cooldown.
       security: [{ userBearer: [] }]
@@ -3803,8 +4242,16 @@ paths:
       responses:
         "200":
           description: >
-            Identical envelope to the admin mint (same assembly path, the two
-            surfaces cannot disagree), bound to the calling user.
+            The one-time enroll token, bound to the calling user, plus
+            everything a client needs to render the enroll QR verbatim: the
+            server base-URL list, the TLS SPKI pin (only when strazad serves
+            its own TLS, absent on plaintext/ingress-terminated deployments,
+            where public-CA trust is assumed), the deployment's public Firebase
+            app config (BYO-Firebase, only when configured; see FCMAppConfig),
+            the WebPush VAPID advert (only when that lane is configured, see
+            WebPushAdvert; since 0.42.0 the QR carries the same object the
+            enroll 201 returns), and qr_payload, the exact JSON string to
+            encode.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApproverEnrollTokenResponse" }
@@ -3887,7 +4334,7 @@ paths:
         failure record, and a store outage answers 503.
         An AI agent's own session is admitted, as on the other connect
         routes.
-      security: [{ sessionBearer: [] }]
+      security: [{ sessionBearer: [] }, { sessionDPoP: [] }]
       parameters:
         - { name: user, in: query, schema: { type: string }, description: "Act for this user (username or id), for a sponsor or an administrator" }
       responses:
@@ -3898,7 +4345,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/ServerRow" }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
@@ -4256,12 +4703,25 @@ components:
         route's area. The scim area of the same token is what opens /scim/v2.
         A session that a coding harness checked in is refused whatever roles
         its user holds, because the agent in that harness holds the token;
-        the sessions of strazactl, the console and the self-service page pass.
+        the sessions of the console and the self-service page pass. Since
+        0.155.0 a session that strazactl started is refused with 403 and
+        one login failure, because strazactl no longer signs in.
         The user must be a person: an AI agent or a service account is
         refused on every admin route whatever roles it holds, a session
         whose user is disabled or locked is refused on its next request, and
         an ID token of a disabled or locked user is refused with 403 and one
-        login failure record.
+        login failure record. A session token bound to a key is
+        accepted only under the DPoP scheme with a proof, as sessionDPoP
+        says.
+    adminAPIToken:
+      type: http
+      scheme: bearer
+      description: >-
+        An admin API token (prefix wat_), which a person mints in the
+        console under Settings, API tokens, with a scope and an expiry.
+        On the connect routes since 0.155.0 a read needs apps:read, a
+        write needs apps:write, and full grants both, as on the admin API.
+        A token is no user, so each request names the user it acts for.
     userBearer:
       type: http
       scheme: bearer
@@ -4269,13 +4729,33 @@ components:
         A person's session token or ID token. An admin API token is refused
         because it carries no user, so it can neither decide nor speak for
         itself. An ID token of a disabled or locked user is refused with 403
-        and one login failure record.
+        and one login failure record. A session token bound to a key
+        is accepted only under the DPoP scheme with a proof, as sessionDPoP
+        says.
     sessionBearer:
       type: http
       scheme: bearer
       description: >-
         The session token a client received at check-in; it names the only
-        session the route acts on.
+        session the route acts on. A token bound to a key is refused
+        under this scheme and goes under sessionDPoP.
+    sessionDPoP:
+      type: http
+      scheme: DPoP
+      description: >-
+        A session token bound to a key, which /v1/checkin mints with cnf.jkt
+        on the key lane and on an AI agent's id_token check-in with a proof,
+        sent as Authorization DPoP with a
+        proof from that key in the DPoP header (RFC 9449). The proof has the
+        request's method as htm, its URL without the query as htu, under the
+        origin the DPoP parameter names, a fresh
+        jti, the newest DPoP-Nonce the server sent as nonce, and ath, the
+        base64url SHA-256 of the token. Such a token with no valid proof, or
+        under Bearer, is refused with 401, the WWW-Authenticate error
+        invalid_dpop_proof and one authn proof failure record. A missing or
+        stale nonce answers the nonce challenge, and a token without cnf
+        under this scheme is refused as an invalid token. The push stream is
+        proven once, when it opens.
     approverBearer:
       type: http
       scheme: bearer
@@ -4301,7 +4781,75 @@ components:
       in: path
       required: true
       schema: { type: string }
+    dpopProof:
+      name: DPoP
+      in: header
+      schema: { type: string }
+      description: >
+        A DPoP proof (RFC 9449), sent on the key lanes only. It is a JWT of
+        type dpop+jwt, signed with EdDSA by the device's Ed25519 key, with
+        the public key as jwk in its header. Its claims are htm, htu, iat, a
+        fresh jti, nonce, the newest DPoP-Nonce the server sent, ath when
+        the request carries a session token, and ctr, the body's counter, on
+        a key-lane check-in only. The origin of htu must be the origin of
+        server.publicUrl. The origin the request arrived on is accepted as
+        well only when server.publicUrl is unset, or when both are loopback
+        hosts with the same scheme and port. Since 0.144.0 an AI agent's
+        id_token check-in may send one too, with no ath and no ctr, and the
+        session token it mints is bound to the proof's key. Since 0.145.0
+        the enterprise profile refuses that check-in without one. The other
+        bearer lanes send none.
+  headers:
+    DPoPNonce:
+      description: >
+        A fresh DPoP nonce for the next proof. Every answer to a request
+        that carried a DPoP header has one, and so does the nonce
+        challenge. A nonce stays valid for at least 60 seconds on every
+        replica.
+      schema: { type: string }
   responses:
+    ProofRefused:
+      description: >
+        The credential or its DPoP proof was refused. When a proof's nonce
+        is missing or stale, the WWW-Authenticate header is DPoP with the
+        error use_dpop_nonce and DPoP-Nonce carries a fresh nonce: sign the
+        request again with it, and nothing is recorded. A key enrollment or
+        a key-lane check-in with no proof or a proof that does not verify,
+        an AI agent's id_token check-in whose proof does not verify, and a
+        session token bound to a key that arrives with no valid proof
+        from that key or under Bearer, get the error invalid_dpop_proof, and
+        the refused session token writes one authn proof failure record. Any
+        other refusal carries only the error sentence.
+      headers:
+        WWW-Authenticate:
+          description: DPoP with the error use_dpop_nonce or invalid_dpop_proof on a proof refusal, absent on any other refusal.
+          schema: { type: string }
+        DPoP-Nonce: { $ref: "#/components/headers/DPoPNonce" }
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+    GitRefusal:
+      description: >
+        Straza does not serve git for this repo URL through exactly one
+        server. The code not_listed, with 404, means no server lists the
+        repo: no server's straza.git.upstream prefixes the URL, or none of
+        the servers it names holds the repo in its object list and shows the
+        session a git tool. Straza then asks each server the upstream names
+        for a fresh listing, so a repo created a moment ago resolves a
+        minute later. The code ambiguous, with 409, means two servers list
+        the repo, and the error asks an administrator to keep it on one
+        server.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string, description: "The sentence that says what failed and what to do next." }
+              code: { type: string, enum: [not_listed, ambiguous], description: "Why Straza cannot name one server for the repo." }
+            required: [error, code]
     ServiceUnavailable:
       description: >
         Straza could not reach its store or the issuer while checking the
@@ -4559,13 +5107,13 @@ components:
         bindingScope: { type: string, enum: [call, tool_identity], description: "What the record's fingerprint covers. call means the concrete call including canonicalized mcp arguments under approve.binding call; tool_identity means MCP server and tool name only, from an explicit binding tool rule, arguments the server never observed, or an older record. Drives the honesty-line wording. Present only with argsPreview." }
     ApprovalDecideBody:
       description: >
-        Optional body for the console and strazactl decide lanes. The
-        endpoints predate it, so no body at all stays legal.
+        Optional body for the console's decide lane. The endpoints predate
+        it, so no body at all stays legal.
       type: object
       properties:
         reason: { type: string, description: "The decider's own words on either verdict, at most 500 bytes of plain text. No control characters beyond newline and tab, and no invisible direction or zero-width characters (U+202A..U+202E, U+2066..U+2069, U+200E, U+200F, U+061C, U+200B, U+FEFF), while ZWJ and ZWNJ stay legal; a failed check is a 400. Unsigned on this lane, while the signed approver lane binds it to the device key." }
     ApproverEnrollTokenRequest:
-      description: Identify the user to mint an approver enroll token for (one of the two).
+      description: The user an older client names, by id or username. The admin enroll-token route mints nothing and names that user in its refusal record when the user exists.
       type: object
       properties:
         user_id: { type: string }
@@ -4858,6 +5406,55 @@ components:
         app: { type: string }
         role: { type: string }
         tools: { type: array, items: { type: string } }
+        covers:
+          $ref: "#/components/schemas/Covers"
+          description: "Which objects of the server's pinned type the row covers, absent on a server that pins no type. The binding list and the role export name each covered object by the value the server's object list holds for its id now, while that list is the listing of the server's pinned objects block, with the same type and declaration. An object the list no longer holds, or any object while the list is of another type or declaration, keeps the value it had when it was published. Objects are sorted by value. A row whose stored covers line cannot be read grants nothing at the gateway, so the binding list, the export, a server's reached_by and a user's own servers leave it out. Added in 0.142.0."
+    Covers:
+      type: object
+      description: >
+        A role's covers line says which objects of a server's pinned type,
+        such as repo, its access row covers. It is every object of the type,
+        the objects the server lists later included, or the named objects.
+        Exactly one of every and objects is present. An answer names each object with its value and the id
+        Straza stored it under, so renaming an object upstream keeps the
+        role on it. A request names each object by value alone, and an id it
+        sends is replaced by the id the server's object list holds. The
+        draft check refuses a value the object list does not hold, and a
+        binding on a pinned server with no covers line, and those answer
+        409. A covers object of another shape and an unknown key answer
+        400. When the setting admin.serverAdminsCoverEvery is false, only a
+        global admin makes a role a server owns cover every object where it
+        did not before, and the holder of that server's admin role who asks
+        answers 400. Added in 0.142.0.
+      additionalProperties: false
+      oneOf:
+        - required: [every]
+        - required: [objects]
+      properties:
+        every: { type: boolean, enum: [true], description: "Covers every object of the type, the ones the server lists later included." }
+        objects:
+          type: array
+          minItems: 1
+          description: "The objects covered, each named once, sorted by value in an answer."
+          items:
+            type: object
+            properties:
+              value: { type: string, description: "The object's name as the server's object list shows it, such as Strazahq/pay-api." }
+              id: { type: string, description: "The object's id in the server's object list. Present in an answer." }
+            required: [value]
+            additionalProperties: false
+    SimObject:
+      type: object
+      description: "The object check of a simulated mcp.call, as the gateway runs it before the policy engine. Added in 0.142.0."
+      properties:
+        type: { type: string, description: "The server's pinned object type, such as repo." }
+        reach: { type: string, enum: [argument, credential, all, none], description: "How far one call of the tool reaches: the object one argument names, what the call's credential reaches, every object, or no object. A tool the pinned declaration does not name reads all. none appears only on a refusal, for a tool whose pinned reach is none and whose server now marks it stricter." }
+        value: { type: string, description: "The object the call names in its argument, present when the reach is argument and args carries it." }
+        id: { type: string, description: "The id of that object in the server's object list, absent when the list does not hold the value." }
+        covered: { type: boolean, description: "True when a role the subject holds covers the call, so the gateway passes it to the policy engine." }
+        role: { type: string, description: "The role that covers the call: the first by name among the subject's roles that bind the tool and cover the object. Absent when covered is false." }
+        refusal: { type: string, description: "The sentence the gateway answers the agent with when covered is false, absent when it is true." }
+      required: [type, reach, covered]
     App:
       type: object
       properties:
@@ -4882,6 +5479,7 @@ components:
         admin_role: { type: string, description: "The Straza role that administers this server. Registration creates one named mcp-admin-<namespace>-<name>, set once and kept as long as the server lives, and a group of people is modeled by a business role that composes it. Every server has one (0.104.0 as adminRole, under this name since 0.127.0)." }
         admin_role_id: { type: string, description: "The id of admin_role." }
         may_change: { type: boolean, description: "Whether the caller may change this server. True under an apps scope, else true on the servers whose admin role the session holds. Display only, because the server re-derives authority per request. Present on listApps only (0.104.0 as mayChange, under this name since 0.127.0)." }
+        may_cover_every: { type: boolean, description: "Whether the caller may make a role this server owns cover every object of the server's pinned type, the objects the server lists later included. True under an apps scope, else the value of the setting admin.serverAdminsCoverEvery. Display only, because the draft check's standing rule decides. Present on listApps only. Added in 0.142.0." }
     AppSecret:
       description: One stored static secret of an MCP server, never its value. scope app is the server's own secret (role empty); scope role is that role's override.
       type: object
@@ -4893,6 +5491,122 @@ components:
         kind: { type: string, enum: [static] }
         fingerprint: { type: string, description: "The first four hex characters of the SHA-256 of the value" }
         set_at: { type: string, format: date-time, description: "When the value was last set (listing only)" }
+    ObjectsBlock:
+      description: >
+        The straza.objects block of app-manifest revision 7, as pinned in a
+        manifest or as a server's tool marks declare it. A tool the block
+        does not name reaches every object of the type.
+      type: object
+      properties:
+        type: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$" }
+        plural: { type: string, description: "The word the console and strazactl use; type plus s when absent" }
+        list:
+          type: object
+          properties:
+            tool: { type: string, description: "The read-only tool that lists the objects" }
+            attributes:
+              type: array
+              items: { $ref: "#/components/schemas/ObjectAttribute" }
+          required: [tool]
+        tools:
+          type: object
+          description: "Each tool's reach: all, none, credential, or the argument that names the object"
+          additionalProperties:
+            oneOf:
+              - { type: string, enum: [all, none, credential] }
+              - type: object
+                properties:
+                  argument: { type: string }
+                required: [argument]
+                additionalProperties: false
+      required: [type, list]
+    ObjectAttribute:
+      description: One attribute a listing keeps, and who may set its value in the source system. An absent setBy reads as object.
+      type: object
+      properties:
+        name: { type: string }
+        setBy: { type: string, enum: [org, object] }
+      required: [name]
+    ObjectList:
+      description: One page of a server's object list with the state of its listing.
+      type: object
+      properties:
+        app: { type: string }
+        type: { type: string, description: "The pinned object type; empty when the server pins none" }
+        plural: { type: string }
+        attributes:
+          type: array
+          items: { $ref: "#/components/schemas/ObjectAttribute" }
+        pinned:
+          description: "The published straza.objects block, or null"
+          oneOf: [{ $ref: "#/components/schemas/ObjectsBlock" }, { type: "null" }]
+        declared:
+          description: "The block the server's live tool marks declare, or null when its tools carry none"
+          oneOf: [{ $ref: "#/components/schemas/ObjectsBlock" }, { type: "null" }]
+        declaredFaults:
+          type: array
+          items: { type: string }
+          description: "One sentence per rule the marks break; the declared block cannot be pinned while any is present"
+        drift: { type: boolean, description: "True when declared is not null and differs from pinned" }
+        listing:
+          oneOf: [{ $ref: "#/components/schemas/ObjectListing" }, { type: "null" }]
+        objects:
+          type: array
+          items: { $ref: "#/components/schemas/ListedObject" }
+        total: { type: integer, description: "Entries that match q, across every page" }
+        next: { type: string, description: "The after value of the next page; absent on the last page" }
+      required: [app, type, objects, total]
+    ObjectListing:
+      description: The state of a server's background listing. listedAt is the last good listing, attemptedAt the last try and dueAt the next.
+      type: object
+      properties:
+        tool: { type: string }
+        credential: { type: string, enum: [set, missing, not-needed] }
+        outcome: { type: string, enum: [never, ok, failed] }
+        reason: { type: string, description: "Why the last listing failed, in a sentence that names the fix" }
+        version: { type: integer, description: "0 before the first good listing, one more per changed result" }
+        count: { type: integer }
+        joined: { type: integer, description: "Entries that joined at the last change" }
+        left: { type: integer, description: "Entries that left at the last change" }
+        listedAt: { type: string, format: date-time }
+        attemptedAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time }
+      required: [tool, credential, outcome, version, count]
+    ListedObject:
+      description: One entry of the object list. id is the server's id for it, or the value when the listing gives none.
+      type: object
+      properties:
+        value: { type: string }
+        id: { type: string }
+        title: { type: string }
+        attributes:
+          type: object
+          additionalProperties:
+            oneOf: [{ type: string }, { type: array, items: { type: string } }]
+        new: { type: boolean, description: "Joined at the current version, which is above 1" }
+        coveredBy:
+          type: array
+          items: { type: string }
+          description: "The roles that cover the entry, sorted; empty when no role does"
+        drafts:
+          type: array
+          description: "The open drafts the caller may read that would add or drop a role covering the entry. There is one per draft and role, sorted by draft then role, and the field is absent when no draft would change the entry. Servers before 0.149.0 never send it."
+          items:
+            type: object
+            properties:
+              draft: { type: string }
+              role: { type: string }
+              change: { type: string, enum: [adds, drops] }
+            required: [draft, role, change]
+      required: [value, id, new, coveredBy]
+    ListingCredential:
+      description: The stored listing credential of a server, never its value.
+      type: object
+      properties:
+        app: { type: string }
+        fingerprint: { type: string, description: "The first four hex characters of the SHA-256 of the value" }
+        setAt: { type: string, format: date-time }
+      required: [app, fingerprint, setAt]
     Tool:
       description: One exposed MCP tool from the live catalog. id is app-qualified (app:tool) because bare tool names collide across servers; name stays bare with app alongside.
       type: object
@@ -4914,7 +5628,7 @@ components:
         fingerprint: { type: string, description: First hex characters of a pasted token's SHA-256; absent on an OAuth connection }
         expires_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time, description: Last connect/rotation time }
-        set_by: { type: string, description: Username of whoever set the row when it was not the owner }
+        set_by: { type: string, description: "Username of whoever set the row when it was not the owner. Since 0.155.0 a row an admin API token set reads as the token's name followed by (admin API token)." }
         allow_agents: { type: boolean, description: The owner's opt-in for their sponsored agents }
         scopes: { type: array, items: { type: string } }
     ServerRow:
@@ -4932,13 +5646,19 @@ components:
         fingerprint: { type: string, description: First hex characters of a pasted token's SHA-256; absent on an OAuth connection or without a row }
         expires_at: { type: string, format: date-time, description: When the row stops working, absent when not recorded }
         updated_at: { type: string, format: date-time, description: When the row was last set, absent without a row }
-        set_by: { type: string, description: Username of whoever set the row when it was not the owner }
+        set_by: { type: string, description: "Username of whoever set the row when it was not the owner. Since 0.155.0 a row an admin API token set reads as the token's name followed by (admin API token)." }
         allow_agents: { type: boolean, description: The owner's opt-in for their sponsored agents; present on caller kinds only }
         scopes: { type: array, items: { type: string }, description: The OAuth scopes on the connection, absent when empty }
     EnrollRequest:
       type: object
       properties:
-        id_token: { type: string }
+        id_token:
+          type: string
+          description: >
+            The ID token of the person's sign-in at the identity provider.
+            Since 0.145.0, on a key enrollment, its nonce names the enrolling
+            key on a browser sign-in and is empty on a code sign-in, and a
+            browser sign-in carries auth_time.
         client_kind:
           type: string
           enum: [kit, human]
@@ -4946,16 +5666,46 @@ components:
             The kind of client that enrols and holds the credential. kit is
             the enforcement kit and human is strazactl; the row records it
             and check-in refuses a harness name of the other class. Missing
-            means kit, so older kits keep enrolling. A re-enrol of the same
-            fingerprint reuses a row of the same kind, binds a row enrolled
-            before the kind was recorded, and never reuses a row of the
-            other kind. Since 0.114.0.
+            means kit. A re-enrol of the same fingerprint reuses a row of the
+            same kind, binds a row enrolled before the kind was recorded, and
+            never reuses a row of the other kind. Since 0.114.0. Since
+            0.144.0 kit enrolls with a key only, so kit or none without a
+            DPoP header answers 403. Since 0.155.0 human answers 403 as well,
+            because strazactl no longer signs in.
         device:
           type: object
           properties:
             name: { type: string }
             platform: { type: string }
             fingerprint: { type: string }
+        custody:
+          type: object
+          description: >
+            Where the device key is held, required on a key enrollment. The
+            kind account is a key holder under its own operating system
+            account, and user is a key in the person's own account. platform
+            and version name the holder, at most 64 bytes each. Added in
+            0.143.0. Since 0.144.0 a kind that ranks below
+            governance.minCustody answers 403, and user ranks below account.
+            The kind is what the client reports, and the server cannot
+            prove it.
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [account, user] }
+            platform: { type: string }
+            version: { type: string }
+        machine_binding:
+          type: string
+          description: >
+            A value the key holder derives from the machine's identity,
+            required on a key enrollment. It is 1 to 128 bytes, and the
+            server stores it without reading it. Added in 0.143.0.
+        counter:
+          type: integer
+          const: 0
+          description: >
+            The key's check-in counter at enrollment, which must be 0. Each
+            key-lane check-in then sends a higher one. Added in 0.143.0.
       required: [id_token]
     EnrollResponse:
       type: object
@@ -4966,28 +5716,65 @@ components:
         device_token:
           type: string
           description: >
-            The long-lived enroll credential, bound to the user and device
-            and usable only at /v1/checkin. Revoked by a user disable or a
-            device revoke. Its lifetime is governance.deviceTokenTTL, 720h
-            by default.
-        device_token_expires_in: { type: integer }
+            No longer sent, because strazad issues no device token. Since
+            0.155.0 no enrollment gets one, and since 0.144.0 only an
+            enrollment with client_kind human got one. It was the long-lived enroll credential, bound to the
+            user and device and usable only at /v1/checkin, and a user
+            disable or a device revoke revoked it.
+        device_token_expires_in: { type: integer, description: "No longer sent, like device_token. It was the seconds until the device token expired." }
+        key_thumbprint:
+          type: string
+          description: >
+            The RFC 7638 thumbprint of the enrolled key, present on a key
+            enrollment only. A client that sent a proof and gets no
+            key_thumbprint talks to a server older than 0.143.0, which
+            ignored the proof and enrolled a bearer device.
+        sign_in_expires_in:
+          type: integer
+          description: >
+            Seconds until the person must sign in again to keep this key
+            enrollment, present on a key enrollment only. Use never renews
+            it. Added in 0.143.0. Since 0.145.0 it is the time that remains
+            of governance.signInMaxAge, 168h by default, counted from the
+            sign-in's auth_time when the ID token carries one, and from this
+            enrollment otherwise, so it is no longer always the setting
+            itself.
     CheckinRequest:
       description: >
         The check-in body: one credential (id_token, device_token or
         session_token), the device id, the harness, the attestation
-        measurements and the client build. The checkin-request JSON schema
-        in the repository's attestation spec is authoritative.
+        measurements and the client build. On the key lane the credential
+        is device_id and counter with a DPoP proof, and the body carries no
+        token. The checkin-request JSON schema in the repository's
+        attestation spec is authoritative.
       type: object
       properties:
         id_token: { type: string }
         device_token: { type: string }
         session_token: { type: string }
         device_id: { type: string }
+        counter:
+          type: integer
+          minimum: 1
+          description: >
+            The key lane's check-in counter, higher than the last one the
+            server accepted for the device. It rides the key lane only, with
+            device_id and no token in the body. Added in 0.143.0.
         harness:
           type: object
           properties:
-            name: { type: string }
-            version: { type: string }
+            name:
+              type: string
+              maxLength: 256
+              description: >
+                The harness the client runs under. Since 0.152.0 at most 256
+                bytes, or the check-in answers 400 with a sentence that names
+                the field, its length and the limit, and writes nothing. The
+                server counts bytes, and maxLength counts characters.
+            version:
+              type: string
+              maxLength: 256
+              description: The harness's version. Since 0.152.0 at most 256 bytes, refused with 400 as name is.
         attestation:
           type: object
           properties:
@@ -4997,7 +5784,10 @@ components:
           type: object
           description: The straza build making the check-in; older clients omit it and the server records it on the session unverified.
           properties:
-            version: { type: string }
+            version:
+              type: string
+              maxLength: 256
+              description: The build's version. Since 0.152.0 at most 256 bytes, refused with 400 as harness.name is.
             commit: { type: string }
     CheckinResponse:
       type: object
@@ -5031,11 +5821,12 @@ components:
         device_token:
           type: string
           description: >
-            A renewed use=device credential, present only on the device-token
-            lane when the presented credential is past half its lifetime. The
-            client replaces its stored credential with it; a client that
-            ignores it keeps working until its old credential expires.
-        device_token_expires_in: { type: integer, description: "Seconds until the renewed device credential expires." }
+            No longer sent, because strazad issues no device token. Since
+            0.155.0 it is never present. Before that it was a renewed use=device credential, present only
+            on the device-token lane when the presented credential was past
+            half its lifetime, and since 0.144.0 only the devices of
+            strazactl and the console checked in on that lane.
+        device_token_expires_in: { type: integer, description: "No longer sent, like device_token. It was the seconds until the renewed device credential expired." }
         admin_grants:
           type: string
           description: >
@@ -5053,6 +5844,84 @@ components:
             How many servers name an admin role the session holds. The
             console opens the MCP servers area for a server admin who has no
             area scope. Omitted when zero. Display only (0.104.0).
+        git_upstreams:
+          type: array
+          items: { type: string }
+          description: >
+            The base URLs of the git hosts that MCP servers serve git for
+            through Straza, sorted. Each is a server's canonical
+            straza.git.upstream, and the field is omitted when no server has
+            a git block. straza service writes its git host file from it, so
+            git on the machine sends only these hosts through Straza. It is
+            the same for every subject, because it holds only host URLs and
+            feeds one file for the whole machine. Since 0.146.0.
+    GitResolveRequest:
+      type: object
+      description: The repo URL to resolve.
+      properties:
+        upstream: { type: string, description: "The URL git was given, such as https://github.com/Strazahq/straza.git." }
+      required: [upstream]
+    GitResolveResponse:
+      type: object
+      description: The one server that serves git for the repo.
+      properties:
+        srv: { type: string, description: "The server's metadata.name." }
+        repo: { type: string, description: "The repo's canonical owner/name from the server's object list." }
+        aud: { type: string, description: "The server's canonical straza.git.url, the audience of its git grants." }
+      required: [srv, repo, aud]
+    GitGrantRequest:
+      type: object
+      description: One git operation on one repo for Straza to decide.
+      properties:
+        upstream: { type: string, description: "The URL git was given, as the resolve route takes it." }
+        op: { type: string, enum: [fetch, push], description: "The git operation the grant opens." }
+        refs:
+          type: array
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/GitRefUpdate" }
+          description: >
+            The ref updates a push names, allowed with op push only. A push
+            without refs asks for the grant that opens the push
+            advertisement.
+        waitSeconds:
+          type: integer
+          minimum: 0
+          description: >
+            How long a hold may keep this request waiting, from 0 to
+            approval.gatewayHoldSeconds. Absent means
+            approval.gatewayHoldSeconds. A ticket never waits.
+      required: [upstream, op]
+    GitRefUpdate:
+      type: object
+      description: One ref update of a push, as the push's command section names it.
+      properties:
+        ref: { type: string, pattern: "^refs/", description: "The full ref name, such as refs/heads/main." }
+        old: { type: string, pattern: "^([0-9a-f]{40}|[0-9a-f]{64})$", description: "The object id the ref holds now, in lower-case hex of 40 or 64 characters, all zeros for a ref the push creates." }
+        new: { type: string, pattern: "^([0-9a-f]{40}|[0-9a-f]{64})$", description: "The object id the push sets, in the same form, all zeros for a ref the push deletes." }
+      required: [ref, old, new]
+    GitGrantResponse:
+      type: object
+      description: An issued git grant and what it names.
+      properties:
+        grant: { type: string, description: "The git grant, a compact JWS of type straza-grant+jwt signed with the session key set." }
+        aud: { type: string, description: "The server's canonical straza.git.url, the grant's audience." }
+        repo: { type: string, description: "The repo's canonical owner/name, which the resource server's path names." }
+        srv: { type: string, description: "The server's metadata.name." }
+        exp: { type: string, format: date-time, description: "When the grant expires, 120 seconds after it was issued." }
+      required: [grant, aud, repo, srv, exp]
+    GitGrantHeld:
+      type: object
+      description: The answer while a hold keeps a git grant waiting.
+      properties:
+        pending: { $ref: "#/components/schemas/GitGrantPending" }
+      required: [pending]
+    GitGrantPending:
+      type: object
+      description: The approval request that holds a git grant.
+      properties:
+        ref: { type: string, description: "The approval request id." }
+        expiresAt: { type: string, format: date-time, description: "When the approval request expires if nobody decides it." }
+      required: [ref, expiresAt]
     User:
       type: object
       properties:
@@ -5203,6 +6072,12 @@ components:
             adds later included, and only a global admin sends it: the holder
             of a server's admin role who does answers 400 (0.138.0). Added in
             0.106.0.
+        covers:
+          $ref: "#/components/schemas/Covers"
+          description: >
+            Which objects of the server's pinned type a server-owned role
+            covers. It is required with server when that server pins an
+            object type, and refused when it pins none. Added in 0.142.0.
       required: [name]
     RoleUpdate:
       type: object
@@ -5243,6 +6118,20 @@ components:
         status: { type: string }
         client_kind: { type: string, description: "The kind of client that enrolled the device. kit or human, and empty for a row enrolled before the kind was recorded. Since 0.114.0." }
         enrolled_at: { type: string, format: date-time }
+        custody:
+          type: object
+          description: >
+            Where the device's key is kept, as its key enrollment stated it,
+            and absent on a device without a key. The kind account is a key
+            holder under its own operating system account, and user is a key
+            in the person's own account. It is what the client reported, and
+            the server cannot prove it. The server compares it with
+            governance.minCustody at every key check-in and refresh. An AI
+            agent's key carries none. Added in 0.144.0.
+          properties:
+            kind: { type: string, enum: [account, user] }
+            platform: { type: string }
+            version: { type: string }
     Pack:
       type: object
       properties:
@@ -5279,6 +6168,7 @@ components:
         username: { type: string, description: Resolved owner username (empty if the user row is gone) }
         harness: { type: string }
         client_version: { type: string, description: The straza build the client named at check-in; absent for a client older than the field or a web login }
+        client_commit: { type: string, description: "The git commit of the straza build named at check-in, at most 64 bytes, absent for older clients and sessions and for a web login." }
         attestation: { type: string }
         status: { type: string, description: active | revoked | closed (janitor closes sessions idle past token expiry) }
         started_at: { type: string, format: date-time }
@@ -5369,7 +6259,7 @@ components:
         kind: { type: string }
         tool: { type: string }
         app: { type: string }
-        toolName: { type: string }
+        toolName: { type: string, description: "mcp.call: the upstream tool. other: the harness's own name of the tool, since 0.148.0." }
         command: { type: string }
         argv: { type: array, items: { type: string } }
         paths: { type: array, items: { type: string } }
@@ -5488,6 +6378,37 @@ components:
       properties:
         issuer: { type: string }
         client_id: { type: string, description: "Empty in the standalone profile (strazad is the issuer)" }
+        nhi_issuer:
+          type: string
+          description: >
+            Where an AI agent or a service account authenticates with its
+            own key, strazad's server.publicUrl on both profiles, whose
+            built-in issuer serves the client_credentials grant. A person
+            signs in at issuer. The server sent it before 0.145.0, which
+            first documents it.
+        loopback_port:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+          description: >
+            The fixed port of the browser sign-in's loopback redirect, from
+            oidc.loopbackPort, for an identity provider that matches the
+            redirect's port exactly. The redirect is http://127.0.0.1 with
+            that port and the path /callback. Absent when the setting is 0,
+            and the client then listens on any free port. Added in 0.145.0.
+        min_sign_in:
+          type: string
+          enum: [code, browser]
+          description: >
+            The lowest sign-in lane the server accepts for a person's
+            machine key, from governance.minSignIn. The lane browser is a
+            sign-in in the person's browser with PKCE whose ID token names
+            the key, and the lane code is a device code sign-in, which ranks
+            below it. The default
+            is browser on the enterprise profile and code on the standalone
+            profile. The server judges the lane itself at /v1/enroll, so the
+            value only tells a client what the server will accept. Always
+            sent since 0.145.0.
       required: [issuer, client_id]
     DraftItem:
       description: One object a draft creates, changes, turns off or removes.
@@ -5550,7 +6471,8 @@ components:
         fix: { type: string }
         before: { type: string }
         after: { type: string }
-        typed: { type: string, description: "The text a publisher types to acknowledge a typed risk." }
+        typed: { type: string, description: "The text a publisher types to confirm a typed risk." }
+        group: { type: string, description: "On a risk only: the risks a client lets the publisher confirm together, once for the whole group, which is the risk's code. Absent on a risk confirmed on its own, a server removal and an agent's loosening of a set that binds it, whose typed text is the name. The publish body still carries every risk's own key in ticked and its own typed text in typed." }
         key: { type: string, description: "The finding's key from before any cut for its reader, which a publish echoes in ticked and typed." }
         document: { type: integer, description: "The number of the sent document a reading refusal names, counted from 1 across every text sent. A text refused whole carries the number of its first document. A client that sent the texts can say where it sits, and a warning that replaces such a refusal keeps the number. Absent on every other finding." }
       required: [code, class, sentence, key]
@@ -5568,6 +6490,33 @@ components:
         before_words: { type: string }
         after_words: { type: string }
       required: [role, server, tool, holders_count, before, after]
+    DraftCoverage:
+      description: >
+        What one role reaches on one server that pins an object type, today
+        and after publishing, for every role the draft touches there. type
+        and plural are the server's own words for its objects. every_before
+        and every_after say the role covers every object, those listed later
+        included; otherwise before and after name the covered objects.
+      type: object
+      properties:
+        role: { type: string }
+        server: { type: string }
+        type: { type: string }
+        plural: { type: string }
+        holders: { type: array, items: { type: string }, description: "Usernames, sent only to root and to a caller holding identity:read." }
+        holders_count: { type: integer, description: "How many users hold the role, directly or through another role." }
+        every_before: { type: boolean }
+        every_after: { type: boolean }
+        before: { type: array, items: { $ref: "#/components/schemas/DraftObjectName" } }
+        after: { type: array, items: { $ref: "#/components/schemas/DraftObjectName" } }
+      required: [role, server, type, plural, holders_count, every_before, every_after, before, after]
+    DraftObjectName:
+      description: One object of a server, the id Straza resolved and the value a role file writes for it.
+      type: object
+      properties:
+        id: { type: string }
+        value: { type: string }
+      required: [id, value]
     DraftNeed:
       type: object
       properties:
@@ -5601,6 +6550,7 @@ components:
         passed: { type: array, items: { $ref: "#/components/schemas/DraftFinding" } }
         info: { type: array, items: { $ref: "#/components/schemas/DraftFinding" } }
         gains: { type: array, items: { $ref: "#/components/schemas/DraftGain" } }
+        objects: { type: array, items: { $ref: "#/components/schemas/DraftCoverage" }, description: "What each role the draft touches covers on a server that pins an object type, now and after publishing. It is absent when it holds nothing, as on a check that stopped at a refusal. Servers before 0.149.0 never send it." }
         needs: { type: array, items: { $ref: "#/components/schemas/DraftNeed" } }
         risk_digest: { type: string, description: "The hex sha256 over the keys of every risk, which a publish carries back. Empty on GET of a draft that is not open." }
       required: [draft, revision, snapshot, checked_at, refused, risks, warnings, unchecked, passed, info, gains, needs, risk_digest]
@@ -5683,7 +6633,7 @@ components:
       properties:
         revision: { type: integer }
         risk_digest: { type: string, pattern: "^([0-9a-fA-F]{64})?$", description: "The verdict's risk_digest as the publisher read it, 64 hex characters, or empty. Any other text answers 400." }
-        ticked: { type: array, items: { type: string }, description: "The key of every risk acknowledged, tick and typed, as each finding carries it." }
+        ticked: { type: array, items: { type: string }, description: "The key of every risk confirmed, tick and typed, as each finding carries it." }
         typed: { type: object, additionalProperties: { type: string }, description: "The text typed for each typed risk, by key." }
       required: [revision, risk_digest]
     DraftRebase:

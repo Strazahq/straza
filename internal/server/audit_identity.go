@@ -11,15 +11,21 @@ import (
 )
 
 // Identity audit actions: one straza.audit.admin record per identity setup
-// write that succeeds (spec/events revision 40). Each name lives here once.
+// write that succeeds (spec/events revision 40), and one per request the
+// admin enroll-token route refuses (revision 56). Each name lives here once.
 const (
-	actionUserCreate        = "user.create"
-	actionUserUpdate        = "user.update"
-	actionEnrollTokenCreate = "enroll-token.create" // #nosec G101 -- an audit action name, not a credential
-	actionApproverEnroll    = "approver.enroll"
-	actionNHIKeySet         = "nhi-key.set"
-	actionNHIKeyRemoved     = "nhi-key.removed"
+	actionUserCreate         = "user.create"
+	actionUserUpdate         = "user.update"
+	actionEnrollTokenCreate  = "enroll-token.create"  // #nosec G101 -- an audit action name, not a credential
+	actionEnrollTokenRefused = "enroll-token.refused" // #nosec G101 -- an audit action name, not a credential
+	actionApproverEnroll     = "approver.enroll"
+	actionNHIKeySet          = "nhi-key.set"
+	actionNHIKeyRemoved      = "nhi-key.removed"
 )
+
+// enrollTokenRefusedReason is the reason of every enroll-token.refused
+// record.
+const enrollTokenRefusedReason = "only the person enrolls their own approver phone or browser"
 
 // actorViaEnrollToken is the actorVia of the approver.enroll record: the
 // enrol route has no admin principal, and the person's one-time enroll
@@ -88,13 +94,24 @@ func (a *App) auditUserUpdate(ctx context.Context, u store.User, changed []strin
 }
 
 // auditEnrollTokenCreate chains the enroll-token.create record of a one-time
-// enroll token minted for u, never the token itself. Only the self route
-// scopes a token to a channel, so a channel marks the record self as well.
+// enroll token the self route minted for u on channel, never the token
+// itself.
 func (a *App) auditEnrollTokenCreate(ctx context.Context, u store.User, channel string) {
-	data := map[string]any{"action": actionEnrollTokenCreate, "target": u.ID, "user": u.ID, "username": u.Username}
-	if channel != "" {
-		data["channel"] = channel
-		data["self"] = true
+	a.emitIdentityAudit(ctx, map[string]any{
+		"action": actionEnrollTokenCreate, "target": u.ID, "user": u.ID, "username": u.Username,
+		"channel": channel, "self": true,
+	})
+}
+
+// auditEnrollTokenRefused chains the enroll-token.refused record of a
+// request the admin enroll-token route refused. The record carries the
+// reason, and target, user and username only when named is a user the body
+// named and the store holds, so a zero named leaves them out. The route
+// mints and stores nothing.
+func (a *App) auditEnrollTokenRefused(ctx context.Context, named store.User) {
+	data := map[string]any{"action": actionEnrollTokenRefused, "reason": enrollTokenRefusedReason}
+	if named.ID != "" {
+		data["target"], data["user"], data["username"] = named.ID, named.ID, named.Username
 	}
 	a.emitIdentityAudit(ctx, data)
 }

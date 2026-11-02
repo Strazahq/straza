@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>session revoked · Straza</title>
 <style>
@@ -229,7 +230,7 @@ var SCENE = {
       text:"Identity ▸ nova ▸ Disable", runtime:["nova"], prov:"I" },
     { action:"flash", variant:"hook", ms:340, target:"disrow" },
     { pane:"admin", speaker:"console", variant:"hook", dim:true, charMs:0, ms:640, poster:true,
-      text:"kill switch: <2 s with daemon (revocation pushed to connected daemons)", prov:"I" },
+      text:"kill switch: <2 s (revocation pushed to each session's stream in straza service)", prov:"I" },
     { pane:"agent", speaker:"model", variant:"hook", text:"▸ Bash  ls /work", action:"type", charMs:30, ms:460, poster:true, prov:"I" },
     { action:"sweep", variant:"hook", ms:600, target:"last" },
     { pane:"agent", speaker:"STRAZA", variant:"hook", accent:true, charMs:0, ms:300, poster:true,
@@ -247,7 +248,7 @@ var SCENE = {
       text:"Identity ▸ nova ▸ Disable", runtime:["nova"], prov:"I" },
     { action:"flash", variant:"gateway", ms:340, target:"disrow2" },
     { pane:"admin", speaker:"console", variant:"gateway", dim:true, charMs:0, ms:640,
-      text:"kill switch: <2 s with daemon (revocation pushed to connected daemons)", prov:"I" },
+      text:"kill switch: <2 s (revocation pushed to each session's stream in straza service)", prov:"I" },
     { pane:"agent", speaker:"model", variant:"gateway", text:"▸ straza · demo-tools__echo", action:"type", charMs:30, ms:460, prov:"I" },
     { action:"sweep", variant:"gateway", ms:600, target:"last" },
     { pane:"agent", speaker:"STRAZA", variant:"gateway", accent:true, charMs:0, ms:300,
@@ -264,7 +265,7 @@ var SCENE = {
       text:"Other fail-closed reasons Straza can return (same inventory):", prov:"I" },
     { pane:"agent", speaker:"model", variant:"related", dim:true, text:"▸ straza · demo-tools__echo   (attestation-gated)", action:"type", charMs:28, ms:420, prov:"I" },
     { pane:"agent", speaker:"STRAZA", variant:"related", accent:true, charMs:0, ms:1900,
-      text:"Straza: attestation level \"none\" is below the required level \"managed\". Reinstall with `straza install --managed <harness>`",
+      text:"Straza: attestation level \"none\" is below the required level \"managed\". An administrator installs the Straza package for this system, then runs `straza install --managed --server <server-url> <harness>` with sudo, or as an administrator on Windows.",
       prov:"V22" },
     { action:"pause", variant:"related", ms:620 },
     { pane:"agent", speaker:"model", variant:"related", dim:true, text:"▸ Bash  ls /work   (security layer offline)", action:"type", charMs:28, ms:420, prov:"I" },

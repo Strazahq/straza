@@ -44,6 +44,16 @@ func (c *check) notes(clean bool) {
 			if f, ok := c.unlistedTools(it.Name); ok {
 				v.Unchecked = append(v.Unchecked, f)
 			}
+			for _, f := range objectsNotes(it, c.w, c.after) {
+				switch f.Class {
+				case ClassWarning:
+					v.Warnings = append(v.Warnings, f)
+				case ClassUnchecked:
+					v.Unchecked = append(v.Unchecked, f)
+				default:
+					v.Info = append(v.Info, f)
+				}
+			}
 		case it.Kind == KindRole && it.Op == OpPut:
 			servers = append(servers, c.after.Access[it.Name].Server)
 			v.Info = append(v.Info, c.roleNotes(it)...)
@@ -89,8 +99,8 @@ func (c *check) notes(clean bool) {
 }
 
 // unchanged reports whether item it leaves its object as live state holds
-// it: a document equal to the live one, or the removal of an object that
-// does not exist.
+// it: a document equal to the live one, its covers line compared by id,
+// or the removal of an object that does not exist.
 func (c *check) unchanged(it Item) bool {
 	switch {
 	case it.Op == OpRemove && it.Kind == KindRole:
@@ -106,7 +116,8 @@ func (c *check) unchanged(it Item) bool {
 	case it.Kind == KindRole:
 		live, ok := RoleDocOf(c.w, it.Name)
 		doc, read := c.after.roleDocs[it.Name]
-		return ok && read && roleText(doc) == roleText(live)
+		return ok && read && roleText(withoutCovers(doc)) == roleText(withoutCovers(live)) &&
+			c.w.Access[it.Name].Covers.Key() == c.after.Access[it.Name].Covers.Key()
 	case it.Kind == KindPolicySet:
 		live, ok := c.w.Policies[it.Name]
 		return ok && live.Text == it.Doc

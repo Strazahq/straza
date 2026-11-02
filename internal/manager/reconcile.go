@@ -59,11 +59,37 @@ func (m *Manager) Stale(ctx context.Context, rows []store.App, since time.Time) 
 }
 
 // runs reports whether inst still serves row as it stands: the same server,
-// neither stopped nor paused, the same manifest, and not parked for a
-// credential that arrived since.
+// neither stopped nor paused, the same manifest but for straza.objects, and
+// not parked for a credential that arrived since. An instance that still
+// serves row takes row's objects block, which it does not run with.
 func (m *Manager) runs(inst *instance, row store.App, paused map[string]bool) bool {
-	return row.Status != StatusStopped && !paused[row.Name] && inst.app.ID == row.ID &&
-		sameManifest(inst.app.Manifest, row.Manifest) && !m.credentialArrived(inst)
+	if row.Status == StatusStopped || paused[row.Name] || inst.app.ID != row.ID {
+		return false
+	}
+	objects, same := sameButObjects(inst.app.Manifest, row.Manifest)
+	if !same || m.credentialArrived(inst) {
+		return false
+	}
+	inst.mu.Lock()
+	inst.objects = objects
+	inst.mu.Unlock()
+	return true
+}
+
+// sameButObjects reports whether two stored manifests differ at most in
+// straza.objects, and answers the objects block of b. A manifest that does
+// not decode differs.
+func sameButObjects(a, b string) (*ObjectsSpec, bool) {
+	ma, errA := FromJSON(a)
+	mb, errB := FromJSON(b)
+	if errA != nil || errB != nil {
+		return nil, false
+	}
+	objects := mb.Straza.Objects
+	ma.Straza.Objects, mb.Straza.Objects = nil, nil
+	ka, errA := ma.JSON()
+	kb, errB := mb.JSON()
+	return objects, errA == nil && errB == nil && ka == kb
 }
 
 // StopNamed stops the instances of the named servers on this replica that

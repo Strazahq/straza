@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// signingKeysServer is the admin surface `signing-keys` walks: the checkin a
-// stored token refreshes through, the list, the two rotate routes and the
-// retire route. It counts the writes and can refuse them the way a grant
+// signingKeysServer is the admin surface `signing-keys` walks: the list, the
+// two rotate routes and the retire route. It counts the writes and can refuse them the way a grant
 // check does.
 type signingKeysServer struct {
 	mu     sync.Mutex
@@ -24,10 +23,6 @@ type signingKeysServer struct {
 func (s *signingKeysServer) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	write := func(body func() string) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
 			s.mu.Lock()
@@ -86,7 +81,7 @@ func TestSigningKeysRotate(t *testing.T) {
 			s := &signingKeysServer{rotateBody: tc.body}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			credsPath := writeCreds(t, srv.URL)
+			credsPath := onToken(t, srv.URL)
 
 			stdout, _, err := runCLI(t, credsPath, "signing-keys", "rotate", tc.purpose)
 			if err != nil {
@@ -135,7 +130,7 @@ func TestSigningKeysRetire(t *testing.T) {
 			s := &signingKeysServer{retireBody: tc.body}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "signing-keys", "retire", "k-ca")
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), "signing-keys", "retire", "k-ca")
 			if err != nil {
 				t.Fatalf("signing-keys retire: %v", err)
 			}
@@ -152,7 +147,7 @@ func TestSigningKeysList(t *testing.T) {
 	s := &signingKeysServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "signing-keys", "list")
+	stdout, _, err := runCLI(t, onToken(t, srv.URL), "signing-keys", "list")
 	if err != nil {
 		t.Fatalf("signing-keys list: %v", err)
 	}
@@ -188,7 +183,7 @@ func TestSigningKeysOperands(t *testing.T) {
 			s := &signingKeysServer{}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
-			_, _, err := runCLI(t, writeCreds(t, srv.URL), append([]string{"signing-keys"}, tc.args...)...)
+			_, _, err := runCLI(t, onToken(t, srv.URL), append([]string{"signing-keys"}, tc.args...)...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want %q", err, tc.want)
 			}

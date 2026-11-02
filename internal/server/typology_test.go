@@ -31,25 +31,15 @@ func TestCheckinCarriesTypology(t *testing.T) {
 	}
 
 	idt := loginDeviceFlow(t, base, "atlas", "hunter2!")
-	var enrolled struct {
-		DeviceToken string `json:"device_token"`
-	}
-	code := adminReq(t, "POST", base+"/v1/enroll", "", map[string]any{
-		"id_token": idt,
-		"device":   map[string]string{"name": "ty-dev", "platform": "linux", "fingerprint": "ty-fp"},
-	}, &enrolled)
-	if code != http.StatusOK || enrolled.DeviceToken == "" {
-		t.Fatalf("enroll = %d", code)
-	}
 	var resp struct {
 		SessionID  string `json:"session_id"`
 		UserType   string `json:"user_type"`
 		AgencyMode string `json:"agency_mode"`
 		SwarmID    string `json:"swarm_id"`
 	}
-	code = adminReq(t, "POST", base+"/v1/checkin", "", map[string]any{
-		"device_token": enrolled.DeviceToken,
-		"harness":      map[string]string{"name": "claude-code", "version": "2.1"},
+	code := adminReq(t, "POST", base+"/v1/checkin", "", map[string]any{
+		"id_token": idt,
+		"harness":  map[string]string{"name": "claude-code", "version": "2.1"},
 	}, &resp)
 	if code != http.StatusOK {
 		t.Fatalf("checkin = %d", code)

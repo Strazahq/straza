@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Straza</title>
+    <options customize="never" require-scripts="false" allow-external-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="ai.straza.straza"/>
+    </choices-outline>
+    <choice id="ai.straza.straza" title="Straza" visible="false">
+        <pkg-ref id="ai.straza.straza"/>
+    </choice>
+    <pkg-ref id="ai.straza.straza" auth="root">#straza.pkg</pkg-ref>
+</installer-gui-script>

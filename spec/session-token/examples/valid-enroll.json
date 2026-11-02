@@ -1,0 +1,30 @@
+{
+  "provenance": "doc RFC 9449 and spec/session-token/SPEC.md 2026-10-20 (generated, not captured from a client: proof key from the Ed25519 seed of 32 bytes 0x07, other key from 32 bytes 0x09, nonce key the 32 bytes 0x00 to 0x1f, signed at 2026-10-20T12:00:30Z)",
+  "description": "A key enrollment proof. Its jwk header is the key being enrolled, so the body carries no second copy.",
+  "at": "2026-10-20T12:00:30Z",
+  "request": {
+    "method": "POST",
+    "path": "/v1/enroll",
+    "origins": [
+      "https://straza.example",
+      "http://127.0.0.1:8420"
+    ]
+  },
+  "proof": "eyJhbGciOiJFZERTQSIsImp3ayI6eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IjZrcHNZLUtjVWdxLTlWQjdFeTdGLVpWSGRxNi12bnVTUWg3cWFSUkcwaXcifSwidHlwIjoiZHBvcCtqd3QifQ.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9zdHJhemEuZXhhbXBsZS92MS9lbnJvbGwiLCJpYXQiOjE3OTI0OTc2MzAsImp0aSI6IjY1YTcwNTQ4ZDYyNTRkMWUwNjdlMjNiNDcwZTQ5NjMxIiwibm9uY2UiOiJBQUFBQUFISDJ4QUhScl84WkNQMVhKRnIxLVlWZWY5OVdqT2VyTUhRbG9oZ015WEJVbFV6VncifQ.JvulqEClKviFFyyOP5J0UPKXrQL312Uw89W1_vKXzUBLgssf6ZRro2DdL7__2rh-tIDY3uYnRpw4vEsfskbVCg",
+  "header": {
+    "alg": "EdDSA",
+    "jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+    },
+    "typ": "dpop+jwt"
+  },
+  "claims": {
+    "htm": "POST",
+    "htu": "https://straza.example/v1/enroll",
+    "iat": 1792497630,
+    "jti": "65a70548d6254d1e067e23b470e49631",
+    "nonce": "AAAAAAHH2xAHRr_8ZCP1XJFr1-YVef99WjOerMHQlohgMyXBUlUzVw"
+  }
+}

@@ -36,7 +36,7 @@ func keyedAll(v drafts.Verdict) verdictPayload {
 	}
 	return verdictPayload{Draft: v.Draft, Revision: v.Revision, Snapshot: v.Snapshot, CheckedAt: v.CheckedAt,
 		Refused: keys(v.Refused), Risks: keys(v.Risks), Warnings: keys(v.Warnings), Unchecked: keys(v.Unchecked),
-		Passed: keys(v.Passed), Info: keys(v.Info), Gains: v.Gains, Needs: v.Needs, RiskDigest: v.RiskDigest}
+		Passed: keys(v.Passed), Info: keys(v.Info), Gains: v.Gains, Objects: append([]drafts.Coverage(nil), v.Objects...), Needs: v.Needs, RiskDigest: v.RiskDigest}
 }
 
 // TestVerdictFor pins the one cut of every verdict a route answers:
@@ -100,9 +100,9 @@ func TestVerdictFor(t *testing.T) {
 		return out
 	}
 	hidden := drafts.Finding{Code: "info.gains-hidden", Class: drafts.ClassInfo,
-		Sentence: "1 row of who gains what is on a server you cannot read, so this view leaves it out. Ask an administrator for the scope apps:read to see it."}
+		Sentence: "1 row under Access after publishing is on a server you cannot read, so this view leaves it out. Ask an administrator for the scope apps:read to see it."}
 	twoHidden := hidden
-	twoHidden.Sentence = "2 rows of who gains what are on servers you cannot read, so this view leaves them out. Ask an administrator for the scope apps:read to see them."
+	twoHidden.Sentence = "2 rows under Access after publishing are on servers you cannot read, so this view leaves them out. Ask an administrator for the scope apps:read to see them."
 
 	// A cut line keeps its code, class, ack and key, and its object and
 	// typed text unless its object names the server: an App line loses
@@ -133,7 +133,7 @@ func TestVerdictFor(t *testing.T) {
 	// Every gain row here is of the role dev, which a reader without
 	// identity:read, root or drafts:read may not read.
 	rolesHidden := keyedOne(drafts.Finding{Code: "info.gains-hidden", Class: drafts.ClassInfo,
-		Sentence: "3 rows of who gains what name roles or servers you cannot read, so this view leaves them out. Ask an administrator for the grants that read them."})
+		Sentence: "3 rows under Access after publishing name roles or servers you cannot read, so this view leaves them out. Ask an administrator for the grants that read them."})
 	counted := v
 	counted.Gains = unnamed(github, jira, native)
 	maxReads := keyedAll(counted)
@@ -453,7 +453,7 @@ func TestVerdictForCutsGainsOnServersTheCallerCannotRead(t *testing.T) {
 	if on(seen.Gains, "jira") != 0 || on(seen.Gains, "github") != on(v.Gains, "github") {
 		t.Errorf("erin reads %d rows on jira and %d of github's %d", on(seen.Gains, "jira"), on(seen.Gains, "github"), on(v.Gains, "github"))
 	}
-	want := "2 rows of who gains what are on servers you cannot read, so this view leaves them out. Ask an administrator for the scope apps:read to see them."
+	want := "2 rows under Access after publishing are on servers you cannot read, so this view leaves them out. Ask an administrator for the scope apps:read to see them."
 	found := false
 	for _, f := range seen.Info {
 		if strings.Contains(f.Sentence, "jira") {

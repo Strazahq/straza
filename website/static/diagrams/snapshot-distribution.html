@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Snapshot distribution · Straza</title>
 <style>
@@ -152,7 +153,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <div class="stage">
 <svg id="dia" viewBox="0 0 960 540" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
 <title id="svgT">Policy snapshot distribution timeline</title>
-<desc id="svgD">Activating a PolicySet compiles and signs a content-addressed snapshot; live clients adopt it by pull within about 30 seconds over three lanes: the post-decision pulse, the daemon tick, and checkin. A fail-closed grace boundary denies everything governed if no valid signed snapshot is available.</desc>
+<desc id="svgD">Activating a PolicySet compiles and signs a content-addressed snapshot; live clients adopt it by pull over three lanes: a busy session through the post-decision check of straza service within about 30 seconds, an idle session through its next call or renewal, and a new session at checkin. A fail-closed grace boundary denies everything governed if no valid signed snapshot is available.</desc>
 <defs>
   <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
 </defs>
@@ -189,7 +190,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 </g>
 
 
-<text class="cap" x="20" y="180">CLIENT ADOPTION: PULL, &#8804; 30 s</text>
+<text class="cap" x="20" y="180">CLIENT ADOPTION: PULL, BUSY SESSION &#8804; 30 s</text>
 <line class="axis" x1="140" y1="216" x2="880" y2="216"/>
 <g>
   <line class="tick" x1="140" y1="212" x2="140" y2="220"/><text class="mono" x="140" y="234" text-anchor="middle">t=0</text>
@@ -205,9 +206,9 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <text id="clock" class="mono" x="140" y="256" text-anchor="middle" style="opacity:0">t=0.0 s</text>
 
 
-<g class="lane node" id="l1" tabindex="0" aria-label="Busy session adopts via the detached post-decision pulse">
+<g class="lane node" id="l1" tabindex="0" aria-label="Busy session adopts via the post-decision check of straza service">
   <text class="s" x="16" y="258" style="font-size:11.5px">busy session</text>
-  <text class="d" x="16" y="272"><tspan class="lf">post-decision pulse</tspan><tspan class="ls">pulse</tspan></text>
+  <text class="d" x="16" y="272"><tspan class="lf">post-decision check</tspan><tspan class="ls">check</tspan></text>
   <line class="laneline" x1="140" y1="264" x2="880" y2="264"/>
   <rect class="chip" x="150" y="252" width="112" height="24" rx="5"/>
   <text class="mono" x="206" y="268" text-anchor="middle" style="fill:var(--text)">
@@ -218,16 +219,16 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 </g>
 
 
-<g class="lane node" id="l2" tabindex="0" aria-label="Idle session adopts at the next daemon tick, about 30 seconds, the fallback when no push nudge reached it">
+<g class="lane node" id="l2" tabindex="0" aria-label="Idle session adopts at once on the push nudge, or else through its next call, which decides on the old snapshot unless it renews the session">
   <text class="s" x="16" y="318" style="font-size:11.5px">idle session</text>
-  <text class="d" x="16" y="332"><tspan class="lf">daemon tick ~30 s</tspan><tspan class="ls">daemon</tspan></text>
+  <text class="d" x="16" y="332"><tspan class="lf">next call or renewal</tspan><tspan class="ls">next call</tspan></text>
   <line class="laneline" x1="140" y1="324" x2="880" y2="324"/>
   <rect class="chip" x="150" y="312" width="112" height="24" rx="5"/>
   <text class="mono" x="206" y="328" text-anchor="middle" style="fill:var(--text)">
     <tspan class="idOld">snap 41d2&#8230;8c</tspan><tspan class="idNew">snap 9f3a&#8230;c1</tspan>
   </text>
   <circle class="adot" cx="711" cy="324" r="4.5"/>
-  <text class="acap d" x="711" y="346" text-anchor="middle">next daemon tick</text>
+  <text class="acap d" x="711" y="346" text-anchor="middle">its next call</text>
 </g>
 
 
@@ -251,7 +252,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
   <text class="mono" x="154" y="478">grace TTL: enterprise 0 &#183; standalone 15 min</text>
 </g>
 
-<text class="d" x="140" y="512">adoption is pull-based plus a push nudge: idle daemons adopt in &lt; 5 s, the tick is the fallback; the &lt; 2 s lever is the session kill switch</text>
+<text class="d" x="140" y="512">adoption is pull-based plus a push nudge: sessions with a push stream adopt in &lt; 5 s, the next call is the fallback; the &lt; 2 s lever is the session kill switch</text>
 </svg>
 </div>
 
@@ -263,11 +264,13 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
   signs it with the ed25519 snapshot key, and stores it; the snapshot id is the content address
   of the CBOR blob, served over GET /v1/snapshot with an ETag. Distribution is pull-based, with
   a push nudge for idle sessions:
-  a busy session adopts it via the detached post-decision pulse (a conditional GET throttled by
-  the client's snapshotLagSeconds, default 30 s; a busy session lags at most one tool call plus
-  that); an idle-but-connected session gets the policy-update push nudge and adopts in under
-  5 s, with the daemon tick (~30 s) as the fallback when no push reached it; new sessions and
-  token refreshes fetch it at checkin. In every lane the blob is fetched and its signature
+  a busy session adopts it via the post-decision check of <code>straza service</code> (a background
+  conditional GET, at most once per the managed config's snapshotLagSeconds for each user, default
+  30 s; a busy session lags at most one tool call plus that); an idle session whose push stream is
+  up gets the policy-update push nudge and adopts in under 5 s, and without one no timer runs: its
+  first call after a change still decides on the old snapshot unless that call renews the session,
+  and the check it starts brings the new one for the calls after it; new sessions and token refreshes fetch it
+  at checkin. In every lane the blob is fetched and its signature
   verified <em>before</em> the session's snapshot id advances. An id alone would brick hooks.
   If the security layer is unreachable and no valid signed snapshot exists within the grace TTL
   (enterprise default 0, standalone 15 min), the client fails closed and denies everything
@@ -290,9 +293,9 @@ var LANES=[{id:'l1',t:18},{id:'l2',t:27},{id:'l3',t:8}];
 var MILES=[
  {t:0, m:'t = 0, PolicySet activated: compile (&lt; 2 s at 10k rules), sign ed25519, store. The snapshot id is the content address of the CBOR blob.'},
  {t:8, m:'t &#8776; 8 s: a new session checks in and fetches the current snapshot; refreshing tokens do the same. Verified before the id advances.'},
- {t:18,m:'t &#8776; 18 s, the busy session&#8217;s next decision fires the detached pulse: a conditional GET throttled by snapshotLagSeconds (default 30 s). At most one tool call + the throttle behind.'},
- {t:27,m:'t &#8776; 27 s: the idle session&#8217;s daemon tick (~30 s) adopts the snapshot, the fallback when no push nudge reached it. The policy-update push has idle daemons adopt in &lt; 5 s.'},
- {t:TMAX,m:'All lanes adopted within &#8804; ~30 s, and every adoption verified the signature first. Faster than that is the kill switch&#8217;s job (&lt; 2 s).'}
+ {t:18,m:'t &#8776; 18 s, the busy session&#8217;s next decision starts the post-decision check of <code>straza service</code>: a background conditional GET, at most once per snapshotLagSeconds (default 30 s) for each user. At most one tool call + the throttle behind.'},
+ {t:27,m:'t &#8776; 27 s: the idle session makes its first call since the change. That call still decides on the old snapshot unless it renews the session, and the check it starts brings the new one for the calls after it. With its push stream up, the policy-update push had it adopt in &lt; 5 s.'},
+ {t:TMAX,m:'The busy session adopted within about 30 s, the idle one through its next call, and every adoption verified the signature first. Faster than that is the kill switch&#8217;s job (&lt; 2 s).'}
 ];
 var FACTS={
  p1:'<strong>activate</strong>: policies live in the DB via admin API/CLI (optional GitOps import); snapshots are the only distribution format either way.',
@@ -300,9 +303,9 @@ var FACTS={
  p3:'<strong>sign</strong>: ed25519 snapshot signing; clients verify against pinned keys before use.',
  p4:'<strong>snapshot id</strong>. Content-addressed CBOR: the id commits to the exact rule content. Ids shown here are illustrative.',
  p5:'<strong>store + serve</strong>: atomic live-engine swap server-side; clients fetch with conditional GETs (ETag).',
- l1:'<strong>busy session</strong>: after every governed decision a detached pulse checks for a newer snapshot (conditional GET, throttled by snapshotLagSeconds, default 30 s).',
- l2:'<strong>idle session</strong>: the policy-update push nudges the straza daemon to adopt at once (&lt; 5 s); the tick (~30 s) is the fallback when no push reached it.',
- l3:'<strong>new session</strong>: checkin returns the snapshot id and the client fetches + verifies the blob before using it.',
+ l1:'<strong>busy session</strong>: after a governed decision, <code>straza service</code> checks for a newer snapshot in the background (conditional GET, at most once per snapshotLagSeconds for each user, default 30 s).',
+ l2:'<strong>idle session</strong>: the policy-update push nudges <code>straza service</code> to adopt at once (&lt; 5 s) when the session&#8217;s push stream is up. Without it no timer runs, and the session decides nothing while idle. Its first call after a change still decides on the old snapshot unless that call renews the session, and the check it starts brings the new one for the calls after it.',
+ l3:'<strong>new session</strong>: checkin returns the snapshot id and <code>straza service</code> fetches + verifies the blob before using it.',
  grace:'<strong>fail-closed boundary</strong>: unreachable platform + no valid signed snapshot within the grace TTL means deny everything governed, with an actionable reason. Grace: enterprise 0, standalone 15 min.'
 };
 Object.keys(FACTS).forEach(function(id){

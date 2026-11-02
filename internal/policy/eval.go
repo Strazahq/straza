@@ -68,6 +68,32 @@ type compiledRule struct {
 	effect     string
 	reason     string
 	hasMatcher bool
+	// byName marks a rule that lists other in tools and sets toolNames
+	// (revision 26). It governs a local tool by the harness's own name,
+	// compared whole, so the rule keeps the tool after a release moves it
+	// into a lane. nameAllow and nameDeny hold the names of each side.
+	byName              bool
+	nameAllow, nameDeny map[string]bool
+}
+
+// harnessToolName answers the harness's own name of a local tool event: the
+// toolName of an unclassified tool, or the nativeTool of a classified one.
+// An MCP call, a tool outside the taxonomy and a nameless event answer "".
+func harnessToolName(ev Event) string {
+	switch {
+	case ev.Tool == ToolOther:
+		return ev.ToolName
+	case ev.Tool != ToolMCPCall && knownTools[ev.Tool]:
+		return ev.NativeTool
+	}
+	return ""
+}
+
+// namesTool reports whether the by-name rule r names the local tool of ev
+// on either side.
+func (r *compiledRule) namesTool(ev Event) bool {
+	n := harnessToolName(ev)
+	return n != "" && (r.nameAllow[n] || r.nameDeny[n])
 }
 
 type compiledRequire struct {
@@ -176,6 +202,10 @@ func compileRule(setName string, r Rule) (compiledRule, error) {
 		}
 		if cr.tnDeny, err = compileAll(r.ToolNames.Deny, false); err != nil {
 			return compiledRule{}, err
+		}
+		if r.NamesHarnessTools() {
+			cr.byName = true
+			cr.nameAllow, cr.nameDeny = toSet(r.ToolNames.Allow), toSet(r.ToolNames.Deny)
 		}
 	}
 	if r.Paths != nil {
@@ -408,7 +438,15 @@ func (e *Engine) Evaluate(ev Event, sub Subject) Decision {
 			if !r.events[ev.Kind] {
 				continue
 			}
-			if r.tools != nil && !r.tools[ev.Tool] {
+			// A by-name rule reaches an unclassified tool, and a classified
+			// tool of a lane it does not list, only through a name it holds,
+			// so its require never bites a tool it does not name.
+			switch {
+			case r.byName && ev.Tool != ToolMCPCall && (ev.Tool == ToolOther || !r.tools[ev.Tool]):
+				if !r.namesTool(ev) {
+					continue
+				}
+			case r.tools != nil && !r.tools[ev.Tool]:
 				continue
 			}
 			if r.apps != nil && (ev.Tool != ToolMCPCall || !r.apps[ev.App]) {
@@ -542,6 +580,9 @@ func (r *compiledRule) verdict(ev Event, sub Subject, cmdForms, paths []string) 
 	if ev.Tool == ToolMCPCall && len(r.tnDeny) > 0 && matchAny(r.tnDeny, ev.ToolName) {
 		return EffectDeny, true
 	}
+	if r.byName && r.nameDeny[harnessToolName(ev)] {
+		return EffectDeny, true
+	}
 	// Interpreter sides are consulted only when the event carries an
 	// interpreter tag: `interpreters: {deny: ["*"]}` must never fire on a
 	// non-interpreter event (glob `*` would otherwise match the empty string).
@@ -565,6 +606,9 @@ func (r *compiledRule) verdict(ev Event, sub Subject, cmdForms, paths []string) 
 		}
 	}
 	if ev.Tool == ToolMCPCall && len(r.tnAllow) > 0 && matchAny(r.tnAllow, ev.ToolName) {
+		return EffectAllow, true
+	}
+	if r.byName && r.nameAllow[harnessToolName(ev)] {
 		return EffectAllow, true
 	}
 	if ev.Interpreter != "" && len(r.interpAllow) > 0 && matchAny(r.interpAllow, ev.Interpreter) {
@@ -622,13 +666,21 @@ func (e *Engine) defaultDecision(ev Event) Decision {
 		// local tool, a tool outside the canonical set and no tool alike,
 		// so an unknown tool is never an unconditional allow. Only a
 		// canonical tool can be allowed by a rule that names it, so the
-		// other two are told to send a known tool instead.
+		// other two are told to send a known tool instead. An unclassified
+		// harness tool is allowed by its own name, so its reason writes
+		// that rule out, and one with no name says no rule can reach it.
 		reason := fmt.Sprintf("Straza: %s is not permitted by default in this profile. Ask an admin for a policy rule that allows it.", ev.Tool)
 		switch {
 		case ev.Tool == "":
 			reason = fmt.Sprintf("Straza: denied, because this %s event names no tool and policy cannot judge it. Send one of the known tools: %s.", ev.Kind, knownToolList)
 		case !knownTools[ev.Tool]:
 			reason = fmt.Sprintf("Straza: denied, because the tool %q is not one Straza knows and policy cannot judge it. Send one of the known tools: %s.", ev.Tool, knownToolList)
+		case ev.Tool == ToolOther && ev.ToolName != "":
+			reason = fmt.Sprintf("Straza: %s is a harness tool Straza does not classify, so this profile denies it. "+
+				"To allow it, an admin adds a policy rule with tools: [other] and toolNames: {allow: [%s]}.", ev.ToolName, ev.ToolName)
+		case ev.Tool == ToolOther:
+			reason = "Straza: this harness tool is one Straza does not classify, and the client sent no tool name, so no rule can allow it. " +
+				"Update the Straza client or the agent kit on this machine, then ask an admin to allow the tool by name."
 		}
 		return Decision{Effect: EffectDeny, Default: true, Reason: reason}
 	default:

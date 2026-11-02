@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DevicesTab } from "./approver-devices";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ApiError, type ApproverDeviceRow, listApproverDevices, revokeApproverDevice } from "@/lib/api";
+import { ApiError, type ApproverDeviceRow, listApproverDevices, readSelf, revokeApproverDevice } from "@/lib/api";
 import { shortID } from "@/lib/approval-model";
 import {
   BY_PUSH,
@@ -31,6 +31,7 @@ import {
   revokeBody,
   revokeTitle,
   revokedToast,
+  selfPhoneLine,
 } from "@/lib/approval-words";
 import { notify } from "@/lib/notify";
 
@@ -38,9 +39,7 @@ vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
   listApproverDevices: vi.fn(),
   revokeApproverDevice: vi.fn(),
-  listUsers: vi.fn(),
-  getUser: vi.fn(),
-  mintEnrollToken: vi.fn(),
+  readSelf: vi.fn(),
 }));
 vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: vi.fn() } }));
 
@@ -75,6 +74,7 @@ describe("the approver devices tab", () => {
   beforeEach(() => {
     vi.mocked(listApproverDevices).mockReset().mockResolvedValue(rows);
     vi.mocked(revokeApproverDevice).mockReset().mockResolvedValue({ status: "revoked" });
+    vi.mocked(readSelf).mockReset().mockResolvedValue({ username: "alice", user_kind: "human", admin_grants: "full", enroll_channels: ["mobile"], sponsored: [] });
     vi.mocked(notify.ok).mockClear();
   });
 
@@ -194,13 +194,15 @@ describe("the approver devices tab", () => {
     expect(notify.ok).not.toHaveBeenCalled();
   });
 
-  it("opens the enrol sheet when the head's counter moves, and not on its first value", async () => {
+  it("opens the enrol sheet for the signed-in person's own phone when the head's counter moves, and not on its first value", async () => {
     const view = mount(0);
     await waitFor(() => expect(row("Pixel 8")).toBeTruthy());
     expect(screen.queryByRole("dialog")).toBe(null);
+    expect(readSelf).not.toHaveBeenCalled();
     view.rerender(<TooltipProvider><DevicesTab addRequest={1} onChanged={() => undefined} /></TooltipProvider>);
     const sheet = await screen.findByRole("dialog");
     expect(sheet.getAttribute("data-enroll-sheet")).toBe("person");
+    expect(await within(sheet).findByText(selfPhoneLine("alice"))).toBeTruthy();
   });
 
   // A fleet of sixty devices over six people: every third device has no

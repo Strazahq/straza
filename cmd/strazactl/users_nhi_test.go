@@ -50,13 +50,6 @@ func TestCreateNHIType(t *testing.T) {
 			var mu sync.Mutex
 			var creates []map[string]any
 			mux := http.NewServeMux()
-			mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-				if tc.wantErr != "" {
-					t.Error("a refused create-nhi refreshed its session")
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-			})
 			mux.HandleFunc("POST /v1/admin/users", func(w http.ResponseWriter, r *http.Request) {
 				if tc.wantErr != "" {
 					t.Error("a refused create-nhi reached the server")
@@ -79,7 +72,7 @@ func TestCreateNHIType(t *testing.T) {
 			t.Cleanup(srv.Close)
 			t.Setenv("STRAZA_SERVER", "")
 
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), tc.args...)
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), tc.args...)
 			if tc.wantErr != "" {
 				if err == nil || err.Error() != tc.wantErr {
 					t.Fatalf("err = %v, want %q", err, tc.wantErr)

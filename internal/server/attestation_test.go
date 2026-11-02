@@ -89,17 +89,11 @@ func TestCheckinAttestationGate(t *testing.T) {
 	})
 	_ = seedIdentity(t, app)
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
-	_, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "linux", "fingerprint": "sha256:fp-gate"},
-	})
-	deviceID := enroll["device_id"].(string)
 
 	checkin := func(managed bool, hashes map[string]string) (int, map[string]any) {
 		return postJSON(t, base+"/v1/checkin", map[string]any{
-			"id_token":  idToken,
-			"device_id": deviceID,
-			"harness":   map[string]string{"name": "claude-code", "version": "2.1.0"},
+			"id_token": idToken,
+			"harness":  map[string]string{"name": "claude-code", "version": "2.1.0"},
 			"attestation": map[string]any{
 				"managed": managed, "platform": "linux/amd64", "hashes": hashes,
 			},
@@ -114,11 +108,13 @@ func TestCheckinAttestationGate(t *testing.T) {
 	if msg, _ := body["error"].(string); !strings.Contains(msg, "advisory") || !strings.Contains(msg, "managed") {
 		t.Errorf("deny reason %q must name the actual and required levels", msg)
 	}
-	// The remedy the user is handed must actually parse. `straza install` is
-	// positional-only, so a bare `--managed` form would error out on paste.
-	// Pinned so a syntax change breaks here, not in a customer's shell.
-	if msg, _ := body["error"].(string); !strings.Contains(msg, "`straza install --managed <harness>`") {
-		t.Errorf("deny reason %q must hand back a command that parses", msg)
+	// The remedy the user is handed must actually run. `straza install` is
+	// positional-only, and --managed refuses to run without --server, so a
+	// form without either would error out on paste. Pinned so a syntax change
+	// breaks here, not in a customer's shell.
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "`straza install --managed --server <server-url> <harness>`") ||
+		!strings.Contains(msg, "Straza package") {
+		t.Errorf("deny reason %q must hand back a command that runs and the package it needs", msg)
 	}
 	if sessions, _ := app.store.Sessions().List(context.Background(), ""); len(sessions) != 0 {
 		t.Errorf("denied checkin must not create a session, got %d", len(sessions))
@@ -183,11 +179,11 @@ func TestCheckinRefreshGate(t *testing.T) {
 		t.Fatalf("refresh after raise = %d %v, want 403", code, refresh)
 	}
 
-	// Re-labeling the refresh as the admin CLI must not dodge the gate; the
+	// Re-labeling the refresh as the console must not dodge the gate; the
 	// session row's harness is authoritative.
 	code, refresh = postJSON(t, base+"/v1/checkin", map[string]any{
 		"session_token": body["session_token"],
-		"harness":       map[string]string{"name": "strazactl", "version": "dev"},
+		"harness":       map[string]string{"name": "console", "version": "dev"},
 		"attestation":   map[string]any{"managed": false, "hashes": map[string]string{}},
 	})
 	if code != http.StatusForbidden {
@@ -195,8 +191,8 @@ func TestCheckinRefreshGate(t *testing.T) {
 	}
 }
 
-// TestAttestationGateAdminCLIAndGateway pins the bootstrap story:
-// strazactl can always log in under require-managed (else no admin could ever
+// TestAttestationGateAdminCLIAndGateway pins the bootstrap story: the
+// console can always log in under require-managed (else no admin could ever
 // register the first hash), but its unattested token is refused by the
 // gateway PEP: the exemption never reaches the data plane.
 func TestAttestationGateAdminCLIAndGateway(t *testing.T) {
@@ -208,14 +204,14 @@ func TestAttestationGateAdminCLIAndGateway(t *testing.T) {
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
 	grantAdmin(t, app, user.ID)
 
-	// Admin CLI checkin: exempt at the gate, token issued with att=none.
+	// Console checkin: exempt at the gate, token issued with att=none.
 	code, body := postJSON(t, base+"/v1/checkin", map[string]any{
 		"id_token":    idToken,
-		"harness":     map[string]string{"name": "strazactl", "version": "dev"},
+		"harness":     map[string]string{"name": "console", "version": "dev"},
 		"attestation": map[string]any{"managed": false, "hashes": map[string]string{}},
 	})
 	if code != http.StatusOK {
-		t.Fatalf("strazactl checkin under require-managed = %d %v, want 200 (bootstrap)", code, body)
+		t.Fatalf("console checkin under require-managed = %d %v, want 200 (bootstrap)", code, body)
 	}
 	token := body["session_token"].(string)
 
@@ -242,8 +238,8 @@ func TestAttestationGateAdminCLIAndGateway(t *testing.T) {
 		}
 		// Same tripwire as the check-in gate: the remedy must be a command
 		// the positional-only CLI accepts.
-		if msg, _ := gw["error"].(string); !strings.Contains(msg, "`straza install --managed <harness>`") {
-			t.Errorf("gateway refusal %q must hand back a command that parses", msg)
+		if msg, _ := gw["error"].(string); !strings.Contains(msg, "`straza install --managed --server <server-url> <harness>`") {
+			t.Errorf("gateway refusal %q must hand back a command that runs", msg)
 		}
 	}
 }

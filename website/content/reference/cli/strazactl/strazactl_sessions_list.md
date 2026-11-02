@@ -2,7 +2,7 @@
 title: strazactl sessions list
 description: List sessions
 pagetype: reference
-weight: 88
+weight: 84
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl sessions list [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

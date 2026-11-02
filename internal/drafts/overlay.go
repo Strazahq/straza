@@ -18,9 +18,9 @@ const statusPending = "pending"
 // An App keeps what live state knows of the server and its manifest
 // cannot say: its id, status, health detail, pause, file, admin role, role
 // prefix and credential rows. It keeps the live tool list, and the tools
-// the live list marks read-only, while its runtime kind, address, command,
-// arguments and image stay the same, and otherwise takes the list apps
-// gives, which Check fills from what a Contact read, or none.
+// the live list marks read-only or destructive, while its runtime kind,
+// address, command, arguments and image stay the same, and otherwise takes
+// the list apps gives, which Check fills from what a Contact read, or none.
 func (w World) Overlay(d Draft, apps map[string]App) World {
 	after := w
 	after.Apps = cloneMap(w.Apps)
@@ -55,7 +55,28 @@ func (w World) Overlay(d Draft, apps map[string]App) World {
 			delete(after.Policies, it.Name)
 		}
 	}
+	after.resolveCovers(w)
 	return after
+}
+
+// resolveCovers fills the ids of the covers line of every access row a
+// Role put wrote, once every App put has laid its pinned type, so each
+// comparison with a live row reads ids. The ids come from after, or from w
+// for a server whose pinned type the draft drops.
+func (after *World) resolveCovers(w World) {
+	for name := range after.roleDocs {
+		acc, ok := after.Access[name]
+		if !ok || acc.Covers == nil {
+			continue
+		}
+		ids := after
+		if after.Apps[acc.Server].Pinned == nil {
+			ids = &w
+		}
+		view := World{Apps: ids.Apps, Access: w.Access}
+		acc.Covers = RowCovers(view, name, RoleBinding{App: acc.Server, Covers: acc.Covers})
+		after.Access[name] = acc
+	}
 }
 
 // overlayApp is the App the server name will be after a put whose facts are
@@ -71,7 +92,7 @@ func overlayApp(w World, name string, next App) App {
 	next.Source, next.AdminRole, next.RolePrefix = live.Source, live.AdminRole, live.RolePrefix
 	next.SharedSecret, next.RoleSecrets, next.UserCredentials = live.SharedSecret, live.RoleSecrets, live.UserCredentials
 	if sameRuntime(live, next) {
-		next.Offered, next.ReadOnly = live.Offered, live.ReadOnly
+		next.Offered, next.ReadOnly, next.Destructive = live.Offered, live.ReadOnly, live.Destructive
 	}
 	return next
 }
@@ -101,7 +122,7 @@ func (after *World) putRole(w World, it Item) {
 	delete(after.Access, it.Name)
 	if len(doc.Spec.Bindings) > 0 {
 		b := doc.Spec.Bindings[0]
-		acc := Access{Server: b.App, Tools: slices.Clone(b.Tools)}
+		acc := Access{Server: b.App, Tools: slices.Clone(b.Tools), Covers: b.Covers.clone()}
 		if row, ok := w.Access[it.Name]; ok && row.Server == b.App {
 			acc.ID = row.ID
 		}

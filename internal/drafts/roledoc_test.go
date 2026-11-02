@@ -60,7 +60,7 @@ func TestRoleDocMarshalWritesTheExportForm(t *testing.T) {
 // strictly and writes out the same bytes.
 func TestParseRoleReadsEveryExportBack(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"role-dev.yaml", "role-owned.yaml"} {
+	for _, name := range []string{"role-dev.yaml", "role-owned.yaml", "role-every.yaml", "role-objects.yaml"} {
 		t.Run(name, func(t *testing.T) {
 			doc, err := ParseRole(fixture(t, name))
 			if err != nil {

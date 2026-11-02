@@ -46,9 +46,6 @@ type redirectLane struct {
 	name string
 	// optional is set when the lane may send the request without a secret.
 	optional bool
-	// fixedTLS is set when the lane builds its own transport, so no test
-	// can make it trust the test certificate.
-	fixedTLS bool
 	// statuses are the redirects the lane is tried with: a 302 for a GET,
 	// and a 307 and a 308 for a POST, the two that re-send its body.
 	statuses []int
@@ -61,20 +58,6 @@ func tlsFrom(origin *httptest.Server, base http.RoundTripper) http.RoundTripper 
 		return origin.Client().Transport
 	}
 	return base
-}
-
-// sessionStoreFor enrols a store against origin with a live session holding
-// token, the state the MCP proxy and the session API read their token from.
-func sessionStoreFor(t *testing.T, origin *httptest.Server, token string) *Store {
-	t.Helper()
-	store := pinStore(t, origin.URL, nil)
-	if err := store.SaveSession(Session{
-		SessionID: "s1", SessionToken: token, Harness: "claude-code/mcp",
-		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return store
 }
 
 // clientFor is NewClient against origin, trusting its certificate.
@@ -98,54 +81,6 @@ var redirectLanes = []redirectLane{
 	{name: "refresh, session token in the body", statuses: bodyRedirects,
 		call: func(ctx context.Context, _ *testing.T, origin *httptest.Server, secret string) error {
 			_, err := clientFor(origin).Refresh(ctx, secret, "claude-code", "2.1.0", Attestation{})
-			return err
-		}},
-	{name: "device check-in, device token in the body", statuses: bodyRedirects,
-		call: func(ctx context.Context, _ *testing.T, origin *httptest.Server, secret string) error {
-			_, err := clientFor(origin).CheckinDevice(ctx, secret, "claude-code", "2.1.0", Attestation{})
-			return err
-		}},
-	{name: "enrol, ID token in the body", statuses: bodyRedirects,
-		call: func(ctx context.Context, _ *testing.T, origin *httptest.Server, secret string) error {
-			_, err := clientFor(origin).Enroll(ctx, secret, "laptop", "linux", "fp")
-			return err
-		}},
-	{name: "MCP proxy", statuses: getRedirects,
-		call: func(ctx context.Context, t *testing.T, origin *httptest.Server, secret string) error {
-			store := sessionStoreFor(t, origin, secret)
-			hc := gatewayHTTPClient(store, NewClient(origin.URL), "claude-code")
-			tr := hc.Transport.(*sessionAuthTransport)
-			tr.base = tlsFrom(origin, tr.base)
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, origin.URL+"/mcp", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			resp, err := hc.Do(req)
-			if err == nil {
-				_ = resp.Body.Close()
-			}
-			return err
-		}},
-	{name: "session API", statuses: getRedirects,
-		call: func(ctx context.Context, t *testing.T, origin *httptest.Server, secret string) error {
-			api, err := NewSessionAPI(sessionStoreFor(t, origin, secret))
-			if err != nil {
-				t.Fatal(err)
-			}
-			tr := api.client.HTTP.Transport.(*sessionAuthTransport)
-			tr.base = tlsFrom(origin, tr.base)
-			return api.Do(ctx, http.MethodGet, "/v1/self", nil, nil)
-		}},
-	{name: "push stream", statuses: getRedirects,
-		call: func(ctx context.Context, _ *testing.T, origin *httptest.Server, secret string) error {
-			e := newEdgePush(origin.URL, nil, nil, nil, nil)
-			e.http.Transport = tlsFrom(origin, e.http.Transport)
-			_, _, err := e.stream(ctx, secret)
-			return err
-		}},
-	{name: "doctor push probe", fixedTLS: true, statuses: getRedirects,
-		call: func(ctx context.Context, _ *testing.T, origin *httptest.Server, secret string) error {
-			_, err := probeEdgePush(ctx, origin.URL, secret)
 			return err
 		}},
 }
@@ -181,7 +116,7 @@ func TestClientRedirectKeepsTokenOnOrigin(t *testing.T) {
 	for _, lane := range redirectLanes {
 		for _, status := range lane.statuses {
 			for _, tc := range cases {
-				if (tc.noSecret && !lane.optional) || (tc.tls && lane.fixedTLS) {
+				if tc.noSecret && !lane.optional {
 					continue
 				}
 				t.Run(lane.name+", "+http.StatusText(status)+", "+tc.name, func(t *testing.T) {

@@ -9,16 +9,17 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/policy"
 )
 
 // Tier-3 exec wrapper: hookless agents get exactly one way to run
 // things, and that way is Straza. Every invocation is a canonical
-// tool.pre/shell.exec event through the SAME local PDP, spool, and
-// fail-closed semantics as the harness hooks. No second decision path
-// exists. ADVISORY on an open machine (an agent that can run anything
-// can skip the shim); boundary-grade only where the environment makes
-// the shim exclusive (sandbox/managed profile; see the Hookless
+// tool.pre/shell.exec event decided by the Straza background service, with
+// the SAME policy, audit, and fail-closed semantics as the harness hooks. No
+// second decision path exists. ADVISORY on an open machine (an agent that can
+// run anything can skip the shim); boundary-grade only where the environment
+// makes the shim exclusive (sandbox/managed profile; see the Hookless
 // processes page of the docs).
 
 // Exec exit codes. Deny mirrors the hook contract's exit 2; spawn failures
@@ -34,9 +35,9 @@ const (
 // sensitive roles), and the audit trail names the tier.
 const execHarness = "exec-wrapper"
 
-// Exec decides argv against the local snapshot and, when allowed, runs the
-// child with inherited stdio, passing its exit code through. Every error
-// path fails closed: no session, no snapshot, or no decision means nothing runs.
+// Exec has the service decide argv and, when allowed, runs the child with
+// inherited stdio, passing its exit code through. Every error path fails
+// closed: no service, no session, or no decision means nothing runs.
 func Exec(ctx context.Context, argv []string, errOut io.Writer) int {
 	if len(argv) == 0 {
 		fmt.Fprintln(errOut, "Straza: nothing to run. Usage: straza exec -- <command> [args...]")
@@ -48,17 +49,12 @@ func Exec(ctx context.Context, argv []string, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "Straza: state unavailable (%v). Refusing to run\n", err)
 		return execDenyExit
 	}
-	// Unlike hooks there is no harness session.start: ensure a session
-	// lazily via the normal checkin (shared cross-process lock, adopts an
-	// existing session, one governed session per machine/user, same as the
-	// MCP proxy). Failure = fail closed with the remedy.
-	if cfg, cfgErr := store.LoadConfig(); cfgErr == nil {
-		if _, err := ensureSession(ctx, store, NewClient(cfg.ServerURL), execHarness); err != nil {
-			fmt.Fprintf(errOut, "Straza: no session and checkin failed (%v). Run `straza enroll`; refusing to run\n", err)
-			return execDenyExit
-		}
-	} else {
-		fmt.Fprintln(errOut, "Straza: not configured. Run `straza enroll`; refusing to run")
+	// Unlike hooks there is no harness session.start, so the wrapper starts
+	// or reuses its session first. The service reuses the caller's newest
+	// live exec-wrapper session and checks in only when none is live.
+	svc := NewServiceClient()
+	if _, err := svc.StartSession(ctx, localapi.SessionRequest{Harness: localapi.Harness{Name: execHarness}}); err != nil {
+		fmt.Fprintf(errOut, "%s Refusing to run.\n", denyLine(serviceSentence(err, outcomeNotRun)))
 		return execDenyExit
 	}
 
@@ -73,9 +69,9 @@ func Exec(ctx context.Context, argv []string, errOut io.Writer) int {
 			Workspace: cwd,
 		},
 	}
-	// The same decide path as hooks: verified snapshot, RefreshIfStale,
-	// spool + detached drain. Nothing exec-specific in the engine.
-	decision := liveDecider{store: store}.Decide(n)
+	// The same decide path as hooks: the service decides, records the
+	// audit record and answers. Nothing exec-specific in the engine.
+	decision := serviceDecider{store: store, svc: svc}.Decide(n)
 	if decision.Effect != policy.EffectAllow {
 		fmt.Fprintln(errOut, denyLine(decision.Reason))
 		return execDenyExit
@@ -94,15 +90,16 @@ func Exec(ctx context.Context, argv []string, errOut io.Writer) int {
 	return 0
 }
 
-// denyLine returns the stderr line for a denied call: the policy reason
-// behind one Straza marker. A reason that already opens with the word Straza,
-// as the seeded starter policy's "Straza starter policy:" does, is printed as
-// it is so the marker never doubles. An empty reason says denied by policy.
+// denyLine returns a deny reason behind one Straza marker, for the hook, exec
+// and the MCP bridge alike. A reason that already opens with Straza, as the
+// seeded starter policy's "Straza starter policy:" and the service's
+// "Straza's background service" do, is kept as it is so the marker never
+// doubles. An empty reason says denied by policy.
 func denyLine(reason string) string {
 	if reason == "" {
 		reason = "denied by policy"
 	}
-	if strings.HasPrefix(reason, "Straza:") || strings.HasPrefix(reason, "Straza ") {
+	if strings.HasPrefix(reason, "Straza") {
 		return reason
 	}
 	return "Straza: " + reason

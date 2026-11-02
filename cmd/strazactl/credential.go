@@ -2,33 +2,34 @@ package main
 
 import (
 	"errors"
-	"fmt"
+	"os"
+	"path/filepath"
 )
 
 // apiTokenEnv names the variable that carries an admin API token. The
 // console's token page prints the same name.
 const apiTokenEnv = "STRAZA_API_TOKEN" // #nosec G101 -- the variable's name, not a credential
 
-// errLoginWithToken refuses login while a token is set: every admin call
-// would send the token, so the login made here would never be used.
-var errLoginWithToken = errors.New("STRAZA_API_TOKEN is set, so strazactl sends that admin API token on every admin call " +
-	"and would never use a login made here. Unset STRAZA_API_TOKEN, then run strazactl login again")
+// errNoSignIn answers the retired login and logout while a token is set.
+var errNoSignIn = errors.New("strazactl no longer signs in. It runs on the admin API token in STRAZA_API_TOKEN, " +
+	"so there is nothing to sign in or out of")
 
-// errTokenWithoutServer replaces ErrNoServer while a token is set, because
-// its advice, to log in, is refused while the token is set.
-var errTokenWithoutServer = errors.New("STRAZA_API_TOKEN is set, but no server is given. " +
-	"Pass --server <url> or set STRAZA_SERVER to the server that issued the token")
+// oldLoginPath is where strazactl kept its login before it ran on admin API
+// tokens alone: ~/.straza/credentials.json. strazactl only names the file,
+// so its owner can delete it.
+func oldLoginPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".straza", "credentials.json")
+}
 
-// loginNote is the line a successful login prints on stderr.
-const loginNote = "note: this login can change Straza's configuration. Keep it away from coding agents. " +
-	"Automation uses an admin API token in STRAZA_API_TOKEN, and an agent proposes config changes through the built-in straza MCP server."
-
-// logoutTokenNote is the line logout prints while a token is set, because
-// ending the login leaves the token working in this shell.
-const logoutTokenNote = "note: STRAZA_API_TOKEN is still set, so strazactl keeps using that admin API token until you unset it." // #nosec G101 -- an operator sentence, not a credential
-
-// tokenNotice is the one stderr line a command prints when its admin calls
-// send the token in place of the login, naming the server they go to.
-func tokenNotice(server string) string {
-	return fmt.Sprintf("note: strazactl uses the admin API token in STRAZA_API_TOKEN for %s, not a strazactl login.", server)
+// noTokenError is the refusal of a command that needs an admin API token
+// when STRAZA_API_TOKEN holds none. When the old login file at loginPath is
+// still there, it adds that the file works nowhere and can be deleted.
+func noTokenError(loginPath string) error {
+	msg := "strazactl needs an admin API token in STRAZA_API_TOKEN. A person mints one in the console under Settings, API tokens, " +
+		"with the scope these commands need and an expiry"
+	if _, err := os.Stat(loginPath); err == nil {
+		msg += ". strazactl no longer signs in, so the login kept in " + loginPath + " works nowhere and can be deleted"
+	}
+	return errors.New(msg)
 }

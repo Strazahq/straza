@@ -37,6 +37,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        # The whole history: --enableGitInfo below dates each page by the
+        # last commit that changed it, and a shallow clone has one commit.
+        with:
+          fetch-depth: 0
       - name: install hugo (release tarball, checksum verified)
         run: |
           curl -sSfL -o hugo.tar.gz "https://github.com/gohugoio/hugo/releases/download/v${DOCS_HUGO_VERSION}/hugo_${DOCS_HUGO_VERSION}_linux-amd64.tar.gz"
@@ -47,6 +51,7 @@ jobs:
         run: >-
           "$RUNNER_TEMP/hugo/hugo" --source website
           --destination "$GITHUB_WORKSPACE/build/site" --noBuildLock
+          --enableGitInfo
       - name: publish (strip comments, scan for tells)
         run: python3 tools/site-publish.py --src build/site --out build/site-public
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

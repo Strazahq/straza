@@ -48,6 +48,10 @@ func newFetchFixture(t *testing.T, goos string) *fetchFixture {
 		t.Fatal(err)
 	}
 	f := &fetchFixture{binPath: filepath.Join(binDir, "straza"), docs: map[string]harnesscfg.Document{}}
+	// The straza package's binary, which install --managed on Linux requires.
+	if err := os.WriteFile(f.binPath, []byte("packaged straza"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	old := vendorDefaultBinPath
 	vendorDefaultBinPath = func(string) string { return f.binPath }
 	t.Cleanup(func() { vendorDefaultBinPath = old })
@@ -101,7 +105,7 @@ func (f *fetchFixture) install(t *testing.T, harness string) (string, error) {
 
 func readManaged(t *testing.T, harness string) []byte {
 	t.Helper()
-	path, err := managedHookPath(harness)
+	path, err := ManagedHookPath(harness)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +122,7 @@ func readManaged(t *testing.T, harness string) []byte {
 func TestInstallManagedFetchLane(t *testing.T) {
 	f := newFetchFixture(t, "linux")
 	hooks := []byte(`{"hooks":{"PreToolUse":"SERVER RENDERED NEWER FORM"}}`)
-	mcp := []byte(`{"mcpServers":{"straza":{"command":"newer"}}}`)
+	mcp := []byte(`{"mcpServers":{"straza":{"command":"` + f.binPath + `","args":["newer"]}}}`)
 	f.serve(t, "claude-code", "linux", map[string][]byte{
 		"hooks.claude-code": hooks, "mcp.claude-code": mcp,
 	})
@@ -153,7 +157,7 @@ func TestInstallManagedRefusesBadCrypto(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "verif") {
 		t.Fatalf("want verification refusal, got %v", err)
 	}
-	path, _ := managedHookPath("claude-code")
+	path, _ := ManagedHookPath("claude-code")
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Fatal("refusal must leave no wiring behind")
 	}
@@ -171,7 +175,7 @@ func TestInstallManagedRefusesUnknownArtifact(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "boot.claude-code") {
 		t.Fatalf("want unknown-artifact refusal naming it, got %v", err)
 	}
-	path, _ := managedHookPath("claude-code")
+	path, _ := ManagedHookPath("claude-code")
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Fatal("refusal must leave no wiring behind")
 	}
@@ -203,7 +207,7 @@ func TestInstallManagedLocalLaneFallbacks(t *testing.T) {
 	t.Run("operator content preserved", func(t *testing.T) {
 		f := newFetchFixture(t, "linux")
 		f.serve(t, "codex", "linux", map[string][]byte{"hooks.codex": []byte("# server block only\n")})
-		path, err := managedHookPath("codex")
+		path, err := ManagedHookPath("codex")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -234,9 +238,7 @@ func TestInstallManagedLocalLaneFallbacks(t *testing.T) {
 		f := newFetchFixture(t, "linux")
 		f.serve(t, "gemini", "linux", map[string][]byte{"hooks.gemini": []byte(`{"served":true}`)})
 		custom := filepath.Join(t.TempDir(), "elsewhere")
-		if err := os.MkdirAll(custom, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		placeManagedBinary(t, custom)
 		var out strings.Builder
 		err := InstallManaged(context.Background(), ManagedInstallOptions{
 			Harnesses: []string{"gemini"}, ServerURL: f.url, BinDir: custom,
@@ -267,5 +269,80 @@ func TestInstallManagedFetchLaneIdempotent(t *testing.T) {
 	}
 	if !bytes.Equal(first, readManaged(t, "gemini")) {
 		t.Fatal("second run changed the file")
+	}
+}
+
+// TestServedRunsElsewhere pins the check that guards a server older than
+// this client: served wiring whose hook commands, or whose straza MCP entry,
+// run another path than this machine's managed binary would never run. The
+// Windows codex shim is judged by its path alone, and no file it names is read.
+func TestServedRunsElsewhere(t *testing.T) {
+	const old, current = "/usr/local/bin/straza", "/usr/bin/straza"
+	const winOld, winCurrent = `C:\Old\bin\straza.exe`, `C:\ProgramData\straza\bin\straza.exe`
+	render := func(harness, goos, binPath string) map[string][]byte {
+		t.Helper()
+		arts, err := RenderManagedArtifacts(harness, goos, binPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return arts
+	}
+	mcpOld := render("claude-code", "linux", current)
+	mcpOld["mcp.claude-code"] = render("claude-code", "linux", old)["mcp.claude-code"]
+	tests := []struct {
+		name    string
+		harness string
+		arts    map[string][]byte
+		binPath string
+		want    string
+	}{
+		{"claude-code rendered for the old path refuses", "claude-code", render("claude-code", "linux", old), current, old},
+		{"claude-code rendered for this binary passes", "claude-code", render("claude-code", "linux", current), current, ""},
+		{"gemini rendered for the old path refuses", "gemini", render("gemini", "linux", old), current, old},
+		{"gemini rendered for this binary passes", "gemini", render("gemini", "linux", current), current, ""},
+		{"codex rendered for the old path refuses", "codex", render("codex", "linux", old), current, old},
+		{"codex rendered for this binary passes", "codex", render("codex", "linux", current), current, ""},
+		{"the claude-code mcp entry counts as a hook command", "claude-code", mcpOld, current, old},
+		{"windows codex shim beside another binary refuses", "codex", render("codex", "windows", winOld), winCurrent,
+			codexShimPathFor("windows", winOld)},
+		{"windows codex shim beside this binary passes", "codex", render("codex", "windows", winCurrent), winCurrent, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := &harnesscfg.Document{Harness: tt.harness}
+			for name, content := range tt.arts {
+				doc.Artifacts = append(doc.Artifacts, harnesscfg.Artifact{Name: name, Content: content})
+			}
+			if got := servedRunsElsewhere(tt.harness, doc, tt.binPath); got != tt.want {
+				t.Errorf("servedRunsElsewhere = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInstallManagedRefusesWiringForAnotherBinary: a server that renders
+// hooks for another path than this machine's binary is refused with the
+// sentence that names both paths, and nothing is written at all, the
+// managed config included.
+func TestInstallManagedRefusesWiringForAnotherBinary(t *testing.T) {
+	f := newFetchFixture(t, "linux")
+	arts, err := RenderManagedArtifacts("claude-code", "linux", "/usr/local/bin/straza")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.serve(t, "claude-code", "linux", arts)
+	_, err = f.install(t, "claude-code")
+	want := "The Straza server at " + f.url + " renders claude-code hooks that run /usr/local/bin/straza, " +
+		"but this machine's Straza is " + f.binPath + ", so those hooks would never run. " +
+		"Upgrade the Straza server first, then run `straza install --managed` again."
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	hooks, _ := ManagedHookPath("claude-code")
+	mcp, _ := ManagedMCPConfigPath("claude-code")
+	for _, p := range []string{ManagedConfigPath(), hooks, mcp} {
+		if _, statErr := os.Stat(p); !os.IsNotExist(statErr) {
+			t.Errorf("refusal wrote %s (stat err=%v), want nothing written", p, statErr)
+		}
 	}
 }

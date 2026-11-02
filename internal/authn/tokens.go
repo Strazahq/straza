@@ -37,6 +37,7 @@ type Claims struct {
 	Attestation string // managed|advisory|none
 	RolesHash   string // deterministic hash of the sorted resolved role ids
 	Snapshot    string // active policy snapshot id
+	CNF         string // cnf.jkt: the thumbprint of the key the token is bound to, "" for a bearer token
 	JTI         string // set by Mint
 	IssuedAt    time.Time
 	Expiry      time.Time
@@ -87,7 +88,7 @@ func (s *TokenService) Mint(c Claims) (string, Claims, error) {
 	c.IssuedAt = time.Now().UTC().Truncate(time.Second)
 	c.Expiry = c.IssuedAt.Add(s.ttl)
 
-	tok, err := jwt.NewBuilder().
+	b := jwt.NewBuilder().
 		Issuer(s.issuer).
 		Subject(c.Subject).
 		JwtID(c.JTI).
@@ -98,8 +99,11 @@ func (s *TokenService) Mint(c Claims) (string, Claims, error) {
 		Claim("hrn", c.Harness).
 		Claim("att", c.Attestation).
 		Claim("rol", c.RolesHash).
-		Claim("snp", c.Snapshot).
-		Build()
+		Claim("snp", c.Snapshot)
+	if c.CNF != "" {
+		b = b.Claim("cnf", map[string]string{"jkt": c.CNF})
+	}
+	tok, err := b.Build()
 	if err != nil {
 		return "", Claims{}, fmt.Errorf("authn: build token: %w", err)
 	}
@@ -115,8 +119,9 @@ func (s *TokenService) Mint(c Claims) (string, Claims, error) {
 }
 
 // Verify parses and validates a session token: EdDSA signature against a
-// known non-retired key, issuer match, exp/iat with 30 s skew. It does NOT
-// consult revocation state; that is the caller's denylist check.
+// known non-retired key, issuer match, exp/iat with 30 s skew, and a typ
+// other than GrantType. It does NOT consult revocation state; that is the
+// caller's denylist check.
 func (s *TokenService) Verify(raw string) (Claims, error) {
 	s.mu.RLock()
 	set := s.verify
@@ -128,6 +133,9 @@ func (s *TokenService) Verify(raw string) (Claims, error) {
 		jwt.WithAcceptableSkew(30*time.Second),
 	)
 	if err != nil {
+		return Claims{}, fmt.Errorf("authn: token rejected: %w", err)
+	}
+	if err := refuseGrantType(raw); err != nil {
 		return Claims{}, fmt.Errorf("authn: token rejected: %w", err)
 	}
 
@@ -152,29 +160,67 @@ func (s *TokenService) Verify(raw string) (Claims, error) {
 			}
 		}
 	}
+	if tok.Has("cnf") {
+		var cnf map[string]any
+		if err := tok.Get("cnf", &cnf); err != nil {
+			return Claims{}, fmt.Errorf("authn: token rejected: claim cnf is not an object: %w", err)
+		}
+		jkt, _ := cnf["jkt"].(string)
+		if jkt == "" {
+			return Claims{}, fmt.Errorf("authn: token rejected: claim cnf carries no jkt thumbprint")
+		}
+		c.CNF = jkt
+	}
 	return c, nil
 }
 
 // IDClaims is the subset of OpenID claims Straza consumes from ID tokens.
 type IDClaims struct {
-	Subject  string
-	Username string // preferred_username
-	Email    string
+	Subject       string
+	Username      string // preferred_username
+	Email         string
+	Nonce         string
+	AuthTime      time.Time // auth_time, zero when the token carries none
+	KeyThumbprint string    // straza_jkt, "" when the token carries none
+}
+
+// LoginFacts is what an ID token says about the sign-in behind it: the
+// nonce the client sent, when the person authenticated (zero without
+// auth_time), and the thumbprint of the agent key it was issued for.
+type LoginFacts struct {
+	Nonce         string
+	AuthTime      time.Time
+	KeyThumbprint string
 }
 
 // MintIDToken issues an OIDC ID token for the built-in issuer, signed
 // with the same rotating ed25519 keys as session tokens.
 func (s *TokenService) MintIDToken(sub, audience string, ttl time.Duration, username, email string) (string, error) {
+	return s.MintIDTokenFor(sub, audience, ttl, username, email, LoginFacts{})
+}
+
+// MintIDTokenFor issues a built-in ID token as MintIDToken does, adding
+// nonce, auth_time in whole seconds and straza_jkt for each fact f sets.
+func (s *TokenService) MintIDTokenFor(sub, audience string, ttl time.Duration, username, email string, f LoginFacts) (string, error) {
 	iat := time.Now().UTC().Truncate(time.Second)
-	tok, err := jwt.NewBuilder().
+	b := jwt.NewBuilder().
 		Issuer(s.issuer).
 		Subject(sub).
 		Audience([]string{audience}).
 		IssuedAt(iat).
 		Expiration(iat.Add(ttl)).
 		Claim("preferred_username", username).
-		Claim("email", email).
-		Build()
+		Claim("email", email)
+	if f.Nonce != "" {
+		b = b.Claim("nonce", f.Nonce)
+	}
+	if !f.AuthTime.IsZero() {
+		b = b.Claim("auth_time", f.AuthTime.Unix())
+	}
+	if f.KeyThumbprint != "" {
+		b = b.Claim(keyStampClaim, f.KeyThumbprint)
+	}
+	tok, err := b.Build()
 	if err != nil {
 		return "", fmt.Errorf("authn: build id token: %w", err)
 	}
@@ -189,9 +235,15 @@ func (s *TokenService) MintIDToken(sub, audience string, ttl time.Duration, user
 }
 
 // VerifyIDToken validates an ID token minted by the built-in issuer
-// (signature, issuer, audience, expiry) and extracts the OpenID claims.
+// (signature, issuer, audience, expiry, a typ other than GrantType) and
+// extracts the OpenID claims.
 // External-IdP tokens are verified by the OIDC client, not here.
 func (s *TokenService) VerifyIDToken(raw, audience string) (IDClaims, error) {
+	return s.verifyIDTokenAt(raw, audience, time.Now())
+}
+
+// verifyIDTokenAt is VerifyIDToken at the time now, for the example replay.
+func (s *TokenService) verifyIDTokenAt(raw, audience string, now time.Time) (IDClaims, error) {
 	s.mu.RLock()
 	set := s.verify
 	s.mu.RUnlock()
@@ -200,8 +252,12 @@ func (s *TokenService) VerifyIDToken(raw, audience string) (IDClaims, error) {
 		jwt.WithIssuer(s.issuer),
 		jwt.WithAudience(audience),
 		jwt.WithAcceptableSkew(30*time.Second),
+		jwt.WithClock(jwt.ClockFunc(func() time.Time { return now })),
 	)
 	if err != nil {
+		return IDClaims{}, fmt.Errorf("authn: id token rejected: %w", err)
+	}
+	if err := refuseGrantType(raw); err != nil {
 		return IDClaims{}, fmt.Errorf("authn: id token rejected: %w", err)
 	}
 	var c IDClaims
@@ -212,7 +268,43 @@ func (s *TokenService) VerifyIDToken(raw, audience string) (IDClaims, error) {
 	if tok.Has("email") {
 		_ = tok.Get("email", &c.Email)
 	}
+	if tok.Has("nonce") {
+		if err := tok.Get("nonce", &c.Nonce); err != nil {
+			return IDClaims{}, fmt.Errorf("authn: id token rejected: claim nonce is not a string: %w", err)
+		}
+	}
+	if tok.Has("auth_time") {
+		var v any
+		if err := tok.Get("auth_time", &v); err != nil {
+			return IDClaims{}, fmt.Errorf("authn: id token rejected: claim auth_time: %w", err)
+		}
+		if c.AuthTime, err = numericDate(v); err != nil {
+			return IDClaims{}, fmt.Errorf("authn: id token rejected: %w", err)
+		}
+	}
+	if tok.Has(keyStampClaim) {
+		// A stamp that names no key is refused, never read as absent.
+		if err := tok.Get(keyStampClaim, &c.KeyThumbprint); err != nil || c.KeyThumbprint == "" {
+			return IDClaims{}, fmt.Errorf("authn: id token rejected: claim %s is not a non-empty string", keyStampClaim)
+		}
+	}
 	return c, nil
+}
+
+// keyStampClaim names an agent ID token's key. It is not cnf, which Bearer refuses.
+const keyStampClaim = "straza_jkt"
+
+// numericDate reads the auth_time claim as decoded from JSON. A nil value
+// means the claim is absent and gives the zero time. A value that is not a
+// number is an error, so a malformed auth_time never reads as a missing one.
+func numericDate(v any) (time.Time, error) {
+	switch n := v.(type) {
+	case nil:
+		return time.Time{}, nil
+	case float64:
+		return time.Unix(int64(n), 0).UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("authn: claim auth_time is not a number")
 }
 
 // DeviceClaims is what a verified device token proves: this user enrolled

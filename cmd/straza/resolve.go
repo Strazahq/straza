@@ -45,7 +45,8 @@ func (t enrollTarget) Announce() string {
 
 // resolveEnrollServer applies enroll's server resolution order: --server beats
 // $STRAZA_SERVER. Neither is a silent default and there is no localhost
-// guess; an empty Server means the caller must fail closed and say so.
+// guess. An empty Server leaves the choice to the background service, which
+// uses a managed configuration's server or refuses with its own sentence.
 func resolveEnrollServer(flagValue, envValue string) enrollTarget {
 	if v := strings.TrimSpace(flagValue); v != "" {
 		return enrollTarget{Server: v, Source: enrollSourceFlag}

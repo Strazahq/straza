@@ -14,12 +14,9 @@ COPY --from=straza . .
 ARG VERSION=dev
 ARG COMMIT=none
 ENV CGO_ENABLED=0
-# strazactl rides along for per-user self-service (strazactl login +
-# strazactl connect midpoint): the on-behalf demo needs it and end users
-# hold no console access to do it there.
 RUN go build -trimpath \
       -ldflags "-s -w -X github.com/strazahq/straza/internal/version.Version=${VERSION} -X github.com/strazahq/straza/internal/version.Commit=${COMMIT}" \
-      -o /out/ ./cmd/straza ./cmd/strazactl
+      -o /out/ ./cmd/straza
 
 FROM node:22-bookworm-slim
 # CLAUDE_VERSION mirrors CLAUDE_PINNED in test/harness-matrix/versions.env:
@@ -33,9 +30,20 @@ RUN apt-get update \
  && npm install -g @anthropic-ai/claude-code@${CLAUDE_VERSION}
 
 COPY --from=straza-build /out/straza /usr/local/bin/straza
-COPY --from=straza-build /out/strazactl /usr/local/bin/strazactl
+# git runs straza as its remote helper by this name, as the deb and rpm ship it.
+RUN ln -s straza /usr/local/bin/git-remote-straza
 COPY harness-entry.sh /usr/local/bin/harness-entry.sh
 RUN chmod 0755 /usr/local/bin/harness-entry.sh
+# straza-service (uid 64000) runs the harness's service container from this
+# image. Its passwd line lets the straza client check that the socket
+# belongs to the service, and Docker copies these two directories' owner and
+# mode into the empty socket and state volumes the first time a container
+# mounts them.
+RUN groupadd --system --gid 64000 straza-service \
+ && useradd --system --uid 64000 --gid 64000 --no-create-home \
+      --home-dir /var/lib/straza-service --shell /usr/sbin/nologin straza-service \
+ && install -d -o 64000 -g 64000 -m 0755 /run/straza-service \
+ && install -d -o 64000 -g 64000 -m 0700 /var/lib/straza-service
 
 # The node image's stock non-root user; /home/node is a volume in the
 # overlay, so enrollment, hook wiring, and the operator's claude login all

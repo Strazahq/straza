@@ -7,9 +7,11 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FetchError, RefusedError } from "@/components/error-state";
-import { WhyCard, wireLine, type CardTone } from "@/components/why-card";
-import { type ApiError, type AuditRow, type RoleRow, type SimulateAnswer, type SimulateRequest, listAudit, listRoles, overview, simulate } from "@/lib/api";
+import { type Gate, WhyCard, wireLine, type CardTone } from "@/components/why-card";
+import { type ApiError, type AuditRow, type ObjectListing, type ObjectRow, type ObjectsBlock, type RoleRow, type SimObject, type SimulateAnswer, type SimulateRequest, appObjects, listAudit, listRoles, overview, query, simulate } from "@/lib/api";
+import { cap, stripOf } from "@/lib/object-words";
 import { version } from "@/lib/public";
+import { readFailed } from "@/lib/say";
 import { OUTCOME, SIMULATION_ONLY, unknownOutcome } from "@/lib/server-words";
 import { aboutServer } from "@/lib/words";
 import { cn } from "@/lib/utils";
@@ -40,6 +42,55 @@ const TOOL_MISSING = "Type the tool name to test.";
 
 const EFFECT_HUE: Record<string, string> = { allow: "text-ok", deny: "text-danger", approve: "text-warn", confirm: "text-warn" };
 
+// The words of the object a call names, on a server whose manifest pins an
+// object type. Every noun is the server's type or plural, such as repo and
+// repos. objectLine and refusedLine are strazactl policy simulate's
+// sentences too (internal/ctl/policysim.go), so both tell one story. The
+// Policies area's Test a call shares the picker and these words.
+export type Pinned = { type: string; plural: string; tools: ObjectsBlock["tools"] };
+const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_LIMIT = 20;
+
+// pinnedOf reads the nouns and the tool reaches of a pinned block.
+export const pinnedOf = (b: ObjectsBlock): Pinned => ({ type: b.type, plural: b.plural || b.type + "s", tools: b.tools });
+const objectHint = (p: Pinned, arg: string) => "Pick the " + p.type + " the call works on. Test a call sends it in the argument " + arg + ", as the agent would.";
+export const objectMissing = (p: Pinned) => "Pick the " + p.type + " this call works on.";
+const searchLabel = (p: Pinned) => "Search " + p.plural + " by name";
+
+// emptyHint says why the picker offers nothing, with the next step: the
+// search matched nothing, the listing needs its credential or has not run,
+// or the list is empty and a refresh may fill it.
+function emptyHint(app: string, p: Pinned, q: string, l?: ObjectListing): string {
+  if (q) return "No " + p.type + " in the list matches " + q + ".";
+  const strip = l ? stripOf(app, p, l) : null;
+  if (strip && l && (strip.tone === "danger" || l.outcome !== "ok")) return strip.lines.join(" ");
+  return "The " + p.type + " list is empty, so there is nothing to pick yet. If " + app + " has " + p.plural + " now, refresh the list with strazactl apps objects refresh " + app + ", then open Test a call again.";
+}
+const firstOnly = (p: Pinned) => "The first " + SEARCH_LIMIT + " " + p.plural + " are shown. Type to narrow the list.";
+
+// objectLine names the held role that covers the call, and is empty when
+// the object check refused it.
+export function objectLine(o: SimObject): string {
+  if (!o.covered) return "";
+  if (!o.value) return o.role + " covers every " + o.type + ".";
+  if (!o.id) return o.role + " covers every " + o.type + ", " + o.value + " included.";
+  return o.role + " covers " + o.value + ", id " + o.id + ".";
+}
+
+// refusedLine opens a refusal of the object check: no policy ran.
+export const refusedLine = (o: SimObject) => "The " + o.type + " check refused this call before any policy ran.";
+
+// gateOf is the sentence a why card reads in place of the no-rule one when
+// the object check refused the call, and undefined when it did not.
+export const gateOf = (o?: SimObject): Gate | undefined => (o && o.refusal ? { lead: refusedLine(o), reason: o.refusal.replace(/^Straza: /, "") } : undefined);
+
+// argumentOf answers the argument that names the object for a tool whose
+// pinned reach is argument, and "" for every other tool.
+export function argumentOf(p: Pinned | null, tool: string): string {
+  const reach = p?.tools?.[tool];
+  return reach && typeof reach === "object" ? reach.argument : "";
+}
+
 export function simulationOutcome(d: SimulateAnswer["active"]): { label: string; tone: CardTone } {
   if (d.effect === "deny") return { label: OUTCOME.deny, tone: "danger" };
   if (d.approve || (d as typeof d & { confirm?: boolean }).confirm || d.effect === "approve" || d.effect === "confirm") return { label: OUTCOME.approve, tone: "warn" };
@@ -48,7 +99,7 @@ export function simulationOutcome(d: SimulateAnswer["active"]): { label: string;
 }
 
 type RolesRead = { kind: "loading" } | { kind: "ready"; roles: RoleRow[] } | { kind: "failed"; detail: string };
-type Replay = { seq: number; user: string; tool: string; effect: string };
+type Replay = { seq: number; user: string; tool: string; effect: string; object?: ObjectRow };
 type ReplayState = { kind: "closed" } | { kind: "loading" } | { kind: "ready"; rows: Replay[] } | { kind: "failed"; detail: string };
 type Result = { answer: SimulateAnswer; subject: SimulateRequest["subject"] };
 
@@ -69,7 +120,10 @@ function replayRows(rows: AuditRow[], name: string): Replay[] {
     const d = ce.data || {};
     const about = aboutServer(d, name);
     if (!about.mine) continue;
-    out.push({ seq: r.seq, user: String(r.username || d.user || ""), tool: about.tool, effect: String(d.effect || "") });
+    // A value the record cut is not the value the call named, so it fills
+    // no pick.
+    const o = d.object as { value?: string; id?: string; valueTruncated?: boolean } | undefined;
+    out.push({ seq: r.seq, user: String(r.username || d.user || ""), tool: about.tool, effect: String(d.effect || ""), object: o && o.value && !o.valueTruncated ? { value: String(o.value), id: String(o.id || "") } : undefined });
   }
   return out.sort((a, b) => b.seq - a.seq).slice(0, 20);
 }
@@ -83,12 +137,16 @@ function ResultCard({ result, profile }: { result: Result; profile: string }) {
   const outcome = simulationOutcome(d);
   const who = result.subject.roles ? "roles " + result.subject.roles.join("/") : result.subject.user || "";
   const gate = "rounded-md border-link/40 bg-accent-bg font-mono text-[13px] font-normal text-foreground";
+  const obj = result.answer.object;
+  const subjectLine = <>{"subject: " + who + " · snapshot "}<span className="font-mono">{String(result.answer.snapshot || "").slice(0, 16)}</span>{SIMULATION_ONLY}</>;
+  const covered = obj ? objectLine(obj) : "";
   return (
     <WhyCard
       d={d}
       profile={profile}
       mark="result"
       tone={outcome.tone}
+      gate={gateOf(obj)}
       wire={wireLine(d, result.answer.snapshot || "", "live") + " serverCheck=" + !!d.serverCheck + " classify=" + !!d.classify}
       head={
         <>
@@ -99,11 +157,76 @@ function ResultCard({ result, profile }: { result: Result; profile: string }) {
       }
       context={
         <>
-          {"subject: " + who + " · snapshot "}<span className="font-mono">{String(result.answer.snapshot || "").slice(0, 16)}</span>
-          {SIMULATION_ONLY}
+          {covered && <span className="block text-text-2" data-object-line>{covered}</span>}
+          {subjectLine}
         </>
       }
     />
+  );
+}
+
+type Search = { kind: "loading" } | { kind: "ready"; rows: ObjectRow[]; more: boolean; listing?: ObjectListing } | { kind: "failed"; detail: string };
+
+// ObjectPicker picks the object a call names from the server's list, with
+// the search on the server and no free text: a typed value is a search,
+// never what is sent. The line under it previews the arguments the test
+// sends.
+export function ObjectPicker({ app, pinned, arg, picked, onPick }: { app: { id: string; name: string }; pinned: Pinned; arg: string; picked: ObjectRow | null; onPick: (o: ObjectRow | null) => void }) {
+  const [typed, setTyped] = React.useState("");
+  const [q, setQ] = React.useState("");
+  const [search, setSearch] = React.useState<Search>({ kind: "loading" });
+  const seq = React.useRef(0);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => setQ(typed.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [typed]);
+
+  React.useEffect(() => {
+    if (picked) return;
+    const my = ++seq.current;
+    setSearch({ kind: "loading" });
+    appObjects(app.id, query({ q, limit: SEARCH_LIMIT })).then(
+      (a) => { if (my === seq.current) setSearch({ kind: "ready", rows: a.objects || [], more: !!a.next, listing: a.listing }); },
+      (e: ApiError) => { if (my === seq.current && e.status !== 401) setSearch({ kind: "failed", detail: readFailed("The " + pinned.plural, e) }); },
+    );
+  }, [app.id, q, picked, pinned.plural]);
+
+  return (
+    <div className="flex flex-col gap-1.5" data-object-picker>
+      <span className={CAPS}>{pinned.type}</span>
+      {picked ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={cn(PILL, PILL_ON, "gap-2 font-mono")} data-picked>
+            {picked.value}
+            <button type="button" aria-label={"Clear the " + pinned.type} className="text-muted-foreground hover:text-foreground" onClick={() => onPick(null)}>×</button>
+          </span>
+          <span className="font-mono text-[13px] text-muted-foreground">{picked.id ? "id " + picked.id : ""}</span>
+        </div>
+      ) : (
+        <>
+          <Input value={typed} onChange={(e) => setTyped(e.target.value)} aria-label={searchLabel(pinned)} placeholder={searchLabel(pinned)} className="h-9" spellCheck={false} />
+          {search.kind === "loading" && <p className={HINT}>{"Reading the " + pinned.plural + "."}</p>}
+          {search.kind === "failed" && <FetchError subject={cap(pinned.plural)} detail={search.detail} />}
+          {search.kind === "ready" && search.rows.length === 0 && <p className={HINT} data-object-empty>{emptyHint(app.name, pinned, q, search.listing)}</p>}
+          {search.kind === "ready" && search.rows.length > 0 && (
+            <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-card" data-object-list>
+              {search.rows.map((o) => (
+                <button key={o.id} type="button" onClick={() => onPick(o)}
+                  className="flex w-full items-baseline gap-3 border-b border-border px-3 py-1.5 text-left text-[13px] last:border-b-0 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+                  <span className="font-mono text-foreground">{o.value}</span>
+                  {o.title && <span className="min-w-0 flex-1 truncate text-muted-foreground">{o.title}</span>}
+                  <span className="ml-auto font-mono text-muted-foreground">{o.id}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {search.kind === "ready" && search.more && <p className={HINT}>{firstOnly(pinned)}</p>}
+        </>
+      )}
+      <p className={HINT}>{objectHint(pinned, arg)}</p>
+      <p className="font-mono text-[13px] text-muted-foreground" data-args-preview>{"args " + JSON.stringify(picked ? { [arg]: picked.value } : {})}</p>
+    </div>
   );
 }
 
@@ -125,6 +248,9 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
   const [unsupported, setUnsupported] = React.useState(false);
   const [missing, setMissing] = React.useState<string | null>(null);
   const [toolMissing, setToolMissing] = React.useState<string | null>(null);
+  const [pinned, setPinned] = React.useState<Pinned | null>(null);
+  const [target, setTarget] = React.useState<ObjectRow | null>(null);
+  const [objectMissingNote, setObjectMissingNote] = React.useState<string | null>(null);
   const pillsRef = React.useRef<HTMLDivElement>(null);
   const freeRef = React.useRef<HTMLInputElement>(null);
   const userRef = React.useRef<HTMLInputElement>(null);
@@ -153,12 +279,21 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
     // The profile only words the no-rule refusal; a failed read leaves the
     // generic sentence, so nothing is shown for it.
     void version().then((v) => { if (alive) setProfile((v && v.profile) || ""); });
+    // A server that pins an object type gets the picker on a tool that names
+    // one. A failed read shows none, and the answer then says what the call
+    // lacks, in the gateway's words.
+    appObjects(app.id, query({ limit: 1 })).then(
+      (a) => { if (alive && a && a.type && a.pinned) setPinned(pinnedOf(a.pinned)); },
+      () => {},
+    );
     return () => { alive = false; };
   }, []);
 
   // Any change to the question drops the old answer, so a result on screen
   // always belongs to the inputs beside it.
-  const touch = () => { setResult(null); setProblem(null); setMissing(null); setToolMissing(null); };
+  const touch = () => { setResult(null); setProblem(null); setMissing(null); setToolMissing(null); setObjectMissingNote(null); };
+  const pick = (o: ObjectRow | null) => { touch(); setTarget(o); };
+  const arg = argumentOf(pinned, toolName.trim());
 
   const toggleRole = (name: string) => {
     touch();
@@ -181,9 +316,15 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
       toolRef.current?.focus();
       return;
     }
+    if (pinned && arg && !target) {
+      setObjectMissingNote(objectMissing(pinned));
+      document.querySelector<HTMLInputElement>("[data-object-picker] input")?.focus();
+      return;
+    }
     const subject: SimulateRequest["subject"] = mode === "roles" ? { roles } : { user: who };
     if (attestation !== UNSET) subject.attestation = attestation;
     const body: SimulateRequest = { event: { kind: "tool.pre", tool: "mcp.call", app: app.name, toolName: tool }, subject };
+    if (arg && target) body.event.args = { [arg]: target.value };
     setRunning(true);
     setResult(null);
     setProblem(null);
@@ -226,6 +367,7 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
     setMode("user");
     setUser(r.user);
     if (r.tool) setToolName(r.tool);
+    setTarget(r.object ?? null);
     setReplay({ kind: "closed" });
   };
 
@@ -315,6 +457,13 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
             {toolMissing && <p className="text-[13px] text-danger" role="alert">{toolMissing}</p>}
           </div>
         </div>
+
+        {pinned && arg && (
+          <div className="flex flex-col gap-1.5">
+            <ObjectPicker app={app} pinned={pinned} arg={arg} picked={target} onPick={pick} />
+            {objectMissingNote && <p className="text-[13px] text-danger" role="alert" data-object-missing>{objectMissingNote}</p>}
+          </div>
+        )}
 
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">

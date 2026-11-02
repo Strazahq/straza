@@ -15,10 +15,6 @@ import (
 func policyApplyServer(t *testing.T, status string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("PUT /v1/admin/policies", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"ps-7","name":"set-a","priority":0,"status":"` + status + `"}`))
@@ -63,7 +59,7 @@ func TestPolicyApplySaysWhatWasStored(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := policyApplyServer(t, tc.status)
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "policy", "apply", "-f", file)
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), "policy", "apply", "-f", file)
 			if err != nil {
 				t.Fatalf("policy apply: %v", err)
 			}
@@ -94,7 +90,7 @@ func TestPolicyListStatusWords(t *testing.T) {
 		`{"id":"ps-4","name":"off-set","priority":40,"status":"draft"}`+
 		`],"total":4,"limit":0,"offset":0,"roles":[]}`)
 	t.Setenv("STRAZA_SERVER", "")
-	stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "policy", "list")
+	stdout, _, err := runCLI(t, onToken(t, srv.URL), "policy", "list")
 	if err != nil {
 		t.Fatalf("policy list: %v", err)
 	}

@@ -198,6 +198,7 @@ type liveObject struct {
 	set     *PolicySet
 	admin   *Role
 	lost    []string
+	scope   *ObjectScope
 }
 
 // run is steps 1 to 11 of the publish, in order. Any error rolls every
@@ -387,9 +388,9 @@ func (p *publishTx) readObject(ctx context.Context, ref ObjectRef) (liveObject, 
 }
 
 // readRole reads a role as the World does: the row, the name of the live
-// server that owns it, its access row with the live server's name and the
-// tools, a matcher that does not decode reading as none, and the names of
-// the roles it implies.
+// server that owns it, its access row with the live server's name, the
+// tools and the covers line, a matcher or a covers line that does not
+// decode reading as none, and the names of the roles it implies.
 func (p *publishTx) readRole(ctx context.Context, name string) (liveObject, error) {
 	var lo liveObject
 	ro, err := scanRole(p.tx.QueryRowContext(ctx, p.r.s.q(`SELECT `+roleCols+` FROM roles WHERE name = $1`+p.forUpdate()), name))
@@ -407,13 +408,15 @@ func (p *publishTx) readRole(ctx context.Context, name string) (liveObject, erro
 	}
 	var b ToolBinding
 	var ca scanTime
-	err = p.tx.QueryRowContext(ctx, p.r.s.q(`SELECT b.id, b.role_id, b.app_id, b.tool_matcher, b.effect, b.created_at,
+	var scope sql.NullString
+	err = p.tx.QueryRowContext(ctx, p.r.s.q(`SELECT b.id, b.role_id, b.app_id, b.tool_matcher, b.effect, b.object_scope, b.created_at,
 		COALESCE(a.name, '') FROM tool_bindings b LEFT JOIN apps a ON a.id = b.app_id AND a.deleted_at IS NULL
-		WHERE b.role_id = $1`), ro.ID).Scan(&b.ID, &b.RoleID, &b.AppID, &b.ToolMatcher, &b.Effect, &ca, &cfg.Server)
+		WHERE b.role_id = $1`), ro.ID).Scan(&b.ID, &b.RoleID, &b.AppID, &b.ToolMatcher, &b.Effect, &scope, &ca, &cfg.Server)
 	switch {
 	case err == nil:
 		b.CreatedAt = ca.t
-		lo.binding = &b
+		b.Scope, b.ScopeFault = decodeScope("the access row "+b.ID+" of "+name, scope)
+		lo.binding, cfg.Scope = &b, b.Scope
 		_ = json.Unmarshal([]byte(b.ToolMatcher), &cfg.Tools)
 	case !errors.Is(err, sql.ErrNoRows):
 		return lo, p.r.s.mapErr(err)
@@ -425,7 +428,7 @@ func (p *publishTx) readRole(ctx context.Context, name string) (liveObject, erro
 	for implied := range lo.edges {
 		cfg.Implies = append(cfg.Implies, implied)
 	}
-	lo.role, lo.server, lo.tools, lo.fp = &ro, cfg.Server, cfg.Tools, FingerprintRole(cfg)
+	lo.role, lo.server, lo.tools, lo.scope, lo.fp = &ro, cfg.Server, cfg.Tools, cfg.Scope, FingerprintRole(cfg)
 	return lo, nil
 }
 

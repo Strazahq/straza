@@ -74,7 +74,6 @@ func TestRequireFullAdmin(t *testing.T) {
 	}{
 		{"a full administrator's login", kimLogin, http.StatusNoContent, ""},
 		{"a full administrator's console session", session("console"), http.StatusNoContent, ""},
-		{"a full administrator's strazactl session", session("strazactl"), http.StatusNoContent, ""},
 		{"an admin API token with the scope full", mint("root", "full"), http.StatusNoContent, ""},
 		{"a full administrator's coding harness session", session("claude-code"), http.StatusForbidden, `coding harness "claude-code"`},
 		{"an admin API token with every grant", mint("grants", strings.Join(everyGrant, ",")), http.StatusForbidden, needsFull},

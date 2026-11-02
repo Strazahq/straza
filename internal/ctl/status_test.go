@@ -64,7 +64,7 @@ func TestStatusUnreachable(t *testing.T) {
 
 // TestStatusAnswerThatIsNotStrazad pins what status says when the address
 // answers with something other than strazad's JSON. Go's TLS listener asked
-// over plain http gets the sentence that names the https login, any other
+// over plain http gets the sentence that names the https address, any other
 // answer gets its status and what to check, and neither calls strazad
 // unreachable. An https front that relays Go's refusal, and a page that
 // only quotes it, get the proxy sentence. A strazad that answers JSON is the
@@ -103,8 +103,8 @@ func TestStatusAnswerThatIsNotStrazad(t *testing.T) {
 	}{
 		{"a TLS listener asked over plain http", plain, nil,
 			"the server at " + plain + " speaks HTTPS now, so it refused this plain http request. " +
-				"Log in again with `strazactl login --server https://" + tlsSrv.Listener.Addr().String() +
-				"`, which stores the https address for the commands that follow"},
+				"Run the command again with --server https://" + tlsSrv.Listener.Addr().String() +
+				", or set STRAZA_SERVER to that address for the commands that follow"},
 		{"an HTML page", htmlSrv.URL, nil, proxy(htmlSrv.URL, http.StatusOK)},
 		{"an HTML page that quotes Go's refusal", quoting.URL, nil, proxy(quoting.URL, http.StatusBadRequest)},
 		{"an https front that relays Go's refusal", relay.URL, relay.Client(), proxy(relay.URL, http.StatusBadRequest)},

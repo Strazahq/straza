@@ -5,20 +5,36 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type deviceRepo struct{ s *sqlStore }
 
-const deviceCols = "id, user_id, name, fingerprint, platform, status, enrolled_at, client_kind"
+const deviceCols = "id, user_id, name, fingerprint, platform, status, enrolled_at, client_kind, " +
+	"key_jwk, key_thumbprint, custody, machine_binding, key_counter, signed_in_at"
 
 func scanDevice(row scanner) (Device, error) {
 	var d Device
 	var ea scanTime
-	if err := row.Scan(&d.ID, &d.UserID, &d.Name, &d.Fingerprint, &d.Platform, &d.Status, &ea, &d.ClientKind); err != nil {
+	var sa scanTimePtr
+	if err := row.Scan(&d.ID, &d.UserID, &d.Name, &d.Fingerprint, &d.Platform, &d.Status, &ea, &d.ClientKind,
+		&d.KeyJWK, &d.KeyThumbprint, &d.Custody, &d.MachineBinding, &d.KeyCounter, &sa); err != nil {
 		return Device{}, scanErr(err)
 	}
 	d.EnrolledAt = ea.t
+	if sa.t != nil {
+		d.SignedInAt = *sa.t
+	}
 	return d, nil
+}
+
+// signedInArg encodes SignedInAt, NULL for the zero time of a device
+// enrolled without a key.
+func (r deviceRepo) signedInArg(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return r.s.tArg(t)
 }
 
 func (r deviceRepo) Create(ctx context.Context, d Device) (Device, error) {
@@ -27,9 +43,11 @@ func (r deviceRepo) Create(ctx context.Context, d Device) (Device, error) {
 	if d.Status == "" {
 		d.Status = "active"
 	}
-	_, err := r.s.exec(ctx, `INSERT INTO devices (id, user_id, name, fingerprint, platform, status, enrolled_at, client_kind)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		d.ID, d.UserID, d.Name, d.Fingerprint, d.Platform, d.Status, r.s.tArg(d.EnrolledAt), d.ClientKind)
+	_, err := r.s.exec(ctx, `INSERT INTO devices (id, user_id, name, fingerprint, platform, status, enrolled_at, client_kind,
+			key_jwk, key_thumbprint, custody, machine_binding, key_counter, signed_in_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		d.ID, d.UserID, d.Name, d.Fingerprint, d.Platform, d.Status, r.s.tArg(d.EnrolledAt), d.ClientKind,
+		d.KeyJWK, d.KeyThumbprint, d.Custody, d.MachineBinding, d.KeyCounter, r.signedInArg(d.SignedInAt))
 	if err != nil {
 		return Device{}, err
 	}
@@ -58,28 +76,85 @@ func (r deviceRepo) ListByUser(ctx context.Context, userID string) ([]Device, er
 	return out, rows.Err()
 }
 
+// Update writes the key fields too, because a re-enrollment replaces the
+// key, custody, binding and counter and moves SignedInAt. It writes back the
+// counter the caller read, so an AdvanceCounter that lands in between is
+// undone.
 func (r deviceRepo) Update(ctx context.Context, d Device) (Device, error) {
-	err := mustAffect(r.s.exec(ctx, `UPDATE devices SET name = $1, fingerprint = $2, platform = $3, status = $4, client_kind = $5
-		WHERE id = $6`, d.Name, d.Fingerprint, d.Platform, d.Status, d.ClientKind, d.ID))
+	err := mustAffect(r.s.exec(ctx, `UPDATE devices SET name = $1, fingerprint = $2, platform = $3, status = $4, client_kind = $5,
+		key_jwk = $6, key_thumbprint = $7, custody = $8, machine_binding = $9, key_counter = $10, signed_in_at = $11
+		WHERE id = $12`, d.Name, d.Fingerprint, d.Platform, d.Status, d.ClientKind,
+		d.KeyJWK, d.KeyThumbprint, d.Custody, d.MachineBinding, d.KeyCounter, r.signedInArg(d.SignedInAt), d.ID))
 	if err != nil {
 		return Device{}, err
 	}
 	return r.GetByID(ctx, d.ID)
 }
 
-func (r deviceRepo) Delete(ctx context.Context, id string) error {
-	return mustAffect(r.s.exec(ctx, `DELETE FROM devices WHERE id = $1`, id))
+// AdvanceCounter is one conditional write, so of two concurrent check-ins
+// with the same counter only one moves it, and a lower counter never
+// replaces a higher one. The thumbprint condition keeps a check-in on a key
+// the device was enrolled away from, after its read, off the new key's
+// counter. A missing device, another key and a counter at or below the
+// stored one all answer false.
+func (r deviceRepo) AdvanceCounter(ctx context.Context, id, thumbprint string, n int64) (bool, error) {
+	// n rides twice: the dialect rewriter takes $1..$n strictly in order.
+	res, err := r.s.exec(ctx, `UPDATE devices SET key_counter = $1 WHERE id = $2 AND key_thumbprint = $3 AND key_counter < $4`,
+		n, id, thumbprint, n)
+	if err != nil {
+		return false, err
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return changed == 1, nil
+}
+
+// SpendProof sweeps, then inserts. The insert alone decides the answer, so
+// of two replicas spending one proof at once only one inserts the row.
+func (r deviceRepo) SpendProof(ctx context.Context, thumbprint, jti string, until time.Time) (bool, error) {
+	if _, err := r.s.exec(ctx, `DELETE FROM spent_proofs WHERE `+r.s.timeAfter("$1", "expires_at"), r.s.tArg(now())); err != nil {
+		return false, err
+	}
+	res, err := r.s.exec(ctx, `INSERT INTO spent_proofs (key, expires_at) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		thumbprint+" "+jti, r.s.tArg(until))
+	if err != nil {
+		return false, err
+	}
+	inserted, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return inserted == 1, nil
 }
 
 type sessionRepo struct{ s *sqlStore }
 
-const sessionCols = "id, user_id, device_id, harness_name, harness_version, attestation_level, attestation_hashes, status, started_at, last_seen, client_version"
+const sessionCols = "id, user_id, device_id, harness_name, harness_version, attestation_level, attestation_hashes, status, started_at, last_seen, client_version, client_commit"
+
+// clientCommitMax is the most bytes of a client-sent commit a session keeps.
+// A git commit id is 40 or 64 hex characters, so nothing longer is one.
+const clientCommitMax = 64
+
+// cutClientCommit cuts c to clientCommitMax bytes on a character boundary,
+// so a client cannot grow a session row through the field.
+func cutClientCommit(c string) string {
+	if len(c) <= clientCommitMax {
+		return c
+	}
+	n := clientCommitMax
+	for n > 0 && !utf8.RuneStart(c[n]) {
+		n--
+	}
+	return c[:n]
+}
 
 func scanSession(row scanner) (Session, error) {
 	var s Session
 	var sa, ls scanTime
 	if err := row.Scan(&s.ID, &s.UserID, &s.DeviceID, &s.HarnessName, &s.HarnessVersion,
-		&s.AttestationLevel, &s.AttestationHashes, &s.Status, &sa, &ls, &s.ClientVersion); err != nil {
+		&s.AttestationLevel, &s.AttestationHashes, &s.Status, &sa, &ls, &s.ClientVersion, &s.ClientCommit); err != nil {
 		return Session{}, scanErr(err)
 	}
 	s.StartedAt, s.LastSeen = sa.t, ls.t
@@ -101,10 +176,11 @@ func (r sessionRepo) Create(ctx context.Context, s Session) (Session, error) {
 	if s.AttestationHashes == "" {
 		s.AttestationHashes = "{}"
 	}
-	_, err := r.s.exec(ctx, `INSERT INTO sessions (id, user_id, device_id, harness_name, harness_version, attestation_level, attestation_hashes, status, started_at, last_seen, client_version)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+	s.ClientCommit = cutClientCommit(s.ClientCommit)
+	_, err := r.s.exec(ctx, `INSERT INTO sessions (id, user_id, device_id, harness_name, harness_version, attestation_level, attestation_hashes, status, started_at, last_seen, client_version, client_commit)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		s.ID, s.UserID, s.DeviceID, s.HarnessName, s.HarnessVersion,
-		s.AttestationLevel, s.AttestationHashes, s.Status, r.s.tArg(s.StartedAt), r.s.tArg(s.LastSeen), s.ClientVersion)
+		s.AttestationLevel, s.AttestationHashes, s.Status, r.s.tArg(s.StartedAt), r.s.tArg(s.LastSeen), s.ClientVersion, s.ClientCommit)
 	if err != nil {
 		return Session{}, err
 	}
@@ -196,33 +272,6 @@ func (r sessionRepo) SetStatus(ctx context.Context, id, status string) error {
 		`UPDATE sessions SET status = $1 WHERE id = $2`, status, id))
 }
 
-// SetStatusIfChanged is SetStatus with a truthful transition report. The
-// distinction cannot come from RowsAffected on a plain UPDATE (both dialects
-// count a same-value write as affected), so the WHERE clause carries it, and
-// a 0-row outcome is disambiguated with one lookup (absent vs already-there).
-// The row is the durable signal on purpose: an in-memory check (denylist)
-// answers wrongly on a restarted or peer pod, whose maps are rebuilt FROM
-// these rows.
-func (r sessionRepo) SetStatusIfChanged(ctx context.Context, id, status string) (bool, error) {
-	// status rides twice: the dialect rewriter takes $1..$n strictly in order.
-	res, err := r.s.exec(ctx,
-		`UPDATE sessions SET status = $1 WHERE id = $2 AND status <> $3`, status, id, status)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if n > 0 {
-		return true, nil
-	}
-	if _, err := r.GetByID(ctx, id); err != nil {
-		return false, err // ErrNotFound for an absent session
-	}
-	return false, nil // already carried the target status
-}
-
 // CloseIdle closes every active session not seen since the cutoff: such a
 // session's token expired long ago and can never refresh (an expired token
 // is refused at checkin), so the row is dead bookkeeping, not a live
@@ -266,7 +315,7 @@ func (r sessionRepo) CloseIdle(ctx context.Context, cutoff time.Time) ([]ClosedS
 
 // CloseStartedBefore closes every active session started before the cutoff,
 // whether or not it is still being refreshed: past the absolute lifetime the
-// row ends and the client starts a fresh session from its device credential.
+// row ends and the client starts a fresh session from its enrollment.
 func (r sessionRepo) CloseStartedBefore(ctx context.Context, cutoff time.Time) ([]ClosedSession, error) {
 	return r.closeActive(ctx,
 		`UPDATE sessions SET status = $1 WHERE status = $2 AND started_at < $3 RETURNING id, user_id`, cutoff)

@@ -37,11 +37,10 @@ No console sheet changes this switch, so publish it like any other manifest chan
 ```sh
 strazactl apps export views-demo > views-demo.yaml
 strazactl drafts create -f views-demo.yaml
-strazactl drafts publish <id>
 ```
 {{< /command >}}
 
-Edit `views-demo.yaml` between the first two commands, and write back every value the export masks first, as [the apps directory]({{< relref "guides/serve-mcp-apps/gitops-apps-directory.md#the-directory-and-the-other-ways-in" >}}) explains. `strazactl apps install -f views-demo.yaml` publishes the same change in one step. Only the scope `apps:write` or the role `straza-global-mcp-admin` may change the switch, because with views on, chat apps show the server's own HTML to the people who use it. A server's own admin role is refused with "changing straza.exposure.views of a server needs the scope apps:write or the role straza-global-mcp-admin, because with views on, chat apps show the server's own HTML pages to the people who use it. Ask a holder of straza-global-mcp-admin to make that change."
+Edit `views-demo.yaml` between the two commands, and write back every value the export masks first, as [the apps directory]({{< relref "guides/serve-mcp-apps/gitops-apps-directory.md#the-directory-and-the-other-ways-in" >}}) explains. A person then publishes the draft in the console under **Drafts**, because strazactl runs on an admin API token and a token never publishes. `strazactl apps install -f views-demo.yaml` publishes the same change in one step. Only the scope `apps:write` or the role `straza-global-mcp-admin` may change the switch, because with views on, chat apps show the server's own HTML to the people who use it. A server's own admin role is refused with "changing straza.exposure.views of a server needs the scope apps:write or the role straza-global-mcp-admin, because with views on, chat apps show the server's own HTML pages to the people who use it. Ask a holder of straza-global-mcp-admin to make that change."
 
 
 With the switch off, nothing changes for the server: Straza's handshake with it stays the same, and no tool carries a view link. With it on, Straza tells the server that chat apps can show views and reads each view a listed tool links. It serves a view only when the view is one HTML text of at most 2 MiB, and at most 32 views of one server. Straza reads a view again within 10 minutes, or at once after `strazactl apps recheck views-demo`. A changed view raises the same drift alarm as a changed tool, and a view the server stops answering for stays served for at most 20 minutes after its last answer.
@@ -54,7 +53,7 @@ The demo stack ships two servers with views on. `views-demo`, the official MCP A
 Straza's combined endpoint, `/mcp`, names every tool after its server, as `views-demo__get-time`, while a view calls its tools by the server's own names. Views are therefore served only on the server's own endpoint, `/mcp/views-demo`. That endpoint lists the server's tools under their own names with their view links, applies the same rules, holds and records as `/mcp`, and lists none of the built-in straza tools.
 
 
-`straza mcp views-demo` connects a chat app to that endpoint over stdio, on a machine where `straza enroll` has run. For Claude Desktop on macOS, add the entry to `~/Library/Application Support/Claude/claude_desktop_config.json`, with the path of your own `straza` binary, then restart Claude Desktop:
+`straza mcp views-demo` connects a chat app to that endpoint over stdio, on a machine whose `straza service`, the Straza background service, holds your enrollment. On a Mac that service comes from the Straza package for macOS, as [Install]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) shows, and `/usr/local/bin/straza` is the package's link to its binary. Claude Desktop on macOS reads the entry from `~/Library/Application Support/Claude/claude_desktop_config.json`, with the path of your own `straza` binary, after a restart:
 
 ```json
 {
@@ -67,7 +66,7 @@ Straza's combined endpoint, `/mcp`, names every tool after its server, as `views
 }
 ```
 
-Ask Claude for the time on the server. The `get-time` tool runs and the clock card renders, and its Get Server Time button calls `get-time` again through Straza. Claude Desktop on Windows reportedly shows no view for a local stdio server (issue 1069 in anthropics/claude-ai-mcp), so walk this on macOS. Register a server's own entry only in chat apps that show views. In Claude Code, the hooks take only the `straza` entry's tools for gateway calls, so keep `straza mcp` there.
+In a chat app that shows views, ask Claude for the time on the server. The `get-time` tool runs and the clock card renders, and its Get Server Time button calls `get-time` again through Straza. Claude Desktop on Windows reportedly shows no view for a local stdio server (issue 1069 in anthropics/claude-ai-mcp). Register a server's own entry only in chat apps that show views. In Claude Code, the hooks take only the `straza` entry's tools for gateway calls, so keep `straza mcp` there.
 
 
 The endpoint advertises the extension in its handshake, and `tools/list` keeps the view link. The walk's answers, trimmed:

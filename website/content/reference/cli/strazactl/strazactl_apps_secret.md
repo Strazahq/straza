@@ -18,12 +18,12 @@ strazactl apps secret [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
 * [strazactl apps](/reference/cli/strazactl/strazactl_apps/): Manage MCP servers
-* [strazactl apps secret remove](/reference/cli/strazactl/strazactl_apps_secret_remove/): Remove the server's own secret, or with --role the override one role uses
-* [strazactl apps secret set](/reference/cli/strazactl/strazactl_apps_secret_set/): Store the server's own secret, or with --role the override one role uses instead
+* [strazactl apps secret remove](/reference/cli/strazactl/strazactl_apps_secret_remove/): Remove the server's own secret, with --role the override one role uses, or with --listing the listing credential
+* [strazactl apps secret set](/reference/cli/strazactl/strazactl_apps_secret_set/): Store the server's own secret, with --role the override one role uses instead, or with --listing the listing credential
 

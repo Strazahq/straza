@@ -28,8 +28,8 @@ func TestApproverPendingCarriesSessionIdentity(t *testing.T) {
 	var mint struct {
 		EnrollToken string `json:"enroll_token"`
 	}
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "kim"}, &mint); code != http.StatusOK {
+	if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", adminTok,
+		map[string]any{"channel": "mobile"}, &mint); code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d", code)
 	}
 	_, spki := genApproverKey(t)

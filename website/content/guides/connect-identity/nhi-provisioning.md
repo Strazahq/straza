@@ -5,9 +5,9 @@ pagetype: how-to
 weight: 50
 draft: false
 tested:
-  version: v1.1.0
-  platform: A Linux container against the demo stack, with the administrator's commands and the agent's commands run as two users of the same container
-  date: 2026-09-28
+  version: v1.0.0-1570-gaf326165-dirty
+  platform: An Alpine 3.20 container against a standalone server, both built from an uncommitted working tree, where the SCIM request, the role made with strazactl roles create and its members PATCH, every strazactl and curl block, and keygen, the headless enrollment, status and the refused enrollment through a straza service started with STRAZA_HOME in the agent's home directory all ran. That run came before strazactl stopped signing in, so the admin API token the steps now hand to strazactl was written in on 2026-11-01 and not walked. The administrator's commands and the agent's commands ran as the same OS user with separate home directories. The console steps and the midPoint notes describe the demo stack and were not run. The Undo sentences that say a key removal ends the running sessions and refuses the held ID token, and the dialog text there, were written from the code on 2026-10-27 and not walked
+  date: 2026-10-21
 applies_to: both
 who: You, as the admin, and the AI agent's machine
 where: A terminal with strazactl and curl, and a terminal on the agent's machine
@@ -30,11 +30,11 @@ The identity manager cuts an agent the way it cuts a person. Once the record is 
 ## Before you start {.nostep}
 
 
-- A Straza administrator login for `strazactl`, or a console session that holds the identity area.
+- `strazactl` with `STRAZA_SERVER` and an admin API token in `STRAZA_API_TOKEN`, or a console session that holds the identity area. The steps mint another token, which takes `tokens:write`, a root-equivalent grant, so mint a **Full root** token for 30 days in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows, and revoke it when you are done.
 - The `straza` binary on the agent's machine.
 - An admin API token in `ADMIN_API_TOKEN`, for the SCIM request and the two admin API reads below. Mint it with `strazactl api-token create --name idm-agents --scope scim:read,scim:write,identity:read`. In the console, mint it under **Settings**, **API tokens**, **New API token** with the job **Custom**, **scim** set to **read and write** and **identity** set to **read**.
 
-The examples ran against the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) at `http://localhost:8420`, with the agent's side on the same host.
+The command examples ran against a standalone server at `http://localhost:8420`, with the agent's side on the same host. The console steps and the midPoint notes describe the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}).
 
 ## Provision the identity
 
@@ -52,7 +52,7 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" -H 'Content-Type: applicatio
 {{< see >}}`"kind":"nhi"` and the sponsor `alice` under `ext`.{{< /see >}}
 
 ```text
-{"id":"01a0e998-c864-7011-a0fd-3f959fe0a63e","userName":"scout-bot","userType":"agent","active":true,"ext":{"agencyMode":"autonomous","kind":"nhi","locked":false,"origin":"scim","sponsor":"alice"}}
+{"id":"01a15d8e-856f-7d10-9e63-a550763da368","userName":"scout-bot","userType":"agent","active":true,"ext":{"agencyMode":"autonomous","kind":"nhi","locked":false,"origin":"scim","sponsor":"alice"}}
 ```
 
 
@@ -86,8 +86,8 @@ strazactl users list
 {{< see >}}`scout-bot` with `ORIGIN` `scim`.{{< /see >}}
 
 ```table
-USERNAME                  STATUS  ORIGIN  EMAIL                           ID
-scout-bot                 active  scim                                    01a0e998-c864-7011-a0fd-3f959fe0a63e
+USERNAME     STATUS    ORIGIN  EMAIL              ID
+scout-bot    active    scim                       01a15d8e-856f-7d10-9e63-a550763da368
 ```
 
 The listing is trimmed to the new row.
@@ -98,7 +98,7 @@ The listing is trimmed to the new row.
 
 {{< only form="cli" >}}The key is made on the agent's machine, so this step runs in its terminal.{{< /only >}}
 
-Generate the key on the agent's machine. The private half stays there, and the command prints the exact registration line:
+Generate the key on the agent's machine, as the agent's user. `straza service`, the Straza background service on that machine, makes the key and keeps the private half, so it never reaches the agent. It runs on Linux, macOS and Windows, as [Headless agents]({{< relref "guides/govern-an-agent/headless-agents.md" >}}) says. The command prints the exact registration line:
 
 {{< command terminal="Terminal 2" purpose="on the agent's machine" >}}
 ```sh
@@ -109,12 +109,12 @@ straza keygen --user scout-bot
 {{< see >}}The `Public key:` line, which the next step registers.{{< /see >}}
 
 ```text
-NHI key generated (private half stays in /home/agent/.straza/state/nhi-key.json).
-Public key: YNw6V5UQxROrLSHGY4eiRCOY4POchjr60rZev41NsQ8=
+NHI key generated (the Straza background service holds the private half).
+Public key: pzXwnoH6Vcc/cs+T/gxsrZ/SGMzU7J7nQSgfKWy5AUg=
 
 An administrator registers it with:
-  strazactl users nhi-key set scout-bot YNw6V5UQxROrLSHGY4eiRCOY4POchjr60rZev41NsQ8=
-(or: PUT /v1/admin/users/{id}/nhi-key {"public_key":"YNw6V5UQxROrLSHGY4eiRCOY4POchjr60rZev41NsQ8="})
+  strazactl users nhi-key set scout-bot pzXwnoH6Vcc/cs+T/gxsrZ/SGMzU7J7nQSgfKWy5AUg=
+(or: PUT /v1/admin/users/{id}/nhi-key {"public_key":"pzXwnoH6Vcc/cs+T/gxsrZ/SGMzU7J7nQSgfKWy5AUg="})
 Then enroll headless:
   straza enroll --server <strazad-url> --headless --user scout-bot
 ```
@@ -142,7 +142,7 @@ The **Assertion key** section shows only on an AI agent. Paste the key under **P
 {{< cli >}}
 {{< command terminal="Terminal" purpose="Straza administration" >}}
 ```sh
-strazactl users nhi-key set scout-bot YNw6V5UQxROrLSHGY4eiRCOY4POchjr60rZev41NsQ8=
+strazactl users nhi-key set scout-bot pzXwnoH6Vcc/cs+T/gxsrZ/SGMzU7J7nQSgfKWy5AUg=
 ```
 {{< /command >}}
 
@@ -156,12 +156,12 @@ key registered for scout-bot. The agent can now `straza enroll --headless --user
 
 {{< command terminal="Terminal" purpose="admin API" >}}
 ```sh
-curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost:8420/v1/admin/users/01a0e998-c864-7011-a0fd-3f959fe0a63e/nhi-key
+curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost:8420/v1/admin/users/01a15d8e-856f-7d10-9e63-a550763da368/nhi-key
 ```
 {{< /command >}}
 
 ```text
-{"created":"2026-09-28T19:58:38.022919495Z","fingerprint":"sha256:73f8ea006bb4bca644f6cba92a499e25c3752bd6dcea854112df45a42466e342","registered":true,"user_id":"01a0e998-c864-7011-a0fd-3f959fe0a63e"}
+{"created":"2026-10-21T08:23:04.034349172Z","fingerprint":"sha256:86f2e918a060dc958b8483ba0248f82acf8e4d21fe658c2cd589f897b4f848a8","registered":true,"user_id":"01a15d8e-856f-7d10-9e63-a550763da368"}
 ```
 {{< /cli >}}
 
@@ -170,7 +170,7 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost:8420/v1/adm
 
 Roles arrive the way they do for a person: the identity manager adds the identity to the role's group. The example added `scout-bot` to the application role `scout-tools-readers` with a members PATCH, the request [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md#read-a-role-and-write-its-membership" >}}) shows. The identity's `groups` then listed the role.
 
-Enrollment needs no person, because the key signs a short-lived token. strazad's discovery document names the issuer that accepts the key as `nhi_issuer`. On the agent's machine, enroll and check the client:
+Enrollment needs no person, because the service signs a short-lived token with the key. strazad's discovery document names the issuer that accepts the key as `nhi_issuer`. On the agent's machine, enroll and check what the service holds:
 
 {{< command terminal="Terminal 2" purpose="on the agent's machine" >}}
 ```sh
@@ -178,10 +178,10 @@ straza enroll --server http://localhost:8420 --headless --user scout-bot
 ```
 {{< /command >}}
 
-{{< see >}}`Enrolled headless as scout-bot`.{{< /see >}}
+{{< see >}}`Enrolled headless as scout-bot.`, followed by a sentence that the Straza background service holds this agent's key.{{< /see >}}
 
 ```text
-Enrolled headless as scout-bot (nhi-key; sessions are deviceless, and the local credential mints each session's token).
+Enrolled headless as scout-bot. The Straza background service holds this agent's key and starts each of its sessions.
 ```
 
 {{< command terminal="Terminal 2" purpose="on the agent's machine" >}}
@@ -191,12 +191,14 @@ straza status
 {{< /command >}}
 
 ```text
+service    straza service v1.0.0-1570-gaf326165-dirty (custody user)
 server     http://localhost:8420
-identity   scout-bot (headless, nhi-key lane, no device)
+identity   scout-bot (AI agent, no device, key l4kywJ7bjSeu)
 session    none (start a harness session)
+audit      nothing waiting to upload
 ```
 
-No harness has started a session yet, so the session line says so. Once one starts, the line names the session with its roles and attestation, such as `01a0e999-b481-7406-8821-e792b25c31c0 (roles [scout-tools-readers], attestation advisory)`. Two more lines then name the policy snapshot and the kill-switch lane. The identity line names the key sign-in instead of a device, because the key mints every session token and no device credential exists. [Headless agents]({{< relref "guides/govern-an-agent/headless-agents.md" >}}) proves a governed call from such an agent.
+No harness has started a session yet, so the session line says so. Once one starts, a session line names the harness window, the session id, the user, how long its token lasts and the state of its kill switch. The identity line says `AI agent, no device`, because the key mints every session token and no device exists. [Headless agents]({{< relref "guides/govern-an-agent/headless-agents.md" >}}) proves a governed call from such an agent.
 
 ## Verify
 
@@ -212,7 +214,7 @@ An administrator's view of the identity shows every fact in one record.
 {{< cli >}}
 {{< command terminal="Terminal" purpose="admin API" >}}
 ```sh
-curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost:8420/v1/admin/users/01a0e998-c864-7011-a0fd-3f959fe0a63e \
+curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost:8420/v1/admin/users/01a15d8e-856f-7d10-9e63-a550763da368 \
   | jq -c '{username, kind, user_type, origin, sponsor, agency_mode, effective_roles, nhi_key_registered}'
 ```
 {{< /command >}}
@@ -225,14 +227,14 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost:8420/v1/adm
 ## Undo
 
 
-Revoking the key is the immediate cut for the credential, and the next enrollment attempt fails. A session that is already running keeps going until you revoke it or the identity is deactivated.
+Revoking the key is the cut for the credential, and the next enrollment attempt fails at once. It also ends every session of the agent that is running. The service still holds the agent's last ID token, but the server refuses it, because that token names the removed key, so no new session starts with it. Registering a different key ends the running sessions the same way.
 
 {{< console >}}
 {{< clicks "Users" "scout-bot" "Revoke key" "Revoke key" >}}
 
 {{< shot name="user-agent-key" caption="A registered key with its fingerprint, **Rotate key** and **Revoke key**." >}}
 
-The question reads `Revoke the assertion key of scout-bot?` and says `scout-bot can no longer mint sessions with the client_credentials grant.`
+The question reads `Revoke the assertion key of scout-bot?` and says `The running sessions of scout-bot end now, and it can no longer mint sessions with the client_credentials grant.`
 {{< /console >}}
 
 {{< cli >}}
@@ -256,7 +258,7 @@ straza enroll --server http://localhost:8420 --headless --user scout-bot
 {{< /command >}}
 
 ```text
-straza: headless login refused (invalid_client): client authentication failed. Check the registered key/client and that the identity is an active NHI
+straza: the identity provider refused the agent's sign-in (invalid_client): client authentication failed. Check the registered key or client, and that the user is an active agent
 ```
 
 
@@ -267,7 +269,7 @@ Retiring the identity is the identity manager's act. A SCIM deactivation or dele
 
 Humans are excluded from the key grant on purpose, so a stolen key can never become a password-equivalent login for a person.
 
-In the enterprise profile an agent has a second way to sign in, the identity provider's own client-credentials grant. There the agent holds a client id and secret at the identity provider, and strazad resolves the token's subject to the provisioned identity's `externalId`. An agent with a registered key uses the key, and an agent without one uses the identity provider. A deployment that registers no keys has nothing to configure. [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#agent-sign-in" >}}) shows both profiles.
+In the enterprise profile an agent has a second way to sign in, the identity provider's own client-credentials grant. There the agent has a client id and secret at the identity provider, which the service reads from a file only it can read and never from the agent's environment, as [Headless agents]({{< relref "guides/govern-an-agent/headless-agents.md" >}}) describes. strazad resolves the token's subject to the provisioned identity's `externalId`. An agent with a registered key uses the key, and an agent without one uses the identity provider. A deployment that registers no keys has nothing to configure. An agent that an older Straza client enrolled with a key file or a client secret in its environment still checks in without a proof, which the server accepts. Register a new key from `straza keygen` through the service with `strazactl users nhi-key set`, and rotate every client secret that sat in an agent's environment. [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#agent-sign-in" >}}) shows both profiles.
 
 ## Next {.nostep}
 

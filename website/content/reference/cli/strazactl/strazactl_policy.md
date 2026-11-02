@@ -2,7 +2,7 @@
 title: strazactl policy
 description: Validate and manage PolicySets
 pagetype: reference
-weight: 68
+weight: 64
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl policy [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -94,6 +94,52 @@ func (s *Service) resolveDeciders(ctx context.Context, in RequestInput) (users [
 	return []string{su.Username}, false, ""
 }
 
+// deciders resolves the decide pool of a new record for in through
+// resolveDeciders, and approver roles on the rule carry the record instead
+// of the requester. A pool that comes out entirely empty answers an
+// *UnroutableError and logs one warn line. cause is the failed sponsor half
+// of a pool that roles still carry, which the caller logs.
+func (s *Service) deciders(ctx context.Context, in RequestInput) (users []string, requesterDecides bool, cause string, err error) {
+	users, requesterDecides, cause = s.resolveDeciders(ctx, in)
+	// A rule that also names approver roles asked for a second pair of eyes,
+	// so the roles carry the record and it never becomes a self-confirmation.
+	requesterDecides = requesterDecides && len(in.Spec.Roles) == 0
+	if len(users) == 0 && len(in.Spec.Roles) == 0 && !in.Confirm && !in.Spec.SelfApproval && !requesterDecides {
+		// Revision 14: an entirely empty pool means nobody would ever be
+		// notified and nobody but a console-watching admin could ever decide,
+		// so the call is denied NOW with the cause instead of minting a record
+		// that can only expire (a fleet must never wait on an approval nobody
+		// will see). The PEP's decision audit carries the deny + reason; this
+		// warn line and the server-side unroutable counter are the ops trail.
+		if cause == "" {
+			cause = "the rule names no approver"
+		}
+		s.log.Warn("approval unroutable; denied at request",
+			"lane", in.Lane, "rule", in.RuleID, "user", in.Username, "cause", cause)
+		return nil, false, cause, &UnroutableError{Cause: fmt.Sprintf(
+			"%s, and rule %q names no approver roles. Fix: set the requester's sponsor to a person in your identity manager, or add approve.roles / approve.deciders to the rule",
+			cause, in.RuleID)}
+	}
+	return users, requesterDecides, cause, nil
+}
+
+// Routable answers what Request would answer for in before it writes
+// anything, and writes nothing itself: nil when a pending record already
+// covers the call or someone could decide a new one, an *UnroutableError
+// with Request's cause when nobody could, and the lookup's store error
+// otherwise. It runs the same lookup first, as Request does. A nil answer
+// does not promise the later Request, because the store or the sponsor can
+// change in between.
+func (s *Service) Routable(ctx context.Context, in RequestInput) error {
+	if _, err := s.findPendingDedupe(ctx, in, in.ArgvHash); err == nil {
+		return nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("approval request-dedupe: %w", err)
+	}
+	_, _, _, err := s.deciders(ctx, in)
+	return err
+}
+
 // Request creates (or dedupes onto) a pending record, then notifies + audits.
 // The dedupe key is (rule, argvHash) among pending rows, scoped per class by
 // findPendingDedupe: session for a hold, USER for a ticket. A hit returns the
@@ -110,8 +156,8 @@ func (s *Service) Request(ctx context.Context, in RequestInput) (Record, error) 
 	// one place every caller shares. Username is deliberately untouched: it
 	// is a server-verified identity field joined against users, not display
 	// text, and escaping it would break those joins.
-	in.Summary = redact.Neutralize(in.Summary)
-	in.Justification = redact.Neutralize(in.Justification)
+	in.Summary = clampDisplay(redact.Neutralize(in.Summary))
+	in.Justification = clampDisplay(redact.Neutralize(in.Justification))
 	in.ArgsPreview = redact.Neutralize(in.ArgsPreview)
 	if existing, err := s.findPendingDedupe(ctx, in, in.ArgvHash); err == nil {
 		s.log.Debug("approval request attached to pending", "component", "approval", "id", existing.ID, "rule", in.RuleID)
@@ -120,25 +166,9 @@ func (s *Service) Request(ctx context.Context, in RequestInput) (Record, error) 
 		return Record{}, fmt.Errorf("approval request-dedupe: %w", err) // the PEP logs once with the correlation id
 	}
 
-	users, requesterDecides, cause := s.resolveDeciders(ctx, in)
-	// A rule that also names approver roles asked for a second pair of eyes,
-	// so the roles carry the record and it never becomes a self-confirmation.
-	requesterDecides = requesterDecides && len(in.Spec.Roles) == 0
-	if len(users) == 0 && len(in.Spec.Roles) == 0 && !in.Confirm && !in.Spec.SelfApproval && !requesterDecides {
-		// Revision 14: an entirely empty pool means nobody would ever be
-		// notified and nobody but a console-watching admin could ever decide,
-		// so the call is denied NOW with the cause instead of minting a record
-		// that can only expire (a fleet must never wait on an approval nobody
-		// will see). The PEP's decision audit carries the deny + reason; this
-		// warn line and the server-side unroutable counter are the ops trail.
-		if cause == "" {
-			cause = "the rule names no approver"
-		}
-		s.log.Warn("approval unroutable; denied at request",
-			"lane", in.Lane, "rule", in.RuleID, "user", in.Username, "cause", cause)
-		return Record{}, &UnroutableError{Cause: fmt.Sprintf(
-			"%s, and rule %q names no approver roles. Fix: set the requester's sponsor to a person in your identity manager, or add approve.roles / approve.deciders to the rule",
-			cause, in.RuleID)}
+	users, requesterDecides, cause, err := s.deciders(ctx, in)
+	if err != nil {
+		return Record{}, err
 	}
 	if cause != "" {
 		// Roles still carry the record; the failed sponsor half is warn-only.

@@ -34,9 +34,9 @@ func (e *DisabledUserError) Error() string {
 // ExternalVerifier validates ID tokens minted by an external OIDC IdP
 // (Keycloak, Okta, Entra, …) and maps their claims onto local users.
 //
-// Mapping order: external_id == sub, then username == preferred_username,
-// then email. A matched user without an external_id gets it backfilled
-// (account linking). With JIT enabled a missing user is created.
+// Mapping order: external_id == sub, then username == preferred_username.
+// A matched user without an external_id gets it backfilled (account
+// linking). With JIT enabled a missing user is created.
 type ExternalVerifier struct {
 	verifier *oidc.IDTokenVerifier
 	users    store.UserRepo
@@ -114,29 +114,43 @@ func discoverAt(ctx context.Context, issuerURL, discoveryURL string) (*oidc.Prov
 type externalClaims struct {
 	Username string `json:"preferred_username"`
 	Email    string `json:"email"`
+	AuthTime any    `json:"auth_time"`
 }
 
 // VerifyLogin validates the raw ID token and resolves it to an active local
-// user per the mapping rules above. A user who is not active comes back as
-// a *DisabledUserError.
+// user, as VerifyLoginFacts does, without the login facts.
 func (v *ExternalVerifier) VerifyLogin(ctx context.Context, rawIDToken string) (store.User, error) {
+	u, _, err := v.VerifyLoginFacts(ctx, rawIDToken)
+	return u, err
+}
+
+// VerifyLoginFacts validates the raw ID token, resolves it to an active
+// local user per the mapping rules above, and returns the token's nonce and
+// auth_time beside the user. A user who is not active comes back as a
+// *DisabledUserError. An auth_time that is not a number refuses the token.
+// Every refusal returns the zero user and the zero facts.
+func (v *ExternalVerifier) VerifyLoginFacts(ctx context.Context, rawIDToken string) (store.User, LoginFacts, error) {
 	idToken, err := v.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		return store.User{}, fmt.Errorf("authn: external id token rejected: %w", err)
+		return store.User{}, LoginFacts{}, fmt.Errorf("authn: external id token rejected: %w", err)
 	}
 	var claims externalClaims
 	if err := idToken.Claims(&claims); err != nil {
-		return store.User{}, fmt.Errorf("authn: parse claims: %w", err)
+		return store.User{}, LoginFacts{}, fmt.Errorf("authn: parse claims: %w", err)
+	}
+	facts := LoginFacts{Nonce: idToken.Nonce}
+	if facts.AuthTime, err = numericDate(claims.AuthTime); err != nil {
+		return store.User{}, LoginFacts{}, fmt.Errorf("authn: external id token rejected: %w", err)
 	}
 
 	u, err := v.mapUser(ctx, idToken.Subject, claims)
 	if err != nil {
-		return store.User{}, err
+		return store.User{}, LoginFacts{}, err
 	}
 	if u.Status != store.UserActive {
-		return store.User{}, &DisabledUserError{User: u}
+		return store.User{}, LoginFacts{}, &DisabledUserError{User: u}
 	}
-	return u, nil
+	return u, facts, nil
 }
 
 // protects reports whether username is the protected local account.

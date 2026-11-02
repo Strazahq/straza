@@ -1,10 +1,35 @@
-# SCIM Profile, v1beta1 (revision 20)
+# SCIM Profile, v1beta1 (revision 21)
 
 Status: **beta**. The profile began as v1alpha1, and the move to beta
 changed no wire format. Conformance transcripts: `spec/conformance/scim/*.json`. The
 platform's SCIM server MUST satisfy every transcript; they double as request
 examples for the identity manager guides at
 https://docs.straza.ai/guides/connect-identity/.
+
+Revision 21 (2026-10-19, https://docs.straza.ai/guides/connect-identity/midpoint/):
+a role may cover only some objects of a server that pins an object type,
+and the read-only Group projection (§4.1) says which. The block gains
+`covers`, a multi-valued string next to `tools`, computed over the
+implication closure like `apps`. Each access row in the closure on a
+server that pins a type renders values of the form
+`<server>:<type> <rest>`, where `<server>` is the server's name as `apps`
+spells it and `<type>` is the pinned type word. `<rest>` is `every` for a
+row that covers every object, and `none` for a row with no covers line or
+one Straza cannot read, because such a row covers nothing. A row that
+names objects renders one value per object, with the object's name as a
+JSON string. The names are quoted so that an object named `every` renders
+as `"every"` and never reads as every object. Values are deduplicated and
+sorted in byte order, and `every` from one row never hides a name from
+another. Outside a failed read, `covers` is never omitted on a role whose
+closure binds a server that pins a type, because a certifier would read
+its absence as every object. When a read that `apps`, `tools` or `covers` needs fails, the
+block leaves out all three together and renders the rest as before, so it
+never shows tools without the objects they reach. The attribute is
+read-only like the rest of the block, so a PATCH against it answers `400`
+scimType `mutability` with the existing detail. Additive: the revision 20
+transcripts replay unchanged, and the `group-enrichment` transcript gains
+three steps, derived from the reference server and not captured from a
+live wire.
 
 Revision 20 (2026-10-01, https://docs.straza.ai/guides/serve-mcp-apps/catalogs-per-role/):
 every application role that reaches an MCP server is server-owned, so the
@@ -468,8 +493,9 @@ Every rendered wire-group (exported role) declares and renders
   "roleKind": "business",
   "plane": "access",
   "description": "Developer access: demo-tools + midpoint read",
-  "apps": ["demo-tools", "midpoint"],
-  "tools": ["demo-tools:echo", "midpoint:search_users"],
+  "apps": ["demo-tools", "midpoint", "objects-demo"],
+  "tools": ["demo-tools:echo", "midpoint:search_users", "objects-demo:repo_read"],
+  "covers": ["objects-demo:repo \"Strazahq/docs-site\"", "objects-demo:repo \"Strazahq/straza\""],
   "policies": ["dev-guardrails"],
   "administers": ["finance/jira"]
 }
@@ -505,9 +531,23 @@ Every rendered wire-group (exported role) declares and renders
   server-owned roles by this one attribute, never by parsing the name.
   Membership on a server-owned wire-group is the identity manager's like
   on every other.
+- `covers` (revision 21) says which objects the closure's access rows
+  reach on servers that pin an object type. Each such row renders values
+  `<server>:<type> <rest>`, with `<server>` the server's name as `apps`
+  spells it and `<type>` the pinned type word. `<rest>` is `every`, or
+  `none` for a row with no covers line or one Straza cannot read, which
+  covers nothing. A row that names objects renders one value per object,
+  with the name as a JSON string and HTML escaping off, so a quoted name
+  such as `"every"` never reads as every object. Values are deduplicated
+  and sorted in byte order, so `every` from one role and a name from
+  another both show. A row on a server that pins no type renders nothing.
+  Outside a failed read, omitted only when no row in the closure sits on
+  a server that pins a type, because a certifier would read its absence
+  on such a role as every object. When a read that `apps`, `tools` or `covers` needs fails,
+  the block leaves out all three.
 - The whole block is **readOnly**: PATCH against the URN, its qualified
   sub-attributes, or the bare names (`role`, `roleKind`, `plane`,
-  `description`, `apps`, `tools`, `policies`, `administers`, `server`) ⇒ `400` scimType
+  `description`, `apps`, `tools`, `policies`, `administers`, `server`, `covers`) ⇒ `400` scimType
   `mutability`. PUT bodies carrying the URN are ignored (mapped-subset
   rule); the response re-renders server truth. Membership stays the only
   assignable fact on this wire: grants change through Straza roles and

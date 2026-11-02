@@ -2,7 +2,7 @@
 title: strazactl apps disable
 description: 'Pause a server: stop it and keep it stopped until re-enabled'
 pagetype: reference
-weight: 17
+weight: 14
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl apps disable <server> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

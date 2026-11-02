@@ -320,7 +320,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 
 // whoamiOn answers what the tagged server that app runs says it is.
 func whoamiOn(ctx context.Context, app *App) (string, error) {
-	res, err := app.manager.Call(ctx, "tagged", "whoami", nil, nil)
+	res, err := app.manager.Call(ctx, "tagged", "whoami", nil, nil, nil)
 	if err != nil {
 		return "", err
 	}
@@ -337,7 +337,8 @@ func whoamiOn(ctx context.Context, app *App) (string, error) {
 // keeps its one connection, where two connections to one file turn a write
 // away at once. Both relays drain the one outbox, so a test feeds b a
 // publish's events through b's own converge consumer, in the order it
-// chooses.
+// chooses. b mints and verifies session tokens under a's issuer, as the
+// replicas behind one public URL do, so a session moves between them.
 func replicaPair(t *testing.T) (a, b *App, baseA, baseB string) {
 	t.Helper()
 	a, baseA = testApp(t, func(cfg *config.Config) { cfg.Apps.HealthInterval = time.Hour })
@@ -352,7 +353,7 @@ func replicaPair(t *testing.T) (a, b *App, baseA, baseB string) {
 	}
 	baseB = "http://" + b.Addr()
 	b.cfg.Server.PublicURL = baseB
-	tokens, err := authn.NewTokenService(ctx, b.store.SigningKeys(), baseB, 0)
+	tokens, err := authn.NewTokenService(ctx, b.store.SigningKeys(), baseA, 0)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -502,11 +503,15 @@ func TestChangedReachNamesEveryRoleWhoseClosureChanged(t *testing.T) {
 }
 
 // TestKeepsAccessKeepsIdenticalRows pins step 3 from state: a row stays
-// only when the state holds a row identical in role, server and matchers.
+// only when the state holds a row identical in role, server, matchers and
+// scope key, so a rename of a covered object keeps the row.
 func TestKeepsAccessKeepsIdenticalRows(t *testing.T) {
+	pay := &store.ObjectScope{Objects: []store.CoveredObject{{ID: "11", Value: "org/pay-api"}}}
 	live := []store.LiveAccess{
 		{ID: "n1", Role: "dev", App: "x", Matchers: []string{"*"}},
 		{ID: "n2", Role: "dev", App: "y", Matchers: []string{"echo", "env"}},
+		{ID: "n3", Role: "pay", App: "gh", Matchers: []string{"pr_create"}, Scope: pay},
+		{ID: "n4", Role: "all", App: "gh", Matchers: []string{"pr_create"}, Scope: &store.ObjectScope{Every: true}},
 	}
 	cases := []struct {
 		name string
@@ -517,6 +522,12 @@ func TestKeepsAccessKeepsIdenticalRows(t *testing.T) {
 		{name: "a row whose matchers changed", row: gwBinding{ID: "n2", Role: "dev", App: "y", Matchers: []string{"echo"}}},
 		{name: "a row of another role", row: gwBinding{ID: "n1", Role: "ops", App: "x", Matchers: []string{"*"}}},
 		{name: "a row the state lacks", row: gwBinding{ID: "o3", Role: "dev", App: "z", Matchers: []string{"*"}}},
+		{name: "a row whose objects are renamed", want: true, row: gwBinding{ID: "n3", Role: "pay", App: "gh", Matchers: []string{"pr_create"},
+			Scope: &store.ObjectScope{Objects: []store.CoveredObject{{ID: "11", Value: "org/pay-api-v2"}}}}},
+		{name: "a row whose objects changed", row: gwBinding{ID: "n3", Role: "pay", App: "gh", Matchers: []string{"pr_create"},
+			Scope: &store.ObjectScope{Objects: []store.CoveredObject{{ID: "12", Value: "org/pay-api"}}}}},
+		{name: "a row that covered every and now names objects", row: gwBinding{ID: "n4", Role: "all", App: "gh", Matchers: []string{"pr_create"}, Scope: pay}},
+		{name: "a row that had no covers line", row: gwBinding{ID: "n4", Role: "all", App: "gh", Matchers: []string{"pr_create"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

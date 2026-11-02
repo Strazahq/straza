@@ -270,7 +270,7 @@ func readRoleConfig(t *testing.T, s Store, name string) RoleConfig {
 		t.Fatal(err)
 	}
 	for _, b := range bindings {
-		c.Server = appName(b.AppID)
+		c.Server, c.Scope = appName(b.AppID), b.Scope
 		if err := json.Unmarshal([]byte(b.ToolMatcher), &c.Tools); err != nil {
 			t.Fatalf("decode the tools %s: %v", b.ToolMatcher, err)
 		}

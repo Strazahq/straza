@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -157,10 +158,13 @@ func (a *App) groupRoleProjection(ctx context.Context, roleID string) map[string
 // an IdM certifies equals what a session holding the role can actually
 // reach. Errors degrade to a smaller (or absent) block, never a failed
 // read: one broken policyset must not wedge an IdM reconciliation run.
+// apps, tools and covers render together or not at all, so the block never
+// shows tools without the objects they reach.
 func (a *App) groupRoleBlock(ctx context.Context, role store.Role) map[string]any {
 	// What holding this role effectively grants: closure over implications.
 	closure := map[string]bool{role.ID: true}
-	if imps, err := a.store.Roles().ListImplications(ctx); err == nil {
+	imps, accessErr := a.store.Roles().ListImplications(ctx)
+	if accessErr == nil {
 		adj := map[string][]string{}
 		for _, imp := range imps {
 			adj[imp.RoleID] = append(adj[imp.RoleID], imp.ImpliesRoleID)
@@ -176,53 +180,22 @@ func (a *App) groupRoleBlock(ctx context.Context, role store.Role) map[string]an
 		}
 	}
 
-	// apps = the closure's bound apps (binding evidence, like the pull
-	// lane's ri:apps); tools = what those bindings reach on the LIVE
-	// catalog (running/degraded views only, the fail-closed truth
-	// /v1/admin/tools also reports).
-	appName := map[string]string{}
-	if apps, err := a.store.Apps().List(ctx); err == nil {
-		for _, ap := range apps {
-			appName[ap.ID] = ap.Name
-		}
+	servers := map[string]store.App{}
+	apps, err := a.store.Apps().List(ctx)
+	for _, ap := range apps {
+		servers[ap.ID] = ap
 	}
-	matchersByApp := map[string][]string{}
-	for id := range closure {
-		bindings, err := a.store.ToolBindings().ListByRole(ctx, id)
-		if err != nil {
-			continue
-		}
-		for _, b := range bindings {
-			var matchers []string
-			if json.Unmarshal([]byte(b.ToolMatcher), &matchers) != nil || len(matchers) == 0 {
-				continue
-			}
-			if name := appName[b.AppID]; name != "" {
-				matchersByApp[name] = append(matchersByApp[name], matchers...)
-			}
-		}
+	if accessErr == nil {
+		accessErr = err
 	}
-	appsOut := make([]string, 0, len(matchersByApp))
-	for name := range matchersByApp {
-		appsOut = append(appsOut, name)
+	var appsOut, toolsOut, coversOut []string
+	if accessErr == nil {
+		appsOut, toolsOut, coversOut, accessErr = a.closureAccess(ctx, closure, servers)
 	}
-	sort.Strings(appsOut)
-	var toolsOut []string
-	for _, v := range a.manager.Views() {
-		if v.Status != manager.StatusRunning && v.Status != manager.StatusDegraded {
-			continue
-		}
-		matchers := matchersByApp[v.Name]
-		if len(matchers) == 0 {
-			continue
-		}
-		for _, tl := range v.Tools {
-			if manager.MatchAnyGlob(matchers, tl.Name) {
-				toolsOut = append(toolsOut, v.Name+":"+tl.Name)
-			}
-		}
+	if accessErr != nil {
+		a.log.Warn("scim: the group projection leaves out apps, tools and covers, because a read they need failed. The next read renders them once it succeeds, and a server whose stored manifest does not decode needs installing again",
+			"role", role.Name, "err", accessErr)
 	}
-	sort.Strings(toolsOut)
 
 	// policies = ACTIVE sets that NAME a projected role. Subject-global
 	// sets (empty match) are deliberately absent: the block answers "what
@@ -262,13 +235,16 @@ func (a *App) groupRoleBlock(ctx context.Context, role store.Role) map[string]an
 	if len(toolsOut) > 0 {
 		block["tools"] = toolsOut
 	}
+	if len(coversOut) > 0 {
+		block["covers"] = coversOut
+	}
 	if len(policiesOut) > 0 {
 		block["policies"] = policiesOut
 	}
 	// server = the owning server's name (revision 19), present only on a
 	// server-owned role, so an IdM delineates those roles by one attribute
 	// instead of parsing a name prefix.
-	if name := appName[role.OwnerAppID]; name != "" {
+	if name := servers[role.OwnerAppID].Name; name != "" {
 		block["server"] = name
 	}
 	// administers = the live servers whose admin role is in the closure
@@ -291,6 +267,127 @@ func (a *App) groupRoleBlock(ctx context.Context, role store.Role) map[string]an
 		}
 	}
 	return block
+}
+
+// closureAccess answers what the access rows of the roles in closure
+// grant, each list sorted: apps, the bound servers by name, tools, what
+// those rows reach on the live catalog (running and degraded views only,
+// the fail-closed truth /v1/admin/tools also reports), and covers, the
+// values of the covers line of each row on a server that pins an object
+// type, without repeats, each named object under the name its server's
+// object list holds now (currentValues). It fails when a role's rows
+// cannot be read, a bound server's stored manifest does not decode or the
+// current names cannot be read.
+func (a *App) closureAccess(ctx context.Context, closure map[string]bool, servers map[string]store.App) (apps, tools, covers []string, err error) {
+	matchersByApp := map[string][]string{}
+	pinned := map[string]string{}
+	var rows []store.ToolBinding
+	named := map[string][]string{}
+	for id := range closure {
+		bindings, err := a.store.ToolBindings().ListByRole(ctx, id)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("the access rows of the role %s cannot be read: %w", id, err)
+		}
+		for _, b := range bindings {
+			srv, ok := servers[b.AppID]
+			if !ok {
+				continue
+			}
+			typ, ok := pinned[srv.ID]
+			if !ok {
+				mf, err := manager.FromJSON(srv.Manifest)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("the stored manifest of %s does not decode: %w", srv.Name, err)
+				}
+				if spec := pinnedObjects(mf); spec != nil {
+					typ = spec.Type
+				}
+				pinned[srv.ID] = typ
+			}
+			if typ != "" {
+				rows = append(rows, b)
+				if b.Scope != nil {
+					for _, o := range b.Scope.Objects {
+						named[srv.ID] = append(named[srv.ID], o.ID)
+					}
+				}
+			}
+			var matchers []string
+			if json.Unmarshal([]byte(b.ToolMatcher), &matchers) != nil || len(matchers) == 0 {
+				continue
+			}
+			matchersByApp[srv.Name] = append(matchersByApp[srv.Name], matchers...)
+		}
+	}
+	current := map[string]map[string]string{}
+	for appID, ids := range named {
+		srv := servers[appID]
+		if current[appID], err = a.currentValues(ctx, appID, srv.Manifest, ids); err != nil {
+			return nil, nil, nil, fmt.Errorf("the object list of %s cannot be read: %w", srv.Name, err)
+		}
+	}
+	values := map[string]bool{}
+	for _, b := range rows {
+		srv := servers[b.AppID]
+		for _, v := range scimCovers(srv.Name, pinned[srv.ID], b.Scope, current[srv.ID]) {
+			values[v] = true
+		}
+	}
+	for name := range matchersByApp {
+		apps = append(apps, name)
+	}
+	sort.Strings(apps)
+	for _, v := range a.manager.Views() {
+		if v.Status != manager.StatusRunning && v.Status != manager.StatusDegraded {
+			continue
+		}
+		matchers := matchersByApp[v.Name]
+		if len(matchers) == 0 {
+			continue
+		}
+		for _, tl := range v.Tools {
+			if manager.MatchAnyGlob(matchers, tl.Name) {
+				tools = append(tools, v.Name+":"+tl.Name)
+			}
+		}
+	}
+	sort.Strings(tools)
+	for v := range values {
+		covers = append(covers, v)
+	}
+	sort.Strings(covers)
+	return apps, tools, covers, nil
+}
+
+// scimCovers renders the covers line of an access row on server, which
+// pins the object type typ, as values that start "<server>:<type> ": one
+// ending every, one per named object ending as a JSON string the value
+// current holds for its id, or its stored value where current lacks the
+// id, or one ending none. A row with no covers line and one the store
+// cannot read, which reaches it as nil, both cover nothing at the gate, so
+// both render none. The quotes keep an object named every from reading as
+// every object.
+func scimCovers(server, typ string, scope *store.ObjectScope, current map[string]string) []string {
+	prefix := server + ":" + typ + " "
+	switch {
+	case scope == nil:
+		return []string{prefix + "none"}
+	case scope.Every:
+		return []string{prefix + "every"}
+	}
+	out := make([]string, len(scope.Objects))
+	for i, o := range scope.Objects {
+		value := o.Value
+		if v, ok := current[o.ID]; ok {
+			value = v
+		}
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(value) // A string always encodes.
+		out[i] = prefix + strings.TrimSuffix(buf.String(), "\n")
+	}
+	return out
 }
 
 // origin records which authority created the row: the

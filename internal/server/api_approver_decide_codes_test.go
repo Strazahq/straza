@@ -72,7 +72,7 @@ func enrollApprover(t *testing.T, app *App, userID string) (priv *ecdsa.PrivateK
 	t.Helper()
 	ctx := context.Background()
 	priv, spki := genApproverKey(t)
-	grant, err := app.approval.MintEnrollToken(ctx, userID, "")
+	grant, err := app.approval.MintEnrollToken(ctx, userID, approval.EnrollChannelMobile)
 	if err != nil {
 		t.Fatalf("mint enroll token: %v", err)
 	}

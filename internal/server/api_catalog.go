@@ -46,6 +46,19 @@ type previewEntry struct {
 	// Hint is one plain sentence per status, always present, the words the
 	// CLI and the console print for the row.
 	Hint string `json:"hint"`
+	// Object says, on a server that pins an object type, which objects the
+	// subject's covers lines reach for the tool.
+	Object *previewObject `json:"object,omitempty"`
+}
+
+// previewObject is the object member of a preview entry: the server's type,
+// the tool's reach, and covers, which is every when a held binding on every
+// object binds the tool, some when only bindings on named objects do and
+// the gate lets them name one, and none when the gate refuses every call.
+type previewObject struct {
+	Type   string `json:"type"`
+	Reach  string `json:"reach"`
+	Covers string `json:"covers"`
 }
 
 // catalogPreviewResponse is the preview body. Notes carries one sentence
@@ -182,8 +195,13 @@ func (a *App) previewEntries(sub policy.Subject, appFilter string, assume []stri
 			entries = append(entries, previewEntry{App: view.Name, Status: previewNoBinding, Hint: hintNoBinding})
 			continue
 		}
+		held := a.heldCatalog(sub.Roles, view.Name)
 		for _, t := range view.Tools {
-			entries = append(entries, previewToolEntry(eng, sub, view.Name, t, matchers))
+			e := previewToolEntry(eng, sub, view.Name, t, matchers)
+			if e.Status != previewMatcherMiss {
+				e.Object = a.previewObject(held, view.Name, t.Name)
+			}
+			entries = append(entries, e)
 		}
 	}
 	// Bound apps with no managed instance at all (stopped/removed) still surface
@@ -229,6 +247,35 @@ func previewToolEntry(eng *policy.Engine, sub policy.Subject, app string, t *mcp
 		e.Hint = hintVisible
 	}
 	return e
+}
+
+// previewObject answers the object member for tool on app, read from the
+// same pinned declaration and held covers lines the object gate decides
+// with. It is nil when the gate does not apply: the server pins no type,
+// the tool's reach is none and its mark has not drifted, or no held binding
+// binds the tool. A tool only an assumed matcher admits has no covers line
+// to read, so it is nil too.
+func (a *App) previewObject(heldOn *sessionCatalog, app, tool string) *previewObject {
+	oc, ok := a.manager.ObjectsFor(app, tool)
+	if !ok || (oc.Reach.Reach == manager.ReachNone && !oc.Drifted) {
+		return nil
+	}
+	held := heldOn.held(app, tool)
+	if len(held) == 0 {
+		return nil
+	}
+	named := oc.Reach.Reach == manager.ReachArgument && !oc.Drifted && a.cfg.Apps.Objects.Enabled
+	covers := "none"
+	for _, h := range held {
+		if h.Scope.Every() {
+			covers = "every"
+			break
+		}
+		if h.Scope != nil && named {
+			covers = "some"
+		}
+	}
+	return &previewObject{Type: oc.Type, Reach: oc.Reach.Reach, Covers: covers}
 }
 
 func nonNilStrings(s []string) []string {

@@ -1,0 +1,20 @@
+# Invalid: a tool's reach is all, none, credential or {argument: <name>}
+# (revision 7). "some" is none of them.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: ghapp
+server:
+  name: com.example/github-app
+  version: "0.4.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://ghapp.example.com/mcp
+  objects:
+    type: repo
+    list:
+      tool: repo_list
+    tools:
+      search_code: some

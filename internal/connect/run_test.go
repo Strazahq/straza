@@ -58,9 +58,11 @@ func TestRun(t *testing.T) {
 			},
 		},
 		{
-			name:    "nobody signs in for another user",
-			opts:    Options{Server: "midpoint", User: "joe"},
-			wantErr: "midpoint uses sign-in, which needs joe's own browser, so nobody can connect on their behalf",
+			name: "nobody signs in for another user",
+			opts: Options{Server: "midpoint", User: "joe"},
+			wantErr: "midpoint uses sign-in, which needs joe's own browser, so nobody can connect on their behalf. " +
+				"A person connects on the Credentials tab of the self-service page. An agent cannot sign in, " +
+				"so an administrator sets credential.agents on midpoint instead",
 		},
 		{
 			name:    "a bad expiry is refused before the token is read",

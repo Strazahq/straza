@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/strazahq/straza/internal/store"
 )
@@ -17,8 +18,9 @@ import (
 // login failure record per request, a user row that cannot be read while
 // the store answers is refused in words that say so, and a store outage
 // answers 503 with no record. It runs for a person's console session and
-// for an AI agent's kit session, because straza connect calls these routes
-// on the agent's own session, so an active agent passes as a person does.
+// for an AI agent's deviceless session, because straza connect calls these
+// routes on the agent's own session, so an active agent passes as a person
+// does. The device case runs for the person only.
 func TestConnectRoutesJudgeTheSession(t *testing.T) {
 	t.Parallel()
 	app, base, fs := testAppFault(t)
@@ -31,11 +33,27 @@ func TestConnectRoutesJudgeTheSession(t *testing.T) {
 		{http.MethodDelete, "/v1/connect/no-such-server", http.StatusNotFound},
 		{http.MethodPost, "/v1/connect/callback", http.StatusBadRequest},
 	}
+	// start opens the caller's session and answers it with its device, ""
+	// for the agent's deviceless one.
 	callers := []struct {
-		name, userType, client, harness string
+		name, userType string
+		start          func(u store.User) (body map[string]any, code int, device string)
 	}{
-		{"person", store.UserTypeHuman, store.DeviceClientHuman, "console"},
-		{"agent", store.UserTypeAgent, store.DeviceClientKit, "claude-code"},
+		{"person", store.UserTypeHuman, func(u store.User) (map[string]any, int, string) {
+			device := "fp-" + u.Username
+			sesID, tok := storedSession(t, app, u.ID, device, "console")
+			return map[string]any{"session_token": tok, "session_id": sesID}, http.StatusOK, device
+		}},
+		{"agent", store.UserTypeAgent, func(u store.User) (map[string]any, int, string) {
+			idt, err := app.tokens.MintIDToken(u.ID, "straza", time.Minute, u.Username, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			code, checkin := postJSON(t, base+"/v1/checkin", map[string]any{"id_token": idt,
+				"harness":     map[string]string{"name": "claude-code", "version": "1"},
+				"attestation": map[string]any{"managed": false, "hashes": map[string]string{}}})
+			return checkin, code, ""
+		}},
 	}
 	const disabled = "user is disabled. Contact your administrator"
 	cases := []struct {
@@ -69,20 +87,22 @@ func TestConnectRoutesJudgeTheSession(t *testing.T) {
 	}
 	for ci, c := range callers {
 		for i, tc := range cases {
+			if c.name == "agent" && tc.name == "with the device on the denylist" {
+				continue // an agent's session has no device
+			}
 			t.Run(c.name+" "+tc.name, func(t *testing.T) {
 				name := fmt.Sprintf("conn%d%d", ci, i)
 				u, err := app.store.Users().Create(ctx, store.User{Username: name, Email: name + "@x.io", UserType: c.userType})
 				if err != nil {
 					t.Fatal(err)
 				}
-				d, deviceToken := mintDevice(t, app, u.ID, c.client, "fp-"+name)
-				code, checkin := checkinDeviceAs(t, base, deviceToken, c.harness, "1")
+				checkin, code, device := c.start(u)
 				tok, _ := checkin["session_token"].(string)
 				sesID, _ := checkin["session_id"].(string)
 				if code != http.StatusOK || tok == "" {
-					t.Fatalf("%s check-in = %d %v", c.harness, code, checkin)
+					t.Fatalf("%s check-in = %d %v", c.name, code, checkin)
 				}
-				tc.arm(u, d.ID, sesID)
+				tc.arm(u, device, sesID)
 				defer fs.disarm()
 				for _, rt := range routes {
 					before := len(authnFailures(t, app, u.ID, ""))

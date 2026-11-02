@@ -7,7 +7,7 @@ import type { DraftSaveOptions } from "@/components/use-draft-save";
 import type { SaveItem } from "@/lib/draft-save";
 import type { DraftPublished } from "@/lib/api";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { appLogs, catalogPreview, disableApp, enableApp, getConfig, listApps, listAudit, listBindings, listChanges, listRoles, listSecrets, listTools, listUsers, recheckApp, removeApp, removeSecret, setSecret } from "@/lib/api";
+import { appLogs, appObjects, catalogPreview, disableApp, enableApp, getConfig, listApps, listAudit, listBindings, listChanges, listRoles, listSecrets, listTools, listUsers, recheckApp, removeApp, removeSecret, setSecret } from "@/lib/api";
 import { navigate } from "@/lib/router";
 import { adminAreas } from "@/lib/session";
 import { notify } from "@/lib/notify";
@@ -17,7 +17,7 @@ vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
   listApps: vi.fn(), listTools: vi.fn(), listBindings: vi.fn(), listAudit: vi.fn(), listChanges: vi.fn(), listSecrets: vi.fn(), listRoles: vi.fn(), listUsers: vi.fn(),
   catalogPreview: vi.fn(), recheckApp: vi.fn(), enableApp: vi.fn(), disableApp: vi.fn(), removeApp: vi.fn(), setSecret: vi.fn(), removeSecret: vi.fn(), appLogs: vi.fn(),
-  getConfig: vi.fn(),
+  getConfig: vi.fn(), appObjects: vi.fn(),
 }));
 // The session's standing tells a server outside the list from one that
 // does not exist: null is a full grant.
@@ -34,6 +34,12 @@ vi.mock("@/components/server-change-sheet", () => ({
       <button type="button" onClick={() => onSaved()}>Save the sheet</button>
     </div>
   ),
+}));
+
+// The objects tab is its own lazy module with its own suite; here it stands
+// in with the props it was handed, so this suite pins the tab wiring alone.
+vi.mock("@/components/server-objects", () => ({
+  ServerObjects: ({ app, roles }: { app: { name: string }; roles: { name: string }[] }) => <div data-objects-stub={app.name}>{roles.map((r) => r.name).join(",")}</div>,
 }));
 
 // The origin line reads the drafts list and has its own suite.
@@ -83,6 +89,11 @@ const apps = [
   callerApp("app-8", "open-tools", { kind: "none" }),
   { ...callerApp("app-10", "midpoint-file", { kind: "static", inject: { as: "header", name: "Authorization", template: "Bearer {{secret}}" } }), file: "/etc/straza/apps/midpoint-file.app.yaml" },
 ];
+// pinning answers a server row whose manifest pins the objects block given.
+const pinning = (objects: Record<string, unknown>) => {
+  const row = callerApp("app-13", "ghapp", { kind: "none" });
+  return { ...row, manifest: { ...row.manifest, straza: { ...row.manifest.straza, objects } } };
+};
 const tools = [
   { id: "t1", app: "scout-tools", app_id: "app-9", name: "echo", description: "Echoes back the input string" },
   { id: "t2", app: "scout-tools", app_id: "app-9", name: "get-sum", description: "Returns the sum of two numbers" },
@@ -150,6 +161,7 @@ describe("the MCP server page", () => {
     vi.mocked(listUsers).mockResolvedValue({ items: [], next_cursor: "" });
     vi.mocked(adminAreas).mockReturnValue(null);
     vi.mocked(appLogs).mockReset();
+    vi.mocked(appObjects).mockResolvedValue({ app: "ghapp", type: "repo", objects: [], total: 10 });
   });
 
   it("opens with the name, one sentence and the actions in order, Recheck as the primary", async () => {
@@ -656,5 +668,63 @@ describe("the MCP server page", () => {
     await opened("app-9");
     expect(headButtons()).not.toContain("Remove server");
     expect(headButtons()).toContain("Pause");
+  });
+
+  // Each case is a server's pinned block, or none, and the exact tab labels:
+  // the tab of a pinned type sits after Tools, named by the plural or the
+  // type plus s, with the count of the list the API holds.
+  it.each([
+    ["a server that pins no type", null, ["Overview", "Tools 2", "Server roles 0", "Activity", "Manifest"]],
+    ["a server that pins a type and its plural", { type: "repo", plural: "repositories", list: { tool: "repo_list" } }, ["Overview", "Tools 2", "Repositories 10", "Server roles 0", "Activity", "Manifest"]],
+    ["a server that pins a type alone", { type: "repo", list: { tool: "repo_list" } }, ["Overview", "Tools 2", "Repos 10", "Server roles 0", "Activity", "Manifest"]],
+  ])("labels the tabs exactly for %s", async (_case, objects, labels) => {
+    const row = objects ? pinning(objects) : callerApp("app-13", "ghapp", { kind: "none" });
+    vi.mocked(listApps).mockResolvedValue([...apps, row] as never);
+    await opened("app-13");
+    await waitFor(() => expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(labels));
+    if (objects) expect(appObjects).toHaveBeenCalledWith("app-13", "limit=1");
+    else expect(appObjects).not.toHaveBeenCalled();
+  });
+
+  it("names the tab without a count when the list cannot be read", async () => {
+    vi.mocked(appObjects).mockRejectedValue(apiError(403, "requires the server's admin role"));
+    vi.mocked(listApps).mockResolvedValue([...apps, pinning({ type: "repo", list: { tool: "repo_list" } })] as never);
+    await opened("app-13");
+    await waitFor(() => expect(appObjects).toHaveBeenCalled());
+    expect(screen.getByRole("tab", { name: "Repos" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("opens the tab at its address with the roles the page read, and moves to it on a click", async () => {
+    vi.mocked(listApps).mockResolvedValue([...apps, pinning({ type: "repo", list: { tool: "repo_list" } })] as never);
+    await opened("app-13", "objects");
+    expect(screen.getByRole("tab", { name: /^Repos/ }).getAttribute("aria-selected")).toBe("true");
+    const stub = await waitFor(() => { const el = document.querySelector("[data-objects-stub]") as HTMLElement; expect(el).not.toBeNull(); return el; });
+    expect(stub.getAttribute("data-objects-stub")).toBe("ghapp");
+    expect(stub.textContent).toBe("scout-role,dev-tools,dev");
+    document.body.innerHTML = "";
+    await opened("app-13");
+    await userEvent.click(screen.getByRole("tab", { name: /^Repos/ }));
+    expect(navigate).toHaveBeenCalledWith("servers", ["app-13", "objects"], true);
+  });
+
+  // Each case is how the bindings read answers, and what the Roles tab of a
+  // server pinning an invented type then shows for its role's covers line.
+  it.each([
+    ["the role's own row from the list the page read", null, "TCK-1TCK-2"],
+    ["not readable when strazad refused the list", apiError(403, "session lacks grant apps:read"), "not readable"],
+  ])("hands the Roles tab %s", async (_case, err, cell) => {
+    vi.mocked(listApps).mockResolvedValue([...apps, pinning({ type: "ticket", list: { tool: "ticket_list" } })] as never);
+    vi.mocked(listRoles).mockResolvedValue([{ id: "r5", name: "ghapp-desk", kind: "application", server: "ghapp", tools: ["a"] }]);
+    if (err) vi.mocked(listBindings).mockRejectedValue(err);
+    else vi.mocked(listBindings).mockResolvedValue([...bindings, { id: "b5", app: "ghapp", role: "ghapp-desk", tools: ["a"], covers: { objects: [{ value: "TCK-2", id: "2" }, { value: "TCK-1", id: "1" }] } }]);
+    await opened("app-13", "roles");
+    expect(document.querySelector('[data-owned-role="ghapp-desk"] [data-covers-cell]')?.textContent).toBe(cell);
+  });
+
+  it("lands the address of the tab on Overview for a server that pins no type", async () => {
+    await opened("app-9", "objects");
+    expect(screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelector("[data-objects-stub]")).toBeNull();
   });
 });

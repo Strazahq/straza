@@ -1,0 +1,32 @@
+# INVALID (semantic): every tool under git.ops must be pinned under
+# objects.tools with the reach {argument: <name>} (revision 9), because a
+# git grant names exactly one repo and Straza decides it as a call that
+# names the repo in that argument. Here git_push carries the reach all.
+# JSON Schema cannot tie a value of git.ops to a key of objects.tools, so
+# the schema alone admits this manifest, and the platform parser MUST
+# refuse it.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: ghapp
+server:
+  name: com.example/github-app
+  version: "0.5.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://ghapp.example.com/mcp
+  objects:
+    type: repo
+    list:
+      tool: repo_list
+    tools:
+      git_fetch: {argument: repo}
+      git_push: all
+  git:
+    url: https://ghapp.example.com
+    upstream: https://github.com
+    ops:
+      fetch: git_fetch
+      push: git_push

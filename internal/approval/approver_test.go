@@ -45,7 +45,7 @@ func signDecision(t *testing.T, priv *ecdsa.PrivateKey, requestID, verdict, chal
 func (h *harness) enroll(t *testing.T, userID, spki string) string {
 	t.Helper()
 	ctx := context.Background()
-	grant, err := h.svc.MintEnrollToken(ctx, userID, "")
+	grant, err := h.svc.MintEnrollToken(ctx, userID, EnrollChannelMobile)
 	if err != nil {
 		t.Fatalf("MintEnrollToken: %v", err)
 	}
@@ -66,13 +66,14 @@ func (h *harness) enroll(t *testing.T, userID, spki string) string {
 	return res.DeviceID
 }
 
-// TestEnrollChannelScope pins the channel-scoped token contract: a
-// self-minted token is stamped with the
-// channel it was authorized for and consume refuses a platform outside that
-// channel; an admin-minted (empty-channel) token enrolls any platform; an
-// unknown stamp fails closed. Every mismatch answers the one coarse
-// ErrEnrollTokenInvalid (no oracle) and burns the token like any failed
-// consume after the CAS.
+// TestEnrollChannelScope pins the channel-scoped token contract: a token
+// is stamped with the channel it was authorized for and consume refuses a
+// platform outside that channel. A mint for the empty or an unknown channel
+// is refused with ErrBadEnrollChannel. A stored row with
+// the empty stamp, an unscoped token minted before every token had a
+// channel, or an unknown stamp fails closed on any platform. Every mismatch
+// answers the one coarse ErrEnrollTokenInvalid (no oracle) and burns the
+// token like any failed consume after the CAS.
 func TestEnrollChannelScope(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -90,8 +91,6 @@ func TestEnrollChannelScope(t *testing.T) {
 		{"browser token, browser", "browser", "browser", false},
 		{"browser token, ios", "browser", "ios", true},
 		{"browser token, android", "browser", "android", true},
-		{"admin token, ios", "", "ios", false},
-		{"admin token, browser", "", "browser", false},
 		{"mobile token, unknown platform", "mobile", "toaster", true},
 	}
 	for _, tc := range cases {
@@ -117,21 +116,33 @@ func TestEnrollChannelScope(t *testing.T) {
 		})
 	}
 
-	// An unknown channel stamp on the row (never minted by this build) fails
-	// closed even for a matching-looking platform.
-	_, spki := genP256(t)
-	raw := "weird-stamp-token"
-	if _, err := h.st.Approvers().InsertEnrollToken(ctx, store.ApproverEnrollToken{
-		TokenHash: sha256hex(raw), UserID: u.ID, Channel: "carrier-pigeon",
-		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Minute),
-	}); err != nil {
-		t.Fatal(err)
+	// The mint refuses any channel but mobile and browser.
+	for _, channel := range []string{"", "carrier-pigeon", "Mobile"} {
+		if _, err := h.svc.MintEnrollToken(ctx, u.ID, channel); !errors.Is(err, ErrBadEnrollChannel) {
+			t.Fatalf("MintEnrollToken(%q) = %v, want ErrBadEnrollChannel", channel, err)
+		}
 	}
-	if _, err := h.svc.Enroll(ctx, EnrollInput{
-		EnrollToken: raw, Name: "d", Platform: "ios",
-		KeyAlg: "ecdsa-p256", PublicKeyB64: spki,
-	}); !errors.Is(err, ErrEnrollTokenInvalid) {
-		t.Fatalf("unknown channel stamp: Enroll = %v, want ErrEnrollTokenInvalid", err)
+
+	// A row stamped with the empty channel, an unscoped token minted before
+	// this build, or with an unknown stamp fails closed on every platform.
+	_, spki := genP256(t)
+	for _, row := range []struct{ stamp, platform string }{
+		{"", "ios"}, {"", "android"}, {"", "browser"},
+		{"carrier-pigeon", "ios"}, {"carrier-pigeon", "browser"},
+	} {
+		raw := "stamp-" + row.stamp + "-" + row.platform
+		if _, err := h.st.Approvers().InsertEnrollToken(ctx, store.ApproverEnrollToken{
+			TokenHash: sha256hex(raw), UserID: u.ID, Channel: row.stamp,
+			CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.svc.Enroll(ctx, EnrollInput{
+			EnrollToken: raw, Name: "d", Platform: row.platform,
+			KeyAlg: "ecdsa-p256", PublicKeyB64: spki,
+		}); !errors.Is(err, ErrEnrollTokenInvalid) {
+			t.Fatalf("channel stamp %q on %s: Enroll = %v, want ErrEnrollTokenInvalid", row.stamp, row.platform, err)
+		}
 	}
 
 	// A mismatch burns the token: the same mobile token refuses ios after a
@@ -170,8 +181,8 @@ func (h *harness) seedNHI(t *testing.T, username string, roles ...string) store.
 	return u
 }
 
-// TestApproverDecideSignedEndToEnd drives the whole mobile loop: admin mints an
-// enroll token, the hardware key enrolls, the approver fetches the decidable
+// TestApproverDecideSignedEndToEnd drives the whole mobile loop: a mobile
+// enroll token is minted, the hardware key enrolls, the approver fetches the decidable
 // row (with a fresh challenge), signs, and the signed verdict resolves the
 // record. Then a replay of the same signed request is rejected, and a tampered
 // verdict fails signature verification.
@@ -296,7 +307,7 @@ func TestApproverEnrollKeyRequired(t *testing.T) {
 	u := h.seedUser(t, "kim", "sec-approvers")
 
 	mint := func() string {
-		g, err := h.svc.MintEnrollToken(ctx, u.ID, "")
+		g, err := h.svc.MintEnrollToken(ctx, u.ID, EnrollChannelMobile)
 		if err != nil {
 			t.Fatalf("MintEnrollToken: %v", err)
 		}
@@ -324,7 +335,7 @@ func TestApproverEnrollKeyRequired(t *testing.T) {
 
 	// Valid P-256 but a LYING key_alg: the curve wins, enrolment succeeds.
 	_, spki := genP256(t)
-	if _, err := h.svc.Enroll(ctx, EnrollInput{EnrollToken: mint(), KeyAlg: "ed25519", PublicKeyB64: spki}); err != nil {
+	if _, err := h.svc.Enroll(ctx, EnrollInput{EnrollToken: mint(), Platform: "android", KeyAlg: "ed25519", PublicKeyB64: spki}); err != nil {
 		t.Errorf("valid P-256 with lying key_alg = %v, want success", err)
 	}
 }
@@ -335,14 +346,14 @@ func TestApproverEnrollTokenOneTime(t *testing.T) {
 	ctx := context.Background()
 	u := h.seedUser(t, "kim")
 	_, spki := genP256(t)
-	grant, err := h.svc.MintEnrollToken(ctx, u.ID, "")
+	grant, err := h.svc.MintEnrollToken(ctx, u.ID, EnrollChannelMobile)
 	if err != nil {
 		t.Fatalf("MintEnrollToken: %v", err)
 	}
-	if _, err := h.svc.Enroll(ctx, EnrollInput{EnrollToken: grant.Token, PublicKeyB64: spki}); err != nil {
+	if _, err := h.svc.Enroll(ctx, EnrollInput{EnrollToken: grant.Token, Platform: "android", PublicKeyB64: spki}); err != nil {
 		t.Fatalf("first enroll: %v", err)
 	}
-	if _, err := h.svc.Enroll(ctx, EnrollInput{EnrollToken: grant.Token, PublicKeyB64: spki}); err != ErrEnrollTokenInvalid {
+	if _, err := h.svc.Enroll(ctx, EnrollInput{EnrollToken: grant.Token, Platform: "android", PublicKeyB64: spki}); err != ErrEnrollTokenInvalid {
 		t.Errorf("second enroll = %v, want ErrEnrollTokenInvalid", err)
 	}
 }

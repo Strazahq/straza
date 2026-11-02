@@ -137,6 +137,23 @@ func TestStandingRefusal(t *testing.T) {
 	maxi := personCaller("max", "apps:read", "apps:write")
 	both := personCaller("both", "identity:write", "apps:write")
 	pat := personCaller("pat", "policy:write")
+	// coversOnly runs over pinned, where github pins repos and the held
+	// github-writers covers one of them, and its draft names a second.
+	const coversOnly = "a server admin changes only the covers line of a held role"
+	pinned := standingWorld(t)
+	gh := pinned.Apps["github"]
+	gh.Pinned = &drafts.PinnedObjects{Type: "repo", Plural: "repos", LiveType: "repo", Reach: map[string]string{"push_files": "argument"},
+		IDs: map[string]string{"acme/pay": "1", "acme/web": "2"}}
+	pinned.Apps["github"] = gh
+	writers := pinned.Access["github-writers"]
+	writers.Covers = &drafts.Scope{Objects: []drafts.ObjectRef{{Value: "acme/pay", ID: "1"}}}
+	pinned.Access["github-writers"] = writers
+	widened, err := drafts.RoleDoc{APIVersion: drafts.RoleAPIVersion, Kind: string(drafts.KindRole), Metadata: drafts.RoleDocMeta{Name: "github-writers"},
+		Spec: drafts.RoleDocSpec{Kind: drafts.RoleKindApplication, Server: "github", Bindings: []drafts.RoleBinding{{App: "github", Tools: []string{"push_files"},
+			Covers: &drafts.Scope{Objects: []drafts.ObjectRef{{Value: "acme/pay"}, {Value: "acme/web"}}}}}}}.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name  string
 		c     draftCaller
@@ -181,6 +198,8 @@ func TestStandingRefusal(t *testing.T) {
 			d41 + "a server-owned role lists the tools it reaches by name. Only a global admin may give it every tool, and the tools the server adds later, with the * matcher."},
 		{"a server admin changes the tools of a held role", erin, []drafts.Item{role("github-writers", "github", "", "github", "push_files", "get_me")}, needOwnedRow,
 			d41 + "the role github-writers has 1 holder. Its tools change only by the global admin or by a new role."},
+		{coversOnly, erin, []drafts.Item{{Kind: drafts.KindRole, Name: "github-writers", Op: drafts.OpPut, Doc: string(widened)}}, needOwnedRow,
+			d41 + "the role github-writers has 1 holder. Its tools and the repos it covers change only by the global admin or by a new role."},
 		{"a server admin removes a held role", erin, []drafts.Item{remove(drafts.KindRole, "github-writers")}, needOwnedRemove,
 			d41 + "the role github-writers has 1 holder. The identity manager removes them first, then delete it."},
 		{"the global MCP admin removes a held role github owns", maxi, []drafts.Item{remove(drafts.KindRole, "github-writers")}, needOwnedRemove,
@@ -215,7 +234,11 @@ func TestStandingRefusal(t *testing.T) {
 			}
 			needs = append(needs, drafts.Need{Object: it.Object(), Standing: tc.need})
 		}
-		if got := tc.c.standingRefusal(d, w, in, needs); got != tc.want {
+		live := w
+		if tc.name == coversOnly {
+			live = pinned
+		}
+		if got := tc.c.standingRefusal(d, live, in, needs); got != tc.want {
 			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
 		}
 	}
@@ -440,10 +463,10 @@ func TestReviseRefusal(t *testing.T) {
 		{"a person revises another's draft", personCaller("u-lee"), []drafts.Principal{ci, bot}, ""},
 		{"a token revises the draft it wrote", adminAPICaller("t-ci"), []drafts.Principal{ci}, ""},
 		{"a token revises a draft a person also wrote", adminAPICaller("t-ci"), []drafts.Principal{ci, ada},
-			"An admin API token changes only the drafts it wrote, and draft 41 was written by someone else. A person can revise it on the console or with strazactl."},
+			"An admin API token changes only the drafts it wrote, and draft 41 was written by someone else. A person can revise it on the console under Drafts."},
 		{"an agent revises the draft it wrote", agentCaller("u-bot"), []drafts.Principal{bot}, ""},
 		{"an agent revises a person's draft", agentCaller("u-bot"), []drafts.Principal{ada},
-			"An agent changes only the drafts it wrote, and draft 41 was written by someone else. A person can revise it on the console or with strazactl."},
+			"An agent changes only the drafts it wrote, and draft 41 was written by someone else. A person can revise it on the console under Drafts."},
 	}
 	for _, tc := range cases {
 		if got := tc.c.reviseRefusal("41", tc.authors); got != tc.want {

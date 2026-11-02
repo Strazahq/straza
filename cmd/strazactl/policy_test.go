@@ -17,10 +17,6 @@ import (
 func policyServer(t *testing.T, listBody string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("GET /v1/admin/policies", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(listBody))
@@ -41,7 +37,7 @@ func TestPolicyListDecodesEnvelope(t *testing.T) {
 		`],"total":2,"limit":0,"offset":0,`+
 		`"roles":[{"role":"*","sets":1,"postures":{"deny":3}},{"role":"dev","sets":1,"postures":{"deny":2,"hold":4,"ticket":2,"allow":4}}]}`)
 	t.Setenv("STRAZA_SERVER", "")
-	stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "policy", "list")
+	stdout, _, err := runCLI(t, onToken(t, srv.URL), "policy", "list")
 	if err != nil {
 		t.Fatalf("policy list: %v", err)
 	}
@@ -59,7 +55,7 @@ func TestPolicyListDecodesEnvelope(t *testing.T) {
 func TestPolicyListEmptyEnvelope(t *testing.T) {
 	srv := policyServer(t, `{"items":[],"total":0,"limit":0,"offset":0,"roles":[]}`)
 	t.Setenv("STRAZA_SERVER", "")
-	stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "policy", "list")
+	stdout, _, err := runCLI(t, onToken(t, srv.URL), "policy", "list")
 	if err != nil {
 		t.Fatalf("policy list (empty): %v", err)
 	}
@@ -73,7 +69,7 @@ func TestPolicyListEmptyEnvelope(t *testing.T) {
 func TestPolicyListPre078ServerNamesTheSkew(t *testing.T) {
 	srv := policyServer(t, `[{"id":"ps-1","name":"old","priority":1,"status":"draft","yaml":"..."}]`)
 	t.Setenv("STRAZA_SERVER", "")
-	_, _, err := runCLI(t, writeCreds(t, srv.URL), "policy", "list")
+	_, _, err := runCLI(t, onToken(t, srv.URL), "policy", "list")
 	if err == nil || !strings.Contains(err.Error(), "0.78.0") {
 		t.Fatalf("err = %v, want the version-skew hint naming 0.78.0", err)
 	}
@@ -162,9 +158,6 @@ func TestPolicyActivateLinesSayWhetherItChanged(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var body string
 			mux := http.NewServeMux()
-			mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-			})
 			mux.HandleFunc("POST /v1/admin/policies/set-a/activate", func(w http.ResponseWriter, r *http.Request) {
 				raw, _ := io.ReadAll(r.Body)
 				body = string(raw)
@@ -173,7 +166,7 @@ func TestPolicyActivateLinesSayWhetherItChanged(t *testing.T) {
 			srv := httptest.NewServer(mux)
 			t.Cleanup(srv.Close)
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "policy", tc.verb, "set-a")
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), "policy", tc.verb, "set-a")
 			if err != nil {
 				t.Fatalf("policy %s: %v", tc.verb, err)
 			}

@@ -8,11 +8,11 @@ Straza (or replace it) without reading its source. If a byte crosses a
 process boundary in Straza, its shape is defined here, not in Go code
 (invariant: no wire format ships without a spec source of truth).
 
-Everything below is at **v1beta1** and frozen for the `spec-v1.0` tag:
-breaking changes from here on mean a new major version with migration notes.
-Two post-tag additions carry their own status: `harness-config/` is
-**v1alpha1** (shapes may still change with migration notes until beta) and
-`snapshot/` is a descriptive record of a format that has not changed since it was first built.
+Everything below is at **v1beta1**. A breaking change ships only with a new
+major release of Straza, such as 2.0.0, whose notes name it and say how to migrate.
+Three post-tag additions carry their own status: `harness-config/` and
+`grant/` are **v1alpha1** (shapes may still change with migration notes until
+beta) and `snapshot/` is a descriptive record of a format that has not changed since it was first built.
 
 ## Artifacts
 
@@ -20,13 +20,14 @@ Two post-tag additions carry their own status: `harness-config/` is
 |---|---|---|
 | Agent Governance Hook Profile | `hook-profile/` | The canonical hook event every harness dialect normalizes into (Claude Code, Codex CLI, Gemini/Antigravity; mapping tables in `mappings/`), the tool taxonomy, decision semantics (allow/deny/reason/obligations), and the Tier-1/Tier-2 conformance levels. |
 | PolicySet | `policyset/` | The declarative YAML policy document and its normative evaluation semantics: deny-overrides combining, profile defaults, `require:` predicates, `serverCheck`, pattern matching (glob/regex/argv, `${workspace}`), monotonic Rego escape hatch. |
-| App Manifest | `app-manifest/` | The `App` document: a verbatim MCP-registry `server.json` under `server:` plus `straza:` deployment extensions (runtime, credential injection, exposure, limits), and the deterministic registry-import rules. |
+| App Manifest | `app-manifest/` | The `App` document: a verbatim MCP-registry `server.json` under `server:` plus `straza:` deployment extensions (runtime, credential injection, exposure, limits, objects, and the `git` block that maps a git host's upstream URL to the server's git tools and the base URL its git grants name), and the deterministic registry-import rules. |
 | Canonical Objects | `objects/` | The version-control face of configuration objects: the `Role` document that `GET /v1/admin/roles/{id}/export` serves, and the bundle a draft reads, a YAML stream of App, Role, PolicySet and Removal documents that a person publishes as one change. |
 | Events | `events/` | The CloudEvents 1.0 envelope profile: subject taxonomy (`straza.audit.* / policy.* / revocation.* / apps.* / identity.*`), payload schemas, and the tamper-evident hash-chain audit record format. |
 | SCIM Profile | `scim-profile/` | The strict SCIM 2.0 subset an IdM speaks to Straza: supported resources, ops and filters; Groups render exported roles and take membership writes; `active:false` ⇒ revocation semantics; the one credential that opens it (an admin API token carrying the scim grants). |
 | Attestation | `attestation/` | The check-in payload (artifact hashes, harness identity, managed flag), the `managed|advisory|none` levels, and the expected-hash registry verification rules. |
-| Session Token | `session-token/` | The JWT claim set, TTL/refresh rules, JWKS discovery, and revocation semantics for the 300-second session token. |
+| Session Token | `session-token/` | The JWT claim set, TTL/refresh rules, JWKS discovery, and revocation semantics for the 300-second session token, plus the DPoP proof schema and nonce rules of a key-bound token. |
 | Harness Config | `harness-config/` | The server-rendered managed harness config: a signed artifact set (`hooks.<harness>`, `mcp.<harness>`) written verbatim by managed installs, its domain-separated signing input and verification rules, and the additive expected-hash-registry publication whose row retirement is the stale-version policy. **v1alpha1** (added post-tag, 2026-08-09). |
+| Git Grant | `grant/` | The short signed grant Straza issues for one git fetch or push on one repo: its header and claims, the issuance rules, the git smart HTTP binding with its DPoP proof, and the order in which a resource server verifies it. **v1alpha1** (added post-tag, 2026-10-24). |
 | Policy Snapshot | `snapshot/` | The signed CBOR envelope `/v1/snapshot` serves and clients pin-verify: payload fields, content-addressed id, verification rules, offline-grace semantics. **Descriptive backfill** (as-built; schema + fixtures land with the first format bump). |
 
 Format rules: every wire format has a JSON Schema (draft 2020-12; YAML

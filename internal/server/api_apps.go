@@ -67,6 +67,11 @@ type appPayload struct {
 	// listApps only): true under an area grant, else true on the servers
 	// whose admin role the session holds. Display only.
 	MayChange *bool `json:"may_change,omitempty"`
+	// MayCoverEvery says whether the caller may make a role this server
+	// owns cover every object of its pinned type (listApps only): true
+	// under an area grant, else admin.serverAdminsCoverEvery. Display only,
+	// because the draft check's standing rule decides.
+	MayCoverEvery *bool `json:"may_cover_every,omitempty"`
 }
 
 // withAdminRole fills the payload's admin role fields from the row, with
@@ -83,7 +88,8 @@ func (a *App) withAdminRole(ctx context.Context, p *appPayload, row store.App, n
 }
 
 // reachedBy maps every app id to the sorted names of the roles holding an
-// access row on it (admin plane: store reads).
+// access row on it (admin plane: store reads), leaving out a row whose
+// covers line cannot be read, which grants nothing.
 func (a *App) reachedBy(ctx context.Context) (map[string][]string, error) {
 	bindings, err := a.store.ToolBindings().List(ctx)
 	if err != nil {
@@ -99,7 +105,7 @@ func (a *App) reachedBy(ctx context.Context) (map[string][]string, error) {
 	}
 	out := map[string][]string{}
 	for _, b := range bindings {
-		if n := name[b.RoleID]; n != "" {
+		if n := name[b.RoleID]; n != "" && b.ScopeFault == "" {
 			out[b.AppID] = append(out[b.AppID], n)
 		}
 	}
@@ -179,8 +185,8 @@ func (a *App) handleAppsList(w http.ResponseWriter, r *http.Request) {
 		p.Manifest, p.URL = manifestFields(row.Manifest)
 		p.File, p.FileDiffers = a.fileOf(row)
 		a.withAdminRole(r.Context(), &p, row, names)
-		may := st.Full || st.Apps[row.ID]
-		p.MayChange = &may
+		may, every := st.Full || st.Apps[row.ID], st.Full || a.cfg.Admin.ServerAdminsCoverEvery
+		p.MayChange, p.MayCoverEvery = &may, &every
 		out = append(out, p)
 	}
 	writeJSON(w, http.StatusOK, out)

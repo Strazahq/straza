@@ -1,0 +1,18 @@
+{
+  "data": {
+    "action": "apps.objects.list",
+    "app": "objects-demo",
+    "count": 11,
+    "outcome": "failed",
+    "reason": "objects-demo has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set objects-demo --listing, then refresh with strazactl apps objects refresh objects-demo.",
+    "target": "01a14dd5-81eb-76d2-b8ad-de5c87259abf",
+    "tool": "repo_list",
+    "type": "repo",
+    "version": 2
+  },
+  "id": "c21426c2-e66f-4cd6-b534-50f804cdf5fd",
+  "source": "strazad/c6e0d1c1-bc6f-4ebb-9159-77fe1bfe5080",
+  "specversion": "1.0",
+  "time": "2026-10-18T07:11:10.721987837Z",
+  "type": "straza.audit.admin"
+}

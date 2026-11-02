@@ -22,7 +22,7 @@ import (
 var dialects = []string{"claude-code", "codex", "gemini", "python-sdk"}
 
 // actionNames lists the step actions, in the order the README documents them.
-var actionNames = []string{"admin", "scim", "enroll", "approver", "daemon", "server", "hook", "mcp", "audit", "wait"}
+var actionNames = []string{"admin", "scim", "enroll", "approver", "server", "hook", "mcp", "audit", "wait"}
 
 // scenario is one corpus file.
 type scenario struct {
@@ -33,7 +33,8 @@ type scenario struct {
 	Harnesses  []string `yaml:"harnesses"`
 	// Governance holds the lifetimes the scenario's strazad boots with, as
 	// duration strings under the keys of the config file's governance
-	// section. Only the three lifetimes are accepted; see validateGovernance.
+	// section, and the custody floor. Only the keys of governanceKeys are
+	// accepted; see validateGovernance.
 	Governance map[string]string   `yaml:"governance"`
 	Identities map[string]identity `yaml:"identities"`
 	Steps      []step              `yaml:"steps"`
@@ -320,19 +321,36 @@ func (sc *scenario) validate() error {
 	return nil
 }
 
-// governanceKeys are the config-file lifetimes a scenario may shorten, and
-// nothing else: a posture knob such as localToolDefault or offlineGraceTTL
-// set to hours would change what the scenario proves without a reader
-// seeing it in the steps.
-var governanceKeys = []string{"offlineGraceTTL", "deviceTokenTTL", "sessionMaxLifetime"}
+// governanceKeys are the config-file lifetimes a scenario may shorten and
+// the custody and sign-in floors it may raise, and nothing else: a posture
+// knob such as localToolDefault, or offlineGraceTTL set to hours, would
+// change what the scenario proves without a reader seeing it in the steps.
+// minCustody and minSignIn are the exceptions because the matrix boots the
+// standalone profile, whose floors are user and code, so a scenario about
+// the refusal of a key kept in the person's own account, or about the
+// browser sign-in, sets its floor in plain sight.
+var governanceKeys = []string{"offlineGraceTTL", "deviceTokenTTL", "sessionMaxLifetime", "signInMaxAge", "minCustody", "minSignIn"}
 
-// validateGovernance accepts the three lifetimes as durations: the grace
-// bound may be zero, the profile value the enterprise contract states, and
-// the two credential lifetimes must be positive, as the server demands.
+// validateGovernance accepts minCustody as account or user, minSignIn as
+// code or browser, and the four lifetimes as durations: the grace bound may
+// be zero, the profile value the enterprise contract states, and the three
+// other lifetimes must be positive, as the server demands.
 func (sc *scenario) validateGovernance() error {
 	for key, raw := range sc.Governance {
 		if !contains(governanceKeys, key) {
 			return fmt.Errorf("governance.%s is not one of %s", key, strings.Join(governanceKeys, ", "))
+		}
+		if key == "minCustody" {
+			if raw != "account" && raw != "user" {
+				return fmt.Errorf("governance.minCustody must be account or user, got %q", raw)
+			}
+			continue
+		}
+		if key == "minSignIn" {
+			if raw != "code" && raw != "browser" {
+				return fmt.Errorf("governance.minSignIn must be code or browser, got %q", raw)
+			}
+			continue
 		}
 		d, err := time.ParseDuration(raw)
 		if err != nil || d < 0 || (d == 0 && key != "offlineGraceTTL") {
@@ -372,16 +390,9 @@ func (sc *scenario) validateStep(st *step) error {
 			return errors.New("a wait records nothing, so it takes no want, save, within or timer: a value a poll can observe is written with within instead")
 		}
 	case "enroll":
-		return needIdentity()
+		return sc.validateEnroll(st, needIdentity)
 	case "approver":
 		return sc.validateApprover(st, needIdentity)
-	case "daemon":
-		if err := needIdentity(); err != nil {
-			return err
-		}
-		if a := st.str("action"); a != "start" && a != "stop" {
-			return errors.New("daemon.action must be start or stop")
-		}
 	case "server":
 		if a := st.str("action"); a != "start" && a != "stop" {
 			return errors.New("server.action must be start or stop")
@@ -398,9 +409,27 @@ func (sc *scenario) validateStep(st *step) error {
 			return errors.New("mcp needs exactly one of list: true or a tool")
 		}
 	case "audit":
-		if len(st.Args) == 0 {
-			return errors.New("audit needs at least one of subject, kind, action, decision, reasonContains, count")
-		}
+		return validateAudit(st.Args)
+	}
+	return nil
+}
+
+// validateEnroll checks an enroll step. signIn picks the lane a person signs
+// in by, code when it is absent, and an NHI takes none because it enrolls
+// headless with its own key.
+func (sc *scenario) validateEnroll(st *step, needIdentity func() error) error {
+	if err := needIdentity(); err != nil {
+		return err
+	}
+	signIn, named := st.Args["signIn"]
+	if !named {
+		return nil
+	}
+	if signIn != "code" && signIn != "browser" {
+		return fmt.Errorf("enroll signIn must be code or browser, got %v", signIn)
+	}
+	if sc.Identities[st.str("as")].Kind != "human" {
+		return fmt.Errorf("as %q takes no signIn, because an NHI enrolls headless with its key", st.str("as"))
 	}
 	return nil
 }

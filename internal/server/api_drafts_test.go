@@ -102,7 +102,7 @@ type draftsFixture struct {
 	app                         *App
 	base                        string
 	kim                         store.User
-	root, strazactl             string
+	root, console               string
 	erin, ada, nell, bot, token string
 	tokenID                     string
 	github, jira                store.App
@@ -135,7 +135,7 @@ func newDraftsFixture(t *testing.T, preRun []func(*App), mutators ...func(*confi
 	seedAgent(t, app, "bot", "kim", "draft-reviewers")
 	login := func(name string) string { return loginDeviceFlow(t, base, name, "hunter2!") }
 	f.root, f.erin, f.ada, f.nell, f.bot = login("kim"), login("erin"), login("ada"), login("nell"), login("bot")
-	f.strazactl, _ = checkinTokenAs(t, base, "strazactl")
+	f.console, _ = checkinTokenAs(t, base, "console")
 	var minted struct {
 		ID    string `json:"id"`
 		Token string `json:"token"`
@@ -280,7 +280,7 @@ func liveOf(t *testing.T, app *App, name string) (string, string) {
 func TestCreateDraftStoresRevisionOneWithItsCheck(t *testing.T) {
 	t.Parallel()
 	f := newDraftsFixture(t, nil)
-	code, a := f.call(t, http.MethodPost, "/v1/admin/drafts", f.strazactl, map[string]any{
+	code, a := f.call(t, http.MethodPost, "/v1/admin/drafts", f.console, map[string]any{
 		"documents": []string{draftApp("linear", "https://linear.example/mcp", "The Linear server.")},
 		"items":     []map[string]string{{"kind": "Role", "name": "dev", "op": "put", "doc": draftRole("dev", "Developers.")}},
 		"note":      "Linear for the developers.",
@@ -289,10 +289,10 @@ func TestCreateDraftStoresRevisionOneWithItsCheck(t *testing.T) {
 		t.Fatalf("create = %d %q %v", code, a.Error, a.Findings)
 	}
 	d := a.Draft
-	if _, err := strconv.ParseInt(d.ID, 10, 64); err != nil || d.Revision != 1 || d.State != "open" || d.Door != "strazactl" {
-		t.Fatalf("draft = %q revision %d %s %s, want a decimal id at revision 1, open, through strazactl", d.ID, d.Revision, d.State, d.Door)
+	if _, err := strconv.ParseInt(d.ID, 10, 64); err != nil || d.Revision != 1 || d.State != "open" || d.Door != "console" {
+		t.Fatalf("draft = %q revision %d %s %s, want a decimal id at revision 1, open, through the console", d.ID, d.Revision, d.State, d.Door)
 	}
-	want := drafts.Principal{UserID: f.kim.ID, Username: "kim", Via: laneSession, Client: "strazactl"}
+	want := drafts.Principal{UserID: f.kim.ID, Username: "kim", Via: laneSession, Client: "console"}
 	if len(d.Authors) != 1 || d.Authors[0] != want {
 		t.Errorf("authors = %+v, want %+v", d.Authors, want)
 	}
@@ -627,7 +627,7 @@ func TestWorkingDraft(t *testing.T) {
 		}
 	}
 	dev := map[string]string{"kind": "Role", "name": "dev", "op": "put", "doc": draftRole("dev", "Developers.")}
-	code, first := working(f.strazactl, linear, dev)
+	code, first := working(f.console, linear, dev)
 	if code != http.StatusCreated || !first.Draft.Working {
 		t.Fatalf("first working = %d %q, want 201 and a working draft", code, first.Error)
 	}
@@ -643,7 +643,7 @@ func TestWorkingDraft(t *testing.T) {
 	setAccess(t, f.app, devRole.ID, f.github, true, `["*"]`)
 	linear["doc"] = draftApp("linear", "https://linear.example/mcp", "Two.")
 	jira := map[string]string{"kind": "App", "name": "jira", "op": "put", "doc": draftApp("jira", "https://jira.example/mcp", "Ours.")}
-	code, second := working(f.strazactl, linear, dev, jira)
+	code, second := working(f.console, linear, dev, jira)
 	if code != http.StatusOK || second.Draft.ID != first.Draft.ID || second.Draft.Revision != 2 {
 		t.Fatalf("second working = %d draft %s revision %d, want 200 on draft %s at revision 2", code, second.Draft.ID, second.Draft.Revision, first.Draft.ID)
 	}
@@ -982,7 +982,7 @@ func TestUpdateDraft(t *testing.T) {
 		{"a revision that moved", f.root, map[string]any{"revision": 1, "documents": []string{draftRole("dev", "x")}}, http.StatusConflict,
 			"Draft " + id + " changed after you read it: it is at revision 4, and you sent revision 1. Read it again and make your change on top of revision 4."},
 		{"a token that did not write it", f.token, map[string]any{"revision": 4, "documents": []string{draftRole("dev", "x")}}, http.StatusForbidden,
-			"An admin API token changes only the drafts it wrote, and draft " + id + " was written by someone else. A person can revise it on the console or with strazactl."},
+			"An admin API token changes only the drafts it wrote, and draft " + id + " was written by someone else. A person can revise it on the console under Drafts."},
 		{"an intake refusal", f.root, map[string]any{"revision": 4, "documents": []string{"apiVersion: straza.dev/v1beta1\nkind: Pack\nmetadata:\n  name: p\n"}},
 			http.StatusUnprocessableEntity, "Document 1 has kind Pack, and a draft holds App, Role, PolicySet and Removal documents only. Remove it, or make that change with its own command."},
 	}
@@ -1134,7 +1134,7 @@ func TestDraftRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := f.create(t, f.strazactl, draftRole("helpers", "Helpers."))
+	d := f.create(t, f.console, draftRole("helpers", "Helpers."))
 	id := d.Draft.ID
 	creates := draftRecords(t, f.app, "draft.create", id)
 	if len(creates) != 1 {
@@ -1145,8 +1145,8 @@ func TestDraftRecords(t *testing.T) {
 	if fields := exampleFields(t, "valid-audit-admin-draft-create.json"); fieldNames(c) != fields {
 		t.Errorf("draft.create fields = %s, want the example's %s", fieldNames(c), fields)
 	}
-	if c["revision"] != float64(1) || c["door"] != "strazactl" || c["digest"] != digest || c["actor"] != "kim" || c["actorId"] != f.kim.ID || c["actorVia"] != laneSession {
-		t.Errorf("draft.create = %v, want revision 1 through strazactl with the digest %s and kim as actor", c, digest)
+	if c["revision"] != float64(1) || c["door"] != "console" || c["digest"] != digest || c["actor"] != "kim" || c["actorId"] != f.kim.ID || c["actorVia"] != laneSession {
+		t.Errorf("draft.create = %v, want revision 1 through the console with the digest %s and kim as actor", c, digest)
 	}
 	if items, _ := json.Marshal(c["items"]); string(items) != `[{"kind":"Role","name":"helpers","op":"put"}]` {
 		t.Errorf("draft.create items = %s", items)
@@ -1267,7 +1267,7 @@ func TestDraftRoutesWaiveWhatLiveStateHolds(t *testing.T) {
 			return f.call(t, http.MethodPut, "/v1/admin/drafts/"+held, f.root, map[string]any{"revision": row.Revision, "documents": documents})
 		}},
 		{"working", func(documents []string) (int, wireAnswer) {
-			return f.call(t, http.MethodPost, "/v1/admin/drafts", f.strazactl, map[string]any{"documents": documents, "working": true})
+			return f.call(t, http.MethodPost, "/v1/admin/drafts", f.console, map[string]any{"documents": documents, "working": true})
 		}},
 	}
 	userinfo := draftApp("linear", "https://bot:Hunter2Hunter2@linear.example/mcp", "The Linear server.")

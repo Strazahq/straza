@@ -2,7 +2,7 @@
 title: strazactl signing-keys list
 description: List every signing key with its purpose and status
 pagetype: reference
-weight: 92
+weight: 88
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl signing-keys list [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

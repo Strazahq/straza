@@ -203,7 +203,7 @@ func (r *RemoteRuntime) Call(ctx context.Context, in CallInput) (*mcp.CallToolRe
 	if err != nil {
 		return nil, err
 	}
-	res, err := callTool(ctx, s, in.Tool, in.Args)
+	res, err := callTool(ctx, s, in)
 	if err != nil && !errors.Is(ctx.Err(), context.Canceled) {
 		// Every caller of this credential shares s. A caller that left says
 		// nothing about s, and closing s would end its upstream session for

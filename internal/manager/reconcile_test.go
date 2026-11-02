@@ -20,7 +20,7 @@ import (
 // whoami calls the tagged server through a manager and answers the tag of the
 // upstream it reached.
 func whoami(ctx context.Context, m *Manager) (string, error) {
-	res, err := m.Call(ctx, "tagged", "whoami", nil, nil)
+	res, err := m.Call(ctx, "tagged", "whoami", nil, nil, nil)
 	if err != nil {
 		return "", err
 	}
@@ -334,7 +334,7 @@ func TestConvergeStartsAServerWhoseSecretArrived(t *testing.T) {
 				return
 			}
 			waitStatus(t, b, "parked", StatusRunning)
-			res, err := b.Call(ctx, "parked", "env", mustJSON(t, map[string]string{"name": "TOKEN"}), secret)
+			res, err := b.Call(ctx, "parked", "env", mustJSON(t, map[string]string{"name": "TOKEN"}), secret, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

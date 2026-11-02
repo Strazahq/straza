@@ -7,9 +7,9 @@
 # roles, apps, users and devices answer 200 with a status field, a policy
 # delete answers 204, and the bare approvals list is an object with an
 # approvals array.
-# The daemon starts after the first session.start of its identity: the
-# daemon keeps a session fresh and holds its push stream, so it refuses to
-# run before one exists [live].
+# Each identity runs its own straza service, which holds the push stream of
+# every session it starts, and the runner waits for that stream after each
+# session start that is allowed [doc].
 id: g1-device-revoke
 group: G1
 title: The admin deletes a device and a fresh enrolment works again
@@ -61,8 +61,6 @@ steps:
       as: dave
       event: {kind: session.start}
     want: {decision: allow}
-  - name: dave's daemon holds the push stream
-    daemon: {as: dave, action: start}
   - name: a benign command is allowed
     hook:
       as: dave
@@ -87,8 +85,6 @@ steps:
     want: {decision: deny, reasonContains: "revoked"}
     within: 10s
     timer: kill-switch-hook
-  - name: dave's old daemon is stopped before the fresh enrolment
-    daemon: {as: dave, action: stop}
   - name: dave enrolls again with a fresh interactive login
     enroll: {as: dave}
   - name: dave starts a session on the fresh enrolment

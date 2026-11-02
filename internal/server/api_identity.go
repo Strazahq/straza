@@ -11,6 +11,7 @@ import (
 
 	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
+	"github.com/strazahq/straza/internal/dpop"
 	"github.com/strazahq/straza/internal/policy"
 	"github.com/strazahq/straza/internal/store"
 )
@@ -20,8 +21,10 @@ import (
 var allowedAudiences = []string{"straza", "strazactl", "console"} // "straza" (the enforcement kit / headless NHI audience), "strazactl", and the embedded console.
 
 // handleIdPDiscovery is the login-discovery document: it tells
-// clients (straza enroll, strazactl login, the console) which OIDC
-// issuer to run the RFC 8628 device flow against. Enterprise: the external
+// clients (straza enroll, the console) which OIDC
+// issuer to sign in at, the lowest sign-in a person's key enrollment needs
+// in min_sign_in, and in loopback_port the fixed port of a browser
+// sign-in's redirect when oidc.loopbackPort sets one. Enterprise: the external
 // IdP (interactive login happens at the IdP, strazad only verifies the
 // resulting ID token). Standalone: the built-in issuer, even when
 // an external issuer is additionally configured for server-side federation;
@@ -30,26 +33,33 @@ var allowedAudiences = []string{"straza", "strazactl", "console"} // "straza" (t
 // built-in issuer accepts per-client audiences). Public by design: issuer
 // URL and client id are discovery metadata, not secrets.
 func (a *App) handleIdPDiscovery(w http.ResponseWriter, r *http.Request) {
+	// nhi_issuer names where NHIs authenticate (the narrow built-in mount
+	// on enterprise): humans go to the issuer, agents come here. Additive:
+	// old kits ignore the unknown fields.
+	doc := map[string]any{
+		"issuer": a.cfg.Server.PublicURL, "client_id": "",
+		"nhi_issuer": a.cfg.Server.PublicURL, "min_sign_in": a.cfg.Governance.MinSignIn,
+	}
 	if a.cfg.Profile == config.ProfileEnterprise {
 		if a.cfg.OIDC.Issuer == "" {
 			a.fail(w, r, http.StatusServiceUnavailable,
 				"no login issuer configured. Set oidc.issuer (the enterprise profile has no built-in issuer)", nil)
 			return
 		}
-		// nhi_issuer names where NHIs authenticate (the narrow built-in
-		// mount): humans go to the IdP above, agents come
-		// here. Additive: old kits ignore the unknown field.
-		writeJSON(w, http.StatusOK, map[string]string{
-			"issuer": a.cfg.OIDC.Issuer, "client_id": a.cfg.OIDC.ClientID,
-			"nhi_issuer": a.cfg.Server.PublicURL,
-		})
-		return
+		doc["issuer"], doc["client_id"] = a.cfg.OIDC.Issuer, a.cfg.OIDC.ClientID
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"issuer": a.cfg.Server.PublicURL, "client_id": "",
-		"nhi_issuer": a.cfg.Server.PublicURL,
-	})
+	if port := a.cfg.OIDC.LoopbackPort; port != 0 {
+		doc["loopback_port"] = port
+	}
+	writeJSON(w, http.StatusOK, doc)
 }
+
+// managedInstallStep is the next step of every refusal of an attestation
+// level below governance.minAttestation, at check-in, at /v1/decide and at
+// the gateway. The managed install refuses to run without --server, and it
+// uses the system binary that the Straza package puts in place.
+const managedInstallStep = "An administrator installs the Straza package for this system, then runs " +
+	"`straza install --managed --server <server-url> <harness>` with sudo, or as an administrator on Windows."
 
 type attestationPayload struct {
 	Managed bool `json:"managed"`
@@ -66,13 +76,19 @@ type harnessInfo struct {
 
 type checkinRequest struct {
 	// Exactly one of IDToken (fresh login), DeviceToken (enrolled device
-	// starting a session), or SessionToken (refresh).
-	IDToken      string             `json:"id_token,omitempty"`
-	DeviceToken  string             `json:"device_token,omitempty"`
-	SessionToken string             `json:"session_token,omitempty"`
-	DeviceID     string             `json:"device_id,omitempty"`
-	Harness      harnessInfo        `json:"harness"`
-	Attestation  attestationPayload `json:"attestation"`
+	// starting a session), or SessionToken (refresh), or none of them on the
+	// key lane, whose credential is the DPoP proof (identity_key.go). An NHI's
+	// IDToken may come with a DPoP proof, which binds its session to the
+	// proof key.
+	IDToken      string `json:"id_token,omitempty"`
+	DeviceToken  string `json:"device_token,omitempty"`
+	SessionToken string `json:"session_token,omitempty"`
+	DeviceID     string `json:"device_id,omitempty"`
+	// Counter is the key lane's check-in counter, above the last one the
+	// device sent.
+	Counter     int64              `json:"counter,omitempty"`
+	Harness     harnessInfo        `json:"harness"`
+	Attestation attestationPayload `json:"attestation"`
 	// Client is the straza build making the check-in (spec/attestation
 	// v1beta1): recorded on the session, never verified.
 	Client clientInfo `json:"client"`
@@ -116,10 +132,9 @@ type checkinResponse struct {
 	// so the console opens the MCP servers area for a server admin who has
 	// no area grant. Omitted when zero. Display only, like AdminGrants.
 	AdminServers int `json:"admin_servers,omitempty"`
-	// DeviceToken is a renewed enroll credential (see
-	// renewDeviceCredential). Additive; older clients ignore it.
-	DeviceToken          string `json:"device_token,omitempty"`
-	DeviceTokenExpiresIn int    `json:"device_token_expires_in,omitempty"`
+	// GitUpstreams lists the git hosts servers serve git for (gitUpstreams).
+	// straza service writes its git host file from it. Additive.
+	GitUpstreams []string `json:"git_upstreams,omitempty"`
 }
 
 // handleCheckin starts or refreshes a session after enrollment:
@@ -131,11 +146,16 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "malformed JSON body")
 		return
 	}
+	if msg := checkinTextRefusal(req); msg != "" {
+		apiError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	var (
 		u         store.User
 		sessionID string
-		dc        authn.DeviceClaims // device-token lane only; the renewal reads it
+		cnf       string // the key thumbprint the minted token is bound to, "" for a bearer token
+		keyStamp  string // the agent key an id-token check-in's ID token names, "" when none
 	)
 	// Device binding and attestation are session-scoped: fixed at
 	// session start, never re-derived from a refresh payload. A refresh
@@ -149,26 +169,43 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	// via names the credential lane for the authn events (rev 21); 401/403
 	// refusals emit, 400s and outages do not (not authentication outcomes).
 	via := ""
+	proof := r.Header.Get(dpop.HeaderProof) != ""
 	switch {
+	case req.Counter != 0 && (req.IDToken != "" || req.DeviceToken != "" || req.SessionToken != ""):
+		apiError(w, http.StatusBadRequest, counterWithTokenMsg)
+		return
 	case req.SessionToken != "":
 		via = "session-token"
 		var ses store.Session
 		var ok bool
-		if u, ses, ok = a.refreshSession(w, r, req); !ok {
+		if u, ses, cnf, ok = a.refreshSession(w, r, req); !ok {
 			return
 		}
 		sessionID = ses.ID
 		deviceID = ses.DeviceID
 		attLevel = ses.AttestationLevel
 		gateHarness = ses.HarnessName
+	case proof && req.DeviceToken != "":
+		apiError(w, http.StatusBadRequest, oneCredentialMsg)
+		return
+	case (proof && req.IDToken == "") || req.Counter != 0:
+		// A counter marks a key check-in as the schema's fourth lane does,
+		// so one sent without its proof is refused as a proof failure.
+		via = "device-key"
+		var d store.Device
+		var ok bool
+		if u, d, ok = a.checkinKey(w, r, req); !ok {
+			return
+		}
+		deviceID, cnf = d.ID, d.KeyThumbprint
 	case req.DeviceToken != "":
 		via = "device-token"
-		// The enroll credential starts sessions long after the login
-		// token died. Local verify first, then the in-memory denylist (the
-		// push-fed kill switch bites before any store read), then user and
-		// (below, via deviceID) device status from the store (control plane).
-		var err error
-		dc, err = a.tokens.VerifyDeviceToken(req.DeviceToken)
+		// strazad issues no device credential any more, so this lane only
+		// answers the clients that still hold one. Local verify first, then
+		// the in-memory denylist (the push-fed kill switch bites before any
+		// store read), then user and (below, via deviceID) device status from
+		// the store (control plane), whose client binding refuses every row.
+		dc, err := a.tokens.VerifyDeviceToken(req.DeviceToken)
 		if err != nil {
 			a.emitAuthnLogin(r, "failure", authnFields{Via: via,
 				Harness: harnessLabel(req.Harness), Reason: "device credential rejected"})
@@ -206,7 +243,9 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	case req.IDToken != "":
 		via = "id-token"
 		var err error
-		u, err = a.verifyLogin(r, req.IDToken)
+		var facts signInFacts
+		u, facts, err = a.verifyLoginFacts(r, req.IDToken)
+		keyStamp = facts.KeyThumbprint
 		var refused *loginRefusal
 		if errors.As(err, &refused) {
 			a.refuseLogin(w, r, refused, harnessLabel(req.Harness))
@@ -222,11 +261,31 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			apiError(w, http.StatusUnauthorized, "login not accepted")
 			return
 		}
+		// A proof binds an NHI's session to the proof key, the way RFC 9449
+		// binds a key at a token endpoint. A person's machine checks in through
+		// the key lane, so a person's ID token beside a proof stays malformed.
+		if proof {
+			if personUser(u) {
+				apiError(w, http.StatusBadRequest, oneCredentialMsg)
+				return
+			}
+			var ok bool
+			if cnf, ok = a.checkinNHIProof(w, r, u, req.Harness, keyStamp); !ok {
+				return
+			}
+		}
 	default:
 		apiError(w, http.StatusBadRequest, "id_token, device_token, or session_token is required")
 		return
 	}
 
+	// strazactl runs on an admin API token, so a check-in under its name is
+	// refused on every lane once the credential named the user.
+	if req.Harness.Name == strazactlHarness {
+		a.refuseStrazactl(w, r, authnFields{Via: via, User: u.Username, UserID: u.ID,
+			Session: sessionID, Harness: harnessLabel(req.Harness)})
+		return
+	}
 	// The human clients' harness names open the admin plane and the decide
 	// routes, so they are for people only, whatever credential is presented.
 	if adminHarnesses[gateHarness] && !personUser(u) {
@@ -234,9 +293,17 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			User: u.Username, UserID: u.ID, Harness: harnessLabel(req.Harness),
 			Reason: "only a person can open a human client session"})
 		apiError(w, http.StatusForbidden, fmt.Sprintf(
-			"the user %s is %s, and only a person can open a %s session. Sign in as yourself from your own terminal or browser",
+			"the user %s is %s, and only a person can open a %s session. Sign in as yourself in your own browser",
 			u.Username, userTypeWord(u), gateHarness))
 		return
+	}
+	if via == "id-token" {
+		if sentence, reason := a.idTokenDoorRefusal(u, gateHarness, proof); sentence != "" {
+			a.emitAuthnLogin(r, "failure", authnFields{Via: via, User: u.Username, UserID: u.ID,
+				Harness: harnessLabel(req.Harness), Reason: reason})
+			apiError(w, http.StatusForbidden, sentence)
+			return
+		}
 	}
 
 	if deviceID != "" {
@@ -251,11 +318,17 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			apiError(w, http.StatusForbidden, "device not enrolled for this user")
 			return
 		}
+		if code, sentence, reason := a.keyDeviceRefusal(d, via, cnf, time.Now()); code != 0 {
+			a.emitAuthnLogin(r, "failure", authnFields{Via: via, User: u.Username, UserID: u.ID,
+				Session: sessionID, Harness: harnessLabel(req.Harness), Reason: reason})
+			apiError(w, code, sentence)
+			return
+		}
 		// Judged before the attestation exemption below, which a human
 		// client's name would otherwise grant to a kit credential.
 		if sentence, reason := deviceClientRefusal(d, gateHarness); sentence != "" {
-			a.emitAuthnLogin(r, "failure", authnFields{Via: via,
-				User: u.Username, UserID: u.ID, Harness: harnessLabel(req.Harness), Reason: reason})
+			a.emitAuthnLogin(r, "failure", authnFields{Via: via, User: u.Username, UserID: u.ID,
+				Session: sessionID, Harness: harnessLabel(req.Harness), Reason: reason})
 			apiError(w, http.StatusForbidden, sentence)
 			return
 		}
@@ -290,7 +363,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			User: u.Username, UserID: u.ID, Harness: harnessLabel(req.Harness),
 			Reason: fmt.Sprintf("attestation level %q is below the required level %q", attLevel, minAtt)})
 		apiError(w, http.StatusForbidden, fmt.Sprintf(
-			"attestation level %q is below the required level %q. Reinstall with `straza install --managed <harness>` or contact your administrator",
+			"attestation level %q is below the required level %q. "+managedInstallStep,
 			attLevel, minAtt))
 		return
 	}
@@ -301,6 +374,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			UserID: u.ID, DeviceID: deviceID,
 			HarnessName: req.Harness.Name, HarnessVersion: req.Harness.Version,
 			ClientVersion:    req.Client.Version,
+			ClientCommit:     req.Client.Commit,
 			AttestationLevel: attLevel, AttestationHashes: string(hashesJSON),
 		})
 		if err != nil {
@@ -308,6 +382,11 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sessionID = ses.ID
+		// A key change that listed the agent's sessions before this row was
+		// written did not end it, so the stamp is read again now.
+		if keyStamp != "" && !a.keepStampedSession(w, r, u, sessionID, keyStamp, req.Harness) {
+			return
+		}
 		a.emitEvent(r, "straza.identity.updated", map[string]any{
 			"action": "session.start", "user": u.ID, "session": sessionID,
 			"harness": req.Harness.Name, "attestation": attLevel,
@@ -394,7 +473,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	token, claims, err := a.tokens.Mint(authn.Claims{
 		Subject: u.ID, Session: sessionID, Device: deviceID,
 		Harness:     joinHarness(req.Harness.Name, req.Harness.Version),
-		Attestation: attLevel, RolesHash: authn.RolesHash(roleIDs), Snapshot: snapshotID,
+		Attestation: attLevel, RolesHash: authn.RolesHash(roleIDs), Snapshot: snapshotID, CNF: cnf,
 	})
 	if err != nil {
 		a.fail(w, r, http.StatusInternalServerError, "could not mint session token", err)
@@ -417,35 +496,21 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var renewed string
-	var renewedTTL time.Duration
-	if via == "device-token" {
-		// Credential renewal: every gate above passed (denylist, user and device
-		// status, attestation minimum, session minted), so this device is
-		// still enrolled and in good standing.
-		renewed, renewedTTL, err = a.renewDeviceCredential(r, dc, u.ID, deviceID)
-		if err != nil {
-			a.fail(w, r, http.StatusInternalServerError, "could not renew device credential", err)
-			return
-		}
-	}
-
 	writeJSON(w, http.StatusOK, checkinResponse{
-		SessionID:            sessionID,
-		SessionToken:         token,
-		ExpiresIn:            int(time.Until(claims.Expiry).Seconds()),
-		Attestation:          attLevel,
-		User:                 u.Username,
-		Roles:                roleNames,
-		SnapshotID:           snapshotID,
-		Packs:                packOut,
-		UserType:             u.UserType,
-		AgencyMode:           u.AgencyMode,
-		SwarmID:              u.SwarmID,
-		AdminGrants:          a.adminGrantsForRoles(roles),
-		AdminServers:         len(administered),
-		DeviceToken:          renewed,
-		DeviceTokenExpiresIn: int(renewedTTL.Seconds()),
+		SessionID:    sessionID,
+		SessionToken: token,
+		ExpiresIn:    int(time.Until(claims.Expiry).Seconds()),
+		Attestation:  attLevel,
+		User:         u.Username,
+		Roles:        roleNames,
+		SnapshotID:   snapshotID,
+		Packs:        packOut,
+		UserType:     u.UserType,
+		AgencyMode:   u.AgencyMode,
+		SwarmID:      u.SwarmID,
+		AdminGrants:  a.adminGrantsForRoles(roles),
+		AdminServers: len(administered),
+		GitUpstreams: a.gitUpstreams(),
 	})
 }
 

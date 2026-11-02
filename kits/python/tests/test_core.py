@@ -120,6 +120,25 @@ class KitTest(unittest.TestCase):
         straza.check("other", app="midpoint", tool_name="search_users")
         (inv,) = self.invocations(events=False)
         self.assertEqual(inv["payload"]["tool_name"], "mcp__midpoint__search_users")
+        self.assertNotIn("native_tool_name", inv["payload"])
+
+    def test_framework_name_rides_beside_the_kind(self):
+        """tool_name without app is the framework's own name. tool_name keeps
+        the canonical kind, and the name rides native_tool_name, so policy can
+        allow, hold or deny that one tool by name."""
+        straza.check("other", tool_name="refund_order")
+        (inv,) = self.invocations(events=False)
+        self.assertEqual(inv["payload"]["tool_name"], "other")
+        self.assertEqual(inv["payload"]["native_tool_name"], "refund_order")
+
+    def test_guard_sends_its_name(self):
+        @straza.guard("other", name="refund_order")
+        def refund(order):
+            return order
+
+        self.assertEqual(refund(42), 42)
+        (inv,) = self.invocations(events=False)
+        self.assertEqual(inv["payload"]["native_tool_name"], "refund_order")
 
     def test_missing_binary_fails_closed(self):
         os.environ["STRAZA_BIN"] = os.path.join(self.dir, "no-such-binary")
@@ -193,6 +212,12 @@ class TurnParityTest(KitTest):
     def test_tool_result_uses_the_mcp_name_form(self):
         straza.tool_result("mcp.call", app="github", tool_name="create_issue")
         self.assertEqual(self.payloads("PostToolUse")[0]["tool_name"], "mcp__github__create_issue")
+
+    def test_tool_result_carries_the_framework_name(self):
+        straza.tool_result("net.fetch", tool_name="search_orders", url="https://x.io")
+        sent = self.payloads("PostToolUse")[0]
+        self.assertEqual(sent["tool_name"], "net.fetch")
+        self.assertEqual(sent["native_tool_name"], "search_orders")
 
     def test_tool_result_is_observational(self):
         """Never enforced: the decision was already made at check(). A deny

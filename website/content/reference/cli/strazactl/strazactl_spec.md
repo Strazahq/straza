@@ -2,7 +2,7 @@
 title: strazactl spec
 description: Work with the Straza spec artifacts
 pagetype: reference
-weight: 98
+weight: 94
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl spec [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -13,7 +13,7 @@ Every decision Straza makes leaves an audit record that says who acted, what was
 ## What a record holds
 
 
-A record of a local tool decision names the session, the user and the harness that acted. It holds the event kind, the tool and the command, plus the paths and the workspace when the event carried them. It also holds the effect, the rule id, the name of the PolicySet whose rule decided, the reason and the id of the snapshot the decision was made under.
+A record of a local tool decision names the session, the user and the harness that acted. It holds the event kind, the tool and the command, plus the paths and the workspace when the event carried them. It also holds the effect, the rule id, the name of the PolicySet whose rule decided, the reason and the id of the snapshot the decision was made under. A record is at most 256 KiB, so a longer one keeps only a prefix of its longest strings, such as a huge command, each followed by its whole length and SHA-256. One that cutting cannot fit, such as a record of thousands of paths, keeps who acted, the decision and the command, and names the size and hash of the whole record in `dataOmitted`, as [Events and the audit record]({{< relref "reference/events.md#the-envelope" >}}) explains.
 
 A gateway decision holds the same identity fields plus the MCP server, the server's own tool name and the tool arguments as sent, capped at 8 KiB with a marker when cut. When no rule fired and a profile default decided, the rule id and the set name are empty instead of a guess. The snapshot id matters most later. Policy text can change tomorrow, and the record still names the exact state that governed.
 
@@ -23,7 +23,7 @@ The chain carries more than tool decisions. Every admin change names the princip
 ## How a record reaches the chain
 
 
-A client writes its decisions to a local spool and uploads them in batches. The server files each record under the signed-in user. A client may submit only tool decisions and recorded prompts and replies, so it can never write an admin, sign-in or identity record into the chain.
+`straza service`, the Straza background service on the agent's machine, writes the decisions of each user to a local spool and uploads them in batches. The server files each record under the signed-in user. A client may submit only tool decisions and recorded prompts and replies, so it can never write an admin, sign-in or identity record into the chain.
 
 Server decisions enter an in-memory queue first. From there each record moves to a durable outbox in the database, then through the event bus into the hash chain. The record therefore trails its decision by a short time, and revocations and other control events go ahead of audit traffic.
 
@@ -69,7 +69,7 @@ A log that can be edited proves nothing, and a log that slows the agent gets tur
 A record's own hash is the SHA-256 of the previous record's hash, a newline and the record's bytes. The bytes are stored as text and never re-rendered, because a store that reformatted them would hash a representation instead of the record. The verifier reports the first record whose previous hash does not equal its predecessor's hash, or whose own hash does not recompute. Names the admin API adds for display, such as the username behind a user id, live outside the hashed bytes, so that enrichment can never invalidate a record.
 
 
-After the server accepts a batch from a client's spool, the client removes it, and event ids let the server drop a retried duplicate. On ingest, an event that names no session takes the uploader's session. One that names an earlier session of the same user on the same device keeps it, which happens when a client uploads records it spooled before a new check-in. A record that names a session of another user or another device, an unknown session, or a value that is not a session id is refused. It stays out of the chain, strazad logs one warning line for each session an upload names this way with the count of records it covers, and `straza_audit_refused_total` counts each record. The client has already deleted it. The server files any other event type a client sends as a tool decision.
+After the server accepts a batch from the service's spool, the service removes it, and event ids let the server drop a retried duplicate. On ingest, an event that names no session takes the uploader's session. One that names an earlier session of the same user on the same device keeps it, which happens when a client uploads records it spooled before a new check-in. A record that names a session of another user or another device, an unknown session, or a value that is not a session id is refused. It stays out of the chain, strazad logs one warning line for each session an upload names this way with the count of records it covers, and `straza_audit_refused_total` counts each record. The client has already deleted it. The server files any other event type a client sends as a tool decision.
 
 
 Once a record is committed to the transactional outbox, a relay publishes it to the event bus, NATS JetStream, and a consumer appends it to the audit chain. The relay drains control events such as revocations before audit traffic. [The security model]({{< relref "security/security-model.md" >}}) describes the queue and spool limits.

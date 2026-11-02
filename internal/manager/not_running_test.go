@@ -37,7 +37,7 @@ func TestNotRunningSentences(t *testing.T) {
 			return err
 		}},
 		{name: "a call to a server with no instance", want: notRunning("ghost"), call: func() error {
-			_, err := mgr.Call(ctx, "ghost", "echo", nil, nil)
+			_, err := mgr.Call(ctx, "ghost", "echo", nil, nil, nil)
 			return err
 		}},
 		{name: "a token probe on a server with no instance", want: notRunning("ghost"), call: func() error {

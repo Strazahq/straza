@@ -2,7 +2,7 @@
 title: strazactl drafts revert
 description: Make a new draft that undoes a published one, checked like any other
 pagetype: reference
-weight: 57
+weight: 55
 draft: false
 sources:
   - cmd/strazactl
@@ -25,10 +25,10 @@ strazactl drafts revert <id> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
-* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store, review and publish drafts of changes to MCP servers, roles, access rows and policy sets
+* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets
 

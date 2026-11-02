@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strazahq/straza/internal/oidcflow"
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/policy"
 )
 
@@ -252,48 +252,23 @@ func TestGovernanceBannerAndUserLine(t *testing.T) {
 	}
 }
 
-// TestClientSentencesSayAIAgent pins the headless refusal and the doctor's
-// identity row to the product's words: an AI agent, its client at the
-// identity provider, and never NHI or IdP.
+// TestClientSentencesSayAIAgent pins the doctor's enrollment row for an
+// agent to the product's words: an AI agent, and never NHI or IdP.
 func TestClientSentencesSayAIAgent(t *testing.T) {
-	t.Setenv("STRAZA_HOME", t.TempDir())
-	t.Setenv("STRAZA_CLIENT_ID", "")
-	t.Setenv("STRAZA_CLIENT_SECRET", "")
-	_, err := fetchHeadlessToken(context.Background(), nil, nil, oidcflow.Flow{}, HeadlessClientCreds, "ci-bot")
-	if err == nil {
-		t.Fatal("client-credentials enrollment with no client in the environment succeeded")
-	}
-
-	store, serr := OpenStore()
-	if serr != nil {
-		t.Fatal(serr)
-	}
-	if serr := store.SaveConfig(Config{ServerURL: "http://127.0.0.1:1", SnapshotKeys: map[string]string{"k1": "x"}}); serr != nil {
-		t.Fatal(serr)
-	}
-	if serr := store.SaveIdentity(Identity{Username: "ci-bot", Headless: HeadlessKey}); serr != nil {
-		t.Fatal(serr)
-	}
-	var identity string
-	for _, c := range Doctor(context.Background(), store) {
-		if c.Name == "identity" {
-			identity = c.Detail
+	svc := newFakeService(t)
+	svc.status.Enrollment = &localapi.Enrollment{ServerURL: "http://127.0.0.1:1", Kind: localapi.KindAgent, Username: "ci-bot", KeyThumbprint: "thumb"}
+	var row string
+	for _, c := range Doctor(context.Background(), svc.store(t), NewServiceClient()) {
+		if c.Name == "enrollment" {
+			row = c.Detail
 		}
 	}
-
-	for _, tc := range []struct{ name, text, want string }{
-		{"headless refusal", err.Error(), "(the client this AI agent has at your identity provider), or a key of its own instead"},
-		{"doctor identity row", identity, "ci-bot: headless AI agent enrollment (nhi-key lane)"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if !strings.Contains(tc.text, tc.want) {
-				t.Errorf("%s = %q, want it to say %q", tc.name, tc.text, tc.want)
-			}
-			for _, retired := range []string{"NHI", "IdP"} {
-				if strings.Contains(tc.text, retired) {
-					t.Errorf("%s = %q still says %q", tc.name, tc.text, retired)
-				}
-			}
-		})
+	if !strings.Contains(row, "ci-bot (AI agent, no device)") {
+		t.Errorf("doctor enrollment row = %q, want it to say ci-bot (AI agent, no device)", row)
+	}
+	for _, retired := range []string{"NHI", "IdP"} {
+		if strings.Contains(row, retired) {
+			t.Errorf("doctor enrollment row = %q still says %q", row, retired)
+		}
 	}
 }

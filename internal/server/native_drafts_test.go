@@ -30,11 +30,11 @@ import (
 // The sentences the drafting tools answer, pinned here word for word.
 const (
 	wantRoleRefusal   = "Straza: straza__draft_submit needs the Straza role straza-draft-config, and this session does not hold it. Ask an administrator to assign it in your identity manager."
-	wantSubmitNext    = "Straza checks the draft now. Call straza__draft_status with draft %s to read the check. A person publishes it on the console or with strazactl, and you cannot."
+	wantSubmitNext    = "Straza checks the draft now. Call straza__draft_status with draft %s to read the check. A person publishes it on the console under Drafts, and you cannot."
 	wantNotChecked    = "Straza has not checked revision %d yet. Call straza__draft_status again in a few seconds."
 	wantFixRefused    = "Fix the refused lines and submit again with draft %s."
-	wantStale         = "Draft %s went stale: live state changed under it. Ask a person to check it again on the console or with strazactl drafts rebase %s, or submit the documents as a new draft."
-	wantWaits         = "Draft %s waits for a person to publish it on the console or with strazactl. You cannot publish it."
+	wantStale         = "Draft %s went stale: live state changed under it. Ask a person to check it again on the console under Drafts, or submit the documents as a new draft."
+	wantWaits         = "Draft %s waits for a person to publish it on the console under Drafts. You cannot publish it."
 	wantPublished     = "A person published draft %s on %s."
 	wantDiscarded     = "Draft %s was discarded: %s."
 	wantExpired       = "Draft %s expired after 14 days without a change."
@@ -322,8 +322,7 @@ func TestDraftingToolRefusedWithoutTheRole(t *testing.T) {
 		t.Errorf("the record = %v, want a deny with the role sentence", rec)
 	}
 	for _, tool := range []string{nativeToolDraftSubmit, nativeToolDraftStatus} {
-		res := r.app.callNativeStraza(context.Background(), tool, json.RawMessage(`{"documents":["x"],"draft":"1"}`), claims,
-			policy.Subject{User: "joe", Roles: []string{DraftConfigRole}})
+		res := r.app.callNativeStraza(context.Background(), tool, json.RawMessage(`{"documents":["x"],"draft":"1"}`), claims)
 		want := strings.Replace(wantRoleRefusal, "straza__draft_submit", "straza__"+tool, 1)
 		if text := res.Content[0].(*mcp.TextContent).Text; !res.IsError || text != want {
 			t.Errorf("the handler of %s without the cached role answered %q", tool, text)
@@ -472,7 +471,7 @@ func TestDraftSubmitAndStatus(t *testing.T) {
 			t.Errorf("the stale draft is refused with %v", code)
 		}
 	}
-	if len(refused) == 0 || sc["next"] != fmt.Sprintf(wantStale, stID, stID) {
+	if len(refused) == 0 || sc["next"] != fmt.Sprintf(wantStale, stID) {
 		t.Errorf("status of a stale draft = %v", sc)
 	}
 }
@@ -950,8 +949,8 @@ func TestHookLaneDraftSubmitPreviewIsTheDigest(t *testing.T) {
 // TestApprovalRequestSeesTheDraftingGrant pins that approval_request
 // judges a described drafting call with the granted fact the gateway would
 // give it: a holder with no rule on the tool is told that no approval is
-// needed, a deny still denies, and a session without the role keeps the
-// default deny.
+// needed, a deny still denies, and a session without the role is told the
+// tool is not one it can call, as its real call would be.
 func TestApprovalRequestSeesTheDraftingGrant(t *testing.T) {
 	t.Parallel()
 	r := newDoorRig(t)
@@ -977,7 +976,7 @@ func TestApprovalRequestSeesTheDraftingGrant(t *testing.T) {
 	}{
 		{"a holder with no rule", norule, "Straza: no approval needed. The described call is already allowed by policy; just make the call"},
 		{"a holder under a deny", denied, "Straza: denied by policy. The described call would be denied (Straza: drafting is paused for this agent); an approval ticket cannot override a deny"},
-		{"a session without the role", sessionToken(t, r.base, "bot"), "Straza: denied by policy. The described call would be denied ("},
+		{"a session without the role", sessionToken(t, r.base, "bot"), "Straza: straza:draft_submit is not a tool this session can call, so no approval can be requested for it. Check the app and tool name, or ask an admin for access to the tool."},
 	} {
 		if text, _, _ := callTool(t, r.base, tc.tok, "straza__approval_request", action); !strings.HasPrefix(text, tc.want) {
 			t.Errorf("%s: approval_request = %q, want %q", tc.name, text, tc.want)

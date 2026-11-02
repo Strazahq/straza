@@ -49,15 +49,15 @@ func verifyAttestation(p attestationPayload, harness string, expected []store.At
 	return store.AttestationManaged
 }
 
-// adminHarnesses are the harness names the human web/CLI clients check in
-// with (strazactl CLI, embedded web console, the self-service page). Listing
+// adminHarnesses are the harness names the human web clients check in with
+// (embedded web console, the self-service page). Listing
 // here has exactly two effects: exemption from the checkin minAttestation
 // gate (bootstrap: admins must be able to log in before any hash is
 // registered; the gateway still refuses these tokens on the data plane
 // under the same minimum) and a blank wiring status in the sessions list.
 // "self-service" is the self-service page, which checks in under its own
 // name so the sessions list tells it from a console sign-in.
-var adminHarnesses = map[string]bool{"strazactl": true, "console": true, "self-service": true}
+var adminHarnesses = map[string]bool{"console": true, "self-service": true}
 
 // --- /v1/admin/attestation-hashes: the expected-hash registry ---
 

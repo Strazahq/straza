@@ -1,0 +1,14 @@
+# The sales team's statement. One statement serves both sales databases,
+# so a role that covers only sales_eu may call it on sales_eu alone.
+version: 1
+tools:
+  revenue_by_month:
+    description: Sums the net revenue of the orders that were not cancelled, per month and region, from a first day on. Returns one row per month and region, in the database's currency.
+    mode: read
+    databases: [sales_eu, sales_us]
+    login: read
+    params:
+      - name: since
+        description: The first day to count, such as 2026-01-01.
+        required: true
+    limits: { rows: 500 }

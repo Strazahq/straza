@@ -1,0 +1,19 @@
+{
+  "data": {
+    "action": "apps.objects.list",
+    "app": "objects-demo",
+    "count": 11,
+    "joined": 1,
+    "left": 0,
+    "outcome": "ok",
+    "target": "01a14dd5-81eb-76d2-b8ad-de5c87259abf",
+    "tool": "repo_list",
+    "type": "repo",
+    "version": 2
+  },
+  "id": "607d910f-d2e3-4c1d-91f0-86092e385c88",
+  "source": "strazad/c6e0d1c1-bc6f-4ebb-9159-77fe1bfe5080",
+  "specversion": "1.0",
+  "time": "2026-10-18T07:11:03.382505362Z",
+  "type": "straza.audit.admin"
+}

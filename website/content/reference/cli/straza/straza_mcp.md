@@ -2,7 +2,7 @@
 title: straza mcp
 description: Serve the Straza MCP gateway to this harness over stdio (`straza install` registers it)
 pagetype: reference
-weight: 14
+weight: 13
 draft: false
 sources:
   - cmd/straza
@@ -14,9 +14,10 @@ keywords: straza, mcp
 ## Synopsis
 
 An MCP stdio server whose backend is the Straza gateway (/mcp): role-computed
-tool catalog, server-side credential injection, rate limits, audit. The proxy
-keeps the rotating session token on the wire (the one thing a static MCP
-config cannot do) and joins the same governed session as the hooks.
+tool catalog, server-side credential injection, rate limits, audit. The Straza
+background service keeps the rotating session token and its proof on the wire
+(the one thing a static MCP config cannot do), so the proxy holds no credential
+and joins the harness's newest governed session.
 
 With a server name, it serves that one server from its own gateway endpoint,
 with the server's own tool names and its views, for chat apps that show MCP

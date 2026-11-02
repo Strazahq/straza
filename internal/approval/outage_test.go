@@ -16,8 +16,9 @@ import (
 // device read". Embedding keeps every other repo real.
 type flakyStore struct {
 	store.Store
-	devErr  error
-	userErr error
+	devErr    error
+	userErr   error
+	ticketErr error // the open-ticket lookup a ticket request dedupes on
 }
 
 type flakyApprovers struct {
@@ -44,6 +45,21 @@ func (f flakyUsers) GetByID(ctx context.Context, id string) (store.User, error) 
 	return f.UserRepo.GetByID(ctx, id)
 }
 
+type flakyApprovals struct {
+	store.ApprovalRepo
+	err error
+}
+
+func (f flakyApprovals) FindOpenTicketByUser(ctx context.Context, userID, ruleID, argvHash string) (store.Approval, error) {
+	if f.err != nil {
+		return store.Approval{}, f.err
+	}
+	return f.ApprovalRepo.FindOpenTicketByUser(ctx, userID, ruleID, argvHash)
+}
+
+func (f *flakyStore) Approvals() store.ApprovalRepo {
+	return flakyApprovals{f.Store.Approvals(), f.ticketErr}
+}
 func (f *flakyStore) Approvers() store.ApproverRepo {
 	return flakyApprovers{f.Store.Approvers(), f.devErr}
 }

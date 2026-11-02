@@ -69,6 +69,25 @@ func (a *App) apiTokenAuthenticate(ctx context.Context, bearer string) (apiToken
 	return meta, true
 }
 
+// verifyAPIToken authenticates an admin API token and parses its stored
+// scope. On a refusal it answers the request itself and reports false: 401
+// for an unknown, expired or revoked token, and 403 for a stored scope that
+// no longer parses, such as the retired word read or a corrupted row, which
+// fails closed because minting a new token is the migration.
+func (a *App) verifyAPIToken(w http.ResponseWriter, r *http.Request, raw string) (apiTokenMeta, tokenscopes.Scope, bool) {
+	meta, ok := a.apiTokenAuthenticate(r.Context(), raw)
+	if !ok {
+		apiError(w, http.StatusUnauthorized, "admin API token rejected: unknown, expired or revoked (strazactl api-token list)")
+		return apiTokenMeta{}, tokenscopes.Scope{}, false
+	}
+	scope, err := tokenscopes.Parse(meta.Scope)
+	if err != nil {
+		apiError(w, http.StatusForbidden, "token scope no longer valid: "+err.Error())
+		return apiTokenMeta{}, tokenscopes.Scope{}, false
+	}
+	return meta, scope, true
+}
+
 // stampAPITokenUse records the use on the token's row, best effort. It
 // rewrites the row only while it exists: the copy in hand was read before
 // this write, and a revoke that landed in between must stay a revoke.

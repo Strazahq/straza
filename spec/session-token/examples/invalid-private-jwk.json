@@ -1,0 +1,34 @@
+{
+  "provenance": "doc RFC 9449 and spec/session-token/SPEC.md 2026-10-20 (generated, not captured from a client: proof key from the Ed25519 seed of 32 bytes 0x07, other key from 32 bytes 0x09, nonce key the 32 bytes 0x00 to 0x1f, signed at 2026-10-20T12:00:30Z)",
+  "description": "The jwk header carries the private part d. A key holder never sends it, and the server refuses the proof.",
+  "at": "2026-10-20T12:00:30Z",
+  "request": {
+    "method": "POST",
+    "path": "/v1/checkin",
+    "origins": [
+      "https://straza.example",
+      "http://127.0.0.1:8420"
+    ],
+    "counter": 7
+  },
+  "proof": "eyJhbGciOiJFZERTQSIsImp3ayI6eyJjcnYiOiJFZDI1NTE5IiwiZCI6IkJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2MiLCJrdHkiOiJPS1AiLCJ4IjoiNmtwc1ktS2NVZ3EtOVZCN0V5N0YtWlZIZHE2LXZudVNRaDdxYVJSRzBpdyJ9LCJ0eXAiOiJkcG9wK2p3dCJ9.eyJjdHIiOjcsImh0bSI6IlBPU1QiLCJodHUiOiJodHRwczovL3N0cmF6YS5leGFtcGxlL3YxL2NoZWNraW4iLCJpYXQiOjE3OTI0OTc2MzAsImp0aSI6IjNjNDAzOGJmYzU2OTE0YmRjNTEyYmRhMzM3YTA1ZmZlIiwibm9uY2UiOiJBQUFBQUFISDJ4QUhScl84WkNQMVhKRnIxLVlWZWY5OVdqT2VyTUhRbG9oZ015WEJVbFV6VncifQ.3fRbboN54f1BFKbegoCpbNfAj84lgDxCf6SZUROBi51XNuJqlvRatiDTOBzMXwjJGs958Z27lOOu2Pu4IC0aCg",
+  "header": {
+    "alg": "EdDSA",
+    "jwk": {
+      "crv": "Ed25519",
+      "d": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "kty": "OKP",
+      "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+    },
+    "typ": "dpop+jwt"
+  },
+  "claims": {
+    "ctr": 7,
+    "htm": "POST",
+    "htu": "https://straza.example/v1/checkin",
+    "iat": 1792497630,
+    "jti": "3c4038bfc56914bdc512bda337a05ffe",
+    "nonce": "AAAAAAHH2xAHRr_8ZCP1XJFr1-YVef99WjOerMHQlohgMyXBUlUzVw"
+  },
+  "reason": "jwk carries a private key"
+}

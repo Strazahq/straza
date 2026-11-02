@@ -1,4 +1,4 @@
-// Command strazactl is the Straza admin CLI: login, identity
+// Command strazactl is the Straza admin CLI on an admin API token: identity
 // CRUD, policy lifecycle, drafts, apps/bindings, packs, sessions, audit,
 // transcripts, api-tokens, connect, spec conformance, status.
 package main
@@ -58,14 +58,13 @@ func underDrafts(cmd *cobra.Command) bool {
 	return false
 }
 
-func rootCmd() *cobra.Command { return newRootCmd(ctl.DefaultCredsPath()) }
+func rootCmd() *cobra.Command { return newRootCmd(oldLoginPath()) }
 
-// newRootCmd builds the command tree against an explicit credentials file so
-// tests can drive the real CLI without touching the operator's ~/.straza.
-func newRootCmd(credsPath string) *cobra.Command {
-	var serverURL string
-	var target ctl.Target
-	var apiToken, agentMarker string
+// newRootCmd builds the command tree against an explicit path of the old
+// login file, which the refusal of a run without a token names when the file
+// is there, so tests never look at the operator's ~/.straza.
+func newRootCmd(loginPath string) *cobra.Command {
+	var serverURL, server, apiToken string
 
 	root := &cobra.Command{
 		Use:           "strazactl",
@@ -75,58 +74,34 @@ func newRootCmd(credsPath string) *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().StringVar(&serverURL, "server", "",
-		"strazad base URL (overrides $STRAZA_SERVER and the server you logged into)")
+		"strazad base URL (overrides $STRAZA_SERVER)")
+
+	client := func() *ctl.Client {
+		c := ctl.NewClient(server)
+		c.APIToken = apiToken
+		return c
+	}
+	status := statusCmd(client)
 
 	// Resolution is lazy: only a command that will build a client needs a
-	// target, so local commands run with no login and no flags.
+	// token and a server, so local commands run with neither. status sends
+	// no credential, so it needs the server alone.
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		// A group run with no verb, as drafts alone is, only prints its help.
 		if !needsServer(cmd) || cmd.HasSubCommands() && len(args) == 0 {
 			return nil
 		}
 		apiToken = os.Getenv(apiTokenEnv)
-		agentMarker = ctl.CodingAgentMarker(os.Getenv)
-		if apiToken != "" && cmd.Name() == "login" {
-			return errLoginWithToken
+		if apiToken == "" && cmd != status {
+			return noTokenError(loginPath)
 		}
-		t, err := ctl.ResolveTarget(serverURL, os.Getenv("STRAZA_SERVER"), credsPath)
-		// Nothing to resolve means nothing to log out of: logout says that in
-		// its own words (naming the credentials file) instead of the generic
-		// error, whose advice (run `login`) is the opposite of the ask.
-		if errors.Is(err, ctl.ErrNoServer) && cmd.Name() == "logout" {
-			return nil
-		}
-		if errors.Is(err, ctl.ErrNoServer) && apiToken != "" {
-			return errTokenWithoutServer
-		}
-		if err != nil {
-			return err
-		}
-		// The override warning speaks of the login's credentials and advises
-		// a login, which a token replaces and refuses, so a token run names
-		// its target in the token notice instead. Logout never sends the
-		// token and says so in its own words.
-		switch {
-		case apiToken == "":
-			if notice := overrideNotice(t, cmd.Name()); notice != "" {
-				fmt.Fprintln(cmd.ErrOrStderr(), notice)
-			}
-		case cmd.Name() != "logout":
-			fmt.Fprintln(cmd.ErrOrStderr(), tokenNotice(t.Server))
-		}
-		target = t
-		return nil
-	}
-
-	client := func() *ctl.Client {
-		c := ctl.NewClient(target.Server)
-		c.CredsPath = credsPath
-		c.APIToken, c.AgentMarker = apiToken, agentMarker
-		return c
+		var err error
+		server, err = ctl.ResolveServer(serverURL, os.Getenv("STRAZA_SERVER"))
+		return err
 	}
 
 	root.AddCommand(
-		statusCmd(client), versionCmd(), loginCmd(client, &target), logoutCmd(client, &target),
+		status, versionCmd(), retiredLogin("login", loginPath), retiredLogin("logout", loginPath),
 		usersCmd(client), rolesCmd(client), assignCmd(client), unassignCmd(client),
 		packsCmd(client), sessionsCmd(client), signingKeysCmd(client), devicesCmd(client), policyCmd(client),
 		auditCmd(client), appsCmd(client), bindingsCmd(client), specCmd(),
@@ -169,20 +144,14 @@ func refuseUnknownVerbs(cmd *cobra.Command) {
 var devCommands []*cobra.Command
 
 // rootLong is the root help: where a command goes, which credential it
-// sends, and what changes inside a coding agent.
-const rootLong = "A command that talks to strazad goes to --server, else $STRAZA_SERVER, else the\n" +
-	"server of your strazactl login. It authenticates with that login, or with an\n" +
-	"admin API token when STRAZA_API_TOKEN holds one. With a token, every admin call\n" +
-	"sends it in place of the login, and one line on stderr says so. strazactl login,\n" +
-	"connect and disconnect act as a person and refuse to run while the token is set,\n" +
-	"and strazactl logout still ends the stored login.\n\n" +
-	"Inside a coding agent, a command that changes Straza refuses to run on your\n" +
-	"login, because the agent would act as you. Reads and checks such as policy\n" +
-	"simulate still work. For automation, use an admin API token in\n" +
-	"STRAZA_API_TOKEN. An agent proposes config changes through the built-in straza\n" +
-	"MCP server's drafting tools. strazactl knows it runs inside a coding agent from\n" +
-	"the environment variables that Claude Code, the Gemini CLI and the npm build of\n" +
-	"Codex set for the commands they run.\n\n" +
+// sends, and the exit codes.
+const rootLong = "A command that talks to strazad goes to --server, else $STRAZA_SERVER. It sends\n" +
+	"the admin API token in STRAZA_API_TOKEN, which a person mints in the console\n" +
+	"under Settings, API tokens, with the scope the commands need and an expiry.\n" +
+	"strazactl has no sign-in of its own. When the identity provider cannot sign\n" +
+	"anyone in, the break-glass admin uses Emergency sign-in on the console's sign-in\n" +
+	"page and mints a token there. strazactl status sends no credential and needs the\n" +
+	"server alone.\n\n" +
 	"Every command exits 0 when it did its job and 1 when it did not. An unknown verb\n" +
 	"exits 1 too. strazactl drafts and strazactl policy diff name other exit codes in\n" +
 	"their help. A retired verb exits 2 and names what replaced it."
@@ -210,35 +179,22 @@ func versionCmd() *cobra.Command {
 	}
 }
 
-func loginCmd(client func() *ctl.Client, target *ctl.Target) *cobra.Command {
-	var breakGlass bool
-	cmd := &cobra.Command{
-		Use:   "login",
-		Short: "Log in via the OIDC device flow and start a strazactl session",
-		Long: "Logs in against --server, else $STRAZA_SERVER, else the server this machine is\n" +
-			"already logged into (a plain `strazactl login` renews where you are). With none\n" +
-			"of the three there is nothing to log in to, and the command says so.\n" +
-			"--break-glass signs in at the server's own emergency page instead of your\n" +
-			"identity provider. That page accepts the break-glass admin only; use it when\n" +
-			"the identity provider cannot sign you in.\n\n" +
-			"While STRAZA_API_TOKEN is set, login refuses to run. Every admin call would\n" +
-			"send that token, so the login would never be used. After a successful login, a\n" +
-			"line on stderr asks you to keep the login away from coding agents.",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			c := client()
-			if target.Source == ctl.SourceCredentials {
-				// Renewal against the stored server: name it, so a renewal
-				// never quietly refreshes a deployment you forgot you were on.
-				fmt.Fprintf(cmd.OutOrStdout(), "Logging in again at %s\n", c.Base)
+// retiredLogin is the hidden verb login or logout. strazactl no longer signs
+// in, so it takes whatever the old verb took, sends nothing and exits with
+// the status of a retired verb. With a token set it says there is nothing to
+// sign in or out of, and without one it answers the refusal of a run without
+// a token.
+func retiredLogin(verb, loginPath string) *cobra.Command {
+	return &cobra.Command{
+		Use:                verb,
+		Hidden:             true,
+		DisableFlagParsing: true,
+		Annotations:        local,
+		RunE: func(*cobra.Command, []string) error {
+			if os.Getenv(apiTokenEnv) != "" {
+				return exitCodeErr{code: 2, err: errNoSignIn}
 			}
-			// Login prints its own logged-in line, so don't repeat it here.
-			if err := c.Login(cmd.Context(), cmd.OutOrStdout(), breakGlass); err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.ErrOrStderr(), loginNote)
-			return nil
+			return exitCodeErr{code: 2, err: noTokenError(loginPath)}
 		},
 	}
-	cmd.Flags().BoolVar(&breakGlass, "break-glass", false, "sign in as the break-glass admin at the server's own emergency page")
-	return cmd
 }

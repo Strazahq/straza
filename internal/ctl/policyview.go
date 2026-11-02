@@ -96,7 +96,5 @@ func (c *Client) PolicyByName(ctx context.Context, name string) (PolicyDetail, e
 // tell 404 from 405 from an error body, which a flattened error string
 // cannot.
 func (c *Client) doWithCode(ctx context.Context, method, path string) ([]byte, int, error) {
-	return c.sendCode(ctx, method, path, func(bearer string) ([]byte, int, error) {
-		return c.doRaw(ctx, method, path, bearer, nil)
-	})
+	return c.doRaw(ctx, method, path, nil)
 }

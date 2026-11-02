@@ -2,7 +2,6 @@ package ctl
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,9 +13,7 @@ import (
 // pack cannot be named again.
 func TestCLIPackDelete(t *testing.T) {
 	base, adminPassword := bootStrazad(t)
-	client := NewClient(base)
-	client.CredsPath = filepath.Join(t.TempDir(), "credentials.json")
-	driveLogin(t, client, base, adminPassword)
+	client := adminTokenClient(t, base, adminPassword)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 

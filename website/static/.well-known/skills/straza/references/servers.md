@@ -2,7 +2,7 @@
 
 This file takes one MCP server from nothing to a role whose sessions call its tools, with the calls that need a person held for that person. You write the server's manifest, its roles and the role's approval set as YAML files, check them against live state, and hand them to the person as one draft. The person publishes the draft, and Straza applies all of it in one step, with the approval set in force before the access row it gates, so no half-built setup is ever live. A published role reaches nobody until it is assigned, so the assignment comes last.
 
-Every command here acts as an administrator on the server that `strazactl status` names. You run the reads and checks on the person's login: `strazactl spec validate`, `strazactl policy validate`, `strazactl policy simulate`, `strazactl drafts check`, `strazactl drafts show` and every export and list. The person runs every change in their own terminal: `strazactl drafts create` and `strazactl drafts publish`, the secret of section 3, the phone enrollment of section 7 and every `assign`. Inside a coding agent `strazactl` refuses those on the person's login, as the SKILL.md section Reads, checks and changes says. The walks behind this file are https://docs.straza.ai/guides/serve-mcp-apps/add-a-server/, https://docs.straza.ai/guides/serve-mcp-apps/credentials/, https://docs.straza.ai/guides/serve-mcp-apps/caller-credentials/ and https://docs.straza.ai/guides/serve-mcp-apps/catalogs-per-role/.
+Every command here acts as an administrator on the server in `STRAZA_SERVER`, on the person's admin API token. You run the offline checks `strazactl spec validate` and `strazactl policy validate` yourself. The person runs every command that reaches the server in their own terminal and shares the output: `strazactl policy simulate`, `strazactl drafts check`, `strazactl drafts show`, every export and list, `strazactl drafts create`, the secret of section 3, the phone enrollment of section 7 and every `assign`. The person publishes the draft in the console, as the SKILL.md section Reads, checks and changes says. The walks behind this file are https://docs.straza.ai/guides/serve-mcp-apps/add-a-server/, https://docs.straza.ai/guides/serve-mcp-apps/credentials/, https://docs.straza.ai/guides/serve-mcp-apps/caller-credentials/ and https://docs.straza.ai/guides/serve-mcp-apps/catalogs-per-role/.
 
 ## 0. Ask before you write
 
@@ -92,10 +92,9 @@ A per-person token, `kind: token`, is valid on a `remote` server only. Each pers
 
 ```sh
 straza connect github
-straza connect github --allow-agents
 ```
 
-The server tests the token once and keeps a sealed copy. The person can also paste it on the Credentials tab of the self-service page at `/self-service/credentials`, and `--expires YYYY-MM-DD` records when it stops working. The manifest's `agents` field says what an agent with no token of its own runs on: nothing (`own`, the default), its sponsor's connection once the sponsor ran `--allow-agents` (`sponsor`), or the server's shared static secret (`shared`). An administrator or a sponsor acts for another user with `strazactl connect github --user <username>` in their own terminal. `examples/app-github-token.yaml` is the shape.
+The server tests the token once and keeps a sealed copy. The person can also paste it on the Credentials tab of the self-service page at `/self-service/credentials`, and `--expires YYYY-MM-DD` records when it stops working. The manifest's `agents` field says what an agent with no token of its own runs on: nothing (`own`, the default), its sponsor's connection once the sponsor turned on **My agents may use this** on the Credentials tab (`sponsor`), or the server's shared static secret (`shared`). The person switches it in a browser, and an organization that wants it on by default switches it for users from a script with `strazactl connect <server> --user <name> --allow-agents`, on a token that holds `apps:write`. A sponsor sets a token for an agent they sponsor in the sponsored-agent rows of the same tab. strazad refuses a change to another user's connection from a session started on a machine, because an agent running as that person can use it. `examples/app-github-token.yaml` is the shape.
 
 An oauth server needs its provider in the server configuration first, under `oauth.providers.<name>` with `clientId`, `clientSecretFile`, `authUrl`, `tokenUrl` and `scopes`, and strazad reads it at start, so the change needs a restart. The manifest then names that provider in `oauth: {provider, scopes}`. Each person runs `straza connect <server>`, which prints their credentials page; they sign in there in a browser. `agents: client_credentials` gives each agent a token of its own client at the provider instead.
 
@@ -150,6 +149,51 @@ spec:
 ```
 
 A business role is refused access of its own with "business role: it composes application roles and reaches tools through them. Give an application role access instead." A Role document is the whole role, its description, its access row and what it composes, so a document without `spec.bindings` takes the role's access row away when it is published. To change a role that exists, start from `strazactl roles export github-devs > github-devs.yaml`. `strazactl bindings list` shows every access row with its id.
+
+### On a server that pins its objects
+
+Some servers reach many separate objects with one credential, such as every repository of an organization. Such a server's manifest can pin one object type under `straza.objects`, and then every access row on it says which of those objects the role covers. Ask the person for the output of `strazactl apps objects <server>` first. On a pinned server it prints the object list, each object with its value, its id and the roles that cover it. On a server that pins nothing it prints the block the server's tool marks declare. What a server's author marks is at https://docs.straza.ai/reference/object-marks/, and https://docs.straza.ai/guides/serve-mcp-apps/add-a-server/ walks the person through pinning it.
+
+On a pinned server the access row carries `covers` in one of two forms. This role, on a server named `ghapp` that pins the type `repo`, names two repositories:
+
+```yaml
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+    name: ghapp-write-payments
+spec:
+    kind: application
+    server: ghapp
+    bindings:
+        - app: ghapp
+          tools:
+            - issue_create
+            - pr_create
+          covers:
+            objects:
+                - Strazahq/pay-api
+                - Strazahq/pay-web
+```
+
+`covers: every` in place of the `objects` mapping reaches every object, including the ones the server lists later. `covers: {objects: [...]}` names objects by value, the exact string the tool argument carries. Copy each value from the output of `strazactl apps objects ghapp` byte for byte, case included, and never guess one. A value the list does not hold is refused with "Strazahq/pay-old is not in ghapp's repo list. Compare the name with ghapp's Repos tab or strazactl apps objects ghapp. If the repo is new, refresh the list with strazactl apps objects refresh ghapp, then try again." Straza stores each object's id beside its value, so a renamed object stays covered and the export writes its new value.
+
+A new or changed access row on a pinned server must carry `covers`, and `strazactl drafts check` refuses one without it: "ghapp-write-payments binds tools that work on repos. Say which repos it covers: every repo, or these repos by name." `strazactl roles create` sends no covers line, so on a pinned server write the role as a Role document in the draft. A role that names objects may hold only tools whose calls name the object or touch none. A tool that reaches every object, such as ghapp's listing tool `repo_list`, goes in a role on every object, and the check says so: "repo_list cannot be in a role on some repos: nothing keeps it to them. Make a role on every repo for it." Whether a server's own admin may write `covers: every` follows the server setting `admin.serverAdminsCoverEvery`, true by default. The draft that first pins a server's objects gives every existing access row on it `covers: every`, so that publish changes nobody's access, and the rows are narrowed in the same draft or a later one.
+
+The gateway checks the object before any policy runs, so no rule, hold or ticket can allow a call it refuses. The agent reads the refusal as the tool's error text, which names what the caller's roles do cover:
+
+```text
+Straza: pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. Your roles cover pr_create on Strazahq/pay-api and Strazahq/pay-web. Check the repo's name, or ask an admin for a role that covers it.
+```
+
+Retry the same call after a minute or two only when the object was just renamed, because the refused call asks for a new listing and the role covers the object by its id. A new object stays refused until a person adds it to the role's covers line. Never retry with another spelling of the value, because Straza matches it byte for byte. Otherwise the person needs a role that covers the object, assigned in the identity manager, or a changed covers line in a draft. A tool that reaches every object answers "Straza: repo_list on ghapp can reach every repo, so only a role on every repo may call it, and none of your roles on ghapp is one. Ask for a role on every repo, or use a tool that names the repo." The audit record of such a refusal carries `object` and `rolesChecked`, the roles the caller holds that bind the tool. To read the answer for one call before it is made, put its arguments in an event file and simulate it, which runs the same check first:
+
+```json
+{"kind": "tool.pre", "tool": "mcp.call", "app": "ghapp", "toolName": "pr_create", "args": {"repo": "Strazahq/site", "title": "Fix the build", "head": "fix-build", "base": "main"}}
+```
+
+```sh
+strazactl policy simulate --user alice --event-json call.json
+```
 
 ## 5. What each call does: the role's access set
 
@@ -219,22 +263,22 @@ For one person governing their own agent, leave `roles` and `deciders` out of th
       reason: "Straza: git push waits for your confirmation on your phone"
 ```
 
-Do not give that person an approver role and name it in `approve.roles`: they would be the only holder, they may not decide their own request, and the hold would expire to a deny. The console and `strazactl approvals approve` refuse a person's own request too, because an agent on the same machine could run them; the enrolled phone or browser is the only place it is decided. The server setting `approval.unsignedOwnDecisions` lifts that refusal, and in doing so it lets an agent on the machine approve its own holds, so never suggest it.
+Do not give that person an approver role and name it in `approve.roles`: they would be the only holder, they may not decide their own request, and the hold would expire to a deny. The console refuses a person's own request too, because an agent on the same machine could reach it, so the enrolled phone or browser is the only place it is decided. The server setting `approval.unsignedOwnDecisions` lifts that refusal, and in doing so it lets an agent on the machine approve its own holds, so never suggest it.
 
 ## 7. Make the phone work
 
 A phone needs three things: the Straza approver app, an enrollment, and an address it can reach. Push is a fourth, which brings the request to the phone while the app is closed.
 
-To enroll a phone, the person mints an enroll token in their own terminal for whoever decides, with that person and the phone at hand, never you: an enrollment makes a device that decides holds. The token is single use and expires in ten minutes. The fields go to stdout and the QR is drawn on stderr.
+The person who decides enrolls their own phone, never you, because an enrolled phone decides holds in that person's name. No admin route or console screen enrolls a device for someone else, so the person does it on the self-service page while they are signed in as themself. They need the role `straza-enroll-mobile` from the identity manager, or from `strazactl assign` on a standalone server. Then they open `/self-service/` on the server, sign in and choose Add a phone on the This browser tab. The enroll token is single use and expires in ten minutes.
 
 ```sh
-strazactl approvals enroll-token alice
+strazactl assign straza-enroll-mobile --user alice
 strazactl approvers list alice
 ```
 
-The person scans the QR in the app, which keeps its signing key in the phone's secure hardware. `strazactl approvers revoke <device-id>` retires a lost phone, and a new one needs a fresh token.
+The person scans the QR in the app, which keeps its signing key in the phone's secure hardware. `strazactl approvers revoke <device-id>` retires a lost phone, and the person enrolls a new one the same way.
 
-The QR's `Servers:` line is the address the phone dials, and it must open from wherever the person stands. The standalone profile starts a phone listener on port 8443 with a certificate it made and the machine's LAN address, which works while the phone is on the same Wi-Fi. When that address is wrong, set `server.approverTLS.publicUrl` in the server configuration, or `STRAZA_APPROVER_TLS_PUBLIC_URL`, to an https address the phone can open, such as a VPN or tunnel hostname, restart strazad and mint again. A proxy that terminates TLS on a public hostname takes `server.approverPublicUrl` instead. The mint refuses only when the server found no address at all. A configured or loopback address is printed as it is, so read the `Servers:` line yourself: `127.0.0.1` or `localhost` there means the phone cannot reach the server, and the setting above must change before the person scans.
+The servers the sheet lists are the addresses the phone dials, and one must open from wherever the person stands. The standalone profile starts a phone listener on port 8443 with a certificate it made and the machine's LAN address, which works while the phone is on the same Wi-Fi. When that address is wrong, set `server.approverTLS.publicUrl` in the server configuration, or `STRAZA_APPROVER_TLS_PUBLIC_URL`, to an https address the phone can open, such as a VPN or tunnel hostname, restart strazad and mint again. A proxy that terminates TLS on a public hostname takes `server.approverPublicUrl` instead. The mint refuses only when the server found no address at all. A configured or loopback address is listed as it is, so have the person read the list: `127.0.0.1` or `localhost` there means the phone cannot reach the server, and the setting above must change before the person scans.
 
 Push delivery is off until it is configured. Without it the app still finds a held call by polling every 15 seconds while it is open, so a person who is not looking misses the request and it expires. The hosted relay needs no vendor account and sends only a reference, never the command. strazad reads `straza.yaml` from the directory it starts in, or the file `--config` names, and every setting here also has an environment face:
 
@@ -254,26 +298,25 @@ When a rule holds a call, a local tool is answered at once with a deny that name
 
 ## 8. Check the draft, then the person publishes it
 
-Check the whole directory against live state. The check stores nothing, contacts no server and runs on the person's login:
+The person checks the whole directory against live state in their own terminal and shares the output. The check stores nothing and contacts no server:
 
 ```sh
 strazactl drafts check -f onboard/
 ```
 
-It lists each document with a mark, `+` for an object that does not exist yet, `~` for one that does and `-` for a removal. Then comes one line per finding: `refused` blocks the publish and says the fix, `widens` is a line the person acknowledges when they publish, `warning` says what will not work yet, and `unchecked` says what Straza could not check without contacting the server. The command exits 0 when the draft can be published as it is, 1 when a line is refused, and 2 when it could not run, and `--json` prints the server's whole answer instead. Fix every refused line in the files and check again.
+It lists each document with a mark, `+` for an object that does not exist yet, `~` for one that does and `-` for a removal. Then comes one line per finding: `refused` blocks the publish and says the fix, `widens` is a line the person confirms when they publish, with the text to type printed once under each block of typed lines, `warning` says what will not work yet, and `unchecked` says what Straza could not check without contacting the server. The command exits 0 when the draft can be published as it is, 1 when a line is refused, and 2 when it could not run, and `--json` prints the server's whole answer instead. Fix every refused line in the files, and the person checks again. When your user holds `straza-draft-config`, you can submit the files with `straza__draft_submit` instead and read the server's check with `straza__draft_status`.
 
-Then hand the person two commands for their own terminal. The first stores the draft and prints its check and its number, 41 here, and the second publishes it:
+Then the person stores the draft from their own terminal. The command prints its check and its number, 41 here:
 
 ```sh
 strazactl drafts create -f onboard/ --note "Add the GitHub server for the platform team"
-strazactl drafts publish 41
 ```
 
-The note is the person's own words for whoever publishes, and Straza does not check it. Before it publishes, `drafts publish` lists each line that widens access and asks the person to acknowledge it. A line that publishing the old state again cannot undo asks them to type a word instead, such as the host that will receive the server's credential, `api.githubcopilot.com` for this server, and that word is theirs to type, never yours. The publish applies the whole draft or nothing. Its answer names each server with its status and the steps that remain, such as assigning the roles and each person's `straza connect`, and ends with the command that undoes it. `strazactl drafts show 41` prints the draft, its check and who gains which tool, and it runs on the person's login too, so you can read what the person is about to publish.
+The note is the person's own words for whoever publishes, and Straza does not check it. The person publishes the draft in the console under Drafts, which says what publishing does and asks them to confirm the lines that widen access, one block per kind. A block that publishing the old state again cannot undo asks them to type a text instead: a name, such as the host that will receive the server's credential, `api.githubcopilot.com` for this server, or the count of several such lines, typed once. That text is theirs to type, never yours. The publish applies the whole draft or nothing. `strazactl drafts show 41` prints the draft, its check and who gains which tool, so ask the person for its output when you need to read what they are about to publish.
 
-When a line is refused after the create, fix the files, and the person sends them again with `strazactl drafts update 41 -f onboard/`. When live state changed after the check, the draft is refused as stale with the object that moved, and no update clears that. The person checks it again with `strazactl drafts rebase 41`, which keeps what the draft changed and takes every other field from live state. A field that the draft and live state both changed needs the person's pick, `--pick "App/github metadata.description=draft"` to keep the draft's value or `=live` to take live's. `strazactl drafts revert 41` makes a new draft that undoes a published one, and the person publishes it the same way.
+When a line is refused after the create, fix the files, and the person sends them again with `strazactl drafts update 41 -f onboard/`. When live state changed after the check, the draft is refused as stale with the object that moved, and no update clears that. The person checks it again with `strazactl drafts rebase 41`, which keeps what the draft changed and takes every other field from live state. A field that the draft and live state both changed needs the person's pick, `--pick "App/github metadata.description=draft"` to keep the draft's value or `=live` to take live's. `strazactl drafts revert 41` makes a new draft that undoes a published one, and the person publishes it in the console the same way.
 
-After the publish, `strazactl apps list` gives each server's status with the reason behind it, and `strazactl apps show github` gives one server in full: health, tools, who has access and how each tool runs, and the stored secrets as fingerprints. A server that needs a credential and has none stays degraded until section 3 is done. When a server stays down, `strazactl apps logs github` prints its recent log lines and `strazactl apps recheck github` probes it again at once. When a server stalls, the recheck can wait longer than strazactl's 30 seconds. strazactl then says that it sent the request in full and got no answer, and `strazactl apps show github` reads the reason the check recorded. A file in the server's apps directory, the `apps.dir` setting, proposes a draft when it appears or changes and a removal draft when it goes, and the person publishes each with `strazactl drafts publish`. Such a server takes changes from the direct commands like any other.
+After the publish, `strazactl apps list` gives each server's status with the reason behind it, and `strazactl apps show github` gives one server in full: health, tools, who has access and how each tool runs, and the stored secrets as fingerprints. A server that needs a credential and has none stays degraded until section 3 is done. When a server stays down, `strazactl apps logs github` prints its recent log lines and `strazactl apps recheck github` probes it again at once. When a server stalls, the recheck can wait longer than strazactl's 30 seconds. strazactl then says that it sent the request in full and got no answer, and `strazactl apps show github` reads the reason the check recorded. A file in the server's apps directory, the `apps.dir` setting, proposes a draft when it appears or changes and a removal draft when it goes, and the person publishes each in the console under Drafts. Such a server takes changes from the direct commands like any other.
 
 ## 9. Check, then assign
 
@@ -303,4 +346,4 @@ A new session sees the tools as `github__<tool>`, and a running session picks th
 
 ## The console does the same
 
-The console's MCP servers page runs a four-step wizard: Server, Credential, Review, Check. It ends with a button that creates a role for the new server, and the role editor asks which tools the role reaches and what happens on each call, which writes the same `-access` set as section 5.
+The console's MCP servers page runs a four-step wizard: Server, Credential, Review, Check. It ends with a button that creates a role for the new server, and the role editor asks which tools the role reaches and what happens on each call, which writes the same `-access` set as section 5. On a server that pins its objects, the editor also asks which of them the role covers.

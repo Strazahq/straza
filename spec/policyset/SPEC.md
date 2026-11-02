@@ -1,10 +1,32 @@
-# PolicySet, v1beta1 (revision 25)
+# PolicySet, v1beta1 (revision 26)
 
 Status: **beta**. The specification began as v1alpha1, and the move to
 beta changed no wire format. Schema: `policyset.schema.json`. Examples:
 `examples/valid-*.yaml`, `examples/invalid-*.yaml`. The platform parser
 MUST agree with the schema on every example. Decision semantics are
 exercised by the decision-table fixtures in `spec/conformance/decisions/`.
+
+Revision 26 (2026-10-30): **a rule names harness tools by their own
+name** (decision semantics; no document-shape change, so documents keep
+parsing under every revision-25 client). A rule that lists `other` in
+`tools` and sets `toolNames` is a by-name rule, and section 2.1 holds its
+semantics. It governs exactly the harness tools it names, compared whole:
+an unclassified tool by the `toolName` its `other` event carries
+(spec/hook-profile revision 2026-10-30), and a classified local tool by
+the `nativeTool` its decide request carries beside the event. A name
+therefore keeps its rule after a release of the client classifies the
+tool, and a deny from the name or from the tool's lane still wins. Until
+this revision `toolNames` was read for `mcp.call` only, so such a rule
+never fired. A revision-25 client keeps that behavior, which keeps denying
+an unclassified tool where the profile default denies, so an older client
+fails closed. Validate, activate and the draft check refuse a by-name rule
+that lists another tool kind, carries another matcher block, writes a
+pattern, or newly allows a tool the server's built-in mappings already
+classify, and a set the active snapshot carries keeps its stored by-name
+rules. The `other` default deny of section 3 now names the tool and the
+rule that allows it. New fixture files `by-name-enterprise.yaml` and
+`by-name-standalone.yaml` pin the decisions, the example
+`valid-by-name.yaml` the shape, and the previous fixtures replay green.
 
 Revision 25 (2026-10-06): **a Rego escape module may not call
 `glob.match`** (compile semantics; no document-shape change, so documents
@@ -462,6 +484,8 @@ the following hold:
 3. `apps` is omitted OR (the tool is `mcp.call` AND the event's app name is
    in `apps`). A rule with `apps` set never applies to non-`mcp.call` events.
 
+A by-name rule (section 2.1) replaces item 2 for a local tool event.
+
 An applying rule produces a **verdict**:
 
 1. If `require` is present and any predicate fails → verdict `deny`
@@ -645,6 +669,42 @@ An applying rule produces a **verdict**:
    `roles` = four-eyes; `approve` + `roles` + `selfApproval: true` = peer
    (requester included in the pool); `confirm` = the requester alone.
 
+### 2.1 Rules that name harness tools (revision 26)
+
+A rule that lists `other` in `tools` and sets `toolNames` names harness
+tools by the harness's own name, such as `SubagentHandback` or
+`refund_order`:
+
+```yaml
+- id: allow-subagent-handback
+  tools: [other]
+  toolNames: { allow: [SubagentHandback] }
+```
+
+- The tool's name is the event's `toolName` when the tool is `other`, and
+  the decide request's `nativeTool` when the tool is another local kind.
+  An `mcp.call`, a tool outside the taxonomy and an event that carries no
+  name have none.
+- The rule applies to an `other` event, and to a local event of a kind
+  its `tools` does not list, only when one of its `toolNames` lists, allow
+  or deny, holds that name. It never applies to a tool it does not name, so
+  its `require` never reaches one.
+- Names are compared whole and case-sensitively on both sides. A pattern
+  matches only a tool whose name is that exact text, so it matches no real
+  tool, and the write gates refuse it.
+- The verdict follows section 2: `require`, then the deny side, then the
+  allow side. Section 3 combines it with every other firing rule, so a
+  lane rule's deny beats a by-name allow, and a by-name deny beats a lane
+  rule's allow.
+- Validate, activate and the draft check refuse a by-name rule that lists
+  another tool kind in `tools`, carries `apps`, `command`, `paths` or
+  `interpreters`, or writes a pattern in `toolNames`. They also refuse an
+  allow-side name that the server's built-in mappings already classify,
+  such as `Bash`, unless the version of the set that the active snapshot
+  carries already allowed that name by name. A tool Straza classifies is
+  allowed through the rules of its kind, so those rules keep narrowing it,
+  and a by-name allow a release later overtakes keeps working.
+
 ## 3. Combining
 
 All firing verdicts from all applicable sets are combined:
@@ -672,7 +732,10 @@ All firing verdicts from all applicable sets are combined:
      `other`) → the profile default (`allow` standalone, `deny` enterprise).
      A tool outside the taxonomy and an event with no tool take the same
      profile default. No rule can name them, so where the default denies,
-     the reason lists the known tools (revision 24).
+     the reason lists the known tools (revision 24). Where the default
+     denies an `other` event, the reason names the tool and the by-name
+     rule that allows it, or says that no rule can allow a tool that came
+     without a name (revision 26).
    - non-tool events (`session.start`, `prompt.submit`, `tool.post`,
      `subagent.*`, `session.end`, `compact.pre`) → `allow` (audit-only).
 4. An event whose kind is not one of the canonical kinds is denied in

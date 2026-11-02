@@ -9,11 +9,11 @@
 - id: signin
   title: Sign-in and users
   rows:
-    # internal/server/api_identity.go 32-56 (handleIdPDiscovery); internal/authn/issuer.go 92-113
+    # internal/server/api_identity.go 32-56 (handleIdPDiscovery); internal/authn/issuer.go 92-113; internal/authn/issuer_code.go, the authorize page
     - id: sign-in
       what: Who signs people in
       knob: oidc.issuer
-      standalone: Straza's own sign-in page, with a password and a one-time code. Clients use it even when `oidc.issuer` is set.
+      standalone: Straza's own sign-in page, with a password, in a browser on the person's machine or with a one-time code. Clients use it even when `oidc.issuer` is set.
       enterprise: Your identity provider, named in `oidc.issuer`. Until you set it, strazad still starts and every sign-in fails with `no login issuer configured`.
     # internal/server/admin_bootstrap.go 22-74 (both profiles); internal/server/server.go 497-499 (LoginOnly); internal/authn/issuer.go 167
     - id: break-glass
@@ -32,17 +32,22 @@
       knob: oidc.jitProvision
       standalone: Gets a user at that sign-in.
       enterprise: Is refused. Your identity manager creates the user over SCIM first.
-    # internal/agentguard/headless.go 20-35, 103-125; internal/server/api_identity.go 39-50; internal/server/server.go 454-463
+    # internal/agentguard/service/cred_agent.go, enrollAgent and agentSecret; internal/server/api_identity.go 39-50; internal/server/server.go 454-463
     - id: agent-sign-in
       what: How an AI agent signs in
       standalone: With a key of its own that an admin registers, checked by Straza's own sign-in.
-      enterprise: With its own client at your identity provider, from `STRAZA_CLIENT_ID` and `STRAZA_CLIENT_SECRET`, or with a registered key of its own.
+      enterprise: With its own client at your identity provider, whose secret `straza service` reads from a file only the service can read, or with a registered key of its own.
     # internal/server/server.go 501-513; internal/server/hardening.go 91-122; internal/config/knobs.go 92
     - id: token-limit
       what: The rate limit on the token endpoint where AI agents sign in
       knob: server.loginPerIPRPS
       standalone: None. The limit covers the password form only.
       enterprise: The same limit as the password form, 2 requests per second for each client address by default.
+    # internal/server/identity_signin.go, idTokenDoorRefusal
+    - id: id-token-door
+      what: A check-in with an ID token alone
+      standalone: Accepted for a person under any harness name, and for an AI agent without a key proof.
+      enterprise: Refused for a person under a coding harness name, and for an AI agent or a service account without a key proof.
 
 - id: decide
   title: Decisions
@@ -58,7 +63,7 @@
       what: A policy on a new install
       standalone: "`standalone-starter`, seeded on an empty database. It denies recursive force-delete, such as `rm -rf`."
       enterprise: None. You write the first policy.
-    # internal/config/config.go 93, 122; internal/config/knobs.go 126; internal/agentguard/localpdp.go 129-156
+    # internal/config/config.go 93, 122; internal/config/knobs.go 126; internal/agentguard/service/api_decide.go, decideFor and expiredReason
     - id: offline
       what: A client that cannot reach strazad
       knob: governance.offlineGraceTTL
@@ -70,6 +75,18 @@
       knob: governance.minAttestation
       standalone: "`none`: any install."
       enterprise: "`managed`: an install whose files match the hashes you registered."
+    # internal/config/governance.go, MinCustody and the profile defaults; internal/config/knobs.go, governance.minCustody; internal/server/identity_key.go, the custody check
+    - id: custody
+      what: Where a person's machine key may be kept, as the client reports it
+      knob: governance.minCustody
+      standalone: "`user`: also in the person's own account, as a service started with `STRAZA_HOME` keeps it."
+      enterprise: "`account`: only by `straza service` under its own OS account."
+    # internal/config/governance.go, MinSignIn and the profile defaults; internal/config/knobs.go, governance.minSignIn; internal/server/identity_signin.go, judgeSignIn
+    - id: min-sign-in
+      what: The lowest sign-in a person's machine key needs
+      knob: governance.minSignIn
+      standalone: "`code`: also a sign-in code approved on any device."
+      enterprise: "`browser`: only a sign-in in a browser on the machine being enrolled, made for its key."
     # internal/config/config.go 95, 124; internal/config/knobs.go 128; internal/server/pdp_state.go 282-296
     - id: backpressure
       what: Audit records while the database is down

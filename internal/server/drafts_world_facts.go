@@ -17,9 +17,10 @@ import (
 // manifestFacts fills the facts of app that mf says: the credential kind
 // and agents value, the OAuth provider with the scopes a person's sign-in
 // asks for and where a secret is injected, the runtime with the names of its
-// environment entries and never their values, the exposure globs, and the
-// address the verbatim server block's registry record gives. It is the one
-// reading of a manifest for live servers and draft items alike.
+// environment entries and never their values, the exposure globs, the
+// address the verbatim server block's registry record gives, and the
+// pinned object type. It is the one reading of a manifest for live servers
+// and draft items alike.
 func manifestFacts(app drafts.App, mf manager.Manifest) drafts.App {
 	app.Credential, app.Agents = mf.CredentialKind(), mf.AgentsSource()
 	app.Provider, app.InjectAs, app.Scopes = "", "", nil
@@ -46,6 +47,7 @@ func manifestFacts(app drafts.App, mf manager.Manifest) drafts.App {
 	}
 	app.Exposure = slices.Clone(mf.ExposedTools())
 	app.RegistryURL = registryURL(mf.Server)
+	app.Pinned = pinnedFacts(mf)
 	return app
 }
 
@@ -89,6 +91,23 @@ func readOnlyTools(tools []*mcp.Tool) []string {
 	return out
 }
 
+// destructiveTools answers each of tools whose upstream annotations set
+// destructiveHint, with the value they set, or nil when none does. A nil
+// hint is no hint, so it leaves the tool out.
+func destructiveTools(tools []*mcp.Tool) map[string]bool {
+	var out map[string]bool
+	for _, t := range tools {
+		if t == nil || t.Annotations == nil || t.Annotations.DestructiveHint == nil {
+			continue
+		}
+		if out == nil {
+			out = map[string]bool{}
+		}
+		out[t.Name] = *t.Annotations.DestructiveHint
+	}
+	return out
+}
+
 // itemFacts answers the facts of every App d puts, by name, read from the
 // item's document with manager.Parse and manifestFacts, with its manifest
 // as canonical JSON and the admin role name and role prefix the store
@@ -108,7 +127,8 @@ func (a *App) itemFacts(d drafts.Draft) map[string]drafts.App {
 }
 
 // appFacts reads the facts of the App put named name of the draft id from
-// its document doc, and reports false, with the reason in the log, for a
+// its document doc, with the review of its objects block against the
+// running server, and reports false, with the reason in the log, for a
 // manifest that does not parse.
 func (a *App) appFacts(id, name, doc string) (drafts.App, bool) {
 	mf, err := manager.Parse([]byte(doc))
@@ -120,7 +140,9 @@ func (a *App) appFacts(id, name, doc string) (drafts.App, bool) {
 		a.log.Warn("draft check: the manifest of an App item cannot be read", "draft", id, "app", name, "err", err)
 		return drafts.App{}, false
 	}
-	return manifestFacts(drafts.App{Name: name, Manifest: manifest, AdminRole: store.AppAdminRoleName(name), RolePrefix: store.OwnedRolePrefix(name)}, mf), true
+	app := manifestFacts(drafts.App{Name: name, Manifest: manifest, AdminRole: store.AppAdminRoleName(name), RolePrefix: store.OwnedRolePrefix(name)}, mf)
+	app.Objects = a.objectsReview(name, mf)
+	return app, true
 }
 
 // keptFacts reads again, into apps, the facts of every App put of d whose
@@ -140,6 +162,9 @@ func (a *App) keptFacts(w drafts.World, d drafts.Draft, apps map[string]drafts.A
 			continue
 		}
 		if app, ok := a.appFacts(d.ID, it.Name, restored); ok {
+			// A mask stands for a secret value, never for the objects
+			// block, so the pinned facts worldFor read still hold.
+			app.Pinned = apps[it.Name].Pinned
 			apps[it.Name] = app
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,16 +18,17 @@ import (
 )
 
 // Issuer is the built-in OIDC provider: discovery, RFC 8628 device
-// authorization, token endpoint, and a minimal local-user login page. The
-// standalone profile signs every human in here. The enterprise profile
-// mounts the same issuer for two callers only: NHIs on the
-// client_credentials grant, and the break-glass admin on the login page
-// (LoginOnly), so a lockout by the identity provider stays recoverable. It
-// is deliberately NOT a general-purpose IdP, just enough for
-// `straza enroll` / `strazactl login`.
+// authorization, the authorization code flow with PKCE for programs on the
+// person's own machine (issuer_code.go), the token endpoint, and minimal
+// local-user login pages. The standalone profile signs every human in here.
+// The enterprise profile mounts the same issuer for two callers only: NHIs
+// on the client_credentials grant, and the break-glass admin on the login
+// pages (LoginOnly), so a lockout by the identity provider stays
+// recoverable. It is deliberately NOT a general-purpose IdP, just enough
+// for `straza enroll` and the console's sign-in.
 //
-// Grants live in memory: standalone runs a single process, and a lost grant
-// only means re-running the login (fail closed).
+// Grants and codes live in memory: standalone runs a single process, and a
+// lost grant or code only means re-running the login (fail closed).
 type Issuer struct {
 	users   store.UserRepo
 	tokens  *TokenService
@@ -36,11 +38,11 @@ type Issuer struct {
 	// principals (issuer_nhi.go). nil ⇒ the grant is refused.
 	NHIKeys NHIKeyLookup
 
-	// LoginOnly, when set, restricts the login page to that one username
-	// and presents the page as the emergency sign-in. The enterprise
+	// LoginOnly, when set, restricts both login pages to that one username
+	// and presents them as the emergency sign-in. The enterprise
 	// profile sets it to the break-glass admin: humans there have no local
-	// passwords, so a hash on any other row must never open this
-	// page. Every other username is refused before its credential is
+	// passwords, so a hash on any other row must never open these
+	// pages. Every other username is refused before its credential is
 	// judged, and the refusal fires OnLoginFailed with an empty username.
 	LoginOnly string
 
@@ -74,8 +76,27 @@ type Issuer struct {
 	mu         sync.Mutex
 	grants     map[string]*deviceGrant // device_code → grant
 	byUserCode map[string]string       // user_code → device_code
+	codes      map[string]*authCode    // authorization code → its binding
 	seenJTI    map[string]time.Time    // assertion jti → exp (replay cache)
+	lastSweep  time.Time               // when gcLocked last swept grants and codes
 }
+
+// sweepEvery is the least time between two sweeps of expired grants and
+// authorization codes. Every reader checks expiry itself, so the sweep only
+// frees memory and may lag behind it.
+const sweepEvery = time.Second
+
+// maxPendingGrants is the most device grants the issuer holds at once. A
+// grant stays in memory until it is redeemed or expires, so past this bound
+// a new start is refused and no grant is evicted: a flood of starts can
+// delay new sign-ins but never cancels one a person has begun.
+const maxPendingGrants = 4096
+
+// The answers of the device authorization endpoint when it starts no grant.
+const (
+	deviceClientRefused = "client_id must be straza, strazactl or console, the Straza programs this server signs in. Start the sign-in again with straza enroll."
+	deviceGrantsFull    = "This server already holds 4096 sign-ins waiting for a code, the most it keeps. Wait a few minutes and sign in again, or sign in through the browser. If it repeats, look in the access log for a flood of POST /oidc/device_authorization."
+)
 
 type deviceGrant struct {
 	deviceCode string
@@ -83,6 +104,7 @@ type deviceGrant struct {
 	clientID   string
 	status     string // pending|approved|denied
 	userID     string
+	authTime   time.Time // when the password was checked
 	expiresAt  time.Time
 	lastPoll   time.Time
 }
@@ -99,6 +121,7 @@ func NewIssuer(users store.UserRepo, tokens *TokenService, baseURL string) *Issu
 		idTTL:      10 * time.Minute,
 		grants:     map[string]*deviceGrant{},
 		byUserCode: map[string]string{},
+		codes:      map[string]*authCode{},
 		seenJTI:    map[string]time.Time{},
 	}
 }
@@ -109,18 +132,22 @@ func (i *Issuer) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /oidc/device_authorization", i.handleDeviceAuthorization)
 	mux.HandleFunc("GET /oidc/device", i.handleLoginPage)
 	mux.HandleFunc("POST /oidc/device", i.handleLoginSubmit)
+	mux.HandleFunc("GET /oidc/authorize", i.handleAuthorizePage)
+	mux.HandleFunc("POST /oidc/authorize", i.handleAuthorizeSubmit)
 	mux.HandleFunc("POST /oidc/token", i.handleToken)
 }
 
 func (i *Issuer) handleDiscovery(w http.ResponseWriter, _ *http.Request) {
 	writeJSONIssuer(w, http.StatusOK, map[string]any{
 		"issuer":                                i.baseURL,
+		"authorization_endpoint":                i.baseURL + "/oidc/authorize",
 		"device_authorization_endpoint":         i.baseURL + "/oidc/device_authorization",
 		"token_endpoint":                        i.baseURL + "/oidc/token",
 		"jwks_uri":                              i.baseURL + "/.well-known/straza/jwks.json",
-		"grant_types_supported":                 []string{"urn:ietf:params:oauth:grant-type:device_code", "client_credentials"},
-		"token_endpoint_auth_methods_supported": []string{"private_key_jwt"},
-		"response_types_supported":              []string{"id_token"},
+		"grant_types_supported":                 []string{"authorization_code", "urn:ietf:params:oauth:grant-type:device_code", "client_credentials"},
+		"token_endpoint_auth_methods_supported": []string{"private_key_jwt", "none"},
+		"response_types_supported":              []string{"code"},
+		"code_challenge_methods_supported":      []string{"S256"},
 		"subject_types_supported":               []string{"public"},
 		"id_token_signing_alg_values_supported": []string{"EdDSA"},
 		"scopes_supported":                      []string{"openid", "profile", "email"},
@@ -137,16 +164,35 @@ func (i *Issuer) handleDeviceAuthorization(w http.ResponseWriter, r *http.Reques
 		oauthError(w, "invalid_request", "client_id is required")
 		return
 	}
+	if len(r.PostForm["client_id"]) != 1 || !authorizeClients[clientID] {
+		oauthError(w, "invalid_client", deviceClientRefused)
+		return
+	}
 
+	// The form parser hands out values that share memory with the whole
+	// request body, so the grant keeps a copy of the client id of its own.
 	g := &deviceGrant{
 		deviceCode: randomToken(32),
 		userCode:   randomUserCode(),
-		clientID:   clientID,
+		clientID:   strings.Clone(clientID),
 		status:     "pending",
 		expiresAt:  time.Now().Add(i.grantTTL),
 	}
 	i.mu.Lock()
 	i.gcLocked()
+	// Only this endpoint adds to grants, and every grant in it, approved
+	// ones not yet redeemed included, holds memory. A grant that expired
+	// since the last sweep still counts, which can only refuse a start
+	// early, for under a second.
+	if len(i.grants) >= maxPendingGrants {
+		i.mu.Unlock()
+		w.Header().Set("Retry-After", "60")
+		writeJSONIssuer(w, http.StatusServiceUnavailable, map[string]string{
+			"error":             "temporarily_unavailable",
+			"error_description": deviceGrantsFull,
+		})
+		return
+	}
 	i.grants[g.deviceCode] = g
 	i.byUserCode[g.userCode] = g.deviceCode
 	i.mu.Unlock()
@@ -161,11 +207,15 @@ func (i *Issuer) handleDeviceAuthorization(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-var loginTmpl = template.Must(template.New("login").Parse(`<!doctype html>
+// pageHead opens both sign-in pages, the device page and the authorize
+// page: the title, the style and the heading, which reads .Only.
+const pageHead = `<!doctype html>
 <title>Sign in to Straza</title>
 <style>body{font-family:system-ui;max-width:22rem;margin:4rem auto}label{display:block;margin:.6rem 0 .2rem}input{width:100%;padding:.4rem}button{margin-top:1rem;padding:.5rem 1.2rem}.err{color:#b00}.ok{color:#070}</style>
 <h1>{{if .Only}}Emergency sign-in to Straza{{else}}Sign in to Straza{{end}}</h1>
-{{if .Done}}<p class="ok">Signed in. You can close this tab. The console or terminal that showed the code carries on by itself.</p>{{else}}
+`
+
+var loginTmpl = template.Must(template.New("login").Parse(pageHead + `{{if .Done}}<p class="ok">Signed in. You can close this tab. The terminal that showed the code carries on by itself.</p>{{else}}
 {{if .Only}}<p>This page signs in the emergency admin {{.Only}} and nobody else. Everyone else signs in at your identity provider.</p>{{end}}
 {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
 <form method="post" action="/oidc/device">
@@ -198,27 +248,67 @@ func (i *Issuer) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	password := r.PostForm.Get("password")
 	view := loginView{UserCode: userCode, Only: i.LoginOnly}
 
+	const codeRefused = "That code is not valid or has expired. Check it against the console or terminal and try again."
+
 	i.mu.Lock()
-	deviceCode, ok := i.byUserCode[userCode]
-	var g *deviceGrant
-	if ok {
-		g = i.grants[deviceCode]
-	}
+	g := i.grants[i.byUserCode[userCode]]
+	pending := g.pendingLocked(time.Now())
 	i.mu.Unlock()
-	if g == nil || g.status != "pending" || time.Now().After(g.expiresAt) {
-		view.Error = "That code is not valid or has expired. Check it against the console or terminal and try again."
+	if !pending {
+		view.Error = codeRefused
 		renderLogin(w, view)
 		return
 	}
+	u, refusal := i.judgePassword(r, username, password)
+	if refusal != "" {
+		view.Error = refusal
+		renderLogin(w, view)
+		return
+	}
+	authTime := time.Now()
+	// The person authenticated, whatever happens to the grant next, so the
+	// break-glass alarm never depends on the grant's timing.
+	if i.OnLogin != nil {
+		i.OnLogin(u.ID, u.Username)
+	}
+
+	// The grant may have changed during the password check: an overlapping
+	// submit approved it, or it expired. Only a grant still pending now is
+	// approved, so one sign-in decides it.
+	i.mu.Lock()
+	pending = g.pendingLocked(authTime)
+	if pending {
+		g.status = "approved"
+		g.userID = u.ID
+		g.authTime = authTime
+	}
+	i.mu.Unlock()
+	if !pending {
+		view.Error = codeRefused
+		renderLogin(w, view)
+		return
+	}
+	renderLogin(w, loginView{Done: true})
+}
+
+// pendingLocked reports whether g still waits for a sign-in at now. A nil
+// grant does not. Called with i.mu held.
+func (g *deviceGrant) pendingLocked(now time.Time) bool {
+	return g != nil && g.status == "pending" && !now.After(g.expiresAt)
+}
+
+// judgePassword checks a password submit, the same way on the device page
+// and the authorize page. It returns the active user, or the sentence the
+// page shows instead. Each refusal fires OnLoginFailed once with the
+// post-zeroing username.
+func (i *Issuer) judgePassword(r *http.Request, username, password string) (store.User, string) {
 	if i.LoginOnly != "" && username != i.LoginOnly {
 		// Refused before any lookup: on this mount no other row's hash is
 		// a credential, whatever set-password stored on it.
 		if i.OnLoginFailed != nil {
 			i.OnLoginFailed("", r)
 		}
-		view.Error = "This page signs in the account " + i.LoginOnly + " only. Everyone else signs in at your identity provider."
-		renderLogin(w, view)
-		return
+		return store.User{}, "This page signs in the account " + i.LoginOnly + " only. Everyone else signs in at your identity provider."
 	}
 
 	u, err := i.users.GetByUsername(r.Context(), username)
@@ -233,19 +323,9 @@ func (i *Issuer) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		if i.OnLoginFailed != nil {
 			i.OnLoginFailed(username, r)
 		}
-		view.Error = "Invalid username or password."
-		renderLogin(w, view)
-		return
+		return store.User{}, "Invalid username or password."
 	}
-
-	i.mu.Lock()
-	g.status = "approved"
-	g.userID = u.ID
-	i.mu.Unlock()
-	if i.OnLogin != nil {
-		i.OnLogin(u.ID, u.Username)
-	}
-	renderLogin(w, loginView{Done: true})
+	return u, ""
 }
 
 func (i *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
@@ -256,11 +336,14 @@ func (i *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 	switch gt := r.PostForm.Get("grant_type"); gt {
 	case "urn:ietf:params:oauth:grant-type:device_code":
 		// interactive lane, below
+	case "authorization_code":
+		i.handleCodeGrant(w, r) // browser lane (issuer_code.go)
+		return
 	case "client_credentials":
 		i.handleClientCredentials(w, r) // headless NHI lane (issuer_nhi.go)
 		return
 	default:
-		oauthError(w, "unsupported_grant_type", "supported grants: device_code (interactive) and client_credentials (NHI headless)")
+		oauthError(w, "unsupported_grant_type", "the supported grants are authorization_code and device_code for people, and client_credentials for NHIs")
 		return
 	}
 	deviceCode := r.PostForm.Get("device_code")
@@ -288,7 +371,7 @@ func (i *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g.lastPoll = nowT
-	status, userID := g.status, g.userID
+	status, userID, authTime := g.status, g.userID, g.authTime
 	if status == "approved" {
 		delete(i.grants, g.deviceCode)
 		delete(i.byUserCode, g.userCode)
@@ -306,27 +389,44 @@ func (i *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 			oauthError(w, "access_denied", "user no longer active")
 			return
 		}
-		idTok, err := i.tokens.MintIDToken(u.ID, clientID, i.idTTL, u.Username, u.Email)
-		if err != nil {
-			oauthError(w, "server_error", "could not sign id token")
-			return
-		}
-		writeJSONIssuer(w, http.StatusOK, map[string]any{
-			"access_token": idTok, // the ID token doubles as access token for Straza APIs
-			"id_token":     idTok,
-			"token_type":   "Bearer",
-			"expires_in":   int(i.idTTL.Seconds()),
-		})
+		i.issueIDToken(w, u, clientID, LoginFacts{AuthTime: authTime})
 	}
 }
 
-// gcLocked drops expired grants. Called with i.mu held.
+// issueIDToken answers a token request with an ID token for u, minted for
+// clientID with the login facts f.
+func (i *Issuer) issueIDToken(w http.ResponseWriter, u store.User, clientID string, f LoginFacts) {
+	idTok, err := i.tokens.MintIDTokenFor(u.ID, clientID, i.idTTL, u.Username, u.Email, f)
+	if err != nil {
+		oauthError(w, "server_error", "could not sign id token")
+		return
+	}
+	writeJSONIssuer(w, http.StatusOK, map[string]any{
+		"access_token": idTok, // the ID token doubles as access token for Straza APIs
+		"id_token":     idTok,
+		"token_type":   "Bearer",
+		"expires_in":   int(i.idTTL.Seconds()),
+	})
+}
+
+// gcLocked drops expired grants and authorization codes, at most once per
+// sweepEvery, so a flood of starts does not walk both tables under i.mu on
+// each one. Called with i.mu held.
 func (i *Issuer) gcLocked() {
 	nowT := time.Now()
+	if nowT.Sub(i.lastSweep) < sweepEvery {
+		return
+	}
+	i.lastSweep = nowT
 	for code, g := range i.grants {
 		if nowT.After(g.expiresAt) {
 			delete(i.grants, code)
 			delete(i.byUserCode, g.userCode)
+		}
+	}
+	for code, c := range i.codes {
+		if nowT.After(c.expiresAt) {
+			delete(i.codes, code)
 		}
 	}
 }
@@ -352,8 +452,18 @@ func Checksum(content string) string {
 }
 
 func renderLogin(w http.ResponseWriter, v loginView) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	pageHeaders(w)
 	_ = loginTmpl.Execute(w, v)
+}
+
+// pageHeaders marks a sign-in page as HTML that no other site may frame. The
+// server sets the same frame headers on every response, and the issuer sets
+// them too, so a password form never depends on how it is mounted.
+func pageHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Content-Security-Policy", "frame-ancestors 'none'")
 }
 
 // oauthError writes an RFC 6749 error response.

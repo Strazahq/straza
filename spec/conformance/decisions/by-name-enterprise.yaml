@@ -1,0 +1,93 @@
+# Decision-table fixtures: rules that name harness tools by their own name
+# (revision 26), enterprise profile. A rule that lists other in tools and sets
+# toolNames governs exactly the tools it names, by exact name: an other event
+# by its toolName, and a classified local tool by the nativeTool its decide
+# request carries, so a name keeps its rule after a release classifies the
+# tool. A deny from the name or from the lane wins [doc].
+profile: enterprise
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: by-name }
+    spec:
+      match: { roles: [dev, ci] }
+      rules:
+        - id: allow-handback
+          tools: [other]
+          toolNames: { allow: [SubagentHandback, ArtifactCheck] }
+        - id: deny-monitor
+          tools: [other]
+          toolNames: { deny: [Monitor] }
+          reason: "Monitor is off for this team"
+        - id: allow-sub-pattern
+          tools: [other]
+          toolNames: { allow: ["Sub*"] }
+        - id: deny-every-name
+          tools: [other]
+          toolNames: { deny: ["*"] }
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: lanes }
+    spec:
+      match: { roles: [dev] }
+      rules:
+        - id: allow-delegation
+          tools: [task.spawn]
+          effect: allow
+        - id: deny-egress
+          tools: [net.fetch]
+          effect: deny
+          reason: "no egress for dev"
+        - id: mcp-names-only
+          toolNames: { allow: ["*"] }
+cases:
+  - name: named-unknown-tool-allowed
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: other, toolName: SubagentHandback }
+    want: { effect: allow, ruleId: allow-handback, setName: by-name }
+  - name: nameless-unknown-tool-stays-denied
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: other }
+    want: { effect: deny, default: true }
+  - name: classified-tool-keeps-its-by-name-allow
+    subject: { user: kai, roles: [ci] }
+    event: { kind: tool.pre, tool: task.spawn, nativeTool: SubagentHandback }
+    want: { effect: allow, ruleId: allow-handback, setName: by-name }
+  - name: lane-deny-beats-by-name-allow
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: net.fetch, nativeTool: ArtifactCheck }
+    want: { effect: deny, ruleId: deny-egress }
+  - name: by-name-deny-beats-lane-allow
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: task.spawn, nativeTool: Monitor }
+    want: { effect: deny, ruleId: deny-monitor }
+  - name: unnamed-classified-tool-follows-its-lane
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: task.spawn, nativeTool: Agent }
+    want: { effect: allow, ruleId: allow-delegation }
+  - name: by-name-pattern-is-not-a-glob
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: other, toolName: SubagentStart }
+    want: { effect: deny, default: true }
+  - name: by-name-deny-pattern-is-not-a-glob
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: task.spawn, nativeTool: TaskStop }
+    want: { effect: allow, ruleId: allow-delegation }
+  - name: unnamed-unknown-tool-stays-denied-even-under-a-toolnames-star
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: other, toolName: FutureTool }
+    want: { effect: deny, default: true }
+  - name: by-name-rule-never-names-an-mcp-tool
+    subject: { user: kai, roles: [ci] }
+    event: { kind: tool.pre, tool: mcp.call, app: github, toolName: SubagentHandback }
+    want: { effect: deny, default: true }
+  - name: native-name-on-a-tool-outside-the-taxonomy-is-ignored
+    subject: { user: kim, roles: [dev] }
+    event: { kind: tool.pre, tool: made-up-tool, nativeTool: SubagentHandback }
+    want: { effect: deny, default: true }
+  - name: by-name-rule-applies-to-no-other-role
+    subject: { user: lee, roles: [ops] }
+    event: { kind: tool.pre, tool: other, toolName: SubagentHandback }
+    want: { effect: deny, default: true }

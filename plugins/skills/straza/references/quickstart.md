@@ -2,7 +2,7 @@
 
 The standalone profile runs on one machine: one server binary with an embedded database, an embedded event broker and a built-in sign-in page. No Docker, no Postgres, no external identity provider. At the end an agent session starts with a governance line naming the person and the signed policy in force, and a destructive command is denied inside the agent before it runs. The docs page this follows is https://docs.straza.ai/get-started/first-governed-session/.
 
-You need the three binaries `strazad`, `strazactl` and `straza` on the PATH, two terminals, and the agent harness on the same machine. Take them from a release archive on https://github.com/strazahq/straza/releases, or build them from a clone of the repository with Go 1.26 or newer, Git and Make; the binaries land under `bin`:
+You need a Linux machine with the three binaries `strazad`, `strazactl` and `straza` on the PATH, four terminals, and the agent harness on the same machine. The client starts sessions on Linux, macOS and Windows, and this quickstart uses Linux. Take them from a release archive on https://github.com/strazahq/straza/releases, or build them from a clone of the repository with Go 1.26 or newer, Git and Make; the binaries land under `bin`:
 
 ```sh
 make build
@@ -10,25 +10,31 @@ export PATH="$PWD/bin:$PATH"
 strazad version
 ```
 
-The person at the keyboard signs in twice in a browser; hand them the printed link both times. Inside a coding agent, `strazactl` refuses the changes of steps 3, 7 and 9 on the person's login, so hand those commands to the person for their admin terminal. The reads run anywhere, `strazactl policy simulate` included.
+The person at the keyboard signs in twice in a browser: in the console, where they mint an admin API token for `strazactl`, and at the enrollment of step 5, where `straza enroll` opens their browser on the sign-in page. Every `strazactl` command that reaches the server runs on that token in the person's admin terminal, so hand those commands to the person, reads included, and work from the output they share. You run only `strazactl policy validate`, which checks a file offline.
 
-## 1. Start the server
+## 1. The person starts the server
+
+This step is the person's own. They run the server in the first terminal, and you wait until they tell you it runs:
 
 ```sh
 strazad serve --profile standalone
 ```
 
-The first boot prints the `admin` password once and the `break-glass` password once, seeds the starter policy, and serves on `http://127.0.0.1:8420`, loopback only. Tell the user to copy the admin password from the log now. State lives under `data` in the directory the server started from. A lost password means stop the server, delete `data` and start again.
+Never run it yourself, never read its log and never ask for what it printed. The first boot prints the `admin` password and the `break-glass` password once, in that log. A log you read puts both passwords in your transcript, and either one signs in as an administrator. Tell the person to copy both passwords from the log into their password vault now, because a restart does not print them again. The first boot also seeds the starter policy and serves on `http://127.0.0.1:8420`, loopback only. State lives under `data` in the directory the server started from. A lost password means stop the server, delete `data` and start again.
 
-Keep the server running in its own terminal. Once a harness is governed, a stopped server does not switch governance off: the agent keeps deciding from its last signed policy for up to 15 minutes, and after that every tool call is denied until the server is back. If you are the agent inside the harness being governed, say so to the person before step 6, because your own tool calls are governed from the next session on. The way out when the server is gone for good is `straza uninstall claude-code`, which the person runs in a plain shell; never run it yourself.
+The person keeps the server running in that terminal. Once a harness is governed, a stopped server does not switch governance off: the agent keeps deciding from its last signed policy for up to 15 minutes, and after that every tool call is denied until the server is back. If you are the agent inside the harness being governed, say so to the person before step 6, because your own tool calls are governed from the next session on. The way out when the server is gone for good is `straza uninstall claude-code`, which the person runs in a plain shell; never run it yourself.
 
-## 2. Sign in as the admin
+## 2. Sign in to the console and mint an admin token
+
+The person opens `http://127.0.0.1:8420/console/` in a browser, presses Sign in, and signs in as `admin` with the password from the log. Under Settings, API tokens, they press New API token, name it `admin-terminal`, pick `expires in 30 days` and the Full root job, press Mint token, and copy the token, which is shown only once. Then, in the second terminal, the one they use as the admin:
 
 ```sh
-strazactl login --server http://127.0.0.1:8420
+export STRAZA_SERVER=http://127.0.0.1:8420
+read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
+strazactl users list
 ```
 
-The command prints a link with a device code and waits. The user opens it, enters `admin` and the password, and the terminal prints `Logged in as admin.`. `login` is the one command that needs the server address, and it remembers it. A `login timed out` means the code expired after ten minutes; run it again and approve the new code.
+`read -rs` reads the pasted token without showing it and keeps it out of the shell history. The list shows the two users the first boot created, `admin` and `break-glass`. The token is a bearer credential: whoever holds it acts as an administrator until it expires or is revoked. So it stays in that terminal only, never in a shell profile, and the harness never starts from that terminal. Never ask the person for the token. They revoke it under Settings, API tokens when they finish.
 
 ## 3. Create a person and a role
 
@@ -38,7 +44,7 @@ strazactl roles create dev --kind application
 strazactl assign dev --user alice
 ```
 
-A PolicySet matches application roles, which is why the kind is stated. The password is visible on the command line, so the person picks it and runs the first line in their own terminal.
+A PolicySet matches application roles, which is why the kind is stated. The password is visible on the command line, so the person picks it.
 
 ## 4. See the policy that already governs
 
@@ -50,14 +56,24 @@ strazactl policy simulate --roles dev --tool shell.exec --command 'rm -rf /tmp/x
 
 A fresh standalone store already carries `standalone-starter`, one active set that denies recursive force-deletes with a reason. The simulation answers `This call would be denied.` and names the rule and the set. The same command with `git status` is allowed, because the standalone profile allows a local tool no rule mentions. Writing a set of the user's own is `policy.md`.
 
-## 5. Enroll the machine as the person
+## 5. Start the background service and enroll the machine as the person
+
+In the third terminal, as the person:
 
 ```sh
+export STRAZA_HOME="$HOME/.straza"
+straza service
+```
+
+`straza service` holds alice's key and every Straza session of this machine, and the hooks reach it over a local socket. Keep it running in its own terminal. The straza package for Linux runs it under its own OS account, and here it runs as the person instead, with its socket and state under `STRAZA_HOME`. This works only on a machine with no system service and no managed install, because on a machine with either one, every `straza` command ignores `STRAZA_HOME` and reaches the system service. Export the same `STRAZA_HOME` in every terminal that runs `straza` or starts the harness, or the hooks deny because they cannot reach the service. In the fourth terminal, which holds no admin token:
+
+```sh
+export STRAZA_HOME="$HOME/.straza"
 straza enroll --server http://127.0.0.1:8420
 straza status
 ```
 
-Enroll prints a link and a code and waits for the user to sign in as `alice`. It binds this machine to her once. `straza status` then names the server and the identity and says no session exists yet, because a session starts when a harness checks in. `straza doctor` at this point reports enrollment, identity and server as ok and three expected warnings with the command that clears each.
+Enroll opens the user's browser on the sign-in page and waits for them to sign in as `alice`, with `--use-device-code` as the way on a machine with no display. It binds this machine to her once, with a key the service keeps. `straza status` then names the service, the server and the identity and says no session exists yet, because a session starts when a harness checks in. `straza doctor` at this point reports the service, the enrollment and the server as ok, and two expected warnings, no session and no harness wiring, each with the command that clears it.
 
 ## 6. Wire the harness
 
@@ -65,7 +81,7 @@ Enroll prints a link and a code and waits for the user to sign in as `alice`. It
 straza install claude-code
 ```
 
-Use `codex` or `gemini` for those harnesses. The command merges the hook entries into the harness settings and registers the `straza mcp` gateway server, then prints the files it wrote. Restart the harness. Codex also needs the user to open `/hooks` inside Codex and trust the Straza hooks once, and the install says so.
+Use `codex` or `gemini` for those harnesses. The command merges the hook entries into the harness settings and registers the `straza mcp` gateway server, then prints the files it wrote. Restart the harness from a terminal that exports the same `STRAZA_HOME`, so its hooks reach the service. Codex also needs the user to open `/hooks` inside Codex and trust the Straza hooks once, and the install says so.
 
 Start a new session and ask the agent to run `rm -rf /tmp/x`. The session opens with a governance line naming the user, the role and the policy snapshot, and the command is denied before it runs, with the starter policy's reason shown to the user and to the model. `git status` passes. The same check runs without a harness by piping the harness payload into the hook:
 
@@ -77,11 +93,7 @@ A deny prints the reason and exits 2. An allow exits 0.
 
 ## 7. Pull the kill switch
 
-```sh
-straza daemon
-```
-
-Leave the daemon running in its own terminal as the person. Without it a session learns of a revocation at its next token refresh, at most 300 seconds away; with it the push arrives at once. From the admin terminal:
+`straza service` holds a push stream for each live session, so a revocation reaches a running session at once while the service runs. A session whose stream is down learns of it at the first call that renews its token, once 120 seconds or less of the 300 remain, so at most about 180 seconds after the token was minted for a session that keeps working. From the admin terminal:
 
 ```sh
 strazactl sessions list
@@ -89,7 +101,7 @@ strazactl sessions revoke <session id>
 strazactl users disable alice
 ```
 
-Revoking the session makes the daemon print that hooks now deny, and the next tool call in the agent is denied. Disabling the user is the durable cut: every session is revoked and the next session start is refused. `strazactl users enable alice` brings her back.
+Revoking the session marks it revoked in the service, and the next tool call in the agent is denied. A new session start checks in again and gets a new session, because only the session was revoked. Disabling the user is the durable cut: every session is revoked and the next session start is refused. `strazactl users enable alice` brings her back.
 
 ## 8. Read the evidence
 
@@ -131,10 +143,10 @@ spec:
 strazactl policy validate -f dev-ask-before-push.yaml
 strazactl policy apply -f dev-ask-before-push.yaml
 strazactl policy activate dev-ask-before-push
-strazactl approvals enroll-token alice
+strazactl assign straza-enroll-mobile --user alice
 ```
 
-Do not create an approver role for alice and name it in the rule: she would be its only holder, nobody may decide their own request, and the hold would expire to a deny. `examples/hold-for-approver.yaml` is the team shape. The enroll token is single use and expires in ten minutes, so mint it with alice and her phone present; she scans the QR in the Straza approver app. Before she scans, check that the `Servers:` line names an address her phone can open, and that push is configured, or the request never reaches her phone while the app is closed. `servers.md` sections 6 and 7 cover both, the browser alternative, and what the agent sees while the call waits.
+Do not create an approver role for alice and name it in the rule: she would be its only holder, nobody may decide their own request, and the hold would expire to a deny. `examples/hold-for-approver.yaml` is the team shape. She enrolls her own phone, never you, because a phone enrolled in her name decides as her. No admin route or console screen enrolls a phone for someone else, so she does it on the self-service page while she is signed in as herself. With the role she opens `/self-service/` on the server, signs in and chooses Add a phone on the This browser tab, then scans the QR in the Straza approver app. The enroll token is single use and expires in ten minutes, so she mints it with her phone in hand. Before she scans, have her check that the servers the sheet lists name an address her phone can open, and that push is configured, or the request never reaches her phone while the app is closed. `servers.md` sections 6 and 7 cover both, the browser alternative, and what the agent sees while the call waits.
 
 ## Add an MCP server
 

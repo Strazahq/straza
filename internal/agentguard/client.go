@@ -2,6 +2,7 @@ package agentguard
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/strazahq/straza/internal/agentguard/trace"
 	"github.com/strazahq/straza/internal/oidcflow"
+	"github.com/strazahq/straza/internal/policy"
 	"github.com/strazahq/straza/internal/sameorigin"
 	"github.com/strazahq/straza/internal/version"
 )
@@ -72,64 +74,45 @@ func (c *Client) DiscoverNHI(ctx context.Context) (oidcflow.Flow, bool, error) {
 }
 
 // StartDeviceFlow requests a device code at the flow's discovered endpoint,
-// asking for scope=openid so external IdPs mint an ID token (the built-in
-// issuer implies it and ignores the parameter).
+// asking for the scopes openid and profile, so external IdPs mint an ID
+// token and Entra puts preferred_username and oid in it (the built-in
+// issuer implies them and ignores the parameter).
 func (c *Client) StartDeviceFlow(ctx context.Context, flow oidcflow.Flow) (DeviceAuth, error) {
 	var out DeviceAuth
 	err := c.postForm(ctx, flow.DeviceAuthURL, url.Values{
 		"client_id": {flow.ClientID},
-		"scope":     {"openid"},
+		"scope":     {"openid profile"},
 	}, &out)
 	return out, err
 }
 
-// PollToken polls the flow's token endpoint once. Returns (idToken, pending,
-// error). The endpoint answers protocol state per RFC 6749 §5.2:
-// authorization_pending, slow_down, expired_token arrive as HTTP 400 with an
-// `error` body (pinned by authn TestDeviceFlowWireContract), so it must be
-// read with postFormOAuth, never the generic 4xx-is-failure path.
-func (c *Client) PollToken(ctx context.Context, flow oidcflow.Flow, deviceCode string) (string, bool, error) {
+// PollToken polls the flow's token endpoint once. Returns (idToken, wait,
+// error), where wait is authorization_pending or slow_down while the person
+// has not approved yet, and empty otherwise. The endpoint answers protocol
+// state per RFC 6749 §5.2: authorization_pending, slow_down, expired_token
+// arrive as HTTP 400 with an `error` body (pinned by authn
+// TestDeviceFlowWireContract), so it must be read with PostTokenForm, never
+// the generic 4xx-is-failure path.
+func (c *Client) PollToken(ctx context.Context, flow oidcflow.Flow, deviceCode string) (string, string, error) {
 	var out struct {
 		IDToken string `json:"id_token"`
 		Error   string `json:"error"`
 	}
-	if err := c.postFormOAuth(ctx, flow.TokenURL, url.Values{
+	if err := c.PostTokenForm(ctx, flow.TokenURL, url.Values{
 		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
 		"device_code": {deviceCode},
 		"client_id":   {flow.ClientID},
 	}, &out); err != nil {
-		return "", false, err
+		return "", "", err
 	}
 	switch out.Error {
 	case "":
-		return out.IDToken, false, nil
+		return out.IDToken, "", nil
 	case "authorization_pending", "slow_down":
-		return "", true, nil
+		return "", out.Error, nil
 	default:
-		return "", false, fmt.Errorf("login failed: %s", out.Error)
+		return "", "", fmt.Errorf("login failed: %s", out.Error)
 	}
-}
-
-// EnrollResponse mirrors POST /v1/enroll.
-type EnrollResponse struct {
-	UserID               string `json:"user_id"`
-	Username             string `json:"username"`
-	DeviceID             string `json:"device_id"`
-	DeviceToken          string `json:"device_token"`
-	DeviceTokenExpiresIn int    `json:"device_token_expires_in"`
-}
-
-// Enroll binds the identity to a device.
-func (c *Client) Enroll(ctx context.Context, idToken, name, platform, fingerprint string) (EnrollResponse, error) {
-	var out EnrollResponse
-	err := c.postJSON(ctx, "/v1/enroll", "", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": name, "platform": platform, "fingerprint": fingerprint},
-		// The kit names itself (openapi 0.114.0), so the credential opens
-		// sessions for coding harnesses only; an older server drops the field.
-		"client_kind": "kit",
-	}, &out)
-	return out, err
 }
 
 // Attestation is the check-in attestation payload (spec/attestation
@@ -157,11 +140,11 @@ type CheckinResponse struct {
 	UserType   string `json:"user_type,omitempty"`
 	AgencyMode string `json:"agency_mode,omitempty"`
 	SwarmID    string `json:"swarm_id,omitempty"`
-	// DeviceToken is a renewed enroll credential: the server
-	// sends one only on the device-token lane, when the presented credential
-	// is past half its life. Absent from older servers and every other lane.
-	DeviceToken          string `json:"device_token,omitempty"`
-	DeviceTokenExpiresIn int    `json:"device_token_expires_in,omitempty"`
+	// GitUpstreams lists the git hosts the server's apps serve git for, such
+	// as https://github.com, sorted. `straza service` writes them into the
+	// machine's git host file. An older server, or one with no git app,
+	// omits it.
+	GitUpstreams []string `json:"git_upstreams,omitempty"`
 }
 
 // PackPayload is a delivered knowledge pack.
@@ -180,17 +163,6 @@ func (c *Client) Checkin(ctx context.Context, idToken, deviceID, harnessName, ha
 		"device_id":   deviceID,
 		"harness":     map[string]string{"name": harnessName, "version": harnessVersion},
 		"attestation": att,
-	})
-}
-
-// CheckinDevice starts a session with the long-lived enroll credential. The
-// server derives the device binding from the token itself.
-func (c *Client) CheckinDevice(ctx context.Context, deviceToken, harnessName, harnessVersion string, att Attestation) (CheckinResponse, error) {
-	return c.checkin(ctx, map[string]any{
-		"device_token": deviceToken,
-		"client":       clientStamp(),
-		"harness":      map[string]string{"name": harnessName, "version": harnessVersion},
-		"attestation":  att,
 	})
 }
 
@@ -232,10 +204,14 @@ type DecideResponse struct {
 
 // Decide asks the server PDP (serverCheck rules). agentType and agentID are
 // the delegate attribution of the call, sent beside the event for the
-// server's audit record and omitted when empty.
-func (c *Client) Decide(ctx context.Context, sessionToken string, event any, agentType, agentID string) (DecideResponse, error) {
+// server's audit record and omitted when empty. The event's NativeTool rides
+// beside it too, because the event's JSON leaves it out.
+func (c *Client) Decide(ctx context.Context, sessionToken string, event policy.Event, agentType, agentID string) (DecideResponse, error) {
 	var out DecideResponse
 	body := map[string]any{"event": event}
+	if event.NativeTool != "" {
+		body["nativeTool"] = event.NativeTool
+	}
 	if agentType != "" {
 		body["agentType"] = agentType
 	}
@@ -372,10 +348,11 @@ func (c *Client) postForm(ctx context.Context, path string, form url.Values, out
 	return c.do(req, out)
 }
 
-// postFormOAuth posts a form to an OAuth endpoint, where a 4xx carrying an
-// `error` field is a protocol ANSWER (RFC 6749 §5.2) the caller interprets,
-// not a failure. Bodies without one, and 5xx, error like c.do.
-func (c *Client) postFormOAuth(ctx context.Context, path string, form url.Values, out any) error {
+// PostTokenForm posts a form to an OAuth token endpoint, an absolute URL or
+// a strazad path, and decodes the answer into out. A 4xx carrying an `error`
+// field is a protocol ANSWER (RFC 6749 §5.2) the caller interprets, not a
+// failure. Bodies without one, and 5xx, come back as a *StatusError.
+func (c *Client) PostTokenForm(ctx context.Context, path string, form url.Values, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL(path), bytes.NewReader([]byte(form.Encode())))
 	if err != nil {
 		return err
@@ -452,14 +429,15 @@ func (c *Client) do(req *http.Request, out any) error {
 	trace.CallFrom(req.Context()).Observe(resp.StatusCode, resp.Header.Get("X-Request-Id"))
 	buf, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
+		// An OAuth refusal names a code in error and the sentence in
+		// error_description. A strazad refusal puts its sentence in error.
 		var apiErr struct {
-			Error string `json:"error"`
+			Error       string `json:"error"`
+			Description string `json:"error_description"`
 		}
 		_ = json.Unmarshal(buf, &apiErr)
-		if apiErr.Error == "" {
-			apiErr.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
-		}
-		return fmt.Errorf("%s: %w", req.URL.Path, &StatusError{Status: resp.StatusCode, Msg: apiErr.Error})
+		msg := cmp.Or(apiErr.Description, apiErr.Error, fmt.Sprintf("HTTP %d", resp.StatusCode))
+		return fmt.Errorf("%s: %w", req.URL.Path, &StatusError{Status: resp.StatusCode, Msg: msg})
 	}
 	if out != nil && len(buf) > 0 {
 		return json.Unmarshal(buf, out)

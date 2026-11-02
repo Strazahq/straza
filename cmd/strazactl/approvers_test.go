@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// approversServer is the admin surface the approvers family walks: checkin for
-// the stored token, the enrolled-phone list, and the existing device delete.
+// approversServer is the admin surface the approvers family walks: the
+// enrolled-phone list, and the existing device delete.
 type approversServer struct {
 	mu      sync.Mutex
 	revoked []string
@@ -19,10 +19,6 @@ type approversServer struct {
 func (s *approversServer) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("GET /v1/admin/approvers", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.lastURI = r.URL.RequestURI()
@@ -59,7 +55,7 @@ func TestApproversList(t *testing.T) {
 	s := &approversServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	credsPath := writeCreds(t, srv.URL)
+	credsPath := onToken(t, srv.URL)
 
 	stdout, _, err := runCLI(t, credsPath, "approvers", "list")
 	if err != nil {
@@ -98,7 +94,7 @@ func TestApproversRevoke(t *testing.T) {
 	s := &approversServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	credsPath := writeCreds(t, srv.URL)
+	credsPath := onToken(t, srv.URL)
 
 	stdout, _, err := runCLI(t, credsPath, "approvers", "revoke", "apd_1")
 	if err != nil {
@@ -126,7 +122,7 @@ func TestApproversOperandCount(t *testing.T) {
 	s := &approversServer{}
 	srv := s.start(t)
 	t.Setenv("STRAZA_SERVER", "")
-	credsPath := writeCreds(t, srv.URL)
+	credsPath := onToken(t, srv.URL)
 
 	for _, args := range [][]string{
 		{"approvers", "list", "kim", "extra"},

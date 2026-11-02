@@ -61,11 +61,11 @@ const (
 // whose only refusals are draft.stale gets nextStale, because a new
 // revision keeps the stale base and would meet the same refusal.
 const (
-	nextSubmitted = "Straza checks the draft now. Call straza__draft_status with draft %s to read the check. A person publishes it on the console or with strazactl, and you cannot."
+	nextSubmitted = "Straza checks the draft now. Call straza__draft_status with draft %s to read the check. A person publishes it on the console under Drafts, and you cannot."
 	nextUnchecked = "Straza has not checked revision %d yet. Call straza__draft_status again in a few seconds."
 	nextRefused   = "Fix the refused lines and submit again with draft %s."
-	nextStale     = "Draft %s went stale: live state changed under it. Ask a person to check it again on the console or with strazactl drafts rebase %s, or submit the documents as a new draft."
-	nextWaits     = "Draft %s waits for a person to publish it on the console or with strazactl. You cannot publish it."
+	nextStale     = "Draft %s went stale: live state changed under it. Ask a person to check it again on the console under Drafts, or submit the documents as a new draft."
+	nextWaits     = "Draft %s waits for a person to publish it on the console under Drafts. You cannot publish it."
 	nextPublished = "A person published draft %s on %s."
 	nextDiscarded = "Draft %s was discarded%s."
 	nextExpired   = "Draft %s expired after 14 days without a change."
@@ -480,7 +480,7 @@ func nextStep(row store.DraftRow, checked bool, refused []drafts.Finding) string
 	case !checked:
 		return fmt.Sprintf(nextUnchecked, row.Revision)
 	case len(refused) > 0 && !slices.ContainsFunc(refused, func(f drafts.Finding) bool { return f.Code != draftStaleCode }):
-		return fmt.Sprintf(nextStale, id, id)
+		return fmt.Sprintf(nextStale, id)
 	case len(refused) > 0:
 		return fmt.Sprintf(nextRefused, id)
 	default:

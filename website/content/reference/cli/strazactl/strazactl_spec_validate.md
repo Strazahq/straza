@@ -2,7 +2,7 @@
 title: strazactl spec validate
 description: Validate documents against the embedded v1beta1 spec validators
 pagetype: reference
-weight: 100
+weight: 96
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl spec validate <policyset|app|event> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

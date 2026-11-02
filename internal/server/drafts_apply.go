@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/policy"
 	"github.com/strazahq/straza/internal/snapshot"
 	"github.com/strazahq/straza/internal/store"
@@ -103,6 +104,9 @@ func (a *App) applyLocked(ctx context.Context, head *publishHead) (store.LiveSta
 	st, err := a.store.Drafts().LiveState(ctx, live)
 	if err != nil {
 		return store.LiveState{}, a.applyFailed("the read of live state", err)
+	}
+	for _, fault := range st.Unreadable {
+		a.log.Error(fault, "component", "apply")
 	}
 	settled := true
 	if err := a.broker.Refresh(ctx); err != nil && a.lifetime.Err() == nil {
@@ -254,8 +258,9 @@ type settledRoles struct {
 }
 
 // settleRoles resolves the roles of userID and caches the subject build
-// makes from them for sessionID, with the session facts check-in read, only
-// once this replica applied the config they come from. It reads the config
+// makes from them for sessionID, with the session facts check-in read and
+// the hash of the roles' ids that the minted token carries, only once this
+// replica applied the config they come from. It reads the config
 // generation after the roles, and when the store holds one this replica has
 // not applied it applies first and resolves again. It caches only while the
 // resolution epoch it resolved in holds, because an apply bumps the epoch
@@ -277,8 +282,13 @@ func (a *App) settleRoles(ctx context.Context, sessionID, userID string, facts s
 		}
 		if !applied {
 			sub := build(roles)
+			ids := make([]string, len(roles))
+			for i, role := range roles {
+				ids[i] = role.ID
+			}
+			e := cachedSubject{sub: sub, facts: facts, until: until, rolesHash: authn.RolesHash(ids)}
 			held := func() bool { return a.resolver.Epoch() == epoch }
-			if prev, had, ok := a.subjects.putIf(sessionID, sub, facts, until, held); ok {
+			if prev, had, ok := a.subjects.putIf(sessionID, e, held); ok {
 				return settledRoles{roles: roles, subject: sub, prev: prev, hadPrev: had}, "", nil
 			}
 		}
@@ -354,14 +364,15 @@ func (a *App) applySettled() {
 }
 
 // keepsAccess is step 3 from state, ahead of the stop: a row of the table
-// stays only when the state holds a row identical in role, server and
-// matchers. The rows of the servers the stop names go after it.
+// stays only when the state holds a row identical in role, server,
+// matchers and scope key. The rows of the servers the stop names go after
+// it.
 func keepsAccess(access []store.LiveAccess) func(gwBinding) bool {
 	rows := make(map[string]bool, len(access))
 	for _, r := range access {
-		rows[accessKey(r.Role, r.App, r.Matchers)] = true
+		rows[accessKey(r.Role, r.App, r.Matchers)+"\x02"+r.Scope.Key()] = true
 	}
-	return func(b gwBinding) bool { return rows[accessKey(b.Role, b.App, b.Matchers)] }
+	return func(b gwBinding) bool { return rows[accessKey(b.Role, b.App, b.Matchers)+"\x02"+b.Scope.Key()] }
 }
 
 // accessKey is an access row's identity for step 3. The separators are
@@ -374,7 +385,7 @@ func accessKey(role, app string, matchers []string) string {
 func bindingsOf(access []store.LiveAccess) []gwBinding {
 	out := make([]gwBinding, 0, len(access))
 	for _, r := range access {
-		out = append(out, gwBinding{ID: r.ID, App: r.App, Role: r.Role, Matchers: r.Matchers})
+		out = append(out, gwBinding{ID: r.ID, App: r.App, Role: r.Role, Matchers: r.Matchers, Scope: r.Scope})
 	}
 	return out
 }

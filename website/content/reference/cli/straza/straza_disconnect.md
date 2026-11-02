@@ -2,7 +2,7 @@
 title: straza disconnect
 description: Remove your own connection to an MCP server
 pagetype: reference
-weight: 6
+weight: 5
 draft: false
 sources:
   - cmd/straza

@@ -2,10 +2,12 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -292,45 +294,242 @@ func TestRolesImplicationsAssignments(t *testing.T) {
 	})
 }
 
-// TestSessionSetStatusIfChanged pins the transition signal the revoke
-// handlers gate their side effects on: true exactly when the row actually
-// changed status, false on a same-status replay (SQL RowsAffected cannot make
-// this distinction: both dialects count a same-value UPDATE as affected, so
-// the WHERE clause carries it), ErrNotFound when the session does not exist.
-// Without it, replaying a revoke re-fires the revocation row + control event
-// + push every call for the token's whole TTL.
-func TestSessionSetStatusIfChanged(t *testing.T) {
+// revokeEvent is the outbox event a revoke test writes for the ended ids.
+func revokeEvent(ended []string) (OutboxEvent, error) {
+	ce, err := json.Marshal(map[string]any{"data": map[string]any{"sessions": ended}})
+	return OutboxEvent{Subject: "straza.revocation.sessions", CE: string(ce)}, err
+}
+
+// outboxCount counts the outbox rows on subject.
+func outboxCount(t *testing.T, s Store, subject string) int {
+	t.Helper()
+	rows, err := s.Outbox().ListRecent(context.Background(), 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range rows {
+		if e.Subject == subject {
+			n++
+		}
+	}
+	return n
+}
+
+// revocationCount counts the revocation rows of kind for target.
+func revocationCount(t *testing.T, s Store, kind, target string) int {
+	t.Helper()
+	rows, err := s.Revocations().ListByTarget(context.Background(), kind, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(rows)
+}
+
+// tableAway renames table away while fn runs, so every write to it inside
+// fn fails, and then renames it back.
+func tableAway(t *testing.T, s Store, table string, fn func()) {
+	t.Helper()
+	db := s.(*sqlStore).db
+	if _, err := db.Exec(`ALTER TABLE ` + table + ` RENAME TO ` + table + `_away`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := db.Exec(`ALTER TABLE ` + table + `_away RENAME TO ` + table); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	fn()
+}
+
+// TestSessionsRevoke pins the session revoke transaction on both drivers.
+// An active or closed session ends with one revocation row and one event, a
+// replay and an unknown id write nothing, a mixed set of 1000 ids ends each
+// active session once in the order given, and a write the database refuses
+// leaves the session active with no row and no event, so a rerun ends it.
+func TestSessionsRevoke(t *testing.T) {
 	forEachStore(t, func(t *testing.T, s Store) {
 		ctx := context.Background()
 		u, err := s.Users().Create(ctx, User{Username: "kim"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		ses, err := s.Sessions().Create(ctx, Session{UserID: u.ID, HarnessName: "claude-code"})
-		if err != nil {
-			t.Fatalf("Sessions.Create: %v", err)
+		newSession := func(status string) string {
+			t.Helper()
+			ses, err := s.Sessions().Create(ctx, Session{UserID: u.ID, HarnessName: "claude-code"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status != SessionActive {
+				if err := s.Sessions().SetStatus(ctx, ses.ID, status); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return ses.ID
 		}
+		var calls [][]string
+		event := func(ended []string) (OutboxEvent, error) {
+			calls = append(calls, slices.Clone(ended))
+			return revokeEvent(ended)
+		}
+		statusOf := func(id string) string {
+			t.Helper()
+			ses, err := s.Sessions().GetByID(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return ses.Status
+		}
+
+		active, closed := newSession(SessionActive), newSession(SessionClosed)
+		var mixed, mixedActive, mixedRevoked []string
+		for i := range 300 {
+			id := newSession(SessionActive)
+			mixed, mixedActive = append(mixed, id, fmt.Sprintf("unknown-%d", i)), append(mixedActive, id)
+		}
+		for range 100 {
+			id := newSession(SessionRevoked)
+			mixed, mixedRevoked = append(mixed, id), append(mixedRevoked, id)
+		}
+		mixed = append(mixed, mixedActive[0])
+		for i := len(mixed); i < 1000; i++ {
+			mixed = append(mixed, fmt.Sprintf("unknown-%d", i))
+		}
+
 		steps := []struct {
-			name        string
-			status      string
-			wantChanged bool
+			name string
+			ids  []string
+			want []string
 		}{
-			{"active -> revoked transitions", SessionRevoked, true},
-			{"revoked -> revoked is a replay", SessionRevoked, false},
-			{"revoked -> closed still transitions", SessionClosed, true},
-			{"closed -> closed is a replay", SessionClosed, false},
+			{"an active session ends", []string{active}, []string{active}},
+			{"a replay ends nothing", []string{active}, nil},
+			{"an unknown id ends nothing", []string{"no-such-session"}, nil},
+			{"a closed session ends as revoked", []string{closed}, []string{closed}},
+			{"a mixed set of 1000 ids ends each active session once, in order", mixed, mixedActive},
 		}
 		for _, tc := range steps {
-			changed, err := s.Sessions().SetStatusIfChanged(ctx, ses.ID, tc.status)
-			if err != nil || changed != tc.wantChanged {
-				t.Fatalf("%s: changed=%v err=%v, want changed=%v", tc.name, changed, err, tc.wantChanged)
+			calls = nil
+			before := outboxCount(t, s, "straza.revocation.sessions")
+			got, err := s.Sessions().Revoke(ctx, tc.ids, "l4 test", event)
+			if err != nil || !slices.Equal(got, tc.want) {
+				t.Fatalf("%s: Revoke = %d ids (%v), want %d", tc.name, len(got), err, len(tc.want))
 			}
-			if got, _ := s.Sessions().GetByID(ctx, ses.ID); got.Status != tc.status {
-				t.Fatalf("%s: status = %q, want %q", tc.name, got.Status, tc.status)
+			wantEvents := 0
+			if len(tc.want) > 0 {
+				wantEvents = 1
+				if len(calls) != 1 || !slices.Equal(calls[0], tc.want) {
+					t.Errorf("%s: the event was built %d times, want once from the ended ids", tc.name, len(calls))
+				}
+			} else if len(calls) != 0 {
+				t.Errorf("%s: the event was built %d times with nothing ended, want never", tc.name, len(calls))
+			}
+			if n := outboxCount(t, s, "straza.revocation.sessions") - before; n != wantEvents {
+				t.Errorf("%s: outbox rows written = %d, want %d", tc.name, n, wantEvents)
 			}
 		}
-		if changed, err := s.Sessions().SetStatusIfChanged(ctx, "no-such-session", SessionRevoked); !errors.Is(err, ErrNotFound) || changed {
-			t.Errorf("unknown session = (%v, %v), want (false, ErrNotFound)", changed, err)
+		for _, id := range []string{active, closed} {
+			if st, n := statusOf(id), revocationCount(t, s, RevokeSession, id); st != SessionRevoked || n != 1 {
+				t.Errorf("session %s: status %q with %d revocation rows, want revoked with exactly 1", id, st, n)
+			}
+		}
+		rows, err := s.Revocations().ListByTargets(ctx, RevokeSession, append(slices.Clone(mixedActive), mixedRevoked...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range mixedActive {
+			if rv := rows[id]; len(rv) != 1 || rv[0].Reason != "l4 test" || rv[0].Origin != RevocationOriginAdmin || statusOf(id) != SessionRevoked {
+				t.Fatalf("mixed active session %s: rows %+v, want one of reason l4 test and origin admin, and the row revoked", id, rv)
+			}
+		}
+		for _, id := range mixedRevoked {
+			if len(rows[id]) != 0 {
+				t.Fatalf("already revoked session %s got %d revocation rows, want none", id, len(rows[id]))
+			}
+		}
+
+		failures := []struct {
+			name  string
+			table string
+			event func([]string) (OutboxEvent, error)
+		}{
+			{"the event cannot be built", "", func([]string) (OutboxEvent, error) { return OutboxEvent{}, errors.New("no event") }},
+			{"the revocations table is gone", "revocations", revokeEvent},
+			{"the outbox table is gone", "events_outbox", revokeEvent},
+		}
+		for _, tc := range failures {
+			id := newSession(SessionActive)
+			before := outboxCount(t, s, "straza.revocation.sessions")
+			var got []string
+			var err error
+			run := func() { got, err = s.Sessions().Revoke(ctx, []string{id}, "l4 test", tc.event) }
+			if tc.table == "" {
+				run()
+			} else {
+				tableAway(t, s, tc.table, run)
+			}
+			if err == nil || got != nil {
+				t.Fatalf("%s: Revoke = %v (%v), want an error and no ids", tc.name, got, err)
+			}
+			st, n, ev := statusOf(id), revocationCount(t, s, RevokeSession, id), outboxCount(t, s, "straza.revocation.sessions")-before
+			if st != SessionActive || n != 0 || ev != 0 {
+				t.Errorf("%s: status %q, %d revocation rows, %d outbox rows, want active with none", tc.name, st, n, ev)
+			}
+			if got, err := s.Sessions().Revoke(ctx, []string{id}, "l4 test", revokeEvent); err != nil || !slices.Equal(got, []string{id}) {
+				t.Errorf("%s: the rerun = %v (%v), want it to end the session", tc.name, got, err)
+			}
+		}
+	})
+}
+
+// TestDevicesRevoke pins the device revoke transaction on both drivers. An
+// enrolled device is deleted with one revocation row and one event, a gone
+// device answers ErrNotFound and writes nothing, and a write the database
+// refuses leaves the device enrolled with no row and no event.
+func TestDevicesRevoke(t *testing.T) {
+	forEachStore(t, func(t *testing.T, s Store) {
+		ctx := context.Background()
+		u, err := s.Users().Create(ctx, User{Username: "kim"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		const subject = "straza.revocation.device"
+		ev := OutboxEvent{Subject: subject, CE: `{"data":{"device":"l4"}}`}
+		cases := []struct{ name, table string }{
+			{"the revocations table is gone", "revocations"},
+			{"the outbox table is gone", "events_outbox"},
+			{"a healthy store", ""},
+		}
+		for i, tc := range cases {
+			d, err := s.Devices().Create(ctx, Device{UserID: u.ID, Name: "box", Fingerprint: fmt.Sprintf("fp-l4-%d", i)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := outboxCount(t, s, subject)
+			run := func() { err = s.Devices().Revoke(ctx, d.ID, "l4 test", ev) }
+			if tc.table == "" {
+				run()
+			} else {
+				tableAway(t, s, tc.table, run)
+			}
+			_, getErr := s.Devices().GetByID(ctx, d.ID)
+			rows, events := revocationCount(t, s, RevokeDevice, d.ID), outboxCount(t, s, subject)-before
+			if tc.table != "" {
+				if err == nil || getErr != nil || rows != 0 || events != 0 {
+					t.Errorf("%s: Revoke = %v, device lookup %v, %d rows, %d events, want an error with the device enrolled and nothing written",
+						tc.name, err, getErr, rows, events)
+				}
+				continue
+			}
+			if err != nil || !errors.Is(getErr, ErrNotFound) || rows != 1 || events != 1 {
+				t.Fatalf("%s: Revoke = %v, device lookup %v, %d rows, %d events, want the device gone with one row and one event",
+					tc.name, err, getErr, rows, events)
+			}
+			if err := s.Devices().Revoke(ctx, d.ID, "l4 test", ev); !errors.Is(err, ErrNotFound) {
+				t.Errorf("a gone device = %v, want ErrNotFound", err)
+			}
+			if rows, events := revocationCount(t, s, RevokeDevice, d.ID), outboxCount(t, s, subject)-before; rows != 1 || events != 1 {
+				t.Errorf("a gone device wrote: %d rows and %d events in all, want still 1 and 1", rows, events)
+			}
 		}
 	})
 }
@@ -373,7 +572,7 @@ func TestDevicesAndSessions(t *testing.T) {
 		if got, _ = s.Devices().GetByID(ctx, kit.ID); got.ClientKind != DeviceClientKit {
 			t.Errorf("client kind = %q, want kit", got.ClientKind)
 		}
-		if err := s.Devices().Delete(ctx, kit.ID); err != nil {
+		if err := s.Devices().Revoke(ctx, kit.ID, "test cleanup", OutboxEvent{Subject: "straza.revocation.device", CE: "{}"}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -444,7 +643,7 @@ func TestDevicesAndSessions(t *testing.T) {
 			t.Errorf("second CloseIdle = %v, %v; want none", again, err)
 		}
 
-		if err := s.Devices().Delete(ctx, d.ID); err != nil {
+		if err := s.Devices().Revoke(ctx, d.ID, "test cleanup", OutboxEvent{Subject: "straza.revocation.device", CE: "{}"}); err != nil {
 			t.Fatal(err)
 		}
 	})

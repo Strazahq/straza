@@ -1,0 +1,33 @@
+{
+  "provenance": "doc RFC 9449 and spec/session-token/SPEC.md 2026-10-20 (generated, not captured from a client: proof key from the Ed25519 seed of 32 bytes 0x07, other key from 32 bytes 0x09, nonce key the 32 bytes 0x00 to 0x1f, signed at 2026-10-20T12:00:30Z)",
+  "description": "A request with a key-bound session token under the DPoP scheme. ath hashes the token, the key's thumbprint equals cnf.jkt, and a nonce from the previous window is still accepted.",
+  "at": "2026-10-20T12:00:30Z",
+  "request": {
+    "method": "POST",
+    "path": "/v1/decide",
+    "origins": [
+      "https://straza.example",
+      "http://127.0.0.1:8420"
+    ],
+    "access_token": "example-session-token",
+    "thumbprint": "--6IM5l0OosLj9yWskISYhUA3n_3CURQkmrYMSha_ck"
+  },
+  "proof": "eyJhbGciOiJFZERTQSIsImp3ayI6eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IjZrcHNZLUtjVWdxLTlWQjdFeTdGLVpWSGRxNi12bnVTUWg3cWFSUkcwaXcifSwidHlwIjoiZHBvcCtqd3QifQ.eyJhdGgiOiJvbC1TQXB6bU9WZVZhVDVoNDBPNUJYZ29yM1NzY3Vxdjlod3VoMXYwMWRZIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vc3RyYXphLmV4YW1wbGUvdjEvZGVjaWRlIiwiaWF0IjoxNzkyNDk3NjMwLCJqdGkiOiI3NDgyN2IyNDM0ZThmMmMxYTM1NmRkZTYyOTBhY2VhYiIsIm5vbmNlIjoiQUFBQUFBSEgydy1lbW53SDAwOGpQLWtRVi1wbzlPdlVTZUVLZW1KNVpGVVRkTmVWb0pGeWdBIn0.SkS7JRGiFpuS9d3W885XJviR47wIZBMQXrR4SKpA-toMfFL4rdBQ64QGwq4iqUN1SvrR7lZgEAa2f60eLjawCA",
+  "header": {
+    "alg": "EdDSA",
+    "jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+    },
+    "typ": "dpop+jwt"
+  },
+  "claims": {
+    "ath": "ol-SApzmOVeVaT5h40O5BXgor3Sscuqv9hwuh1v01dY",
+    "htm": "POST",
+    "htu": "https://straza.example/v1/decide",
+    "iat": 1792497630,
+    "jti": "74827b2434e8f2c1a356dde6290aceab",
+    "nonce": "AAAAAAHH2w-emnwH008jP-kQV-po9OvUSeEKemJ5ZFUTdNeVoJFygA"
+  }
+}

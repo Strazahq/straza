@@ -6,16 +6,16 @@ pagetype: tutorial
 weight: 20
 draft: false
 who: You, as the admin, and later as alice
-where: Two terminals and a browser
+where: Three terminals and a browser
 steps: true
 modes: [console, cli]
 mode_default: cli
 tested:
-  version: v1.1.0
-  platform: Linux amd64 in a fresh Alpine 3.20 container with the three binaries on the PATH, where each sign-in page was answered with the form post the browser sends. The Claude Code section, including the deny inside the agent, is described without a run, and its banner is the one the session-start hook returned in the same run
-  date: 2026-09-28
+  version: v1.0.0-1570-gaf326165-dirty
+  platform: Linux amd64 in a fresh Alpine 3.20 container with three binaries built from an uncommitted working tree on the PATH, where each sign-in page was answered with the form post the browser sends and straza service ran as root with STRAZA_HOME set to /root/.straza. The Claude Code section, including the deny inside the agent, is described without a run, and its banner is the one the session-start hook returned in the same run. In that run strazactl signed in with strazactl login, which it no longer does, so the steps that mint an admin API token and hand it to strazactl were written on 2026-11-01 and not walked. The browser sign-in of straza enroll was written from the code on 2026-10-22 and not walked, so its recorded outputs are not shown yet. The console's browser sign-in was written from the code on 2026-10-22 and not walked
+  date: 2026-10-21
 applies_to: standalone
-keywords: enroll install first deny session banner console
+keywords: enroll install first deny session banner console straza service background service
 ---
 
 
@@ -24,6 +24,7 @@ You start a server in the standalone profile, create a person called alice, and 
 ## Before you start {.nostep}
 
 
+- A Linux machine, the system this tutorial was walked on. It starts `straza service` by hand as your own user, which also works on a Mac without the Straza package for macOS. On Windows the service runs only as the Windows service an administrator installs, as [Install]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) shows.
 - The three binaries on your PATH: `strazad`, `strazactl` and `straza`. [Install]({{< relref "get-started/install.md" >}}) shows how.
 - An empty directory. The server keeps its data there, so use a throwaway one, and use a separate test machine if this one already runs Straza.
 - A POSIX shell for the commands, and a browser on this machine for the sign-in page.
@@ -49,9 +50,9 @@ strazad serve --profile standalone
 Passwords are masked here and timestamps left out.
 
 ```text
-{"level":"WARN","msg":"bootstrap admin created. Store this password now, it will not be shown again","username":"admin","password":"6770xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
-{"level":"WARN","msg":"break-glass admin created. Store this password in your vault now, it will not be shown again; rotate on-box via `strazactl users set-password break-glass`","username":"break-glass","password":"aef0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
-{"level":"INFO","msg":"strazad serving","addr":"127.0.0.1:8420","profile":"standalone","publicUrl":"http://127.0.0.1:8420","tls":false,"version":"v1.1.0"}
+{"level":"WARN","msg":"bootstrap admin created. Store this password now, it will not be shown again","username":"admin","password":"3489xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
+{"level":"WARN","msg":"break-glass admin created. Store this password in your vault now, it will not be shown again; rotate on-box via `strazactl users set-password break-glass`","username":"break-glass","password":"671axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
+{"level":"INFO","msg":"strazad serving","addr":"127.0.0.1:8420","profile":"standalone","publicUrl":"http://127.0.0.1:8420","tls":false,"version":"v1.0.0-1570-gaf326165-dirty"}
 ```
 {{< /details >}}
 
@@ -60,56 +61,48 @@ The server keeps its state under `data` in the directory where you started it. T
 ## Sign in as the admin
 
 
-{{< console >}}
-Open `http://127.0.0.1:8420/console/` in your browser and press **Sign in with a code**. The console shows a one-time code.
+Both forms start in the console, because the console is where a person signs in. Open `http://127.0.0.1:8420/console/` in your browser and press **Sign in**.
 
-{{< shot name="signin-code" caption="Press Open the sign-in page. Your code is different." >}}
+{{< shot name="signin" caption="The console's sign-in card." >}}
 
-1. Press **Open the sign-in page**. A new tab opens with the code filled in.
-2. Check that the code matches, enter `admin` and the saved password, and press **Sign in**.
-3. The tab says *Signed in. You can close this tab.* Go back to the console.
+1. The tab goes to the page titled Sign in to Straza.
+2. Enter `admin` and the saved password, and press **Sign in**.
+3. The tab comes back to the console, which says `Signing you in`.
 
 {{< see >}}The console opens on Overview. The bottom of the menu says `standalone` and the server's build.{{< /see >}}
-{{< /console >}}
 
-{{< cli >}}
-In the second terminal, log in. The command needs the server address once and remembers it for every later command.
+
+`strazactl` has no sign-in of its own, so some steps below, in both forms, run on an admin API token that you mint in the console now.
+
+{{< clicks "Settings" "API tokens" "New API token" >}}
+
+1. Name it `admin-terminal`, pick `expires in 30 days` under **Lifetime**, and pick **Full root** under **The job**.
+2. Press **Mint token**.
+3. Copy the token from the sheet that follows, because it is shown only once.
+
+Hand the token and the server address to `strazactl` in a second terminal, then list the users. At the `read` line, paste the token and press Enter: `read -rs` takes it without showing it and keeps it out of the shell history.
 
 {{< command terminal="Terminal 2" purpose="administration" >}}
 ```sh
-strazactl login --server http://127.0.0.1:8420
+export STRAZA_SERVER=http://127.0.0.1:8420
+read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
+strazactl users list
 ```
 {{< /command >}}
 
-It prints an address and a code, then waits for you.
+{{< see >}}A table with the two users that the first start created: `admin` and `break-glass`.{{< /see >}}
 
-1. Open the address in your browser.
-2. Check that the code matches, enter `admin` and the saved password, and press **Sign in**.
-3. Go back to the terminal.
-
-{{< see >}}`Logged in as admin.` and a note that asks you to keep this login away from coding agents.{{< /see >}}
-
-{{< details summary="Recorded output" >}}
-The code changes with every attempt, so use the address and code from your own terminal.
-
-```text
-Open http://127.0.0.1:8420/oidc/device?user_code=NCPJ-QXXZ
-and confirm code NCPJ-QXXZ
-Logged in as admin.
-note: this login can change Straza's configuration. Keep it away from coding agents. Automation uses an admin API token in STRAZA_API_TOKEN, and an agent proposes config changes through the built-in straza MCP server.
-```
-{{< /details >}}
-{{< /cli >}}
+The token is a bearer credential, so whoever holds it acts as an administrator until it expires or you revoke it. Keep it in this terminal only. Never put it in a shell profile or where an agent runs as you, and revoke it under **Settings**, **API tokens** when you finish this tutorial. [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) explains the jobs.
 
 {{< fails >}}
 `Invalid username or password.`
 : Use the admin password from the first start of this data directory. If you no longer have it, follow [Recover from a lockout]({{< relref "security/keys-certificates-and-tokens.md#recover-from-a-lockout-with-the-break-glass-admin" >}}). Never delete the data directory of a real deployment to get back in.
 
-`That code is not valid or has expired. Check it against the console or terminal and try again.`
-: The sign-in page holds an old code. Start the sign-in again and open the new address, because a tab from an earlier attempt shows a stale code.
+`This sign-in answer was not started in this tab, or it is more than 10 minutes old, so Straza did not use it. Press Sign in to start again.`
+: The console got back a sign-in that this tab did not start, or one that took more than 10 minutes. Press **Sign in** again.
 
-`login timed out (device code expired)`
-: The code ran out before you signed in. Run `strazactl login --server http://127.0.0.1:8420` again.
+`strazactl needs an admin API token in STRAZA_API_TOKEN. A person mints one in the console under Settings, API tokens, with the scope these commands need and an expiry.`
+: The variable is not set in the terminal where you ran the command, so run the `read` line there again and paste the token.
 {{< /fails >}}
 
 ## Create a person and a role
@@ -120,17 +113,16 @@ A role is a label you give a person. A **PolicySet** is a policy document with r
 {{< console >}}
 {{< only form="cli" >}}The first two commands run in the CLI. The console has no Add user, because people come from your identity manager or the CLI. Its New role asks an application role for its MCP server, and `dev` reaches none.{{< /only >}}
 
-In the second terminal, log the CLI in once, the same way as the console, then create alice and the role.
+Create alice and the role in the second terminal, where the token is set.
 
 {{< command terminal="Terminal 2" purpose="administration" >}}
 ```sh
-strazactl login --server http://127.0.0.1:8420
 strazactl users create alice --password 'pick-a-passphrase' --email alice@example.com
 strazactl roles create dev --kind application
 ```
 {{< /command >}}
 
-{{< see >}}`Logged in as admin.`, then `created user alice` and `created role dev`, each with an id that is different on your machine.{{< /see >}}
+{{< see >}}`created user alice` and `created role dev`, each with an id that is different on your machine.{{< /see >}}
 
 Back in the console, give alice the role. Open her sheet, pick `dev` in the **Assign** picker and press **Assign role**. The console asks you to confirm, so press **Assign role** again.
 
@@ -156,8 +148,8 @@ strazactl assign dev --user alice
 
 {{< details summary="Recorded output" >}}
 ```text
-created user alice (01a0e993-0abd-79e1-a958-015170d2cc16)
-created role dev (01a0e993-0ae6-7389-9e00-cb2f1cf2831e)
+created user alice (01a15d8a-b17d-7002-889b-3dfc5875d7e5)
+created role dev (01a15d8a-b19e-7e49-9568-348b7393315e)
 assigned dev to alice
 ```
 {{< /details >}}
@@ -191,14 +183,14 @@ The `show` output below leaves out the set's description line, which says the se
 
 ```table
 NAME                PRIORITY  STATUS  ID
-standalone-starter  0         Live    01a0e992-ffd3-76b8-a32f-ab27e32eff4c
+standalone-starter  0         Live    01a15d8a-a6f3-7b5b-89ba-ce535486f761
 ```
 
 ```text
 name        standalone-starter
 status      Live
 priority    0
-updated     2026-09-28 19:52:00 +00:00
+updated     2026-10-21 08:18:50 +00:00
 applies to  * everyone
 rules       1 · denied 1 · needs approval 0 · checked 0 · allowed 0
 apiVersion: straza.dev/v1beta1
@@ -257,8 +249,8 @@ Decided by rule block-recursive-delete in policy standalone-starter: Straza star
 Simulated against the policies live right now, your file included if you passed one. This is today's answer, not a replay of any past decision.
 
 subject   roles dev · attestation none
-snapshot  0b900684ea3244f6e1f81f760ed663d30d8a2b63bfb34d720535bf59b197d522 (live)
-wire      effect=deny · ruleId=block-recursive-delete · setName=standalone-starter · snapshot=0b900684
+snapshot  55c45aa7a5f3253f269b570697f9c478e80c4ebea81fec3b2cddecb20db68769 (live)
+wire      effect=deny · ruleId=block-recursive-delete · setName=standalone-starter · snapshot=55c45aa7
 note      this verdict applies once this snapshot reaches the client;
           straza doctor proves a client is governed
 ```
@@ -267,12 +259,47 @@ note      this verdict applies once this snapshot reaches the client;
 
 `git status` is allowed because no rule matches it, and the standalone profile allows a local command that no rule mentions. The enterprise profile [denies it instead]({{< relref "reference/standalone-and-enterprise.md#no-rule" >}}).
 
+## Start the background service
+
+
+`straza service`, the Straza background service, holds alice's key and every Straza session on this machine, and the hooks and the other `straza` commands reach it over a local socket. On Linux, the `straza` package installs it as the system service, under its own OS account, as [Install]({{< relref "get-started/install.md#install-the-package-on-linux" >}}) shows. Here you start it by hand with `STRAZA_HOME` set, so it runs as your OS user, with its socket and its state in that directory. This works only on a machine with no system service and no managed install, because on a machine with either one, every `straza` command ignores `STRAZA_HOME` and reaches the system service.
+
+In a third terminal, start the service and leave it running.
+
+{{< command terminal="Terminal 3" purpose="background service, keep it running" >}}
+```sh
+export STRAZA_HOME="$HOME/.straza"
+straza service
+```
+{{< /command >}}
+
+{{< see >}}A log line that says `straza service listening` with the socket path.{{< /see >}}
+
+{{< details summary="Recorded output" >}}
+```text
+time=2026-10-21T08:18:53.042Z level=INFO msg="straza service listening" socket=/root/.straza/service.sock user_mode=true
+```
+{{< /details >}}
+
+Then point the second terminal at the same directory, so every `straza` command you run there reaches this service.
+
+{{< command terminal="Terminal 2" purpose="client, as alice" >}}
+```sh
+export STRAZA_HOME="$HOME/.straza"
+```
+{{< /command >}}
+
+{{< fails >}}
+``Straza's background service for STRAZA_HOME /root/.straza isn't running, so this command can't reach your Straza session. Start it with `straza service` in a shell that has the same STRAZA_HOME.``
+: The service in Terminal 3 stopped, or this terminal has another `STRAZA_HOME`. Start the service again, and export the same value in both terminals.
+{{< /fails >}}
+
 ## Enroll your machine as alice
 
 
 {{< only form="cli" >}}Enrolling happens on the agent's machine, so it runs in the client in both forms.{{< /only >}}
 
-Enrolling binds this machine to alice, once per machine, through the same sign-in you used for the admin.
+Enrolling binds this machine to alice, once per machine, through the same sign-in page you used for the admin. The service makes a key for alice and keeps it, and the Straza server stores only its public half.
 
 {{< command terminal="Terminal 2" purpose="client, as alice" >}}
 ```sh
@@ -280,19 +307,9 @@ straza enroll --server http://127.0.0.1:8420
 ```
 {{< /command >}}
 
-Open the address it prints, sign in as `alice` with the passphrase you chose for her, and press **Sign in**. While it waits, the command repeats the code every sixteen seconds and says how long the code stays valid.
+The command opens your browser on the sign-in page. Sign in as `alice` with the passphrase you chose for her, and press **Sign in**. The page asks for a password every time, so signing in as the admin earlier does not carry over. The tab then says that you are signed in to Straza on this computer.
 
-{{< see >}}`Enrolled as alice` and the id of this device.{{< /see >}}
-
-{{< details summary="Recorded output" >}}
-```text
-To authorize this device, open:
-  http://127.0.0.1:8420/oidc/device?user_code=SFXZ-TM3X
-and confirm code SFXZ-TM3X
-waiting for approval in the browser…
-Enrolled as alice (device 01a0e993-1360-71dc-a98a-78f82064b889).
-```
-{{< /details >}}
+{{< see >}}`Enrolled as alice`, the id of this device, and that the background service holds this machine's key.{{< /see >}}
 
 Then ask the client what it knows.
 
@@ -304,17 +321,22 @@ straza status
 
 {{< details summary="Recorded output" >}}
 ```text
+service    straza service v1.0.0-1570-gaf326165-dirty (custody user)
 server     http://127.0.0.1:8420
-identity   alice (device 01a0e993-1360-71dc-a98a-78f82064b889)
+identity   alice (device 01a15d8a-bc3b-7821-8651-c3cd0d22f431, key jotq8ezInO5o)
 session    none (start a harness session)
+audit      nothing waiting to upload
 ```
 {{< /details >}}
 
-There is no session yet, because a session starts when a harness checks in. At this point `straza doctor` reports the enrollment, the identity, the server and the approver surface as ok. It warns that no session, no cached policy and no harness wiring exist yet, and it follows each warning with the command that fixes it. Run it whenever a later step does not behave as written. [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) covers enrolling with your own identity provider and what each check of `straza doctor` means.
+There is no session yet, because a session starts when a harness checks in. At this point `straza doctor` reports the service, the enrollment, the server and the approver surface as ok. It warns that no session and no harness wiring exist yet, and it follows each warning with the command that fixes it. Run it whenever a later step does not behave as written. [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) covers enrolling with your own identity provider and what each check of `straza doctor` means.
 
 {{< fails >}}
-`the device code expired before it was approved. Run enroll again and approve the NEWLY printed code (a browser tab from an earlier attempt shows a stale one)`
-: Run `straza enroll --server http://127.0.0.1:8420` again and open the new address.
+``The browser sign-in did not finish within 5 minutes. Run `straza enroll` again.``
+: Run `straza enroll --server http://127.0.0.1:8420` again and sign in on the page it opens.
+
+``This machine has no display, so Straza cannot open a browser here. Run `straza enroll --use-device-code` to sign in with a code on another device, if your Straza admin allows it.``
+: The terminal runs without a display. Run the command in a desktop session, or add `--use-device-code`, which a standalone server accepts, and confirm the code it prints.
 {{< /fails >}}
 
 ## Watch the hook decide {#watch-it-govern}
@@ -322,7 +344,7 @@ There is no session yet, because a session starts when a harness checks in. At t
 
 {{< only form="cli" >}}The hook runs on the agent's machine, so this step runs in the client in both forms.{{< /only >}}
 
-A coding assistant such as Claude Code calls `straza hook` before each tool call and reads its answer. Here you send the hook the same events by hand, so you need no agent. The hook decides each call and runs neither command. This checks the hook itself, and a later section connects a real agent.
+A coding assistant such as Claude Code calls `straza hook` before each tool call and reads its answer, and the hook asks the service to decide. Here you send the hook the same events by hand, so you need no agent. The hook decides each call and runs neither command. This checks the hook itself, and a later section connects a real agent.
 
 First open a session for alice.
 
@@ -336,7 +358,7 @@ printf '%s' '{"hook_event_name":"SessionStart","session_id":"first-session","cwd
 
 {{< details summary="Recorded output" >}}
 ```text
-{"hookSpecificOutput":{"additionalContext":"Straza governance is active for this session. You are operating as \"alice\" (roles: dev) against http://127.0.0.1:8420; policy snapshot 0b900684ea32, attestation advisory. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial.","hookEventName":"SessionStart"},"systemMessage":"🛡 Straza governance active: alice (dev) @ http://127.0.0.1:8420 · policy 0b900684ea32 · attestation advisory"}
+{"hookSpecificOutput":{"additionalContext":"Straza governance is active for this session. You are operating as \"alice\" (roles: dev) against http://127.0.0.1:8420; policy snapshot 55c45aa7a5f3, attestation advisory. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial.","hookEventName":"SessionStart"},"systemMessage":"🛡 Straza governance active: alice (dev) @ http://127.0.0.1:8420 · policy 55c45aa7a5f3 · attestation advisory"}
 ```
 {{< /details >}}
 
@@ -373,7 +395,7 @@ printf '%s' '{"hook_event_name":"PreToolUse","session_id":"first-session","tool_
 ```
 {{< /details >}}
 
-`straza status` now shows the session with its roles and the policy snapshot it decides against. [What the agent reads back]({{< relref "guides/govern-an-agent/what-the-agent-reads-back.md" >}}) lists every answer an agent can get from the hook.
+`straza status` now shows alice's session for the `claude-code` window, how long its token lasts and whether its kill-switch stream is connected. [What the agent reads back]({{< relref "guides/govern-an-agent/what-the-agent-reads-back.md" >}}) lists every answer an agent can get from the hook.
 
 {{< fails >}}
 `Straza: no active Straza session. Restart the session so straza can check in`
@@ -404,33 +426,33 @@ strazactl audit verify
 {{< see >}}The deny of `rm -rf /tmp/x` and the allow of `git status` among the newest records, then `audit chain intact:` with the number of records it verified.{{< /see >}}
 
 {{< details summary="Recorded output, from the end of the walk" >}}
-This was recorded after the optional revocation check below, so it also holds the end of the revoked session and the two records of disabling alice. The numbers are positions in the chain, and the first record is the admin's login. Each record is trimmed to the fields that tell the story. The real ones also carry the record id, the source, the ids of the session, the user and the actor, the snapshot, and the fields left empty.
+This was recorded after the optional revocation check below, so it also holds the end of the revoked session and the two records of disabling alice. The numbers are positions in the chain, and the first record is the admin's login. Each record is trimmed to the fields that tell the story. The real ones also carry the record id, the source, the ids of the session, the user and the actor, the snapshot, the caller's address and client, and the fields left empty.
 
 ```text
-#4 [alice] {"data":{"action":"roles.assign","actor":"admin","origin":"admin","role":"dev"},"time":"2026-09-28T19:52:03.093098433Z","type":"straza.audit.admin"}
-#5 [alice] {"data":{"command":"rm -rf /tmp/x","effect":"deny","event":"tool.pre","harness":"claude-code","reason":"Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.","ruleId":"block-recursive-delete","setName":"standalone-starter","tool":"shell.exec"},"time":"2026-09-28T19:52:05.58480012Z","type":"straza.audit.tool"}
-#6 [alice] {"data":{"command":"git status","effect":"allow","event":"tool.pre","harness":"claude-code","tool":"shell.exec"},"time":"2026-09-28T19:52:05.613490475Z","type":"straza.audit.tool"}
-#7 [alice] {"data":{"action":"session.end","outcome":"revoked-admin","reason":"revoked by admin","session":"01a0e993-14a9-745d-9daf-8151fe32bbfa"},"time":"2026-09-28T19:52:10.137064939Z","type":"straza.audit.authn"}
-#8 [alice] {"data":{"action":"user.update","actor":"admin","changed":["status"]},"time":"2026-09-28T19:52:13.389689301Z","type":"straza.audit.admin"}
-#9 [alice] {"data":{"action":"user.killed","origin":"admin","reason":"user disabled by admin","sessionsRevoked":1},"time":"2026-09-28T19:52:13.396841921Z","type":"straza.audit.identity"}
+#4 [alice] {"data":{"action":"roles.assign","actor":"admin","origin":"admin","role":"dev"},"time":"2026-10-21T08:18:53.002254226Z","type":"straza.audit.admin"}
+#5 [alice] {"data":{"command":"rm -rf /tmp/x","effect":"deny","event":"tool.pre","harness":"claude-code","reason":"Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.","ruleId":"block-recursive-delete","setName":"standalone-starter","tool":"shell.exec"},"time":"2026-10-21T08:18:55.96398161Z","type":"straza.audit.tool"}
+#6 [alice] {"data":{"command":"git status","effect":"allow","event":"tool.pre","harness":"claude-code","tool":"shell.exec"},"time":"2026-10-21T08:18:55.982923197Z","type":"straza.audit.tool"}
+#7 [alice] {"data":{"action":"session.end","outcome":"revoked-admin","reason":"revoked by admin","session":"01a15d8a-bd38-7f04-a43b-1b1090003ec7"},"time":"2026-10-21T08:18:58.232976028Z","type":"straza.audit.authn"}
+#8 [alice] {"data":{"action":"user.update","actor":"admin","changed":["status"]},"time":"2026-10-21T08:19:00.395064884Z","type":"straza.audit.admin"}
+#9 [alice] {"data":{"action":"user.killed","origin":"admin","reason":"user disabled by admin","sessionsRevoked":1},"time":"2026-10-21T08:19:00.401488973Z","type":"straza.audit.identity"}
 audit chain intact: 9 records verified
 ```
 {{< /details >}}
 {{< /cli >}}
 
-Records reach the chain a moment after the step that made them. The client uploads its records after the decision, and the server appends its own records through a queue. A record you look for right after a step can be missing, and the next look has it.
+Records reach the chain a moment after the step that made them. The background service uploads its records after the decision, and the server appends its own records through a queue. A record you look for right after a step can be missing, and the next look has it.
 
 ## What just happened {.nostep}
 
 
 {{< diagram name="first-session" caption="strazad signed the starter policy. The hook on this machine checked each call against its own copy, denied `rm -rf /tmp/x` and allowed `git status`, and both decisions went to the audit chain afterwards." >}}
 
-The decisions were made on this machine, from a signed copy of the policy. The server was needed to start the session and to receive the records. [What just happened]({{< relref "get-started/how-that-worked.md" >}}) names each piece that acted, and [How a tool call is decided]({{< relref "concepts/how-straza-works.md" >}}) follows one call through them.
+The decisions were made on this machine, by the background service, from a signed copy of the policy. The server was needed to start the session and to receive the records. [What just happened]({{< relref "get-started/how-that-worked.md" >}}) names each piece that acted, and [How a tool call is decided]({{< relref "concepts/how-straza-works.md" >}}) follows one call through them.
 
 ## Optional: connect Claude Code {.nostep #wire-claude-code}
 
 
-On the machine where Claude Code runs, as the same user who enrolled, install the hooks. The command takes no server address, because the hooks use the one `straza enroll --server` saved in the step before.
+On the machine where Claude Code runs, as the same user who enrolled, install the hooks. The command takes no server address, because the background service keeps the one `straza enroll --server` named in the step before.
 
 {{< command terminal="Terminal 2" purpose="client, as alice" >}}
 ```sh
@@ -438,13 +460,13 @@ straza install claude-code
 ```
 {{< /command >}}
 
-The installer merges hook entries into your Claude Code settings, registers the Straza MCP server and prints the paths it changed. Restart Claude Code so it loads those settings, then run `straza doctor` to inspect the installation. This is a user-mode install with `advisory` attestation, and it checks the actions that pass through the installed hooks. The [Claude Code guide]({{< relref "guides/govern-an-agent/claude-code.md" >}}) explains the managed install and its different security boundary.
+The installer merges hook entries into your Claude Code settings, registers the Straza MCP server and prints the paths it changed. Restart Claude Code from a terminal that exports the same `STRAZA_HOME`, so its hooks reach the service, and that does not hold `STRAZA_API_TOKEN`, so the agent never holds your admin token. Then run `straza doctor` to inspect the installation. This is a user-mode install with `advisory` attestation, and it checks the actions that pass through the installed hooks. The [Claude Code guide]({{< relref "guides/govern-an-agent/claude-code.md" >}}) explains the managed install and its different security boundary.
 
 Start a new Claude Code session in a throwaway working directory and look for the governance banner. Ask it to run `git status`, which runs. Then ask it to run `rm -rf /tmp/x`, which Claude Code reports as denied with the starter policy's reason.
 
 {{< details summary="Recorded banner" >}}
 ```text
-🛡 Straza governance active: alice (dev) @ http://127.0.0.1:8420 · policy 0b900684ea32 · attestation advisory
+🛡 Straza governance active: alice (dev) @ http://127.0.0.1:8420 · policy 55c45aa7a5f3 · attestation advisory
 ```
 {{< /details >}}
 
@@ -453,22 +475,7 @@ Start a new Claude Code session in a throwaway working directory and look for th
 ## Optional: test revocation {.nostep #pull-the-kill-switch}
 
 
-Revocation reaches a running session through the client daemon. Start one in a third terminal as alice and leave it running.
-
-{{< command terminal="Terminal 3" purpose="client daemon, as alice" >}}
-```sh
-straza daemon
-```
-{{< /command >}}
-
-{{< details summary="Recorded output" >}}
-```text
-daemon: edge push subscribing; poll-refresh remains the backstop
-daemon: kill-switch push active (gateway edge)
-```
-{{< /details >}}
-
-The daemon receives pushed revocations and updates the client's state. Without it, the client learns of a revocation at its next token refresh, as [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) explains. In the administration terminal, list the sessions.
+Revocation reaches a running session through the push stream that the background service holds for each live session. When that stream is down, the session learns of a revocation at its next token refresh, as [Credentials and sessions]({{< relref "security/credentials-and-sessions.md#revocation-and-lockout" >}}) explains. In the administration terminal, list the sessions.
 
 {{< command terminal="Terminal 2" purpose="administration" >}}
 ```sh
@@ -477,10 +484,11 @@ strazactl sessions list
 {{< /command >}}
 
 {{< details summary="Recorded output" >}}
+The listing is trimmed to alice's session.
+
 ```table
-ID                                    USER   HARNESS           CLIENT  ATTESTATION  WIRING      STATUS  LAST SEEN
-01a0e993-14a9-745d-9daf-8151fe32bbfa  alice  claude-code       v1.1.0  advisory     unmeasured  active  2026-09-28 19:52:05
-01a0e993-0a39-71aa-9d65-0d0ebd02fd09  admin  strazactl/v1.1.0  v1.1.0  none         -           active  2026-09-28 19:52:02
+ID                                    USER   HARNESS                                CLIENT                       ATTESTATION  WIRING      STATUS  LAST SEEN
+01a15d8a-bd38-7f04-a43b-1b1090003ec7  alice  claude-code                            v1.0.0-1570-gaf326165-dirty  advisory     unmeasured  active  2026-10-21 08:18:55
 ```
 {{< /details >}}
 
@@ -494,12 +502,12 @@ strazactl sessions revoke SESSION_ID
 
 {{< details summary="Recorded output" >}}
 ```text
-revoked 01a0e993-14a9-745d-9daf-8151fe32bbfa
+revoked 01a15d8a-bd38-7f04-a43b-1b1090003ec7
 ```
 {{< /details >}}
 
 
-The daemon terminal prints "daemon: revocation received. Session state dropped, hooks now deny", and the daemon exits. Send the `git status` event from the hook step again, and this time the hook denies it.
+The service marks that session revoked and keeps running. Send the `git status` event from the hook step again, and this time the hook denies it.
 
 {{< details summary="Recorded output" >}}
 ```text

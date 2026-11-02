@@ -1,7 +1,11 @@
 package drafts
 
 import (
+	"errors"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/strazahq/straza/internal/policy"
 )
@@ -115,6 +119,95 @@ func ObligationViolations(doc policy.Document) []string {
 		out = append(out, fmt.Sprintf(
 			"rules[%d] (%s): obligations are not supported and never ran. Remove the obligations list. To keep recorded content out of the transcript, set capture.mode: redact on the set. To tell people about a call waiting on a hold, set approve.notify on the rule.",
 			i, r.ID))
+	}
+	return out
+}
+
+// ByNameViolations lists every rule of doc that names harness tools in a
+// way spec/policyset revision 26 refuses, one line per finding, each naming
+// the fix. Such a rule lists other in tools and sets toolNames, and it
+// governs exactly the tools it names, so it lists only other, carries no
+// other matcher and takes whole names. An allow of a name that tools
+// classifies is refused, because it would skip the rules of that kind, unless
+// live, the published version of the set or the zero Document, already
+// allowed that name by name: a set keeps its rules after a release classifies
+// one of their tools. tools is read only for a set with a by-name rule, and a
+// table it cannot answer refuses the set, so the gate fails closed.
+func ByNameViolations(doc policy.Document, live policy.Document, tools func() (map[string]string, error)) []string {
+	if !slices.ContainsFunc(doc.Spec.Rules, policy.Rule.NamesHarnessTools) {
+		return nil
+	}
+	classified, err := map[string]string(nil), errors.New("no table was handed in")
+	if tools != nil {
+		classified, err = tools()
+	}
+	if err != nil {
+		return []string{fmt.Sprintf("the set names harness tools, and Straza could not read its built-in tool mappings to check them (%v). "+
+			"Nothing was published. Read the strazad log, because the mappings are built into strazad.", err)}
+	}
+	kept := map[string]bool{}
+	for _, r := range live.Spec.Rules {
+		if r.NamesHarnessTools() {
+			for _, n := range r.ToolNames.Allow {
+				kept[n] = true
+			}
+		}
+	}
+	var out []string
+	for _, r := range doc.Spec.Rules {
+		if !r.NamesHarnessTools() {
+			continue
+		}
+		if len(r.Tools) > 1 {
+			out = append(out, fmt.Sprintf(
+				"rule %q: a rule that names harness tools in toolNames lists only other in tools, because the names pick the tools. Move the other tool kinds to a rule of their own.",
+				r.ID))
+		}
+		if blocks := otherMatchers(r); len(blocks) > 0 {
+			out = append(out, fmt.Sprintf(
+				"rule %q: a rule that names harness tools takes no %s block, because it governs exactly the tools it names. Move that block to a rule of its own.",
+				r.ID, strings.Join(blocks, " or ")))
+		}
+		var patterns []string
+		for _, n := range append(slices.Clone(r.ToolNames.Allow), r.ToolNames.Deny...) {
+			if strings.HasPrefix(n, "re:") || strings.ContainsAny(n, "*?") {
+				patterns = append(patterns, strconv.Quote(n))
+			}
+		}
+		if len(patterns) > 0 {
+			verb := "is a pattern"
+			if len(patterns) > 1 {
+				verb = "are patterns"
+			}
+			out = append(out, fmt.Sprintf(
+				"rule %q: toolNames on the other tool takes exact tool names only, and %s %s. Straza compares these names whole, so a pattern matches no tool. Write each name in full, for example SubagentHandback.",
+				r.ID, strings.Join(patterns, ", "), verb))
+		}
+		for _, n := range r.ToolNames.Allow {
+			if kind, ok := classified[n]; ok && !kept[n] {
+				out = append(out, fmt.Sprintf(
+					"rule %q: toolNames.allow names %s, which Straza already classifies as %s. Allow it with a %s rule, so the rules for that kind keep governing it.",
+					r.ID, n, kind, kind))
+			}
+		}
+	}
+	return out
+}
+
+// otherMatchers names the matcher blocks of r beside toolNames.
+func otherMatchers(r policy.Rule) []string {
+	var out []string
+	if len(r.Apps) > 0 {
+		out = append(out, "apps")
+	}
+	if r.Command != nil {
+		out = append(out, "command")
+	}
+	if r.Paths != nil {
+		out = append(out, "paths")
+	}
+	if r.Interpreters != nil {
+		out = append(out, "interpreters")
 	}
 	return out
 }

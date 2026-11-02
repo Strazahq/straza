@@ -91,7 +91,7 @@ The QR names one address, and the phone must be able to open it from wherever th
 
 A proxy or ingress may terminate TLS for the approver surface on its own public hostname, with a public certificate. Then set `server.approverPublicUrl` to that hostname, and leave the dedicated listener off with `server.approverTLS.autoMint: false` and no `server.approverTLS.publicUrl`. A `server.approverTLS.publicUrl`, which auto-mint fills in on its own, wins over `server.approverPublicUrl`.
 
-The QR then carries no pin, and the phone trusts the system store. The enroll output says `TLS SPKI pin: none (public-CA TLS via the system trust store, the expected ingress shape)`. Mixing the two, a public hostname with a pin that belongs to the listener behind the proxy, is refused by design. The phone would pin a key that the host it dials never presents.
+The QR then carries no pin, and the phone trusts the system store. The enroll sheet says `public certificate` under `How the phone trusts it`. Mixing the two, a public hostname with a pin that belongs to the listener behind the proxy, is refused by design. The phone would pin a key that the host it dials never presents.
 
 
 These four situations cover most deployments.

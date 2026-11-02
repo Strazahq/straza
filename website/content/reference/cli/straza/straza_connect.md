@@ -19,8 +19,9 @@ your credentials page, where you sign in and finish. On a token server it asks f
 token with the input hidden.
 
 The token also reads from stdin when stdin is not a terminal, and never from an
-argument. straza disconnect takes a connection away. An administrator or a sponsor
-stores another user's token with strazactl connect. A sign-in is stored only by the
+argument. straza disconnect takes a connection away. Letting the agents you sponsor
+use a connection, and setting an agent's token, happen on the Credentials tab of the
+self-service page, where you sign in in your browser. A sign-in is stored only by the
 person who signs in.
 
 ```
@@ -38,7 +39,6 @@ straza connect [server] [flags]
 ## Options
 
 ```
-      --allow-agents     let the agents you sponsor use this connection (=false takes it back)
       --expires string   the date the token stops working, as YYYY-MM-DD
 ```
 

@@ -228,6 +228,53 @@ strazactl roles create scout-tools-readers --app scout-tools --tools echo,get-su
 
 An application role that reaches a server belongs to that server, so the identity manager shows it as that server's role. Assign the role to the person or agent through Users or your identity manager. [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) walks this step and checks which tools the holder's session can call and which need approval.
 
+## Pin the objects a server reaches {#objects .nostep}
+
+
+Some servers reach many separate things with one credential. ghapp, a GitHub App server, is one: it reaches every repository the App is installed on. Its tools say so in their tool list. Each tool that works on one repository marks its argument `repo` as the one that names it, and `repo_list` marks itself as the tool that lists them all. Straza reads those marks and acts on them only once a person pins them in the server's manifest, under `straza.objects`. [Object marks for server authors]({{< relref "reference/object-marks.md" >}}) is the reference for the server's author. A pinned server then gets a tab named with the server's own word, here Repos, that lists each repository with its attributes, the roles that cover it and its id.
+
+
+From the pin on, the gateway checks every call to the server against the repositories each role covers. At the first pin no role loses or gains a repository, because the draft that pins a server for the first time gives every role that already reaches it `covers: every`, the reach it had. Its check says so in a line such as `Pinning repos on ghapp keeps today's reach: ghapp-readers now covers every repo. Narrow it in this draft or later.` A role on every repository keeps working before the first listing too, because `every` also covers the repositories the list does not hold yet. Two things do change for every role. Straza refuses a call whose `repo` argument it cannot read, such as one that sends `repo` twice or leaves it out, and an approval or ticket given before the pin, for a tool that names its repository, is asked for again, because the approval then carries the repository.
+
+
+Add the server first, as the steps above do, and pin its objects in a later publish. A manifest that starts a server and pins the block in one publish can meet a server that is still starting, and that first listing then fails and runs again in about a minute. For ghapp the first listing after the pin fails on the missing listing credential in any case, and storing the credential lists again with no refresh, as the failures under the listing below explain. On a running server that pins nothing, `strazactl apps objects ghapp` prints the `straza.objects` block its marks declare, and `strazactl apps objects draft ghapp` opens a draft whose manifest pins exactly that block, with you as its proposer. You publish it as any other draft. A change under `straza.objects` alone never restarts the server. The draft's check compares the block with the server's live tools. The listing tool must be marked read-only, each argument the block names must be a required string argument of its tool, and no tool may be pinned looser than the server's own mark. A tool the block leaves out reads as reaching every repository, and the check lists it under `Needs a decision`. ghapp's whole block, as a manifest file holds it, is in [The apps directory]({{< relref "guides/serve-mcp-apps/gitops-apps-directory.md#objects" >}}).
+
+
+A remote server whose manifest names a credential, as ghapp's does, needs a listing credential of its own. Straza calls the listing tool with that credential and nothing else, and it never sends it on a tool call or a health probe. Without one the listing fails and says so, because Straza never falls back to the server's own secret or a role's. A server on the `command` or `oci` runtime, or a remote one that takes no credential, keeps none. Store the listing credential once the pin is published, because a server that pins nothing refuses one. For ghapp it is the value of its `GHAPP_MCP_LISTING_TOKEN`, which ghapp accepts on `repo_list` alone. The command asks for the value at a hidden prompt:
+
+{{< command terminal="Terminal" purpose="administration" >}}
+```sh
+strazactl apps secret set ghapp --listing
+```
+{{< /command >}}
+
+Until one is stored, the pin's draft warns `ghapp has no listing credential, so Straza cannot list its repos, and only roles on every repo can use its repo tools until it has one. Add one with strazactl apps secret set ghapp --listing after you publish.` [Credentials]({{< relref "guides/serve-mcp-apps/credentials.md#listing-credential" >}}) sets it beside the server's other secrets.
+
+
+Straza lists the repositories every 10 minutes, within about 15 seconds after a publish that pins or changes the block, and at once when the listing credential changes. One replica lists at a time, and every other replica holds the new list within 30 seconds. A listing that fails, or that breaks a limit such as 100,000 repositories per server, changes nothing, and the last good list stays. `strazactl apps objects refresh ghapp` asks for a listing now, and so does `POST /v1/admin/apps/{id}/objects/refresh`. The Repos tab has no refresh control. A call that names a repository the list does not hold asks for one as well, and the two share a limit of one a minute per server. Each listing that changes the list, and each listing whose outcome turns from success to failure or back, writes `apps.objects.list` to the audit log. In the console the tab is under **MCP servers**, then the server, and it shows the last listing, a failure's reason and what the server's marks declare. `apps.objects.enabled`, true by default, can be set to false to stop every listing, and [Configuration]({{< relref "reference/configuration.md#config-apps" >}}) says what it does to the roles on such a server.
+
+
+{{< fails >}}
+`ghapp has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set ghapp --listing, then refresh with strazactl apps objects refresh ghapp.`
+: Store the listing credential. Storing it starts a listing at once, so the refresh is needed only when that listing failed too.
+
+`ghapp is not running, so Straza could not call repo_list. Start it, then refresh.`
+: When the listing ran, the server was still starting or had failed to start, or someone had paused or stopped it. One publish that adds a server and pins its objects can meet the first case, and Straza then lists it again in about a minute. A server that failed to start is tried again each minute too. A paused or stopped server is listed again 10 minutes after the failed listing, so once ghapp runs again, run `strazactl apps objects refresh ghapp`.
+
+`Straza has not read ghapp's tool list yet, so it cannot check repo_list before it lists ghapp's repos. It tries again in about a minute. If ghapp stays degraded, read why with strazactl apps show ghapp.`
+: Straza started ghapp, but ghapp has not answered its tools probe yet, so Straza cannot tell whether `repo_list` is there and marked read-only. A start that failed reads the same way. Straza lists ghapp again in about a minute, and you do not need to refresh it. When ghapp does not come up, `strazactl apps show ghapp` says why.
+{{< /fails >}}
+
+## Limit a role to some repositories {#covers .nostep}
+
+
+Once a server pins its repositories, each role's access row on it says which of them it covers: `covers: every`, or `covers: {objects: [...]}` with each repository named. [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md#covers" >}}) writes both forms, lists what a draft refuses and says what the gateway does on each call.
+
+## Serve git through Straza {#git .nostep}
+
+
+A server that holds a git host's credential, such as ghapp, can also serve git to agents that run plain git. Its manifest then carries a `straza.git` block with the server's git address, the git host it serves and the tools that decide a fetch and a push, and the objects block pins both tools to the argument that names the repository. [Git through Straza]({{< relref "guides/serve-mcp-apps/git-through-straza.md" >}}) writes the block for ghapp and gives roles the two tools.
+
 ## Runtimes, limits and timeouts {.nostep}
 
 

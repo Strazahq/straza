@@ -1,16 +1,20 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -310,5 +314,140 @@ straza:
 	}
 	if len(apps) != 1 || len(apps[0].Offered) != 0 {
 		t.Errorf("stopped server offers %v, want nothing", apps[0].Offered)
+	}
+}
+
+// objectsUpstream is an MCP server whose tools carry the ai.straza/* marks
+// of a repo server, with a count of the initialize requests it answered,
+// which a server start sends. marks replaces a tool's _meta by name.
+func objectsUpstream(t *testing.T, marks map[string]mcp.Meta) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "objects", Version: "1.0.0"}, nil)
+	meta := map[string]mcp.Meta{
+		"repo_list": {"ai.straza/lists-objects": map[string]any{"type": "repo", "attributes": []any{map[string]any{"name": "area", "setBy": "org"}}}},
+		"repo_read": {"ai.straza/object": map[string]any{"type": "repo", "argument": "repo"}},
+		"whoami":    {"ai.straza/object": map[string]any{"type": "repo", "reach": "none"}},
+	}
+	for name, m := range marks {
+		meta[name] = m
+	}
+	type listArgs struct {
+		Cursor string `json:"cursor,omitempty"`
+	}
+	type repoArgs struct {
+		Repo string `json:"repo"`
+	}
+	type noArgs struct{}
+	answer := func(text string) *mcp.CallToolResult {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+	}
+	mcp.AddTool(srv, &mcp.Tool{Name: "repo_list", Description: "list repos", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}, Meta: meta["repo_list"]},
+		func(context.Context, *mcp.CallToolRequest, listArgs) (*mcp.CallToolResult, any, error) {
+			return answer("[]"), nil, nil
+		})
+	mcp.AddTool(srv, &mcp.Tool{Name: "repo_read", Description: "read a repo", Meta: meta["repo_read"]},
+		func(_ context.Context, _ *mcp.CallToolRequest, a repoArgs) (*mcp.CallToolResult, any, error) {
+			return answer(a.Repo), nil, nil
+		})
+	mcp.AddTool(srv, &mcp.Tool{Name: "whoami", Description: "who am I", Meta: meta["whoami"]},
+		func(context.Context, *mcp.CallToolRequest, noArgs) (*mcp.CallToolResult, any, error) {
+			return answer("me"), nil, nil
+		})
+	inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+	var inits atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			raw, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(raw), `"initialize"`) {
+				inits.Add(1)
+			}
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	t.Cleanup(up.Close)
+	return up, &inits
+}
+
+// objectsManifest is the manifest of the objects upstream at url, with
+// extra YAML under straza: indented two spaces.
+func objectsManifest(url, extra string) string {
+	return fmt.Sprintf(`
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata: {name: repos}
+server: {name: straza.test/repos, version: "1.0.0"}
+straza:
+  runtime:
+    kind: remote
+    remote: {url: %q}
+%s`, url, extra)
+}
+
+const pinnedRepos = `  objects:
+    type: repo
+    list:
+      tool: repo_list
+      attributes: [{name: area, setBy: org}]
+    tools:
+      repo_read: {argument: repo}
+      whoami: none
+`
+
+// TestAppsObjectsOnlyChangeKeepsTheServer pins that a change of the
+// straza.objects block alone stores the manifest, writes apps.install with
+// the straza.objects paths and keeps the running instance, whose view then
+// carries the new block, while any other change still restarts it.
+func TestAppsObjectsOnlyChangeKeepsTheServer(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	user := seedIdentity(t, app)
+	grantAdmin(t, app, user.ID)
+	bearer := loginDeviceFlow(t, base, "kim", "hunter2!")
+	up, inits := objectsUpstream(t, nil)
+
+	install := func(body string) {
+		t.Helper()
+		var out map[string]any
+		if code := rawReq(t, "POST", base+"/v1/admin/apps", bearer, "application/yaml", []byte(body), &out); code != http.StatusCreated {
+			t.Fatalf("install = %d %v", code, out)
+		}
+	}
+	install(objectsManifest(up.URL, ""))
+	waitAppStatus(t, base, bearer, "repos", "running")
+	started := inits.Load()
+
+	install(objectsManifest(up.URL, pinnedRepos))
+	var records []map[string]any
+	for _, ev := range adminAuditEvents(t, app) {
+		if ev["action"] == "apps.install" {
+			records = append(records, ev)
+		}
+	}
+	want := "straza.objects.list.attributes,straza.objects.list.tool,straza.objects.tools.repo_read.argument,straza.objects.tools.whoami,straza.objects.type"
+	if len(records) != 2 || fmt.Sprint(records[1]["changed"]) != "["+strings.ReplaceAll(want, ",", " ")+"]" {
+		t.Fatalf("apps.install records = %v, want a second one changing %s", records, want)
+	}
+	row, err := app.store.Apps().GetByName(context.Background(), "repos")
+	if err != nil || !strings.Contains(row.Manifest, `"objects":{"type":"repo"`) {
+		t.Fatalf("stored manifest = %s, %v, want the objects block", row.Manifest, err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if inits.Load() != started {
+		t.Errorf("an objects-only change restarted the server: %d initialize requests, want %d", inits.Load(), started)
+	}
+	view, ok := app.manager.View("repos")
+	if !ok || view.Manifest.Straza.Objects == nil || view.Manifest.Straza.Objects.Type != "repo" {
+		t.Errorf("the running instance shows objects %+v, want the pinned repo block", view.Manifest.Straza.Objects)
+	}
+
+	install(objectsManifest(up.URL, pinnedRepos+"  limits: {rps: 5}\n"))
+	waitAppStatus(t, base, bearer, "repos", "running")
+	deadline := time.Now().Add(5 * time.Second)
+	for inits.Load() == started && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if inits.Load() == started {
+		t.Errorf("a limits change did not restart the server, so this test cannot see a restart")
 	}
 }

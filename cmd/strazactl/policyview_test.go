@@ -21,10 +21,9 @@ import (
 // tests bind the constructors directly.
 func runPolicyView(t *testing.T, srvURL string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	credsPath := writeCreds(t, srvURL)
 	client := func() *ctl.Client {
 		c := ctl.NewClient(srvURL)
-		c.CredsPath = credsPath
+		c.APIToken = testToken
 		return c
 	}
 	root := &cobra.Command{Use: "strazactl", SilenceUsage: true, SilenceErrors: true}
@@ -39,8 +38,7 @@ func runPolicyView(t *testing.T, srvURL string, args ...string) (stdout, stderr 
 	return out.String(), errBuf.String(), err
 }
 
-// policyDetailServer serves one set on the by-name read (plus the checkin
-// lane every call walks with the opaque test token).
+// policyDetailServer serves one set on the by-name read.
 func policyDetailServer(t *testing.T, name string, payload map[string]any) *httptest.Server {
 	t.Helper()
 	body, err := json.Marshal(payload)
@@ -48,10 +46,6 @@ func policyDetailServer(t *testing.T, name string, payload map[string]any) *http
 		t.Fatalf("marshal payload: %v", err)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("GET /v1/admin/policies/"+name, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)

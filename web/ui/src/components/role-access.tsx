@@ -9,13 +9,16 @@ import { RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { AccessEditor } from "@/components/access-editor";
 import { type Built, RoleSaves, liveExport } from "@/components/role-saves";
+import { coversKey, coversOf, listed, partial, pinnedOf, uncovered } from "@/lib/access-covers";
+import { COVERS_HEAD, coversCell, missingCovers, onWhich, todayCount } from "@/lib/access-object-words";
 import { type Plan, emptyPlan, grantMatchers, sameRules } from "@/lib/access-plan";
 import { type AccessRead, accessRead, mayWritePolicy, retires } from "@/lib/access-read";
-import { type ApiError, type AppRow, type BindingRow, type PreviewEntry, type RoleRow, type ToolRow, catalogPreview, getPolicy, listRoles, removeBinding } from "@/lib/api";
+import { type ApiError, type AppRow, type BindingRow, type ObjectsBlock, type PreviewEntry, type RoleRow, type ToolRow, appObjects, catalogPreview, getPolicy, listRoles, query, removeBinding } from "@/lib/api";
 import { type GrantInput, storedRules } from "@/lib/grant-commit";
 import { put } from "@/lib/handoff";
 import { heldKinds, heldSets } from "@/lib/held-kinds";
 import { notify } from "@/lib/notify";
+import { nounsOf } from "@/lib/object-words";
 import { type Yaml, asList, asMap, parsePolicy } from "@/lib/policy-yaml";
 import { useFirstCall } from "@/lib/first-call";
 import { accessItems, readOwnSet } from "@/lib/role-draft";
@@ -73,7 +76,7 @@ const DESTRUCTIVE = "bg-danger text-white hover:bg-danger/90";
 
 // FirstCallRow is the line under a server's row after a grant lands: the
 // audit log's own witness that the grant is real.
-function FirstCallRow({ app, since }: { app: string; since: number }) {
+function FirstCallRow({ app, since, cols }: { app: string; since: number; cols: number }) {
   const call = useFirstCall(app, true, since);
   const dot = <span aria-hidden="true" className={cn("mr-2 inline-block size-2 rounded-full align-middle", call.state === "watching" ? "bg-ok" : "bg-muted-foreground")} />;
   const openAudit = (seq?: number) => {
@@ -82,7 +85,7 @@ function FirstCallRow({ app, since }: { app: string; since: number }) {
   };
   return (
     <TableRow data-first-call={call.state}>
-      <TableCell colSpan={4} className="whitespace-normal text-[13px] leading-snug text-text-2">
+      <TableCell colSpan={cols} className="whitespace-normal text-[13px] leading-snug text-text-2">
         {call.state === "watching" && <>{dot}{firstCallWatching(app)}</>}
         {call.state === "hit" && call.rec && (
           <>
@@ -147,6 +150,16 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
 
   const grants = bindings.filter((b) => b.role === role.name);
   const appOf = (name: string) => apps.find((a) => a.name === name);
+  // A row on a server that pins a type gains the On which column. A row on
+  // every object counts today's list under its cell, and a failed read or a
+  // listing that gave no list yet leaves the count out.
+  const pinnedAll = grants.map((b) => pinnedOf(appOf(b.app))).filter((p): p is ObjectsBlock => !!p);
+  const pinnedFirst = pinnedAll[0] || null;
+  // Servers that pin different types share the neutral head, and each cell
+  // names its own noun.
+  const coversHead = pinnedFirst && pinnedAll.every((p) => p.type === pinnedFirst.type) ? onWhich(nounsOf(pinnedFirst)) : COVERS_HEAD;
+  const cols = pinnedFirst ? 5 : 4;
+  const [counts, setCounts] = React.useState<Record<string, number>>({});
   const toolsOf = (name: string) => tools.filter((t) => t.app === name);
   const open = !!editing;
   const current = editing ? editing.app : null;
@@ -179,6 +192,17 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
     }
     return () => { alive = false; };
   }, [role.name, key, nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const everyKey = grants.filter((b) => b.covers?.every && pinnedOf(appOf(b.app))).map((b) => b.app).join(",");
+  React.useEffect(() => {
+    let alive = true;
+    for (const name of everyKey ? everyKey.split(",") : []) {
+      const app = appOf(name);
+      if (!app) continue;
+      appObjects(app.id, query({ limit: 1 })).then((a) => { if (alive && listed(a.listing)) setCounts((c) => ({ ...c, [name]: a.total })); }, () => undefined);
+    }
+    return () => { alive = false; };
+  }, [everyKey, nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The role's own set carries the rules this page writes.
   React.useEffect(() => {
@@ -226,14 +250,17 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
   const matchers = current ? grantMatchers(plan, currentNames) : [];
   const before = stored ? (isGlob(stored.tools) ? ["*"] : (stored.tools || []).slice().sort()) : null;
   const sameTools = !!before && JSON.stringify(before) === JSON.stringify(matchers);
+  // sameRow says the access row stays as stored: its tools and its covers
+  // line, which a save writes with the row.
+  const sameRow = sameTools && coversKey(coversOf(stored?.covers)) === coversKey(plan.covers);
   const sameCalls = !!read && !!current && sameRules(read.initial, plan, current.name, currentNames, role.name);
   const retiring = !!read && !!current && retires(read, plan, current.name, currentNames, role.name);
   // written is what a save would store for this server in the own set the
   // editor opened on, so the fold shows the kept ids and reasons.
   const written = read && current && typeof read.text === "string" ? storedRules(read.text, plan, current.name, currentNames, role.name) : undefined;
-  // changed says a save would store tools or rules other than the ones the
-  // editor opened on.
-  const changed = !!read && !!current && (!sameCalls || JSON.stringify(grantMatchers(read.initial, currentNames)) !== JSON.stringify(matchers));
+  // changed says a save would store tools, a covers line or rules other than
+  // the ones the editor opened on.
+  const changed = !!read && !!current && (!sameCalls || JSON.stringify(grantMatchers(read.initial, currentNames)) !== JSON.stringify(matchers) || coversKey(read.initial.covers) !== coversKey(plan.covers));
 
   // seed opens the editor on what was read. A reader of policy has no Which
   // tools question, so a row naming every tool opens as ticks it can change.
@@ -292,7 +319,12 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
       setNote(PICK_A_TOOL);
       return null;
     }
-    if (sameTools && sameCalls) {
+    const pinned = pinnedOf(current);
+    if (pinned && uncovered(current, plan.covers)) {
+      setNote(missingCovers(nounsOf(pinned)));
+      return null;
+    }
+    if (sameRow && sameCalls) {
       setNote(NOTHING_CHANGED);
       return null;
     }
@@ -303,11 +335,11 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
       app: current,
       tools: currentTools,
       plan,
-      replace: sameTools ? null : stored,
-      keep: sameTools,
+      replace: sameRow ? null : stored,
+      keep: sameRow,
       before: read.initial,
     };
-    const text = sameTools ? "" : await liveExport(role);
+    const text = sameRow ? "" : await liveExport(role);
     if (typeof text !== "string") return text;
     const answer = await accessItems(input, text);
     return "error" in answer ? { tone: "refused", lines: [NOTHING_SAVED, answer.error] } : answer.items;
@@ -316,7 +348,7 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
   // published follows a publish of the sheet's draft: a new row gets the
   // first-call watcher, and the tab reads its rows again.
   const published = () => {
-    if (current && !sameTools) setLanded({ app: current.name, since: Date.now() });
+    if (current && !sameRow) setLanded({ app: current.name, since: Date.now() });
     close();
     setNonce((n) => n + 1);
     onChanged();
@@ -347,6 +379,7 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
           <colgroup>
             <col className="w-[18%]" />
             <col className="w-[30%]" />
+            {pinnedFirst && <col className="w-[24%]" />}
             <col />
             <col className="w-[88px]" />
           </colgroup>
@@ -354,6 +387,7 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
             <TableRow>
               <TableHead>{ACCESS_HEAD.server}</TableHead>
               <TableHead>{ACCESS_HEAD.tools}</TableHead>
+              {pinnedFirst && <TableHead>{coversHead}</TableHead>}
               <TableHead>
                 <span className="inline-flex items-center gap-1.5">{ACCESS_HEAD.policy}<HelpTip label={ACCESS_HEAD.policy} text={POLICY_HELP} /></span>
               </TableHead>
@@ -363,7 +397,7 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
           <TableBody>
             {grants.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="whitespace-normal text-muted-foreground" data-no-access>{role.server ? ownedNoAccess(role.server) : NO_SERVER_ROLE}</TableCell>
+                <TableCell colSpan={cols} className="whitespace-normal text-muted-foreground" data-no-access>{role.server ? ownedNoAccess(role.server) : NO_SERVER_ROLE}</TableCell>
               </TableRow>
             )}
             {grants.map((b) => {
@@ -371,6 +405,8 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
               const known = toolsOf(b.app).length || (app && app.tools ? app.tools.length : 0) || null;
               const kinds = heldKinds(previews[b.app], { ...texts, [ownName]: ownText });
               const summary = policySummary(previews[b.app], kinds);
+              const pinned = pinnedOf(app);
+              const covers = coversOf(b.covers);
               return (
                 <React.Fragment key={b.id}>
                   <TableRow data-access={b.app}>
@@ -382,6 +418,12 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
                       )}
                     </TableCell>
                     <TableCell className="truncate" title={matchersTitle(b.tools)}>{toolsWords(b.tools, known)}</TableCell>
+                    {pinnedFirst && (
+                      <TableCell className="whitespace-normal" data-covers-cell>
+                        {pinned && <span className={covers ? "text-foreground" : "text-warn"}>{coversCell(nounsOf(pinned), covers)}</span>}
+                        {pinned && covers && !partial(covers) && counts[b.app] !== undefined && <div className="text-[13px] text-muted-foreground" data-covers-count>{todayCount(counts[b.app], nounsOf(pinned))}</div>}
+                      </TableCell>
+                    )}
                     <TableCell className="truncate text-text-2" title={heldTitle(summary, kinds)} data-policy-cell>{summary}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       <Tooltip>
@@ -398,7 +440,7 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
                       </Tooltip>
                     </TableCell>
                   </TableRow>
-                  {landed && landed.app === b.app && <FirstCallRow app={b.app} since={landed.since} />}
+                  {landed && landed.app === b.app && <FirstCallRow app={b.app} since={landed.since} cols={cols} />}
                 </React.Fragment>
               );
             })}
@@ -435,14 +477,14 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
             )}
             {note ? (
               <p role="status" className="m-0 text-[13px] text-danger" data-save-note>{note}</p>
-            ) : sameTools && read && !sameCalls && !retiring ? (
+            ) : sameRow && read && !sameCalls && !retiring ? (
               <p role="status" className="m-0 text-[13px] text-muted-foreground" data-save-note>{UNCHANGED_TOOLS}</p>
             ) : null}
           </div>
           <SheetFooter className="mt-0 border-t border-border">
             <RoleSaves
               role={role.name}
-              toast={current && !sameTools ? accessToast(role.name, current.name) : undefined}
+              toast={current && !sameRow ? accessToast(role.name, current.name) : undefined}
               build={build}
               ask={(asked, confirm, cancel, publish) => (
                 <AlertDialog open={asked} onOpenChange={(o) => { if (!o) cancel(); }}>

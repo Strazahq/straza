@@ -99,7 +99,7 @@ func TestAccessCreateRefusal(t *testing.T) {
 			w := accessWorld()
 			w.Roles["draft-role"] = Role{Name: "draft-role", Kind: RoleKindApplication}
 			w.Apps = map[string]App{"EchoHub": {Name: "EchoHub", RolePrefix: "echohub-"}}
-			wantRefusal(t, AccessCreateRefusal(w, tc.st, tc.role, tc.server, tc.tools), tc.kind, tc.want)
+			wantRefusal(t, AccessCreateRefusal(w, tc.st, tc.role, tc.server, tc.tools, false), tc.kind, tc.want)
 		})
 	}
 }
@@ -121,6 +121,8 @@ func TestAccessRemoveRefusal(t *testing.T) {
 			"dev is not a role of the server echoapp. A server admin gives access only to the roles their server owns"},
 		{"a server admin on a held role", erin, "echoapp-readers", "echoapp", RefusalConflict,
 			"the role echoapp-readers has 1 holder. Its tools change only by the global admin or by a new role"},
+		{"a server admin on a held role of a pinned server", erin, "echoapp-readers", "echoapp", RefusalConflict,
+			"the role echoapp-readers has 1 holder. Its tools and the repos it covers change only by the global admin or by a new role"},
 		{"a server admin on a role nobody holds", erin, "echoapp-writers", "echoapp", 0, ""},
 		{"a server admin on a role nobody counted", erin, "echoapp-loose", "echoapp", RefusalUnread,
 			"Straza did not count who holds echoapp-loose, so it cannot tell whether its tools may change. Try again, and read the strazad log if it keeps failing."},
@@ -128,7 +130,11 @@ func TestAccessRemoveRefusal(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			wantRefusal(t, AccessRemoveRefusal(accessWorld(), tc.st, tc.role, tc.server), tc.kind, tc.want)
+			w := accessWorld()
+			if tc.name == "a server admin on a held role of a pinned server" {
+				w.Apps = map[string]App{"echoapp": {Name: "echoapp", Pinned: &PinnedObjects{Type: "repo", Plural: "repos", LiveType: "repo"}}}
+			}
+			wantRefusal(t, AccessRemoveRefusal(w, tc.st, tc.role, tc.server), tc.kind, tc.want)
 		})
 	}
 }

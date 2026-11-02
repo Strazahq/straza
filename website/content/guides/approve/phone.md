@@ -1,35 +1,33 @@
 ---
 title: Approve on a phone
-description: A person's phone is enrolled as an approver device, decides a held call in the Straza approver app, and signs each answer with its own key.
+description: A person enrolls their own phone as an approver device on the self-service page, decides a held call in the Straza approver app, and signs each answer with its own key.
 pagetype: how-to
 weight: 30
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server in a Linux container. A shell script with an openssl P-256 key stood in for the phone. It paired with an enroll token from strazactl, fetched the pending request and signed the decision against the approver listener on port 8443, and the call it decided was a real hold that dana's hook call raised. The QR scan and the tap in the app on a real phone were not run, and the console form was not walked in a browser
+  platform: A throwaway standalone server in a Linux container. A shell script with an openssl P-256 key stood in for the phone. It paired with an enroll token from strazactl, fetched the pending request and signed the decision against the approver listener on port 8443, and the call it decided was a real hold that dana's hook call raised. The QR scan and the tap in the app on a real phone were not run, and the console form was not walked in a browser. The enroll token of that run came from strazactl, which no longer mints one. The role step and the person's own Add a phone were written from the code on 2026-11-01 and not walked
   date: 2026-10-06
 applies_to: both
 keywords: phone approver enroll push signature
-who: You, as the admin, and the person who decides on their phone
-where: The console or a terminal with strazactl, and the Straza approver app on the person's phone
+who: The person who decides on their phone, after you as the admin give them the role
+where: The self-service page, the console or a terminal with strazactl, and the Straza approver app on the person's phone
 steps: true
 modes: [console, cli]
 mode_default: console
 ---
 
 
-You, as the admin, enroll a person's phone so they answer held calls in the Straza approver app. Each answer is signed by a key the phone keeps in its secure hardware. By the end of this page a phone is enrolled as an approver device, has decided a held call, and shows in the list of approver devices.
+A person enrolls their own phone so they answer held calls in the Straza approver app. Each answer is signed by a key the phone keeps in its secure hardware. By the end of this page a phone is enrolled as an approver device, has decided a held call, and shows in the list of approver devices.
 
 
-You mint a one-time enroll token for the person, and the person scans it with the app. From then on the phone holds a signing key the server knows. When a rule holds a call, Straza sends the request to the phone, the app fetches it over its own connection to the server, and a tap signs the verdict against a challenge that works once. The server checks who decided, never where from, so the phone can sit on any network.
-
-A person whose account holds the `straza-enroll-mobile` role can mint their own token, with no admin involved, from **Add a phone** on the **This browser** tab of the self-service page.
+The person mints a one-time enroll token on the self-service page and scans it with the app. No admin route or console screen enrolls a phone for someone else. The self-service page enrolls a phone for whoever is signed in as the person. On a standalone server Straza checks the passwords itself, so anyone who may set the person's password can also add a phone in their name, as [Known limits]({{< relref "security/known-limits.md" >}}) says. Your part as the admin is to give the person the role that lets them enroll. From then on the phone holds a signing key the server knows. When a rule holds a call, Straza sends the request to the phone, the app fetches it over its own connection to the server, and a tap signs the verdict against a challenge that works once. The server checks who decided, never where from, so the phone can sit on any network.
 
 ## Before you start {.nostep}
 
 
-- An admin login, in the console or with `strazactl`.
-- A person a rule names as a decider, such as the person behind an agent or a holder of an approver role.
+- An admin's console sign-in, or `strazactl` on an admin API token minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows. You need it to give the role and to see and revoke devices.
+- A person a rule names as a decider, such as the person behind an agent or a holder of an approver role, with an account at the identity provider your server signs in with.
 - The Straza approver app on that person's phone, from the [App Store](https://apps.apple.com/app/straza-approver/id6798735074) or [Google Play](https://play.google.com/store/apps/details?id=ai.straza.approver).
 - A server address the phone can open. [Make the address reachable from the phone]({{< relref "guides/approve/push-and-connectivity.md#make-the-address-reachable-from-the-phone" >}}) covers how.
 - A pending request to decide, such as the one [Hold a call for a person]({{< relref "guides/write-policy/hold-for-a-human.md" >}}) raises.
@@ -38,60 +36,63 @@ Push delivery is recommended, so the phone learns of a request while the app is 
 
 A person without the app can decide from a browser instead, as [Approve in the browser]({{< relref "guides/approve/browser.md" >}}) shows.
 
+## Give the person the phone role
+
+
+Only a person who holds `straza-enroll-mobile`, or `straza-admin`, may add a phone. When your identity manager feeds Straza over SCIM, assign the role there. Otherwise, as the admin, assign it in the console or from a terminal.
+
+{{< console >}}
+{{< clicks "Roles" "straza-enroll-mobile" "Assign to a user" "Assign role" >}}
+
+Pick the person under **User** before you press **Assign role**.
+{{< /console >}}
+
+{{< cli >}}
+{{< command terminal="Terminal" purpose="administration" >}}
+```sh
+strazactl assign straza-enroll-mobile --user lena
+```
+{{< /command >}}
+
+{{< see >}}`assigned straza-enroll-mobile to lena`{{< /see >}}
+{{< /cli >}}
+
 ## Mint the enroll token
 
 
-The token works once and expires after ten minutes, so mint it with the person and their phone next to you.
+The person mints the token on their own self-service page. It works once and expires after ten minutes, so they mint it with their phone in hand.
 
-{{< console >}}
+They open `/self-service/` on the server and sign in, as [Approve in the browser]({{< relref "guides/approve/browser.md#sign-in-on-the-self-service-page" >}}) shows.
 
-{{< clicks "Approvals" "Approver devices" "Add a phone" >}}
+{{< clicks "This browser" "Add a phone" >}}
 
-**Add a phone** sits in the page head while the **Approver devices** tab is open. Pick the person under **Person** and press **Create the QR code**.
+**Add a phone** opens a sheet for the person who is signed in, such as `For you, lena. The phone approves the requests routed to you.` They press **Create the QR code**.
 
 {{< shot name="enroll-qr" caption="The QR code for lena, with the one-time code, the servers the phone tries and how it trusts them." >}}
 
 {{< see >}}The QR under `Scan with the Straza approver app`, with the line `The code expires in` and the time left.{{< /see >}}
 
-The sheet also shows the code itself under `One-time code`. It names the servers the phone tries under `Servers the phone tries, in order`, and how the phone trusts each one under `How the phone trusts it`.
+Beside the QR, the sheet shows the code itself under `One-time code`. It names the servers the phone tries under `Servers the phone tries, in order`, and how the phone trusts each one under `How the phone trusts it`.
 
-{{< fails >}}
-`<name> is an agent and cannot approve. Pick a person.`
-: An AI agent never approves. Pick the person who decides.
+{{< console >}}
 
-`The code expired before a phone scanned it. Create another.`
-: The ten minutes ran out. Press **Create another** with the person and the phone beside you.
+As the admin, you add your own phone the same way, or from the console.
 
-`This code is too large to draw. Use strazactl approvals enroll-token instead.`
-: The sheet cannot draw this QR. Mint the token with the CLI form of this step.
-{{< /fails >}}
+{{< clicks "Approvals" "Approver devices" "Add a phone" >}}
+
+The console's sheet is for your own phone only. Under **For someone else** it gives the self-service address with **Copy**, so you can send it to the person who should enroll.
 {{< /console >}}
 
-{{< cli >}}
+{{< fails >}}
+`You do not hold the role straza-enroll-mobile, so you cannot add a phone of your own. Your identity manager assigns it.`
+: The console says this to an admin whose account lacks the phone role. Give your own account the role as the step before shows. The self-service page shows **Add a phone** only to an account that may enroll a phone.
 
-Mint the token for the person's username. The fields go to stdout for scripts, and the scannable QR is drawn on stderr. `2>/dev/null` mutes the picture without touching what a script reads.
+`The code expired before a phone scanned it. Create another.`
+: The ten minutes ran out. Press **Create another** with the phone in hand.
 
-{{< command terminal="Terminal" purpose="administration" >}}
-```sh
-strazactl approvals enroll-token alice 2>/dev/null
-```
-{{< /command >}}
-
-```text
-Enroll token (one-time, expires in 600s):
-  FGq1
-
-Project: straza-30b9 (prj_01a11309-3832-7b68-b5c3-f869493330b9)
-Servers:
-  https://172.17.0.3:8443
-TLS SPKI pin: sha256/nlNwm71p7W6IFFBxAq4rwjuVIqwQTUIMBkORV2QGFa8=
-
-QR payload (encode as a QR for the app):
-  {"v":1,"servers":["https://172.17.0.3:8443"],"token":"FGq1","pin":"sha256/nlNwm71p7W6IFFBxAq4rwjuVIqwQTUIMBkORV2QGFa8=","project":{"id":"prj_01a11309-3832-7b68-b5c3-f869493330b9","name":"straza-30b9"}}
-```
-
-Only the first four characters of the enroll token are shown. The rest of the value is masked here.
-{{< /cli >}}
+`This code is too large to draw. In the approver app, choose Enter the code manually and paste the enrollment text below.`
+: The QR cannot carry this enrollment. Press **Copy** under **Enrollment text**, and paste the text in the app's **Enter the code manually**.
+{{< /fails >}}
 
 
 The QR carries everything the app needs to trust your server:
@@ -100,7 +101,7 @@ The QR carries everything the app needs to trust your server:
 - A pin of that listener's certificate, so the phone verifies that it reached your server without any public certificate authority.
 - Your project's identity, so a phone that serves several deployments keeps them apart.
 
-Behind an ingress that terminates TLS with a public certificate, the pin line reads `none` and the phone trusts the system store instead.
+Behind an ingress that terminates TLS with a public certificate, the QR carries no pin. The sheet then says `public certificate` under `How the phone trusts it`, and the phone trusts the system store instead.
 
 
 The pin is the anchor of trust. Replacing the approver listener's certificate strands every enrolled phone until each one enrolls again, so plan that as a fleet event. [Known limits]({{< relref "security/known-limits.md" >}}) lists it with what reduces it.
@@ -115,7 +116,7 @@ Enrollment makes a P-256 key in the phone's secure hardware. It sends the token 
 A failed pairing needs a fresh token. The first attempt that reaches the server with a well-formed key spends it, whatever happens after that. The listener serves only the approver routes, which is why a browser opened at that address sees nothing.
 
 
-In the example run, a script that speaks the app's contract performed the same exchange with a token minted in the first step. The server answered with the device id `apd_01a1130f-0376-7385-9c96-c1c9252ab7cb`, a credential valid for `2592000` seconds and the project reference. The device credential is a bearer secret and is not shown.
+In the example run, a script that speaks the app's contract performed the same exchange. The server answered with the device id `apd_01a1130f-0376-7385-9c96-c1c9252ab7cb`, a credential valid for `2592000` seconds and the project reference. The device credential is a bearer secret and is not shown.
 
 ## Decide from the phone
 
@@ -187,7 +188,7 @@ revoked approver device apd_01a1130f-0376-7385-9c96-c1c9252ab7cb: its credential
 {{< /cli >}}
 
 
-The credential fails on the device's next call, and its push routes stop. Its person is untouched, and their other devices keep working. To use the phone again, enroll it with a fresh token.
+The credential fails on the device's next call, and its push routes stop. Its person is untouched, and their other devices keep working. To use the phone again, the person enrolls it again on their own self-service page.
 
 ## Next {.nostep}
 

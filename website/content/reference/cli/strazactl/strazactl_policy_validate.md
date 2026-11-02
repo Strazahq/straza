@@ -2,7 +2,7 @@
 title: strazactl policy validate
 description: Validate PolicySet YAML files locally against the v1beta1 spec
 pagetype: reference
-weight: 77
+weight: 73
 draft: false
 sources:
   - cmd/strazactl
@@ -14,7 +14,7 @@ keywords: strazactl, policy, validate
 ## Synopsis
 
 Validates PolicySet YAML files offline against the v1beta1 spec, with no server
-and no login. `strazactl drafts check -f` runs the server's checks against live state.
+and no token. `strazactl drafts check -f` runs the server's checks against live state.
 
 ```
 strazactl policy validate [flags]
@@ -29,7 +29,7 @@ strazactl policy validate [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

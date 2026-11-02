@@ -2,7 +2,7 @@
 title: strazactl users disable
 description: Disable a user (status disabled, every session revoked, lifted by `strazactl users enable`)
 pagetype: reference
-weight: 108
+weight: 104
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl users disable <username> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

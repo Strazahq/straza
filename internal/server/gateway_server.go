@@ -103,8 +103,11 @@ func notInCatalogMsg(name string) string {
 // notification, which has no id, with 202 and no body, the same for every
 // name. A tools/call and a resources/read still leave one deny record whose
 // reason is that sentence, as a probe of an unbound tool does on /mcp, so a
-// sweep of server names reaches the SIEM.
+// sweep of server names reaches the SIEM. The server name and the tool
+// name are the caller's, so the answer and the record quote both cut by
+// cutUnresolved.
 func (a *App) refuseServer(w http.ResponseWriter, r *http.Request, req rpcRequest, claims authn.Claims, name string) {
+	name = cutUnresolved(name)
 	msg := notInCatalogMsg(name)
 	switch req.Method {
 	case "tools/call":
@@ -112,7 +115,7 @@ func (a *App) refuseServer(w http.ResponseWriter, r *http.Request, req rpcReques
 			Name string `json:"name"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
-		a.auditRefused(r.Context(), claims, policy.Event{Kind: policy.EventToolPre, Tool: policy.ToolMCPCall, App: name, ToolName: p.Name}, gwTarget{}, msg)
+		a.auditRefused(r.Context(), claims, policy.Event{Kind: policy.EventToolPre, Tool: policy.ToolMCPCall, App: name, ToolName: cutUnresolved(p.Name)}, gwTarget{}, msg)
 	case "resources/read":
 		var p struct {
 			URI string `json:"uri"`

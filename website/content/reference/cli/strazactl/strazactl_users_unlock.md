@@ -2,7 +2,7 @@
 title: strazactl users unlock
 description: 'Unlock a user: lift the user''s revocations and leave the status as it is, so a disabled user still needs `strazactl users enable`'
 pagetype: reference
-weight: 116
+weight: 112
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl users unlock <username> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

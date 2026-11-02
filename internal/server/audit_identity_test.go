@@ -19,12 +19,14 @@ import (
 
 // TestIdentityWritesChainAdminRecords pins that each identity setup write
 // chains exactly one straza.audit.admin record: a user create, a user
-// PATCH that changes a field, an enroll token mint on the admin and the
-// self route, an approver enrolment and an agent key set or removal. Each
-// record names the actor of the lane that made the call, the target and
-// subject fields of spec/events revision 40 and no secret value. A refused
-// write and a PATCH that changes nothing chain no record. The rows run in
-// order on one server, because later rows use what earlier rows created.
+// PATCH that changes a field, an enroll token mint on the self route, an
+// approver enrolment and an agent key set or removal. Each record names the
+// actor of the lane that made the call, the target and subject fields of
+// spec/events revision 40 and no secret value. A refused write and a PATCH
+// that changes nothing chain no record, except the admin enroll-token
+// route, whose refusal chains one enroll-token.refused record (revision
+// 56). The rows run in order on one server, because later rows use what
+// earlier rows created.
 func TestIdentityWritesChainAdminRecords(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -162,16 +164,14 @@ func TestIdentityWritesChainAdminRecords(t *testing.T) {
 			code: http.StatusOK,
 		},
 		{
-			name: "mint an enroll token on the admin route", bearer: wat, method: "POST",
+			name: "refuse an enroll token on the admin route", bearer: wat, method: "POST",
 			path: func() string { return "/v1/admin/approvers/enroll-token" },
 			body: func() any { return map[string]any{"username": "ada"} },
-			code: http.StatusOK,
-			keep: func(resp map[string]any) { got["enroll"], _ = resp["enroll_token"].(string) },
+			code: http.StatusForbidden,
 			want: func() map[string]any {
-				return asToken(map[string]any{"action": "enroll-token.create", "target": got["ada"],
-					"user": got["ada"], "username": "ada"})
+				return asToken(map[string]any{"action": "enroll-token.refused", "target": got["ada"],
+					"user": got["ada"], "username": "ada", "reason": "only the person enrolls their own approver phone or browser"})
 			},
-			secrets: func() []string { return []string{got["enroll"]} },
 		},
 		{
 			name: "mint an enroll token on the self route", bearer: login, method: "POST",
@@ -197,7 +197,7 @@ func TestIdentityWritesChainAdminRecords(t *testing.T) {
 			name: "enrol an approver device", method: "POST",
 			path: func() string { return "/v1/approver/enroll" },
 			body: func() any {
-				return map[string]any{"enroll_token": got["enroll"], "device": device("ada-pixel", "android")}
+				return map[string]any{"enroll_token": got["self"], "device": device("kim-edge", "browser")}
 			},
 			code: http.StatusCreated,
 			keep: func(resp map[string]any) {
@@ -206,10 +206,10 @@ func TestIdentityWritesChainAdminRecords(t *testing.T) {
 			},
 			want: func() map[string]any {
 				return map[string]any{"action": "approver.enroll", "target": got["device"],
-					"user": got["ada"], "username": "ada", "device": got["device"], "platform": "android", "name": "ada-pixel",
-					"actor": "ada", "actorId": got["ada"], "actorVia": "enroll-token"}
+					"user": kim.ID, "username": "kim", "device": got["device"], "platform": "browser", "name": "kim-edge",
+					"actor": "kim", "actorId": kim.ID, "actorVia": "enroll-token"}
 			},
-			secrets: func() []string { return []string{got["enroll"], got["deviceCredential"], deviceKey} },
+			secrets: func() []string { return []string{got["self"], got["deviceCredential"], deviceKey} },
 		},
 		{
 			name: "refuse an agent key for a person", bearer: login, method: "PUT",

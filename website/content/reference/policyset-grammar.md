@@ -83,8 +83,8 @@ Values inside one list combine with OR, and the lists combine with AND. An empty
 | `events` | A list of [event kinds](#events). The default is `[tool.pre]`. | `events: [permission.request]` |
 | `tools` | A list of [tools](#tools). Absent by default, so the rule covers every tool. | `tools: [shell.exec]` |
 | `apps` | A list of MCP server names. Absent by default, so the rule covers every server and every local tool. | `apps: [demo-tools]` |
-| `toolNames.allow` | A list of [patterns](#patterns) over the MCP tool name. | `allow: ["read_*"]` |
-| `toolNames.deny` | A list of patterns over the MCP tool name. | `deny: ["delete_*"]` |
+| `toolNames.allow` | A list of [patterns](#patterns) over the MCP tool name. With `tools: [other]`, exact harness tool names, as [Harness tools by name](#harness-tools-by-name) describes. | `allow: ["read_*"]` |
+| `toolNames.deny` | A list of patterns over the MCP tool name. With `tools: [other]`, exact harness tool names. | `deny: ["delete_*"]` |
 | `command.allowPatterns` | A list of patterns over a shell command. | `allowPatterns: ["git *"]` |
 | `command.denyPatterns` | A list of patterns over a shell command. | `denyPatterns: ["rm -rf *"]` |
 | `paths.allow` | A list of patterns over the paths a file call touches. | `allow: ["${workspace}/**"]` |
@@ -99,7 +99,7 @@ Values inside one list combine with OR, and the lists combine with AND. An empty
 | `effect` | `allow` or `deny`. Absent by default, so the side of the pattern that matched decides. | `effect: deny` |
 | `reason` | Text the agent and the person deciding read. A deny without one reads "Straza: blocked by policy rule" followed by the set and the rule. | `reason: "Straza: no curl"` |
 
-A rule applies to a call when the call's event kind is in `events`, its tool is in `tools` when the rule lists any, and, for a rule with `apps`, the call is an MCP call to one of those servers. A rule with `apps` never applies to a local tool, and `toolNames` is read only for an MCP call.
+A rule applies to a call when the call's event kind is in `events`, its tool is in `tools` when the rule lists any, and, for a rule with `apps`, the call is an MCP call to one of those servers. A rule with `apps` never applies to a local tool. `toolNames` is read for an MCP call, and in a rule that lists `other` in `tools` it holds the harness's own tool names, as [Harness tools by name](#harness-tools-by-name) describes.
 
 Once a rule applies, it checks `require` first. A session below the required attestation, or on a harness the list does not name, gets a deny from this rule with its reason. Harness names include `claude-code`, `codex` and `gemini`. `require.deviceCert` cannot be met today, because no device certificate is issued yet, so a rule that sets it denies wherever it gates an allow, and the server's check warns that "require.deviceCert is not implemented yet".
 
@@ -189,9 +189,38 @@ A rule with no `events` fires on `tool.pre`, which every harness sends. The MCP 
 | `net.fetch` | Fetching a URL |
 | `mcp.call` | A call to a tool of an MCP server |
 | `task.spawn` | Starting a subagent or a task |
-| `other` | A harness tool Straza cannot classify |
+| `other` | A harness tool Straza cannot classify. The call carries the tool's own name. |
 
 An MCP call that no rule matches runs when one of the caller's roles has access to the tool, and is denied when none has. Every other tool that no rule matches takes the profile default, as [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#no-rule" >}}) shows.
+
+## Harness tools by name
+
+
+A harness can have tools Straza does not classify, such as a tool Claude Code added after your Straza release, or a business tool of your own LangChain agent. Such a tool reaches policy as `other` with its own name. The enterprise profile denies it, and the reason names the tool and the rule that allows it. A rule that lists `other` in `tools` and names the tool in `toolNames` allows, holds or denies exactly that tool:
+
+```yaml
+- id: allow-subagent-handback
+  tools: [other]
+  toolNames: { allow: [SubagentHandback] }
+- id: hold-refunds
+  tools: [other]
+  toolNames: { allow: [refund_order] }
+  mode: approve
+  approve: { deciders: [sponsor] }
+```
+
+- Names are exact and case-sensitive. The server refuses a pattern such as `Sub*`, because a pattern matches no tool here.
+- The rule governs only the tools it names, so its `require` never reaches another tool.
+- When a later Straza release classifies a tool you named, for example as `task.spawn`, the rule keeps governing it, and a deny from the rule or from the `task.spawn` rules wins.
+- A tool Straza already classifies, such as `Bash`, cannot be newly allowed by name, because the rules of its kind would then no longer narrow it. Allow it with a rule for its kind. Denying it by name works.
+- The rule lists only `other` in `tools` and carries no `apps`, `command`, `paths` or `interpreters` block.
+- A client older than this feature sends no name, so its unknown tools stay denied, with a reason that says to update the client.
+
+To find the tools a harness added, list the tool records and keep the ones whose `tool` is `other`. Their `toolName` names the tool:
+
+```sh
+strazactl audit tail --type straza.audit.tool --limit 500 | grep '"tool":"other"'
+```
 
 ## Capture
 

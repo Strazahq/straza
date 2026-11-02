@@ -1,0 +1,34 @@
+{
+  "provenance": "doc RFC 9449 and spec/session-token/SPEC.md 2026-10-20 (generated, not captured from a client: proof key from the Ed25519 seed of 32 bytes 0x07, other key from 32 bytes 0x09, nonce key the 32 bytes 0x00 to 0x1f, signed at 2026-10-20T12:00:30Z)",
+  "description": "INVALID (semantic): ath hashes another token, so the proof cannot be paired with the token it travels with.",
+  "at": "2026-10-20T12:00:30Z",
+  "request": {
+    "method": "POST",
+    "path": "/v1/decide",
+    "origins": [
+      "https://straza.example",
+      "http://127.0.0.1:8420"
+    ],
+    "access_token": "example-session-token",
+    "thumbprint": "--6IM5l0OosLj9yWskISYhUA3n_3CURQkmrYMSha_ck"
+  },
+  "proof": "eyJhbGciOiJFZERTQSIsImp3ayI6eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IjZrcHNZLUtjVWdxLTlWQjdFeTdGLVpWSGRxNi12bnVTUWg3cWFSUkcwaXcifSwidHlwIjoiZHBvcCtqd3QifQ.eyJhdGgiOiJ0Y2pWTkxBVmU4emVDSU84a3lyLXZxb3BUdzNObzIwaVRGQWtXZnRJb200IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vc3RyYXphLmV4YW1wbGUvdjEvZGVjaWRlIiwiaWF0IjoxNzkyNDk3NjMwLCJqdGkiOiJmMDA1ZDZjNjc0YWI2NWM1NjFiOTQ2YWMyODcwZWE4MyIsIm5vbmNlIjoiQUFBQUFBSEgyeEFIUnJfOFpDUDFYSkZyMS1ZVmVmOTlXak9lck1IUWxvaGdNeVhCVWxVelZ3In0.pd3t054YkYi9kS8VIMyAVqFvXVgMNUgrP78CbuFAn9e0A_G40B0tx4H8vY7tGqtyrdt2hubb2OQPUHPOhNx1Cw",
+  "header": {
+    "alg": "EdDSA",
+    "jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+    },
+    "typ": "dpop+jwt"
+  },
+  "claims": {
+    "ath": "tcjVNLAVe8zeCIO8kyr-vqopTw3No20iTFAkWftIom4",
+    "htm": "POST",
+    "htu": "https://straza.example/v1/decide",
+    "iat": 1792497630,
+    "jti": "f005d6c674ab65c561b946ac2870ea83",
+    "nonce": "AAAAAAHH2xAHRr_8ZCP1XJFr1-YVef99WjOerMHQlohgMyXBUlUzVw"
+  },
+  "reason": "ath does not match the access token"
+}

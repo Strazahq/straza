@@ -2,7 +2,7 @@
 title: strazactl users enable
 description: 'Enable a disabled user: the status goes back to active, the user''s revocations are lifted, and a device still enrolled needs no new enrollment'
 pagetype: reference
-weight: 109
+weight: 105
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl users enable <username> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -136,6 +136,9 @@ func (c draftCaller) firstStanding(d drafts.Draft, w drafts.World, in drafts.Che
 		switch it.Kind {
 		case drafts.KindApp:
 			no = c.appStanding(st.apps, w, in, it)
+			if no == nil && !st.apps.Full {
+				no = pinStanding(w, in, d, it)
+			}
 		case drafts.KindRole:
 			no = c.roleStanding(st, view, it)
 		default:
@@ -153,14 +156,20 @@ func (c draftCaller) firstStanding(d drafts.Draft, w drafts.World, in drafts.Che
 // withDraftServers is w with each server in's facts name that live state
 // lacks, under an id no live server has, so a role of a server the draft
 // adds meets the rules of a server that exists, as it will once published.
+// A live server the draft puts takes the pinned type the draft leaves, so
+// a role's covers line meets the type it will cover.
 func withDraftServers(w drafts.World, in drafts.CheckInput) drafts.World {
 	view := w
 	view.Apps = maps.Clone(w.Apps)
 	for name, app := range in.Apps {
-		if _, live := w.Apps[name]; !live {
+		live, ok := w.Apps[name]
+		if !ok {
 			app.ID = "draft:" + name
 			view.Apps[name] = app
+			continue
 		}
+		live.Pinned = app.Pinned
+		view.Apps[name] = live
 	}
 	return view
 }
@@ -229,6 +238,68 @@ func (c draftCaller) appStanding(st drafts.Standing, w drafts.World, in drafts.C
 	return nil
 }
 
+// pinStanding refuses a server admin's App put it that widens a role on
+// some objects of a live server, the roles as draft d leaves them: removing
+// the pinned type or changing it, after which every covers line is
+// cleared, or turning the reach of a tool such a role binds to none, after
+// which the gate no longer checks that tool. A reach the put makes stricter
+// passes.
+func pinStanding(w drafts.World, in drafts.CheckInput, d drafts.Draft, it drafts.Item) *standingNo {
+	live, next := w.Apps[it.Name].Pinned, in.Apps[it.Name].Pinned
+	if it.Op != drafts.OpPut || live == nil {
+		return nil
+	}
+	unpin := next == nil || next.Type != live.Type
+	var opened []string
+	if !unpin {
+		for tool, r := range next.Reach {
+			if r == manager.ReachNone && live.Reach[tool] != manager.ReachNone {
+				opened = append(opened, tool)
+			}
+		}
+		if len(opened) == 0 {
+			return nil
+		}
+		slices.Sort(opened)
+	}
+	after := w.Overlay(d, in.Apps).Access
+	partial := func(tool string) []string {
+		var roles []string
+		for name, acc := range after {
+			if acc.Server == it.Name && acc.Covers != nil && !acc.Covers.Every && (tool == "" || manager.MatchAnyGlob(acc.Tools, tool)) {
+				roles = append(roles, name)
+			}
+		}
+		slices.Sort(roles)
+		return roles
+	}
+	refusal := func(what, then string, roles []string) *standingNo {
+		who, reach := "roles name", "each of them would"
+		if len(roles) == 1 {
+			who, reach = "a role names", "it would"
+		}
+		return refusedNo(drafts.RefusalForbidden, fmt.Sprintf("Only a global admin may %s while %s %s on it, because %s then %s: %s. Ask a global admin to publish this draft.",
+			what, who, live.Plural, reach, then, strings.Join(roles, ", ")))
+	}
+	if unpin {
+		roles := partial("")
+		if len(roles) == 0 {
+			return nil
+		}
+		what := fmt.Sprintf("remove %s's pinned %s", it.Name, live.Plural)
+		if next != nil {
+			what = fmt.Sprintf("change %s's pinned type", it.Name)
+		}
+		return refusal(what, "reach every "+live.Type, roles)
+	}
+	for _, tool := range opened {
+		if roles := partial(tool); len(roles) > 0 {
+			return refusal(fmt.Sprintf("make %s on %s reach no %s", tool, it.Name, live.Type), fmt.Sprintf("call %s on every %s", tool, live.Type), roles)
+		}
+	}
+	return nil
+}
+
 // roleStanding answers the standing of a Role item as the routes that make
 // the same change answer it today: the roles routes for its creation,
 // description and removal, the access row routes for its row, and the
@@ -276,7 +347,7 @@ func (c draftCaller) createStanding(st draftStandings, w drafts.World, name stri
 	spec := drafts.RoleSpec{Name: name, Kind: doc.Spec.Kind, Server: doc.Spec.Server}
 	owned := spec.Server != ""
 	if owned && len(doc.Spec.Bindings) > 0 {
-		spec.Tools = doc.Spec.Bindings[0].Tools
+		spec.Tools, spec.Covers = doc.Spec.Bindings[0].Tools, doc.Spec.Bindings[0].Covers
 	}
 	switch {
 	case st.roles.Full || (owned && st.everyServer):
@@ -345,14 +416,16 @@ func (c draftCaller) rolesRoute(st drafts.Standing, w drafts.World, ro drafts.Ro
 
 // accessChanged reports whether the Role document doc changes the access
 // row of the role name from the one live state holds: another server,
-// other tools, a row where there was none, or none where there was one.
+// other tools, another covers line by id, a row where there was none, or
+// none where there was one.
 func accessChanged(w drafts.World, name string, doc drafts.RoleDoc) bool {
 	live, had := w.Access[name]
 	if len(doc.Spec.Bindings) == 0 {
 		return had
 	}
 	b := doc.Spec.Bindings[0]
-	return !had || live.Server != b.App || !slices.Equal(slices.Sorted(slices.Values(live.Tools)), slices.Sorted(slices.Values(b.Tools)))
+	return !had || live.Server != b.App || !slices.Equal(slices.Sorted(slices.Values(live.Tools)), slices.Sorted(slices.Values(b.Tools))) ||
+		live.Covers.Key() != drafts.RowCovers(w, name, b).Key()
 }
 
 // accessRoutes answers the access row routes with the apps standing st for
@@ -381,10 +454,16 @@ func (c draftCaller) accessRoutes(st drafts.Standing, w drafts.World, name strin
 	if no := serverRoute(st, w, name, b.App); no != nil {
 		return no
 	}
+	old, had := w.Access[name]
+	// A row with no covers line on a server live state pins nothing on
+	// reaches every object already, unless its line cannot be read.
+	p := w.Apps[b.App].Pinned
+	wasEvery := had && old.Server == b.App && ((old.Covers != nil && old.Covers.Every) || (old.Covers == nil && old.Fault == "" && p != nil && p.LiveType == ""))
+	every := b.Covers != nil && b.Covers.Every && !wasEvery
 	view := w
 	view.Access = maps.Clone(w.Access)
 	delete(view.Access, name)
-	if ref := drafts.AccessCreateRefusal(view, st, name, b.App, b.Tools); ref != nil {
+	if ref := drafts.AccessCreateRefusal(view, st, name, b.App, b.Tools, every); ref != nil {
 		return &standingNo{ref: ref}
 	}
 	return nil

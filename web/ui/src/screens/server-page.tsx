@@ -17,7 +17,7 @@ import { ServerRolesTab } from "@/components/server-roles-tab";
 import { NoRole, RoleChip, StatusBadge } from "@/components/status-badge";
 import { TestACall } from "@/components/test-a-call";
 import { SaveNoteLine, useDraftSave } from "@/components/use-draft-save";
-import { type ApiError, type AppRow, type BindingRow, type PreviewEntry, type RoleRow, type ToolRow, appLogs, catalogPreview, disableApp, enableApp, getConfig, listApps, listAudit, listBindings, listRoles, listTools, recheckApp } from "@/lib/api";
+import { type ApiError, type AppRow, type BindingRow, type PreviewEntry, type RoleRow, type ToolRow, appLogs, appObjects, catalogPreview, disableApp, enableApp, getConfig, listApps, listAudit, listBindings, listRoles, listTools, recheckApp } from "@/lib/api";
 import { manifestYAML } from "@/lib/manifest";
 import {
   BANNER, FROM_SUMMARY, LAST_CALL_NOT_READABLE, NOT_CHECKED_YET, NO_DESCRIPTION, NO_ROLE_ACCESS, REACH_NOT_READABLE, ROLE_ACCESS_NOT_READABLE, SINCE_NOT_RECORDED,
@@ -34,10 +34,13 @@ import { downloadText } from "@/lib/utils";
 // The Change sheets load when one is first opened, so their code stays out
 // of the entry page's gzipped budget.
 const ChangeSheet = React.lazy(() => import("@/components/server-change-sheet").then((m) => ({ default: m.ChangeSheet })));
+// The tab of a pinned object type loads when it is first opened, with its
+// words, for the same reason.
+const ServerObjects = React.lazy(() => import("@/components/server-objects").then((m) => ({ default: m.ServerObjects })));
 
 type Props = { id: string; tab?: string };
 
-const TABS = ["overview", "tools", "roles", "activity", "manifest"] as const;
+const TABS = ["overview", "tools", "objects", "roles", "activity", "manifest"] as const;
 type Tab = (typeof TABS)[number];
 
 const CAPS = "text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground";
@@ -45,7 +48,7 @@ const CODE = "rounded bg-muted px-1 font-mono text-[13px] text-foreground";
 
 
 type LastCall = { kind: "none" } | { kind: "unread" } | { kind: "closed" } | { kind: "call"; user: string; tool: string; t: string; verdict: string };
-type Data = { app: AppRow; tools: ToolRow[]; bindings: BindingRow[]; roles: RoleRow[]; last: LastCall; reachReadable: boolean };
+type Data = { app: AppRow; tools: ToolRow[]; bindings: BindingRow[]; bindingsRead: boolean; roles: RoleRow[]; last: LastCall; reachReadable: boolean };
 type State = { kind: "loading" } | { kind: "missing" } | { kind: "locked"; message: string } | { kind: "error"; message: string } | { kind: "ready"; data: Data; problem: string | null; lastRead: Date };
 type Problem = { subject: string; unreachable: boolean; sentence: string };
 type Busy = "recheck" | "pause" | "enable" | null;
@@ -299,14 +302,17 @@ export function ServerPage({ id, tab }: Props) {
   const [sheet, setSheet] = React.useState<ChangeWhich | null>(null);
   const [upstreamTimeout, setUpstreamTimeout] = React.useState<number | null>(null);
   const [, tick] = React.useState(0);
+  const [objectCount, setObjectCount] = React.useState<number | null>(null);
   const current: Tab = (TABS as readonly string[]).includes(tab || "") ? (tab as Tab) : "overview";
 
   const load = React.useCallback(async () => {
     setState((s) => (s.kind === "ready" ? s : { kind: "loading" }));
     try {
-      // The tools and bindings lists are apps-area reads that a server admin
-      // holds no grant for, so a 403 on them leaves the page standing on the
-      // row's own tool list and says the reach is not readable.
+      // The tools list is an apps-area read that a server admin holds no
+      // grant for, so a 403 on it or on the bindings list leaves the page
+      // standing on the row's own tool list and says the reach is not
+      // readable. The bindings list answers a server admin with the rows of
+      // their own servers, so the Roles tab still reads what each role covers.
       // The roles list is read the same way: a server admin's answer holds
       // the roles their own servers own, and the Roles tab shows this
       // server's.
@@ -323,7 +329,7 @@ export function ServerPage({ id, tab }: Props) {
         // account when the audit area refused it.
         if ((e as ApiError).status === 403) last = { kind: "closed" };
       }
-      setState({ kind: "ready", data: { app, tools, bindings, roles, last, reachReadable: toolsRead && bindingsRead }, problem: null, lastRead: new Date() });
+      setState({ kind: "ready", data: { app, tools, bindings, bindingsRead, roles, last, reachReadable: toolsRead && bindingsRead }, problem: null, lastRead: new Date() });
     } catch (e) {
       const err = e as ApiError;
       if (err.status === 401) return;
@@ -351,6 +357,16 @@ export function ServerPage({ id, tab }: Props) {
     );
     return () => { alive = false; };
   }, []);
+  // The tab of a pinned type carries the size of the list the API holds,
+  // as the Tools tab carries its count. A failed read leaves the count off.
+  const pinnedType = state.kind === "ready" ? state.data.app.manifest?.straza?.objects?.type || "" : "";
+  React.useEffect(() => {
+    setObjectCount(null);
+    if (!pinnedType) return;
+    let alive = true;
+    appObjects(id, "limit=1").then((a) => { if (alive) setObjectCount(a.total); }, () => undefined);
+    return () => { alive = false; };
+  }, [id, pinnedType]);
   React.useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 30000);
     return () => clearInterval(t);
@@ -464,6 +480,8 @@ export function ServerPage({ id, tab }: Props) {
   // a server admin pauses their server and never removes it.
   const canRemove = globalAdmin;
   const ownedRoles = state.data.roles.filter((r) => r.server === app.name);
+  const pinned = app.manifest?.straza?.objects;
+  const shown = current === "objects" && !pinned ? "overview" : current;
   const recheckButton = (primary: boolean) => (
     <Button variant={primary ? "default" : "outline"} onClick={recheck} disabled={others("recheck")} aria-busy={busy === "recheck" || undefined}>
       <RefreshCwIcon className={busy === "recheck" ? "animate-spin" : ""} /> Recheck
@@ -505,11 +523,12 @@ export function ServerPage({ id, tab }: Props) {
         {problem && (problem.unreachable
           ? <FetchError subject={problem.subject} detail={problem.sentence} />
           : <RefusedError subject={problem.subject} message={cap(problem.sentence.slice(problem.subject.length + " refused: ".length))} />)}
-        <Tabs value={current} onValueChange={(v) => navigate("servers", [id, v], true)}>
+        <Tabs value={shown} onValueChange={(v) => navigate("servers", [id, v], true)}>
           <div className="flex items-center border-b border-border">
             <TabsList variant="line">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="tools">Tools <span className="font-mono text-xs text-muted-foreground">{names.length}</span></TabsTrigger>
+              {pinned && <TabsTrigger value="objects">{cap(pinned.plural || pinned.type + "s")}{objectCount !== null && <> <span className="font-mono text-xs text-muted-foreground">{objectCount}</span></>}</TabsTrigger>}
               <TabsTrigger value="roles">{TAB_ROLES} <span className="font-mono text-xs text-muted-foreground">{ownedRoles.length}</span></TabsTrigger>
               <TabsTrigger value="activity">Activity</TabsTrigger>
               <TabsTrigger value="manifest">Manifest</TabsTrigger>
@@ -517,7 +536,8 @@ export function ServerPage({ id, tab }: Props) {
           </div>
           <TabsContent value="overview"><ServerOverview app={app} upstreamTimeout={upstreamTimeout} onInspectAccess={() => navigate("servers", [id, "tools"], true)} onTest={canTest ? () => setTestOpen(true) : undefined} onChange={setSheet} onRefused={(err) => refuse("Secret", err)} /></TabsContent>
           <TabsContent value="tools"><ToolsTab app={app} tools={tools} bindings={bindings} reachReadable={state.data.reachReadable} globalAdmin={globalAdmin} onChange={!app.manifest ? null : () => setSheet("settings")} /></TabsContent>
-          <TabsContent value="roles"><ServerRolesTab app={app} roles={ownedRoles} tools={tools} globalAdmin={globalAdmin} onChanged={() => void load()} /></TabsContent>
+          {pinned && <TabsContent value="objects"><React.Suspense fallback={null}><ServerObjects app={app} roles={state.data.roles} /></React.Suspense></TabsContent>}
+          <TabsContent value="roles"><ServerRolesTab app={app} roles={ownedRoles} tools={tools} bindings={state.data.bindingsRead ? bindings : null} globalAdmin={globalAdmin} onChanged={() => void load()} /></TabsContent>
           <TabsContent value="activity"><ServerActivity app={app} /></TabsContent>
           <TabsContent value="manifest"><ManifestTab app={app} /></TabsContent>
         </Tabs>

@@ -86,8 +86,8 @@ networkPolicy:
 # Declarative app registrations (the GitOps apps dir). Each key is a
 # filename, each value a straza.dev/v1beta1 App manifest; they render into a
 # ConfigMap mounted at /etc/straza/apps (STRAZA_APPS_DIR). Each file proposes
-# a draft, and a removed file a removal draft, which a person publishes with
-# `strazactl drafts publish` or on the console, so `helm install` alone
+# a draft, and a removed file a removal draft, which a person publishes in
+# the console under Drafts, so `helm install` alone
 # registers no server: it leaves drafts to publish. Replicas propose one
 # draft per file revision between them, and a publish on one replica starts
 # the server on every replica. With the per-pod sqlite store a replaced pod
@@ -114,10 +114,16 @@ apps:
   #       exposure:
   #         tools: ["*"]
 
-# External OIDC IdP (required in enterprise).
+# External OIDC IdP (required in enterprise). Register two redirects for
+# clientId there, as docs.straza.ai/guides/connect-identity/ shows per IdP.
 oidc:
   issuer: ""
   clientId: straza # keep: the OIDC client id must match the IdP registration
+  # One is the address people open the console at plus /console/signin. The
+  # other, for straza enroll, is http://127.0.0.1:<loopbackPort>/callback.
+  # 0 lets each sign-in pick a free port, which Keycloak and the built-in
+  # issuer accept. Set 1024 to 65535 for a provider that matches it exactly.
+  loopbackPort: 0
 
 # Key-encryption key for the built-in secret store. Reference a secret
 # holding a 32-byte key at data key "kek"; it is mounted at

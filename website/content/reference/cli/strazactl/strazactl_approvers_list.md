@@ -2,7 +2,7 @@
 title: strazactl approvers list
 description: List enrolled approver phones and browsers, with owner, key posture and push routes
 pagetype: reference
-weight: 13
+weight: 10
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl approvers list [username] [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

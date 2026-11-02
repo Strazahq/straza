@@ -49,18 +49,22 @@ func buildOAuthProviders(cfg config.Config) (map[string]secrets.ProviderConfig, 
 }
 
 // requireUser authenticates a session token with no role requirement and
-// hands the handler the calling user's id. The session is judged by
-// judgeSession as the admin plane judges it, on every request. It admits an
-// AI agent, because straza connect calls these routes on the agent's own
-// session.
+// hands the handler the calling user's id, with the device the session
+// started on in the request context for refuseMachineWrite. The session is
+// judged by judgeSession as the admin plane judges it, on every request. It
+// admits an AI agent, because straza connect calls these routes on the
+// agent's own session.
 func (a *App) requireUser(next func(w http.ResponseWriter, r *http.Request, userID string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		raw := bearerToken(r)
+		raw, scheme := sessionCredential(r)
 		if raw == "" {
 			apiError(w, http.StatusUnauthorized, "missing bearer token")
 			return
 		}
-		claims, err := a.tokens.Verify(raw)
+		claims, err := a.verifySessionToken(w, r, raw, scheme)
+		if errors.Is(err, errAnswered) {
+			return
+		}
 		if err != nil || claims.Session == "" {
 			apiError(w, http.StatusUnauthorized, "session token rejected")
 			return
@@ -69,8 +73,43 @@ func (a *App) requireUser(next func(w http.ResponseWriter, r *http.Request, user
 		if !ok {
 			return
 		}
-		next(w, r, u.ID)
+		next(w, r.WithContext(context.WithValue(r.Context(), sessionDeviceKey{}, claims.Device)), u.ID)
 	}
+}
+
+// sessionDeviceKey carries the device a connect request's session started
+// on, empty for a session that began with the person's own sign-in.
+type sessionDeviceKey struct{}
+
+// refuseMachineWrite answers 403, records one connection.refused event and
+// reports true when a write that lets agents in, or that changes another
+// user's connection, arrives on a session a machine enrollment started. The
+// background service holds such sessions, and any
+// program running as the person can use them, an agent included, so only a
+// session that began with the person's own sign-in in a browser makes those
+// writes. grant is a write that turns the agents opt-in on. An admin API
+// token puts no device in the context, so it never meets this rule.
+func (a *App) refuseMachineWrite(w http.ResponseWriter, r *http.Request, callerID string, target store.User, app string, grant bool) bool {
+	device, _ := r.Context().Value(sessionDeviceKey{}).(string)
+	if device == "" || (target.ID == callerID && !grant) {
+		return false
+	}
+	page := strings.TrimRight(a.cfg.Server.PublicURL, "/") + connectPagePath
+	reason := "a session a machine started cannot change another user's connection"
+	msg := fmt.Sprintf("changing %s's %s connection needs your own sign-in in a browser, because this session was started on a machine, "+
+		"where an agent running as you can use it too. Make the change in the Credentials tab of the self-service page, "+
+		"which lists the agents you sponsor: %s", target.Username, app, page)
+	if target.ID == callerID {
+		reason = "a session a machine started cannot allow agents"
+		msg = fmt.Sprintf("letting the agents you sponsor use your %s connection needs your own sign-in in a browser, because this session "+
+			"was started on a machine, where an agent running as you can use it too. Turn it on in the Credentials tab of the "+
+			"self-service page: %s", app, page)
+	}
+	a.emitEvent(r, "straza.identity.updated", map[string]any{
+		"action": "connection.refused", "user": target.ID, "setBy": callerID, "app": app, "reason": reason,
+	})
+	apiError(w, http.StatusForbidden, msg)
+	return true
 }
 
 // callerApp resolves a managed caller-kind app (oauth or token) by name or
@@ -126,11 +165,8 @@ func (a *App) actFor(ctx context.Context, callerID, ref string) (target store.Us
 	if ref == "" || ref == caller.ID || ref == caller.Username {
 		return caller, "", nil
 	}
-	target, err = a.store.Users().GetByUsername(ctx, ref)
-	if err != nil {
-		if target, err = a.store.Users().GetByID(ctx, ref); err != nil {
-			return store.User{}, "", fmt.Errorf("unknown user %q", ref)
-		}
+	if target, err = a.userByRef(ctx, ref); err != nil {
+		return store.User{}, "", err
 	}
 	if target.Sponsor == caller.Username {
 		return target, "", nil
@@ -167,8 +203,9 @@ const tokenMaxBytes = 8192
 // app the body carries the pasted token, tested once against the server
 // and sealed under the user's id; on an oauth-kind app it answers a person
 // with the provider authorization URL for the Credentials tab and that
-// tab's address for a terminal, and refuses an agent. POST /v1/connect/{app}.
-func (a *App) handleConnectStart(w http.ResponseWriter, r *http.Request, userID string) {
+// tab's address for a terminal, and refuses an agent and an admin API token.
+// POST /v1/connect/{app}.
+func (a *App) handleConnectStart(w http.ResponseWriter, r *http.Request, c connectCaller) {
 	row, view, err := a.callerApp(r)
 	if err != nil {
 		apiError(w, http.StatusNotFound, err.Error())
@@ -182,10 +219,17 @@ func (a *App) handleConnectStart(w http.ResponseWriter, r *http.Request, userID 
 		}
 	}
 	if view.Manifest.CredentialKind() == manager.CredentialToken {
-		a.connectToken(w, r, row, userID, req)
+		a.connectToken(w, r, row, c, req)
 		return
 	}
 	providerName := oauthProviderOf(view)
+	if c.token != nil {
+		if target, ok := a.connectTarget(w, r, c, req.User); ok {
+			apiError(w, http.StatusForbidden, a.tokenSignInRefusal(target, row.Name, providerName))
+		}
+		return
+	}
+	userID := c.userID
 	if req.User != "" {
 		apiError(w, http.StatusBadRequest, fmt.Sprintf(
 			"the MCP server %s uses each caller's own sign-in through %s, which needs that person's browser, so nobody can connect on behalf of %s. Set credential.kind token on the server for pasted tokens, or credential.agents sponsor or shared for agents",
@@ -249,7 +293,7 @@ func agentSignInRefusal(caller store.User, server, provider string) string {
 // against the server. The value is sealed at once and never echoed; the
 // answer carries its fingerprint. One identity record per set names the
 // actor, the subject, the app, the fingerprint and the probe outcome.
-func (a *App) connectToken(w http.ResponseWriter, r *http.Request, row store.App, callerID string, req connectRequest) {
+func (a *App) connectToken(w http.ResponseWriter, r *http.Request, row store.App, c connectCaller, req connectRequest) {
 	token := strings.TrimSpace(req.Token)
 	switch {
 	case token == "":
@@ -273,13 +317,11 @@ func (a *App) connectToken(w http.ResponseWriter, r *http.Request, row store.App
 		t = t.UTC()
 		expires = &t
 	}
-	target, refusal, err := a.actFor(r.Context(), callerID, req.User)
-	if err != nil {
-		apiError(w, http.StatusNotFound, err.Error())
+	target, ok := a.connectTarget(w, r, c, req.User)
+	if !ok {
 		return
 	}
-	if refusal != "" {
-		apiError(w, http.StatusForbidden, refusal)
+	if a.refuseMachineWrite(w, r, c.userID, target, row.Name, false) {
 		return
 	}
 	probeCtx, cancel := context.WithTimeout(r.Context(), a.upstreamTimeout(row.Name))
@@ -295,8 +337,8 @@ func (a *App) connectToken(w http.ResponseWriter, r *http.Request, row store.App
 		return
 	}
 	meta := secrets.GrantMeta{ExpiresAt: expires}
-	if target.ID != callerID {
-		meta.SetBy = callerID
+	if target.ID != c.id() {
+		meta.SetBy = c.id()
 	}
 	// A re-paste of a rotated token keeps the owner's agents opt-in.
 	if prev, ok, err := a.broker.UserRowFor(r.Context(), row.ID, target.ID); err == nil && ok {
@@ -308,10 +350,10 @@ func (a *App) connectToken(w http.ResponseWriter, r *http.Request, row store.App
 		return
 	}
 	fp := secrets.Fingerprint(token)
-	data := map[string]any{
+	data := c.stamp(map[string]any{
 		"action": "token.connect", "user": target.ID, "app": row.Name,
-		"setBy": callerID, "credentialId": cred.ID, "fingerprint": fp, "probe": "ok",
-	}
+		"credentialId": cred.ID, "fingerprint": fp, "probe": "ok",
+	})
 	if expires != nil {
 		data["expiresAt"] = expires.Format(time.RFC3339)
 	}
@@ -325,14 +367,14 @@ func (a *App) connectToken(w http.ResponseWriter, r *http.Request, row store.App
 		out["expires_at"] = expires.Format(time.RFC3339)
 	}
 	if meta.SetBy != "" {
-		out["set_by"] = a.setterName(r.Context(), callerID)
+		out["set_by"] = a.setterName(r.Context(), c.id())
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 // handleConnectAgents records the owner's opt-in for their sponsored agents
 // on one connection, on either caller kind. PATCH /v1/connect/{app}.
-func (a *App) handleConnectAgents(w http.ResponseWriter, r *http.Request, userID string) {
+func (a *App) handleConnectAgents(w http.ResponseWriter, r *http.Request, c connectCaller) {
 	row, _, err := a.callerApp(r)
 	if err != nil {
 		apiError(w, http.StatusNotFound, err.Error())
@@ -343,13 +385,11 @@ func (a *App) handleConnectAgents(w http.ResponseWriter, r *http.Request, userID
 		apiError(w, http.StatusBadRequest, "the body must be a JSON object with allow_agents true or false")
 		return
 	}
-	target, refusal, err := a.actFor(r.Context(), userID, req.User)
-	if err != nil {
-		apiError(w, http.StatusNotFound, err.Error())
+	target, ok := a.connectTarget(w, r, c, req.User)
+	if !ok {
 		return
 	}
-	if refusal != "" {
-		apiError(w, http.StatusForbidden, refusal)
+	if a.refuseMachineWrite(w, r, c.userID, target, row.Name, *req.AllowAgents) {
 		return
 	}
 	cred, err := a.broker.SetAllowAgents(r.Context(), row.ID, target.ID, *req.AllowAgents)
@@ -361,10 +401,10 @@ func (a *App) handleConnectAgents(w http.ResponseWriter, r *http.Request, userID
 		a.fail(w, r, http.StatusInternalServerError, "the connection could not be updated", err)
 		return
 	}
-	a.emitEvent(r, "straza.identity.updated", map[string]any{
+	a.emitEvent(r, "straza.identity.updated", c.stamp(map[string]any{
 		"action": "connection.agents", "user": target.ID, "app": row.Name,
-		"setBy": userID, "credentialId": cred.ID, "allow": *req.AllowAgents,
-	})
+		"credentialId": cred.ID, "allow": *req.AllowAgents,
+	}))
 	a.emitEvent(r, "straza.apps.updated", map[string]any{"change": "grant", "app": row.Name})
 	writeJSON(w, http.StatusOK, map[string]any{"app": row.Name, "user": target.Username, "allow_agents": *req.AllowAgents})
 }
@@ -372,15 +412,11 @@ func (a *App) handleConnectAgents(w http.ResponseWriter, r *http.Request, userID
 // handleConnectList reports the acting user's connection on every managed
 // caller-kind app, never a value: the kind, the app's agents setting, the
 // fingerprint of a pasted token, the expiry, who set it and the agents
-// opt-in. GET /v1/connect, with user= for a sponsor or an administrator.
-func (a *App) handleConnectList(w http.ResponseWriter, r *http.Request, userID string) {
-	target, refusal, err := a.actFor(r.Context(), userID, r.URL.Query().Get("user"))
-	if err != nil {
-		apiError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if refusal != "" {
-		apiError(w, http.StatusForbidden, refusal)
+// opt-in. GET /v1/connect, with user= for a sponsor, an administrator or an
+// admin API token.
+func (a *App) handleConnectList(w http.ResponseWriter, r *http.Request, c connectCaller) {
+	target, ok := a.connectTarget(w, r, c, r.URL.Query().Get("user"))
+	if !ok {
 		return
 	}
 	type entry struct {
@@ -442,30 +478,36 @@ func (a *App) fillConnectRow(ctx context.Context, view manager.AppView, userID s
 }
 
 // setterName names whoever set a row for a person: the username while the
-// id still resolves, else the id itself.
+// id resolves to a user, the token's name marked as an admin API token while
+// it resolves to one, else the id itself.
 func (a *App) setterName(ctx context.Context, id string) string {
 	if setter, err := a.store.Users().GetByID(ctx, id); err == nil {
 		return setter.Username
+	}
+	if tokens, err := a.apiTokens(ctx); err == nil {
+		for _, m := range tokens {
+			if m.ID == id {
+				return m.Name + " (admin API token)"
+			}
+		}
 	}
 	return id
 }
 
 // handleConnectDelete removes the acting user's connection on one app,
-// grant or token. DELETE /v1/connect/{app}, with user= for a sponsor or an
-// administrator.
-func (a *App) handleConnectDelete(w http.ResponseWriter, r *http.Request, userID string) {
+// grant or token. DELETE /v1/connect/{app}, with user= for a sponsor, an
+// administrator or an admin API token.
+func (a *App) handleConnectDelete(w http.ResponseWriter, r *http.Request, c connectCaller) {
 	row, view, err := a.callerApp(r)
 	if err != nil {
 		apiError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	target, refusal, err := a.actFor(r.Context(), userID, r.URL.Query().Get("user"))
-	if err != nil {
-		apiError(w, http.StatusNotFound, err.Error())
+	target, ok := a.connectTarget(w, r, c, r.URL.Query().Get("user"))
+	if !ok {
 		return
 	}
-	if refusal != "" {
-		apiError(w, http.StatusForbidden, refusal)
+	if a.refuseMachineWrite(w, r, c.userID, target, row.Name, false) {
 		return
 	}
 	if err := a.broker.DeleteGrant(r.Context(), row.ID, target.ID); err != nil {
@@ -476,9 +518,9 @@ func (a *App) handleConnectDelete(w http.ResponseWriter, r *http.Request, userID
 	if view.Manifest.CredentialKind() == manager.CredentialOAuth {
 		action = "oauth.disconnect"
 	}
-	a.emitEvent(r, "straza.identity.updated", map[string]any{
-		"action": action, "user": target.ID, "app": row.Name, "provider": oauthProviderOf(view), "setBy": userID,
-	})
+	a.emitEvent(r, "straza.identity.updated", c.stamp(map[string]any{
+		"action": action, "user": target.ID, "app": row.Name, "provider": oauthProviderOf(view),
+	}))
 	a.emitEvent(r, "straza.apps.updated", map[string]any{"change": "grant", "app": row.Name})
 	writeJSON(w, http.StatusOK, map[string]string{"app": row.Name, "user": target.Username, "status": "disconnected"})
 }

@@ -2,7 +2,7 @@
 title: strazactl signing-keys rotate
 description: Stage a new key of one purpose; the server promotes it once every replica holds it
 pagetype: reference
-weight: 94
+weight: 90
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl signing-keys rotate {session|client_assertion} [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

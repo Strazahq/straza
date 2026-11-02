@@ -1,10 +1,8 @@
 package drafts
 
 import (
-	"cmp"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -33,6 +31,7 @@ const (
 	codePolicyPool        = "policy.pool"
 	codePolicyMatch       = "policy.match"
 	codePolicyObligations = "policy.obligations"
+	codePolicyByName      = "policy.by-name"
 	codePolicyCompile     = "policy.compile"
 	codeAgentStrazaReach  = "agent.straza-reach"
 )
@@ -64,8 +63,8 @@ func staleFindings(w World, d Draft, changed map[string]LastChange) []Finding {
 		// moves the base, keeping what the draft changed.
 		out = append(out, refusal(codeStale, object,
 			fmt.Sprintf("%s changed after this draft was checked%s.", visible(object), clause),
-			"Check the draft again with Check again on the console or strazactl drafts rebase "+cmp.Or(d.ID, "<id>")+
-				". Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."))
+			"Check the draft again with Check again on the console under Drafts. "+
+				"Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."))
 	}
 	return out
 }
@@ -73,11 +72,11 @@ func staleFindings(w World, d Draft, changed map[string]LastChange) []Finding {
 // checkRefusals answers the check refusals that read w, after and the
 // items and need no who-gains table: a text that is not one document, the
 // provider of an App, a removal of a server that does not exist, the role
-// rules, the access and implication rules, and the policy gates. docsA is
-// the sets of after, each parsed once for the whole check, and apps holds
-// the facts of every App d puts. Its cost grows with the items and the
-// sets, never with their product.
-func checkRefusals(w, after World, docsA map[string]policy.Document, d Draft, apps map[string]App) []Finding {
+// rules, the access and implication rules, and the policy gates. docsW and
+// docsA are the sets of w and after, each parsed once for the whole check,
+// apps holds the facts of every App d puts and tools the classified harness
+// tools. Its cost grows with the items and the sets, never with their product.
+func checkRefusals(w, after World, docsW, docsA map[string]policy.Document, d Draft, apps map[string]App, tools func() (map[string]string, error)) []Finding {
 	deciders, admins, removed, graph := decidersOf(docsA), adminRolesOf(after), removedApps(w, d), newRoleGraph(after)
 	var out []Finding
 	for i, it := range d.Items {
@@ -91,6 +90,7 @@ func checkRefusals(w, after World, docsA map[string]policy.Document, d Draft, ap
 		switch {
 		case it.Kind == KindApp && it.Op == OpPut:
 			out = append(out, appRefusals(w, it, apps)...)
+			out = append(out, objectsRefusals(it, w, after)...)
 		case it.Kind == KindApp && it.Op == OpRemove:
 			if _, ok := w.Apps[it.Name]; !ok {
 				out = append(out, refusal(codeAppRemoveMissing, it.Object(), "unknown server",
@@ -101,7 +101,7 @@ func checkRefusals(w, after World, docsA map[string]policy.Document, d Draft, ap
 		case it.Kind == KindRole && it.Op == OpRemove:
 			out = append(out, roleRemoveRefusals(it, deciders, admins)...)
 		case it.Kind == KindPolicySet && it.Op == OpPut:
-			out = append(out, policyRefusals(after, docsA, it)...)
+			out = append(out, policyRefusals(after, docsA, docsW[it.Name], it, tools)...)
 		case it.Kind == KindPolicySet && it.Op == OpOff:
 			_, fs := readPolicy(it, it.Doc)
 			out = append(out, fs...)
@@ -202,10 +202,13 @@ func rolePutRefusals(w, after World, graph *roleGraph, it Item, removed map[stri
 	}
 	if ro, ok := after.Roles[it.Name]; ok && len(doc.Spec.Bindings) > 0 {
 		b := doc.Spec.Bindings[0]
+		b.Covers = after.Access[it.Name].Covers
 		// The row rules judge a row the put adds or changes. A row live state
 		// holds and the put keeps, as every direct route sends it back, was
 		// judged when it was made, perhaps before a rule existed.
-		if !rowKept(w, it.Name, b) {
+		kept := rowKept(w, it.Name, b)
+		out = append(out, coversRefusals(after, it.Name, b, kept)...)
+		if !kept {
 			if msg := roleRefusal(ro, "cannot be given tool access", "Give an application role access instead."); msg != "" {
 				out = append(out, refusal(codeAccessRole, object, msg, ""))
 			} else if _, ok := after.Apps[b.App]; ok {
@@ -341,9 +344,9 @@ func removedApps(w World, d Draft) map[string]bool {
 }
 
 // policyRefusals answers the refusals of a PolicySet put: a text that does
-// not parse, and the three gates an activate runs, over the roles the draft
-// leaves. docsA holds the set as the check parsed it.
-func policyRefusals(after World, docsA map[string]policy.Document, it Item) []Finding {
+// not parse, and the four gates an activate runs, over the roles the draft
+// leaves. docsA holds the set as the check parsed it, and live as it is live.
+func policyRefusals(after World, docsA map[string]policy.Document, live policy.Document, it Item, tools func() (map[string]string, error)) []Finding {
 	doc, ok := docsA[it.Name]
 	if !ok {
 		_, fs := readPolicy(it, it.Doc)
@@ -357,6 +360,7 @@ func policyRefusals(after World, docsA map[string]policy.Document, it Item) []Fi
 		{codePolicyPool, approvePoolViolations(after, doc, true)},
 		{codePolicyMatch, MatchRoleViolations(after, doc)},
 		{codePolicyObligations, ObligationViolations(doc)},
+		{codePolicyByName, ByNameViolations(doc, live, tools)},
 	} {
 		for _, line := range gate.lines {
 			out = append(out, refusal(gate.code, it.Object(), line, ""))
@@ -588,12 +592,4 @@ func dedupe(fs []Finding) []Finding {
 		}
 	}
 	return out
-}
-
-// rowKept reports whether the binding b of the role name is the access row
-// live state w holds for it: the same server and the same tools, each once
-// and in any order.
-func rowKept(w World, name string, b RoleBinding) bool {
-	acc, ok := w.Access[name]
-	return ok && acc.Server == b.App && slices.Equal(slices.Compact(sortedCopy(acc.Tools)), slices.Compact(sortedCopy(b.Tools)))
 }

@@ -6,12 +6,12 @@ weight: 40
 draft: false
 tested:
   version: v1.1.0
-  platform: Linux container, standalone profile, for where the directory lives and the log line that names it. The steps that propose, publish and remove a server through a draft, and the refused file, ran on the enterprise demo stack with the file copied into its strazad container and a server name of its own in place of gitops-tools
+  platform: Linux container, standalone profile, for where the directory lives and the log line that names it. The steps that propose, publish and remove a server through a draft, and the refused file, ran on the enterprise demo stack with the file copied into its strazad container and a server name of its own in place of gitops-tools. strazactl no longer publishes or discards a draft the directory proposed, so a person now does both in the console. The ghapp git sentences were read from ghapp's code on 2026-11-01
   date: 2026-09-28
 applies_to: both
 keywords: gitops apps directory manifest
 who: You, as the operator who owns the files, and a person who publishes
-where: A terminal and your repository, and the console or strazactl to publish
+where: A terminal and your repository, and the console to publish
 steps: true
 modes: [console, cli]
 mode_default: cli
@@ -103,25 +103,25 @@ Within a second or two a new draft waits. Its proposer is `strazad`, it came in 
 
 {{< shot name="draft-gitops" caption="The draft's **Checks**, where the server's address is not contacted yet and **Contact it now** reads its tools." >}}
 
-The draft's page shows What changes, Who gains what and Checks. The publish dialog lists each line that widens access, and you acknowledge each one before **Publish** works.
+The draft's page shows What changes, Access after publishing and Checks. The publish dialog groups the lines that widen access into blocks, one per kind, and **Publish** works once you confirm each block.
 {{< /console >}}
 
 {{< cli >}}
-`strazactl drafts list` shows it with the PROPOSER `strazad` and the DOOR `apps directory`. Read it, then publish it with the id the list printed:
+
+`strazactl drafts list` shows it with the PROPOSER `strazad` and the DOOR `apps directory`. Read it with the id the list printed:
 
 {{< command terminal="Terminal" purpose="administration" >}}
 ```sh
 strazactl drafts list
 strazactl drafts show <id>
-strazactl drafts publish <id>
 ```
 {{< /command >}}
 
-Publishing asks you to acknowledge each line of the check that widens access.
+strazactl runs on an admin API token, and only a person publishes a draft, so publish it in the console as its form of this step shows. Publishing asks you to confirm the lines of the check that widen access, one block per kind.
 {{< /cli >}}
 
 
-Straza does not dial an address that only a draft names. Until a person asks, the check lists among what it could not check `Straza has not contacted mcp.example.com, because an address in a draft is contacted only when a person asks, so the tool names of gitops-tools are unknown.` To read the tool names before you publish, press **Contact it now** on the draft's page, or run `strazactl drafts contact <id> gitops-tools`. Only a person contacts it, so an admin API token is refused. strazad dials the address once, with no credential, follows no redirect, starts nothing, and keeps the tool names on the draft for its check. The audit chain records who asked. [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) walks the whole life of a draft.
+Straza does not dial an address that only a draft names. Until a person asks, the check lists among what it could not check `Straza has not contacted mcp.example.com, because an address in a draft is contacted only when a person asks, so the tool names of gitops-tools are unknown.` To read the tool names before you publish, press **Contact it now** on the draft's page. Only a person contacts it, so strazactl, which runs on an admin API token, has no way to. strazad dials the address once, with no credential, follows no redirect, starts nothing, and keeps the tool names on the draft for its check. The audit chain records who asked. [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) walks the whole life of a draft.
 
 Publishing installs the server on every replica and writes `apps.install` with you as its actor. `strazactl apps list` shows `gitops` in the SOURCE column of a server whose last change was published from a file. The new server gives nobody access, so give a role access to it next, as [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) shows.
 
@@ -132,6 +132,60 @@ Editing the file proposes a draft for the new revision. The earlier draft of the
 
 
 A file that does not parse, names an OAuth provider strazad does not know, holds a secret or holds a masked value becomes a draft with no items, titled with the file's name and `Does not read`. Its check refuses it with `file.refused`, whose sentence names the file and says why, and whose fix ends with `Straza proposes it again once it is saved`. Such a draft never publishes, and it keeps none of the file's bytes, so a secret pasted into a file never lands in a draft.
+
+## Pin objects in a file {#objects .nostep}
+
+
+A server that reaches many repositories, projects or databases with one credential can mark them in its tool list, and a manifest pins those marks under `straza.objects`. The block names the type, the tool that lists every object of that type with the attributes Straza keeps, and how each tool reaches an object: through a named argument, through its credential, every object at once, or none. This is the block of ghapp, a GitHub App server with its git endpoint off, as its marks declare it, under the `straza` key of its manifest file:
+
+```yaml
+straza:
+  objects:
+    type: repo
+    list:
+      tool: repo_list
+      attributes:
+        - { name: team, setBy: org }
+    tools:
+      branch_list: { argument: repo }
+      file_get: { argument: repo }
+      issue_comment: { argument: repo }
+      issue_create: { argument: repo }
+      issue_get: { argument: repo }
+      issue_list: { argument: repo }
+      pr_comment: { argument: repo }
+      pr_create: { argument: repo }
+      pr_get: { argument: repo }
+      pr_list: { argument: repo }
+      pr_merge: { argument: repo }
+      repo_get: { argument: repo }
+      repo_list: all
+      search_code: { argument: repo }
+      search_issues: { argument: repo }
+```
+
+Every tool but `repo_list` names its repository in the argument `repo`, the searches included, because ghapp searches one repository per call. `repo_list` lists every repository, so it reaches them all. With `GHAPP_PUBLIC_URL` and `GHAPP_GIT_GRANT_ISSUER` set, ghapp's git endpoint is on, and its git tools take `repo` as well: `git_fetch`, and `git_push` unless `GHAPP_MCP_READ_ONLY` is true. They hand out no ticket. They check the repository and answer with the plain git command for it, and git runs through Straza's git grants once the file also carries a `straza.git` block, as [Git through Straza]({{< relref "guides/serve-mcp-apps/git-through-straza.md" >}}) shows. ghapp reports the GitHub custom properties its `GHAPP_MCP_ATTRIBUTES` names, here `team`. It decides `setBy` when it starts: `org` when every organization that defines the property lets only its owners set the values, and `object` otherwise, also when it cannot read the property's schema.
+
+
+While a running server pins nothing, `strazactl apps objects <server>` prints the block its marks declare, so you can copy it into the file instead of writing it by hand. Publish the file without the block first, and add the block in a later revision once the server runs. Publishing a change that touches only `straza.objects` keeps the server running, and Straza lists the objects within about 15 seconds after it. A file that adds a server and pins its objects in one publish can meet a server that is still starting, and that first listing then fails and runs again in about a minute. For ghapp the first listing after the pin fails either way with `ghapp has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set ghapp --listing, then refresh with strazactl apps objects refresh ghapp.`, because its listing credential can be stored only once the pin is published, and storing it starts a listing at once. The first publish that pins a server gives every role on it `covers: every`, so no role loses or gains a repository. From then on Straza refuses a call whose `repo` argument it cannot read, for every role, and an approval or ticket given before the pin, for a tool that names its repository, is asked for again, because the approval then carries the repository. The listing credential Straza lists with never goes in the file: set it once the pin is published, with `strazactl apps secret set <server> --listing`, as [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md#objects" >}}) shows. Taking the block out of the file proposes an unpin, and its check names each role that loses its list, as in `Removing ghapp's pinned repos makes every role on ghapp reach every repo again: ghapp-write-payments loses its list of repos.` Only a global admin may publish an unpin while a role names repositories.
+
+
+The apps directory reads App manifests and nothing else. Which repositories a role covers is part of its Role document, which you keep in the same repository and propose with `strazactl drafts create -f`, as [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md#covers" >}}) shows. A role on every repository carries `covers: every` in its binding:
+
+```yaml
+apiVersion: straza.dev/v1beta1
+kind: Role
+metadata:
+  name: ghapp-readers
+spec:
+  kind: application
+  description: Read tools of ghapp on every repo
+  server: ghapp
+  bindings:
+    - app: ghapp
+      tools: [file_get, pr_get, pr_list, repo_get]
+      covers: every
+```
 
 ## Remove a manifest
 
@@ -151,16 +205,11 @@ Type `gitops-tools` where the dialog asks, then press **Publish**.
 {{< /console >}}
 
 {{< cli >}}
-{{< command terminal="Terminal" purpose="administration" >}}
-```sh
-strazactl drafts list
-strazactl drafts publish <id>
-```
-{{< /command >}}
+`strazactl drafts list` names the draft, and a person publishes it in the console, as its form of this step shows.
 {{< /cli >}}
 
 
-Discarding that draft keeps the server as it is and ends its link to the file, so Straza does not propose the removal again. In the console that is **Discard: keep gitops-tools**, an optional reason and **Discard draft**, and in a terminal `strazactl drafts discard <id>`. From then on the server is changed like any server the console or the API installed.
+Discarding that draft keeps the server as it is and ends its link to the file, so Straza does not propose the removal again. In the console that is **Discard: keep gitops-tools**, an optional reason and **Discard draft**. A person discards it there, because an admin API token discards only the drafts it wrote, so `strazactl drafts discard` refuses a draft the directory proposed. From then on the server is changed like any server the console or the API installed.
 
 A file deleted while strazad was down is proposed for removal at the next start. When another file of the directory cannot be read or does not parse at that start, strazad logs the files to fix and proposes nothing, because that file may still name the server. Moving a file to another name, or a second file that names the same server, proposes no removal while any file still names the server. Changing `metadata.name` in a file proposes one draft that adds the new server and removes the old one.
 

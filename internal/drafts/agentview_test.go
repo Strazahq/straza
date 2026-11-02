@@ -25,7 +25,7 @@ func TestForAgentKeepsWhatAnAgentMayRead(t *testing.T) {
 		Risks: []Finding{f(codeGuardrail, ClassRisk, "dev-access will stop denying mcp.call as rule no-delete does today, because this draft changes the rule."),
 			f(codeUngated, ClassRisk, "get_me on github will run for holders of dev with no rule gating it."), f(codeGated, ClassRisk, "gated"), f(codeGateLooser, ClassRisk, "looser"),
 			f(codeDenyRemoved, ClassRisk, "deny"), f(codeSelfApproval, ClassRisk, "self"), f(codeNativeOpened, ClassRisk, "native"), f(codeImplication, ClassRisk, "implies"),
-			f(codeToolsLater, ClassRisk, "later")},
+			f(codeToolsLater, ClassRisk, "later"), f("role.covers-wider", ClassRisk, "covers")},
 		Warnings: []Finding{f(codeToolUnknown, ClassWarning, "dev names get_you, which github does not offer."), f(codeRuleNothing, ClassWarning, "Rule d of s names gitlab, which is not a registered server."),
 			f(codePoolEmpty, ClassWarning, "pool"), f(codeDeciderDevice, ClassWarning, "device"), f(codeNoPush, ClassWarning, "push"),
 			f(codeHoldShort, ClassWarning, "short"), f(codeNobodyConnected, ClassWarning, "connected"), f(codeRoleLoses, ClassWarning, "loses")},

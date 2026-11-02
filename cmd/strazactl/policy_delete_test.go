@@ -12,10 +12,6 @@ import (
 func policyDeleteServer(t *testing.T, s *rolesServer) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("DELETE /v1/admin/policies/{name}", func(w http.ResponseWriter, r *http.Request) {
 		s.record(r, nil)
 		w.Header().Set("Content-Type", "application/json")
@@ -83,7 +79,7 @@ func TestPolicyDelete(t *testing.T) {
 			s := &rolesServer{}
 			srv := policyDeleteServer(t, s)
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, err := runCLIIn(t, writeCreds(t, srv.URL), tc.stdin, tc.args...)
+			stdout, err := runCLIIn(t, onToken(t, srv.URL), tc.stdin, tc.args...)
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("%v: %v", tc.args, err)

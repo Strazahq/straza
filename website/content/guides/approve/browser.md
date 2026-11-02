@@ -6,7 +6,7 @@ weight: 15
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server on Linux. The approver lena signed in on the self-service page in headless Chromium, enabled the browser and approved alice's held kubectl apply, which her machine then ran through the Claude Code hook
+  platform: A throwaway standalone server on Linux. The approver lena signed in on the self-service page in headless Chromium, enabled the browser and approved alice's held kubectl apply, which her machine then ran through the Claude Code hook. That sign-in was the code sign-in of its time, and the browser sign-in that replaced it was written from the code on 2026-10-22 and not walked
   date: 2026-10-06
 applies_to: both
 who: A person who decides requests, after you as the admin give them the role
@@ -45,7 +45,7 @@ strazactl assign straza-enroll-browser --user lena
 ## Sign in on the self-service page
 
 
-The person opens `/self-service/` on the server, for example `http://127.0.0.1:8420/self-service/` on a standalone server, and presses **Sign in** at the top right. The card works as the console's does: **Sign in with a code**, then **Open the sign-in page**, check that the code matches, and sign in.
+The person opens `/self-service/` on the server, for example `http://127.0.0.1:8420/self-service/` on a standalone server, and presses **Sign in** at the top right. The tab goes straight to the identity provider, or to the server's own sign-in page on a standalone server. After the sign-in the tab comes back to the self-service page, signed in.
 
 {{< shot name="selfservice-signin" caption="The self-service page before sign-in, with **Sign in** at the top right." >}}
 

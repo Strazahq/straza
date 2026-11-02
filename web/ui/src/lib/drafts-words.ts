@@ -3,11 +3,12 @@
 // import this file, so none of it lands in the console's entry page. The
 // server's own sentences, a finding's words and a refusal's, are shown as
 // the server answered them and never live here.
-import type { ApiError, DraftDoor, DraftKind, DraftPrincipal, DraftState, FindingClass, GainOutcome } from "./api";
-import type { ChangeCount, ChangeWhat, GainMark, RuleMark, Shown } from "./drafts-model";
-import { list, plural } from "./policy-words";
+import type { ApiError, DraftCoverage, DraftDoor, DraftKind, DraftObjectName, DraftPrincipal, DraftState, FindingClass, GainOutcome } from "./api";
+import type { CoverLead, Lead, ObjectsMove } from "./drafts-access";
+import { AGENT_LOOSEN_CODE, type ChangeCount, type ChangeWhat, type ConfirmBlock, type RuleMark, type Shown } from "./drafts-model";
+import { type Nouns, cap, counted } from "./object-words";
+import { list, orList, plural } from "./policy-words";
 import { WRITE_UNCONFIRMED } from "./say";
-import { holders } from "./words";
 
 const bare = (s: string) => s.replace(/[.\s]+$/, "");
 
@@ -31,7 +32,7 @@ export const FILTER_LABEL = "Filter drafts";
 export const SUBJECT_LIST = "The draft list";
 export const READING_LIST = "Reading the drafts.";
 export const COLUMN = { id: "Draft", what: "What changes", who: "Drafted by", door: "How it came in", checks: "Checks", waiting: "Waiting", decided: "Decided" };
-export const CHECKS_HELP = "The counts of the server's last check. Each line that widens access is acknowledged by whoever publishes the draft.";
+export const CHECKS_HELP = "The counts of the server's last check. Each line that widens access is confirmed by whoever publishes the draft.";
 export const shownCount = (shown: number, loaded: number) => shown + " of " + loaded + " shown";
 export const loadedLine = (n: number) => plural(n, "draft", "drafts") + " loaded";
 export const LOAD_MORE = "Load more";
@@ -70,7 +71,7 @@ export const refusedCount = (n: number) => n + " refused";
 export const widenCount = (n: number) => n + (n === 1 ? " widens access" : " widen access");
 export const warningCount = (n: number) => plural(n, "warning", "warnings");
 export const uncheckedCount = (n: number) => n + " not checked";
-export const NOTHING_TO_ACK = "nothing to acknowledge";
+export const NOTHING_TO_ACK = "nothing to confirm";
 export const NOT_CHECKED_YET = "not checked yet";
 export const NOT_CHECKED_HELP = "The server has not checked this revision yet. Opening the draft checks it.";
 
@@ -93,10 +94,10 @@ export const STATE_WORD: Record<Shown, string> = { ready: "Ready to publish", re
 // and for the straza app the harness the agent ran in.
 export const cameInLine = (door: DraftDoor, source: string | undefined, client: string | undefined) =>
   doorWords(door) + (source ? ", " + source : "") + (door === "straza-app" && client ? ", from " + client : "");
-export const FACT = { by: "Drafted by", door: "How it came in", revisions: "Revisions", checked: "Checked", expires: "Expires", undoes: "Undoes", needs: "Publishing needs" };
+export const FACT = { by: "Drafted by", door: "Came from", revisions: "Revisions", checked: "Last checked", expires: "Expires", undoes: "Undoes", needs: "Who may publish" };
 export const revisionLine = (n: number, who: string, door: string, at: string, mechanical: boolean) =>
   "rev " + n + " by " + who + " in " + doorWords(door) + " at " + at + (mechanical ? ", checked again against live state" : "");
-export const checkedLine = (at: string, version: string) => "against the live state at " + at + (version ? ", policy version " + version : "");
+export const checkedLine = (at: string, version: string) => at + (version ? ", against live policy " + version : "");
 export const expiresLine = (at: string) => at + ", unless someone revises it first";
 export const undoesLine = (id: string) => "draft " + id;
 export const MAY_PUBLISH_ALL = "You may publish all of it.";
@@ -111,22 +112,30 @@ export function objectWords(object: string): string {
   const kind = object.slice(0, i) as DraftKind;
   return i > 0 && KIND_WORD[kind] ? KIND_WORD[kind] + " " + object.slice(i + 1) : object;
 }
-export const needLine = (object: string, standing: string) => objectWords(object) + " needs " + bare(standing) + ".";
+// needLine is one sentence of the Who may publish help: the grant one
+// object needs.
+export const needLine = (object: string, standing: string) => cap(objectWords(object)) + " needs " + bare(standing) + ".";
+
+// LOOSEN_TAIL ends the red warning of an agent's draft that loosens the
+// rules binding that agent, which agentWrote opens.
+export const LOOSEN_TAIL = "A person may accept it when publishing.";
 
 // The note: the proposer's own words, checked by nobody.
 export const saysTitle = (agent: boolean, name: string) => (agent ? "What the agent says" : "What " + name + " says");
 export const SAYS_AGENT_HELP = "The note the agent wrote with its draft. Written by the model and checked by nobody. Every other line on this page is computed by the server.";
 export const saysPersonHelp = (name: string) => "The note " + name + " wrote with the draft, checked by nobody. Every other line on this page is computed by the server.";
 
-// The verdict strip.
+// The verdict strip. It counts only the classes that hold a line, and says
+// NOTHING_TO_CONFIRM when none does.
 export const STRIP_LABEL = "The server's verdict";
 export const stripWord: Record<"refused" | "risk" | "warning" | "unchecked", (n: number) => string> = {
   refused: () => "refused",
-  risk: (n) => (n === 1 ? "widens access" : "widen access"),
+  risk: (n) => (n === 1 ? "line to confirm" : "lines to confirm"),
   warning: (n) => (n === 1 ? "warning" : "warnings"),
   unchecked: () => "not checked",
 };
 export const stripJump = (n: number, word: string) => n + " " + word + ": go to the checks";
+export const NOTHING_TO_CONFIRM = "Nothing to confirm";
 
 // What changes.
 export const CHANGES_TITLE = "What changes";
@@ -139,13 +148,12 @@ const countPhrase = (c: ChangeCount) => {
 };
 export const changesLede = (counts: ChangeCount[]) => (counts.length ? list(counts.map(countPhrase)) + ". They go live together or not at all." : "This draft holds no object.");
 export const changesLedePublished = (counts: ChangeCount[]) => (counts.length ? list(counts.map(countPhrase)) + ". They went live together." : "This draft held no object.");
-export const ITEM_KIND: Record<DraftKind, string> = { App: "MCP server", Role: "Role", PolicySet: "Approval set" };
-// roleKindWords names a role's kind the way the Roles area does, with the
-// server that owns it.
+export const ITEM_KIND: Record<DraftKind, string> = { App: "MCP server", Role: "role", PolicySet: "approval set" };
+// roleKindWords names a role's kind on its card: the server that owns it,
+// or the kind the Roles area names when no server owns it.
 export function roleKindWords(kind: string, server: string): string {
-  const k: Record<string, string> = { application: "Application role", business: "Business role", approver: "Approver role", straza: "Straza role" };
-  const word = k[kind] || "Role";
-  return server ? word + ", " + server + "'s own" : word;
+  const k: Record<string, string> = { application: "application role", business: "business role", approver: "approver role", straza: "Straza role" };
+  return server ? "role · owned by " + server : k[kind] || "role";
 }
 export const MARK: Record<ChangeWhat, string> = { new: "new", changed: "changes", off: "turned off", removed: "removed" };
 export const NOW_AFTER = { field: "Field", now: "Now", after: "After publishing" };
@@ -153,13 +161,22 @@ export const NOTHING_STARTS = "Nothing starts or connects before publishing.";
 export const TOOLS_ROW = "Tools";
 export const TOOLS_NOT_READ = "not read yet";
 export const contactedLine = (host: string, at: string, n: number) => "Contacted " + host + " at " + at + ": " + plural(n, "tool", "tools") + " read.";
-export const NOT_READABLE_DOC = "The document does not read as YAML, so this card shows it as text in The documents.";
-export const reachesOn = (server: string) => "Reaches on " + server;
+export const NOT_READABLE_DOC = "The document does not read as YAML, so this card shows it as text under Files.";
+// toolsOn labels a role's tools: Tools alone when the role reaches one
+// server, which its card names, else the server too.
+export const toolsOn = (server: string, one: boolean) => (one ? TOOLS_ROW : "Tools on " + server);
 export const IMPLIES = "Implies";
 export const DESCRIPTION = "Description";
 export const NOTHING = "nothing";
-export const toolsWords = (tools: string[]) => (tools.includes("*") ? "every tool, and tools added later" : tools.length ? tools.join(", ") : NOTHING);
+export const EVERY_TOOL = "every tool, and tools added later";
+export const toolsWords = (tools: string[]) => (tools.includes("*") ? EVERY_TOOL : tools.length ? tools.join(", ") : NOTHING);
+// toolsSame is a role's tools row when no tool joins or leaves it.
+export const toolsSame = (tools: string[]) => (tools.includes("*") ? EVERY_TOOL : plural(tools.length, "tool", "tools")) + ", unchanged";
 export const TOOL_COLUMN = (server: string) => "Tool on " + server;
+// The objects a role covers, in its server's own words.
+export const objectsLabel = (w: Nouns) => cap(w.plural);
+export const everyType = (w: Nouns) => "every " + w.type;
+export const addedMark = (value: string) => "+ " + value;
 export const REACHED = "reached";
 export const NOT_REACHED = "not reached";
 export const JOINS = "joins the role";
@@ -170,30 +187,91 @@ export const setFold = (name: string) => name + ".yaml, as it would be published
 export const OFF_LINE = "Off after publishing: the set stays stored and gates nothing.";
 export const GOES_WITH = "What goes with it";
 export const GOES_WITH_ALL = "What goes with the removals";
-export const NO_FIELD_CHANGE = "No field the server page shows changes. The documents below hold the whole text.";
+export const NO_FIELD_CHANGE = "No field the server page shows changes. The files below hold the whole text.";
 export const REMOVED_LINE = "Publishing removes it with everything live that belongs to it.";
 export const REMOVED_LINE_PAST = "This publish removed it, with everything live that belonged to it.";
 
-// Who gains what.
-export const GAINS_TITLE = "Who gains what";
-export const GAINS_HELP = "For each role the draft touches and each tool on its server: what a holder gets today and after publishing, in the words the policy pages use, with the holders named where you may read them. The server computes it with the policy engine over the published policy plus this draft.";
-export const GAIN_COLUMN = { tool: "Tool", today: "Today", after: "After publishing" };
-const OUTCOME: Record<GainOutcome, string> = { runs: "runs at once", "needs-approval": "needs approval", denied: "denied", "not-reachable": "not reachable", unknown: "not known" };
-// outcomeWords is one cell of the table: the policy word, and the gate in
-// the server's words when it named one.
-export const outcomeWords = (o: GainOutcome, words?: string) => (OUTCOME[o] || o) + (words ? ": " + words : "");
-export const GAIN_MARK: Record<GainMark, string> = { gains: "gains", loses: "loses", gate: "gate changes", same: "same", unknown: "not known" };
-export function groupLine(role: string, server: string, names: string[] | undefined, count: number): string {
-  const held = names && names.length ? "held by " + list(names) : count ? holders(count) : "held by nobody";
-  return role + " on " + server + " · " + held;
+// Access after publishing.
+export const GAINS_TITLE = "Access after publishing";
+export const GAINS_HELP = "What a holder of each role the draft touches gets, now and after publishing. The server computes it with the policy engine.";
+export const GAIN_COLUMN = { tool: "Tool", now: "Now", after: "After publishing" };
+// OUTCOME is the chip of one cell, in the words the policy pages use.
+export const OUTCOME: Record<GainOutcome, string> = { runs: "allowed", "needs-approval": "needs approval", denied: "denied", "not-reachable": "no access", unknown: "not known" };
+// outcomeFoot says a gate's words once under the table, after the chip
+// word it explains.
+export const outcomeFoot = (o: GainOutcome, words: string) => (OUTCOME[o] || o) + ": " + bare(words) + ".";
+// people counts the holders of a role in the console's words for people,
+// and holdsWords says it as a sentence.
+const people = (n: number) => (n === 1 ? "1 person" : n.toLocaleString("en-US") + " people");
+export const holdsWords = (n: number) => people(n) + (n === 1 ? " holds it." : " hold it.");
+const objectNames = (os: DraftObjectName[]) => list(os.map((o) => o.value));
+// coveredWords names the objects a role covers: every object, none, or the
+// count and the names.
+export const coveredWords = (w: Nouns, every: boolean, os: DraftObjectName[]) =>
+  every ? everyType(w) : os.length ? counted(os.length, w) + ": " + objectNames(os) : "no " + w.plural;
+
+// groupLine heads one group of the table: the role, on its server when the
+// table's groups span several servers (server empty otherwise), who holds
+// it, the objects it covers when the table does not show them as a row,
+// and what a holder gains and loses.
+export function groupLine(role: string, server: string, names: string[] | undefined, count: number, on: string, gains: string[], loses: string[]): string {
+  const held = names && names.length ? "held by " + list(names) : count ? people(count) : "nobody holds it";
+  return [role + (server ? " on " + server : ""), held, on ? "on " + on : "", gains.length ? "gains " + list(gains) : "", loses.length ? "loses " + list(loses) : ""].filter(Boolean).join(" · ");
 }
+export const toolCount = (n: number) => plural(n, "tool", "tools");
+// objectsGained and objectsLost are a group line's words for the objects
+// a role adds and drops.
+export function objectsGained(w: Nouns, m: ObjectsMove): string {
+  if (m.every === "gained") return everyType(w);
+  return m.added.length ? coveredWords(w, false, m.added) : "";
+}
+export function objectsLost(w: Nouns, m: ObjectsMove): string {
+  if (m.every === "lost") return "every other " + w.type;
+  return m.dropped.length ? coveredWords(w, false, m.dropped) : "";
+}
+// sameFold folds the tools whose outcome does not change.
+export const sameFold = (n: number) => toolCount(n) + ", same outcome as now.";
 export const NO_GAINS = "No role gains or loses a tool when this is published.";
-export const GAINS_HIDDEN = "Part of who gains what is hidden from you.";
+export const GAINS_HIDDEN = "Part of the access after publishing is hidden from you.";
 export const NOBODY_GAINS = "Nobody gains access when this is published.";
-export const nobodyHolds = (roles: string[]) => "Nobody holds " + list(roles) + ". The table says what a holder gets once the identity manager or an admin assigns the role.";
 export const holdersGain = (roles: string[]) => "Holders of " + list(roles) + " gain access when this is published.";
 export const holdersLose = (roles: string[]) => "Holders of " + list(roles) + " lose tools they reach today, and their calls to them are refused after publishing.";
-export const GAINS_FOOT = "Roles this draft does not touch lose and gain nothing.";
+
+// The lead of the page: what publishing does to the objects of each role
+// on a server that pins a type, then who holds the roles it touches.
+export const NOBODY_YET = "Nobody holds it yet, so nobody gains access until the identity manager assigns it.";
+export function nobodyYet(roles: string[], hidden: boolean): string {
+  if (hidden) return "Nobody holds " + orList(roles) + " yet.";
+  return "Nobody holds " + orList(roles) + " yet, so nobody gains access until the identity manager assigns " + (roles.length === 1 ? "it." : "them.");
+}
+const more = (n: number, w: Nouns) => counted(n, w).replace(/^([\d,]+) /, "$1 more ");
+const everyLater = (w: Nouns) => everyType(w) + ", including " + w.plural + " added later";
+// coverLead says what publishing does to one role's objects.
+export function coverLead(l: CoverLead, w: Nouns): string {
+  const c: DraftCoverage = l.coverage;
+  const m = l.move;
+  if (l.isNew) return "Adds the role " + c.role + " on " + c.server + ", for " + (c.every_after ? everyLater(w) : coveredWords(w, false, c.after)) + ".";
+  const head = "Changes the role " + c.role + ": it will ";
+  if (m.every === "gained") return head + "reach " + everyType(w) + " on " + c.server + ", including " + w.plural + " added later.";
+  if (m.every === "lost") return head + "reach only " + counted(c.after.length, w) + " on " + c.server + " instead of " + everyType(w) + (c.after.length ? ": " + objectNames(c.after) : "") + ".";
+  const add = m.added.length ? "reach " + more(m.added.length, w) + " on " + c.server + ", " + objectNames(m.added) : "";
+  const drop = m.dropped.length ? "stop reaching " + counted(m.dropped.length, w) + (add ? "" : " on " + c.server) + ", " + objectNames(m.dropped) : "";
+  return head + (add && drop ? add + ", and " + drop : add || drop) + ".";
+}
+// leadLines are the lead's sentences in order, each marked when it says
+// that holders lose what they reach today.
+export function leadLines(lead: Lead, nouns: (c: DraftCoverage) => Nouns, hidden: boolean): { text: string; loses?: boolean }[] {
+  const out: { text: string; loses?: boolean }[] = [];
+  for (const l of lead.covers) {
+    out.push({ text: coverLead(l, nouns(l.coverage)) });
+    out.push({ text: l.coverage.holders_count ? holdsWords(l.coverage.holders_count) : NOBODY_YET });
+  }
+  if (lead.gain.length) out.push({ text: holdersGain(lead.gain) });
+  if (lead.nobody.length) out.push({ text: nobodyYet(lead.nobody, hidden) });
+  if (lead.nobodyGains) out.push({ text: NOBODY_GAINS });
+  if (lead.lose.length) out.push({ text: holdersLose(lead.lose), loses: true });
+  return out;
+}
 
 // Checks.
 export const CHECKS_TITLE = "Checks";
@@ -208,30 +286,47 @@ export const notCheckedAgain = (state: string) => "Straza does not check a draft
 // publishedUnread stands for the stored check when a publish landed and the
 // page's read of the draft after it failed.
 export const publishedUnread = (id: string) => "Draft " + id + " is published. This page could not read it again, so its stored check is not shown. Reload to try again.";
-export const GROUP: Record<FindingClass, string> = { refused: "Refused", risk: "Widens access, acknowledged when you publish", warning: "Warnings", unchecked: "Not checked", passed: "Passed", info: "Notes" };
-export const NOTHING_REFUSED = "Nothing refused.";
+export const GROUP: Record<FindingClass, string> = { refused: "Refused", risk: "Widens access", warning: "Warnings", unchecked: "Not checked", passed: "Passed", info: "Notes" };
+// riskTail follows the count in the heading of the lines that widen access.
+export const riskTail = (n: number) => (n === 1 ? "you confirm it when you publish" : "you confirm them when you publish");
 export const nowAfter = (before: string, after: string) => "Now: " + bare(before) + ". After publishing: " + bare(after) + ".";
-// ackWords says how a risk is acknowledged at publish.
-export function ackWords(ack: string | undefined, typed: string | undefined): string {
-  if (ack !== "typed") return "Tick it when you publish: republishing the old state undoes it.";
-  if (!typed) return "Only someone who can read what this line names can acknowledge it.";
-  return "Type " + typed + " when you publish: republishing the old state cannot undo it.";
+// ackWords says how the publish dialog asks to confirm a risk, by the
+// confirm block that holds it: a tick, the text to type, or the count of
+// the lines of its kind typed once.
+export function ackWords(b: ConfirmBlock): string {
+  const n = b.lines.length;
+  if (b.blocked) return "Only someone who can read what this line names can confirm it, so ask an admin who can read it to publish this draft.";
+  if (b.kind === "tick") return n === 1 ? "Tick it when you publish: republishing the old state undoes it." : "One tick confirms the " + n + " lines of this kind when you publish: republishing the old state undoes them.";
+  if (b.kind === "count") return "Type " + b.expect + " when you publish, once for the " + n + " lines of this kind: republishing the old state cannot undo them.";
+  if (b.lines.some((f) => f.code === AGENT_LOOSEN_CODE)) return "Type " + b.expect + " when you publish to accept it.";
+  return "Type " + b.expect + " when you publish: republishing the old state cannot undo it.";
 }
 export const CONTACT = "Contact it now";
 export const CONTACT_HELP = "Opens one MCP connection to the address with no credential and asks for its tools. Nothing starts, the tool names are kept with the draft, and the audit chain records who asked.";
 export const CONTACT_FAILED = "The contact did not finish.";
 
-// The documents.
-export const DOCS_TITLE = "The documents";
-export const docsFold = (n: number, revision: number) => plural(n, "document", "documents") + ", revision " + revision + ", as they would be published";
-export const DOCS_MASKED = "A value the server keeps secret reads [REDACTED] here, so these documents are for reading and cannot be sent back as a draft.";
+// Files.
+export const DOCS_TITLE = "Files";
+// docsFold counts the files: as they will be published while the draft is
+// open, else as they were published or drafted.
+export function docsFold(n: number, state: DraftState): string {
+  const [it, was] = n === 1 ? ["it", "was"] : ["they", "were"];
+  return plural(n, "file", "files") + ", as " + it + (state === "open" ? " will be published" : " " + was + (state === "published" ? " published" : " drafted"));
+}
+export const DOCS_MASKED = "A value the server keeps secret reads [REDACTED] here, so these files are for reading and cannot be sent back as a draft.";
 export const removalDoc = (object: string) => "Removes " + objectWords(object) + ".";
 
-// The bar at the foot of the page.
-export function ackBar(risks: number, warnings: number): string {
-  if (risks === 1) return "1 line needs your acknowledgment when you publish.";
-  if (risks > 1) return risks + " lines need your acknowledgment when you publish.";
-  return warnings ? "Nothing to acknowledge. Read the warnings first." : "Nothing to acknowledge.";
+// ackBar is the bar at the foot of the page: what to do before Publish.
+// It counts the confirmations the way the publish dialog asks for them,
+// one per confirm block, and names them lines while every block holds one
+// line.
+export function ackBar(blocks: number, lines: number, warnings: number): string {
+  const read = warnings ? "Read " + warningCount(warnings) : "";
+  if (!blocks) return read ? read + " before you publish." : NOTHING_TO_CONFIRM + ".";
+  const asks = blocks === lines
+    ? (blocks === 1 ? "1 line needs" : blocks + " lines need") + " your confirmation when you publish."
+    : "Publishing asks you for " + plural(blocks, "confirmation", "confirmations") + ".";
+  return read ? read + " first. " + asks : asks;
 }
 export const REFUSED_BAR = "Fix what is refused before publishing.";
 export const STALE_BAR = "Check the draft again before publishing.";
@@ -277,16 +372,95 @@ export function goLive(counts: ChangeCount[]): string {
   return phrases.length ? "Publishing " + list(phrases) + " in one step, or nothing changes." : "Publishing changes nothing.";
 }
 export const NOBODY_UNTIL = "Nobody gains access until the roles are assigned.";
-export const typePrompt = (typed: string) => "Type " + typed + " to acknowledge it:";
-export const typeLabel = (typed: string) => "Type " + typed;
-export const CUT_TYPED = "You cannot type the text for this line, because it names something you cannot read.";
-export const ACK_MISSING = "Acknowledge each line to publish. The first one left is outlined.";
-export const typedWrong = (object: string | undefined, typed: string) =>
-  "The text typed for " + objectWords(object || "this line") + " is not " + typed + ". Type " + typed + " exactly to acknowledge it.";
-export const signLine = (agent: string | null) =>
-  (agent ? "You sponsor " + agent + ", which proposed this draft. " : "") + "The publish records you, the console and your login, so a borrowed login would show.";
+
+// Does is what publishing does to the objects a risk line names: a verb,
+// then the noun it counts in the singular and the plural.
+export type Does = [verb: string, one: string, many: string];
+
+// PUBLISH_DOES words what publishing does, for the lead of the publish
+// dialog and the heading of each confirm block. A line is worded by its
+// risk code, else as unread when the server left out its object for this
+// reader, else by the kind of the object it names, else by other. Lines of
+// one code name distinct objects, but unread lines of several codes may
+// name one object, so those count as lines. Every risk widens access, so
+// the fallbacks say so. strazactl's publish prompt copies this table, so
+// a change here goes there too.
+export const PUBLISH_DOES: { code: Record<string, Does>; kind: Record<string, Does>; unread: Does; other: Does } = {
+  code: {
+    "server.removal": ["removes", "MCP server", "MCP servers"],
+    "policy.guardrail-changed": ["loosens", "approval set", "approval sets"],
+    "agent.guardrail": ["loosens", "approval set", "approval sets"],
+    "role.covers-wider": ["widens", "role", "roles"],
+  },
+  kind: {
+    App: ["widens access through", "MCP server", "MCP servers"],
+    Role: ["widens", "role", "roles"],
+    PolicySet: ["widens access through", "approval set", "approval sets"],
+  },
+  unread: ["widens access through", "line", "lines"],
+  other: ["widens access through", "object", "objects"],
+};
+
+// doesOf is the words of one risk line, by its code and its Kind/Name
+// object.
+export function doesOf(code: string, object: string | undefined): Does {
+  const kind = (object || "").split("/")[0];
+  if (Object.hasOwn(PUBLISH_DOES.code, code)) return PUBLISH_DOES.code[code];
+  if (!object) return PUBLISH_DOES.unread;
+  return Object.hasOwn(PUBLISH_DOES.kind, kind) ? PUBLISH_DOES.kind[kind] : PUBLISH_DOES.other;
+}
+
+const doesCount = (does: Does, n: number) => does[0] + " " + plural(n, does[1], does[2]);
+
+// publishLead is the lead of the publish dialog over the risk lines of a
+// verdict, in the order of their blocks: one phrase per verb and noun,
+// each counting the objects its lines name, a line with no object counted
+// alone.
+export function publishLead(lines: { code: string; object?: string; key: string }[]): string {
+  const said = new Map<string, { does: Does; objects: Set<string> }>();
+  for (const f of lines) {
+    const does = doesOf(f.code, f.object);
+    const p = said.get(does.join("\n")) || { does, objects: new Set<string>() };
+    p.objects.add(f.object || f.key);
+    said.set(does.join("\n"), p);
+  }
+  const phrases = [...said.values()].map((p) => doesCount(p.does, p.objects.size));
+  return "Publishing " + list(phrases) + (phrases.length > 1 ? ", in one step" : "") + ", or nothing changes.";
+}
+
+// blockTitle heads a confirm block: what publishing does to the n objects
+// its lines name.
+export const blockTitle = (does: Does, n: number) => {
+  const s = doesCount(does, n);
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+// showLines opens the fold of a block's lines.
+export const showLines = (does: Does, n: number) => "Show the " + plural(n, does[1], does[2]);
+// readLines is the one tick of a block of several tick lines.
+export const readLines = (n: number) => "I read the " + n + " lines.";
+export const AGENT_LOOSENS = "The agent loosens its own rules";
+export const agentWrote = (agent: string | null) => (agent || "An agent") + " wrote this draft to loosen its own rules.";
+// A typed block is confirmed, and an agent's self-loosening accepted.
+export const CONFIRM = "confirm";
+export const ACCEPT = "accept it";
+// typePrompt is the label of a typed block's field, split around the text
+// to type, which the dialog sets as code: Type <text> to confirm.
+export const typePrompt = (verb: string): [string, string] => ["Type", "to " + verb];
+export const MATCHED = "Typed correctly.";
+export const typedWrong = (expect: string, verb: string) => "That is not " + expect + ". Type " + expect + " to " + verb + ".";
+export const BLOCKED = "You cannot confirm this block, because a line in it names something you may not read. Ask an admin who may read it to publish this draft.";
+export const ACK_MISSING = "Confirm each block to publish.";
+// signLine says who the publish record names: the publisher, as the person
+// who accepted an agent's self-loosening when the draft holds one. To the
+// sponsor of the agent that proposed the draft, it also says that a draft
+// with a risk needs another admin while second-person publishing is on.
+export function signLine(sponsored: string | null, accepts: boolean, risky: boolean): string {
+  const names = accepts ? "The publish record names you as the person who accepted it." : "The publish record names you.";
+  if (!sponsored) return names;
+  return "You sponsor " + sponsored + (risky ? ". When second-person publishing is on, another admin must publish this. " : ", which proposed this draft. ") + names;
+}
 export const SIGN_LABEL = "Who the publish records";
-export const SIGN_HELP = "Straza cannot tell your agent from you when it uses your sign-in. strazactl refuses config writes with your login inside a coding agent, and every publish names the client and the credential it came from.";
+export const SIGN_HELP = "It also records the console and your login, so a borrowed login would show. Straza cannot tell your agent from you when it uses your sign-in. strazactl refuses config writes with your login inside a coding agent, and every publish names the client and the credential it came from.";
 export const PUBLISH = "Publish";
 export const CANCEL = "Cancel";
 export const NOT_PUBLISHED = "Nothing was published.";

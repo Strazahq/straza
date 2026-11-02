@@ -283,7 +283,7 @@ func TestInstallCreatesFileWhenAbsent(t *testing.T) {
 // wiring, per scope. A managed writer with the user-scope 0600/0750 breaks a
 // fleet silently in two ways at once: every OTHER user's harness cannot read
 // the managed policy wiring (so it runs ungoverned while looking installed),
-// and measureAttestation EPERMs on the file it must hash, reporting att=none
+// and the service's attestation EPERMs on the file it must hash, reporting att=none
 // everywhere. Managed artifacts are root-writable, world-readable; user-scope
 // files stay private to their owner.
 func TestInstallHookFileModesByScope(t *testing.T) {

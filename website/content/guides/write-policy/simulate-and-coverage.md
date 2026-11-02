@@ -23,7 +23,7 @@ A simulation asks the live engine what one call would do for one subject, withou
 ## Before you start {.nostep}
 
 
-- An administrator's login.
+- An administrator's console sign-in, or an admin API token for `strazactl` in `STRAZA_API_TOKEN` minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows. The token needs `policy:write`. A simulation changes nothing, but it is a POST to the policy area, which `policy:read` alone does not open.
 - At least one live policy set for a role, such as the ones from [Your first deny]({{< relref "guides/write-policy/first-deny.md" >}}) and [Hold a call for a person]({{< relref "guides/write-policy/hold-for-a-human.md" >}}).
 
 ## Simulate one call
@@ -76,6 +76,21 @@ Decided by rule hold-kubectl-apply in policy kubectl-apply-hold: Straza: kubectl
 ```
 
 The output is trimmed to the verdict lines. The subject, snapshot and wire lines follow as above.
+{{< /cli >}}
+
+### When the call names an object {#object .nostep}
+
+
+Some servers pin an object type in their manifest, such as ghapp with its repos, and each role on them covers every repo or a named list. A simulation of a call to such a server runs the gateway's object check first. When the check refuses the call, its sentence is the answer and no policy runs.
+
+{{< console >}}
+Under What, pick **MCP tool**, then the server and a tool whose calls name a repo, such as `pr_create` on ghapp. A picker for the repo appears, with `Search repos by name` and the line `Pick the repo the call works on. Test a call sends it in the argument repo, as the agent would.` Pick a repo from ghapp's list, and the preview under it shows the arguments the test sends, such as `args {"repo":"Strazahq/pay-api"}`. Pressing **Test** with no repo picked answers `Pick the repo this call works on.` A server's own Test a call asks the same way.
+
+A covered call names the first role by name that covers it, such as `ghapp-write-payments covers Strazahq/pay-api, id 101.` with the repo's own id. For a repo the list does not hold yet, only a role on every repo covers the call, and the line reads like `ghapp-write covers every repo, Strazahq/pay-new included.` When the check refuses the call, the answer reads `The repo check refused this call before any policy ran.`, then the sentence the agent would read. **Test this call** on an audit record fills in the repo the call named and answers at once. A record that cut a long value fills in no repo, so pick one and press **Test** again.
+{{< /console >}}
+
+{{< cli >}}
+`strazactl policy simulate` has no flag for the object, so the arguments go in the file that `--event-json` reads, under `args`, such as `{"kind":"tool.pre","tool":"mcp.call","app":"ghapp","toolName":"pr_create","args":{"repo":"Strazahq/pay-api"}}`. The answer then carries a line keyed `repo` that names the covering role in the console's words. For a refused call, the decided-by line reads `The repo check refused this call before any policy ran.` and then the sentence the agent would read, without its `Straza:` prefix.
 {{< /cli >}}
 
 ## Test a change before it is live

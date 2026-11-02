@@ -1,29 +1,38 @@
 import * as React from "react";
-import { Loader2Icon } from "lucide-react";
+import { CheckIcon, Loader2Icon } from "lucide-react";
 import { RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import type { ApiError, Draft, DraftFinding, DraftPublished, DraftVerdict } from "@/lib/api";
+import type { ApiError, Draft, DraftPublished, DraftVerdict } from "@/lib/api";
 import { publishDraft, refusalOf } from "@/lib/drafts-api";
-import { type Acks, acknowledged, changeCounts, firstMissing, gainStory, gainsHidden, publishBody, typedWrongly } from "@/lib/drafts-model";
+import { AGENT_LOOSEN_CODE, type Acks, type ConfirmBlock, acknowledged, changeCounts, confirmBlocks, firstMissing, gainStory, gainsHidden, publishBody, typedWrongly } from "@/lib/drafts-model";
 import {
+  ACCEPT,
   ACK_MISSING,
+  AGENT_LOOSENS,
+  BLOCKED,
   CANCEL,
-  CUT_TYPED,
+  CONFIRM,
   GROUP,
+  MATCHED,
   NOBODY_UNTIL,
   NOT_PUBLISHED,
   PUBLISH,
   SIGN_HELP,
   SIGN_LABEL,
+  agentWrote,
   answered,
+  blockTitle,
+  doesOf,
   goLive,
+  publishLead,
   publishTitle,
   publishedToast,
+  readLines,
+  showLines,
   signLine,
-  typeLabel,
   typePrompt,
   typedWrong,
 } from "@/lib/drafts-words";
@@ -31,12 +40,13 @@ import { notify } from "@/lib/notify";
 import { snapshot } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
-// The publish dialog of a draft, shared by
-// the review page and the editors' Save and publish. It asks for a tick on
-// each risk and the typed text where republishing the old state cannot
-// undo it, sends back the keys and the digest of the verdict on screen, and
-// shows every refusal as the server answered it: publish is the server's
-// decision, and this dialog only collects the acknowledgments.
+// The publish dialog of a draft, shared by the review page and the editors'
+// Save and publish. It groups the risks into confirm blocks, one tick or
+// one typed text each, and keeps Publish off until every block is
+// confirmed. It sends back each line's key and typed text and the digest of
+// the verdict on screen, and shows every refusal as the server answered
+// it: publish is the server's decision, and this dialog only collects the
+// confirmations.
 
 export type DraftPublishProps = {
   draft: Draft;
@@ -63,79 +73,136 @@ export type DraftPublishProps = {
   quiet?: boolean;
 };
 
-const LINE = "flex gap-2.5 rounded-md border bg-card px-3 py-2.5 text-sm leading-relaxed text-text-2";
+const NO_ACKS: Acks = { ticked: {}, typed: {} };
+// REMOVAL_CODE is the risk of a server removal, a block shown loud like an
+// agent's self-loosening, because publishing the old state cannot bring
+// back the server's secrets and connections.
+const REMOVAL_CODE = "server.removal";
+const BOX = "flex flex-col gap-2 rounded-md border px-3 py-2.5 text-sm leading-relaxed text-text-2";
+const TICK = "mt-1 size-4 shrink-0 accent-primary";
 // FOCUS_RING rings Cancel on any focus. The dialog opens from a mouse press
 // and focuses Cancel from code, which a browser does not treat as
 // focus-visible, so the button's own ring would stay off.
 const FOCUS_RING = "focus:border-ring focus:ring-[3px] focus:ring-ring/50";
 
-// sponsoredAgent is the agent that proposed the draft when the person
-// publishing it is its sponsor, the case where a borrowed login matters.
-function sponsoredAgent(draft: Draft): string | null {
-  const me = snapshot()?.user || "";
-  const p = draft.authors[0];
-  return p && p.agent && me && p.sponsor === me ? p.username : null;
+// proposerAgent is the first agent among the draft's authors, or null when
+// only people or a file wrote it. The server reads a draft any agent
+// revised as an agent's draft.
+function proposerAgent(draft: Draft): string | null {
+  return draft.authors.find((p) => p.agent)?.username || null;
 }
 
-// AckLine is one risk: a tick, or the sentence with the field its typed
-// text goes in, or a note where this reader cannot type it.
-function AckLine({ f, acks, need, onTick, onType }: { f: DraftFinding; acks: Acks; need: boolean; onTick: (on: boolean) => void; onType: (text: string) => void }) {
-  const box = cn(LINE, need ? "border-warn" : "border-border");
-  if (f.ack === "typed") {
-    return (
-      <div className={cn(box, "flex-col gap-1.5")} data-ack={f.key} data-need={need || undefined}>
-        <span>{f.sentence}</span>
-        {need && typedWrongly(f, acks) && <span className="text-[13px] text-danger" data-typed-wrong>{typedWrong(f.object, f.typed as string)}</span>}
-        {f.typed ? (
-          <label className="flex flex-wrap items-center gap-2 text-[13px]">
-            {typePrompt(f.typed)}
-            <Input
-              aria-label={typeLabel(f.typed)}
-              value={acks.typed[f.key] || ""}
-              onChange={(e) => onType(e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-              className="h-8 w-64 max-w-full font-mono text-[13px]"
-            />
-          </label>
-        ) : (
-          <span className="text-[13px] text-muted-foreground">{CUT_TYPED}</span>
-        )}
+// sponsoredAgent is an agent author of the draft that the person
+// publishing it sponsors, the case where a borrowed login matters and
+// second-person publishing bars the sponsor, or null.
+function sponsoredAgent(draft: Draft): string | null {
+  const me = snapshot()?.user || "";
+  return (me && draft.authors.find((p) => p.agent && p.sponsor === me)?.username) || null;
+}
+
+const loosens = (b: ConfirmBlock) => b.lines.some((f) => f.code === AGENT_LOOSEN_CODE);
+
+// Typed is the field of a typed block: what to type, set as code and as
+// the placeholder, a check mark once it matches, and a plain line when the
+// text can no longer match.
+function Typed({ b, acks, verb, onType }: { b: ConfirmBlock; acks: Acks; verb: string; onType: (text: string) => void }) {
+  const id = React.useId();
+  const [pre, post] = typePrompt(verb);
+  const wrong = typedWrongly(b, acks);
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <label htmlFor={id}>
+          {pre} <code className="rounded border border-border bg-secondary px-1 font-mono text-[13px] font-semibold text-foreground">{b.expect}</code> {post}
+        </label>
+        <Input
+          id={id}
+          value={acks.typed[b.id] || ""}
+          placeholder={b.expect}
+          onChange={(e) => onType(e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={wrong || undefined}
+          className="h-8 w-56 max-w-full font-mono text-[13px]"
+        />
+        <span aria-live="polite" className="text-ok">
+          {acknowledged(b, acks) && (
+            <span data-matched>
+              <CheckIcon className="size-4" aria-hidden="true" />
+              <span className="sr-only">{MATCHED}</span>
+            </span>
+          )}
+        </span>
       </div>
+      {wrong && <p className="m-0 text-[13px] text-danger" data-typed-wrong>{typedWrong(b.expect, verb)}</p>}
+    </>
+  );
+}
+
+// Block is one confirm block. A lone tick line is its tick, labelled with
+// the line. Every other block has a heading, its lines, folded for a count
+// or a tick group, and then its tick, its field, or why this reader cannot
+// confirm it.
+function Block({ b, acks, agent, onTick, onType }: { b: ConfirmBlock; acks: Acks; agent: string | null; onTick: (on: boolean) => void; onType: (text: string) => void }) {
+  const tick = <input type="checkbox" checked={!!acks.ticked[b.id]} onChange={(e) => onTick(e.target.checked)} className={TICK} />;
+  if (b.kind === "tick" && b.lines.length === 1) {
+    return (
+      <label className={cn(BOX, "flex-row gap-2.5 border-border bg-card")} data-block={b.id}>
+        {tick}
+        <span>{b.lines[0].sentence}</span>
+      </label>
     );
   }
+  const agents = loosens(b);
+  const loud = agents || b.lines.some((f) => f.code === REMOVAL_CODE);
+  const does = doesOf(b.lines[0].code, b.lines[0].object);
+  const objects = new Set(b.lines.map((f) => f.object || f.key)).size;
   return (
-    <label className={box} data-ack={f.key} data-need={need || undefined}>
-      <input type="checkbox" checked={!!acks.ticked[f.key]} onChange={(e) => onTick(e.target.checked)} className="mt-1 size-4 shrink-0 accent-primary" />
-      <span>{f.sentence}</span>
-    </label>
+    <div className={cn(BOX, loud ? "border-danger/40 bg-danger-bg" : "border-border bg-card")} data-block={b.id} data-loud={loud || undefined}>
+      <p className={cn("m-0 font-semibold", agents ? "text-danger" : "text-foreground")}>{agents ? AGENT_LOOSENS : blockTitle(does, objects)}</p>
+      {agents && <p className="m-0">{agentWrote(agent)}</p>}
+      {b.kind === "name" ? (
+        b.lines.map((f) => <p key={f.key} className="m-0">{f.sentence}</p>)
+      ) : (
+        <details>
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">{showLines(does, objects)}</summary>
+          <ul className="mt-1.5 mb-0 flex list-disc flex-col gap-1 pl-5">{b.lines.map((f) => <li key={f.key}>{f.sentence}</li>)}</ul>
+        </details>
+      )}
+      {b.blocked ? (
+        <p className="m-0 text-muted-foreground" data-blocked>{BLOCKED}</p>
+      ) : b.kind === "tick" ? (
+        <label className="flex items-start gap-2.5">{tick}<span>{readLines(b.lines.length)}</span></label>
+      ) : (
+        <Typed b={b} acks={acks} verb={agents ? ACCEPT : CONFIRM} onType={onType} />
+      )}
+    </div>
   );
 }
 
 function Body({ draft, verdict, onOpenChange, onPublished, onVerdict, onRefused, title, warnings, quiet }: Omit<DraftPublishProps, "open">) {
-  const [acks, setAcks] = React.useState<Acks>({ ticked: {}, typed: {} });
-  const [tried, setTried] = React.useState(false);
+  const [acks, setAcks] = React.useState<Acks>(NO_ACKS);
+  // A new verdict, such as the one a 409 carries, can add a line to a
+  // block the person already confirmed, so every block starts again.
+  const [digest, setDigest] = React.useState(verdict.risk_digest);
+  if (digest !== verdict.risk_digest) {
+    setDigest(verdict.risk_digest);
+    setAcks(NO_ACKS);
+  }
   const [busy, setBusy] = React.useState(false);
   const [refusal, setRefusal] = React.useState<string | null>(null);
-  const linesRef = React.useRef<HTMLDivElement>(null);
-  const risks = verdict.risks || [];
-  const missing = firstMissing(risks, acks);
+  const hint = React.useId();
+  const blocks = confirmBlocks(verdict.risks || []);
+  const missing = firstMissing(blocks, acks);
+  const blocked = blocks.some((b) => b.blocked);
   const story = gainStory(verdict.gains);
   // Nobody gains is a claim about every row, so it is left out for a reader
   // the server hid rows from.
-  const lead = goLive(changeCounts(draft.items)) + (story.nobodyHolds.length && !story.gain.length && !gainsHidden(verdict) ? " " + NOBODY_UNTIL : "");
-  // A line typed wrong says so on itself, so the general sentence is for a
-  // line left empty or unticked.
-  const leftEmpty = risks.some((f) => !acknowledged(f, acks) && !typedWrongly(f, acks));
+  const nobody = story.nobodyHolds.length && !story.gain.length && !gainsHidden(verdict) ? " " + NOBODY_UNTIL : "";
+  const lead = (blocks.length ? publishLead(blocks.flatMap((b) => b.lines)) : goLive(changeCounts(draft.items))) + nobody;
 
   const publish = async () => {
-    if (busy) return;
-    if (missing) {
-      setTried(true);
-      const input = linesRef.current?.querySelector('[data-ack="' + missing + '"] input') as HTMLInputElement | null;
-      input?.focus();
-      return;
-    }
+    if (busy || missing) return;
     setBusy(true);
     setRefusal(null);
     try {
@@ -154,7 +221,7 @@ function Body({ draft, verdict, onOpenChange, onPublished, onVerdict, onRefused,
     }
   };
 
-  const agent = sponsoredAgent(draft);
+  const agent = proposerAgent(draft);
   return (
     <>
       <DialogHeader>
@@ -164,37 +231,37 @@ function Body({ draft, verdict, onOpenChange, onPublished, onVerdict, onRefused,
 
       {warnings && (verdict.warnings || []).length > 0 && (
         <div className="flex flex-col gap-1.5" data-warnings>
-          <p className="m-0 text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground">{GROUP.warning}</p>
+          <p className="m-0 text-[13px] font-semibold text-muted-foreground">{GROUP.warning}</p>
           {verdict.warnings.map((f) => <p key={f.key} className="m-0 border-l-[3px] border-warn bg-card px-3 py-2 text-sm leading-relaxed text-text-2">{f.sentence}</p>)}
         </div>
       )}
 
-      {risks.length > 0 && (
-        <div ref={linesRef} className="flex flex-col gap-2" data-acks>
-          {risks.map((f) => (
-            <AckLine
-              key={f.key}
-              f={f}
+      {blocks.length > 0 && (
+        <div className="flex flex-col gap-2" data-blocks>
+          {blocks.map((b) => (
+            <Block
+              key={b.id}
+              b={b}
               acks={acks}
-              need={tried && !acknowledged(f, acks)}
-              onTick={(on) => setAcks((a) => ({ ...a, ticked: { ...a.ticked, [f.key]: on } }))}
-              onType={(text) => setAcks((a) => ({ ...a, typed: { ...a.typed, [f.key]: text } }))}
+              agent={agent}
+              onTick={(on) => setAcks((a) => ({ ...a, ticked: { ...a.ticked, [b.id]: on } }))}
+              onType={(text) => setAcks((a) => ({ ...a, typed: { ...a.typed, [b.id]: text } }))}
             />
           ))}
         </div>
       )}
-      {tried && missing && leftEmpty && <p className="m-0 text-sm text-danger" data-ack-missing>{ACK_MISSING}</p>}
 
       <p className="flex items-start gap-2 border-t border-border pt-3 text-sm leading-relaxed text-text-2" data-sign>
-        <span>{signLine(agent)}</span>
+        <span>{signLine(sponsoredAgent(draft), blocks.some((b) => loosens(b) && !b.blocked), blocks.length > 0)}</span>
         <HelpTip label={SIGN_LABEL} text={SIGN_HELP} className="mt-0.5" />
       </p>
 
       {refusal && <RefusedError subject={PUBLISH} heading={NOT_PUBLISHED} message={refusal} />}
+      {missing && !blocked && <p id={hint} className="m-0 text-sm text-muted-foreground" data-ack-missing>{ACK_MISSING}</p>}
 
       <DialogFooter>
         <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy} className={FOCUS_RING} data-cancel>{CANCEL}</Button>
-        <Button onClick={() => void publish()} disabled={busy} data-publish>{busy && <Loader2Icon className="animate-spin" />}{PUBLISH}</Button>
+        <Button onClick={() => void publish()} disabled={busy || !!missing} aria-describedby={missing && !blocked ? hint : undefined} data-publish>{busy && <Loader2Icon className="animate-spin" />}{PUBLISH}</Button>
       </DialogFooter>
     </>
   );
@@ -204,7 +271,7 @@ export function DraftPublish({ open, ...rest }: DraftPublishProps) {
   return (
     <Dialog open={open} onOpenChange={rest.onOpenChange}>
       <DialogContent
-        className="max-h-[90vh] overflow-y-auto sm:max-w-[560px]"
+        className="max-h-[90vh] overflow-y-auto sm:max-w-[620px]"
         data-draft-publish={rest.draft.id}
         onOpenAutoFocus={(e) => {
           e.preventDefault();

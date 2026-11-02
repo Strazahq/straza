@@ -28,7 +28,7 @@ export const FILTERS: { key: Filter; label: string }[] = [
 ];
 export const SEARCH_REQUESTS = "Search who asked, calls, rules";
 export const REQUEST_COLUMN = { asked: "Asked", who: "Who asked", call: "Call", decides: "Who decides", state: "State" };
-export const DECIDES_HELP = "The rule that held the call names who decides. An agent's call goes to its sponsor, the accountable person the identity manager names on it. A person's own agent asks that person, on their enrolled phone or browser. A person who has a sponsor is decided by that sponsor. An approver role is a role of the approver kind, and whoever holds it and answers first decides. When a rule names both, a person's own call goes to the role alone. Being an admin adds nothing; the console, the CLI and the phone decide the same record under the same rule.";
+export const DECIDES_HELP = "The rule that held the call names who decides. An agent's call goes to its sponsor, the accountable person the identity manager names on it. A person's own agent asks that person, on their enrolled phone or browser. A person who has a sponsor is decided by that sponsor. An approver role is a role of the approver kind, and whoever holds it and answers first decides. When a rule names both, a person's own call goes to the role alone. Being an admin adds nothing. The console, the self-service page and the phone decide the same record under the same rule.";
 export const YOURS = "yours";
 // The seat's own request on a lane that carries no device signature: the
 // row says so and links the page that signs, the dialog adds where to go.
@@ -255,11 +255,13 @@ export type Verdict = "approve" | "deny";
 export const decideTitle = (v: Verdict, r: ApprovalRow) => (v === "approve" ? "Approve " : "Deny ") + callOf(r.summary).call + " for " + (r.username || r.user) + "?";
 export function decideBody(v: Verdict, r: ApprovalRow): string {
   if (v === "deny") return "The call is denied and the agent is told who denied it.";
-  if (kindOf(r) === "ticket") return "The next " + callOf(r.summary).call + " call from this session within the grant window runs, once.";
+  if (kindOf(r) === "ticket") return "The next " + callOf(r.summary).call + " call by " + (r.username || r.user) + ", in any of their sessions, within the grant window runs, once.";
   return "The call runs now, once, and the agent's session gets the answer.";
 }
 export function decideHelp(v: Verdict, r: ApprovalRow): string {
-  if (v === "deny") return "A denied request stays denied for this call in this session until its window closes. The audit chain records who denied it and the reason.";
+  if (v === "deny") return kindOf(r) === "ticket"
+    ? "A denied ticket keeps the same call from " + (r.username || r.user) + " refused in every session until " + absTime(r.expiresAt) + ", and no new request opens for it. The audit chain records who denied it and the reason."
+    : "A denied hold refuses this one call, and the same call later raises a new request. The audit chain records who denied it and the reason.";
   if (kindOf(r) === "ticket") return "A ticket is used by the first matching call inside the grant window and then it is spent. The audit chain records the approval and the use as two records.";
   return "Approving a hold releases this one call. The same call later raises a new request.";
 }
@@ -314,10 +316,10 @@ export const REVOKE_DEVICE = "Revoke device";
 export const revokeName = (name: string) => "Revoke " + name;
 export const revokeTitle = (name: string) => "Revoke " + name + "?";
 export const revokeBody = (person: string) => person + " can no longer approve from it. The device deletes its key the next time it contacts Straza.";
-export const REVOKE_HELP = "A phone enrolls again from a new QR code on this page. A browser enrolls again from the self-service page. Other devices of the same person are untouched.";
+export const REVOKE_HELP = "The person enrolls the device again on their own self-service page. Other devices of the same person are untouched.";
 export const revokedToast = (person: string, name: string) => "Revoked. " + person + " can no longer approve from " + name + ".";
 export const DEVICES_EMPTY_TITLE = "No approver device is enrolled.";
-export const DEVICES_EMPTY_BODY = "Add a phone from the button above. A person can also enable approvals in their own browser on the self-service page.";
+export const DEVICES_EMPTY_BODY = "Add your own phone from the button above. Each person adds their own phone or browser on the self-service page.";
 export const DEVICES_LEGEND = "A person approves from a phone with the Straza approver app or from their own browser. Only the person's enrolled devices sign their decisions; a decision from the console is signed by the session.";
 export const deviceName = (d: Pick<ApproverDeviceRow, "name" | "id">) => d.name || shortID(d.id);
 // The strip above the table: every chip is a count and a filter.
@@ -340,9 +342,10 @@ export const DEVICES_PAGE = 50;
 // ---- the enroll sheet ----
 
 export const ADD_PHONE_SUB = "A one-time QR code the Straza approver app scans. The phone then approves the requests routed to its owner.";
-export const PERSON_LABEL = "Person";
-export const PERSON_HINT = "A person, never an agent. Agents cannot approve.";
-export const agentPicked = (name: string) => name + " is an agent and cannot approve. Pick a person.";
+export const FOR_OTHERS_TITLE = "For someone else";
+export const FOR_OTHERS_LINE = "This sheet adds your own phone only, and no admin screen adds one for someone else. Give the person the role straza-enroll-mobile in your identity manager or under Roles, then they sign in to the self-service page below and choose Add a phone.";
+export const NO_ENROLL_ROLE = "You do not hold the role straza-enroll-mobile, so you cannot add a phone of your own. Your identity manager assigns it.";
+export const SUBJECT_SELF = "Your enrollment roles";
 export const CREATE_QR = "Create the QR code";
 export const CREATE_ANOTHER = "Create another";
 export const SCAN_TITLE = "Scan with the Straza approver app";
@@ -363,7 +366,8 @@ export const PLAINTEXT = "plain HTTP";
 export const plaintextLine = (hosts: string[]) => hosts.join(", ") + " carries the one-time code and every approval in the clear. Fine for a local eval; give the approver address TLS before a real phone enrolls.";
 export const TRANSPORT_UNKNOWN = "transport unknown";
 export const TRANSPORT_UNKNOWN_LINE = "No usable server address came back, so the trust posture cannot be stated.";
-export const QR_TOO_BIG = "This code is too large to draw. Use strazactl approvals enroll-token instead.";
+export const QR_TOO_BIG = "This code is too large to draw. In the approver app, choose Enter the code manually and paste the enrollment text below.";
+export const ENROLL_TEXT_TITLE = "Enrollment text";
 export const MINT_VERB = "Create the QR code";
 export const QR_LABEL = "Enrollment QR code";
 // trustPosture classifies the transport the phone will use, from the
@@ -405,7 +409,7 @@ export const targetsCount = (n: number) => (n === 1 ? "1 target." : n + " target
 export const DELIVERED = "delivered";
 export const NO_TARGETS = "No target. Nothing on this channel can receive a request.";
 export const NO_TARGETS_PUSH = "No target. No enrolled device has a push route, so Straza cannot send a request to any of them.";
-export const CHANNELS_FOOT = "Which channels announce a rule's requests is set on the rule (approve.notify). Deciding always works here, on the CLI and on the phone, whatever announced it.";
+export const CHANNELS_FOOT = "Which channels announce a rule's requests is set on the rule (approve.notify). Deciding always works here, on the self-service page and on the phone, whatever announced it.";
 
 // ---- the enroll sheet, continued ----
 
@@ -439,6 +443,6 @@ export const testName = (name: string) => SEND_TEST + " on " + name;
 
 // ---- the self-service page ----
 
-// selfPhoneLine is the person line of Add a phone on the self-service page,
-// where the person is the one signed in and nobody is picked.
+// selfPhoneLine is the person line of Add a phone, on the console and the
+// self-service page alike, where the person is the one signed in.
 export const selfPhoneLine = (username: string) => "For you, " + username + ". The phone approves the requests routed to you.";

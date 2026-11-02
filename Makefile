@@ -39,8 +39,17 @@ test:
 	CGO_ENABLED=1 go test -race -timeout $(TEST_TIMEOUT) ./...
 	CGO_ENABLED=0 go test -timeout $(TEST_TIMEOUT) ./...
 
+# The second and third lines compile the client's Windows and macOS code,
+# which no Linux pass builds, so a change that breaks either build fails here.
 vet:
 	go vet ./...
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./cmd/straza/... ./internal/agentguard/...
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go vet ./cmd/straza/... ./internal/agentguard/...
+
+# GOLANGCI_LINT_VERSION is the one linter version for make lint, the commit
+# gate and CI, because a newer release adds checks and the three would
+# disagree. Move all three together.
+GOLANGCI_LINT_VERSION := 2.15.0
 
 # GOLANGCI_LINT_VERSION is the one linter version for make lint, the commit
 # gate and CI, because a newer release adds checks and the three would
@@ -58,7 +67,7 @@ lint:
 # the count of non-test Go source files over 600 lines may only go DOWN. Lower
 # FILE_LENGTH_MAX when a split lands; never raise it. `make check` and CI
 # share this one number.
-FILE_LENGTH_MAX ?= 7
+FILE_LENGTH_MAX ?= 6
 
 LENGTHS_FIND := find . -name '*.go' -not -name '*_test.go' -not -path './.git/*' -not -path './build/*' -not -path './.tools/*' -not -path './.claude/*' -print0 | xargs -0 wc -l | awk '$$1>600 && $$2!="total"'
 
@@ -155,6 +164,16 @@ security:
 	@govulncheck ./... > $(SECURITY_OUT)/govulncheck.txt 2>&1; rc=$$?; \
 	  cat $(SECURITY_OUT)/govulncheck.txt; \
 	  [ $$rc -eq 0 ] || { echo "make security: govulncheck FAILED" >&2; exit $$rc; }
+	@echo ""
+	@echo "== govulncheck for windows/amd64: the straza client's Windows-only code, which the pass above never loads =="
+	@GOOS=windows GOARCH=amd64 govulncheck ./cmd/straza/... > $(SECURITY_OUT)/govulncheck-windows.txt 2>&1; rc=$$?; \
+	  cat $(SECURITY_OUT)/govulncheck-windows.txt; \
+	  [ $$rc -eq 0 ] || { echo "make security: govulncheck for windows/amd64 FAILED" >&2; exit $$rc; }
+	@echo ""
+	@echo "== govulncheck for darwin/arm64: the straza client's macOS-only code, which the passes above never load =="
+	@GOOS=darwin GOARCH=arm64 govulncheck ./cmd/straza/... > $(SECURITY_OUT)/govulncheck-darwin.txt 2>&1; rc=$$?; \
+	  cat $(SECURITY_OUT)/govulncheck-darwin.txt; \
+	  [ $$rc -eq 0 ] || { echo "make security: govulncheck for darwin/arm64 FAILED" >&2; exit $$rc; }
 	@echo ""
 	@echo "== osv-scanner: every dependency manifest/lockfile in the tree (the non-Go"
 	@echo "   surface govulncheck structurally cannot see) =="
@@ -292,11 +311,23 @@ harness-matrix:
 # e2e-matrix: the spec-authored journey corpus against binaries built from
 # the tree: a real strazad, the real straza hook on every dialect, the
 # gateway, the admin and SCIM APIs and the audit chain (test/e2e-matrix/
-# README.md). Loopback only, no model, no docker. STRAZA_E2E_SCENARIOS
-# selects a comma-separated subset by id. The report lands in
-# test/e2e-matrix/.work/report.md.
+# README.md). Loopback only, no model. STRAZA_E2E_SCENARIOS selects a
+# comma-separated subset by id. The report lands in
+# test/e2e-matrix/.work/report.md. On a machine that runs the Straza system
+# service every straza ignores STRAZA_HOME and the lane would reach that
+# service, so there the same test runs in a Go container with no network.
+E2E_TEST := go test -count=1 -timeout 45m -run TestJourneys -v ./test/e2e-matrix
+E2E_IMAGE ?= mirror.gcr.io/library/golang:$(patsubst go%,%,$(shell go env GOVERSION))-bookworm
 e2e-matrix:
-	STRAZA_E2E_MATRIX=1 go test -count=1 -timeout 25m -run TestJourneys -v ./test/e2e-matrix
+	@if [ -d /run/straza-service ]; then \
+		echo "e2e-matrix: this machine runs the Straza system service, so the journeys run in $(E2E_IMAGE)"; \
+		docker run --rm --network none --user "$$(id -u):$$(id -g)" -e HOME=/tmp/home -e GOCACHE=/tmp/gocache \
+			-e GOMODCACHE=/go/pkg/mod -e GOTOOLCHAIN=local -e STRAZA_E2E_MATRIX=1 \
+			-e STRAZA_E2E_SCENARIOS="$$STRAZA_E2E_SCENARIOS" -v "$(CURDIR)":/src \
+			-v "$$(go env GOMODCACHE)":/go/pkg/mod:ro -w /src $(E2E_IMAGE) $(E2E_TEST); \
+	else \
+		STRAZA_E2E_MATRIX=1 $(E2E_TEST); \
+	fi
 
 tidy:
 	go mod tidy

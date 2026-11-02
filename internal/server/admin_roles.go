@@ -185,11 +185,23 @@ func roleExistsMsg(name string) string {
 // handleRolesCreate is POST /v1/admin/roles: the role the body names,
 // published as a one-item draft. A global role takes the kind
 // sent, business when none is, and a role a server owns is an application
-// role with its one access row on that server.
+// role with its one access row on that server, covering the objects the
+// body's covers line names.
 func (a *App) handleRolesCreate(w http.ResponseWriter, r *http.Request) {
-	var req roleCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+	var req struct {
+		roleCreateRequest
+		Covers *drafts.Scope `json:"covers"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if refusedCovers(w, err) {
+		return
+	}
+	switch {
+	case err != nil || req.Name == "":
 		apiError(w, http.StatusBadRequest, "name is required")
+		return
+	case req.Covers != nil && req.Server == "":
+		apiError(w, http.StatusBadRequest, "covers needs the server the role is owned by, because a covers line belongs to one server's access row. Add server, or drop covers.")
 		return
 	}
 	doc := drafts.RoleDoc{APIVersion: drafts.RoleAPIVersion, Kind: string(drafts.KindRole), Metadata: drafts.RoleDocMeta{Name: req.Name},
@@ -197,13 +209,13 @@ func (a *App) handleRolesCreate(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case req.Server != "":
 		doc.Spec.Kind, doc.Spec.Server = drafts.RoleKindApplication, req.Server
-		doc.Spec.Bindings = []drafts.RoleBinding{{App: req.Server, Tools: onceEach(req.Tools)}}
+		doc.Spec.Bindings = []drafts.RoleBinding{{App: req.Server, Tools: onceEach(req.Tools), Covers: req.Covers}}
 	case req.Kind == "":
 		doc.Spec.Kind = drafts.RoleKindBusiness
 	}
 	res, ok := a.publishOne(w, r, directRoute{
 		prepare: func(live drafts.World, _ drafts.Principal) (directChange, bool) {
-			spec := drafts.RoleSpec{Name: req.Name, Kind: req.Kind, Server: req.Server, Tools: req.Tools}
+			spec := drafts.RoleSpec{Name: req.Name, Kind: req.Kind, Server: req.Server, Tools: req.Tools, Covers: req.Covers}
 			if ref := drafts.RoleCreateRefusal(live, draftStanding(standingFrom(r.Context())), spec); ref != nil {
 				refuse(w, ref)
 				return directChange{}, false

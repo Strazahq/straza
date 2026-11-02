@@ -24,7 +24,8 @@ Recording is a policy decision about whose conversations are kept. A policy set 
 
 
 - The `local-tools` allow rule from [Your first deny]({{< relref "guides/write-policy/first-deny.md" >}}) live for your role.
-- An administrator's login, and an enrolled machine held by a user of the role, here `dana`.
+- An administrator's console sign-in, or an admin API token for `strazactl` in `STRAZA_API_TOKEN` minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows.
+- An enrolled machine held by a user of the role, here `dana`.
 
 ## Turn recording on
 
@@ -99,7 +100,7 @@ printf %s '{"hook_event_name":"SessionStart","session_id":"a7d5f2b4-6ea2-4b8b-9f
 The context for the agent and the one-line `systemMessage` for the person both end with the notice. Under `mode: verbatim` both say `word for word` in place of `with secrets masked`.
 
 
-Claude Code sends the prompt text in its `UserPromptSubmit` event. The hook records it, hashes the full original, masks it, caps it at 64 KiB and spools it to the audit pipeline. Because the event is observational, the hook answers with silence and exit code 0.
+Claude Code sends the prompt text in its `UserPromptSubmit` event. The hook hands it to `straza service`, which hashes the full original, masks it, caps it at 64 KiB and spools it to the audit pipeline. Because the event is observational, the hook answers with silence and exit code 0.
 
 {{< command terminal="dana's machine" purpose="client" >}}
 ```sh
@@ -110,7 +111,7 @@ printf %s '{"hook_event_name":"UserPromptSubmit","session_id":"a7d5f2b4-6ea2-4b8
 {{< see >}}`exit 0`{{< /see >}}
 
 
-Once the prompt is spooled, the hook starts a detached background upload, the hidden `straza drain` command, and exits at once. The upload is skipped when the binary is not named `straza` or when `STRAZA_NO_DRAIN_SPAWN` is set, and the record then rides the next decision or session start. Replies are recorded differently: when a turn ends, the hook reads what the harness appended to its own transcript file since the previous read.
+Once the prompt is spooled, the service starts an upload at once, and it also uploads every 15 seconds, so the hook exits without waiting. Replies are recorded differently: when a turn ends, the hook reads what the harness appended to its own transcript file since the previous read and hands that text to the service.
 
 ## Read it back
 

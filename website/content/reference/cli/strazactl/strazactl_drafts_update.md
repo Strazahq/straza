@@ -2,7 +2,7 @@
 title: strazactl drafts update
 description: Replace an open draft's documents with a new revision and print its verdict
 pagetype: reference
-weight: 59
+weight: 57
 draft: false
 sources:
   - cmd/strazactl
@@ -32,10 +32,10 @@ strazactl drafts update <id> -f <path>... [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
-* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store, review and publish drafts of changes to MCP servers, roles, access rows and policy sets
+* [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets
 

@@ -355,8 +355,8 @@ func checkE2E(recordsPath, stderrPath, evidencePath string) (errs []string) {
 		errs = append(errs, fmt.Sprintf(
 			"no server-side codex session for %s (sessions=%v): SessionStart never checked in", ev.User, ev.Sessions))
 	}
-	// session.end has no audit CE type of its own (it drains the client
-	// spool and returns), so "the turn's audit reached the server" is
+	// session.end has no audit CE type of its own (the service drains its
+	// spool on its own), so "the turn's audit reached the server" is
 	// asserted on the rows a capture-active completing turn MUST produce:
 	// the captured prompt AND the captured reply. The reply row is the live
 	// pin for codex root reply capture (transcriptDelta over the rollout:

@@ -6,21 +6,18 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/strazahq/straza/internal/sameorigin"
 )
 
 // TestClientRedirectKeepsCredentialsOnOrigin pins strazactl's redirect rule:
-// a request that carries a credential, the admin or login token in the
-// Authorization header or a session, device or ID token in the check-in
-// body, follows a redirect only within its scheme, host and port. Every
-// other redirect is refused before anything is sent there, with a sentence
-// that names the redirect and does not call strazad unreachable.
+// a request that carries a credential, the admin API token in the
+// Authorization header or a pasted connection token in the body, follows a
+// redirect only within its scheme, host and port. Every other
+// redirect is refused before anything is sent there, with a sentence that
+// names the redirect and does not call strazad unreachable.
 func TestClientRedirectKeepsCredentialsOnOrigin(t *testing.T) {
 	const secret = "secret-credential-9c1e"
 	lanes := []struct {
@@ -30,22 +27,12 @@ func TestClientRedirectKeepsCredentialsOnOrigin(t *testing.T) {
 	}{
 		{"admin call, token in the header", []int{http.StatusFound},
 			func(ctx context.Context, c *Client) error {
-				_, _, err := c.doRaw(ctx, http.MethodGet, "/v1/admin/users", secret, nil)
+				_, _, err := c.doRaw(ctx, http.MethodGet, "/v1/admin/users", nil)
 				return err
 			}},
-		{"session refresh, session token in the body", []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect},
+		{"pasted connection token in the body", []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect},
 			func(ctx context.Context, c *Client) error {
-				_, err := c.checkin(ctx, map[string]any{"session_token": secret})
-				return err
-			}},
-		{"device check-in, device token in the body", []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect},
-			func(ctx context.Context, c *Client) error {
-				_, err := c.checkin(ctx, map[string]any{"device_token": secret})
-				return err
-			}},
-		{"login check-in, ID token in the body", []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect},
-			func(ctx context.Context, c *Client) error {
-				_, err := c.checkin(ctx, map[string]any{"id_token": secret})
+				_, _, err := c.doRaw(ctx, http.MethodPost, "/v1/connect/github", map[string]string{"token": secret})
 				return err
 			}},
 	}
@@ -97,7 +84,7 @@ func TestClientRedirectKeepsCredentialsOnOrigin(t *testing.T) {
 					target = tc.target(origin, other)
 
 					c := NewClient(origin.URL)
-					c.CredsPath = filepath.Join(t.TempDir(), "credentials.json")
+					c.APIToken = secret
 					if tc.tls {
 						c.HTTP.Transport = origin.Client().Transport
 					}
@@ -126,65 +113,5 @@ func TestClientRedirectKeepsCredentialsOnOrigin(t *testing.T) {
 				})
 			}
 		}
-	}
-}
-
-// TestReauthKeepsTheRedirectSentence pins that a refused redirect on the
-// session refresh or on the device check-in reaches the person as the
-// redirect sentence alone, because a new login would meet the same
-// redirect. A refused check-in keeps the advice to log in (positive
-// control).
-func TestReauthKeepsTheRedirectSentence(t *testing.T) {
-	other := httptest.NewServer(http.NotFoundHandler())
-	defer other.Close()
-	const redirect, refuse = "redirect", "refuse"
-	cases := []struct {
-		name            string
-		refresh, device string
-		deviceCred      string
-		want            string
-	}{
-		{"refresh redirects, no device credential", redirect, "", "", ""},
-		{"refresh refused, device check-in redirects", refuse, redirect, "dev-cred", ""},
-		{"refresh and device check-in redirect", redirect, redirect, "dev-cred", ""},
-		{"refresh refused, no device credential", refuse, "", "",
-			"session refresh failed (run `strazactl login`): checkin refused: session expired"},
-		{"refresh and device check-in refused", refuse, refuse, "dev-cred",
-			"session re-establish failed (run `strazactl login`): checkin refused: session expired"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				body, _ := io.ReadAll(r.Body)
-				answer := tc.refresh
-				if strings.Contains(string(body), `"device_token"`) {
-					answer = tc.device
-				}
-				switch {
-				case r.URL.Path != "/v1/checkin":
-					w.WriteHeader(http.StatusTeapot)
-				case answer == redirect:
-					http.Redirect(w, r, other.URL+"/v1/checkin", http.StatusTemporaryRedirect)
-				default:
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusUnauthorized)
-					_, _ = w.Write([]byte(`{"error":"session expired"}`))
-				}
-			}))
-			defer origin.Close()
-			c := NewClient(origin.URL)
-			c.CredsPath = filepath.Join(t.TempDir(), "credentials.json")
-			if err := c.saveCreds(credentials{Server: origin.URL, SessionToken: "stale", DeviceToken: tc.deviceCred}); err != nil {
-				t.Fatal(err)
-			}
-			want := tc.want
-			if want == "" {
-				want = (&sameorigin.RedirectError{From: origin.URL, To: other.URL}).Error()
-			}
-			err := c.Do(context.Background(), http.MethodGet, "/v1/admin/users", nil, nil)
-			if err == nil || err.Error() != want {
-				t.Fatalf("err\n got %v\nwant %s", err, want)
-			}
-		})
 	}
 }

@@ -31,11 +31,10 @@ func TestAdminRoutesRefuseCodingHarnessSessions(t *testing.T) {
 		says   string
 	}{
 		{"login token", login, http.StatusOK, ""},
-		{"strazactl session", session("strazactl"), http.StatusOK, ""},
 		{"console session", session("console"), http.StatusOK, ""},
 		{"self-service session", session("self-service"), http.StatusOK, ""},
 		{"claude-code session", session("claude-code"), http.StatusForbidden, `coding harness "claude-code"`},
-		{"codex session", session("codex"), http.StatusForbidden, "Run strazactl from your own terminal"},
+		{"codex session", session("codex"), http.StatusForbidden, "run strazactl with STRAZA_API_TOKEN set to an admin API token"},
 	}
 	// One route per guard: the users list is behind requireAdmin, the apps
 	// list behind requireServerAdmin.

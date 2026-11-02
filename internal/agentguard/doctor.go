@@ -2,16 +2,18 @@ package agentguard
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/agentguard/spool"
-	"github.com/strazahq/straza/internal/policy"
 	"github.com/strazahq/straza/internal/version"
 )
 
@@ -30,151 +32,215 @@ const (
 	checkFail = "fail"
 )
 
-// Doctor runs every diagnostic against local state and the platform. It
-// never mutates anything and always returns the full list: a failed early
-// check still lets later ones report, because an operator debugging a deny
-// wants the whole picture, not the first error.
-func Doctor(ctx context.Context, store *Store) []Check {
-	var out []Check
-
-	cfg, err := store.LoadConfig()
+// Doctor runs every diagnostic against the Straza background service, the
+// platform and this machine's own files. It never mutates anything and always
+// returns the full list: a failed early check still lets later ones report,
+// because an operator debugging a deny wants the whole picture, not the first
+// error.
+func Doctor(ctx context.Context, store *Store, svc *localapi.Client) []Check {
+	st, err := svc.Status(ctx)
 	if err != nil {
-		out = append(out, Check{"enrollment", checkFail,
-			"no straza state found",
-			"run `straza enroll --server <strazad url>`. The local checks below still ran; identity, server, session, snapshot and killswitch checks resume once enrolled"})
-		// Un-enrolled is exactly the box whose local findings need surfacing:
-		// a wiped config with live wiring fails every hook, and hiding the
-		// wiring, binary, and audit checks behind this return would keep
-		// that box dark. See localChecks' contract.
-		local := localChecks(store, Session{}, false)
-		for i := range local {
-			// Un-enrolled, a spool backlog cannot upload at all: pointing at
-			// "the server check above" (which did not run) would send the
-			// operator past the actual blocker. Fail-soft: if the wording
-			// drifted, the generic hint stands.
-			if local[i].Name == "audit-spool" {
-				local[i].Hint = strings.Replace(local[i].Hint,
-					"a persistent backlog means uploads are failing. Check the server check above",
-					"nothing can upload until this machine is enrolled", 1)
-			}
-		}
-		return append(out, local...)
+		// No service is exactly the box whose local findings need surfacing:
+		// live wiring with nothing behind it fails every hook, so the wiring,
+		// binary and error log checks never hide behind this one.
+		return append([]Check{serviceDownCheck(err)}, localChecks(store, nil)...)
 	}
-	out = append(out, Check{"enrollment", checkOK,
-		fmt.Sprintf("server %s, %d snapshot key(s) pinned, straza %s", cfg.ServerURL, len(cfg.SnapshotKeys), version.Version), ""})
-
-	// Identity + the device credential. credentialDead records a verdict
-	// the session and kill-switch lines below must not contradict: their
-	// automatic-refresh hints assume a device credential that can still
-	// start a session.
-	credentialDead := false
-	id, err := store.LoadIdentity()
-	switch {
-	case err != nil:
-		credentialDead = true
-		out = append(out, Check{"identity", checkFail, "no identity persisted",
-			"run `straza enroll` again"})
-	case id.Headless != "":
-		// Deviceless by design: the local credential (NHI key or IdP
-		// client secret) mints each session's token, so no device row and no
-		// device credential exist to check.
-		out = append(out, Check{"identity", checkOK,
-			fmt.Sprintf("%s: headless AI agent enrollment (%s lane), sessions are deviceless", id.Username, id.Headless), ""})
-	case id.DeviceToken == "":
-		out = append(out, Check{"identity", checkWarn,
-			fmt.Sprintf("%s (device %s): no device credential (enrolled before device credentials existed)", id.Username, id.DeviceID),
-			"re-run `straza enroll`: new sessions currently depend on the short-lived login token"})
-	default:
-		exp, expErr := tokenExpiry(id.DeviceToken)
-		switch {
-		case expErr != nil:
-			out = append(out, Check{"identity", checkWarn,
-				fmt.Sprintf("%s (device %s): device credential unreadable", id.Username, id.DeviceID),
-				"re-run `straza enroll`"})
-		case time.Now().After(exp):
-			credentialDead = true
-			out = append(out, Check{"identity", checkFail,
-				fmt.Sprintf("%s (device %s): device credential EXPIRED %s", id.Username, id.DeviceID, exp.Format(time.RFC3339)),
-				"run `straza enroll` again"})
-		case time.Until(exp) < 48*time.Hour:
-			out = append(out, Check{"identity", checkWarn,
-				fmt.Sprintf("%s (device %s): device credential expires %s", id.Username, id.DeviceID, exp.Format(time.RFC3339)),
-				"re-enroll soon (`straza enroll`)"})
-		default:
-			out = append(out, Check{"identity", checkOK,
-				fmt.Sprintf("%s (device %s), device credential valid until %s", id.Username, id.DeviceID, exp.Format("2006-01-02")), ""})
-		}
+	out := []Check{{"service", checkOK,
+		fmt.Sprintf("straza service %s answers at %s and keeps keys in %s custody%s", st.Version, svc.Socket(), st.Custody, homeIgnored()), ""}}
+	e := st.Enrollment
+	if e == nil {
+		out = append(out, Check{"enrollment", checkFail, "this machine isn't enrolled for you yet",
+			"run `straza enroll --server <strazad url>` and sign in with your work account. The local checks below still ran; the server, session and killswitch checks resume once enrolled"})
+		return append(out, localChecks(store, nil)...)
 	}
+	out = append(out, enrollmentCheck(*e, time.Now()))
 
 	// Server reachability + clock skew from the response Date header, plus,
 	// when the server advertises a pinned approver surface (/version), the
 	// facts a phone enrollment stands on.
-	srv, approver := serverCheck(ctx, cfg.ServerURL)
+	srv, approver := serverCheck(ctx, e.ServerURL)
 	out = append(out, srv)
 	if approver != nil {
 		out = append(out, approverCheck(ctx, *approver))
 	}
 
-	// Session state.
-	ses, sesErr := store.LoadSession()
-	switch {
-	case sesErr != nil:
-		out = append(out, Check{"session", checkWarn, "no active session",
-			"start a harness session (the SessionStart hook checks in), or pipe a SessionStart payload through `straza hook`"})
-	case time.Now().After(ses.ExpiresAt) && credentialDead:
-		// The re-acquire lane needs the device credential, so promising an
-		// automatic refresh here would send the operator in circles.
-		out = append(out, Check{"session", checkFail,
-			fmt.Sprintf("%s (roles %v, attestation %s): token expired %s ago and cannot refresh", ses.SessionID, ses.Roles, ses.Attestation, time.Since(ses.ExpiresAt).Round(time.Second)),
-			"the automatic refresh needs the device credential the identity check above found dead: run `straza enroll` again, then restart the harness session"})
-	case time.Now().After(ses.ExpiresAt):
-		out = append(out, Check{"session", checkWarn,
-			fmt.Sprintf("%s (roles %v, attestation %s): token expired %s ago", ses.SessionID, ses.Roles, ses.Attestation, time.Since(ses.ExpiresAt).Round(time.Second)),
-			"the next hook call refreshes it automatically; if it stays expired, restart the harness session"})
-	default:
-		out = append(out, Check{"session", checkOK,
-			fmt.Sprintf("%s (roles %v, attestation %s, token valid %s)", ses.SessionID, ses.Roles, ses.Attestation, time.Until(ses.ExpiresAt).Round(time.Second)), ""})
-	}
+	out = append(out, sessionChecks(st.Sessions, time.Now())...)
 
-	// Cached snapshot: signature against pinned keys + age.
-	out = append(out, snapshotCheck(store, cfg, ses, sesErr == nil))
-	if c := policyRefusalCheck(store, cfg, ses, time.Now()); sesErr == nil && c != nil {
-		out = append(out, *c)
-	}
-
-	// Managed wiring CONTENT vs the published artifact:
-	// shape checks live in localChecks; this one needs the server + pinned
-	// keys, so it runs only enrolled.
-	if c := managedContentCheck(ctx, cfg); c != nil {
-		out = append(out, *c)
+	// Managed wiring CONTENT vs the published artifact: shape checks live in
+	// localChecks; this one needs the server and the keys the managed
+	// install pinned, so it runs only enrolled and only on a managed box.
+	if cfg, err := store.LoadConfig(); err == nil {
+		if c := managedContentCheck(ctx, cfg); c != nil {
+			out = append(out, *c)
+		}
 	}
 
 	// Everything that reads only this machine.
-	out = append(out, localChecks(store, ses, sesErr == nil)...)
+	out = append(out, localChecks(store, st.Sessions)...)
 
-	// Kill-switch path: the transport this session's revocation rides, PROBED
-	// rather than printed, and the daemon heartbeat that says someone is
-	// actually subscribed to it (a verified lane nobody holds delivers nothing
-	// sub-second; see heartbeat.go).
-	if sesErr == nil {
-		out = append(out, killswitchCheck(ctx, cfg.ServerURL, ses, srv.Status != checkFail, credentialDead,
-			readDaemonLiveness(store.heartbeatPath(), time.Now())))
+	// The audit spool lives in the service, which uploads it.
+	out = append(out, spoolCheck(st.Spool, time.Now()))
+	if c := droppedAuditCheck(st.Spool, droppedMarkerPath()); c != nil {
+		out = append(out, *c)
+	}
+
+	// Kill-switch path: the push stream the service holds for each session.
+	if c := killswitchCheck(st.Sessions, time.Now(), srv.Status != checkFail); c != nil {
+		out = append(out, *c)
 	}
 	return out
 }
 
+// serviceDownCheck is the first line when the service did not answer: the
+// service's own sentence for a refusal, else what failed and how to start it.
+func serviceDownCheck(err error) Check {
+	var refused *localapi.RefusalError
+	if errors.As(err, &refused) {
+		return Check{"service", checkFail, "the Straza background service refused the status request: " + refused.Msg, ""}
+	}
+	hint := "ask IT to reinstall Straza. On Linux, `systemctl status straza-service` shows why"
+	switch osName() {
+	case "windows":
+		hint = "ask IT to reinstall Straza. " + windowsWhy
+	case "darwin":
+		hint = "ask IT to reinstall Straza. " + macWhy
+	}
+	if _, _, user := localapi.Paths(serviceHome()); user {
+		hint = "start it with `straza service` in a shell that has the same STRAZA_HOME"
+	}
+	if goos := osName(); goos != "linux" && goos != "darwin" && goos != "windows" {
+		hint = "`straza service` runs only on Linux, macOS and Windows in this version of Straza, so this machine cannot hold Straza sessions yet"
+	}
+	return Check{"service", checkFail, err.Error() + homeIgnored(),
+		hint + ". The checks below that read only this machine still ran; the enrollment, server, session and killswitch checks resume once the service answers"}
+}
+
+// homeIgnored says, for the service row, that a set STRAZA_HOME was ignored
+// because this machine has a system service or a managed install.
+func homeIgnored() string {
+	if os.Getenv("STRAZA_HOME") != "" && serviceHome() == "" {
+		return ". STRAZA_HOME is ignored here, because this machine has a system service or a managed install"
+	}
+	return ""
+}
+
+// enrollmentCheck reports the caller's enrollment as the service holds it:
+// who, on which server, with which key, and whether the key is still usable.
+func enrollmentCheck(e localapi.Enrollment, now time.Time) Check {
+	who := e.Username + " (device " + e.DeviceID + ")"
+	if e.Kind == localapi.KindAgent {
+		who = e.Username + " (AI agent, no device)"
+	}
+	detail := fmt.Sprintf("%s at %s, key %s, straza %s", who, e.ServerURL, shortThumb(e.KeyThumbprint), version.Version)
+	switch {
+	case e.MachineChanged:
+		return Check{"enrollment", checkFail, detail + ": this machine's identity changed since it was enrolled, so Straza stopped using its key",
+			"run `straza enroll` to enroll it again"}
+	case now.Before(e.WaitUntil):
+		return Check{"enrollment", checkWarn,
+			detail + ": Straza is waiting for the server to confirm this machine's last check-in until " + e.WaitUntil.Local().Format(time.RFC3339),
+			"new sessions fail until then. Start the session again after that time"}
+	}
+	return Check{"enrollment", checkOK, detail, ""}
+}
+
+// shortThumb shortens a key thumbprint for display.
+func shortThumb(t string) string {
+	if len(t) > 12 {
+		return t[:12]
+	}
+	return t
+}
+
+// sessionChecks reports each live session the service holds for the caller,
+// one row per harness window. A session whose newer policy the server
+// refused to send reports as a policy row, because its hooks deny once the
+// session time held at the refusal runs out.
+func sessionChecks(sessions []localapi.SessionStatus, now time.Time) []Check {
+	if len(sessions) == 0 {
+		return []Check{{"session", checkWarn, "no live session",
+			"start a harness session (its SessionStart hook starts one through the Straza background service), or pipe a SessionStart payload through `straza hook`"}}
+	}
+	var out []Check
+	var idle, idleRevoked int
+	for _, s := range sessions {
+		detail := fmt.Sprintf("%s %s as %s", harnessName(s.Harness), s.SessionID, s.User)
+		switch {
+		case s.Revoked != "" && now.Sub(s.ExpiresAt) > IdleWindowAfter:
+			idleRevoked++
+		case now.Sub(s.ExpiresAt) > IdleWindowAfter:
+			idle++
+		case s.Revoked != "":
+			out = append(out, Check{"session", checkFail, detail + ": revoked (" + s.Revoked + ")",
+				"tool calls in that window stay denied. Start a new session; if that is refused too, your user or this machine is disabled, so contact your administrator"})
+		case s.PolicyRefused != "":
+			out = append(out, Check{"policy", checkFail,
+				detail + ": the server holds a newer policy that straza could not fetch. " + s.PolicyRefused,
+				"fix the cause the reason names; the first fetch that succeeds ends the denial, at the next renewal or session start"})
+		case now.After(s.ExpiresAt):
+			out = append(out, Check{"session", checkWarn,
+				fmt.Sprintf("%s: token expired %s ago", detail, now.Sub(s.ExpiresAt).Round(time.Second)),
+				"the next hook call renews it automatically; if it stays expired, restart the harness session"})
+		default:
+			out = append(out, Check{"session", checkOK,
+				fmt.Sprintf("%s (token valid %s)", detail, s.ExpiresAt.Sub(now).Round(time.Second)), ""})
+		}
+	}
+	switch {
+	case idle == 1:
+		out = append(out, Check{"session", checkOK, "1 window unused for over an hour. It checks in again at its next call", ""})
+	case idle > 1:
+		out = append(out, Check{"session", checkOK,
+			fmt.Sprintf("%d windows unused for over an hour. Each one checks in again at its next call", idle), ""})
+	}
+	revokedHint := "start a new session in that harness; if that is refused too, your user or this machine is disabled, so contact your administrator"
+	switch {
+	case idleRevoked == 1:
+		out = append(out, Check{"session", checkWarn,
+			"1 revoked window unused for over an hour. Its tool calls stay denied until its harness starts a new session", revokedHint})
+	case idleRevoked > 1:
+		out = append(out, Check{"session", checkWarn, fmt.Sprintf("%d revoked windows unused for over an hour. "+
+			"Their tool calls stay denied until their harness starts a new session", idleRevoked), revokedHint})
+	}
+	return out
+}
+
+// IdleWindowAfter is how long past its token's expiry a window keeps a row
+// of its own in doctor and status. The service keeps a window for days, and
+// older ones sit unused, so they share one row.
+const IdleWindowAfter = time.Hour
+
+// harnessName renders a harness as name/version, or the bare name.
+func harnessName(h localapi.Harness) string {
+	if h.Version == "" {
+		return h.Name
+	}
+	return h.Name + "/" + h.Version
+}
+
+// checkedIn returns the label of a live session of the named harness, the
+// outside evidence that its SessionStart hook ran.
+func checkedIn(sessions []localapi.SessionStatus, name string) (string, bool) {
+	for _, s := range sessions {
+		if s.Harness.Name == name {
+			return harnessName(s.Harness), true
+		}
+	}
+	return "", false
+}
+
 // localChecks are the diagnostics that read only this machine: harness hook
 // wiring and the binary it invokes, codex's trust gate and MCP registration,
-// the audit spool, its drop marker, and the client error log.
+// and the client error log.
 //
-// CONTRACT: every check here MUST run, and be truthful, on an un-enrolled
-// box. The wiped-config-live-wiring machine (hooks firing and failing with
-// no config to read) is exactly where these findings matter most,
-// so none of them may hide behind enrollment. None may claim more without it
-// either: ses/haveSession only ever serve as POSITIVE evidence
-// (codexHooksCheck), so Session{}, false degrades to the honest warn, never to
-// a fabricated green. A new check belongs here only if both directions hold.
-func localChecks(store *Store, ses Session, haveSession bool) []Check {
+// CONTRACT: every check here MUST run, and be truthful, with no service and
+// no enrollment. The wiped-state-live-wiring machine (hooks firing and
+// failing with nothing behind them) is exactly where these findings matter
+// most, so none of them may hide behind the service. None may claim more
+// without it either: sessions only ever serve as POSITIVE evidence
+// (codexHooksCheck), so nil degrades to the honest warn, never to a
+// fabricated green. A new check belongs here only if both directions hold.
+func localChecks(store *Store, sessions []localapi.SessionStatus) []Check {
 	var out []Check
 
 	// Harness hook wiring (user-mode and managed paths), then the binary those
@@ -184,10 +250,15 @@ func localChecks(store *Store, ses Session, haveSession bool) []Check {
 	if c := hookBinaryCheck(); c != nil {
 		out = append(out, *c)
 	}
+	// The service ignores a managed config that non-administrators can
+	// change, so only this check tells the admin why.
+	if err := ManagedRootUntrusted(); err != nil {
+		out = append(out, Check{"managed layout", checkFail, err.Error(), ""})
+	}
 
 	// codex's hook lane has a trust gate wiringCheck cannot see, and debris
 	// from the settings.json straza used to write.
-	if c := codexHooksCheck(ses, haveSession); c != nil {
+	if c := codexHooksCheck(sessions); c != nil {
 		out = append(out, *c)
 	}
 
@@ -195,7 +266,7 @@ func localChecks(store *Store, ses Session, haveSession bool) []Check {
 	// wiring file reads perfect: folder-trust safe mode, the hooksConfig kill
 	// switch, the system-settings env redirect (geminitrust.go).
 	if cwd, err := os.Getwd(); err == nil {
-		if c := geminiHooksCheck(ses, haveSession, cwd); c != nil {
+		if c := geminiHooksCheck(sessions, cwd); c != nil {
 			out = append(out, *c)
 		}
 	}
@@ -206,20 +277,13 @@ func localChecks(store *Store, ses Session, haveSession bool) []Check {
 		out = append(out, *c)
 	}
 
-	// Audit spool: where async audit data is right now.
-	out = append(out, spoolCheck(store))
+	// Credential files an older client left in the straza home. Nothing
+	// reads them, but a copied one still works until it is revoked.
+	out = append(out, oldCredentialChecks(store)...)
 
-	// Audit the spool had to DROP: the marker enforceSpoolCap / the oversize
-	// guard write is the only trace those records existed, and doctor is its
-	// only reader (drops happen inside hook-invoked drains, where stderr is
-	// harness-interpreted, so no safe drop-time surface exists).
-	if c := droppedAuditCheck(store); c != nil {
-		out = append(out, *c)
-	}
-
-	// Recent client errors (hook/spool/drain failures the error log recorded).
-	// The same reasoning as the drop marker: failures happen where stderr is
-	// harness-interpreted, so doctor and `straza logs` are the surfaces.
+	// Recent client errors (hook and capture failures the error log
+	// recorded). Failures happen where stderr is harness-interpreted, so
+	// doctor and `straza logs` are the surfaces.
 	if c := clientErrorsCheck(store, time.Now()); c != nil {
 		out = append(out, *c)
 	}
@@ -233,58 +297,21 @@ func localChecks(store *Store, ses Session, haveSession bool) []Check {
 	return out
 }
 
-// snapshotCheck verifies the cached snapshot against the pinned keys and
-// reports its age vs the offline-grace bound.
-func snapshotCheck(store *Store, cfg Config, ses Session, haveSession bool) Check {
-	signed, err := store.LoadSnapshot()
-	if err != nil {
-		return Check{"snapshot", checkWarn, "no cached snapshot",
-			"start a harness session. SessionStart downloads and verifies the active snapshot"}
+// oldCredentialChecks reports each credential file a Straza client before
+// the background service wrote to the user's straza home, one FAIL per
+// file: an agent key or token in it outlives the client that wrote it.
+func oldCredentialChecks(store *Store) []Check {
+	var out []Check
+	for _, name := range []string{"identity.json", "session.json", "nhi-key.json"} {
+		path := store.statePath(name)
+		if _, err := os.Lstat(path); err != nil {
+			continue
+		}
+		out = append(out, Check{"old-credential", checkFail,
+			"this machine still holds a credential file from an older Straza client at " + path,
+			"delete it, and ask your Straza admin to register this agent's new key with `strazactl users nhi-key set` and rotate any client secret it held"})
 	}
-	lookup, err := keyLookup(cfg.SnapshotKeys)
-	if err != nil {
-		return Check{"snapshot", checkFail, err.Error(),
-			"run `straza enroll` again to pin the server's snapshot keys, or on a machine set up with " +
-				"`straza install --managed` ask an administrator to run that install again with `--server <server-url>`, " +
-				"because straza enroll does not change the keys a managed install pinned"}
-	}
-	wantID := ""
-	if haveSession {
-		wantID = ses.SnapshotID
-	}
-	_, snap, err := policy.OpenSnapshot(signed, wantID, lookup)
-	if err != nil {
-		return Check{"snapshot", checkFail, fmt.Sprintf("cached snapshot fails verification: %v", err),
-			"hooks are denying (fail closed). Start a new session of the AI agent, which fetches a fresh snapshot. " +
-				"If this line still fails after that, the server's snapshot keys changed: run `straza enroll` again, or on a machine set up with " +
-				"`straza install --managed` ask an administrator to run that install again with `--server <server-url>`"}
-	}
-	age := time.Since(time.Unix(snap.CreatedUnix, 0)).Round(time.Second)
-	if snap.MaxAgeSecs > 0 && age > time.Duration(snap.MaxAgeSecs)*time.Second {
-		return Check{"snapshot", checkWarn,
-			fmt.Sprintf("verified but stale: compiled %s ago, offline grace is %ds", age, snap.MaxAgeSecs),
-			"if strazad is reachable the next session refreshes it; offline past grace, hooks deny"}
-	}
-	return Check{"snapshot", checkOK, fmt.Sprintf("verified against pinned keys (compiled %s ago)", age), ""}
-}
-
-// policyRefusalCheck reports an outstanding refusal of a newer policy
-// (settlePolicy): its reason and when the hooks start or started to deny
-// with it, the deadline plus the offline grace (policyDenyAt). The cached
-// snapshot still verifies in that state, so the snapshot line alone would
-// read fine. It returns nil when no refusal is outstanding.
-func policyRefusalCheck(store *Store, cfg Config, ses Session, now time.Time) *Check {
-	if ses.PolicyRefused == "" {
-		return nil
-	}
-	from := policyDenyAt(store, cfg, ses)
-	when := "Hooks deny every governed call from " + from.Local().Format(time.RFC3339) + "."
-	if now.After(from) {
-		when = "Hooks have denied every governed call since " + from.Local().Format(time.RFC3339) + "."
-	}
-	return &Check{"policy", checkFail,
-		"the server holds a newer policy that straza could not fetch. " + ses.PolicyRefused + " " + when,
-		"fix the cause the reason names; the first fetch that succeeds ends the denial, at the next renewal or session start"}
+	return out
 }
 
 // codexMCPCheck reports the state of codex's MCP registration: the half of
@@ -329,139 +356,56 @@ func codexMCPCheck() *Check {
 		"codex hooks are wired but the agent has no route to straza's own tools. Re-run `straza install codex`, which writes the registration (older installs only printed it)."}
 }
 
-// spoolCheck is the audit "where is my data" surface: audit is async,
-// so "no error" never meant "delivered". It reports the pending backlog (live
-// spool + rotated audit-pending-* files) and the last successful drain: the
-// mtime of the marker Spool.Drain stamps whenever it leaves the spool empty
-// (nothing else persists drain success; the drained files are deleted). It
-// degrades, never crashes: no spool is a healthy "no pending audit events",
-// an unreadable one is reported with the path.
-func spoolCheck(store *Store) Check {
-	live := store.SpoolPath()
-	dir := filepath.Dir(live)
-	lastDrain := "no successful drain recorded yet"
-	if fi, err := os.Stat(filepath.Join(dir, spool.LastDrainMarkerName)); err == nil {
-		lastDrain = fmt.Sprintf("last successful drain %s ago", time.Since(fi.ModTime()).Round(time.Second))
+// spoolCheck is the audit "where is my data" surface: audit is async, so "no
+// error" never meant "delivered". It reports the backlog the service holds
+// for the caller, its last successful upload and the last upload error.
+func spoolCheck(sp localapi.SpoolStatus, now time.Time) Check {
+	lastDrain := "no successful upload recorded yet"
+	if !sp.LastDrain.IsZero() {
+		lastDrain = fmt.Sprintf("last successful upload %s ago", now.Sub(sp.LastDrain).Round(time.Second))
 	}
-	parked, _ := filepath.Glob(filepath.Join(dir, "audit-pending-*.jsonl"))
-	events, files, oversize := 0, 0, 0
-	for _, p := range append([]string{live}, parked...) {
-		// spool.ScanRecords, not spool.ReadRecords: the skipped count is records too large
-		// for the upload chunk, which the backlog number cannot see. Reporting
-		// only what uploads would under-count the spool right up until the next
-		// drain discards them.
-		recs, skipped, err := spool.ScanRecords(p) // missing file = no records, not an error
-		if err != nil {
-			return Check{"audit-spool", checkWarn,
-				fmt.Sprintf("spool unreadable: %v", err),
-				"fix permissions under " + dir + ". Spooled audit events cannot upload until the spool is readable"}
-		}
-		oversize += skipped
-		if len(recs) > 0 {
-			events += len(recs)
-			files++
-		}
-	}
-	doomed := ""
-	if oversize > 0 {
-		doomed = fmt.Sprintf(" + %d record(s) too large to upload (the next drain discards them and records it under audit-dropped)", oversize)
-	}
-	if events == 0 && oversize == 0 {
+	if sp.Pending == 0 {
 		return Check{"audit-spool", checkOK, "no pending audit events (" + lastDrain + ")", ""}
 	}
-	return Check{"audit-spool", checkWarn,
-		fmt.Sprintf("%d audit event(s) in %d file(s) awaiting upload%s (%s)", events, files, doomed, lastDrain),
-		"they upload on the next drain (after decisions, at session start/end, on daemon ticks, or `straza drain`); a persistent backlog means uploads are failing. Check the server check above. Records too large to upload never block the queue: they are dropped and surface in the audit-dropped check."}
+	detail := fmt.Sprintf("%d audit event(s) awaiting upload (%s)", sp.Pending, lastDrain)
+	if sp.LastError != "" {
+		detail += ". The last upload failed: " + sp.LastError
+	}
+	return Check{"audit-spool", checkWarn, detail,
+		"the Straza background service uploads them on its own; a persistent backlog means uploads are failing. Check the server check above"}
 }
 
-// droppedAuditCheck surfaces the audit-dropped marker: records the spool cap
-// or the oversize guard discarded before they ever reached the server. They
-// are unrecoverable, and nothing else reads the marker.
-//
-// No marker = no line at all: loss is the exception, and a routine "nothing
-// was lost" row would train operators to skim past the day it flips. A
-// populated marker is a FAIL (gone audit evidence on a governance box is
-// exactly what `doctor`'s exit-1 gate exists for) and stays red until the
-// human acknowledges by deleting the marker (doctor itself never mutates).
-// A marker that exists but holds nothing readable is a WARN: unknown loss,
-// never silence. Parked compaction claims are read and summed alongside.
-func droppedAuditCheck(store *Store) *Check {
-	path := filepath.Join(filepath.Dir(store.SpoolPath()), spool.DroppedMarkerName)
-	// Read the live marker AND any parked compaction claims: a crash between
-	// compaction's rename and its summary append leaves the whole ledger in a
-	// claim file until the next drop folds it back; doctor summing both
-	// closes that window (claims first: their lines are the older half, and
-	// lastLine should be the live marker's).
-	claims, _ := filepath.Glob(path + spool.DroppedCompactingSuffix + "*")
-	var raw []byte
-	var sources []string
-	for _, p := range append(claims, path) {
-		b, err := os.ReadFile(p) // #nosec G304 -- our own marker
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return &Check{"audit-dropped", checkWarn,
-				fmt.Sprintf("drop marker unreadable: %v", err),
-				"fix " + p + ". It records audit events straza had to drop, and until it is readable the loss cannot be quantified"}
-		}
-		raw = append(raw, b...)
-		raw = append(raw, '\n')
-		sources = append(sources, p)
-	}
-	if len(sources) == 0 {
-		return nil // no marker was ever written: nothing was recorded lost
-	}
-	ack := strings.Join(sources, " and ")
-	st := spool.ParseDroppedMarker(raw)
-	if st.Events == 0 {
-		// The marker EXISTS with no readable drop line. Its only creator is
-		// noteDropped, so this means a drop happened and even the note about
-		// it failed (a full disk is exactly adjacent to why drops happen).
-		// Unknown loss is loss: an empty marker must never read as "nothing
-		// lost".
-		return &Check{"audit-dropped", checkWarn,
-			"drop marker " + path + " exists but holds no readable drop record. Audit was dropped and even the note about it failed (disk full when it was written?)",
-			"an unknown amount of audit never reached the server. Investigate the gap, then delete " + ack + " to acknowledge"}
-	}
-	var what []string
-	if st.Files > 0 {
-		what = append(what, fmt.Sprintf("%d parked spool file(s)", st.Files))
-	}
-	if st.Records > 0 {
-		what = append(what, fmt.Sprintf("%d oversize record(s)", st.Records))
-	}
-	if len(what) == 0 {
-		what = append(what, "an unknown amount")
-	}
-	last := "time unknown"
-	if !st.Last.IsZero() {
-		last = st.Last.Format(time.RFC3339)
+// droppedAuditCheck surfaces audit records the service's spool cap or
+// oversize guard discarded before they ever reached the server. They are
+// unrecoverable. No drop = no line at all: loss is the exception, and a
+// routine "nothing was lost" row would train operators to skim past the day
+// it flips. A drop is a FAIL, because gone audit evidence on a governance box
+// is exactly what doctor's exit-1 gate exists for, and it stays red until an
+// administrator removes marker, the service's record of the drop.
+func droppedAuditCheck(sp localapi.SpoolStatus, marker string) *Check {
+	if sp.Dropped == 0 {
+		return nil
 	}
 	return &Check{"audit-dropped", checkFail,
-		fmt.Sprintf("audit evidence DROPPED, unrecoverable: %s across %d drop event(s), last %s (%q)",
-			strings.Join(what, " + "), st.Events, last, st.LastLine),
-		"these records never reached the server: the agent was offline long enough for the spool cap to evict its oldest backlog, or single records outgrew the upload chunk. Investigate the gap (a failing server check above is the usual cause), then delete " + ack + " to acknowledge. This check stays red until the marker is removed"}
+		fmt.Sprintf("audit evidence DROPPED, unrecoverable: %d record(s) never reached the server", sp.Dropped),
+		"the service was offline long enough for the spool cap to evict its oldest backlog, or single records outgrew the upload chunk. " +
+			"Investigate the gap with your Straza administrator (a failing server check above is the usual cause). " +
+			"After looking into it, an administrator removes " + marker + ", the Straza background service's record of the drop, to acknowledge it. This check stays red until then"}
 }
 
-// tokenExpiry reads a JWT's exp claim WITHOUT verifying it: purely local,
-// informational display; the server is the verifier.
-func tokenExpiry(raw string) (time.Time, error) {
-	parts := strings.Split(raw, ".")
-	if len(parts) != 3 {
-		return time.Time{}, fmt.Errorf("not a JWT")
+// droppedMarkerPath is the caller's audit-drop marker in the state directory
+// of the service this client talks to. The caller's folder there is named by
+// the uid, and on Windows by the account's SID, which os/user gives as Uid.
+func droppedMarkerPath() string {
+	_, stateDir, _ := localapi.Paths(serviceHome())
+	uid := strconv.Itoa(os.Getuid())
+	if runtime.GOOS == "windows" {
+		uid = "<your account's SID>"
+		if u, err := user.Current(); err == nil {
+			uid = u.Uid
+		}
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return time.Time{}, err
-	}
-	var claims struct {
-		Exp float64 `json:"exp"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp == 0 {
-		return time.Time{}, fmt.Errorf("no exp claim")
-	}
-	return time.Unix(int64(claims.Exp), 0), nil
+	return filepath.Join(stateDir, "u", uid, spool.DroppedMarkerName)
 }
 
 // denyHints is the hint catalog: every stable deny/failure reason straza

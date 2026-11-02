@@ -1,8 +1,8 @@
 ---
 title: straza keygen
-description: Generate the local Ed25519 key an AI agent enrolls with headless
+description: Have the background service generate the Ed25519 key an AI agent enrolls with headless
 pagetype: reference
-weight: 12
+weight: 11
 draft: false
 sources:
   - cmd/straza
@@ -13,10 +13,10 @@ keywords: straza, keygen
 
 ## Synopsis
 
-Generates the keypair a headless AI agent or service account authenticates with.
-The private half never leaves this machine; print-out includes the
-`strazactl users nhi-key set` line an administrator runs to register
-the public half, after which `straza enroll --headless` works.
+Asks the Straza background service to generate the keypair a headless AI agent
+or service account authenticates with. The service keeps the private half;
+print-out includes the `strazactl users nhi-key set` line an administrator
+runs to register the public half, after which `straza enroll --headless` works.
 
 ```
 straza keygen [flags]

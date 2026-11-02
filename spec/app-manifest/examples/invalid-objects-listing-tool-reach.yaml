@@ -1,0 +1,25 @@
+# INVALID (semantic): the listing tool returns every object, so a block
+# that names it under objects.tools gives it the reach all (revision 8).
+# Here repo_list carries none, which would let a role that binds it read
+# every repo. JSON Schema cannot tie a key of objects.tools to the value of
+# objects.list.tool, so the schema alone admits this manifest, and the
+# platform parser MUST refuse it.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: ghapp
+server:
+  name: com.example/github-app
+  version: "0.4.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://ghapp.example.com/mcp
+  objects:
+    type: repo
+    list:
+      tool: repo_list
+    tools:
+      repo_list: none
+      pr_create: {argument: repo}

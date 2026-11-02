@@ -35,7 +35,8 @@ const codeSecondPerson = "second_person"
 const (
 	publishBodyRefusal        = "The request body is not a publish: %s. Send revision, risk_digest, ticked and typed as JSON."
 	publishDigestRefusal      = "The request body is not a publish: risk_digest must be the verdict's risk digest, 64 hex characters, or empty. Send the digest the check answered."
-	publishCutRefusal         = "Publish refused: draft %s holds a risk on something you cannot read, so you cannot type the text that acknowledges it. Ask someone who can read everything the draft names to publish it."
+	publishCutRefusal         = "Publish refused: draft %s holds a line on something you cannot read, so you cannot type the text that confirms it. Ask someone who can read everything the draft names to publish it."
+	publishGroupRefusal       = "Publish refused: %d lines like this one are not all confirmed: %s Type %d to confirm them when you publish, then publish again."
 	publishMovedRefusal       = "Publish refused: other publishes kept changing live state while this one was checked, so nothing was published. Publish again."
 	publishBusyRefusal        = "Straza could not publish draft %s, because the database turned the change away three times while other changes were written. Nothing was published. Publish again in a moment."
 	publishBuildRefusal       = "Straza could not build the policy snapshot for draft %s, so nothing was published. Read the strazad log for the cause, fix it, and publish again."
@@ -302,7 +303,7 @@ func (p *publishRun) check() (*draftPlan, bool) {
 	dp.plan.Checked = &check
 	dp.plan.Close = slotCloses(d.ID, p.row.Slot, dp.plan.Items)
 	dp.records.publish = &publishFields{Revision: p.row.Revision, Items: cd.d.Items, RiskDigest: cd.v.RiskDigest, ReviewedDigest: p.body.RiskDigest,
-		Acknowledged: ticked, Typed: typed, Proposer: p.row.Proposer, Client: c.author.Client, Reverts: d.Reverts}
+		Acknowledged: ticked, Typed: typed, Proposer: p.row.Proposer, Client: c.author.Client, Reverts: d.Reverts, AgentLoosened: agentLoosened(cd.v)}
 	p.world, p.view = cd.w, view
 	return &dp, false
 }
@@ -333,6 +334,15 @@ func (p *publishRun) secondPerson(v drafts.Verdict) bool {
 // typedRisk reports whether the risk f is acknowledged by typing its text.
 func typedRisk(f drafts.Finding) bool { return f.Ack == drafts.AckTyped && f.Typed != "" }
 
+// confirmVerb is what typing the text of the typed risk f does: it accepts
+// an agent's loosening of a set that binds it, and confirms every other.
+func confirmVerb(f drafts.Finding) string {
+	if f.Code == agentGuardrailCode {
+		return "to accept it"
+	}
+	return "to confirm"
+}
+
 // acksRefusal answers the 409 sentence of step 6 for the publish of draft
 // id, whose full verdict is v and whose verdict as the publisher reads it
 // is view, or "": every risk of v, in verdict order, needs its key in
@@ -340,12 +350,20 @@ func typedRisk(f drafts.Finding) bool { return f.Ack == drafts.AckTyped && f.Typ
 // trimming spaces and compared without case. A typed risk whose text
 // verdictFor cut for this publisher refuses whatever the body holds.
 // A key in ticked that names no current risk is ignored. The sentences
-// quote the view, never the full verdict.
+// quote the view, never the full verdict. A missing typed risk of a group
+// with two or more typed risks asks for the group's count, which a client
+// has the publisher type once for the whole group.
 func acksRefusal(id string, v drafts.Verdict, view verdictPayload, body publishBody) string {
 	ticked := setOf(body.Ticked)
 	lines := make(map[string]drafts.Finding, len(view.Risks))
 	for _, f := range view.Risks {
 		lines[f.Key] = f.Finding
+	}
+	grouped := map[string]int{}
+	for _, f := range v.Risks {
+		if typedRisk(f) && f.Group != "" {
+			grouped[f.Group]++
+		}
 	}
 	for _, f := range v.Risks {
 		key, line := f.Key(), lines[f.Key()]
@@ -354,14 +372,17 @@ func acksRefusal(id string, v drafts.Verdict, view verdictPayload, body publishB
 		switch {
 		case typed && line.Typed == "":
 			return fmt.Sprintf(publishCutRefusal, id)
+		case (!ticked[key] || typed && sent == "") && typed && grouped[f.Group] > 1:
+			n := grouped[f.Group]
+			return fmt.Sprintf(publishGroupRefusal, n, line.Sentence, n)
 		case !ticked[key] || typed && sent == "":
-			ack := ""
+			confirm := "Confirm it"
 			if typed {
-				ack = ", typing " + line.Typed + ","
+				confirm = "Type " + line.Typed + " " + confirmVerb(f)
 			}
-			return "Publish refused: " + line.Sentence + " Acknowledge it" + ack + " and publish again."
+			return "Publish refused: " + line.Sentence + " " + confirm + ", then publish again."
 		case typed && !strings.EqualFold(sent, strings.TrimSpace(f.Typed)):
-			return fmt.Sprintf("Publish refused: the text typed for %s is not %s. Type %s exactly to acknowledge it, then publish again.", line.Object, line.Typed, line.Typed)
+			return fmt.Sprintf("Publish refused: the text typed for %s is not %s. Type %s %s, then publish again.", line.Object, line.Typed, line.Typed, confirmVerb(f))
 		}
 	}
 	return ""

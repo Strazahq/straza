@@ -37,14 +37,14 @@ func TestSessionSelfRevokeExpiredToken(t *testing.T) {
 		return "token rejected: this session token has expired, so it cannot end a session. " +
 			"Session " + id + " ends by itself once no client refreshes it or at its lifetime limit. " +
 			"The session token that is live now ends it at once, and so does an administrator with strazactl sessions revoke " + id + ". " +
-			"Run strazactl login to start a new session."
+			"Sign in again to start a new session."
 	}
 	const (
 		idTokenMsg = "token rejected: this ID token has expired, and an ID token names no session, so there is nothing for it to end. " +
-			"Only a session token ends its own session. A person runs strazactl login to sign in again, " +
+			"Only a session token ends its own session. A person signs in again, " +
 			"and an AI agent requests a new token with a fresh client assertion."
 		deviceMsg = "token rejected: this device credential has expired, and a device credential names no session, so there is nothing for it to end. " +
-			"Only a session token ends its own session. Run strazactl login, or straza enroll on a machine with the straza client, for a new device credential."
+			"Only a session token ends its own session, and Straza no longer issues device credentials."
 		notSessionMsg = "token rejected: only a session token can end its own session"
 	)
 	cases := []struct {

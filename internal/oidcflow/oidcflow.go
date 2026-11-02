@@ -1,8 +1,9 @@
-// Package oidcflow implements the client side of login discovery:
-// ask strazad which OIDC issuer to log in at (`/.well-known/straza/idp.json`),
-// then resolve that issuer's RFC 8628 endpoints via standard OIDC discovery.
-// Used by `straza enroll` and `strazactl login`; the embedded console
-// mirrors the same two fetches in JS. Stdlib only: both CLI clients embed it.
+// Package oidcflow implements the client side of a person's sign-in: ask
+// strazad which OIDC issuer to sign in at (`/.well-known/straza/idp.json`),
+// resolve that issuer's endpoints through standard OIDC discovery, and run
+// the browser lane (SignIn) or hand the device-code endpoints to the
+// caller. Used by `straza service` for `straza enroll`. The embedded
+// console mirrors the two fetches in JS. Stdlib only: the client embeds it.
 package oidcflow
 
 import (
@@ -11,21 +12,34 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
-// Flow is where a client runs the device-code login.
+// Flow is where a client signs a person in.
 type Flow struct {
 	// Issuer is the OIDC issuer base URL (external IdP, or strazad itself
 	// for the built-in issuer). Informational for progress output.
 	Issuer string
-	// DeviceAuthURL and TokenURL are the absolute RFC 8628 endpoints.
+	// AuthorizeURL, DeviceAuthURL and TokenURL are the absolute endpoints
+	// the issuer advertises. AuthorizeURL or DeviceAuthURL is empty when
+	// the issuer offers no browser lane or no device-code lane.
+	AuthorizeURL  string
 	DeviceAuthURL string
 	TokenURL      string
 	// ClientID is the id to present: server-dictated for an external IdP
 	// (it is the audience strazad requires on ID tokens), else the caller's
 	// default (the built-in issuer accepts per-client audiences).
 	ClientID string
+	// LoopbackPort is idp.json's loopback_port, the port the browser
+	// lane's redirect must use, and 0 for any port.
+	LoopbackPort int
+	// MinSignIn is idp.json's min_sign_in, the lowest sign-in lane the
+	// server accepts for a person's key, empty from an older server.
+	MinSignIn string
+	// server is the strazad the flow was discovered at, equal to Issuer
+	// when the issuer is the server's own.
+	server string
 }
 
 // Builtin is the device flow at the strazad's own issuer, skipping idp.json:
@@ -38,12 +52,40 @@ func Builtin(base, clientID string) Flow {
 		DeviceAuthURL: base + "/oidc/device_authorization",
 		TokenURL:      base + "/oidc/token",
 		ClientID:      clientID,
+		server:        base,
 	}
+}
+
+// CheckDevice reports whether the issuer offers the device-code lane, with
+// the sentence that says how to turn it on when it does not.
+func (f Flow) CheckDevice() error {
+	if f.DeviceAuthURL == "" {
+		return fmt.Errorf("oidcflow: identity provider %s does not advertise a device_authorization_endpoint. Enable the OAuth 2.0 device authorization grant for client %q", f.Issuer, f.ClientID)
+	}
+	return nil
+}
+
+// CheckBrowser reports whether the issuer offers the browser lane. Without
+// it the sentence names command, such as "straza enroll", with
+// --use-device-code: an older Straza server when the server is its own
+// issuer, or the provider's missing endpoint otherwise.
+func (f Flow) CheckBrowser(command string) error {
+	switch {
+	case f.AuthorizeURL != "":
+		return nil
+	case f.server != "" && f.Issuer == f.server:
+		return sentencef("The Straza server at %s does not offer a browser sign-in yet. "+
+			"Run `%s --use-device-code`, or ask your Straza admin to upgrade the server.", f.server, command)
+	}
+	return sentencef("The identity provider %s advertises no authorization_endpoint, so Straza cannot sign you in through a browser there. "+
+		"Run `%s --use-device-code`, or ask IT to turn on the authorization code flow for client %q.", f.Issuer, command, f.ClientID)
 }
 
 // Discover resolves the login flow for the strazad at base. A server without
 // idp.json, an older one, falls back to the built-in issuer paths on the
-// server itself, so new clients keep working against old servers.
+// server itself, so new clients keep working against old servers. It needs
+// only the token endpoint, and each lane checks its own (CheckDevice,
+// CheckBrowser).
 func Discover(ctx context.Context, httpc *http.Client, base, defaultClientID string) (Flow, error) {
 	base = strings.TrimSuffix(base, "/")
 	doc, status, err := getJSON(ctx, httpc, base+"/.well-known/straza/idp.json")
@@ -69,7 +111,31 @@ func Discover(ctx context.Context, httpc *http.Client, base, defaultClientID str
 	if clientID == "" {
 		clientID = defaultClientID
 	}
+	port := 0
+	if p := doc["loopback_port"]; p != "" {
+		if port, err = strconv.Atoi(p); err != nil || port < 0 || port > 65535 {
+			return Flow{}, fmt.Errorf("oidcflow: the server's idp.json names loopback_port %s, which is not a port number. Ask your Straza admin to check oidc.loopbackPort", p)
+		}
+	}
+	flow, err := DiscoverIssuer(ctx, httpc, issuer, clientID)
+	if err != nil {
+		return Flow{}, err
+	}
+	flow.LoopbackPort, flow.MinSignIn, flow.server = port, doc["min_sign_in"], base
+	if strings.TrimSuffix(doc["nhi_issuer"], "/") == issuer {
+		// A standalone server names its own issuer for both, under its
+		// public URL, which can differ from the base the client dialed.
+		flow.server = issuer
+	}
+	return flow, nil
+}
 
+// DiscoverIssuer resolves the endpoints of the issuer at its OIDC
+// discovery document, needing only the token endpoint. Discover calls it
+// for the issuer idp.json names, and the break-glass browser sign-in for
+// the strazad's own issuer, skipping idp.json.
+func DiscoverIssuer(ctx context.Context, httpc *http.Client, issuer, clientID string) (Flow, error) {
+	issuer = strings.TrimSuffix(issuer, "/")
 	disc, status, err := getJSON(ctx, httpc, issuer+"/.well-known/openid-configuration")
 	if err != nil {
 		return Flow{}, fmt.Errorf("oidcflow: reach identity provider %s: %w. Check that this machine can open %s, for example in a browser here, then sign in again", issuer, err, issuer)
@@ -77,17 +143,16 @@ func Discover(ctx context.Context, httpc *http.Client, base, defaultClientID str
 	if status != http.StatusOK {
 		return Flow{}, fmt.Errorf("oidcflow: identity provider %s discovery failed: HTTP %d", issuer, status)
 	}
-	if disc["device_authorization_endpoint"] == "" {
-		return Flow{}, fmt.Errorf("oidcflow: identity provider %s does not advertise a device_authorization_endpoint. Enable the OAuth 2.0 device authorization grant for client %q", issuer, clientID)
-	}
 	if disc["token_endpoint"] == "" {
 		return Flow{}, fmt.Errorf("oidcflow: identity provider %s does not advertise a token_endpoint", issuer)
 	}
 	return Flow{
 		Issuer:        issuer,
+		AuthorizeURL:  disc["authorization_endpoint"],
 		DeviceAuthURL: disc["device_authorization_endpoint"],
 		TokenURL:      disc["token_endpoint"],
 		ClientID:      clientID,
+		server:        issuer,
 	}, nil
 }
 
@@ -156,7 +221,9 @@ func ResolveNHI(ctx context.Context, httpc *http.Client, offer NHIOffer) (Flow, 
 	}
 	disc, status, err := getJSON(ctx, httpc, offer.Issuer+"/.well-known/openid-configuration")
 	if err != nil {
-		return Flow{}, fmt.Errorf("oidcflow: reach NHI issuer %s: %w. The server advertises this address (server.publicUrl / STRAZA_PUBLIC_URL); make it dialable from this machine, or enroll on the IdP client-secret lane (STRAZA_CLIENT_ID and STRAZA_CLIENT_SECRET)", offer.Issuer, err)
+		return Flow{}, fmt.Errorf("oidcflow: reach NHI issuer %s: %w. The server advertises this address in server.publicUrl, or STRAZA_PUBLIC_URL, so make it reachable from this machine. "+
+			"Or enroll the agent with its client secret at your identity provider instead, which the Straza background service reads from agent-<uid>.json "+
+			"in the directory systemd's LoadCredential names, or in the credentials directory of the service's state directory", offer.Issuer, err)
 	}
 	if status != http.StatusOK {
 		return Flow{}, fmt.Errorf("oidcflow: NHI issuer %s discovery failed: HTTP %d", offer.Issuer, status)
@@ -183,8 +250,9 @@ func DiscoverNHI(ctx context.Context, httpc *http.Client, base string) (Flow, bo
 	return flow, true, nil
 }
 
-// getJSON fetches url and decodes a flat string-valued JSON object, tolerating
-// non-string values (ignored; OIDC discovery documents carry arrays too).
+// getJSON fetches url and decodes a flat JSON object into strings. A number
+// keeps its decimal text, and other values are ignored, since OIDC
+// discovery documents carry arrays too.
 func getJSON(ctx context.Context, httpc *http.Client, url string) (map[string]string, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -209,8 +277,11 @@ func getJSON(ctx context.Context, httpc *http.Client, url string) (map[string]st
 			return out, resp.StatusCode, nil // non-200 with junk body: status is the answer
 		}
 		for k, v := range raw {
-			if s, ok := v.(string); ok {
-				out[k] = s
+			switch v := v.(type) {
+			case string:
+				out[k] = v
+			case float64:
+				out[k] = strconv.FormatFloat(v, 'f', -1, 64)
 			}
 		}
 	}

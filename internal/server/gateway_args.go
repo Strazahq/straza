@@ -12,6 +12,11 @@ import (
 // should be retried.
 const argumentsMismatchMsg = "Straza checked the arguments against %s's input schema before asking for approval, and they do not match: %s. Fix the arguments and call the tool again."
 
+// schemaDetailMax is the most bytes of the schema check's detail that
+// argumentsMismatchMsg quotes. The validator's detail can repeat the
+// arguments that broke the schema, so it is cut by cutQuoted.
+const schemaDetailMax = 512
+
 // inputSchema returns the input schema the server published for the
 // catalog name, or nil when the catalog holds no such tool.
 func (c *sessionCatalog) inputSchema(name string) any {
@@ -23,13 +28,14 @@ func (c *sessionCatalog) inputSchema(name string) any {
 	return nil
 }
 
-// schemaMismatch reports why args break schema, or "" when they fit. It also
-// answers "" when the check cannot judge: no schema, one the validator cannot
-// read, such as draft-04's boolean exclusiveMaximum, or one whose $ref points
-// outside itself. The validator's default loader refuses every external
-// reference, so a schema from an upstream server never makes strazad fetch a
-// URL or read a file. The check is never stricter than a server that can read
-// its own schema, and the call then goes on as it did before the check.
+// schemaMismatch reports why args break schema, cut at schemaDetailMax
+// bytes, or "" when they fit. It also answers "" when the check cannot
+// judge: no schema, one the validator cannot read, such as draft-04's
+// boolean exclusiveMaximum, or one whose $ref points outside itself. The
+// validator's default loader refuses every external reference, so a schema
+// from an upstream server never makes strazad fetch a URL or read a file.
+// The check is never stricter than a server that can read its own schema,
+// and the call then goes on as it did before the check.
 func schemaMismatch(schema any, args json.RawMessage) string {
 	if schema == nil {
 		return ""
@@ -54,7 +60,7 @@ func schemaMismatch(schema any, args json.RawMessage) string {
 		return ""
 	}
 	if err := resolved.Validate(instance); err != nil {
-		return err.Error()
+		return cutQuoted(err.Error(), schemaDetailMax)
 	}
 	return ""
 }

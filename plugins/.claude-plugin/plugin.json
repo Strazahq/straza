@@ -1,7 +1,7 @@
 {
   "name": "straza",
   "description": "One skill for operating Straza, the control plane between your identity manager and your AI agents: the five-minute setup, policy with the validator in the loop, identity-manager roles to Straza roles, and evidence from the audit chain.",
-  "version": "0.6.19",
+  "version": "0.6.35",
   "author": {
     "name": "Straza"
   },

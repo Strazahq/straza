@@ -70,8 +70,8 @@ func runStrazad(t *testing.T, args ...string) (string, error) {
 // prints for a database already at the version it names, through each way
 // serve finds its database: the --store-dsn flag, the config file and
 // --data-dir. A command that looked at any other database would refuse,
-// because that one holds no migration. The embedded migrations are one
-// baseline, so the moves themselves are pinned in the store's tests.
+// because that one holds no migration. The moves between the embedded
+// migrations themselves are pinned in the store's tests.
 func TestMigrateCommandAnswersTheMigrationItFinds(t *testing.T) {
 	cases := []struct {
 		name string
@@ -131,11 +131,10 @@ func TestMigrateCommandRefuses(t *testing.T) {
 			},
 		},
 		{
-			name: "a version below the one migration this strazad has",
-			args: func(head int) []string { return []string{"--to", strconv.Itoa(head - 1)} },
+			name: "a version below the first migration",
+			args: func(int) []string { return []string{"--to", "36"} },
 			want: func(head int) string {
-				return "this strazad has no migration " + strconv.Itoa(head-1) + ". Its only migration is " + strconv.Itoa(head) +
-					", so there is no older version to move the database to"
+				return "this strazad has no migration 36. Its migrations run from 37 to " + strconv.Itoa(head) + ", so name one of those"
 			},
 		},
 		{

@@ -5,7 +5,7 @@ pagetype: how-to
 weight: 13
 draft: false
 who: You, as the admin who runs the server
-where: A terminal that reaches strazad, with strazactl signed in as an admin, and the server's config file
+where: A terminal that reaches strazad, with strazactl on an admin API token, and the server's config file
 steps: true
 tested:
   version: v1.1.0
@@ -32,8 +32,9 @@ Its rows cover the settings that decide who can reach strazad, what it shows wit
 | `server.tls.certFile` and `keyFile` | TLS 1.2 or newer on the main listener | Unset, so plain HTTP with no warning | Unset, so plain HTTP with a warning at every boot |
 | `server.approverTLS.autoMint` | A second listener, HTTPS only, that serves only the phone approver routes | `true`: port 8443 on every interface, with a self-signed certificate it creates in the data directory | `false`: no approver listener until you configure one |
 | `server.approverTLS.perIPRPS` | Requests per second that each connecting address may make to the approver listener | 10 | 10 |
-| `server.loginPerIPRPS` | Requests per second that each client address may make to the password submit, and under enterprise to the agent token endpoint | 2 | 2 |
-| `server.maxBodyBytes` | The largest request body, except on `/mcp` and `/v1/audit/batch`, which cap their own at 4 MiB | 1 MiB | 1 MiB |
+| `server.loginPerIPRPS` | Requests per second that each client address may make to the password submit, under enterprise to the agent token endpoint too, and from a separate budget to the start of a device code sign-in | 2 | 2 |
+| `server.maxBodyBytes` | The largest request body, except on `/mcp`, which `server.mcpMaxBodyBytes` caps, and `/v1/audit/batch`, which caps its own at 4 MiB | 1 MiB | 1 MiB |
+| `server.mcpMaxBodyBytes` | The largest body of one request to the MCP gateway, on `/mcp` and on each server's own endpoint, from 1 byte to 8 MiB | 4 MiB | 4 MiB |
 | `server.metricsToken` | A bearer token that `/metrics` requires | Unset, so `/metrics` answers anyone who reaches the listener | Unset, the same |
 | Fixed | Browser hardening headers on every answer of both listeners | Always sent | Always sent |
 | Fixed | `/version`, `/healthz` and `/readyz` on the main listener | Answer without a token | Answer without a token |
@@ -41,13 +42,14 @@ Its rows cover the settings that decide who can reach strazad, what it shows wit
 | `capture.bodyStore.disableSSL` | Turns off TLS to the S3-compatible store that holds recorded conversation bodies | Not used, because standalone keeps bodies in its database | `false`, so TLS stays on |
 | `oidc.jitProvision` | Creates a user at their first verified sign-in | `true` | `false`, because your identity manager creates users over SCIM |
 | `governance.minAttestation` | The lowest attestation that a check-in gets a session for | `none`, any install | `managed`, hashes that match the registry |
-| `governance.offlineGraceTTL` | How long a client keeps deciding from its last signed policy after its token expires, while strazad cannot be reached | 15 minutes | 0, so it denies once the token expires |
+| `governance.offlineGraceTTL` | How long `straza service` keeps deciding from its last signed policy after its token expires, while strazad cannot be reached | 15 minutes | 0, so it denies once the token expires |
 | `governance.sessionMaxLifetime` | The longest a session lives from its start | 12 hours | 12 hours |
-| `governance.deviceTokenTTL` | The lifetime of a machine's device credential, renewed at a check-in past half of it | 30 days | 30 days |
+| `governance.signInMaxAge` | How long a person's key enrollment lasts, counted from the enrollment, which needs a sign-in at the identity provider, and never renewed by use. Whether that sign-in makes the person authenticate again is the identity provider's own session policy, so an admin who lowers this setting for an AAL2 policy also sets the identity provider's reauthentication period to match | 7 days | 7 days |
+| `governance.minCustody` | The lowest custody the client may report for a person's machine key, checked at enrollment, at every key check-in and at every refresh: `account` for a key that `straza service` holds under its own OS account, `user` for a key in the person's own account. strazad checks the client's report and cannot verify it | `user` | `account` |
 | `governance.localToolDefault` | The decision for a call that no rule matches and that is not an MCP tool call: a local tool, a tool Straza does not know, or a call that names no tool | `allow` | `deny` |
 | Fixed | An MCP server that runs as a command | Runs as a child process of strazad, with its user, files and network | Refused, with no setting to allow it |
 | `apps.allowLoopbackUpstreams` | Whether strazad dials a remote MCP server at a loopback address. Link-local, cloud metadata and unspecified addresses are refused in both profiles | `true` | `false` |
-| `approval.unsignedOwnDecisions` | Whether a person may decide their own request from the console, strazactl or Slack, which carry no device signature | `false`, so only an enrolled phone or browser decides it | `false`, the same |
+| `approval.unsignedOwnDecisions` | Whether a person may decide their own request from the console or Slack, which carry no device signature | `false`, so only an enrolled phone or browser decides it | `false`, the same |
 | `admin.secondPerson` | Whether a change that widens access needs a second person to publish it | `false` | `false` |
 | `governance.auditBackpressure` | What strazad does with audit records that the database cannot take | `drop-with-counter`: decisions go on, and lost records are counted | `block`: records stay queued until the database takes them, and once 4,096 wait, a new decision waits up to 25 seconds and is then refused |
 | `governance.sentinel.enabled` | The audit sentinel, which flags patterns after the fact and blocks nothing | `false` | `false` |
@@ -56,7 +58,10 @@ Every answer of both listeners carries `X-Content-Type-Options: nosniff`, `X-Fra
 
 `/version` answers anyone who reaches the main listener. It names the exact version and commit, the Go version, the operating system and architecture, the profile and the runtimes this host can start MCP servers with. When strazad serves the approver listener itself, it adds the approver's address, pin and certificate expiry, and the certificate's path when strazad minted it. `strazactl status`, `straza doctor` and the console's footer read it with no token. `/readyz` names a failing component with its error. The approver listener answers both `/version` and `/healthz` with 404, because it serves only the approver routes and `/readyz`.
 
-Two settings in the table open a known limit when you change them. Setting `approval.unsignedOwnDecisions` to true lets an agent that runs as a person approve its own calls with that person's strazactl login. Setting `apps.allowLoopbackUpstreams` to true under enterprise lets a remote manifest reach strazad's own host. [Known limits]({{< relref "security/known-limits.md" >}}) lists every limit with what reduces it.
+
+`server.mcpMaxBodyBytes` bounds what one request to the gateway can make strazad hold. The default is 4 MiB and the range is 1 byte to 8 MiB, and strazad refuses to start on 0 or a value outside it, so the cap cannot be turned off. The ceiling is 8 MiB because the straza client keeps at most 8 MiB of a request to send it again after a proof challenge. Each MCP request takes about 6 times its body in strazad's memory until it is decided, and an allowed call takes about 3 times more while strazad forwards it to its server. The worst case is therefore the limit times the requests in flight times 9, about 72 MiB for each 8 MiB request. strazad sets no read deadline on a request body yet, so a client can hold a request open while it sends its body slowly. If you raise the limit, put strazad behind an ingress that times out slow request bodies. An agent whose call is over the limit reads a sentence that names the setting, and strazad logs one warning line with the session's id.
+
+Two settings in the table open a known limit when you change them. Setting `approval.unsignedOwnDecisions` to true lets an agent that runs as a person approve its own calls with any credential of that person it can read, such as an unexpired ID token. Setting `apps.allowLoopbackUpstreams` to true under enterprise lets a remote manifest reach strazad's own host. [Known limits]({{< relref "security/known-limits.md" >}}) lists every limit with what reduces it.
 
 ## Read the plaintext warning as your signal
 
@@ -121,7 +126,7 @@ Compare the pin with the one your approvers enrolled against after every server 
 Attestation has two floors. `governance.minAttestation` is the check-in floor, `managed` by default in the enterprise profile and `none` in standalone, and the gateway enforces the same level from the token on every call. A policy rule adds the second floor with a `require` block, so one role can demand a managed install for its local tools while another keeps working from a user-mode install. The managed install itself is `straza install --managed --server <server-url> <harness>`, run with sudo, or as an administrator on Windows, which puts the enforcement files in root-owned system paths and lets the server check the hashes they report at check-in. This page shows the server side of it. [Known limits]({{< relref "security/known-limits.md" >}}) says what the `managed` level does and does not prove.
 
 
-The expected hashes of the hook wiring come from the server's own render of the harness configuration and are registered at boot, so the registry is populated before the first managed client checks in. Hashes of the binary and the configuration count only once you register them with `strazactl attestation add`.
+The expected hashes of the hook wiring come from the server's own render of the harness configuration and are registered at boot, so the registry is populated before the first managed client checks in. Hashes of the binary and the configuration count only once you register them with `strazactl attestation add`. On a Mac with the release pkg, the `self` hash is the SHA-256 of `/opt/straza/bin/straza`, one universal file for both darwin/arm64 and darwin/amd64 that neither an archive's binary nor a line of `checksums.txt` gives, so take it with `shasum -a 256 /opt/straza/bin/straza` on a Mac that installed the pkg.
 
 ```sh
 strazactl attestation list
@@ -129,11 +134,11 @@ strazactl attestation list
 
 ```table
 ID                                    ARTIFACT           HARNESS      PLATFORM       HASH                                                                     NOTE
-01a0e977-8378-7af2-9422-f2045e601d73  hooks.claude-code  claude-code  linux/amd64    sha256:c9ee42bfb613e2e9165bad88ee8d77e889ddb02aa4effe7aa9f664d51b928ab8  harness-config render (strazad v1.1.0)
-01a0e977-837f-7af9-a247-79867a3eafeb  hooks.claude-code  claude-code  linux/arm64    sha256:c9ee42bfb613e2e9165bad88ee8d77e889ddb02aa4effe7aa9f664d51b928ab8  harness-config render (strazad v1.1.0)
+01a0e977-8378-7af2-9422-f2045e601d73  hooks.claude-code  claude-code  linux/amd64    sha256:9c41980a2b2a53080582dea2803db20163c142f9415a3ebbc3cbe8c12fa97bb3  harness-config render (strazad 2.0.0)
+01a0e977-837f-7af9-a247-79867a3eafeb  hooks.claude-code  claude-code  linux/arm64    sha256:9c41980a2b2a53080582dea2803db20163c142f9415a3ebbc3cbe8c12fa97bb3  harness-config render (strazad 2.0.0)
 ```
 
-The listing is trimmed to its first two rows. Each row the server registered itself names a hook wiring artifact, and its note names the render and the running strazad version.
+The listing is trimmed to its first two rows. Each row the server registered itself names a hook wiring artifact, and its note names the render and the running strazad version. The rows above are an example, and your own listing can differ. A release that changes the hook wiring registers a new hash, and the note names the strazad version that registered the row.
 
 
 For the policy floor, create an application role `managed-tools`, export the demo stack's `agent-guardrails` set with `strazactl policy show agent-guardrails > managed-tools-guardrails.yaml`, rename it, point `match.roles` at the new role, drop its capture block, and give the rule that opens the local tools a `require` block with its own reason:
@@ -183,7 +188,7 @@ Both answers are cut after the second line, and the rest names the subject, the 
 ## Scope every admin API token
 
 
-A long-lived admin API token is its own principal, hashed at rest and shown once, and it should carry only the areas the system behind it reads. The scope grammar is `area:read` or `area:write` over the areas that [Delegated admin]({{< relref "guides/operate/delegated-admin.md" >}}) lists, `drafts` among them, and `full` is the root credential. Areas are all a token can carry. The role that a single MCP server names, the other way that guide delegates, is assigned to a person in your identity manager and never to a token, so no long-lived credential can quietly become a server's admin. This example mints a token for a SIEM collector that only reads the audit chain, with a lifetime:
+A long-lived admin API token is its own principal, hashed at rest and shown once, and it should carry only the areas the system behind it reads. The scope grammar is `area:read` or `area:write` over the areas that [Delegated admin]({{< relref "guides/operate/delegated-admin.md" >}}) lists, `drafts` among them, and `full` is the root credential. Areas are all a token can carry. The role that a single MCP server names, the other way that guide delegates, is assigned to a person in your identity manager and never to a token, so no long-lived credential can quietly become a server's admin. A person mints a token in the console under Settings, API tokens. From a terminal, `strazactl api-token create` runs on a token that holds `tokens:write`, which is root-equivalent. This example mints a token for a SIEM collector that only reads the audit chain, with a lifetime:
 
 ```sh
 strazactl api-token create --name siem-collector --scope audit:read --ttl 720h
@@ -302,10 +307,10 @@ A process that runs `straza exec` on an open machine is governed exactly as far 
 
 An MCP server that a person adds to a harness's own configuration does not pass through the gateway. Only the advisory hook sees its calls, its credential sits on that machine, and governing it is that person's responsibility. Register every MCP server that holds a credential in Straza, so the gateway decides its calls and the credential stays on the server. On Claude Code, a managed install also writes an exclusive managed MCP file, so the harness loads only the servers named there.
 
-## Keep people's logins away from their agents
+## Keep admin API tokens away from agents
 
 
-An AI agent that runs as a person can read that person's strazactl login in `~/.straza/credentials.json`, and with it enroll an approval device of its own. Inside Claude Code, the Gemini CLI and Codex installed from npm, strazactl refuses every command that changes Straza on the stored login, and an agent that unsets their variables gets past that guard. Do admin work on a machine or an account where no agent runs as you, or end it with `strazactl logout`, which revokes the stored session and deletes the file. Review the enrolled approval devices regularly:
+strazactl keeps no login, so no admin credential sits on a machine unless someone puts an admin API token there. An AI agent that runs as a person can read whatever that person leaves in its reach, and with a token that holds `approvals:write` it could enroll an approval device of its own. Never put a token where an agent runs as you: not in a shell profile, not in a file an agent can read, not in a terminal an agent shares. Give a token for a terminal the scopes the work needs and the shortest lifetime the console offers, 30 days, and revoke it when the work is done. Keep an automation token in your secret store. A `~/.straza/credentials.json` that an older strazactl wrote works nowhere and can be deleted. Review the enrolled approval devices regularly:
 
 ```sh
 strazactl approvers list
@@ -314,7 +319,7 @@ strazactl approvers list
 Revoke a device nobody recognizes with `strazactl approvers revoke` and its ID.
 
 
-Keep `approval.unsignedOwnDecisions` at its default, false. Then a person's decision on their own request counts only when an enrolled phone or browser signs it, and a decision from the console, strazactl or Slack is refused. Set to true, it lets an agent that holds the person's strazactl login approve its own calls. This path is one of the [known limits]({{< relref "security/known-limits.md" >}}), with what reduces it.
+Keep `approval.unsignedOwnDecisions` at its default, false. Then a person's decision on their own request counts only when an enrolled phone or browser signs it, and a decision from the console or Slack is refused. Set to true, it lets an agent that holds a credential of the person, such as an unexpired ID token, approve its own calls. This path is one of the [known limits]({{< relref "security/known-limits.md" >}}), with what reduces it.
 
 ## Undo {.nostep}
 

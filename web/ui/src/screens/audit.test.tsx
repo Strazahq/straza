@@ -5,7 +5,8 @@ import userEvent from "@testing-library/user-event";
 import { Audit } from "./audit";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { type AuditRow, listAudit, listUsers, overview, revokeSession } from "@/lib/api";
-import { chainBroken, chainVerified, loadedWords, revokeBody, searchLine } from "@/lib/audit-words";
+import { chainBroken, chainVerified, loadedWords, recordMissing, revokeBody, searchLine } from "@/lib/audit-words";
+import { notify } from "@/lib/notify";
 
 // The Audit screen over a chain whose hashes really verify: every fixture
 // is linked the way internal/audit.Link writes it, hash = sha256(prevHash
@@ -341,6 +342,29 @@ describe("the Audit screen", () => {
     await waitFor(() => expect(rows()).toEqual(["4214"]));
     expect(vi.mocked(listAudit).mock.calls.some((c) => c[0] === "order=desc&limit=200&q=" + SESSION + "&user=" + JOE)).toBe(true);
     expect(screen.getByRole("button", { name: "Clear the user filter" })).toBeTruthy();
+  });
+
+  it.each<[string, AuditRow, string]>([
+    ["verified when the checked tail holds it", WINDOW[3], "ok"],
+    ["unchecked when it lies before the loaded tail", chain(4100, [read("2026-09-12T09:00:00Z")])[0], "unknown"],
+  ])("opens the record a preset seq names in the sheet, %s", async (_name, record, check) => {
+    vi.mocked(listAudit).mockImplementation((q: string) => {
+      const p = new URLSearchParams(q);
+      return Promise.resolve(p.get("limit") === "1" && p.get("after") === String(record.seq - 1) ? [record] : serve(q));
+    });
+    render(<TooltipProvider><Audit preset={{ seq: record.seq }} /></TooltipProvider>);
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByRole("heading", { name: new RegExp("Record " + record.seq) })).toBeTruthy();
+    // The sheet reads unchecked until the tail has loaded, so the mark is
+    // read only once the newest record of the window is on screen.
+    await waitFor(() => expect(document.querySelector("[data-seq=\"4219\"]")).not.toBeNull());
+    expect(sheet.querySelector("[data-chain-check]")?.getAttribute("data-chain-check")).toBe(check);
+  });
+
+  it("says the record is gone when a preset seq names none, and opens no sheet", async () => {
+    render(<TooltipProvider><Audit preset={{ seq: 4100 }} /></TooltipProvider>);
+    await waitFor(() => expect(vi.mocked(notify.failed)).toHaveBeenCalledWith(recordMissing(4100)));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("keeps the rows on screen and says what failed when a reload cannot reach strazad", async () => {

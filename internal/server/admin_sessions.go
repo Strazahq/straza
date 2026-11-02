@@ -26,6 +26,9 @@ type devicePayload struct {
 	Status      string    `json:"status"`
 	ClientKind  string    `json:"client_kind"`
 	EnrolledAt  time.Time `json:"enrolled_at"`
+	// Custody says who holds the key of a keyed device, as its enrollment
+	// stored it. A row with no stored custody leaves it out.
+	Custody *custodyInfo `json:"custody,omitempty"`
 }
 
 func (a *App) handleDevicesList(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +49,7 @@ func (a *App) handleDevicesList(w http.ResponseWriter, r *http.Request) {
 	for i, d := range devs {
 		out[i] = devicePayload{ID: d.ID, UserID: d.UserID, Name: d.Name,
 			Fingerprint: d.Fingerprint, Platform: d.Platform, Status: d.Status,
-			ClientKind: d.ClientKind, EnrolledAt: d.EnrolledAt}
+			ClientKind: d.ClientKind, EnrolledAt: d.EnrolledAt, Custody: storedCustody(d.Custody)}
 	}
 	if p, ok := parsePageParams(w, r); p.paged || !ok {
 		if !ok {
@@ -89,19 +92,16 @@ func (a *App) handleDeviceRevoke(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusNotFound, "no such device for this user")
 		return
 	}
-	if err := a.store.Devices().Delete(r.Context(), deviceID); err != nil {
-		a.fail(w, r, http.StatusInternalServerError, "could not revoke device", err)
+	err = a.revokeDevice(r, deviceID, "device revoked by admin")
+	if errors.Is(err, store.ErrNotFound) {
+		// Another revoke deleted the row after the lookup above.
+		apiError(w, http.StatusNotFound, "no such device for this user")
 		return
 	}
-	_, _ = a.store.Revocations().Create(r.Context(), store.Revocation{
-		Kind: store.RevokeDevice, TargetID: deviceID, Reason: "device revoked by admin",
-	})
-	a.denylist.RevokeDevice(deviceID)
-	a.pushRevocation("device", deviceID)
-	// Payload carries ONLY the device id: the spine consumer keys the denylist
-	// scope off which field is set, so a user id riding along would lock the
-	// whole user (spine/revocation.go apply).
-	a.emitEvent(r, "straza.revocation.device", map[string]any{"device": deviceID})
+	if err != nil {
+		a.fail(w, r, http.StatusInternalServerError, fmt.Sprintf(deviceNotRevokedMsg, deviceID, reqID(r.Context())), err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
@@ -112,11 +112,15 @@ type sessionPayload struct {
 	Harness  string `json:"harness"`
 	// ClientVersion is the straza build the client named at check-in
 	// (0.95.0); blank for a client older than the field.
-	ClientVersion string    `json:"client_version,omitempty"`
-	Attestation   string    `json:"attestation"`
-	Status        string    `json:"status"`
-	StartedAt     time.Time `json:"started_at"`
-	LastSeen      time.Time `json:"last_seen"`
+	ClientVersion string `json:"client_version,omitempty"`
+	// ClientCommit is the git commit of that build, which the console
+	// compares with the server's own; blank for a client or a session
+	// older than the field.
+	ClientCommit string    `json:"client_commit,omitempty"`
+	Attestation  string    `json:"attestation"`
+	Status       string    `json:"status"`
+	StartedAt    time.Time `json:"started_at"`
+	LastSeen     time.Time `json:"last_seen"`
 	// WiringStatus/WiringHash: the session's managed-wiring hash classified
 	// against the published render + registry (0.55.0):
 	// current | allowed | mismatch | unmeasured; blank for admin harnesses
@@ -198,7 +202,7 @@ func (a *App) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 	out := make([]sessionPayload, len(sessions))
 	for i, s := range sessions {
 		out[i] = sessionPayload{ID: s.ID, UserID: s.UserID, Username: names[s.UserID],
-			Harness: joinHarness(s.HarnessName, s.HarnessVersion), ClientVersion: s.ClientVersion, Attestation: s.AttestationLevel,
+			Harness: joinHarness(s.HarnessName, s.HarnessVersion), ClientVersion: s.ClientVersion, ClientCommit: s.ClientCommit, Attestation: s.AttestationLevel,
 			Status: s.Status, StartedAt: s.StartedAt, LastSeen: s.LastSeen}
 		if regErr == nil {
 			out[i].WiringStatus, out[i].WiringHash = a.harnessWiringStatus(s.HarnessName, s.AttestationHashes, registry)
@@ -243,9 +247,9 @@ func (a *App) closeIdleSessions(ctx context.Context) {
 // closeLifetimeSessions is the janitor's other pass: an active session older
 // than governance.sessionMaxLifetime is closed even while it is still being
 // refreshed, so a copied session token stops working at a known point. The
-// daemon reads the next refresh's 401 as a stand-down and starts a fresh
-// session from its device credential; no person acts. Runs on the same
-// ticker as closeIdleSessions.
+// client reads the next refresh's 401 as a stand-down and starts a fresh
+// session, the Straza background service through the machine's key, so no
+// person acts. Runs on the same ticker as closeIdleSessions.
 func (a *App) closeLifetimeSessions(ctx context.Context) {
 	lifetime := a.cfg.EffectiveSessionMaxLifetime()
 	closed, err := a.store.Sessions().CloseStartedBefore(ctx, time.Now().Add(-lifetime))
@@ -257,7 +261,7 @@ func (a *App) closeLifetimeSessions(ctx context.Context) {
 		return
 	}
 	a.log.Info("closed sessions past the maximum lifetime", "count", len(closed), "maxLifetime", lifetime.String())
-	reason := fmt.Sprintf("session older than the maximum lifetime of %s; the client starts a new session from its device credential", lifetime)
+	reason := fmt.Sprintf("session older than the maximum lifetime of %s; the client starts a new session from its enrollment", lifetime)
 	for _, c := range closed {
 		// No request produced this: nil r keeps sourceIp/userAgent absent.
 		a.emitAuthnSessionEnd(ctx, nil, "lifetime-closed", authnFields{
@@ -268,32 +272,30 @@ func (a *App) closeLifetimeSessions(ctx context.Context) {
 
 func (a *App) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	changed, err := a.store.Sessions().SetStatusIfChanged(r.Context(), id, store.SessionRevoked)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			apiError(w, http.StatusNotFound, "no such session")
-			return
-		}
-		a.fail(w, r, http.StatusInternalServerError, "revoke failed", err)
-		return
-	}
 	// The kill-switch trio fires only on the actual row transition: a
 	// re-revoke keeps its long-standing 200 but must not re-amplify the
 	// outbox/DB (see handleSessionSelfRevoke, where the caller is unprivileged
 	// and the same replay costs nothing but a valid token).
-	if changed {
-		_, _ = a.store.Revocations().Create(r.Context(), store.Revocation{
-			Kind: store.RevokeSession, TargetID: id, Reason: "revoked by admin",
-		})
-		a.denylist.revokeSession(id)
-		a.subjects.drop(id)
-		a.pushRevocation("session", id)
-		a.emitEvent(r, "straza.revocation.session", map[string]any{"session": id})
-		// Rev 21 chained end record, transition-gated like the trio above.
-		// The row outlives the revoke, so the owner read only garnishes; a
-		// failed read emits the end without a userId (never fabricated).
+	changed, err := a.revokeSession(r.Context(), id, "revoked by admin")
+	if err != nil {
+		a.fail(w, r, http.StatusInternalServerError, fmt.Sprintf(sessionNotRevokedMsg, id, id, reqID(r.Context())), err)
+		return
+	}
+	// The row outlives the revoke. When nothing changed, the read tells an
+	// id that never existed, which keeps its 404, from a replay. After a
+	// transition it only garnishes the rev 21 end record, and a failed read
+	// emits the end without a userId (never fabricated).
+	ses, readErr := a.store.Sessions().GetByID(r.Context(), id)
+	switch {
+	case !changed && errors.Is(readErr, store.ErrNotFound):
+		apiError(w, http.StatusNotFound, "no such session")
+		return
+	case !changed && readErr != nil:
+		a.fail(w, r, http.StatusInternalServerError, fmt.Sprintf(sessionUncheckedMsg, id, id, reqID(r.Context())), readErr)
+		return
+	case changed:
 		f := authnFields{Session: id, Reason: "revoked by admin"}
-		if ses, err := a.store.Sessions().GetByID(r.Context(), id); err == nil {
+		if readErr == nil {
 			f.UserID = ses.UserID
 		}
 		a.emitAuthnSessionEnd(r.Context(), r, "revoked-admin", f)
@@ -308,12 +310,12 @@ const (
 	expiredSessionTokenMsg = "token rejected: this session token has expired, so it cannot end a session. " +
 		"Session %s ends by itself once no client refreshes it or at its lifetime limit. " +
 		"The session token that is live now ends it at once, and so does an administrator with strazactl sessions revoke %s. " +
-		"Run strazactl login to start a new session."
+		"Sign in again to start a new session."
 	expiredIDTokenMsg = "token rejected: this ID token has expired, and an ID token names no session, so there is nothing for it to end. " +
-		"Only a session token ends its own session. A person runs strazactl login to sign in again, " +
+		"Only a session token ends its own session. A person signs in again, " +
 		"and an AI agent requests a new token with a fresh client assertion."
 	expiredDeviceCredentialMsg = "token rejected: this device credential has expired, and a device credential names no session, so there is nothing for it to end. " +
-		"Only a session token ends its own session. Run strazactl login, or straza enroll on a machine with the straza client, for a new device credential."
+		"Only a session token ends its own session, and Straza no longer issues device credentials."
 	notSessionTokenMsg = "token rejected: only a session token can end its own session"
 )
 
@@ -347,7 +349,7 @@ func expiredTokenRefusal(raw string) string {
 // caller ends the session its own token names. No id parameter and no role
 // gate on purpose: the token both authenticates the request and selects the
 // only session the handler can touch (confused-deputy-proof by construction),
-// so `strazactl logout` revokes server-side for every caller, not only
+// so a client's sign-out revokes server-side for every caller, not only
 // holders of straza-admin. Per-target semantics match the admin revoke
 // exactly: stand-down, not lockout.
 //
@@ -358,12 +360,15 @@ func expiredTokenRefusal(raw string) string {
 // idempotent 200), so a 404 from this path means exactly one thing to the
 // CLI: an older strazad without the route (fall back to the admin revoke).
 func (a *App) handleSessionSelfRevoke(w http.ResponseWriter, r *http.Request) {
-	raw := bearerToken(r)
+	raw, scheme := sessionCredential(r)
 	if raw == "" {
 		apiError(w, http.StatusUnauthorized, "missing bearer token")
 		return
 	}
-	claims, err := a.tokens.Verify(raw)
+	claims, err := a.verifySessionToken(w, r, raw, scheme)
+	if errors.Is(err, errAnswered) {
+		return
+	}
 	if errors.Is(err, jwt.TokenExpiredError()) {
 		apiError(w, http.StatusUnauthorized, expiredTokenRefusal(raw))
 		return
@@ -375,29 +380,22 @@ func (a *App) handleSessionSelfRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := claims.Session
-	changed, err := a.store.Sessions().SetStatusIfChanged(r.Context(), id, store.SessionRevoked)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		a.fail(w, r, http.StatusInternalServerError, "revoke failed", err)
-		return
-	}
 	// The kill-switch trio (revocation row, control event, per-target push)
 	// fires ONLY on the actual row transition. tokens.Verify never consults
 	// the denylist, so the just-revoked session's token stays valid for its
 	// whole TTL and can replay this unprivileged route freely; ungated, one
 	// logout would be an authenticated write-amplification primitive against
-	// the outbox. A replay (or a token whose row is gone, ErrNotFound above)
-	// is the idempotent 200 the CLI contract promises: the target state
-	// already holds, nothing re-fires. The row (not the denylist) is the
-	// signal, because a restarted or peer pod's denylist is rebuilt FROM the
-	// rows and would answer wrongly here.
+	// the outbox. A replay (or a token whose row is gone) is the idempotent
+	// 200 the CLI contract promises: the target state already holds, nothing
+	// re-fires. The row (not the denylist) is the signal, because a restarted
+	// or peer pod's denylist is rebuilt FROM the rows and would answer
+	// wrongly here.
+	changed, err := a.revokeSession(r.Context(), id, "revoked by session owner (logout)")
+	if err != nil {
+		a.fail(w, r, http.StatusInternalServerError, fmt.Sprintf(sessionNotEndedMsg, id, id, reqID(r.Context())), err)
+		return
+	}
 	if changed {
-		_, _ = a.store.Revocations().Create(r.Context(), store.Revocation{
-			Kind: store.RevokeSession, TargetID: id, Reason: "revoked by session owner (logout)",
-		})
-		a.denylist.revokeSession(id)
-		a.subjects.drop(id)
-		a.pushRevocation("session", id)
-		a.emitEvent(r, "straza.revocation.session", map[string]any{"session": id})
 		// Rev 21 chained end record: the verified token names both the
 		// session and its owner, and the replay guard above keeps a re-sent
 		// logout from re-emitting.
@@ -466,47 +464,70 @@ func (a *App) handleSessionsBulkRevoke(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	revoked := make([]string, 0, len(ids))
-	for _, id := range ids {
-		// A stand-down starts no session write once the handler's context has
-		// ended, so a store that stopped answering costs one write's limit,
-		// not one per session. The write in flight at the bound runs on
-		// afterCommit's context and completes, and the bound's 503 says to
-		// read the sessions back and run the stand-down again.
-		if r.Context().Err() != nil {
+	// A stand-down skips what it cannot end and counts what it ended. A set
+	// the database refused in part answers 500, because the console reads a
+	// 200 as every selected session ended, and the admin record then counts
+	// only what did end and is not written when nothing did.
+	revoked, err := a.endSessions(r.Context(), ids, req.Reason)
+	if err == nil || len(revoked) > 0 {
+		a.emitEvent(r, "straza.audit.admin", map[string]any{
+			"action": "sessions.bulk-revoke", "count": len(revoked),
+			"target": req.User, "reason": req.Reason,
+		})
+	}
+	if err != nil {
+		count := fmt.Sprintf("%d sessions", len(revoked))
+		if len(revoked) == 1 {
+			count = "1 session"
+		}
+		a.fail(w, r, http.StatusInternalServerError, fmt.Sprintf(sessionsNotEndedMsg, count, reqID(r.Context())), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"revoked": len(revoked)})
+}
+
+// endSessions ends the sessions of ids whose row is not revoked yet, with
+// reason, in one store transaction per bulkRevokeMaxExplicit ids: the status
+// writes, a revocation row each and one straza.revocation.sessions event
+// naming the ids the chunk ended. The ended ids then leave the subject
+// cache, join the denylist and get the per-target push. It returns the ids
+// it ended. An unknown or already revoked id is skipped. A chunk the store
+// refused changes nothing durable and its ids join this server's denylist
+// anyway. Its error, and a context that ended before every chunk was tried,
+// is joined into the error, and the chunks committed before stay ended.
+func (a *App) endSessions(ctx context.Context, ids []string, reason string) ([]string, error) {
+	ended := make([]string, 0, len(ids))
+	var failed error
+	for at := 0; at < len(ids); at += bulkRevokeMaxExplicit {
+		// A stand-down starts no chunk once the handler's context has ended,
+		// so a store that stopped answering costs one write's limit. The
+		// chunk in flight at the bound runs on afterCommit's context and
+		// completes, and the bound's 503 says to read the sessions back and
+		// run the stand-down again. The untried ids still join this server's
+		// denylist.
+		if err := ctx.Err(); err != nil {
+			a.refuseLocally(ids[at:])
+			failed = errors.Join(failed, fmt.Errorf("%d of %d sessions were not ended: %w", len(ids)-at, len(ids), err))
 			break
 		}
-		// Only a real transition counts, fires, and rides the plural event,
-		// which is what the contract always said ("unknown/already-dead ids
-		// are skipped; the response counts what was actually revoked") and
-		// what keeps a replayed set from re-amplifying the outbox.
-		wctx, cancel := afterCommit(r.Context())
-		if changed, err := a.store.Sessions().SetStatusIfChanged(wctx, id, store.SessionRevoked); err != nil || !changed {
-			cancel()
-			continue // unknown or already-dead id: the rest of the set still lands
+		chunk := ids[at:min(at+bulkRevokeMaxExplicit, len(ids))]
+		wctx, cancel := afterCommit(ctx)
+		done, err := a.store.Sessions().Revoke(wctx, chunk, reason, func(done []string) (store.OutboxEvent, error) {
+			return a.cloudEvent(wctx, "straza.revocation.sessions", map[string]any{"sessions": done, "reason": reason})
+		})
+		cancel()
+		if err != nil {
+			a.refuseLocally(chunk)
+			failed = errors.Join(failed, fmt.Errorf("end %d sessions: %w", len(chunk), err))
+			continue
 		}
-		_, _ = a.store.Revocations().Create(wctx, store.Revocation{
-			Kind: store.RevokeSession, TargetID: id, Reason: req.Reason,
-		})
-		cancel()
-		a.denylist.revokeSession(id)
-		a.subjects.drop(id)
-		// The push rule is per-target (spec §5): cheap core-NATS, no outbox.
-		a.pushRevocation("session", id)
-		revoked = append(revoked, id)
+		for _, id := range done {
+			a.denylist.revokeSession(id)
+			a.subjects.drop(id)
+			// The push rule is per-target (spec §5): cheap core-NATS, no outbox.
+			a.pushRevocation("session", id)
+		}
+		ended = append(ended, done...)
 	}
-	for chunk := revoked; len(chunk) > 0; {
-		n := min(len(chunk), bulkRevokeMaxExplicit)
-		ectx, cancel := afterCommit(r.Context())
-		a.emitEventCtx(ectx, "straza.revocation.sessions", map[string]any{
-			"sessions": chunk[:n], "reason": req.Reason,
-		})
-		cancel()
-		chunk = chunk[n:]
-	}
-	a.emitEvent(r, "straza.audit.admin", map[string]any{
-		"action": "sessions.bulk-revoke", "count": len(revoked),
-		"target": req.User, "reason": req.Reason,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"revoked": len(revoked)})
+	return ended, failed
 }

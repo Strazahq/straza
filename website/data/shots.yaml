@@ -3,17 +3,17 @@
 # ring is the target's box in percent of the crop. width and height are the
 # crop's size in pixels. The comment above each entry is the click path.
 
-# Sign in with a code
-signin-code:
-  alt: "The console's sign-in card with a one-time code and the button Open the sign-in page"
-  dark: shots/signin-code-dark.png
-  light: shots/signin-code-light.png
-  full_dark: shots/full/signin-code-dark.png
-  full_light: shots/full/signin-code-light.png
-  ring: {left: 13.41, top: 64.5, width: 73.18, height: 11.0}
+# Sign in
+signin:
+  alt: "The console's sign-in card with the button Sign in"
+  dark: shots/signin-dark.png
+  light: shots/signin-light.png
+  full_dark: shots/full/signin-dark.png
+  full_light: shots/full/signin-light.png
+  ring: {left: 12.95, top: 48.34, width: 74.09, height: 12.0}
   width: 440
   height: 400
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1582-gc6e78918-dirty, standalone
 
 # Overview
 overview:
@@ -675,9 +675,9 @@ server-add-review:
   height: 460
   build: strazad v1.1.0-117-g106081a8, standalone
 
-# Save and publish > acknowledge each line
+# Save and publish > confirm each block
 draft-publish-typed:
-  alt: "The publish dialog of scout-tools, with the warning acknowledged by typing the host it names"
+  alt: "The publish dialog of scout-tools, with the line that widens access confirmed by typing the host it names"
   dark: shots/draft-publish-typed-dark.png
   light: shots/draft-publish-typed-light.png
   full_dark: shots/full/draft-publish-typed-dark.png
@@ -869,7 +869,7 @@ drafts-waiting:
 
 # the draft
 draft-review:
-  alt: "The draft's page with What changes, Who gains what, the checks and Publish…"
+  alt: "The draft's page with What changes, Access after publishing, the checks and Publish…"
   dark: shots/draft-review-dark.png
   light: shots/draft-review-light.png
   full_dark: shots/full/draft-review-dark.png
@@ -929,7 +929,7 @@ server-roles-add:
 
 # the screen at /console/servers/01a1131a-6b55-7498-917e-18fd8d7a072a/roles
 server-roles-list:
-  alt: "The Server roles tab of demo-tools with demo-tools-probes and its Edit tools and Delete actions"
+  alt: "The Server roles tab of demo-tools with demo-tools-probes and its Edit access and Delete actions"
   dark: shots/server-roles-list-dark.png
   light: shots/server-roles-list-light.png
   full_dark: shots/full/server-roles-list-dark.png

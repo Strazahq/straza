@@ -2,7 +2,7 @@
 
 Straza implements a strict, documented subset of SCIM 2.0, and anything outside it is refused with a proper SCIM error rather than accepted and ignored. Users are created, read, updated and deactivated by your client. Roles are created in Straza and appear to your client as groups whose only writable fact is membership. The endpoint is the same in both profiles, so any SCIM 2.0 client, a commercial IGA, a script or an identity provider, can master who exists. The public page is https://docs.straza.ai/guides/connect-identity/generic-scim/, walked with curl against strazad at `http://localhost:8420`.
 
-You need a Straza administrator login for `strazactl` and `curl` on a machine that reaches strazad. The examples hold the token in `ADMIN_API_TOKEN`. That token is the identity manager's credential and never yours, because `scim:write` assigns roles through membership. The person mints it, revokes it and runs the requests that carry it in their own terminal, and inside a coding agent `strazactl` refuses the mint on the person's login.
+You need an admin API token for `strazactl` in `STRAZA_API_TOKEN`, which a person mints in the console under Settings, API tokens, and `curl` on a machine that reaches strazad. The examples hold the token in `ADMIN_API_TOKEN`. That token is the identity manager's credential and never yours, because `scim:write` assigns roles through membership. The person mints it, revokes it and runs the requests that carry it and every `strazactl` command in their own terminal, because you hold no Straza credential.
 
 ## 1. Mint the token
 

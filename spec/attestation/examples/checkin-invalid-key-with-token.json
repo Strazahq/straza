@@ -1,0 +1,7 @@
+{
+  "id_token": "${ID_TOKEN}",
+  "device_id": "${DEVICE_ID}",
+  "counter": 1,
+  "harness": { "name": "claude-code", "version": "2.1.0" },
+  "attestation": { "managed": false, "hashes": {} }
+}

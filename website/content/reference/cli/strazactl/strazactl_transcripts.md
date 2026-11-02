@@ -2,7 +2,7 @@
 title: strazactl transcripts
 description: Search recorded conversations by text or by a secret's value
 pagetype: reference
-weight: 102
+weight: 98
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl transcripts [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -89,6 +89,8 @@ type Extensions struct {
 	Credential *CredentialSpec `yaml:"credential,omitempty" json:"credential,omitempty"`
 	Exposure   *ExposureSpec   `yaml:"exposure,omitempty" json:"exposure,omitempty"`
 	Limits     *LimitsSpec     `yaml:"limits,omitempty" json:"limits,omitempty"`
+	Objects    *ObjectsSpec    `yaml:"objects,omitempty" json:"objects,omitempty"`
+	Git        *GitSpec        `yaml:"git,omitempty" json:"git,omitempty"`
 }
 
 // RuntimeSpec selects exactly one runtime block (SPEC.md §2).
@@ -318,6 +320,10 @@ func validate(m *Manifest) error {
 
 	validateRuntime(&m.Straza.Runtime, fail)
 	validateCredential(m, fail)
+	if m.Straza.Objects != nil {
+		validateObjects(m.Straza.Objects, fail)
+	}
+	validateGit(m, fail)
 
 	if m.Straza.Exposure != nil {
 		switch {

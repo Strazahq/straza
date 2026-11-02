@@ -20,10 +20,12 @@
 
   One view per Straza role kind. The labels carry the word Straza because
   midPoint ships stock views named "Business roles" and "Application roles".
-  Two of them add a column from the role's read-only projection: the owning
-  MCP server of a server-owned application role, and the MCP servers a Straza
-  role administers. A view that declares columns declares all of them, so
-  those two list the name and the description first.
+  Two of them add columns from the role's read-only projection. The Straza
+  application roles view shows the owning MCP server of a server-owned
+  application role and the objects each line of the role covers. The Straza
+  roles view shows the MCP servers a Straza role administers. A view that
+  declares columns declares all of them, so those two list the name and the
+  description first.
 -->
 <objectModification
         xmlns="http://midpoint.evolveum.com/xml/ns/public/common/api-types-3"
@@ -113,6 +115,14 @@
                     <c:label>Owning MCP server</c:label>
                 </c:display>
                 <c:previousColumn>descriptionColumn</c:previousColumn>
+            </c:column>
+            <c:column>
+                <c:name>strazaCoversColumn</c:name>
+                <c:path>c:extension/ext:strazaCovers</c:path>
+                <c:display>
+                    <c:label>Covers</c:label>
+                </c:display>
+                <c:previousColumn>strazaServerColumn</c:previousColumn>
             </c:column>
         </t:value>
         <t:value>

@@ -97,8 +97,8 @@ type draftRequest struct {
 }
 
 // draftsServer answers the drafts routes from scripted replies, keyed by
-// method and path, and records every request, the check-in included, so a
-// refusal can be held to sending nothing at all.
+// method and path, and records every request, so a refusal can be held to
+// sending nothing at all.
 type draftsServer struct {
 	mu   sync.Mutex
 	seen []draftRequest
@@ -125,33 +125,17 @@ func newDraftsServer(t *testing.T, replies map[string]draftReply) (*draftsServer
 		s.mu.Lock()
 		s.seen = append(s.seen, draftRequest{r.Method, r.URL.RequestURI(), r.Header.Get("Authorization"), string(body)})
 		s.mu.Unlock()
-		if r.URL.Path == "/v1/checkin" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-			return
-		}
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
 	return s, srv
 }
 
-// requests is every request the server saw, the check-in included.
-func (s *draftsServer) requests() []draftRequest {
+// calls is every request the server saw: the drafts routes a verb called.
+func (s *draftsServer) calls() []draftRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]draftRequest(nil), s.seen...)
-}
-
-// calls is every request but the check-in: the drafts routes a verb called.
-func (s *draftsServer) calls() []draftRequest {
-	var out []draftRequest
-	for _, r := range s.requests() {
-		if r.uri != "/v1/checkin" {
-			out = append(out, r)
-		}
-	}
-	return out
 }
 
 // runDrafts drives the real cobra tree with stdin and answers stdout, stderr
@@ -191,16 +175,9 @@ func errText(err error) string {
 	return err.Error()
 }
 
-// assertCalls fails the test unless the server saw n drafts calls, and for
-// none nothing at all, the renewal of the login included.
+// assertCalls fails the test unless the server saw n drafts calls.
 func assertCalls(t *testing.T, s *draftsServer, n int) {
 	t.Helper()
-	if n == 0 {
-		if got := s.requests(); len(got) != 0 {
-			t.Errorf("requests = %+v, want nothing sent", got)
-		}
-		return
-	}
 	if got := s.calls(); len(got) != n {
 		t.Errorf("requests = %+v, want %d", got, n)
 	}
@@ -307,8 +284,9 @@ func TestDraftsCheck(t *testing.T) {
 		"  off PolicySet/old-set\n" +
 		"  -   Role/legacy\n" +
 		"Checked against live state at 2026-09-24 10:20 UTC.\n"
-	verdictLines := "  widens    App/github Straza will send every caller's own token to api.githubcopilot.com, a host github has not used before. Type api.githubcopilot.com to publish.\n" +
+	verdictLines := "  widens    App/github Straza will send every caller's own token to api.githubcopilot.com, a host github has not used before.\n" +
 		"            after:  token api.githubcopilot.com\n" +
+		"            Type api.githubcopilot.com to confirm it when you publish the draft in the console under Drafts.\n" +
 		"  widens    Role/developer Holders of developer will also hold github-readers and reach what it reaches.\n" +
 		"            after:  github-readers\n" +
 		"  warning   App/github github runs on each caller's own token, and nobody who holds its roles has connected yet. Each person runs straza connect github after publishing.\n" +
@@ -336,7 +314,7 @@ func TestDraftsCheck(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, srv := newDraftsServer(t, map[string]draftReply{"POST /v1/admin/drafts/check": {body: checkAnswer(tc.refused)}})
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", "drafts", "check", "-f", file, "-f", file, "--note", "why")
+			stdout, _, code, err := runDrafts(t, onToken(t, srv.URL), "", "drafts", "check", "-f", file, "-f", file, "--note", "why")
 			if stdout != tc.wantStdout || code != tc.wantCode {
 				t.Errorf("exit %d (%v), stdout:\n%s\nwant exit %d, stdout:\n%s", code, err, stdout, tc.wantCode, tc.wantStdout)
 			}
@@ -369,7 +347,7 @@ func TestDraftsCreate(t *testing.T) {
 			name:  "a draft that can be published",
 			reply: draftReply{code: http.StatusCreated, body: fixAnswer("41", 1, "", fixTick)},
 			want: []string{head, "  widens    Role/developer Holders", "  info      Role/github-readers Nobody holds",
-				"\nThe draft can be published: strazactl drafts publish 41\n"},
+				"\nPublish draft 41 in the console under Drafts: http://127.0.0.1:", "/console/drafts/41\n"},
 		},
 		{
 			name:     "a draft the check refuses is stored, and exits 1",
@@ -405,7 +383,7 @@ func TestDraftsCreate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, srv := newDraftsServer(t, map[string]draftReply{"POST /v1/admin/drafts": tc.reply})
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", "drafts", "create", "-f", file)
+			stdout, _, code, err := runDrafts(t, onToken(t, srv.URL), "", "drafts", "create", "-f", file)
 			if code != tc.wantCode || errText(err) != tc.wantErr {
 				t.Errorf("exit %d, err %v, want exit %d, err %q", code, err, tc.wantCode, tc.wantErr)
 			}
@@ -441,7 +419,7 @@ func TestDraftsUpdate(t *testing.T) {
 			wantBody: `{"revision":2,"documents":["kind: App\n"],"note":""}`,
 			want: []string{"Draft 41 is at revision 3. Nothing changes until a person publishes it.\n" +
 				"  +   App/github\n  ~   Role/developer\n  off PolicySet/old-set\n  -   Role/legacy\n  widens    Role/developer",
-				"\nThe draft can be published: strazactl drafts publish 41\n"},
+				"\nPublish draft 41 in the console under Drafts: http://127.0.0.1:", "/console/drafts/41\n"},
 		},
 		{
 			name:     "no --note keeps the note",
@@ -467,7 +445,7 @@ func TestDraftsUpdate(t *testing.T) {
 			})
 			t.Setenv("STRAZA_SERVER", "")
 			args := append([]string{"drafts", "update", "41", "-f", file}, tc.args...)
-			stdout, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", args...)
+			stdout, _, code, err := runDrafts(t, onToken(t, srv.URL), "", args...)
 			if code != tc.wantCode || errText(err) != tc.wantErr {
 				t.Errorf("exit %d, err %v, want exit %d, err %q", code, err, tc.wantCode, tc.wantErr)
 			}
@@ -567,7 +545,7 @@ func TestDraftsList(t *testing.T) {
 			s, srv := newDraftsServer(t, map[string]draftReply{"GET /v1/admin/drafts": reply})
 			t.Setenv("STRAZA_SERVER", "")
 			args := append([]string{"drafts", "list"}, tc.args...)
-			stdout, stderr, code, err := runDrafts(t, writeCreds(t, srv.URL), "", args...)
+			stdout, stderr, code, err := runDrafts(t, onToken(t, srv.URL), "", args...)
 			if code != tc.wantCode || errText(err) != tc.wantErr {
 				t.Errorf("exit %d, err %v, want exit %d, err %q", code, err, tc.wantCode, tc.wantErr)
 			}
@@ -618,7 +596,7 @@ func TestDraftsShow(t *testing.T) {
 				"ROLE", "SERVER", "TOOL", "NOW", "AFTER", "HOLDERS", "developer", "github", "list_issues", "not reachable",
 				"a hold, up to 2 minutes, decided by sec-approvers", "3\n",
 				"  Publishing App/github needs the scope apps:write or the role straza-global-mcp-admin.\n",
-				"You may publish it: strazactl drafts publish 41\n",
+				"Publish draft 41 in the console under Drafts: http://127.0.0.1:", "/console/drafts/41\n",
 			},
 			notWant: "Proposed by",
 		},
@@ -626,14 +604,14 @@ func TestDraftsShow(t *testing.T) {
 			name: "an open draft the reader may not publish",
 			reply: draftReply{body: fixDetail("open", "", fixTick, false,
 				"You cannot publish draft 41: this draft also changes policy sets, which needs the scope policy:write.")},
-			want:    []string{"\nYou cannot publish draft 41: this draft also changes policy sets, which needs the scope policy:write.\n"},
-			notWant: "You may publish it",
+			want: []string{"\nYou cannot publish draft 41: this draft also changes policy sets, which needs the scope policy:write.\n",
+				"Publish draft 41 in the console under Drafts: http://127.0.0.1:", "/console/drafts/41\n"},
 		},
 		{
 			name:    "an open draft the check refuses",
 			reply:   draftReply{body: fixDetail("open", fixRefused, "", true, "")},
 			want:    []string{"  refused   PolicySet/github-writers-access", "\nFix the refused lines, then send the documents again: strazactl drafts update 41 -f <path>\n"},
-			notWant: "You may publish it",
+			notWant: "Publish draft 41",
 		},
 		{
 			name:    "an item equal to live prints no diff",
@@ -661,6 +639,14 @@ func TestDraftsShow(t *testing.T) {
 			notWant: "Checked against live state at",
 		},
 		{
+			name: "an open draft names the objects each role covers, in the server's own words",
+			reply: draftReply{body: strings.Replace(fixDetail("open", "", "", true, ""), `"needs":[`,
+				`"objects":[{"role":"desk-eu","server":"helpdesk","type":"ticket","plural":"tickets","holders_count":2,"every_before":false,"every_after":false,`+
+					`"before":[{"id":"t1","value":"T-1"}],"after":[{"id":"t1","value":"T-1"},{"id":"t2","value":"T-2"}]}],"needs":[`, 1)},
+			want: []string{"\nTickets on helpdesk, now and after publishing:\n", "ROLE", "NOW", "AFTER", "HOLDERS\n", "desk-eu", "T-1", "T-1, T-2", "2\n",
+				"  Publishing App/github needs"},
+		},
+		{
 			name:     "a draft that is not there exits 2",
 			reply:    draftReply{code: http.StatusNotFound, body: `{"error":"There is no draft 41. List the drafts with strazactl drafts list, or open Drafts on the console."}`},
 			wantErr:  "There is no draft 41. List the drafts with strazactl drafts list, or open Drafts on the console.",
@@ -671,7 +657,7 @@ func TestDraftsShow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, srv := newDraftsServer(t, map[string]draftReply{"GET /v1/admin/drafts/41": tc.reply})
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, stderr, code, err := runDrafts(t, writeCreds(t, srv.URL), "", "drafts", "show", "41")
+			stdout, stderr, code, err := runDrafts(t, onToken(t, srv.URL), "", "drafts", "show", "41")
 			if code != tc.wantCode || errText(err) != tc.wantErr {
 				t.Errorf("exit %d, err %v, want exit %d, err %q", code, err, tc.wantCode, tc.wantErr)
 			}
@@ -741,7 +727,7 @@ func TestDraftsDiscard(t *testing.T) {
 			s, srv := newDraftsServer(t, map[string]draftReply{"POST /v1/admin/drafts/41/discard": tc.reply})
 			t.Setenv("STRAZA_SERVER", "")
 			args := append([]string{"drafts", "discard", "41"}, tc.args...)
-			stdout, _, code, err := runDrafts(t, writeCreds(t, srv.URL), tc.stdin, args...)
+			stdout, _, code, err := runDrafts(t, onToken(t, srv.URL), tc.stdin, args...)
 			if code != tc.wantCode || errText(err) != tc.wantErr || stdout != tc.wantOut {
 				t.Errorf("exit %d, err %v, stdout %q, want exit %d, err %q, stdout %q", code, err, stdout, tc.wantCode, tc.wantErr, tc.wantOut)
 			}
@@ -769,7 +755,7 @@ func TestDraftsRevert(t *testing.T) {
 			name:     "an undo that can be published",
 			args:     []string{"--note", "undo the rollout"},
 			reply:    draftReply{code: http.StatusCreated, body: fixAnswer("42", 1, "", fixTick)},
-			want:     []string{"Created draft 42, which undoes draft 41. Nothing changes until a person publishes it.\n  widens    Role/developer", "\nThe draft can be published: strazactl drafts publish 42\n"},
+			want:     []string{"Created draft 42, which undoes draft 41. Nothing changes until a person publishes it.\n  widens    Role/developer", "\nPublish draft 42 in the console under Drafts: http://127.0.0.1:", "/console/drafts/42\n"},
 			wantBody: `{"note":"undo the rollout"}`,
 		},
 		{
@@ -800,7 +786,7 @@ func TestDraftsRevert(t *testing.T) {
 			s, srv := newDraftsServer(t, map[string]draftReply{"POST /v1/admin/drafts/41/revert": tc.reply})
 			t.Setenv("STRAZA_SERVER", "")
 			args := append([]string{"drafts", "revert", "41"}, tc.args...)
-			stdout, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", args...)
+			stdout, _, code, err := runDrafts(t, onToken(t, srv.URL), "", args...)
 			if code != tc.wantCode || errText(err) != tc.wantErr {
 				t.Errorf("exit %d, err %v, want exit %d, err %q", code, err, tc.wantCode, tc.wantErr)
 			}
@@ -822,8 +808,6 @@ func TestDraftsJSON(t *testing.T) {
 	refusedCheck := `{"items":` + fixItems + `,"verdict":` + fixVerdict(fixRefused, "") + `}`
 	intake := `{"error":"The draft holds no document. Add at least one App, Role, PolicySet or Removal document.","findings":[]}`
 	page := `{"items":[],"next_cursor":"c2"}`
-	published := `{"draft":` + fixDraft("41", 2, "published", "strazactl", fixItems) + `,"snapshot":"3be0a1","servers":[],"next":[]}`
-	stale := `{"error":"Draft 41 cannot be published: App/github changed after this draft was checked.","verdict":` + fixVerdict(fixRefused, "") + `}`
 	discarded := `{"draft":` + fixDraft("41", 2, "discarded", "strazactl", fixItems) + `}`
 	tests := []struct {
 		name       string
@@ -851,25 +835,10 @@ func TestDraftsJSON(t *testing.T) {
 			wantStdout: page, wantStderr: "More drafts exist than these 200. Narrow the list with --state or --mine.\n", wantCalls: 1},
 		{name: "show", args: []string{"show", "41"}, replies: map[string]draftReply{"GET /v1/admin/drafts/41": {body: fixDetail("open", "", "", true, "")}},
 			wantStdout: fixDetail("open", "", "", true, ""), wantCalls: 1},
-		{name: "publish", args: []string{"publish", "41", "--yes", "--ack", "api.githubcopilot.com"},
-			replies: map[string]draftReply{
-				"GET /v1/admin/drafts/41":          {body: fixDetail("open", "", fixTyped, true, "")},
-				"POST /v1/admin/drafts/41/publish": {body: published},
-			},
-			wantStdout: published, wantCalls: 3},
-		{name: "publish that went stale", args: []string{"publish", "41", "--yes"},
-			replies: map[string]draftReply{
-				"GET /v1/admin/drafts/41":          {body: fixDetail("open", "", fixTick, true, "")},
-				"POST /v1/admin/drafts/41/publish": {code: 409, body: stale},
-			},
-			wantStdout: stale, wantErr: "Draft 41 cannot be published: App/github changed after this draft was checked.", wantCode: 1, wantCalls: 3},
 		{name: "discard", args: []string{"discard", "41", "--yes"}, replies: map[string]draftReply{"POST /v1/admin/drafts/41/discard": {body: discarded}},
 			wantStdout: discarded, wantCalls: 1},
 		{name: "revert", args: []string{"revert", "41"}, replies: map[string]draftReply{"POST /v1/admin/drafts/41/revert": {code: 201, body: fixAnswer("42", 1, "", "")}},
 			wantStdout: fixAnswer("42", 1, "", ""), wantCalls: 1},
-		{name: "publish without --yes asks nothing and sends nothing", args: []string{"publish", "41"},
-			wantErr:  "strazactl drafts publish --json needs --yes, because --json keeps stdout for the server's answer and a question cannot share it. Pass --yes, and --ack with the text of each typed risk",
-			wantCode: 2},
 		{name: "a server outage prints nothing on stdout", args: []string{"check", "-f", file},
 			replies:  map[string]draftReply{"POST /v1/admin/drafts/check": {code: 503, body: `{"error":"Straza could not read live state. Try again in a moment."}`}},
 			wantErr:  "Straza could not read live state. Try again in a moment.",
@@ -883,7 +852,7 @@ func TestDraftsJSON(t *testing.T) {
 			s, srv := newDraftsServer(t, tc.replies)
 			t.Setenv("STRAZA_SERVER", "")
 			args := append(append([]string{"drafts"}, tc.args...), "--json")
-			stdout, stderr, code, err := runDrafts(t, writeCreds(t, srv.URL), "", args...)
+			stdout, stderr, code, err := runDrafts(t, onToken(t, srv.URL), "", args...)
 			if code != tc.wantCode || errText(err) != tc.wantErr {
 				t.Errorf("exit %d, err %v, want exit %d, err %q", code, err, tc.wantCode, tc.wantErr)
 			}
@@ -905,66 +874,6 @@ func TestDraftsJSON(t *testing.T) {
 	}
 }
 
-// TestDraftsInsideACodingAgent pins the guard on every verb: on the login
-// inside a coding agent, check, list and show run, and the verbs that change
-// a draft are refused before anything is sent, a read or a question
-// included, and exit 2. On an admin API token they go out.
-func TestDraftsInsideACodingAgent(t *testing.T) {
-	file := writeFile(t, t.TempDir(), "github.yaml", "kind: App\n")
-	replies := map[string]draftReply{
-		"POST /v1/admin/drafts/check":      {body: `{"items":[],"verdict":` + fixVerdict("", "") + `}`},
-		"POST /v1/admin/drafts":            {code: 201, body: fixAnswer("41", 1, "", "")},
-		"GET /v1/admin/drafts":             {body: `{"items":[],"next_cursor":""}`},
-		"GET /v1/admin/drafts/41":          {body: fixDetail("open", "", "", true, "")},
-		"POST /v1/admin/drafts/41/discard": {body: `{"draft":` + fixDraft("41", 2, "discarded", "strazactl", fixItems) + `}`},
-	}
-	const refusal = "CLAUDECODE is set, so strazactl runs inside a coding agent, and this command changes Straza"
-	tests := []struct {
-		name      string
-		token     string
-		args      []string
-		wantCalls []string
-	}{
-		{name: "check runs", args: []string{"check", "-f", file}, wantCalls: []string{"POST /v1/admin/drafts/check"}},
-		{name: "list runs", args: []string{"list"}, wantCalls: []string{"GET /v1/admin/drafts?limit=200&state=open"}},
-		{name: "show runs", args: []string{"show", "41"}, wantCalls: []string{"GET /v1/admin/drafts/41"}},
-		{name: "create is refused", args: []string{"create", "-f", file}},
-		{name: "update is refused before its read", args: []string{"update", "41", "-f", file}},
-		{name: "publish is refused before its read", args: []string{"publish", "41", "--yes"}},
-		{name: "discard is refused before its question", args: []string{"discard", "41"}},
-		{name: "revert is refused", args: []string{"revert", "41"}},
-		{name: "create runs on a token", token: "wat_abc", args: []string{"create", "-f", file}, wantCalls: []string{"POST /v1/admin/drafts"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			s, srv := newDraftsServer(t, replies)
-			t.Setenv("STRAZA_SERVER", "")
-			t.Setenv("CLAUDECODE", "1")
-			t.Setenv(apiTokenEnv, tc.token)
-			stdout, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "y\n", append([]string{"drafts"}, tc.args...)...)
-			var calls []string
-			for _, r := range s.calls() {
-				calls = append(calls, r.method+" "+r.uri)
-			}
-			if strings.Join(calls, "|") != strings.Join(tc.wantCalls, "|") {
-				t.Errorf("requests = %q, want %q", calls, tc.wantCalls)
-			}
-			if tc.wantCalls == nil {
-				assertCalls(t, s, 0)
-			}
-			if tc.wantCalls != nil {
-				if code != 0 {
-					t.Errorf("exit %d (%v), want 0", code, err)
-				}
-				return
-			}
-			if code != 2 || !strings.HasPrefix(errText(err), refusal) || stdout != "" {
-				t.Errorf("exit %d, err %v, stdout %q, want exit 2 with the guard's refusal and nothing printed", code, err, stdout)
-			}
-		})
-	}
-}
-
 // TestDraftsUsageExitsTwo pins the usage refusals: each names the form the
 // verb takes, exits 2, and sends nothing.
 func TestDraftsUsageExitsTwo(t *testing.T) {
@@ -981,8 +890,8 @@ func TestDraftsUsageExitsTwo(t *testing.T) {
 			"strazactl drafts create reads documents with -f, one -f for each path, as in strazactl drafts create -f github.yaml"},
 		{"no draft number", []string{"show"},
 			"strazactl drafts show takes one draft number, such as 41, and got 0. List the drafts with strazactl drafts list"},
-		{"two draft numbers", []string{"publish", "41", "42"},
-			"strazactl drafts publish takes one draft number, such as 41, and got 2. List the drafts with strazactl drafts list"},
+		{"two draft numbers", []string{"show", "41", "42"},
+			"strazactl drafts show takes one draft number, such as 41, and got 2. List the drafts with strazactl drafts list"},
 		{"stdin twice", []string{"check", "-f", "-", "-f", "-"},
 			"-f - reads stdin, which can be read once, and it is given twice. Pass -f - once"},
 		{"an unknown flag", []string{"list", "--bogus"}, "unknown flag: --bogus"},
@@ -992,7 +901,7 @@ func TestDraftsUsageExitsTwo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, srv := newDraftsServer(t, nil)
 			t.Setenv("STRAZA_SERVER", "")
-			_, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", append([]string{"drafts"}, tc.args...)...)
+			_, _, code, err := runDrafts(t, onToken(t, srv.URL), "", append([]string{"drafts"}, tc.args...)...)
 			if code != 2 || errText(err) != tc.wantErr {
 				t.Errorf("exit %d, err %v, want exit 2 and %q", code, err, tc.wantErr)
 			}
@@ -1011,9 +920,9 @@ func TestDraftsAnswerWithNoSentence(t *testing.T) {
 		want string
 	}{
 		{http.StatusNotFound, "strazad answered HTTP 404 with no sentence of its own, which it does when it does not serve GET /v1/admin/drafts. " +
-			"Upgrade strazad, or check that --server or your login points at strazad"},
+			"Upgrade strazad, or check that --server or STRAZA_SERVER points at strazad"},
 		{http.StatusMethodNotAllowed, "strazad answered HTTP 405 with no sentence of its own, which it does when it does not serve GET /v1/admin/drafts. " +
-			"Upgrade strazad, or check that --server or your login points at strazad"},
+			"Upgrade strazad, or check that --server or STRAZA_SERVER points at strazad"},
 		{http.StatusRequestEntityTooLarge, "strazad or a proxy in front of it answered HTTP 413" + generic},
 		{http.StatusBadGateway, "strazad or a proxy in front of it answered HTTP 502" + generic},
 	}
@@ -1021,7 +930,7 @@ func TestDraftsAnswerWithNoSentence(t *testing.T) {
 		t.Run(http.StatusText(tc.code), func(t *testing.T) {
 			_, srv := newDraftsServer(t, map[string]draftReply{"GET /v1/admin/drafts": {code: tc.code, body: "<html>" + http.StatusText(tc.code) + "</html>"}})
 			t.Setenv("STRAZA_SERVER", "")
-			_, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", "drafts", "list")
+			_, _, code, err := runDrafts(t, onToken(t, srv.URL), "", "drafts", "list")
 			if code != 2 || errText(err) != tc.want {
 				t.Errorf("exit %d, err %v, want exit 2 and %q", code, err, tc.want)
 			}
@@ -1030,7 +939,7 @@ func TestDraftsAnswerWithNoSentence(t *testing.T) {
 }
 
 // TestDraftsGroupPrintsItsHelp pins the drafts group run with no verb: it
-// prints its help and exits 0, with no login and no server.
+// prints its help and exits 0, with no token and no server.
 func TestDraftsGroupPrintsItsHelp(t *testing.T) {
 	t.Setenv("STRAZA_SERVER", "")
 	stdout, _, code, err := runDrafts(t, noCreds(t), "", "drafts")

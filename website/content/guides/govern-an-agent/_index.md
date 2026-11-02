@@ -16,5 +16,7 @@ keywords: govern agent harness hooks gateway
 - [Headless agents]({{< relref "guides/govern-an-agent/headless-agents.md" >}}) enrolls an AI agent with no person at the keyboard, with a key it holds, so it checks in without a browser.
 
 - [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) enrolls a machine once, before any harness page.
+- [Deploy with Intune]({{< relref "guides/govern-an-agent/deploy-with-intune.md" >}}) ships the Straza MSI to Windows machines and the Straza pkg to Macs, each with the managed install for your Straza server.
+- [Deploy with Jamf Pro]({{< relref "guides/govern-an-agent/deploy-with-jamf.md" >}}) ships the Straza pkg and the managed install to Macs in one Jamf Pro policy, with a profile that keeps the service switched on.
 - [What the agent reads back]({{< relref "guides/govern-an-agent/what-the-agent-reads-back.md" >}}) shows the deny reasons, the pending answers and the approval tools an agent sees.
 - [Knowledge packs]({{< relref "guides/govern-an-agent/knowledge-packs.md" >}}) says what a pack holds and how an agent gets it.

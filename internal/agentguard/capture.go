@@ -11,49 +11,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/strazahq/straza/internal/policy"
-	"github.com/strazahq/straza/internal/redact"
 )
 
-// Conversation capture, client half:
-// prompts are captured at prompt.submit (the hook payload carries the text),
-// replies at session.end by reading the delta of the harness transcript file
-// since the last capture. Everything rides the existing audit spool: capture
-// is observational and MUST never block or fail a session.
-
-// captureMaxBytes caps one captured turn's stored content. The full-content
-// hash is computed BEFORE the cap, so the chain witnesses what was cut.
-const captureMaxBytes = 64 << 10
-
-// redactedMark replaces matched secrets in redact mode (kept in step with the
-// shared battery's mark).
-const redactedMark = redact.Mark
-
-// redactSecrets masks recognizable credential patterns (capture mode
-// `redact`, spec/policyset §6) via the shared battery (internal/redact).
-func redactSecrets(s string) string {
-	return redact.Redact(s)
-}
-
-// captureContent prepares one turn for the spool: hash the FULL original,
-// then apply the mode, then the size cap.
-func captureContent(content, mode string) (stored string, truncated bool, hash string) {
-	sum := sha256.Sum256([]byte(content))
-	hash = "sha256:" + hex.EncodeToString(sum[:])
-	if mode == policy.CaptureModeRedact {
-		content = redactSecrets(content)
-	}
-	if len(content) > captureMaxBytes {
-		content = content[:captureMaxBytes]
-		truncated = true
-	}
-	return content, truncated, hash
-}
-
-// Capture returns the session's conversation-capture directive from the
-// snapshot the PDP already holds.
-func (p *LocalPDP) Capture() policy.CaptureDirective { return p.engine.Capture(p.subject) }
+// Conversation capture, client half: the hook reads what the harness wrote
+// and hands it to the Straza background service, which applies the capture
+// mode and records it. Prompts are captured at prompt.submit (the hook
+// payload carries the text), replies at session.end by reading the delta of
+// the harness transcript file since the last capture. The watermarks live
+// in the user's straza home, because the service cannot read the user's
+// files. Capture is observational and MUST never block or fail a session.
 
 // maxTranscriptLine bounds one transcript record.
 const maxTranscriptLine = 8 << 20

@@ -2,7 +2,7 @@
 title: strazactl roles implications
 description: List the roles this role composes (holding it also holds these)
 pagetype: reference
-weight: 82
+weight: 78
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl roles implications <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

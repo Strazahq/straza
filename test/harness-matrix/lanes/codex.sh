@@ -11,8 +11,8 @@
 #
 # Codex runs only with CODEX_HOME and HOME inside .work/, reads its managed
 # /etc/codex/requirements.toml through run.sh's overlay, and is npm-installed
-# into .tools/, never globally. The live gates run ollama and a throwaway
-# strazad, killed BY PID (a pattern kill hits this script and the real strazad).
+# into .tools/, never globally. The live gates run ollama, a throwaway strazad
+# and the NHI's service, killed BY PID (a name kill hits the real strazad).
 
 CODEX_VERSION="${CODEX_VERSION:-$CODEX_PINNED}"
 mkdir -p "$WORK"/{g1,g2,g3,g3live,g4,ansi,quoted,codex-home,oss-cwd} "$WORK/etc-upper/codex"
@@ -99,6 +99,7 @@ OLLAMA_BIN="$TOOLS/ollama-$OLLAMA_PINNED/bin/ollama"
 OLLAMA_ADDR="${HARNESS_MATRIX_OLLAMA_ADDR:-127.0.0.1:11434}"
 OLLAMA_OWN_PID=""   # only an ollama THIS run started is ever killed
 STRAZAD_PID=""
+SERVICE_PID=""
 G4_USER=g4-agent
 LIVE_SKIP=""
 
@@ -176,10 +177,11 @@ codex_turn_complete() {
 
 # codex_lane_cleanup tears down everything this lane started, by stored PID
 # only, and destroys the throwaway deployment's state: the strazad data dir
-# (a real store), the enrolled NHI's private key, and the admin token. The
-# bootstrap admin password is redacted in place rather than deleted so a failed
-# run still has its log.
+# (a real store), the service's state with the enrolled NHI's private key,
+# and the admin token. The bootstrap admin password is redacted in place
+# rather than deleted so a failed run still has its log.
 codex_lane_cleanup() {
+  if [ -n "${SERVICE_PID:-}" ]; then kill "$SERVICE_PID" 2>/dev/null || true; SERVICE_PID=""; fi
   if [ -n "${STRAZAD_PID:-}" ]; then kill "$STRAZAD_PID" 2>/dev/null || true; STRAZAD_PID=""; fi
   if [ -n "${OLLAMA_OWN_PID:-}" ]; then kill "$OLLAMA_OWN_PID" 2>/dev/null || true; OLLAMA_OWN_PID=""; fi
   if [ -f "$WORK/g4/strazad.log" ]; then
@@ -294,6 +296,16 @@ else
           --data-dir "$WORK/g4/data" --listen "127.0.0.1:$g4_port" \
           >"$WORK/g4/strazad.log" 2>&1 &
       STRAZAD_PID=$!
+      # The NHI's key, enrollment and sessions live in a user-mode straza
+      # service for the lane's STRAZA_HOME: keygen, enroll and the real hook
+      # all reach it at $STRAZA_HOME/service.sock, and nothing else holds them.
+      env HOME="$WORK/g4/home" STRAZA_HOME="$WORK/g4/home/.straza" \
+        nohup "$WORK/bin/straza" service >"$WORK/g4/service.log" 2>&1 &
+      SERVICE_PID=$!
+      g4_wait=0
+      while [ ! -S "$WORK/g4/home/.straza/service.sock" ] && [ "$g4_wait" -lt 30 ]; do
+        sleep 1; g4_wait=$((g4_wait + 1))
+      done
       if env HOME="$WORK/g4/home" STRAZA_HOME="$WORK/g4/home/.straza" \
            "$WORK/bin/g4boot" -mode bootstrap -server "$G4_SERVER" \
            -log "$WORK/g4/strazad.log" -user "$G4_USER" \
@@ -306,15 +318,16 @@ else
       fi
     fi
     if [ "$g4_ready" != 1 ]; then
-      note "- g4-e2e: **FAIL** (bootstrap never completed; see $WORK/g4/bootstrap.log and $WORK/g4/strazad.log)"
+      note "- g4-e2e: **FAIL** (bootstrap never completed; see $WORK/g4/bootstrap.log, $WORK/g4/service.log and $WORK/g4/strazad.log)"
       sed 's/^/    /' "$WORK/g4/bootstrap.log" 2>/dev/null | tail -20 | tee -a "$REPORT"
+      sed 's/^/    /' "$WORK/g4/service.log" 2>/dev/null | tail -10 | tee -a "$REPORT"
       FAILED=1
     else
       # The MCP echo server is registered as `straza` here: codex prefixes
       # its tools mcp__straza__*, which normalize.go flags GatewayProxied
       # and LocalPDP.Decide answers with the whole-decision deferral.
       # No --conformance-policy: this is the REAL hook against the REAL
-      # enrolled session.
+      # enrolled session, which the lane's service holds.
       sed -e "s|@BIN@|$WORK/bin/g4boot|" -e "s|@NAME@|straza|" \
         "$MATRIX/cases/codex-mcp.toml.tmpl" > "$WORK/g4/config.toml"
       : > "$WORK/g4/records.jsonl"

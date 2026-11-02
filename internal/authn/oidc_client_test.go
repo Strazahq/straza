@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jwt"
+
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/store"
 	"github.com/strazahq/straza/internal/store/storetest"
@@ -254,7 +257,7 @@ func TestExternalVerifierRejectsWrongAudience(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.VerifyLogin(ctx, idp.login(t, "ext-kim", "other-client")); err == nil {
+	if _, err := v.VerifyLogin(ctx, idp.login(t, "ext-kim", "strazactl")); err == nil {
 		t.Fatal("token for another client accepted")
 	}
 	if _, err := v.VerifyLogin(ctx, "garbage.token.here"); err == nil {
@@ -341,6 +344,102 @@ func TestExternalVerifierProtectedAccount(t *testing.T) {
 			}
 			if after.ExternalID != before.ExternalID {
 				t.Errorf("the refused login changed the external id from %q to %q", before.ExternalID, after.ExternalID)
+			}
+		})
+	}
+}
+
+// TestExternalVerifierLoginFacts pins VerifyLoginFacts: it returns the
+// resolved user beside the nonce and auth_time of the provider's ID token,
+// the zero facts when the token carries neither, and a refusal when
+// auth_time is not a number. VerifyLogin resolves the same user.
+func TestExternalVerifierLoginFacts(t *testing.T) {
+	ctx := context.Background()
+	idp := newIDPFixture(t)
+	signedIn := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Second)
+	malformed := func(t *testing.T) string {
+		t.Helper()
+		now := time.Now()
+		tok, err := jwt.NewBuilder().
+			Issuer(idp.srv.URL).Subject("sub-odd").Audience([]string{"straza"}).
+			IssuedAt(now).Expiration(now.Add(time.Minute)).
+			Claim("preferred_username", "ext-odd").Claim("auth_time", "just now").Build()
+		if err != nil {
+			t.Fatal(err)
+		}
+		idp.tokens.mu.RLock()
+		key := idp.tokens.active
+		idp.tokens.mu.RUnlock()
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.EdDSA(), key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(signed)
+	}
+	cases := []struct {
+		name      string
+		token     func(t *testing.T) string
+		wantUser  string
+		wantFacts LoginFacts
+		recent    bool // auth_time is the moment the fixture's device flow checked the password
+		wantErr   bool
+	}{
+		{name: "nonce and auth_time", wantUser: "ext-kim",
+			token: func(t *testing.T) string {
+				raw, err := idp.tokens.MintIDTokenFor("sub-kim", "straza", time.Minute, "ext-kim", "kim@idp.example",
+					LoginFacts{Nonce: "jkt-part.random-part", AuthTime: signedIn})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return raw
+			},
+			wantFacts: LoginFacts{Nonce: "jkt-part.random-part", AuthTime: signedIn}},
+		{name: "no facts", wantUser: "ext-lee",
+			token: func(t *testing.T) string {
+				raw, err := idp.tokens.MintIDToken("sub-lee", "straza", time.Minute, "ext-lee", "lee@idp.example")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return raw
+			}},
+		{name: "the device grant stamps auth_time", wantUser: "ext-ann", recent: true,
+			token: func(t *testing.T) string { return idp.login(t, "ext-ann", "straza") }},
+		{name: "auth_time is not a number", token: malformed, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := NewExternalVerifier(ctx, idp.srv.URL, "", "straza", platformUsers(t), true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := tc.token(t)
+			before := time.Now().Add(-time.Minute)
+			u, facts, err := v.VerifyLoginFacts(ctx, raw)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("VerifyLoginFacts = %+v, %+v, want a refusal", u, facts)
+				}
+				if u.ID != "" || facts != (LoginFacts{}) {
+					t.Errorf("a refusal returned the user %+v and the facts %+v", u, facts)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("VerifyLoginFacts: %v", err)
+			}
+			if u.Username != tc.wantUser {
+				t.Errorf("user = %q, want %q", u.Username, tc.wantUser)
+			}
+			if tc.recent {
+				if facts.Nonce != "" || facts.AuthTime.Before(before.Truncate(time.Second)) || facts.AuthTime.After(time.Now()) {
+					t.Errorf("facts = %+v, want no nonce and an auth_time within the last minute", facts)
+				}
+			} else if facts.Nonce != tc.wantFacts.Nonce || !facts.AuthTime.Equal(tc.wantFacts.AuthTime) {
+				t.Errorf("facts = %+v, want %+v", facts, tc.wantFacts)
+			}
+			again, err := v.VerifyLogin(ctx, raw)
+			if err != nil || again.ID != u.ID {
+				t.Errorf("VerifyLogin = %+v, %v, want the same user %s", again, err, u.ID)
 			}
 		})
 	}

@@ -140,7 +140,7 @@ func TestAuditListResolvesUserID(t *testing.T) {
 		"specversion": "1.0", "id": "uid-ce-1", "type": "straza.audit.authn", "source": "strazad",
 		"data": map[string]any{
 			"action": "session.end", "outcome": "lifetime-closed", "userId": carol.ID, "session": "ses-uid-1",
-			"reason": "session older than the maximum lifetime of 12h0m0s; the client starts a new session from its device credential",
+			"reason": "session older than the maximum lifetime of 12h0m0s; the client starts a new session from its enrollment",
 		},
 	})
 	if err := app.bus.Publish(context.Background(), "straza.audit.authn", janitorCE); err != nil {

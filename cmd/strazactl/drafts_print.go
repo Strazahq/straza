@@ -36,24 +36,36 @@ func itemMark(it ctl.DraftItem) string {
 }
 
 // printVerdict prints the verdict lines: refused, widens, warning,
-// unchecked and info, each list in the server's order. places maps the
-// number of each sent document to where it sits, as printFindings says.
+// unchecked and info, each list in the server's order but the risks, which
+// print by confirm block as printRisks says. places maps the number of each
+// sent document to where it sits, as printFindings says.
 func printVerdict(w io.Writer, v ctl.DraftVerdict, places map[int]string) {
 	printFindings(w, "refused", v.Refused, places)
-	printFindings(w, "widens", v.Risks, nil)
+	printRisks(w, v.Risks)
 	printFindings(w, "warning", v.Warnings, nil)
 	printFindings(w, "unchecked", v.Unchecked, nil)
 	printFindings(w, "info", v.Info, nil)
 }
 
+// printRisks prints the risk lines block by block, in the order publish
+// asks for them, and under the lines of each typed block, once, what a
+// publisher types for it.
+func printRisks(w io.Writer, risks []ctl.DraftFinding) {
+	for _, b := range confirmBlocks(risks) {
+		printFindings(w, "widens", b.lines, nil)
+		if hint := b.hint(); hint != "" {
+			fmt.Fprintf(w, "            %s\n", hint)
+		}
+	}
+}
+
 // printFindings prints one verdict line per finding: two spaces, the class
-// word, the object when the line has one, the sentence with its fix, and for
-// a typed risk the text a publisher types. Under a line whose document
-// number places maps, it says where the document or text the line refuses
-// sits, such as the second document of github.yaml, a Role named deploy.
-// Under a risk or a warning whose before and after words differ, it prints
-// each side the finding has, indented. The server never puts a value in
-// those words.
+// word, the object when the line has one, and the sentence with its fix.
+// Under a line whose document number places maps, it says where the
+// document or text the line refuses sits, such as the second document of
+// github.yaml, a Role named deploy. Under a risk or a warning whose before
+// and after words differ, it prints each side the finding has, indented.
+// The server never puts a value in those words.
 func printFindings(w io.Writer, word string, findings []ctl.DraftFinding, places map[int]string) {
 	for _, f := range findings {
 		line := fmt.Sprintf("  %-9s ", word)
@@ -63,9 +75,6 @@ func printFindings(w io.Writer, word string, findings []ctl.DraftFinding, places
 			line += f.Object + " "
 		}
 		line += lineText(f)
-		if f.Ack == "typed" && f.Typed != "" {
-			line += " Type " + f.Typed + " to publish."
-		}
 		fmt.Fprintln(w, line)
 		if where := places[f.Document]; where != "" {
 			fmt.Fprintf(w, "  in %s\n", where)
@@ -93,10 +102,11 @@ func lineText(f ctl.DraftFinding) string {
 // author, who discarded a discarded draft, the note, each item against live
 // state, when it was checked, or for a draft that is not open the check the
 // server stored for its revision, the verdict, info and passed lines, who
-// gains what, the standing publishing needs, and for an open draft whether
-// the reader may publish it. token says the reader is an admin API token, and
-// then the way to a person's publish follows the server's refusal.
-func printDetail(w io.Writer, d ctl.DraftDetail, token bool) error {
+// gains what, the objects each role covers, the standing publishing needs,
+// and for an open draft whether the reader may publish it. The server's
+// refusal of the reader is followed by the draft's page in the console at
+// server, where a person publishes it.
+func printDetail(w io.Writer, d ctl.DraftDetail, server string) error {
 	draft := d.Draft
 	for _, r := range d.Revisions {
 		fmt.Fprintf(w, "Revision %d by %s through %s at %s.\n", r.Revision, principalWords(r.Author), doorPhrase(r.Door), utcStamp(r.CreatedAt))
@@ -121,6 +131,9 @@ func printDetail(w io.Writer, d ctl.DraftDetail, token bool) error {
 	if err := printGains(w, d.Verdict.Gains); err != nil {
 		return err
 	}
+	if err := printCoverage(w, d.Verdict.Objects); err != nil {
+		return err
+	}
 	for _, n := range d.Verdict.Needs {
 		fmt.Fprintf(w, "  Publishing %s needs %s.\n", n.Object, n.Standing)
 	}
@@ -133,12 +146,10 @@ func printDetail(w io.Writer, d ctl.DraftDetail, token bool) error {
 	case len(d.Verdict.Refused) > 0:
 		fmt.Fprintf(w, "Fix the refused lines, then send the documents again: strazactl drafts update %s -f <path>\n", draft.ID)
 	case d.MayPublish:
-		fmt.Fprintf(w, "You may publish it: strazactl drafts publish %s\n", draft.ID)
+		fmt.Fprintln(w, publishNext(server, draft.ID))
 	case d.PublishRefusal != "":
 		fmt.Fprintln(w, d.PublishRefusal)
-		if token {
-			fmt.Fprintln(w, tokenNext(draft.ID)+".")
-		}
+		fmt.Fprintln(w, publishNext(server, draft.ID))
 	}
 	return nil
 }
@@ -255,14 +266,63 @@ func printGains(w io.Writer, gains []ctl.DraftGain) error {
 	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "ROLE\tSERVER\tTOOL\tNOW\tAFTER\tHOLDERS")
 	for _, g := range gains {
-		holders := strconv.Itoa(g.HoldersCount)
-		if len(g.Holders) > 0 {
-			holders = strings.Join(g.Holders, ", ")
-		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", g.Role, g.Server, g.Tool,
-			wordsOr(g.BeforeWords, outcomeWords(g.Before)), wordsOr(g.AfterWords, outcomeWords(g.After)), holders)
+			wordsOr(g.BeforeWords, outcomeWords(g.Before)), wordsOr(g.AfterWords, outcomeWords(g.After)), holdersCell(g.Holders, g.HoldersCount))
 	}
 	return tw.Flush()
+}
+
+// holdersCell is the HOLDERS cell: the holders by name where the server
+// names them, else how many there are.
+func holdersCell(names []string, count int) string {
+	if len(names) > 0 {
+		return strings.Join(names, ", ")
+	}
+	return strconv.Itoa(count)
+}
+
+// printCoverage prints the objects each role the draft touches covers on a
+// server that pins an object type, now and after publishing: one table per
+// server, headed in the server's own plural, in the order the server listed
+// the roles.
+func printCoverage(w io.Writer, cov []ctl.DraftCoverage) error {
+	var servers []string
+	rows := map[string][]ctl.DraftCoverage{}
+	for _, c := range cov {
+		if rows[c.Server] == nil {
+			servers = append(servers, c.Server)
+		}
+		rows[c.Server] = append(rows[c.Server], c)
+	}
+	for _, s := range servers {
+		fmt.Fprintf(w, "%s on %s, now and after publishing:\n", capFirst(rows[s][0].Plural), s)
+		tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
+		fmt.Fprintln(tw, "ROLE\tNOW\tAFTER\tHOLDERS")
+		for _, c := range rows[s] {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", c.Role, coveredWords(c.EveryBefore, c.Before, c.Type),
+				coveredWords(c.EveryAfter, c.After, c.Type), holdersCell(c.Holders, c.HoldersCount))
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// coveredWords is a cell of the coverage table: every and the type, the
+// values, or nothing.
+func coveredWords(every bool, objects []ctl.DraftObjectName, typ string) string {
+	if every {
+		return "every " + typ
+	}
+	if len(objects) == 0 {
+		return "nothing"
+	}
+	values := make([]string, len(objects))
+	for i, o := range objects {
+		values[i] = o.Value
+	}
+	return strings.Join(values, ", ")
 }
 
 // outcomeWords is an outcome of who gains what in the words the policy

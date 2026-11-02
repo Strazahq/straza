@@ -114,6 +114,10 @@ const (
 	CredScopeApp = "app"
 	CredStatic   = "static"
 	CredOAuth    = "oauth"
+	// CredScopeListing is a server's listing credential: one static row per
+	// app, owned by the app, sent only on the call that lists the server's
+	// objects and never on a tool call.
+	CredScopeListing = "listing"
 	// CredToken is a caller's own pasted token: one user-scoped row per app
 	// and user, the sealed value in EncPayload and the expiry, the setter
 	// and the agents opt-in in OAuthMeta.
@@ -204,6 +208,14 @@ type Device struct {
 	Status      string // active|disabled
 	ClientKind  string // DeviceClientKit|DeviceClientHuman, "" before the kind was recorded
 	EnrolledAt  time.Time
+	// The key fields are set only on a device enrolled with a key; a bearer
+	// device leaves them empty.
+	KeyJWK         string    // the public key as canonical JWK JSON
+	KeyThumbprint  string    // RFC 7638 thumbprint of KeyJWK
+	Custody        string    // JSON {"kind","platform","version"}
+	MachineBinding string    // the client's hash of the machine identity
+	KeyCounter     int64     // the highest check-in counter accepted
+	SignedInAt     time.Time // the last IdP sign-in that enrolled the key
 }
 
 // Session is a first-class principal: user+device+harness binding.
@@ -214,6 +226,7 @@ type Session struct {
 	HarnessName       string
 	HarnessVersion    string
 	ClientVersion     string // straza build stamp the client sent at check-in; "" for older clients
+	ClientCommit      string // git commit of that build, cut to 64 bytes; "" for older clients and rows
 	AttestationLevel  string // managed|advisory|none
 	AttestationHashes string // JSON object of measured hashes
 	Status            string // active|revoked|closed
@@ -266,7 +279,15 @@ type ToolBinding struct {
 	AppID       string
 	ToolMatcher string // JSON array of glob strings, e.g. ["get_*","list_*"]
 	Effect      string // allow (deny arrives via PolicySet rules)
-	CreatedAt   time.Time
+	// Scope is the binding's covers line on a server that pins an object
+	// type, stored in the object_scope column. Nil means no covers line,
+	// which covers nothing at the gate on a pinned server.
+	Scope *ObjectScope
+	// ScopeFault says why the stored covers line cannot be read and what
+	// to do, empty when it can. Scope is then nil, and live state leaves
+	// the row out, so it grants nothing.
+	ScopeFault string
+	CreatedAt  time.Time
 }
 
 // Credential is an encrypted upstream secret. EncPayload is ciphertext,
@@ -480,11 +501,11 @@ type ApproverDevice struct {
 	LastSeenAt       *time.Time
 }
 
-// ApproverEnrollToken is a one-time, short-TTL enrolment credential minted by
-// an admin or by the user themself and rendered as the QR token. Only
-// TokenHash (sha256 hex) is stored; UsedAt gates single use. Channel scopes
-// what the token may enroll: empty = admin-minted, any platform;
-// mobile|browser = self-minted, enforced at consume.
+// ApproverEnrollToken is a one-time, short-TTL enrolment credential the user
+// mints for their own device and that is rendered as the QR token. Only
+// TokenHash (sha256 hex) is stored; UsedAt gates single use. Channel,
+// mobile or browser, scopes what the token may enroll and is enforced at
+// consume, which refuses any other stamp, the empty one included.
 type ApproverEnrollToken struct {
 	ID        string
 	TokenHash string

@@ -101,10 +101,10 @@ func spkiPinOf(t *testing.T, certPEM []byte) string {
 	return "sha256/" + base64.StdEncoding.EncodeToString(sum[:])
 }
 
-// TestApproverSurfaceEndToEnd drives the mobile surface over HTTP: admin mints
-// an enroll token, the device enrolls, non-approver tokens are refused, a
-// signed decision resolves a record, replay is refused, and admin revocation
-// (device-row delete) immediately fails the token.
+// TestApproverSurfaceEndToEnd drives the mobile surface over HTTP: kim mints
+// an enroll token on the self route, the device enrolls, non-approver tokens
+// are refused, a signed decision resolves a record, replay is refused, and
+// admin revocation (device-row delete) immediately fails the token.
 func TestApproverSurfaceEndToEnd(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -112,7 +112,8 @@ func TestApproverSurfaceEndToEnd(t *testing.T) {
 	grantAdmin(t, app, kim.ID)
 	adminTok, _ := checkinToken(t, app, base)
 
-	// 1. Admin mints a one-time enroll token for kim (QR carries the same token).
+	// 1. kim mints a one-time enroll token for their own phone on the self
+	// route (QR carries the same token).
 	var mint struct {
 		EnrollToken string `json:"enroll_token"`
 		ExpiresIn   int    `json:"expires_in"`
@@ -122,8 +123,8 @@ func TestApproverSurfaceEndToEnd(t *testing.T) {
 			Token   string   `json:"token"`
 		} `json:"qr"`
 	}
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "kim"}, &mint); code != http.StatusOK {
+	if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", adminTok,
+		map[string]any{"channel": "mobile"}, &mint); code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d", code)
 	}
 	if mint.EnrollToken == "" || mint.QR.Token != mint.EnrollToken || mint.QR.V != 1 {
@@ -258,8 +259,8 @@ func TestEnrollTokenQRPayloadPlaintext(t *testing.T) {
 	adminTok, _ := checkinToken(t, app, base)
 
 	var resp mintTokenResponse
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "kim"}, &resp); code != http.StatusOK {
+	if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", adminTok,
+		map[string]any{"channel": "mobile"}, &resp); code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d", code)
 	}
 
@@ -324,8 +325,8 @@ func TestEnrollPayloadCarriesFCM(t *testing.T) {
 		grantAdmin(t, app, kim.ID)
 		adminTok, _ := checkinToken(t, app, base)
 		var mint mintTokenResponse
-		if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-			map[string]any{"username": "kim"}, &mint); code != http.StatusOK {
+		if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", adminTok,
+			map[string]any{"channel": "mobile"}, &mint); code != http.StatusOK {
 			t.Fatalf("mint enroll-token = %d", code)
 		}
 		if err := json.Unmarshal([]byte(mint.QRPayload), &qr); err != nil {
@@ -401,8 +402,8 @@ func TestEnrollPayloadCarriesWebPush(t *testing.T) {
 		kim := seedIdentity(t, app)
 		grantAdmin(t, app, kim.ID)
 		adminTok, _ := checkinToken(t, app, base)
-		if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-			map[string]any{"username": "kim"}, &mint); code != http.StatusOK {
+		if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", adminTok,
+			map[string]any{"channel": "mobile"}, &mint); code != http.StatusOK {
 			t.Fatalf("mint enroll-token = %d", code)
 		}
 		// Typed view of the same body, field by field from the raw map.
@@ -512,8 +513,8 @@ func TestEnrollTokenNoPinBehindIngress(t *testing.T) {
 	adminTok, _ := checkinToken(t, app, base)
 
 	var resp mintTokenResponse
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "kim"}, &resp); code != http.StatusOK {
+	if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", adminTok,
+		map[string]any{"channel": "mobile"}, &resp); code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d", code)
 	}
 
@@ -591,14 +592,16 @@ func TestEnrollTokenTLSPin(t *testing.T) {
 		t.Fatalf("cached tlsSPKIPin = %q, want %q", app.tlsSPKIPin, wantPin)
 	}
 
-	seedIdentity(t, app) // user "kim"
+	kim := seedIdentity(t, app)
+	grantRole(t, app, kim.ID, EnrollMobileRole)
 
-	// Drive the handler directly (this app serves native TLS, so an over-the-wire
-	// plaintext client cannot reach it; the response body is what we assert).
-	body, _ := json.Marshal(map[string]string{"username": "kim"})
-	req := httptest.NewRequest(http.MethodPost, "/v1/admin/approvers/enroll-token", bytes.NewReader(body))
+	// Drive the self route's handler directly (this app serves native TLS,
+	// so an over-the-wire plaintext client cannot reach it; the response
+	// body is what we assert).
+	body, _ := json.Marshal(map[string]string{"channel": "mobile"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/self/enroll-token", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	app.handleApproverEnrollToken(w, req)
+	app.handleSelfEnrollToken(w, req, kim.ID)
 	if w.Code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d: %s", w.Code, w.Body.String())
 	}
@@ -649,8 +652,8 @@ func TestApproverPushWebPushRegistration(t *testing.T) {
 	var mint struct {
 		EnrollToken string `json:"enroll_token"`
 	}
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "kim"}, &mint); code != http.StatusOK {
+	if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", adminTok,
+		map[string]any{"channel": "mobile"}, &mint); code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d", code)
 	}
 	_, spki := genApproverKey(t)
@@ -752,8 +755,8 @@ func TestEnrollOmitsWebPushWhenOff(t *testing.T) {
 	var mint struct {
 		EnrollToken string `json:"enroll_token"`
 	}
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "kim"}, &mint); code != http.StatusOK {
+	if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", adminTok,
+		map[string]any{"channel": "mobile"}, &mint); code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d", code)
 	}
 	_, spki := genApproverKey(t)
@@ -810,8 +813,8 @@ func TestApproverPendingMineCarriesApproverRoles(t *testing.T) {
 	var mint struct {
 		EnrollToken string `json:"enroll_token"`
 	}
-	if code := adminReq(t, "POST", base+"/v1/admin/approvers/enroll-token", adminTok,
-		map[string]any{"username": "kim"}, &mint); code != http.StatusOK {
+	if code := adminReq(t, "POST", base+"/v1/approvals/self/enroll-token", adminTok,
+		map[string]any{"channel": "mobile"}, &mint); code != http.StatusOK {
 		t.Fatalf("mint enroll-token = %d", code)
 	}
 	_, spki := genApproverKey(t)

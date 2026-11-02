@@ -95,6 +95,14 @@ func TestCodexMCPConfigPathForInvoker(t *testing.T) {
 			t.Errorf("= (%q, %v), want %s", got, err, want)
 		}
 	})
+	t.Run("LocalSystem without CODEX_HOME resolves no path", func(t *testing.T) {
+		poseAsLocalSystem(t)
+		t.Setenv("CODEX_HOME", "")
+		t.Setenv("SUDO_USER", me.Username)
+		if got, err := CodexMCPConfigPathForInvoker(); err != nil || got != "" {
+			t.Errorf("= (%q, %v), want no path for SYSTEM's profile", got, err)
+		}
+	})
 	t.Run("no sudo, root, or an unresolvable user falls back", func(t *testing.T) {
 		t.Setenv("CODEX_HOME", "")
 		fallback, err := CodexMCPConfigPath()
@@ -109,6 +117,146 @@ func TestCodexMCPConfigPathForInvoker(t *testing.T) {
 			}
 		}
 	})
+}
+
+// poseAsLocalSystem makes the process pose as the Windows LocalSystem
+// account for one test. Tests using it must not run in parallel.
+func poseAsLocalSystem(t *testing.T) {
+	t.Helper()
+	old := asLocalSystem
+	asLocalSystem = func() bool { return true }
+	t.Cleanup(func() { asLocalSystem = old })
+}
+
+// poseAsUID makes the process pose as the account with effective user id
+// uid for one test. Tests using it must not run in parallel.
+func poseAsUID(t *testing.T, uid int) {
+	t.Helper()
+	old := geteuid
+	geteuid = func() int { return uid }
+	t.Cleanup(func() { geteuid = old })
+}
+
+// poseAsRoot makes the process pose as root for one test.
+func poseAsRoot(t *testing.T) { poseAsUID(t, 0) }
+
+// TestCodexMCPConfigPathAsRootOnMac pins the macOS twin of the Windows
+// SYSTEM rule: root with no person behind sudo, as Jamf runs `straza
+// install --managed`, resolves no config.toml, because root's own is no
+// person's. A person behind sudo, an explicit $CODEX_HOME, a run that is not
+// root, and root on Linux resolve a path as before.
+func TestCodexMCPConfigPathAsRootOnMac(t *testing.T) {
+	me, err := user.Current()
+	if err != nil {
+		t.Skip("no current user on this machine")
+	}
+	tests := []struct {
+		name, goos, sudoUser string
+		uid                  int
+		codexHome            bool
+		want                 string // "none", "invoker", "fallback" or "codex-home"
+	}{
+		{name: "macOS root without sudo", goos: "darwin", want: "none"},
+		{name: "macOS root through sudo from root", goos: "darwin", sudoUser: "root", want: "none"},
+		{name: "macOS root through sudo from a person", goos: "darwin", sudoUser: me.Username, want: "invoker"},
+		{name: "macOS root without sudo and an explicit CODEX_HOME", goos: "darwin", codexHome: true, want: "codex-home"},
+		{name: "macOS without root", goos: "darwin", uid: 501, want: "fallback"},
+		{name: "Linux root without sudo", goos: "linux", want: "fallback"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setOSName(t, tt.goos)
+			poseAsUID(t, tt.uid)
+			t.Setenv("SUDO_USER", tt.sudoUser)
+			codexHome := ""
+			if tt.codexHome {
+				codexHome = t.TempDir()
+			}
+			t.Setenv("CODEX_HOME", codexHome)
+			fallback, err := CodexMCPConfigPath()
+			if err != nil {
+				t.Skip("no home directory on this machine")
+			}
+			want := map[string]string{
+				"none":       "",
+				"invoker":    filepath.Join(me.HomeDir, ".codex", "config.toml"),
+				"fallback":   fallback,
+				"codex-home": filepath.Join(codexHome, "config.toml"),
+			}[tt.want]
+			if got, err := CodexMCPConfigPathForInvoker(); err != nil || got != want {
+				t.Errorf("CodexMCPConfigPathForInvoker() = (%q, %v), want %q", got, err, want)
+			}
+		})
+	}
+}
+
+// TestInstallManagedCodexMCPWithoutAPerson pins the codex MCP step of a
+// managed install and uninstall run with no person behind them: as the
+// Windows LocalSystem account, as the Straza MSI and Intune run them, and
+// as root without sudo on macOS, as Jamf runs them. Without $CODEX_HOME
+// neither touches a config.toml in that account's home, and each prints the
+// sentence of its OS that says what a person runs instead. An explicit
+// $CODEX_HOME still gets the block.
+func TestInstallManagedCodexMCPWithoutAPerson(t *testing.T) {
+	tests := []struct {
+		name          string
+		goos          string
+		pose          func(*testing.T)
+		codexHome     bool
+		wantInstall   string
+		wantUninstall string
+	}{
+		{name: "SYSTEM without CODEX_HOME writes nothing", goos: "linux", pose: poseAsLocalSystem,
+			wantInstall: codexMCPSkippedAsSystem, wantUninstall: codexMCPKeptAsSystem},
+		{name: "SYSTEM with an explicit CODEX_HOME still writes", goos: "linux", pose: poseAsLocalSystem, codexHome: true,
+			wantInstall: "user mcp        codex → ", wantUninstall: "removed Straza MCP server for codex from "},
+		{name: "macOS root without CODEX_HOME writes nothing", goos: "darwin", pose: poseAsRoot,
+			wantInstall: codexMCPSkippedAsRoot, wantUninstall: codexMCPKeptAsRoot},
+		{name: "macOS root with an explicit CODEX_HOME still writes", goos: "darwin", pose: poseAsRoot, codexHome: true,
+			wantInstall: "user mcp        codex → ", wantUninstall: "removed Straza MCP server for codex from "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setOSName(t, tt.goos)
+			tt.pose(t)
+			sysDir := t.TempDir()
+			t.Setenv("STRAZA_SYSTEM", sysDir)
+			t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", filepath.Join(sysDir, "harness"))
+			t.Setenv("STRAZA_MANAGED_BIN_DIR", filepath.Join(sysDir, "bin"))
+			t.Setenv("STRAZA_HOME", t.TempDir())
+			placeManagedBinary(t, "")
+			profile := t.TempDir()
+			t.Setenv("HOME", profile)
+			t.Setenv("USERPROFILE", profile)
+			t.Setenv("SUDO_USER", "")
+			config, codexHome := filepath.Join(profile, ".codex", "config.toml"), ""
+			if tt.codexHome {
+				codexHome = t.TempDir()
+				config = filepath.Join(codexHome, "config.toml")
+			}
+			t.Setenv("CODEX_HOME", codexHome)
+
+			var out strings.Builder
+			err := InstallManaged(context.Background(), ManagedInstallOptions{Harnesses: []string{"codex"},
+				ServerURL: snapshotKeyServer(t, map[string]string{"k1": "AAAA"})}, &out)
+			if err != nil {
+				t.Fatalf("InstallManaged: %v", err)
+			}
+			if _, statErr := os.Stat(config); (statErr == nil) != tt.codexHome {
+				t.Errorf("%s written = %v, want %v", config, statErr == nil, tt.codexHome)
+			}
+			if !strings.Contains(out.String(), tt.wantInstall) {
+				t.Errorf("install output lacks %q:\n%s", tt.wantInstall, out.String())
+			}
+			var undo strings.Builder
+			if err := UninstallManaged([]string{"codex"}, "", &undo); err != nil {
+				t.Fatalf("UninstallManaged: %v", err)
+			}
+			if !strings.Contains(undo.String(), tt.wantUninstall) {
+				t.Errorf("uninstall output lacks %q:\n%s", tt.wantUninstall, undo.String())
+			}
+		})
+	}
 }
 
 // TestInstallCodexMCPServerFresh: install must WRITE the registration (file
@@ -614,6 +762,7 @@ func TestInstallManagedCodexMCP(t *testing.T) {
 	t.Setenv("STRAZA_MANAGED_SETTINGS_DIR", filepath.Join(sysDir, "harness"))
 	t.Setenv("STRAZA_MANAGED_BIN_DIR", filepath.Join(sysDir, "bin"))
 	t.Setenv("STRAZA_HOME", t.TempDir())
+	placeManagedBinary(t, "")
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
 
@@ -636,18 +785,6 @@ func TestInstallManagedCodexMCP(t *testing.T) {
 	if strings.Contains(strings.ToLower(out.String()), "by hand") {
 		t.Errorf("no install path may end in a hand-step:\n%s", out.String())
 	}
-	// config.toml is user-writable, so measuring it would turn every ordinary
-	// user edit into att=none: self + config + hooks.codex, and nothing else.
-	att := measureAttestation("codex")
-	if len(att.Hashes) != 3 {
-		t.Errorf("measured %d artifacts, want 3 (self, config, hooks.codex): %+v", len(att.Hashes), att.Hashes)
-	}
-	for artifact := range att.Hashes {
-		if strings.Contains(artifact, "mcp") {
-			t.Errorf("the codex MCP registration must not be a measured artifact: %s", artifact)
-		}
-	}
-
 	// Re-running is idempotent, and the managed uninstall takes the block back.
 	if err := InstallManaged(context.Background(), install, io.Discard); err != nil {
 		t.Fatalf("re-run: %v", err)

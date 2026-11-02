@@ -2,7 +2,7 @@
 title: strazactl policy diff
 description: Diff the stored PolicySet against a local file
 pagetype: reference
-weight: 73
+weight: 69
 draft: false
 sources:
   - cmd/strazactl
@@ -31,7 +31,7 @@ strazactl policy diff <name> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

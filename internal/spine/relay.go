@@ -7,16 +7,21 @@ package spine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/nats-io/nats.go"
 
 	"github.com/strazahq/straza/internal/store"
 )
 
-// publisher is the one Bus method the relay uses, as an interface so tests
+// publisher is the Bus methods the relay uses, as an interface so tests
 // can fail specific subjects (e.g. "the audit stream's disk is full").
 type publisher interface {
 	Publish(ctx context.Context, subject string, data []byte) error
+	MaxPayload() int64
 }
 
 // Relay drains the events_outbox into JetStream: publish each event, then
@@ -28,13 +33,16 @@ type Relay struct {
 	log   *slog.Logger
 	tick  time.Duration
 	batch int
+	// setAside is called once for each row the relay sets aside.
+	setAside func()
 
 	wake chan struct{}
 }
 
-// NewRelay builds the outbox relay. bus is *events.Bus in production.
-func NewRelay(st store.Store, bus publisher, log *slog.Logger) *Relay {
-	return &Relay{store: st, bus: bus, log: log, tick: time.Second, batch: 128, wake: make(chan struct{}, 1)}
+// NewRelay builds the outbox relay. bus is *events.Bus in production, and
+// setAside, which may be nil, counts each row the relay sets aside.
+func NewRelay(st store.Store, bus publisher, log *slog.Logger, setAside func()) *Relay {
+	return &Relay{store: st, bus: bus, log: log, tick: time.Second, batch: 128, setAside: setAside, wake: make(chan struct{}, 1)}
 }
 
 // Nudge asks the relay to drain now (best-effort; never blocks).
@@ -76,20 +84,45 @@ func (r *Relay) drain(ctx context.Context) {
 // claim, publish, mark: one transaction per batch, SKIP LOCKED on Postgres,
 // so replicas take disjoint batches and share the work instead of
 // re-publishing each other's rows. A publish failure ends the pass; the
-// already-published rows are marked, the rest retry next tick.
+// already-published rows are marked, the rest retry next tick. A row larger
+// than the bus's maximum payload is the one failure no retry can heal, so
+// it is set aside and the pass goes on (setAsideRow).
 func (r *Relay) drainPass(ctx context.Context, controlOnly bool) {
 	for {
-		n, err := r.store.Outbox().DrainClaimed(ctx, controlOnly, r.batch, func(e store.OutboxEvent) error {
+		n, aside, err := r.store.Outbox().DrainClaimed(ctx, controlOnly, r.batch, func(e store.OutboxEvent) error {
 			pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			return r.bus.Publish(pubCtx, e.Subject, []byte(e.CE))
+			err := r.bus.Publish(pubCtx, e.Subject, []byte(e.CE))
+			if errors.Is(err, nats.ErrMaxPayload) {
+				return fmt.Errorf("%w: %w", store.ErrUnpublishable, err)
+			}
+			return err
 		})
+		for _, e := range aside {
+			r.setAsideRow(e)
+		}
 		if err != nil {
 			r.log.Warn("relay: drain", "control", controlOnly, "err", err)
 			return
 		}
-		if n < r.batch {
+		if n+len(aside) < r.batch {
 			return // pass drained (or a claim raced another pod; next tick)
 		}
 	}
+}
+
+// setAsideRow counts and logs e, a row the drain set aside because the bus
+// refused it as larger than its maximum payload. A bus outage never sets a
+// row aside: it ends the pass, and the row is tried again on the next one.
+func (r *Relay) setAsideRow(e store.OutboxEvent) {
+	if r.setAside != nil {
+		r.setAside()
+	}
+	r.log.Error("outbox row set aside: the event bus refused it as larger than its largest message, the max_payload attribute, "+
+		"so the relay will never publish it and goes on with the next row. "+
+		"The row stays in events_outbox, unpublished with attempts -1, and its record never reaches the audit chain or the sinks. "+
+		"strazad cuts every record it writes to 256 KiB, so a max_payload below that is the likely cause: "+
+		"raise max_payload on the NATS server to its 1 MiB default. Otherwise the row was written past strazad, "+
+		"so read it by its id before you delete it, and report this line to the Straza project",
+		"id", e.ID, "subject", e.Subject, "bytes", len(e.CE), "max_payload", r.bus.MaxPayload())
 }

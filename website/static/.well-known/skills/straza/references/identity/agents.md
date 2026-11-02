@@ -2,7 +2,7 @@
 
 An agent is an identity like a person, born in your identity manager and provisioned over SCIM, with two differences. Its record says it is an agent and names the human who answers for it, so policy can treat it as one and approvals can reach that human. Its credential is an Ed25519 key registered on the identity, so it enrolls with no browser and no password, and the identity manager cuts it the same way it cuts a person. When the record is deactivated, the next token grant fails and every running session is revoked. The public page is https://docs.straza.ai/guides/connect-identity/nhi-provisioning/.
 
-You need an admin API token for the SCIM request and the admin API reads, minted with `strazactl api-token create --name <token name> --scope scim:read,scim:write,identity:read` and held in `ADMIN_API_TOKEN`, a Straza administrator login for `strazactl`, and the `straza` binary where the agent runs. The walk ran against strazad at `http://localhost:8420`. The person holds that token and runs this page's writes in their own terminal: the SCIM request, `strazactl users create-nhi`, `strazactl users nhi-key set`, `strazactl users nhi-key unset` and `strazactl assign`. They need `scim:write` or `identity:write`, which are never yours, and inside a coding agent `strazactl` refuses them on the person's login.
+You need an admin API token for the SCIM request and the admin API reads, minted with `strazactl api-token create --name <token name> --scope scim:read,scim:write,identity:read` and held in `ADMIN_API_TOKEN`, an admin API token for `strazactl` in `STRAZA_API_TOKEN`, and the `straza` binary where the agent runs. The walk ran against strazad at `http://localhost:8420`. The person holds both tokens and runs this page's writes in their own terminal: the SCIM request, `strazactl users create-nhi`, `strazactl users nhi-key set`, `strazactl users nhi-key unset` and `strazactl assign`. They need `scim:write` or `identity:write`, which are never yours, and they run the reads too, because you hold no Straza credential.
 
 ## 1. Provision the identity
 
@@ -22,14 +22,14 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" -H 'Content-Type: applicatio
 
 ## 2. Generate and register the key
 
-On the agent's machine, generate the key. The private half stays there, and the command prints the exact registration line:
+On the agent's machine, where `straza service` runs, ask the service for the key as the agent's own OS account. The service keeps the private half under its own OS account, and the command prints the exact registration line. On an OS account that holds a person's enrollment, the service refuses both `straza keygen` and `straza enroll --headless`, so a person's machine key is never replaced by an agent's:
 
 ```sh
 straza keygen --user <agent username>
 ```
 
 ```text
-NHI key generated (private half stays in /home/agent/.straza/state/nhi-key.json).
+NHI key generated (the Straza background service holds the private half).
 Public key: <public key>
 
 An administrator registers it with:
@@ -60,10 +60,10 @@ straza enroll --server http://localhost:8420 --headless --user <agent username>
 ```
 
 ```text
-Enrolled headless as <agent username> (nhi-key; sessions are deviceless, and the local credential mints each session's token).
+Enrolled headless as <agent username>. The Straza background service holds this agent's key and starts each of its sessions.
 ```
 
-`straza status` then shows the identity with an empty device field, which is expected: there is no device credential, because the key mints every session token.
+`straza status` then shows the identity as an AI agent with no device, which is expected, because the key mints every session token and the service binds each session to it.
 
 ## 4. Verify
 
@@ -82,7 +82,7 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost:8420/v1/adm
 
 ## Undo
 
-Revoking the key is the immediate cut for the credential, and the next enrollment attempt fails:
+Revoking the key is the cut for the credential, and the next enrollment attempt fails at once. The service keeps the agent's last ID token until 30 seconds before it expires, so new sessions can start with it for up to 10 minutes at the built-in issuer, and a session that already runs keeps going until it is revoked or the identity is deactivated:
 
 ```sh
 strazactl users nhi-key unset <agent username>
@@ -91,7 +91,7 @@ straza enroll --server http://localhost:8420 --headless --user <agent username>
 
 ```text
 key revoked for <agent username>
-straza: headless login refused (invalid_client): client authentication failed. Check the registered key/client and that the identity is an active NHI
+straza: the identity provider refused the agent's sign-in (invalid_client): client authentication failed. Check the registered key or client, and that the user is an active agent
 ```
 
 Retiring the identity is the identity manager's act: a SCIM deactivation or delete disables the account, revokes its sessions and removes its per-user grants. An administrator can also soft-delete it with `DELETE /v1/admin/users/{id}`, which answers `{"status":"deleted"}` and removes the row from `strazactl users list`.

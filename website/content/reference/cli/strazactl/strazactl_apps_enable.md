@@ -2,7 +2,7 @@
 title: strazactl apps enable
 description: Clear a server's admin pause and (re)start it
 pagetype: reference
-weight: 18
+weight: 15
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl apps enable <server> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

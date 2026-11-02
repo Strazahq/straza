@@ -1,0 +1,58 @@
+# adaptive-pg-mcp in front of the four showcase databases on midPoint's
+# Postgres server, reached ONLY through strazad's gateway (its container
+# publishes no ports). The server is the published 0.1.1 release, the
+# image compose.yaml pins by digest. Every tool names its database in a
+# required database argument, so a role can cover some databases and not
+# others. The seeder installs this app only when the pg profile runs the
+# server, and sets two credentials: the server's own secret, which every
+# tool call carries, and its listing credential, which only Straza's
+# listing of list_databases carries. The straza.objects block pins what the
+# marks declare, so the server page shows no drift.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: postgres
+  namespace: ai.straza
+  description: adaptive-pg-mcp, a Postgres MCP server for four showcase databases, via streamable HTTP
+server:
+  name: ai.straza/adaptive-pg-mcp
+  description: Typed tools, the helpdesk and sales teams' SQL as named tools, and free SQL on four databases.
+  repository:
+    url: https://github.com/strazahq/adaptive-pg-mcp
+    source: github
+  version: "0.1.1"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: http://adaptive-pg-mcp:8080/mcp
+  credential:
+    kind: static
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"
+  exposure:
+    tools: ["*"]
+  limits:
+    rps: 10
+  objects:
+    type: database
+    list:
+      tool: list_databases
+    tools:
+      list_databases: all
+      list_schemas: { argument: database }
+      list_tables: { argument: database }
+      describe_table: { argument: database }
+      read_rows: { argument: database }
+      aggregate: { argument: database }
+      insert_rows: { argument: database }
+      update_rows: { argument: database }
+      delete_rows: { argument: database }
+      query_sql: { argument: database }
+      execute_sql: { argument: database }
+      execute_ddl: { argument: database }
+      tickets_by_status: { argument: database }
+      close_stale_tickets: { argument: database }
+      revenue_by_month: { argument: database }

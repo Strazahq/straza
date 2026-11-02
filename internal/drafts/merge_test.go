@@ -375,3 +375,49 @@ func TestAppFieldText(t *testing.T) {
 		}
 	}
 }
+
+// TestMergeRoleKeepsTheCoversLine pins that a merge carries a binding's
+// covers line: live's narrowed line survives a draft that changed the
+// description, the draft's line survives where live kept the binding, and
+// a conflict shows each side's line.
+func TestMergeRoleKeepsTheCoversLine(t *testing.T) {
+	t.Parallel()
+	withCovers := func(doc string, covers *Scope) string {
+		d, err := ParseRole(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.Spec.Bindings[0].Covers = covers
+		return roleText(d)
+	}
+	pay := &Scope{Objects: []ObjectRef{{Value: "Strazahq/pay-web"}, {Value: "Strazahq/pay-api"}}}
+	every := &Scope{Every: true}
+	base := withCovers(roleDoc(t, "old", []string{"a"}, nil), every)
+	cases := []struct {
+		name, draft, live, want string
+		conflicts               []Conflict
+	}{
+		{name: "live narrowed, the draft described", draft: withCovers(roleDoc(t, "new", []string{"a"}, nil), every),
+			live: withCovers(roleDoc(t, "old", []string{"a"}, nil), pay), want: withCovers(roleDoc(t, "new", []string{"a"}, nil), pay)},
+		{name: "the draft narrowed, live kept", draft: withCovers(roleDoc(t, "old", []string{"a"}, nil), pay),
+			live: base, want: withCovers(roleDoc(t, "old", []string{"a"}, nil), pay)},
+		{name: "both changed the line", draft: withCovers(roleDoc(t, "old", []string{"a"}, nil), pay),
+			live: withCovers(roleDoc(t, "old", []string{"a"}, nil), nil),
+			conflicts: []Conflict{{Object: "Role/dev", Field: "spec.bindings", Base: `[{"app":"github","covers":{"every":true},"tools":["a"]}]`,
+				Draft: `[{"app":"github","covers":{"objects":["Strazahq/pay-api","Strazahq/pay-web"]},"tools":["a"]}]`, Live: `[{"app":"github","tools":["a"]}]`}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := Merge(KindRole, "Role/dev", put(base), put(tc.draft), put(tc.live), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(m.Conflicts, tc.conflicts) {
+				t.Fatalf("conflicts\n got %+v\nwant %+v", m.Conflicts, tc.conflicts)
+			}
+			if tc.conflicts == nil && m.Doc != tc.want {
+				t.Errorf("merged\n got %s\nwant %s", m.Doc, tc.want)
+			}
+		})
+	}
+}

@@ -1,0 +1,1 @@
+{"provenance":"doc claude-code 2.1 tool name from the agent tool list of a live session 2026-10-30, tool_input shape not seen (hand-authored)","harness":"claude-code","payload":{"hook_event_name":"PreToolUse","session_id":"abc","cwd":"/work/proj","tool_name":"ArtifactCheck","tool_input":{}},"expect":{"kind":"tool.pre","tool":"net.fetch","workspace":"/work/proj"}}

@@ -26,7 +26,7 @@ Okta provisions people into Straza the way it provisions any SCIM 2.0 applicatio
 ## Before you start {.nostep}
 
 - Okta administration for the app integration.
-- A Straza administrator login for `strazactl`, or a console session that holds the tokens area.
+- `strazactl` with `STRAZA_SERVER` and an admin API token in `STRAZA_API_TOKEN`, or a console session that holds the tokens area. The steps mint another token, which takes `tokens:write`, a root-equivalent grant, so mint a **Full root** token for 30 days in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows, and revoke it when you are done.
 
 The Okta console steps below follow Okta's SCIM integration settings and were not run against an Okta tenant. The requests Okta sends were replayed with curl against a standalone server at `http://localhost:8420`.
 

@@ -23,7 +23,7 @@ const (
 	rebaseBodyRefusal    = "The request body is not a check again: %s. Send revision and picks as JSON."
 	rebasePickRefusal    = "picks must map Kind/Name and a field, such as App/demo-tools straza.limits.rps, to draft or live."
 	rebaseNothingRefusal = "Nothing that draft %s holds changed on live state since it was checked, so there is nothing to check again."
-	rebaseEmptyRefusal   = "Every change of draft %s was already made on live state, so there is nothing left to check again. Discard the draft with strazactl drafts discard %s."
+	rebaseEmptyRefusal   = "Every change of draft %s was already made on live state, so there is nothing left to check again. Discard the draft on the console under Drafts, or with strazactl drafts discard %s when an admin API token wrote it."
 	rebaseConflict       = "Draft %s and live state both changed %s %s since the draft was checked. Pick which value to keep, then check again."
 	rebaseSecretRefusal  = "%s holds a secret at %s on live state, and a draft never keeps a secret, so Check again cannot take live's value there. " +
 		"Keep the draft's value, or write the server's manifest from your own file and store the secret with strazactl apps secret set %s."

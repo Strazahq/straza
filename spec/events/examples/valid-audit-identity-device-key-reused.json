@@ -1,0 +1,15 @@
+{
+  "specversion": "1.0",
+  "id": "019a0f3c-5e11-7e55-9abc-1f2e3d4c5b51",
+  "type": "straza.audit.identity",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-10-20T10:12:44.207Z",
+  "data": {
+    "action": "device.key.reused",
+    "user": "0197fa3d-2222-7abc-9def-000000000002",
+    "device": "019a0f2e-7c30-7e55-9abc-1f2e3d4c5b50",
+    "counter": 41,
+    "storedCounter": 42,
+    "reason": "check-in counter at or below the last one accepted"
+  }
+}

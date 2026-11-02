@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/strazahq/straza/internal/drafts"
 	"github.com/strazahq/straza/internal/manager"
@@ -67,13 +68,32 @@ func planFor(w drafts.World, in drafts.CheckInput, d drafts.Draft, rows []store.
 			pi.BaseDoc = string(text)
 		}
 		if it.Op == drafts.OpPut {
-			pi.After, pi.AfterDoc = store.FingerprintRole(roleConfig(after, it.Name)), it.Doc
+			pi.After, pi.AfterDoc = store.FingerprintRole(publishedConfig(w, after, it.Name)), it.Doc
 		}
 		dp.plan.Items = append(dp.plan.Items, pi)
 	}
 	dp.name(w, after)
 	dp.records.items = dp.plan.Items
 	return dp, nil
+}
+
+// publishedConfig is roleConfig over after, the world after the draft, as
+// the store holds the role once the publish wrote it. The publish changes
+// the covers lines of a live server whose pinned type it adds or removes
+// before it writes the roles: a row with no covers line on a server the
+// draft pins first covers every object, and every row on a server the
+// draft unpins has no covers line.
+func publishedConfig(w, after drafts.World, name string) store.RoleConfig {
+	cfg := roleConfig(after, name)
+	live, ok := w.Apps[cfg.Server]
+	switch next := after.Apps[cfg.Server].Pinned; {
+	case !ok:
+	case cfg.Scope == nil && live.Pinned == nil && next != nil:
+		cfg.Scope = &store.ObjectScope{Every: true}
+	case live.Pinned != nil && next == nil:
+		cfg.Scope = nil
+	}
+	return cfg
 }
 
 // explicit fills the plan item pi of a draft item whose document is doc:
@@ -118,7 +138,7 @@ func (dp *draftPlan) explicit(pi *store.PlanItem, after drafts.World, door draft
 			}
 		}
 	case pi.Ref.Kind == string(drafts.KindRole):
-		cfg := roleConfig(after, name)
+		cfg := publishedConfig(dp.records.w, after, name)
 		cfg.Role.ID = ""
 		pi.Role, pi.After, pi.AfterDoc = &cfg, store.FingerprintRole(cfg), doc
 	default:
@@ -144,10 +164,11 @@ func (dp *draftPlan) explicit(pi *store.PlanItem, after drafts.World, door draft
 
 // name fills the head and the servers from the plan's items: an item
 // writes something exactly when its After differs from its Base. A server
-// put of a live server and a server removal stop its instances, a new
+// put of a live server and a server removal stop its instances, but for a
+// put that changes only straza.objects, which no instance runs with. A new
 // server is announced once it runs, an explicit role put whose access row
-// changes or goes narrows its rows, and every removed role, a removed
-// server's admin role included, goes.
+// changes, its covers line alone included, or goes narrows its rows, and
+// every removed role, a removed server's admin role included, goes.
 func (dp *draftPlan) name(w, after drafts.World) {
 	for _, it := range dp.plan.Items {
 		if it.After == it.Base {
@@ -166,7 +187,7 @@ func (dp *draftPlan) name(w, after drafts.World) {
 			case it.BaseOp != string(drafts.OpPut):
 				change = serverCreated
 			}
-			if change != serverCreated {
+			if change != serverCreated && !objectsOnly(dp.records.changed[name]) {
 				dp.head.Servers = append(dp.head.Servers, name)
 			}
 			dp.servers = append(dp.servers, serverChange{name, change})
@@ -176,12 +197,23 @@ func (dp *draftPlan) name(w, after drafts.World) {
 			switch {
 			case remove:
 				dp.head.Removed = append(dp.head.Removed, name)
-			case !it.Implied && (had != has || had && (live.Server != next.Server ||
+			case !it.Implied && (had != has || had && (live.Server != next.Server || live.Covers.Key() != next.Covers.Key() ||
 				!slices.Equal(slices.Sorted(slices.Values(live.Tools)), slices.Sorted(slices.Values(next.Tools))))):
 				dp.head.AccessRoles = append(dp.head.AccessRoles, name)
 			}
 		}
 	}
+}
+
+// objectsOnly reports whether every path of a server change lies under
+// straza.objects. No paths, as when they could not be read, is a change.
+func objectsOnly(paths []string) bool {
+	for _, p := range paths {
+		if p != "straza.objects" && !strings.HasPrefix(p, "straza.objects.") {
+			return false
+		}
+	}
+	return len(paths) > 0
 }
 
 // announce names the servers whose start the publish answers with: the

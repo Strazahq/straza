@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -21,7 +22,9 @@ import (
 // write that can change resolution: assignments, implications, memberships,
 // role deletion. A cached entry also ends at the next window edge of the
 // user's assignments, so a time-limited assignment starts and ends on time
-// with no write.
+// with no write, and one session token lifetime after it was resolved, so a
+// replica that missed the identity event of another replica's write reads
+// it at the next refresh after that lifetime.
 type Resolver struct {
 	store store.Store
 
@@ -32,11 +35,12 @@ type Resolver struct {
 
 // resolution is one cached answer. until is the earliest valid_from or
 // valid_to of the user's direct assignments after the time the answer was
-// resolved for, zero when there is none: a lookup at or past it resolves
-// again.
+// resolved for, zero when there is none, and expires is that time plus
+// one session token lifetime: a lookup at or past either resolves again.
 type resolution struct {
-	roles []store.Role
-	until time.Time
+	roles   []store.Role
+	until   time.Time
+	expires time.Time
 }
 
 // NewResolver returns a Resolver over s.
@@ -61,8 +65,9 @@ func (r *Resolver) Epoch() uint64 {
 }
 
 // ResolveRoles returns the user's effective roles at time t, sorted by name.
-// A cached answer serves until the epoch moves or t reaches the next window
-// edge of the user's assignments.
+// A cached answer serves until the epoch moves, t reaches the next window
+// edge of the user's assignments, or one session token lifetime passed
+// since it was resolved.
 func (r *Resolver) ResolveRoles(ctx context.Context, userID string, t time.Time) ([]store.Role, error) {
 	roles, _, err := r.ResolveRolesUntil(ctx, userID, t)
 	return roles, err
@@ -75,7 +80,7 @@ func (r *Resolver) ResolveRoles(ctx context.Context, userID string, t time.Time)
 func (r *Resolver) ResolveRolesUntil(ctx context.Context, userID string, t time.Time) ([]store.Role, time.Time, error) {
 	r.mu.Lock()
 	epoch := r.epoch
-	if c, ok := r.cache[userID]; ok && (c.until.IsZero() || t.Before(c.until)) {
+	if c, ok := r.cache[userID]; ok && t.Before(c.expires) && (c.until.IsZero() || t.Before(c.until)) {
 		r.mu.Unlock()
 		return c.roles, c.until, nil
 	}
@@ -91,7 +96,7 @@ func (r *Resolver) ResolveRolesUntil(ctx context.Context, userID string, t time.
 	// was just resolved, so the answer is cached only for the epoch it
 	// started in.
 	if r.epoch == epoch {
-		r.cache[userID] = resolution{roles: roles, until: until}
+		r.cache[userID] = resolution{roles: roles, until: until, expires: t.Add(authn.DefaultTokenTTL)}
 	}
 	r.mu.Unlock()
 	return roles, until, nil

@@ -1,6 +1,6 @@
 ---
 title: strazactl devices revoke
-description: Revoke a device enrollment (its device credential stops minting sessions)
+description: Revoke a device enrollment (it stops starting sessions)
 pagetype: reference
 weight: 47
 draft: false
@@ -13,11 +13,11 @@ keywords: strazactl, devices, revoke
 
 ## Synopsis
 
-Removes the device enrollment: the long-lived device credential minted at
-enroll can no longer start sessions, sessions bound to the device stop
-refreshing, and a live enforcement kit on it is stood down by push. The user
-is untouched: they re-enroll the machine (or a replacement) with a fresh
-interactive login. For a person-level cut, use `users disable` or `users lock`.
+Removes the device enrollment: the machine's key can no longer start sessions,
+sessions bound to the device stop refreshing, and a live enforcement kit on it is
+stood down by push. The user is untouched: they enroll the machine, or a
+replacement, again with `straza enroll` and a fresh sign-in. For a person-level
+cut, use `users disable` or `users lock`.
 
 ```
 strazactl devices revoke <username> <device-id> [flags]
@@ -26,7 +26,7 @@ strazactl devices revoke <username> <device-id> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

@@ -33,13 +33,19 @@ cat <<'NOTE'
 Manual steps from here (the automated, assertion-backed version is
 `make demo-m3`):
 
-  1. strazactl login --server http://127.0.0.1:8420   # device flow as admin
+  1. Sign in to http://127.0.0.1:8420/console/ as admin with the password
+     above. Under Settings, API tokens, mint a token: pick Custom, set
+     identity, apps and policy to read and write and drafts and audit to
+     read, and keep the lifetime short. strazactl runs on that token. The
+     second line waits for you to paste it, unshown:
+       export STRAZA_SERVER=http://127.0.0.1:8420
+       read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
   2. strazactl users create alice --password '...'
      strazactl users create bob   --password '...'   # no role
   3. cp spec/app-manifest/examples/valid-github-remote.yaml \
         "$STRAZA_DATA_DIR/apps/github.app.yaml"      # THE demo moment
      strazactl drafts list                            # → a draft from the apps directory
-     strazactl drafts publish <id>                    # → github installed
+     publish it in the console under Drafts           # a person publishes, never a token
      strazactl apps list                              # → github ... running
   4. strazactl roles create github-dev --app github --tools "get_*,list_*,search_*,create_issue"
      strazactl assign github-dev --user alice
@@ -61,13 +67,12 @@ Manual steps from here (the automated, assertion-backed version is
         claude mcp add --transport http github-via-straza \
           http://127.0.0.1:8420/mcp \
           --header "Authorization: Bearer <alice session token>"
-     (straza's checkin mints the session token; `strazactl login` as
-     alice prints one too.)
+     (straza's checkin mints the session token.)
   7. In Claude Code: /mcp → github-via-straza lists get_issue, list_issues,
      create_issue, never delete_repository. Ask it to fetch an issue: the
      call works, and the GitHub token exists only inside strazad.
      Repeat as bob → the server exposes no tools at all.
-  8. rm "$STRAZA_DATA_DIR/apps/github.app.yaml", then strazactl drafts publish
-     the removal draft it proposes → tools vanish (list_changed).
+  8. rm "$STRAZA_DATA_DIR/apps/github.app.yaml", then publish the removal
+     draft it proposes in the console under Drafts → tools vanish (list_changed).
   9. strazactl audit tail                       # straza.audit.mcp decisions
 NOTE

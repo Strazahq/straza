@@ -10,14 +10,13 @@ import * as React from "react";
 import { ExternalLinkIcon, MonitorIcon, SmartphoneIcon } from "lucide-react";
 import { StrazaMark } from "@/components/straza-mark";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { PageHead } from "@/components/page-head";
 import { ScreenBoundary } from "@/components/screen-boundary";
-import { SignIn } from "@/components/sign-in";
 import { type ApiError, type SelfAnswer, readSelf } from "@/lib/api";
+import { beginSignIn, hasResume, takeSignInProblem } from "@/lib/session";
 import { useSession } from "@/lib/use-session";
 import { useTheme } from "@/lib/theme";
 import { useTimeZone } from "@/lib/timezone";
@@ -57,7 +56,6 @@ export function SelfServiceApp() {
   const [booted, setBooted] = React.useState(false);
   const [storage, setStorage] = React.useState<{ usable: boolean; outlook: StorageOutlook }>({ usable: true, outlook: "unknown" });
   const [notice, setNotice] = React.useState<Notice | null>(null);
-  const [signInOpen, setSignInOpen] = React.useState(false);
   const [sheets, setSheets] = React.useState({ enable: false, phone: false });
   const [counts, setCounts] = React.useState<Counts>({});
 
@@ -138,8 +136,31 @@ export function SelfServiceApp() {
   // re-run it on every render of this shell, and a count it sets moves the
   // shell, which is a loop.
   const setCount = React.useCallback((t: SelfTab, n: number | null) => setCounts((c) => (c[t] === n ? c : { ...c, [t]: n })), []);
-  const openSignIn = React.useCallback(() => setSignInOpen(true), []);
+  // Sign in sends this tab to the identity provider and back to the tab the
+  // person is on. A failure to leave shows as the page's notice.
+  const openSignIn = React.useCallback(() => {
+    beginSignIn({ back: window.location.pathname }).catch((e: unknown) => setNotice({ tone: "warn", text: e instanceof Error ? e.message : String(e) }));
+  }, []);
+  // A sign-in that failed after the identity provider, or came back without
+  // an answer, says why once on arrival.
+  React.useEffect(() => {
+    const say = () => {
+      const problem = takeSignInProblem();
+      if (problem) setNotice({ tone: "warn", text: problem });
+    };
+    say();
+    // A Back from the identity provider can restore this page from the
+    // back-forward cache, which runs no effect, so the restore asks again.
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) say(); };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
   const setSheet = React.useCallback((which: "enable" | "phone", open: boolean) => setSheets((s) => (s[which] === open ? s : { ...s, [which]: open })), []);
+  // An Enable this browser run that left to sign in opens again once the
+  // session it came back with is live, and the sheet carries on.
+  React.useEffect(() => {
+    if (state.kind === "signed-in" && booted && hasResume()) setSheet("enable", true);
+  }, [state.kind, booted, setSheet]);
 
   const session: SessionInfo = state.kind === "signed-in"
     ? { kind: "signed-in", user: state.user, grants: state.grants, servers: state.servers }
@@ -194,7 +215,7 @@ export function SelfServiceApp() {
               )}
               {session.kind === "signed-in" && <span data-signed-in={session.user}>{W.signedInAs(session.user)}</span>}
               {session.kind === "signed-in" && <Button variant="ghost" size="sm" onClick={() => void onSignOut()}>{W.SIGN_OUT}</Button>}
-              {session.kind === "signed-out" && <Button variant="outline" size="sm" onClick={() => setSignInOpen(true)} data-sign-in>{W.SIGN_IN}</Button>}
+              {session.kind === "signed-out" && <Button variant="outline" size="sm" onClick={openSignIn} data-sign-in>{W.SIGN_IN}</Button>}
               {session.kind === "booting" && <span className="text-muted-foreground">{W.RESUMING}</span>}
             </span>
           </header>
@@ -228,21 +249,6 @@ export function SelfServiceApp() {
             </div>
           </main>
         </div>
-        <Dialog open={signInOpen} onOpenChange={setSignInOpen}>
-          <DialogContent className="sm:max-w-[460px]" data-sign-in-dialog>
-            <DialogHeader>
-              <DialogTitle>{W.SIGN_IN_TITLE}</DialogTitle>
-              <DialogDescription>{W.SIGN_IN_BODY}</DialogDescription>
-            </DialogHeader>
-            <SignIn
-              reason={{ kind: "none", detail: "" }}
-              returnTo={W.PAGE_TITLE}
-              adminOnly={false}
-              embedded
-              onAuthed={(resp) => { signedIn(resp); setSignInOpen(false); }}
-            />
-          </DialogContent>
-        </Dialog>
         <Toaster theme={resolved} closeButton />
       </TooltipProvider>
     </SelfContext.Provider>

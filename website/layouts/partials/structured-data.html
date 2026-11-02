@@ -1,0 +1,25 @@
+{{- /* One JSON-LD block per page. The home page describes the docs WebSite.
+Every other page is a TechArticle, with the same title as <title> without
+the site suffix, and a BreadcrumbList from the home page down to the page.
+dateModified is written only when Git dates the page, which the Pages
+workflow turns on. jsonify escapes <, > and &, so no page text can close
+the script element. */ -}}
+{{- $site := dict "@type" "WebSite" "name" site.Title "url" site.Home.Permalink -}}
+{{- $org := dict "@type" "Organization" "name" "Straza" "url" "https://straza.ai/" -}}
+{{- $graph := slice -}}
+{{- if .IsHome -}}
+  {{- $home := merge $site (dict "publisher" $org) -}}
+  {{- with (.Params.seo_description | default .Description) }}{{ $home = merge $home (dict "description" .) }}{{ end -}}
+  {{- $graph = $graph | append $home -}}
+{{- else -}}
+  {{- $article := dict "@type" "TechArticle" "headline" (.Params.seo_title | default .Title) "url" .Permalink "publisher" $org "isPartOf" $site -}}
+  {{- with (.Params.seo_description | default .Description) }}{{ $article = merge $article (dict "description" .) }}{{ end -}}
+  {{- if not .Lastmod.IsZero }}{{ $article = merge $article (dict "dateModified" (.Lastmod.Format "2006-01-02T15:04:05Z07:00")) }}{{ end -}}
+  {{- $items := slice -}}
+  {{- range $i, $p := .Ancestors.Reverse | append . -}}
+    {{- $name := cond $p.IsHome site.Title $p.LinkTitle -}}
+    {{- $items = $items | append (dict "@type" "ListItem" "position" (add $i 1) "name" $name "item" $p.Permalink) -}}
+  {{- end -}}
+  {{- $graph = $graph | append $article (dict "@type" "BreadcrumbList" "itemListElement" $items) -}}
+{{- end -}}
+<script type="application/ld+json">{{ dict "@context" "https://schema.org" "@graph" $graph | jsonify | safeJS }}</script>

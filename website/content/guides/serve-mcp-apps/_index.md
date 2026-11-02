@@ -11,6 +11,8 @@ keywords: mcp apps gateway catalog servers
 - [Credentials]({{< relref "guides/serve-mcp-apps/credentials.md" >}}) chooses who supplies an upstream server's credential and stores one shared secret for it.
 - [Each caller's own credential]({{< relref "guides/serve-mcp-apps/caller-credentials.md" >}}) lets each person reach an upstream server with their own token or sign-in.
 - [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) gives a role access to selected tools and previews what its sessions see.
+- [Limit a role to some objects]({{< relref "guides/serve-mcp-apps/limit-a-role-to-some-objects.md" >}}) pins the repositories a server such as ghapp reaches and gives each role the repositories it covers, so an agent writes only where one of its roles allows.
+- [Git through Straza]({{< relref "guides/serve-mcp-apps/git-through-straza.md" >}}) lets agents run plain git against GitHub with no credential on their machines, while Straza decides each fetch and push on ghapp like a tool call.
 - [Show MCP Apps views]({{< relref "guides/serve-mcp-apps/show-views.md" >}}) lets a chat app render a server's interactive views through the server's own endpoint, with every click decided like any other tool call.
 - [The apps directory]({{< relref "guides/serve-mcp-apps/gitops-apps-directory.md" >}}) keeps server manifests in a directory under version control, where a file proposes a draft that a person publishes.
 

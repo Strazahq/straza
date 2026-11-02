@@ -2,7 +2,7 @@
 title: strazactl apps
 description: Manage MCP servers
 pagetype: reference
-weight: 15
+weight: 12
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl apps [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
@@ -32,6 +32,7 @@ strazactl apps [flags]
 * [strazactl apps install](/reference/cli/strazactl/strazactl_apps_install/): Install or update MCP servers from app.yaml manifests
 * [strazactl apps list](/reference/cli/strazactl/strazactl_apps_list/): List MCP servers with live status, the reason behind it and the roles that reach each
 * [strazactl apps logs](/reference/cli/strazactl/strazactl_apps_logs/): Show recent runtime log lines for a server
+* [strazactl apps objects](/reference/cli/strazactl/strazactl_apps_objects/): Show what Straza last listed on a server, such as its repos, and the roles that cover each
 * [strazactl apps recheck](/reference/cli/strazactl/strazactl_apps_recheck/): Trigger an immediate health probe and print the refreshed state
 * [strazactl apps remove](/reference/cli/strazactl/strazactl_apps_remove/): Stop and remove a server
 * [strazactl apps secret](/reference/cli/strazactl/strazactl_apps_secret/): Manage a server's static secret (injected gateway-side, never client-visible)

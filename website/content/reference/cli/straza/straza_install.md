@@ -2,7 +2,7 @@
 title: straza install
 description: Write hook wiring for Tier-1 harnesses (user mode, or --managed system layout)
 pagetype: reference
-weight: 11
+weight: 10
 draft: false
 sources:
   - cmd/straza
@@ -31,7 +31,7 @@ straza install <harness>... [flags]
 ## Options
 
 ```
-      --bin-dir string   managed binary directory (default: /usr/local/bin or %ProgramData%\straza\bin)
+      --bin-dir string   managed binary directory (default: /usr/bin on Linux, /opt/straza/bin on macOS, %ProgramData%\straza\bin on Windows). The straza package, the Straza package for macOS or the Straza MSI installs the binary there, and this command never copies it
       --managed          install the root-owned, managed layout that a user cannot edit (run with sudo, or as an administrator on Windows)
       --server string    strazad base URL the managed layout pins for every user of this machine (required with --managed)
 ```

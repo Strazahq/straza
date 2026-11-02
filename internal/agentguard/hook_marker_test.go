@@ -4,70 +4,91 @@ import (
 	"bytes"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/strazahq/straza/internal/policy"
 )
 
 // TestHookReasonsCarryOneMarker pins the hook-lane contract on the reasons
-// straza writes itself: a fail-closed reason opens with exactly one
-// "Straza: " marker. The package errors underneath carry no program prefix
-// (the straza command adds the one prefix where it exits), so wrapping one
-// into a reason never doubles the marker.
+// straza writes itself: a fail-closed reason opens with exactly one Straza
+// marker. A sentence that already opens with Straza is the whole reason, and
+// any other gets "Straza: " in front, whether the Straza background service
+// could not be reached or refused.
 func TestHookReasonsCarryOneMarker(t *testing.T) {
 	toolPre := Normalized{HarnessName: "claude-code", HarnessVersion: "2.1",
 		Event: policy.Event{Kind: policy.EventToolPre, Tool: policy.ToolShellExec, Command: "git status"}}
-	enrolledConfig := func(t *testing.T, store *Store) {
-		t.Helper()
-		if err := store.SaveConfig(Config{ServerURL: "http://127.0.0.1:1"}); err != nil {
-			t.Fatal(err)
+	const notEnrolled = "This machine isn't enrolled for you yet. Run `straza enroll` and sign in with your work account."
+	notRunning := func(home string) string {
+		return "Straza's background service for STRAZA_HOME " + home + " isn't running, so this command can't reach your Straza session. " +
+			"Start it with `straza service` in a shell that has the same STRAZA_HOME."
+	}
+	refusing := func(sentence string) func(t *testing.T) string {
+		return func(t *testing.T) string {
+			svc := newFakeService(t)
+			svc.refuse = sentence
+			return svc.home
 		}
 	}
+	const noSession = "no active Straza session. Restart the session so straza can check in"
+	const waiting = "Straza is waiting for the server to confirm this machine's last check-in, which takes up to two minutes after a lost connection. Start the session again in a minute."
 	tests := []struct {
 		name         string
-		seed         func(t *testing.T, store *Store)
-		sessionStart bool   // drive session.start through the hook instead of a tool.pre decision
-		want         string // what follows the single marker
+		seed         func(t *testing.T) (home string)
+		sessionStart bool // drive session.start through the hook instead of a tool.pre decision
+		want         func(home string) string
+		whole        bool // the sentence opens with Straza and is the whole reason
 	}{
 		{
-			name: "revoked session",
-			seed: func(t *testing.T, store *Store) {
-				if err := store.MarkRevoked("kill-switch push from the server"); err != nil {
-					t.Fatal(err)
-				}
+			name: "lower-case refusal",
+			seed: refusing(noSession),
+			want: func(string) string { return noSession },
+		},
+		{
+			name:  "a refusal that names Straza already",
+			seed:  refusing(waiting),
+			want:  func(string) string { return waiting },
+			whole: true,
+		},
+		{
+			name:  "service not running",
+			seed:  noService,
+			want:  notRunning,
+			whole: true,
+		},
+		{
+			name: "service refuses",
+			seed: func(t *testing.T) string {
+				svc := newFakeService(t)
+				svc.refuse = notEnrolled
+				return svc.home
 			},
-			want: "session revoked (kill-switch push from the server). Tool calls stay denied until a new session starts and checks in again. If only this session was revoked, that check-in starts a new session. If the device or user was disabled, the check-in is refused until an administrator re-enables it. Inform the user and stop.",
+			want: func(string) string { return notEnrolled },
 		},
 		{
-			name: "no session",
-			seed: func(*testing.T, *Store) {},
-			want: "no active Straza session. Restart the session so straza can check in",
-		},
-		{
-			name: "session without a cached snapshot",
-			seed: func(t *testing.T, store *Store) {
-				enrolledConfig(t, store)
-				if err := store.SaveSession(Session{SessionID: "s1", SessionToken: "tok", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
-					t.Fatal(err)
-				}
-			},
-			want: "this session is live, but the policy snapshot is missing on this machine",
-		},
-		{
-			name:         "session start without an enrollment",
-			seed:         enrolledConfig,
+			name:         "session start, service not running",
+			seed:         noService,
 			sessionStart: true,
-			want:         "not enrolled (run `straza enroll`): ",
+			want:         notRunning,
+			whole:        true,
+		},
+		{
+			name: "session start refused",
+			seed: func(t *testing.T) string {
+				svc := newFakeService(t)
+				svc.refuse = notEnrolled
+				return svc.home
+			},
+			sessionStart: true,
+			want:         func(string) string { return notEnrolled },
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("STRAZA_HOME", t.TempDir())
+			home := tt.seed(t)
 			store, err := OpenStore()
 			if err != nil {
 				t.Fatal(err)
 			}
-			tt.seed(t, store)
+			svc := NewServiceClient()
 			var reason string
 			if tt.sessionStart {
 				var out, errb bytes.Buffer
@@ -76,13 +97,22 @@ func TestHookReasonsCarryOneMarker(t *testing.T) {
 					Stdout:  &out,
 					Stderr:  &errb,
 					Environ: func() []string { return []string{"CLAUDECODE=1"} },
-				}, store, liveDecider{store: store})
+				}, store, svc, serviceDecider{store: store, svc: svc})
 				if denyCode(t, err) != 2 {
 					t.Fatalf("session start must fail closed, got err=%v stdout=%q", err, out.String())
 				}
 				reason = strings.TrimSpace(errb.String())
 			} else {
-				reason = liveDecider{store: store}.Decide(toolPre).Reason
+				reason = serviceDecider{store: store, svc: svc}.Decide(toolPre).Reason
+			}
+			if strings.HasPrefix(reason, "Straza: Straza") {
+				t.Fatalf("reason = %q carries the marker twice", reason)
+			}
+			if tt.whole {
+				if reason != tt.want(home) {
+					t.Errorf("reason = %q, want %q as it is", reason, tt.want(home))
+				}
+				return
 			}
 			rest, ok := strings.CutPrefix(reason, "Straza: ")
 			if !ok {
@@ -91,8 +121,8 @@ func TestHookReasonsCarryOneMarker(t *testing.T) {
 			if strings.HasPrefix(rest, "Straza: ") || strings.HasPrefix(rest, "straza: ") {
 				t.Errorf("reason = %q carries the marker twice", reason)
 			}
-			if !strings.HasPrefix(rest, tt.want) {
-				t.Errorf("reason = %q, want %q after the marker", reason, tt.want)
+			if want := tt.want(home); rest != want {
+				t.Errorf("reason = %q, want %q after the marker", reason, want)
 			}
 		})
 	}

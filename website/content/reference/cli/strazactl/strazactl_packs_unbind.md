@@ -2,7 +2,7 @@
 title: strazactl packs unbind
 description: Unbind a knowledge pack from a role
 pagetype: reference
-weight: 67
+weight: 63
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl packs unbind <pack> <role> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

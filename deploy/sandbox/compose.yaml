@@ -4,8 +4,11 @@
 # one, so bring up deploy/compose/ or `strazad serve` yourself):
 #
 #   export STRAZA_SERVER_URL=http://host.docker.internal:8420   # your strazad
-#   export STRAZA_ENROLL_DIR=./enroll                           # see the Hookless processes guide
 #   docker compose -f deploy/sandbox/compose.yaml up
+#
+# The agent reaches Straza only through the straza-service container, which
+# holds the agent's key, enrollment and sessions under its own account. Enroll
+# the agent once through it, as the Hookless processes guide shows.
 
 # The IMAGE removes the ungoverned exec routes; the FLAGS below remove the
 # rest. Every one of them is load-bearing; this file is the reference for
@@ -24,8 +27,9 @@
 
 # Egress lockdown is deliberately NOT expressible as an image property and
 # only partially in vanilla compose: the boundary-grade setup is an
-# `internal: true` network that contains ONLY this agent and your strazad
-# (attach strazad with `docker network connect sandbox_straza-only strazad`).
+# `internal: true` network that contains ONLY this agent, its straza-service
+# and your strazad (attach strazad with
+# `docker network connect sandbox_straza-only strazad`).
 # When strazad runs on the host instead, restrict egress with the host
 # firewall (e.g. a DOCKER-USER iptables rule allowing only the strazad
 # address:port from this container's subnet). See
@@ -33,7 +37,7 @@
 
 services:
   agent:
-    build:
+    build: &agent-build
       context: ../..                     # repo root: the shim builds from source
       dockerfile: deploy/sandbox/Dockerfile
       # args:
@@ -45,19 +49,22 @@ services:
       - no-new-privileges:true
     pids_limit: 256
     tmpfs:
-      # the straza home: session/snapshot/audit-spool state (staged by the
-      # entrypoint from the ro enroll mount). uid 65532 owns it; noexec always.
-      - /run/straza:mode=0700,uid=65532,gid=65532,noexec,nosuid,nodev,size=16m
+      # HOME holds the shim's journal and error log, never a credential.
+      # uid 65532 owns it; noexec always.
       - /home/agent:mode=0700,uid=65532,gid=65532,noexec,nosuid,nodev,size=64m
       - /tmp:mode=1777,noexec,nosuid,nodev,size=64m
     volumes:
-      # enrollment material from an operator workstation, READ-ONLY:
-      #   $STRAZA_ENROLL_DIR/config.yaml + $STRAZA_ENROLL_DIR/state/identity.json
-      - ${STRAZA_ENROLL_DIR:-./enroll}:/straza/enroll:ro
+      # the service's socket directory, READ-ONLY: connecting needs no write,
+      # and the agent can place nothing there
+      - service_socket:/run/straza-service:ro
+    depends_on:
+      straza-service:
+        condition: service_healthy
     environment:
-      # cross-checked by the entrypoint against the enrolled serverUrl (the
-      # enrollment is the trust anchor and is never rewritten; a mismatch
-      # fails loudly instead of silently re-pointing enforcement)
+      # cross-checked by the entrypoint against the server the service
+      # enrolled this account with (the enrollment is the trust anchor and is
+      # never rewritten; a mismatch fails loudly instead of silently
+      # re-pointing enforcement)
       STRAZA_SERVER_URL: ${STRAZA_SERVER_URL:-http://host.docker.internal:8420}
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach a host-local strazad
@@ -67,6 +74,44 @@ services:
     # Replace with your agent process; the default drops into a governed
     # Python REPL where every exec route is a Straza decision.
     command: ["python3"]
+
+  straza-service:
+    # The Straza background service for the agent: the same image and binary,
+    # run as `straza service` under straza-service (uid 64000), which the
+    # agent never uses. It alone mounts the state volume with the agent's
+    # key, enrollment, snapshot and audit spool, keeps every session in
+    # memory, and carries governance to strazad. The agent shares only the
+    # socket directory, so the kernel names the agent's uid on every call
+    # and nothing the agent runs can read the key. STRAZA_HOME stays unset,
+    # so the service uses the system paths /run/straza-service/service.sock
+    # and /var/lib/straza-service.
+    build: *agent-build
+    user: "64000:64000"
+    entrypoint: ["/opt/straza/bin/straza", "service"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    tmpfs:
+      - /tmp:mode=1777,noexec,nosuid,nodev,size=16m
+    volumes:
+      - service_socket:/run/straza-service
+      - service_state:/var/lib/straza-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach a host-local strazad
+    networks: [straza-only]
+    healthcheck:
+      # healthy once the service accepts a connection on its socket
+      test: ["CMD", "python3", "-c", "import socket; socket.socket(socket.AF_UNIX).connect('/run/straza-service/service.sock')"]
+      interval: 30s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
+
+volumes:
+  service_socket: # the socket directory the agent and its service share
+  service_state: # the service's key, enrollment and audit spool; never the agent's
 
 networks:
   straza-only:

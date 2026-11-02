@@ -5,9 +5,9 @@ pagetype: how-to
 weight: 90
 draft: false
 tested:
-  version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server in an Alpine 3.20 container on Linux, with the person omar enrolled in a separate home directory for doctor and straza logs, a copy of that state pointed at a closed port for the failure case, and mara's deny record read back after the kill-switch runbook's disable. The log settings were checked by booting with bad values and with debug on. The enterprise boot lines were read with docker logs from the demo stack, which runs v1.1.0-104-g07d2df0e
-  date: 2026-10-06
+  version: v1.0.0-1570-gaf326165-dirty
+  platform: A throwaway standalone server in an Alpine 3.20 container on Linux, built from an uncommitted working tree, with the person omar enrolled through a straza service started with STRAZA_HOME in a home directory of his own, for doctor and straza logs, and strazad stopped for the failure case. mara's deny record was read back after the kill-switch runbook's disable on 2026-10-06 at v1.1.0-117-g106081a8, and the log settings were checked then by booting with bad values and with debug on. The enterprise boot lines were read with docker logs from the demo stack, which runs v1.1.0-104-g07d2df0e
+  date: 2026-10-21
 applies_to: both
 who: You, as the operator, and the person at the agent's machine
 where: A terminal on the agent's machine, and the strazad log
@@ -24,7 +24,7 @@ Doctor says whether that machine can reach the server, hold a session and delive
 
 | What failed | Start here |
 |---|---|
-| An agent cannot start a session or a hook fails | On that agent machine, run `straza doctor`, then `straza logs` for local hook, spool, and drain errors. |
+| An agent cannot start a session or a hook fails | On that agent machine, run `straza doctor`, then `straza logs` for local hook, capture and MCP bridge errors. What `straza service` itself did, such as an audit upload that failed, is on that service's standard error. |
 | strazad has a boot failure or an endpoint fails | Read the server process, container, or Kubernetes log. Find `strazad serving`, or the earlier component that stopped boot. |
 | You need the durable record of a decision, login, or administrative change | Read the audit chain, not the operational log. |
 
@@ -34,7 +34,7 @@ These ten symptoms are common ones. Each links the step whose failure help quote
 | What you see | Where the fix is |
 |---|---|
 | The sign-in page answers `Invalid username or password.` for the admin | [Sign in as the admin]({{< relref "get-started/first-governed-session.md#sign-in-as-the-admin" >}}) on Your first governed session |
-| `straza enroll` stops with `the device code expired before it was approved`, or with an error that ends `connect: connection refused` | [Sign in and enroll]({{< relref "guides/govern-an-agent/enroll-a-machine.md#sign-in-and-enroll" >}}) on Enroll a machine |
+| `straza enroll` stops with `The browser sign-in did not finish within 5 minutes`, with `the sign-in code expired before it was approved`, or with an error that ends `connect: connection refused` | [Sign in and enroll]({{< relref "guides/govern-an-agent/enroll-a-machine.md#sign-in-and-enroll" >}}) on Enroll a machine |
 | Every governed call is denied with `Straza: no active Straza session. Restart the session so straza can check in` | [Check a deny and an allow]({{< relref "guides/govern-an-agent/claude-code.md#check-a-deny-and-an-allow" >}}) on Claude Code |
 | A session start is refused with `attestation level "advisory" is below the required level "managed"` | [Open a session]({{< relref "guides/govern-an-agent/claude-code.md#open-a-session" >}}) on Claude Code |
 | An MCP server reads `degraded`, and its reason says `requires a credential and none is stored` or `Straza does not dial 127.0.0.1` | [Check the connection]({{< relref "guides/serve-mcp-apps/add-a-server.md#verify" >}}) on Add a server |
@@ -47,7 +47,7 @@ These ten symptoms are common ones. Each links the step whose failure help quote
 ## Run doctor on the machine
 
 
-You need the `straza` binary and the state that `straza enroll` wrote under your home. Doctor never changes anything. It keeps going after a failed check, so a broken server does not hide a broken hook. Here it runs for the person `omar`, enrolled but without a harness session yet:
+You need the `straza` binary and a running `straza service`, the Straza background service, which holds the enrollment that `straza enroll` made. Doctor asks the service for your enrollment, sessions and audit spool, and reads this machine's own files for the rest. It never changes anything. It keeps going after a failed check, so a broken server does not hide a broken hook, and the checks that read only this machine run even when the service does not answer. Here it runs for the person `omar`, enrolled but without a harness session yet:
 
 {{< command terminal="Terminal" purpose="on the agent's machine" >}}
 ```sh
@@ -56,42 +56,42 @@ straza doctor
 {{< /command >}}
 
 ```text
-[ ok ] enrollment  server http://localhost:8420, 1 snapshot key(s) pinned, straza v1.1.0-117-g106081a8
-[ ok ] identity    omar (device 01a1132b-cac4-7d77-8056-1b636a9554ce), device credential valid until 2026-11-05
-[ ok ] server      http://localhost:8420 healthy (strazad v1.1.0-117-g106081a8, standalone profile)
-[ ok ] approver    https://172.29.77.10:8443 (pin sha256/ILLqvC0KeV4PfC+9QjM5nBEOJaEAEaJTwtUK6tBAScM=, auto-minted cert data/approver-tls/cert.pem, expires 2029-01-03, verified from here: the surface presents the pinned key)
-[WARN] session     no active session
-                   → start a harness session (the SessionStart hook checks in), or pipe a SessionStart payload through `straza hook`
-[WARN] snapshot    no cached snapshot
-                   → start a harness session. SessionStart downloads and verifies the active snapshot
+[ ok ] service     straza service v1.0.0-1570-gaf326165-dirty answers at /home/omar/.straza/service.sock and keeps keys in user custody
+[ ok ] enrollment  omar (device 01a15d8e-6842-7281-9538-7998c922bc98) at http://127.0.0.1:8420, key cr_GU1wJJWlS, straza v1.0.0-1570-gaf326165-dirty
+[ ok ] server      http://127.0.0.1:8420 healthy (strazad v1.0.0-1570-gaf326165-dirty, standalone profile)
+[ ok ] approver    https://172.17.0.4:8443 (pin sha256/q/+fca2tzRIxC/Wkrnde88ShLVP6Qua+Di9tng51vJ8=, auto-minted cert data/approver-tls/cert.pem, expires 2029-01-18, verified from here: the surface presents the pinned key)
+[WARN] session     no live session
+                   → start a harness session (its SessionStart hook starts one through the Straza background service), or pipe a SessionStart payload through `straza hook`
 [WARN] wiring      no harness has Straza hooks wired
                    → run `straza install claude-code` (or codex/gemini). Enterprise layouts use `straza install --managed --server <server-url> claude-code` (or codex/gemini)
-[ ok ] audit-spool no pending audit events (no successful drain recorded yet)
 [ ok ] trace       journal on, 0 records; debug off
+[ ok ] audit-spool no pending audit events (no successful upload recorded yet)
 ```
 
 
-{{< see >}}`[ ok ]` on enrollment, identity and server. The three warnings for session, snapshot and wiring are the normal state of a machine that has not started a harness session yet.{{< /see >}}
+{{< see >}}`[ ok ]` on service, enrollment and server. The warnings for session and wiring are the normal state of a machine that has not started a harness session yet.{{< /see >}}
 
-Read the list top down, because each line stands on the one above. Everything below the snapshot line reads only this machine.
+Read the list top down, because each line stands on the one above. The lines from wiring to trace read only this machine.
 
 | Line | What it checks |
 |---|---|
-| enrollment | The server this machine trusts, how many snapshot signing keys it pinned when it enrolled, and the straza build that is running. |
-| identity | The user and the device, with the expiry of the device credential. It turns to a warning two days before that expiry. |
+| service | Whether `straza service` answers on its socket, or its named pipe on Windows, its version, and whether it keeps your key in its own account or in yours. When it does not answer, the line says how to start it, and the enrollment, server, session and killswitch lines wait for it. |
+| enrollment | You, the device, the server this machine is enrolled with, the start of the key's thumbprint and the straza build that is running. It fails when the machine's identity changed since it was enrolled, and warns while the service waits for the server to confirm a check-in whose answer was lost. |
 | server | A live probe of `/healthz` and `/version`. |
 | approver | Appears only when the server advertises an approver listener. Doctor connects to it and confirms that the presented key matches the pin. |
-| session, snapshot | Whether a harness session has checked in and left a verified policy snapshot on this machine. |
+| session, policy | One line for each live session the service holds for you, one per harness window, with how long its token stays valid. A policy line replaces a session line when the server holds a newer policy that straza could not fetch. |
+| managed-content | Appears only on a managed install. It compares the managed wiring with what the server published. |
 | wiring, hook-binary | Which harness has Straza hooks, and whether the binary those hooks point at still exists. A codex or gemini line joins them only when that harness is in use. |
-| audit-spool | Where your audit data is right now. Pending events wait for the next drain, and a backlog that persists means uploads fail. |
-| audit-dropped | Appears only when the spool cap or the upload size guard discarded records. It stays red until you delete the marker it names, because lost evidence on a governed machine deserves an acknowledgement. |
+| managed layout | Appears only on Windows, and fails when `C:\ProgramData\straza` holds a managed config while accounts other than administrators can change that folder. Straza then ignores the managed config, and the service logs `the managed config is not used` in the Application event log at each start, until an administrator runs `straza install --managed` again, which locks the folder. |
 | trace | The local decision journal that `straza trace show` prints. |
-| killswitch | Appears with a live session, and closes the list. It says whether the revocation push lane was verified from this machine. |
+| audit-spool | Where your audit data is right now. The service holds pending records for you and uploads them on its own, and a backlog that persists means uploads fail. |
+| audit-dropped | Appears only when the spool cap or the upload size guard discarded records. It stays red until an administrator removes the marker it names, the service's record of the drop, because lost evidence on a governed machine deserves an acknowledgement. |
+| killswitch | Appears with a live session, and closes the list. It says whether the service holds a connected push stream for each of your live sessions. A revoked or lapsed window holds none and is not counted. |
 
 ## Read a failing doctor
 
 
-When the server is down or the URL is wrong, the server line fails. Here the machine's `serverUrl` points at a port where nothing listens, and the output is trimmed to the enrollment line, the failed line and the last line:
+When the server is down or the URL is wrong, the server line fails. Here strazad is stopped, and the output is trimmed to the enrollment line, the failed line and the last line:
 
 {{< command terminal="Terminal" purpose="on the agent's machine" >}}
 ```sh
@@ -100,8 +100,8 @@ straza doctor
 {{< /command >}}
 
 ```text
-[ ok ] enrollment  server http://localhost:8421, 1 snapshot key(s) pinned, straza v1.1.0-117-g106081a8
-[FAIL] server      http://localhost:8421 unreachable: Get "http://localhost:8421/healthz": dial tcp [::1]:8421: connect: connection refused
+[ ok ] enrollment  omar (device 01a15d8e-6842-7281-9538-7998c922bc98) at http://127.0.0.1:8420, key cr_GU1wJJWlS, straza v1.0.0-1570-gaf326165-dirty
+[FAIL] server      http://127.0.0.1:8420 unreachable: Get "http://127.0.0.1:8420/healthz": dial tcp 127.0.0.1:8420: connect: connection refused
                    → is strazad running? verify the URL and any TLS/proxy in between; hooks fail closed while it is unreachable (grace TTL permitting)
 straza: doctor found failures (see hints above)
 ```
@@ -123,12 +123,12 @@ straza logs
 {{< /command >}}
 
 ```text
-no client errors recorded (log: .straza/state/errors.jsonl)
+no client errors recorded (log: /home/omar/.straza/state/errors.jsonl)
 ```
 
 {{< see >}}`no client errors recorded`, which is the healthy answer.{{< /see >}}
 
-The log sits under your home directory, and the path above is trimmed to the part after it. It holds hook, spool and drain failures as the event name, the error and a timestamp, never the payload of the call. Its cap is about one megabyte across one live file and one rotation, so the whole thing is always printable and filtering is your shell's job. Doctor reads the same file and turns a failure inside the last 24 hours into a client-errors warning.
+The log sits in `state` under your Straza home, here omar's `/home/omar/.straza`. It holds hook, capture and MCP bridge failures as the event name, the error and a timestamp, never the payload of the call. The audit spool and its uploads live in `straza service`, which logs their failures to its own standard error. Its cap is about one megabyte across one live file and one rotation, so the whole thing is always printable and filtering is your shell's job. Doctor reads the same file and turns a failure inside the last 24 hours into a client-errors warning.
 
 ## Read the server log
 
@@ -170,7 +170,7 @@ Every request gets a correlation id. strazad takes it from the `X-Request-Id` he
 The per-request access record exists only at `debug` level, and the probes `/healthz`, `/readyz` and `/metrics` never appear in it. The `info` default therefore stays quiet on a healthy server.
 
 
-Six server lines mean that an audit record may be missing from the chain:
+Seven server lines mean that an audit record may be missing from the chain:
 
 | Log line | What it means |
 |---|---|
@@ -179,7 +179,8 @@ Six server lines mean that an audit record may be missing from the chain:
 | `audit record not confirmed` | The write of the record ended without an answer. Search the chain for its id before you treat it as lost. |
 | `audit records lost at shutdown` | strazad could not write this count of records before it stopped. The line is their only trace, because `straza_audit_lost_total` starts at zero in the next process. |
 | `audit batch: spooled records that name one session were refused` | One upload held records that name a session of another user or another device, an unknown session, or a value that is not a session id. The line says which, and gives their count and the first one's id. |
-| `audit batch: N spooled records were refused` | The records past the cap of 1000 sessions one upload may name. The client has already deleted them, so the line is their only trace, and `straza_audit_refused_total` counts them. |
+| `audit batch: N spooled records were refused` | The records past the cap of 1000 sessions one upload may name. The background service on the machine has already deleted them from its spool, so the line is their only trace, and `straza_audit_refused_total` counts them. |
+| `outbox row set aside` | The event bus refused the outbox row it names by id, subject and size as larger than its `max_payload`, which the line also gives, so its record never reaches the chain or the sinks, and every later record is published. The row stays in `events_outbox` with `attempts` -1, and `straza_outbox_set_aside_total` counts it. strazad cuts each record to 256 KiB when it writes it, so raise a `max_payload` below that on the NATS server and then run `UPDATE events_outbox SET attempts = 0 WHERE attempts = -1`, which lets the relay publish the rows it set aside, or else report the line. |
 
 Two more lines belong to the enterprise profile, and a third follows once its audit queue is full:
 

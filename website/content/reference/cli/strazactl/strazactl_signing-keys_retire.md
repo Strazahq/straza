@@ -2,7 +2,7 @@
 title: strazactl signing-keys retire
 description: Retire one client assertion key at once, for a key that may have been copied
 pagetype: reference
-weight: 93
+weight: 89
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl signing-keys retire <kid> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

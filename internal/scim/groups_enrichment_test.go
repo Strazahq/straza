@@ -109,11 +109,20 @@ func TestGroupProjectionWriteRefusals(t *testing.T) {
 	for _, path := range []string{
 		strazaGroupURNLower,
 		strazaGroupURNLower + ":role",
-		"apps", "tools", "policies", "administers", "server", "role", "rolekind", "plane", "description",
+		strazaGroupURNLower + ":covers",
+		"apps", "tools", "policies", "administers", "server", "covers", "role", "rolekind", "plane", "description",
 	} {
 		err := s.planGroupOp(ctx, plan, patchOp{op: "replace", path: path, value: "x"})
 		if !errors.As(err, &me) {
 			t.Errorf("PATCH path %q: err = %v, want mutabilityError", path, err)
+		}
+	}
+	for _, value := range []map[string]any{
+		{"covers": []any{"ghapp:repo every"}},
+		{SchemaStrazaGroup: map[string]any{"covers": []any{"ghapp:repo every"}}},
+	} {
+		if err := s.planGroupOp(ctx, plan, patchOp{op: "replace", value: value}); !errors.As(err, &me) {
+			t.Errorf("PATCH with no path and the value %v: err = %v, want mutabilityError", value, err)
 		}
 	}
 

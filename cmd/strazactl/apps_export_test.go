@@ -78,7 +78,7 @@ func TestAppsExportRoundTrips(t *testing.T) {
 			t.Run(name+" by "+ref, func(t *testing.T) {
 				srv := jsonServer(t, map[string]string{"GET /v1/admin/apps": list})
 				t.Setenv("STRAZA_SERVER", "")
-				stdout, stderr, err := runCLI(t, writeCreds(t, srv.URL), "apps", "export", ref)
+				stdout, stderr, err := runCLI(t, onToken(t, srv.URL), "apps", "export", ref)
 				if err != nil {
 					t.Fatalf("apps export: %v", err)
 				}
@@ -137,7 +137,7 @@ func TestAppsExportRefusals(t *testing.T) {
 			}
 			srv := jsonServer(t, map[string]string{"GET /v1/admin/apps": tc.list})
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, err := runCLI(t, writeCreds(t, srv.URL), "apps", "export", tc.ref)
+			stdout, _, err := runCLI(t, onToken(t, srv.URL), "apps", "export", tc.ref)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("err = %v, want it to contain %q", err, tc.wantErr)
 			}

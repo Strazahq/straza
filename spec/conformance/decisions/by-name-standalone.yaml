@@ -1,0 +1,46 @@
+# Decision-table fixtures: rules that name harness tools by their own name
+# (revision 26), standalone profile, where a tool no rule names takes the
+# allow default. A rule that names tools governs only the tools it names, so
+# its require predicate never reaches an unnamed tool [doc].
+profile: standalone
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: by-name }
+    spec:
+      rules:
+        - id: handback-needs-managed
+          tools: [other]
+          toolNames: { allow: [SubagentHandback] }
+          require: { attestation: managed }
+          reason: "handback needs a managed install"
+        - id: deny-push
+          tools: [other]
+          toolNames: { deny: [PushNotification] }
+          reason: "no pushes from this box"
+cases:
+  - name: named-tool-allowed-on-a-managed-session
+    subject: { user: kim, attestation: managed }
+    event: { kind: tool.pre, tool: other, toolName: SubagentHandback }
+    want: { effect: allow, ruleId: handback-needs-managed }
+  - name: named-tool-denied-when-require-fails
+    subject: { user: kim, attestation: advisory }
+    event: { kind: tool.pre, tool: other, toolName: SubagentHandback }
+    want: { effect: deny, ruleId: handback-needs-managed }
+  - name: require-never-reaches-an-unnamed-unknown-tool
+    subject: { user: kim, attestation: advisory }
+    event: { kind: tool.pre, tool: other, toolName: FutureTool }
+    want: { effect: allow, default: true }
+  - name: require-never-reaches-an-unnamed-classified-tool
+    subject: { user: kim, attestation: advisory }
+    event: { kind: tool.pre, tool: shell.exec, command: "git status", nativeTool: Bash }
+    want: { effect: allow, default: true }
+  - name: by-name-deny-of-a-classified-tool
+    subject: { user: kim, attestation: managed }
+    event: { kind: tool.pre, tool: net.fetch, nativeTool: PushNotification }
+    want: { effect: deny, ruleId: deny-push }
+  - name: by-name-rule-ignores-observational-events
+    subject: { user: kim, attestation: advisory }
+    event: { kind: tool.post, tool: other, toolName: SubagentHandback }
+    want: { effect: allow, default: true }

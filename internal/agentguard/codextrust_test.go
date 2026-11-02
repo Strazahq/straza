@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 )
 
 // codexTrustKey renders a [hooks.state] key exactly as codex writes it
@@ -202,20 +204,19 @@ func TestReadCodexHookTrust(t *testing.T) {
 // no green light without evidence.
 func TestCodexHooksCheckStates(t *testing.T) {
 	setOSName(t, "linux")
-	codexSession := Session{SessionID: "s1", Harness: "codex/0.146.0", ExpiresAt: time.Now().Add(time.Hour)}
+	codexSession := localapi.SessionStatus{SessionID: "s1", Harness: localapi.Harness{Name: "codex", Version: "0.146.0"}, ExpiresAt: time.Now().Add(time.Hour)}
 
 	tests := []struct {
-		name        string
-		hooks       bool   // write hooks.json
-		partial     bool   // write an older straza's partial hooks.json instead
-		stale       bool   // leave the dead settings.json behind
-		managed     bool   // write a managed requirements.toml (no user hooks)
-		config      string // config.toml body ("" = no file); %s is the hooks path
-		session     Session
-		haveSession bool
-		wantCheck   bool
-		wantStatus  string
-		wantDetail  string
+		name       string
+		hooks      bool   // write hooks.json
+		partial    bool   // write an older straza's partial hooks.json instead
+		stale      bool   // leave the dead settings.json behind
+		managed    bool   // write a managed requirements.toml (no user hooks)
+		config     string // config.toml body ("" = no file); %s is the hooks path
+		sessions   []localapi.SessionStatus
+		wantCheck  bool
+		wantStatus string
+		wantDetail string
 	}{
 		{
 			name:      "codex not in use: no line at all",
@@ -286,22 +287,20 @@ func TestCodexHooksCheckStates(t *testing.T) {
 			wantDetail: "DISABLED by an operator",
 		},
 		{
-			name:        "no trust record but a codex session checked in: ok on evidence",
-			hooks:       true,
-			session:     codexSession,
-			haveSession: true,
-			wantCheck:   true,
-			wantStatus:  checkOK,
-			wantDetail:  "a codex session checked in",
+			name:       "no trust record but a codex session checked in: ok on evidence",
+			hooks:      true,
+			sessions:   []localapi.SessionStatus{codexSession},
+			wantCheck:  true,
+			wantStatus: checkOK,
+			wantDetail: "a codex session checked in",
 		},
 		{
-			name:        "another harness's session is not codex evidence",
-			hooks:       true,
-			session:     Session{SessionID: "s2", Harness: "claude-code/2.1.214"},
-			haveSession: true,
-			wantCheck:   true,
-			wantStatus:  checkWarn,
-			wantDetail:  "trust cannot be verified from outside",
+			name:       "another harness's session is not codex evidence",
+			hooks:      true,
+			sessions:   []localapi.SessionStatus{{SessionID: "s2", Harness: localapi.Harness{Name: "claude-code", Version: "2.1.214"}}},
+			wantCheck:  true,
+			wantStatus: checkWarn,
+			wantDetail: "trust cannot be verified from outside",
 		},
 		{
 			name:       "an older straza wired only some events",
@@ -367,7 +366,7 @@ func TestCodexHooksCheckStates(t *testing.T) {
 				}
 			}
 
-			got := codexHooksCheck(tc.session, tc.haveSession)
+			got := codexHooksCheck(tc.sessions)
 			if !tc.wantCheck {
 				if got != nil {
 					t.Fatalf("want no check, got %+v", got)

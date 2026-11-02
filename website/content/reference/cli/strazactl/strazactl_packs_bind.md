@@ -2,7 +2,7 @@
 title: strazactl packs bind
 description: Bind a knowledge pack to a role
 pagetype: reference
-weight: 63
+weight: 59
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl packs bind <pack> <role> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

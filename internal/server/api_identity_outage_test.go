@@ -91,11 +91,26 @@ type faultSessions struct {
 	f *faultStore
 }
 
+// GetByID fails while "sessions" is armed, and for the one session armed as
+// "session-read:<id>", so a test can fail a handler's read of its target
+// without failing the read that authenticates the caller.
 func (s faultSessions) GetByID(ctx context.Context, id string) (store.Session, error) {
 	if err := s.f.fault("sessions"); err != nil {
 		return store.Session{}, err
 	}
+	if err := s.f.fault("session-read:" + id); err != nil {
+		return store.Session{}, err
+	}
 	return s.SessionRepo.GetByID(ctx, id)
+}
+
+// Revoke fails while "sessions.revoke" is armed, before the store's
+// transaction starts, as a database that refuses the write does.
+func (s faultSessions) Revoke(ctx context.Context, ids []string, reason string, event func([]string) (store.OutboxEvent, error)) ([]string, error) {
+	if err := s.f.fault("sessions.revoke"); err != nil {
+		return nil, err
+	}
+	return s.SessionRepo.Revoke(ctx, ids, reason, event)
 }
 
 type faultDevices struct {
@@ -103,11 +118,39 @@ type faultDevices struct {
 	f *faultStore
 }
 
+// Revoke fails while "devices.revoke" is armed, before the store's
+// transaction starts.
+func (d faultDevices) Revoke(ctx context.Context, id, reason string, event store.OutboxEvent) error {
+	if err := d.f.fault("devices.revoke"); err != nil {
+		return err
+	}
+	return d.DeviceRepo.Revoke(ctx, id, reason, event)
+}
+
 func (d faultDevices) GetByID(ctx context.Context, id string) (store.Device, error) {
 	if err := d.f.fault("devices"); err != nil {
 		return store.Device{}, err
 	}
 	return d.DeviceRepo.GetByID(ctx, id)
+}
+
+// AdvanceCounter fails while "devices.counter" is armed. The key apart from
+// "devices" lets a check-in read its device row and then lose the store at
+// the counter write.
+func (d faultDevices) AdvanceCounter(ctx context.Context, id, thumbprint string, n int64) (bool, error) {
+	if err := d.f.fault("devices.counter"); err != nil {
+		return false, err
+	}
+	return d.DeviceRepo.AdvanceCounter(ctx, id, thumbprint, n)
+}
+
+// SpendProof fails while "devices.spend" is armed, apart from the device
+// read and the counter write.
+func (d faultDevices) SpendProof(ctx context.Context, thumbprint, jti string, until time.Time) (bool, error) {
+	if err := d.f.fault("devices.spend"); err != nil {
+		return false, err
+	}
+	return d.DeviceRepo.SpendProof(ctx, thumbprint, jti, until)
 }
 
 type faultApprovers struct {
@@ -244,21 +287,13 @@ func TestLoginLanesAnswerOutageHonestly(t *testing.T) {
 	user := seedIdentity(t, app)
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
 	device := map[string]string{"name": "kim-laptop", "platform": "linux", "fingerprint": "sha256:fp-outage"}
-	harness := map[string]string{"name": "claude-code", "version": "1.0"}
+	harness := map[string]string{"name": "console", "version": "1.0"}
 
-	// Healthy baseline: enroll, start a session by device token, keep both
-	// credentials for the armed lanes below.
-	code, _, enroll := callJSON(t, "POST", base+"/v1/enroll", "", map[string]any{"id_token": idToken, "device": device})
-	if code != http.StatusOK {
-		t.Fatalf("baseline enroll = %d %v", code, enroll)
-	}
-	deviceToken, _ := enroll["device_token"].(string)
-	deviceID, _ := enroll["device_id"].(string)
-	code, _, ses := callJSON(t, "POST", base+"/v1/checkin", "", map[string]any{"device_token": deviceToken, "harness": harness})
-	if code != http.StatusOK {
-		t.Fatalf("baseline device checkin = %d %v", code, ses)
-	}
-	sessionToken, _ := ses["session_token"].(string)
+	// Healthy baseline: a device row with the credential an older client
+	// holds, and a live console session, for the armed lanes below.
+	d, deviceToken := mintDevice(t, app, user.ID, store.DeviceClientKit, "sha256:fp-outage")
+	deviceID := d.ID
+	_, sessionToken := storedSession(t, app, user.ID, "", "console")
 
 	lanes := []struct {
 		name string
@@ -266,7 +301,7 @@ func TestLoginLanesAnswerOutageHonestly(t *testing.T) {
 		call func() (int, http.Header, map[string]any)
 	}{
 		{"enroll", "users", func() (int, http.Header, map[string]any) {
-			return callJSON(t, "POST", base+"/v1/enroll", "", map[string]any{"id_token": idToken, "device": device})
+			return callJSON(t, "POST", base+"/v1/enroll", "", map[string]any{"id_token": idToken, "client_kind": "human", "device": device})
 		}},
 		{"exchange id_token", "users", func() (int, http.Header, map[string]any) {
 			return callJSON(t, "POST", base+"/v1/checkin", "", map[string]any{"id_token": idToken, "harness": harness})
@@ -306,8 +341,8 @@ func TestLoginLanesAnswerOutageHonestly(t *testing.T) {
 		}
 	})
 	t.Run("control healthy lanes still 200", func(t *testing.T) {
-		if code, _, out := callJSON(t, "POST", base+"/v1/checkin", "", map[string]any{"device_token": deviceToken, "harness": harness}); code != http.StatusOK {
-			t.Fatalf("healthy device checkin = %d %v", code, out)
+		if code, _, out := callJSON(t, "POST", base+"/v1/checkin", "", map[string]any{"session_token": sessionToken, "harness": harness}); code != http.StatusOK {
+			t.Fatalf("healthy session refresh = %d %v", code, out)
 		}
 	})
 
@@ -354,8 +389,10 @@ func TestLoginLanesAnswerOutageHonestly(t *testing.T) {
 }
 
 // faultApprovals faults the first store call of approval.Service.Request (the
-// dedupe lookup) so a hook-lane approve fails closed through the REAL service
-// without closing the whole store (background runners would then log too).
+// dedupe lookup of a hold or of a ticket) so an approve fails closed through
+// the REAL service without closing the whole store (background runners would
+// then log too). Armed as "approvals-latest" it faults the deny-final lookup
+// of a ticket instead.
 type faultApprovals struct {
 	store.ApprovalRepo
 	f *faultStore
@@ -366,4 +403,18 @@ func (a faultApprovals) FindPendingByKey(ctx context.Context, sessionID, ruleID,
 		return store.Approval{}, err
 	}
 	return a.ApprovalRepo.FindPendingByKey(ctx, sessionID, ruleID, argvHash)
+}
+
+func (a faultApprovals) FindOpenTicketByUser(ctx context.Context, userID, ruleID, argvHash string) (store.Approval, error) {
+	if err := a.f.fault("approvals"); err != nil {
+		return store.Approval{}, err
+	}
+	return a.ApprovalRepo.FindOpenTicketByUser(ctx, userID, ruleID, argvHash)
+}
+
+func (a faultApprovals) FindLatestTicketByKey(ctx context.Context, userID, ruleID, argvHash string) (store.Approval, error) {
+	if err := a.f.fault("approvals-latest"); err != nil {
+		return store.Approval{}, err
+	}
+	return a.ApprovalRepo.FindLatestTicketByKey(ctx, userID, ruleID, argvHash)
 }

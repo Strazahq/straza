@@ -5,19 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/strazahq/straza/internal/policy"
 )
-
-// harnessLabel joins a harness name and version as name/version, or returns
-// the bare name when the harness reported no version, so no record ends in
-// a dangling slash.
-func harnessLabel(name, version string) string {
-	if version == "" {
-		return name
-	}
-	return name + "/" + version
-}
 
 // Normalized is a canonical event plus the session/harness metadata a hook
 // invocation carries (spec/hook-profile canonical-event.schema.json).
@@ -44,14 +36,19 @@ type Normalized struct {
 	AgentReply          string // subagent.stop: payload-borne final message (fallback lane)
 	AgentID             string // delegate instance id, when the harness attributes the payload
 	AgentType           string // delegate class: the capture tag ("capture, tagged")
+	// NativeTool is the harness's own name of a classified local tool, such
+	// as Bash. It travels beside the event on the decide request, so a rule
+	// that names a tool keeps it after a release classifies the tool, while
+	// the canonical event stays identical across dialects.
+	NativeTool string
 	// GatewayProxied marks a tool call the harness routes through the Straza
 	// gateway registration (mcp__straza__*, or a gemini mcp_context naming
 	// the gateway server). Such a call cannot bypass the gateway PEP, which
 	// evaluates current policy server-side with the TRUE app/tool names it
 	// serves, so the hook lane defers the WHOLE decision to it (single-gate,
 	// extending the approve-only deferral: codex hook payloads carry
-	// sanitized names the hook must not decide on,
-	// see LocalPDP.Decide). Trust boundary: the flag reflects the harness's
+	// sanitized names the hook must not decide on, so the service's decide
+	// defers them). Trust boundary: the flag reflects the harness's
 	// MCP registration, which straza install writes and managed installs pin
 	// and attest; a box owner editing their own harness config is outside the
 	// agent-governance threat model (they could equally unhook straza).
@@ -182,6 +179,21 @@ func Normalize(a *Adapter, payload map[string]any) (Normalized, error) {
 				ev.Tool, ev.App, ev.ToolName = policy.ToolMCPCall, app, tn
 			}
 		}
+		// A local tool keeps the harness's own name: an unclassified one on
+		// the event, where no kind describes it, and a classified one beside
+		// it. The kit sends a canonical kind as tool_name, so its dialect
+		// names the key that carries the framework's name.
+		if ev.Tool != policy.ToolMCPCall {
+			native := rawToolName
+			if a.Fields.NativeTool != "" {
+				native = strField(payload, a.Fields.NativeTool)
+			}
+			if native = cleanToolName(native); ev.Tool == policy.ToolOther {
+				ev.ToolName = native
+			} else {
+				n.NativeTool = native
+			}
+		}
 		// mcp.call: forward the harness tool_input verbatim as the canonical
 		// `args` attribute (spec/hook-profile); the server's approval
 		// fingerprint binds it (v2, binding: call). Runs AFTER the mcp_context
@@ -219,10 +231,10 @@ func (a *Adapter) classifyTool(name string) (tool, app, toolName string) {
 		app, toolName = splitGatewayTool(app, toolName)
 		return policy.ToolMCPCall, app, toolName
 	}
-	// For non-MCP tools the canonical event does not carry the harness-native
-	// name: it is dialect-specific (Bash vs Shell vs run_shell_command) and
-	// belongs in the audit raw payload, not the policy-relevant event. Keeping
-	// it out is what makes cross-dialect events identical.
+	// For a classified tool the canonical event does not carry the
+	// harness-native name: it is dialect-specific (Bash vs Shell vs
+	// run_shell_command), and keeping it out is what makes cross-dialect
+	// events identical. Normalize adds it back for other only.
 	if canon, ok := a.Tools[name]; ok {
 		return canon, "", ""
 	}
@@ -281,6 +293,21 @@ func (a *Adapter) extractToolInput(ev *policy.Event, input map[string]any) {
 			break
 		}
 	}
+}
+
+// maxToolNameLen caps the harness tool name an event carries, because the
+// name lands in a deny reason the model reads and in the audit record.
+const maxToolNameLen = 128
+
+// cleanToolName answers name when it is valid UTF-8 of at most
+// maxToolNameLen bytes with no control or format character, and "" when it
+// is not. A dropped name leaves the tool nameless, so it stays denied.
+func cleanToolName(name string) string {
+	if len(name) > maxToolNameLen || !utf8.ValidString(name) ||
+		strings.IndexFunc(name, func(r rune) bool { return unicode.In(r, unicode.Cc, unicode.Cf) }) >= 0 {
+		return ""
+	}
+	return name
 }
 
 func strField(payload map[string]any, keys ...string) string {

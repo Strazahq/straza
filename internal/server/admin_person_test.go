@@ -120,7 +120,7 @@ func TestAdminPlaneRefusesAgents(t *testing.T) {
 		return u
 	}
 	hana := typed("hana", store.UserTypeHuman)
-	hanaSession, _ := sessionAs(t, base, "hana", "strazactl")
+	hanaSession, _ := sessionAs(t, base, "hana", "console")
 	var minted struct {
 		Token string `json:"token"`
 	}
@@ -174,7 +174,7 @@ func TestAdminPlaneRefusesAgents(t *testing.T) {
 		says         string
 		via, session string
 	}{
-		{"a person's strazactl session", hanaSession, hana, "", "", ""},
+		{"a person's console session", hanaSession, hana, "", "", ""},
 		{"a person's ID token with the audience straza", loginDeviceFlow(t, base, "hana", "hunter2!"), hana, "", "", ""},
 		{"a user with no type signal", root, kim, "", "", ""},
 		{"an admin API token with the scope full", minted.Token, store.User{}, "", "", ""},
@@ -276,14 +276,9 @@ func TestAdminSessionReadsUserState(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			name := fmt.Sprintf("sam%d", i)
 			u := mkHuman(t, app, name, AdminRole)
-			d, deviceToken := mintDevice(t, app, u.ID, store.DeviceClientHuman, "fp-"+name)
-			code, checkin := checkinDeviceAs(t, base, deviceToken, "console", "1")
-			tok, _ := checkin["session_token"].(string)
-			sesID, _ := checkin["session_id"].(string)
-			if code != http.StatusOK || tok == "" {
-				t.Fatalf("console check-in = %d %v", code, checkin)
-			}
-			tc.arm(u, d.ID, sesID)
+			device := "fp-" + name
+			sesID, tok := storedSession(t, app, u.ID, device, "console")
+			tc.arm(u, device, sesID)
 			defer fs.disarm()
 			for _, rt := range routes {
 				before := len(authnFailures(t, app, u.ID, ""))
@@ -405,15 +400,11 @@ func TestRevokeUserCountsOnlyWrittenSessions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			name := fmt.Sprintf("rex%d", i)
 			u := mkHuman(t, app, name, AdminRole)
-			_, deviceToken := mintDevice(t, app, u.ID, store.DeviceClientHuman, "fp-"+name)
 			var tokens, ids []string
 			for range tc.sessions {
-				code, checkin := checkinDeviceAs(t, base, deviceToken, "console", "1")
-				if code != http.StatusOK {
-					t.Fatalf("console check-in = %d %v", code, checkin)
-				}
-				tokens = append(tokens, checkin["session_token"].(string))
-				ids = append(ids, checkin["session_id"].(string))
+				id, tok := storedSession(t, app, u.ID, "fp-"+name, "console")
+				tokens = append(tokens, tok)
+				ids = append(ids, id)
 			}
 			tc.arm(ids)
 			app.revokeUserCtx(ctx, u.ID, "test", store.RevocationOriginAdmin)

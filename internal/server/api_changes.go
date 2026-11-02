@@ -36,7 +36,7 @@ var changeTypes = map[string][]string{
 // consumer is not told to re-read a user on every checkin.
 var identityActionNoise = map[string]bool{
 	"session.start": true, "checkin.denied": true, "enroll": true,
-	"oauth.connect.refused": true,
+	"oauth.connect.refused": true, "connection.refused": true,
 }
 
 type changeRecord struct {
@@ -158,12 +158,18 @@ func (a *App) classifyChange(r *http.Request, subject, ce string) (changeRecord,
 		if id == "" {
 			id = str("user")
 		}
+		if id == "" {
+			// An event that names no object, such as the hash a harness
+			// config render registers, is nothing a consumer can read again,
+			// and a record with no id stops an IGA liveSync.
+			return changeRecord{}, false
+		}
 		op := "update"
 		if subject == "straza.identity.created" {
 			op = "create"
 		}
 		kind := a.identityKind(r, id)
-		if kind == "identity" && id != "" {
+		if kind == "identity" {
 			op = "delete" // the object is gone; tell consumers to drop the shadow
 		}
 		return changeRecord{Type: kind, Op: op, ID: id}, true

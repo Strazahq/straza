@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Architecture overview · Straza</title>
 <style>
@@ -128,7 +129,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <div class="stage">
 <svg viewBox="0 0 1124 600" preserveAspectRatio="xMidYMid meet" role="group" aria-labelledby="svgT svgD">
 <title id="svgT">Straza system architecture</title>
-<desc id="svgD">Agent harnesses feed straza, the client PEP kit, which talks to strazad. strazad holds the policy engine and inline classifier, the two-tier MCP gateway with its native straza app, session tokens, SCIM, the credential broker, the admin API, the approval service with its mobile approver API and push delivery, the audit sentinel, and the event spine, backed by Postgres or SQLite and NATS. Externally: midPoint over SCIM, an OIDC IdP, upstream MCP servers behind the gateway, and a phone running the mobile approver. Hover a node to light its data paths; toggle a plane to filter.</desc>
+<desc id="svgD">Agent harnesses feed straza, the client PEP kit, where straza service holds the keys and sessions and talks to strazad. strazad holds the policy engine and inline classifier, the two-tier MCP gateway with its native straza app, session tokens, SCIM, the credential broker, the admin API, the approval service with its mobile approver API and push delivery, the audit sentinel, and the event spine, backed by Postgres or SQLite and NATS. Externally: midPoint over SCIM, an OIDC IdP, upstream MCP servers behind the gateway, and a phone running the mobile approver. Hover a node to light its data paths; toggle a plane to filter.</desc>
 <defs>
   <marker id="ar"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk"/></marker>
   <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mkA"/></marker>
@@ -138,19 +139,19 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <g id="edges"> <path id="e-h1" class="edge pl-po" d="M162 85 L204 85"/> <path id="e-h2" class="edge pl-po" d="M162 121 L204 121"/> <path id="e-h3" class="edge pl-po" d="M162 157 L204 157"/> <path id="e-h4" class="edge pl-po" d="M162 193 L204 193"/> <path id="e-h5" class="edge pl-po" d="M162 229 L204 229"/> <path id="e-snap"    class="edge async pl-po" d="M470 108 L378 108"/> <path id="e-checkin" class="edge pl-id"       d="M376 150 L468 150"/> <path id="e-mcpx"    class="edge pl-mcp"      d="M376 192 L468 192"/> <path id="e-audit"   class="edge async pl-au" d="M376 234 L468 234"/> <path id="e-enroll" class="edge pl-id"       d="M300 294 V468 H120 V484"/> <path id="e-verify" class="edge async pl-id" d="M150 486 V330 H468"/> <path id="e-up"      class="edge pl-mcp"       d="M898 113 L998 113"/> <path id="e-scim"    class="edge pl-id"        d="M1000 170 L913 170"/> <path id="e-changes" class="edge async pl-id"  d="M913 192 L1000 192"/> <path id="e-class"   class="edge pl-po" d="M614 112 L626 112"/> <path id="e-gwap"    class="edge pl-ap" d="M834 224 V270 H553 V304"/> <path id="e-pdpap"   class="edge pl-ap" d="M486 120 H478 V320 H488"/> <path id="e-appush"  class="edge pl-ap" d="M616 334 L626 334"/> <path id="e-apapi"   class="edge pl-ap" d="M553 362 V370 H832 V364"/> <path id="e-apiph"   class="edge pl-ap" d="M898 333 L998 333"/> <path id="e-pushph"  class="edge async pl-ap" d="M710 362 V374 H982 V345 H998"/> <path id="e-apaudit" class="edge async pl-au" d="M520 362 V382"/> <path id="e-outbox"  class="edge pl-au"       d="M550 426 V440"/> <path id="e-nats"    class="edge pl-au"       d="M692 426 V440"/> <path id="e-consume" class="edge async pl-au" d="M756 467 L768 467"/> <path id="e-sent"    class="edge async pl-au" d="M666 492 V506"/> <path id="e-sentemit" class="edge pl-au"      d="M850 506 V494"/> <path id="e-killpush" class="edge async pl-id" d="M470 500 H340 V296"/> </g>
 
 
-<g id="elabels"> <text class="elabel pl-po"  x="423" y="100" text-anchor="middle">snapshot pull</text> <text class="elabel pl-id"  x="423" y="142" text-anchor="middle">checkin → token</text> <text class="elabel pl-mcp" x="423" y="184" text-anchor="middle">/mcp</text> <text class="elabel pl-au"  x="423" y="226" text-anchor="middle">audit batch</text> <text class="elabel pl-id"  x="300" y="322" text-anchor="middle">OIDC device flow · JWKS</text> <text class="elabel pl-mcp" x="948" y="106" text-anchor="middle">creds injected</text> <text class="elabel pl-id"  x="955" y="163" text-anchor="middle">SCIM 2.0</text> <text class="elabel pl-id"  x="955" y="208" text-anchor="middle">changes</text> <text class="elabel pl-ap"  x="690" y="264" text-anchor="middle">approve gate</text> <text class="elabel pl-ap"  x="955" y="326" text-anchor="middle">/v1/approver/*</text> <text class="elabel pl-au"  x="556" y="437">outbox</text> <text class="elabel pl-au"  x="700" y="437">publish</text> <text class="elabel pl-id"  x="405" y="493" text-anchor="middle">kill switch · /v1/push</text> </g>
+<g id="elabels"> <text class="elabel pl-po"  x="423" y="100" text-anchor="middle">snapshot pull</text> <text class="elabel pl-id"  x="423" y="142" text-anchor="middle">checkin → token</text> <text class="elabel pl-mcp" x="423" y="184" text-anchor="middle">/mcp</text> <text class="elabel pl-au"  x="423" y="226" text-anchor="middle">audit batch</text> <text class="elabel pl-id"  x="300" y="322" text-anchor="middle">browser sign-in · PKCE · JWKS</text> <text class="elabel pl-mcp" x="948" y="106" text-anchor="middle">creds injected</text> <text class="elabel pl-id"  x="955" y="163" text-anchor="middle">SCIM 2.0</text> <text class="elabel pl-id"  x="955" y="208" text-anchor="middle">changes</text> <text class="elabel pl-ap"  x="690" y="264" text-anchor="middle">approve gate</text> <text class="elabel pl-ap"  x="955" y="326" text-anchor="middle">/v1/approver/*</text> <text class="elabel pl-au"  x="556" y="437">outbox</text> <text class="elabel pl-au"  x="700" y="437">publish</text> <text class="elabel pl-id"  x="405" y="493" text-anchor="middle">kill switch · /v1/push</text> </g>
 
 
 <text class="cap" x="12"  y="56">AGENT HARNESSES</text>
 <text class="cap" x="1112" y="72" text-anchor="end">UPSTREAM · IGA · PHONE</text>
 
 
-<g class="node cont" id="n-ag" tabindex="0" role="button" aria-label="straza client PEP kit"> <rect class="box" x="206" y="64" width="170" height="230" rx="6"/> <text class="t" x="220" y="90">straza</text> <text class="d" x="220" y="105">client PEP kit</text> <text class="d" x="220" y="258">local PDP · fail closed</text> <text class="mono tx" x="220" y="274">~/.straza</text> </g>
+<g class="node cont" id="n-ag" tabindex="0" role="button" aria-label="straza client PEP kit"> <rect class="box" x="206" y="64" width="170" height="230" rx="6"/> <text class="t" x="220" y="90">straza</text> <text class="d" x="220" y="105">client PEP kit</text> <text class="d" x="220" y="258">local PDP · fail closed</text> <text class="mono tx" x="220" y="274">/var/lib/straza-service</text> </g>
 <g class="node cont" id="n-strazad" tabindex="0" role="button" aria-label="strazad server"> <rect class="box" x="470" y="40" width="440" height="530" rx="6"/> <text class="t" x="484" y="60">strazad</text> <text class="d" x="484" y="75">control + data plane · one static binary</text> </g>
 <g class="node cont" id="n-appcluster" tabindex="0" role="button" aria-label="Approval subsystem"> <rect class="box" x="480" y="278" width="424" height="96" rx="6"/> <text class="cap" x="492" y="296">APPROVAL · mode: approve</text> </g>
 
 
-<g class="chips" aria-hidden="true"> <rect class="chip" x="220" y="120" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="137">hook · normalize + decide</text> <rect class="chip" x="220" y="152" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="169">mcp · stdio → gateway</text> <rect class="chip" x="220" y="184" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="201">exec · Tier-3 shim</text> <rect class="chip" x="220" y="216" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="233">daemon · push + tick</text> </g>
+<g class="chips" aria-hidden="true"> <rect class="chip" x="220" y="120" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="137">hook · event → service</text> <rect class="chip" x="220" y="152" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="169">mcp · stdio → gateway</text> <rect class="chip" x="220" y="184" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="201">exec · Tier-3 shim</text> <rect class="chip" x="220" y="216" width="142" height="26" rx="5"/> <text class="d tx" x="228" y="233">service · keys + push</text> </g>
 
 
 <g class="node" id="n-claude" tabindex="0" role="button" aria-label="Claude Code harness"> <rect class="box" x="12" y="70" width="150" height="30" rx="6"/><text class="s" x="22" y="89">Claude Code</text></g>
@@ -158,7 +159,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <g class="node" id="n-gemini" tabindex="0" role="button" aria-label="Gemini harness"> <rect class="box" x="12" y="142" width="150" height="30" rx="6"/><text class="s" x="22" y="161"><tspan class="lf">Gemini / Antigravity</tspan><tspan class="ls">Gemini CLI</tspan></text></g>
 <g class="node" id="n-pysdk" tabindex="0" role="button" aria-label="python agentkit"> <rect class="box" x="12" y="178" width="150" height="30" rx="6"/><text class="s" x="22" y="197">python agentkit</text></g>
 <g class="node" id="n-exec" tabindex="0" role="button" aria-label="hookless exec"> <rect class="box" x="12" y="214" width="150" height="30" rx="6"/><text class="s" x="22" y="233"><tspan class="lf">hookless CLI · exec</tspan><tspan class="ls">exec CLI</tspan></text></g>
-<g class="node" id="n-idp" tabindex="0" role="button" aria-label="enterprise IdP"> <rect class="box" x="12" y="486" width="210" height="54" rx="6"/> <text class="s" x="22" y="506">enterprise IdP</text> <text class="d" x="22" y="522">OIDC device flow · JWKS</text></g>
+<g class="node" id="n-idp" tabindex="0" role="button" aria-label="enterprise IdP"> <rect class="box" x="12" y="486" width="210" height="54" rx="6"/> <text class="s" x="22" y="506">enterprise IdP</text> <text class="d" x="22" y="522">browser sign-in · PKCE · JWKS</text></g>
 
 
 <g class="node" id="n-policy" tabindex="0" role="button" aria-label="Policy engine"> <rect class="box" x="486" y="86" width="128" height="52" rx="6"/> <text class="s" x="496" y="105">policy engine</text> <text class="d" x="496" y="120">PolicySet → snapshot</text> <text class="d" x="496" y="133">ed25519 · deny-overrides</text></g>
@@ -168,7 +169,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 <g class="node" id="n-scim" tabindex="0" role="button" aria-label="SCIM 2.0 server"> <rect class="box" x="628" y="150" width="128" height="52" rx="6"/> <text class="s" x="638" y="169">SCIM 2.0 server</text> <text class="d" x="638" y="184">users · roles (Groups)</text> <text class="d" x="638" y="197">active:false ⇒ revoke</text></g>
 <g class="node" id="n-native" tabindex="0" role="button" aria-label="native straza app"> <rect class="chip" x="770" y="186" width="128" height="38" rx="6"/> <text class="s" x="780" y="203">native: straza app</text> <text class="d" x="780" y="217">approval_request …</text></g>
 <g class="node" id="n-broker" tabindex="0" role="button" aria-label="Credential broker"> <rect class="box" x="486" y="214" width="128" height="52" rx="6"/> <text class="s" x="496" y="233">credential broker</text> <text class="d" x="496" y="248">sealed secrets · OAuth</text> <text class="d" x="496" y="261">inject-only</text></g>
-<g class="node" id="n-admin" tabindex="0" role="button" aria-label="Admin API and console"> <rect class="box" x="628" y="214" width="128" height="52" rx="6"/> <text class="s" x="638" y="233">admin API · console</text> <text class="d" x="638" y="248">/v1/admin CRUD</text> <text class="d" x="638" y="261">changes feed · enroll</text></g>
+<g class="node" id="n-admin" tabindex="0" role="button" aria-label="Admin API and console"> <rect class="box" x="628" y="214" width="128" height="52" rx="6"/> <text class="s" x="638" y="233">admin API · console</text> <text class="d" x="638" y="248">/v1/admin CRUD</text> <text class="d" x="638" y="261">changes feed · tokens</text></g>
 
 
 <g class="node" id="n-approval" tabindex="0" role="button" aria-label="Approval service"> <rect class="box" x="490" y="306" width="126" height="56" rx="6"/> <text class="s" x="500" y="325">approval service</text> <text class="d" x="500" y="340">pending · exemptions</text> <text class="d" x="500" y="354">grants · console · Slack</text></g>
@@ -193,8 +194,9 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 
 <details class="alt">
   <summary>What this shows</summary>
-  <p>Agent harnesses funnel through <strong>straza</strong>, the client PEP kit: its local PDP decides
-  every tool call against an ed25519-signed snapshot, no server and no database on the path. Its mcp mode
+  <p>Agent harnesses funnel through <strong>straza</strong>, the client PEP kit: the hooks hand each event
+  to <code>straza service</code>, which holds the keys and sessions (under its own OS account as the system service), and its local
+  PDP decides every tool call against an ed25519-signed snapshot, no server and no database on the path. Its mcp mode
   proxies to the <strong>strazad</strong> MCP gateway, where a <strong>two-tier catalog</strong> (a shared
   role catalog refined by a per-session policy overlay) hides tools the subject could never call and the
   built-in <strong>native straza app</strong> serves approval_request / status / await for tickets. The
@@ -250,7 +252,7 @@ var FACTS={
  'n-gemini':{t:'Gemini / Antigravity',b:'Tier-1 harness: renamed hook events, absorbed by the versioned adapter tables.'},
  'n-pysdk':{t:'python agentkit',b:'stdlib-only check/@guard/capture that spawn <code>straza hook</code> under the python-sdk dialect.'},
  'n-exec':{t:'hookless CLI (Tier 3)',b:'<code>straza exec</code>: argv → canonical tool.pre → local PDP. Boundary-grade only in the sandbox.'},
- 'n-ag':{t:'straza',b:'Client PEP kit: normalize, verify the snapshot signature, decide in-process, fail closed. The daemon holds the kill-switch stream, <code>/v1/push</code> on strazad, and the refresh tick. No client ever reaches NATS.'},
+ 'n-ag':{t:'straza',b:'Client PEP kit. On Linux, <code>straza service</code> alone holds each enrolled user\'s key and every session. As the system service it runs under its own OS account, and one started by hand with <code>STRAZA_HOME</code> runs as its caller. The hooks and <code>straza mcp</code> reach it over a local socket. It verifies the snapshot signature, decides in-process and fails closed, holds the kill-switch stream <code>/v1/push</code> on the Straza server for each session, renews a session when it is close to expiry, and drains the audit spool. No client ever reaches NATS.'},
  'n-strazad':{t:'strazad',b:'Control + data plane in one static binary. Standalone: SQLite + embedded NATS. Enterprise: Postgres + one shared NATS server, so replicas keep no state of their own.'},
  'n-policy':{t:'policy engine',b:'PolicySets compile to a signed CBOR snapshot. Deny-overrides; the <code>/v1/decide</code> PDP shares it and drives serverCheck / classify / approve.'},
  'n-classifier':{t:'classifier',b:'Heuristic: an interpreter-aware shell.exec indirection scan (pipe-to-shell, encoded-exec, nested eval). No model; deny on a clear signal.'},
@@ -259,7 +261,7 @@ var FACTS={
  'n-tokens':{t:'session tokens',b:'ed25519 session JWTs, 300 s TTL, verified locally via JWKS. Attestation is checked at checkin.'},
  'n-scim':{t:'SCIM 2.0 server',b:'IdM provisioning: Users, plus exported roles rendered as Groups (a <code>members</code> write IS the role assignment); <code>active:false</code>/DELETE ⇒ revoke + denylist + push.'},
  'n-broker':{t:'credential broker',b:'Role-bound secrets + per-user OAuth, sealed with a secretbox KEK. Injected upstream; never reach the agent.'},
- 'n-admin':{t:'admin API + console',b:'/v1 admin CRUD + console. Mints approver enroll-tokens (project {id,name}); <code>/v1/admin/changes</code> is the CDC feed.'},
+ 'n-admin':{t:'admin API + console',b:'/v1 admin CRUD + console, and the admin API tokens a person mints there. It mints no approver enroll token: a person mints one for their own phone or browser on the self route <code>/v1/approvals/self/enroll-token</code>. <code>/v1/admin/changes</code> is the CDC feed.'},
  'n-approval':{t:'approval service',b:'The mode:approve engine, with the console always on as a channel: pending off /v1/decide, core-NATS resolution, exemptions (hold) + DB grants (ticket). NHI deciders blocked.'},
  'n-push':{t:'push delivery',b:'Content-free <code>{v,ref,kind}</code>: the hosted relay, FCM, APNs, WebPush and UnifiedPush/ntfy behind allowedPushHosts. Exactly-once across pods.'},
  'n-approver':{t:'mobile approver API',b:'<code>/v1/approver/*</code>: enroll (one-time token), <code>pending?scope=decidable</code> (+ challenge), decide (ECDSA P-256), push, history.'},
@@ -271,7 +273,7 @@ var FACTS={
  'n-up':{t:'upstream MCP servers',b:'MCP apps from app.yaml (server.json + straza: extensions); runtimes oci | command | remote; drift shrinks the catalog.'},
  'n-mid':{t:'midPoint / IGA',b:'Provisions users and role membership over SCIM; pulls catalog changes back over the changes feed (LiveSync).'},
  'n-phone':{t:'mobile approver (phone)',b:'Gets a content-free push, then calls <code>/v1/approver/*</code> to fetch decidable requests and sign a decision (ECDSA P-256).'},
- 'n-idp':{t:'enterprise IdP',b:'OIDC device-code flow is the primary user factor. Standalone runs a built-in issuer; enterprise delegates.'},
+ 'n-idp':{t:'enterprise IdP',b:'A person enrolls a machine through a browser sign-in with the authorization code flow and PKCE. <code>straza service</code> then holds the machine\'s own Ed25519 key and signs a DPoP proof with it at every check-in. A machine with no display may sign in with a device code unless <code>governance.minSignIn</code> is browser. Standalone runs a built-in issuer, and enterprise delegates to your IdP.'},
  'n-appcluster':{t:'approval subsystem',b:'<code>mode: approve</code> end-to-end: the approval service, mobile approver API (/v1/approver/*), and content-free push. Console always on; Slack + mobile opt-in.'}
 };
 

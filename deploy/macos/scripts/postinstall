@@ -1,0 +1,123 @@
+#!/bin/sh
+# The post-install script of the Straza package for macOS. It makes the
+# folders the background service owns, keeps its state out of Time Machine
+# backups, then starts the new service under launchd. A service that an
+# administrator disabled before the install stays disabled. The Installer
+# runs it as root once the package's files landed, and writes what it
+# prints to /var/log/install.log.
+set -eu
+
+account=_straza-service
+label=ai.straza.service
+plist=/Library/LaunchDaemons/$label.plist
+state=/var/db/straza-service
+run=/opt/straza/run
+logs=/var/log/straza-service
+bin=/opt/straza/bin/straza
+pathdir=/usr/local/bin
+
+# own_folder makes folder $1 with mode $2 for the account. A folder that is
+# already there is used only when it is a real folder the account owns,
+# because the service keeps this Mac's key, its socket and its log in these
+# three. Only root can write the folders above them. launchd opens the log
+# as the account, so the account must own the log's folder.
+own_folder() {
+	if [ -L "$1" ] || { [ -e "$1" ] && [ ! -d "$1" ]; } ||
+		{ [ -d "$1" ] && [ "$(stat -f '%Su' "$1")" != "$account" ]; }; then
+		echo "Straza installed its files but did not start its background service, because $1 is a link, is not a folder, or belongs to an account other than $account, so the service cannot trust it with this Mac's key, its socket or its log. An administrator must move it aside, then run the installer again." >&2
+		exit 1
+	fi
+	if [ ! -d "$1" ]; then
+		mkdir -m "$2" "$1"
+	fi
+	chown "$account:$account" "$1"
+	chmod "$2" "$1"
+}
+
+# start_failed stops the script over the launchctl command $1.
+start_failed() {
+	echo "Straza installed its files, but launchd did not start its background service ($1 failed), so every governed tool call on this Mac is refused until it runs. Check \`sudo launchctl print system/$label\` and /var/log/straza-service/service.log, then run the installer again." >&2
+	exit 1
+}
+
+own_folder "$state" 0700
+own_folder "$run" 0755
+own_folder "$logs" 0755
+
+# A sticky exclusion keeps the key out of every backup. It also keeps a
+# restore on this Mac from bringing back an old counter, which the server
+# would read as a copied key. It is hygiene, not a boundary: a copied key
+# works on no other Mac, so a failed exclusion warns and the install goes on.
+if ! tmutil addexclusion "$state"; then
+	echo "Straza could not exclude $state from Time Machine backups, so a backup will hold this Mac's key. That copy works on no other Mac, but an administrator can exclude the folder with \`sudo tmutil addexclusion $state\`." >&2
+fi
+
+# The PATH links. An existing /usr/local/bin stays as it is, because a
+# person owns it on Intel Macs with Homebrew. A link replaces only a missing
+# entry, its own link, or a file root owns, which an older managed install
+# copied there. The hooks run the binary by its full path, so a link that
+# is not made warns and the install goes on.
+made=yes
+if [ ! -e "$pathdir" ] && [ ! -L "$pathdir" ]; then
+	if ! { mkdir -p "$pathdir" && chown root:wheel "$pathdir" && chmod 0755 "$pathdir"; }; then
+		made=no
+		echo "Straza could not make $pathdir, so it linked neither straza nor git-remote-straza there. The hooks run $bin by its full path and still work, but neither is on the PATH until an administrator makes $pathdir and runs the installer again." >&2
+	fi
+fi
+if [ "$made" = yes ]; then
+	for name in straza git-remote-straza; do
+		link=$pathdir/$name
+		why=
+		if [ -L "$link" ]; then
+			target=$(readlink "$link") || target="an unknown place"
+			[ "$target" = "$bin" ] || why="it is a link to $target"
+		elif [ -d "$link" ]; then
+			why="a folder is there"
+		elif [ -e "$link" ]; then
+			owner=$(stat -f '%Su' "$link" 2>/dev/null) || owner="an account other than root"
+			if [ "$owner" != root ]; then
+				why="$owner owns it"
+			elif [ ! -f "$link" ]; then
+				why="it is not a regular file"
+			fi
+		fi
+		if [ -n "$why" ]; then
+			echo "Straza did not link $link to $bin, because $why. The hooks run $bin by its full path and still work, but $name is not on the PATH until an administrator moves $link aside and runs the installer again." >&2
+		elif ! ln -sfn "$bin" "$link"; then
+			echo "Straza could not link $link to $bin. The hooks run $bin by its full path and still work, but $name is not on the PATH until an administrator runs \`sudo ln -sfn $bin $link\`." >&2
+		fi
+	done
+fi
+
+# launchctl lists a disabled job as "label" => disabled, and older macOS
+# as "label" => true. The list is read before this script enables the job,
+# so it holds only an administrator's choice.
+overrides=$(launchctl print-disabled system) || start_failed "launchctl print-disabled system"
+disabled=no
+if printf '%s\n' "$overrides" | grep -Eq '"ai\.straza\.service" => (disabled|true)'; then
+	disabled=yes
+fi
+
+# The old service still runs the binary this install replaced, so it goes
+# first. A bootout that fails leaves it loaded, which the bootstrap below
+# then reports.
+if launchctl print "system/$label" >/dev/null 2>&1; then
+	launchctl bootout "system/$label" || true
+fi
+if [ "$disabled" = yes ]; then
+	echo "Straza left its background service off, because an administrator disabled system/$label before this install, so every governed tool call on this Mac is refused until it runs. To turn it on, run \`sudo launchctl enable system/$label\`, then \`sudo launchctl bootstrap system $plist\`."
+	exit 0
+fi
+launchctl enable "system/$label" || start_failed "launchctl enable system/$label"
+
+# launchd refuses a bootstrap while the old service is still exiting after
+# the bootout, so it is tried up to 30 times, a second apart.
+tries=1
+until launchctl bootstrap system "$plist"; do
+	if [ "$tries" -ge 30 ]; then
+		start_failed "launchctl bootstrap system $plist"
+	fi
+	tries=$((tries + 1))
+	sleep 1
+done
+echo "started the Straza background service system/$label"

@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +20,7 @@ import (
 
 // nativeToolsPolicy is one policy set exercising every branch the native
 // approval_request tool must distinguish: a ticket rule, a hold rule, a plain
-// allow, and (via the mcp.call default) a plain deny.
+// allow, and a plain deny.
 const nativeToolsPolicy = `
 apiVersion: straza.dev/v1beta1
 kind: PolicySet
@@ -50,7 +53,87 @@ spec:
       effect: allow
       mode: approve
       approve: {class: ticket, roles: [sec], ticketTTLSeconds: 86400, grantTTLSeconds: 3600}
+    - id: deny-wipe
+      tools: [mcp.call]
+      apps: [blocked]
+      toolNames: {deny: ["wipe"]}
+      effect: deny
 `
+
+// startNativeToolsUpstream serves the tools nativeToolsPolicy names:
+// rotate_root_key, echo, wipe, and disable_user, whose schema requires the
+// string user.
+func startNativeToolsUpstream(t *testing.T) *gatewayUpstream {
+	t.Helper()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "native-tools", Version: "1.0.0"}, nil)
+	ran := func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ran"}}}, nil
+	}
+	for _, name := range []string{"rotate_root_key", "echo", "wipe"} {
+		srv.AddTool(&mcp.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}, ran)
+	}
+	srv.AddTool(&mcp.Tool{Name: "disable_user", InputSchema: map[string]any{"type": "object",
+		"properties": map[string]any{"user": map[string]any{"type": "string"}}, "required": []any{"user"}}}, ran)
+	u := &gatewayUpstream{Server: httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil))}
+	t.Cleanup(u.Close)
+	return u
+}
+
+// seedNativeToolsServers installs the servers nativeToolsPolicy names,
+// vault, echoapp, midpoint and blocked, each with every tool bound to an
+// application role of its own, and answers sub with those roles added, so
+// a described call reaches the tool as its real call would.
+func seedNativeToolsServers(t *testing.T, app *App, sub policy.Subject) policy.Subject {
+	t.Helper()
+	ctx := context.Background()
+	up := startNativeToolsUpstream(t)
+	names := []string{"vault", "echoapp", "midpoint", "blocked"}
+	for _, name := range names {
+		mf, err := managerParse(t, fmt.Sprintf(`
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata: {name: %s}
+server: {name: straza.test/%s, version: "1.0.0"}
+straza:
+  runtime:
+    kind: remote
+    remote: {url: %q}
+`, name, name, up.URL))
+		if err != nil {
+			t.Fatal(err)
+		}
+		row, err := app.manager.Install(ctx, mf, store.AppSourceAPI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		role, err := app.store.Roles().Create(ctx, store.Role{Name: name + "-tools", Kind: store.RoleKindApplication})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := app.store.ToolBindings().Create(ctx, store.ToolBinding{RoleID: role.ID, AppID: row.ID, ToolMatcher: `["*"]`}); err != nil {
+			t.Fatal(err)
+		}
+		sub.Roles = append(sub.Roles, role.Name)
+	}
+	if err := app.refreshBindings(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		catWaitRunning(t, app, name)
+	}
+	return sub
+}
+
+// requestTicket runs approval_request's two steps in process, as the
+// gateway runs them on either side of the call's record, and answers the
+// tool result.
+func requestTicket(ctx context.Context, app *App, args json.RawMessage, claims authn.Claims, sub policy.Subject) *mcp.CallToolResult {
+	ticket, refusal := app.describeApprovalRequest(ctx, args, claims, sub)
+	if refusal != "" {
+		return nativeToolError(refusal)
+	}
+	return app.openApprovalTicket(ctx, ticket)
+}
 
 // seedNativeToolsApp boots an app with the native-tools policy compiled and
 // returns the requester identity + a dev subject.
@@ -89,10 +172,12 @@ func nativeStruct(t *testing.T, res *mcp.CallToolResult) map[string]any {
 
 // TestNativeApprovalRequest is the table-driven spec for the approval_request
 // native tool: concrete-call rejection, hold-rule rejection, the ticket happy
-// path, no-approval-needed, and denied-by-policy.
+// path, no-approval-needed, denied-by-policy, a tool the session cannot
+// call, and arguments the tool's schema rejects.
 func TestNativeApprovalRequest(t *testing.T) {
 	t.Parallel()
 	app, requester, sub := seedNativeToolsApp(t)
+	sub = seedNativeToolsServers(t, app, sub)
 	ctx := context.Background()
 	claims := authn.Claims{Session: "sess-req", Subject: requester.ID}
 
@@ -107,9 +192,14 @@ func TestNativeApprovalRequest(t *testing.T) {
 			wantErr: "a concrete call is required",
 		},
 		{
-			name:    "tool without an identity field is rejected",
+			name:    "an mcp.call without an identity field is asked for the server and the tool",
 			args:    map[string]any{"action": map[string]any{"tool": "mcp.call"}, "reason": "x"},
-			wantErr: "a concrete call is required",
+			wantErr: wantMCPNotConcrete,
+		},
+		{
+			name:    "another tool without an identity field is rejected",
+			args:    map[string]any{"action": map[string]any{"tool": "shell.exec"}, "reason": "x"},
+			wantErr: "Straza: a concrete call is required. approval_request needs action.tool plus an app+tool_name, a command, or argv (free-text requests are rejected)",
 		},
 		{
 			name: "a hold rule is rejected (holds are interactive)",
@@ -130,7 +220,36 @@ func TestNativeApprovalRequest(t *testing.T) {
 			args: map[string]any{"action": map[string]any{
 				"tool": "mcp.call", "app": "blocked", "tool_name": "wipe",
 			}},
-			wantErr: "denied by policy",
+			wantErr: "Straza: denied by policy. The described call would be denied (",
+		},
+		{
+			name: "a bound tool no rule names needs no approval",
+			args: map[string]any{"action": map[string]any{
+				"tool": "mcp.call", "app": "vault", "tool_name": "echo",
+			}},
+			wantErr: "Straza: no approval needed.",
+		},
+		{
+			name: "a server that does not exist is not a tool this session can call",
+			args: map[string]any{"action": map[string]any{
+				"tool": "mcp.call", "app": "nosuch", "tool_name": "wipe",
+			}},
+			wantErr: "Straza: nosuch:wipe is not a tool this session can call, so no approval can be requested for it. Check the app and tool name, or ask an admin for access to the tool.",
+		},
+		{
+			name: "an mcp call without a tool_name is asked for the server and the tool",
+			args: map[string]any{"action": map[string]any{
+				"tool": "mcp.call", "app": "midpoint", "command": "disable_user temp-x",
+			}},
+			wantErr: wantMCPNotConcrete,
+		},
+		{
+			name: "arguments the tool's schema rejects are refused before anyone is asked",
+			args: map[string]any{"action": map[string]any{
+				"tool": "mcp.call", "app": "midpoint", "tool_name": "disable_user",
+				"args": map[string]any{"login": "temp-x"},
+			}, "reason": "offboard temp-x"},
+			wantErr: "Straza checked the arguments against midpoint__disable_user's input schema before asking for approval, and they do not match",
 		},
 		{
 			name: "a ticket rule opens a ticket",
@@ -160,7 +279,7 @@ func TestNativeApprovalRequest(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res := app.nativeApprovalRequest(ctx, mustJSON(tc.args), claims, sub)
+			res := requestTicket(ctx, app, mustJSON(tc.args), claims, sub)
 			if tc.wantErr != "" {
 				if !res.IsError || !strings.Contains(toolErrText(res), tc.wantErr) {
 					t.Fatalf("got %q, want error containing %q", toolErrText(res), tc.wantErr)
@@ -191,10 +310,11 @@ func TestNativeApprovalRequestArgsConverge(t *testing.T) {
 	t.Parallel()
 	app, requester, sub := seedNativeToolsApp(t)
 	app.cfg.Approval.Preview.Enabled = true
+	sub = seedNativeToolsServers(t, app, sub)
 	ctx := context.Background()
 	claims := authn.Claims{Session: "sess-req", Subject: requester.ID}
 
-	res := nativeStruct(t, app.nativeApprovalRequest(ctx, mustJSON(map[string]any{
+	res := nativeStruct(t, requestTicket(ctx, app, mustJSON(map[string]any{
 		"action": map[string]any{
 			"tool": "mcp.call", "app": "midpoint", "tool_name": "disable_user",
 			"args": map[string]any{"user": "temp-x", "force": true},
@@ -240,8 +360,8 @@ func TestNativeApprovalRequestDedupe(t *testing.T) {
 		"tool": "shell.exec", "command": "deploy-prod --now",
 	}, "reason": "ship"})
 
-	first := nativeStruct(t, app.nativeApprovalRequest(ctx, args, claims, sub))
-	second := nativeStruct(t, app.nativeApprovalRequest(ctx, args, claims, sub))
+	first := nativeStruct(t, requestTicket(ctx, app, args, claims, sub))
+	second := nativeStruct(t, requestTicket(ctx, app, args, claims, sub))
 	if first["ref"] != second["ref"] {
 		t.Errorf("dedupe: refs differ %v vs %v", first["ref"], second["ref"])
 	}
@@ -261,7 +381,7 @@ func TestNativeApprovalStatusScoping(t *testing.T) {
 	app, requester, sub := seedNativeToolsApp(t)
 	ctx := context.Background()
 	claims := authn.Claims{Session: "sess-req", Subject: requester.ID}
-	req := nativeStruct(t, app.nativeApprovalRequest(ctx, mustJSON(map[string]any{
+	req := nativeStruct(t, requestTicket(ctx, app, mustJSON(map[string]any{
 		"action": map[string]any{"tool": "shell.exec", "command": "deploy-prod --now"},
 	}), claims, sub))
 	ref := req["ref"].(string)

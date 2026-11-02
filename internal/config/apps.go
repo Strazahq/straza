@@ -36,6 +36,16 @@ type Apps struct {
 	AllowLoopbackUpstreams bool `yaml:"allowLoopbackUpstreams"`
 	// Catalog tunes the per-session virtual tool catalog the gateway serves.
 	Catalog Catalog `yaml:"catalog"`
+	// Objects switches the object lists of servers that pin an object type.
+	Objects AppsObjects `yaml:"objects"`
+}
+
+// AppsObjects switches the object lists. Enabled false stops every listing,
+// and the gateway then lets only a role on every object call a tool that
+// names an object, so turning it off never widens access. Default true in
+// both profiles.
+type AppsObjects struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // Catalog tunes the gateway's virtual tool catalog (per-session tool
@@ -76,4 +86,5 @@ func applyEnvApps(cfg *Config, getenv func(string) string) {
 	// Only "true" or "1" lifts the refusal, the idiom of the enabled knobs,
 	// so an env typo never opens strazad's own host.
 	set("STRAZA_APPS_ALLOW_LOOPBACK_UPSTREAMS", func(v string) { cfg.Apps.AllowLoopbackUpstreams = v == "true" || v == "1" })
+	set("STRAZA_APPS_OBJECTS_ENABLED", func(v string) { cfg.Apps.Objects.Enabled = v != "false" && v != "0" })
 }

@@ -2,7 +2,7 @@
 title: strazactl users nhi-key
 description: Manage an agent identity's headless assertion key (straza keygen prints it)
 pagetype: reference
-weight: 112
+weight: 108
 draft: false
 sources:
   - cmd/strazactl
@@ -18,12 +18,12 @@ strazactl users nhi-key [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
 * [strazactl users](/reference/cli/strazactl/strazactl_users/): Manage users
-* [strazactl users nhi-key set](/reference/cli/strazactl/strazactl_users_nhi-key_set/): Register (or rotate) the agent identity's Ed25519 public key
-* [strazactl users nhi-key unset](/reference/cli/strazactl/strazactl_users_nhi-key_unset/): Revoke the agent identity's key (the next token request fails; running sessions die via the kill switch)
+* [strazactl users nhi-key set](/reference/cli/strazactl/strazactl_users_nhi-key_set/): Register the agent identity's Ed25519 public key, or rotate it and end the agent's running sessions
+* [strazactl users nhi-key unset](/reference/cli/strazactl/strazactl_users_nhi-key_unset/): Revoke the agent identity's key, which ends its running sessions and refuses its next token request
 

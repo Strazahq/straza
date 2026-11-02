@@ -71,9 +71,10 @@ func newStrazad(bin, dir string, governance map[string]string) (*strazad, error)
 	return s, nil
 }
 
-// governanceYAML renders the scenario's lifetimes as the config file's
-// governance section, keys in order. The values passed validation as
-// durations, so the document carries nothing but them.
+// governanceYAML renders the scenario's lifetimes and custody floor as the
+// config file's governance section, keys in order. The values passed
+// validation as durations or as a custody word, so the document carries
+// nothing but them.
 func governanceYAML(g map[string]string) []byte {
 	var b strings.Builder
 	b.WriteString("governance:\n")
@@ -180,7 +181,7 @@ func (s *strazad) stop() {
 }
 
 // login signs in as the bootstrap admin through the built-in issuer's
-// device flow, the way strazactl login does, and keeps the id token.
+// device flow and keeps the ID token, the bearer every admin step sends.
 func (s *strazad) login(ctx context.Context) error {
 	token, err := s.deviceToken(ctx, "admin", s.password)
 	if err != nil {
@@ -190,12 +191,32 @@ func (s *strazad) login(ctx context.Context) error {
 	return nil
 }
 
+// signInClient is the built-in issuer's client id the runner signs people in
+// under: the console's, the client a person signs in to Straza with.
+const signInClient = "console"
+
 // deviceToken signs one person in through the built-in issuer's device flow
-// and returns their ID token, the person-bound credential the decide routes
-// take. The password is never part of an error string.
+// and returns their ID token, the person-bound credential the admin plane
+// and the decide routes take. The runner sends the ID token itself and
+// checks in no session, so its sign-ins add no session row, session.start
+// record or lifetime close to the scenario that counts them. The password
+// is never part of an error string.
 func (s *strazad) deviceToken(ctx context.Context, username, password string) (string, error) {
-	code, auth, err := postForm(ctx, s.URL+"/oidc/device_authorization",
-		url.Values{"client_id": {"strazactl"}, "scope": {"openid"}})
+	// The issuer throttles device sign-in starts per client IP and answers
+	// 429 with Retry-After 1, so the runner waits 2 seconds and starts again
+	// a few times, as approveDevice does for the password submit.
+	var code int
+	var auth map[string]any
+	var err error
+	for attempt := 0; ; attempt++ {
+		code, auth, err = postForm(ctx, s.URL+"/oidc/device_authorization",
+			url.Values{"client_id": {signInClient}, "scope": {"openid"}})
+		if err == nil && code == http.StatusTooManyRequests && attempt < 6 {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		break
+	}
 	if err != nil || code != http.StatusOK {
 		return "", fmt.Errorf("device_authorization: status %d, %v", code, err)
 	}
@@ -210,7 +231,7 @@ func (s *strazad) deviceToken(ctx context.Context, username, password string) (s
 	for i := 0; i < 30; i++ {
 		code, tok, err := postForm(ctx, s.URL+"/oidc/token", url.Values{
 			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-			"device_code": {deviceCode}, "client_id": {"strazactl"}})
+			"device_code": {deviceCode}, "client_id": {signInClient}})
 		if err != nil {
 			return "", fmt.Errorf("token poll: %w", err)
 		}

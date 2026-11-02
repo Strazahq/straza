@@ -52,30 +52,6 @@ func (c *Client) Approvals(ctx context.Context, state string) ([]ApprovalInfo, e
 	return out.Approvals, c.Do(ctx, http.MethodGet, path, nil, &out)
 }
 
-// ApproveApproval approves one pending record by id. The server validates the
-// caller's approver roles (any active session may attempt it). reason is the
-// decider's optional own words (0.63.0, ≤500 bytes); "" sends no body, the
-// pre-0.63.0 wire shape.
-func (c *Client) ApproveApproval(ctx context.Context, id, reason string) (ApprovalInfo, error) {
-	return c.decideApproval(ctx, id, "approve", reason)
-}
-
-// DenyApproval denies one pending record by id; reason as on ApproveApproval.
-func (c *Client) DenyApproval(ctx context.Context, id, reason string) (ApprovalInfo, error) {
-	return c.decideApproval(ctx, id, "deny", reason)
-}
-
-func (c *Client) decideApproval(ctx context.Context, id, verdict, reason string) (ApprovalInfo, error) {
-	var out struct {
-		Approval ApprovalInfo `json:"approval"`
-	}
-	var body any
-	if reason != "" {
-		body = map[string]string{"reason": reason}
-	}
-	return out.Approval, c.Do(ctx, http.MethodPost, "/v1/admin/approvals/"+url.PathEscape(id)+"/"+verdict, body, &out)
-}
-
 // ApproverDeviceInfo is the admin API view of one enrolled mobile approver
 // device (GET /v1/admin/approvers, 0.41.0): owner, posture, liveness, and the
 // push-registration count that says whether the phone actually rings.

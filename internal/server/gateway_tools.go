@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/strazahq/straza/internal/approval"
 	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/manager"
 	"github.com/strazahq/straza/internal/policy"
@@ -84,13 +85,12 @@ func (a *App) handleToolCall(w http.ResponseWriter, r *http.Request, req rpcRequ
 	a.callTool(w, r, req, claims, sub, nil)
 }
 
-// callTool is the PEP hot path: visibility (default-deny) → PDP →
-// in-memory credential resolution → upstream call → async audit. On a server
+// callTool is the PEP hot path: the shared decision (decideCall) → in-memory
+// credential resolution → upstream call → async audit. On a server
 // endpoint the name is the server's own tool name and resolves only to that
 // server's tools. From there the path is the same, and a refusal of a server
 // whose views are on also carries the decision slot (toolRefusal).
 func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, claims authn.Claims, sub policy.Subject, srv *serverScope) {
-	start := time.Now()
 	var params struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -99,155 +99,32 @@ func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, c
 		writeRPCError(w, req.ID, -32602, "params.name is required")
 		return
 	}
-
-	// entry is the tool's name in the catalog, and probe is what the record
-	// of an unknown name says. A server endpoint takes the server's own tool
-	// name, so both name the server.
-	var (
-		tier1   *sessionCatalog
-		target  gwTarget
-		visible bool
-	)
-	entry := params.Name
-	probe := policy.Event{Kind: policy.EventToolPre, Tool: policy.ToolMCPCall, ToolName: params.Name}
-	if srv == nil {
-		tier1 = a.catalogFor(sub.Roles)
-		target, visible = tier1.targets[entry]
-	} else {
-		tier1, entry, probe.App = srv.tier1, srv.catalogName(params.Name), srv.name
-		target, visible = srv.target(params.Name)
-	}
-	if !visible {
-		// Invisible = nonexistent: no role binding, no exposure, or no such
-		// tool. Indistinguishable by design (default-deny). The record still
-		// names the probe, so a sweep of ungranted names reaches the SIEM.
-		a.auditRefused(r.Context(), claims, probe, gwTarget{},
-			fmt.Sprintf("unknown tool %q: no access row for this session's roles admits it", params.Name))
-		writeRPCError(w, req.ID, -32602, fmt.Sprintf("unknown tool %q", params.Name))
+	v := a.decideCall(r.Context(), gatewayCall{claims: claims, sub: sub, srv: srv, name: params.Name, args: params.Arguments})
+	switch {
+	case v.unknown:
+		writeRPCError(w, req.ID, -32602, v.refusal)
+		return
+	case v.refusal != "":
+		writeRPCResult(w, req.ID, toolRefusal(v.refusal, srv, v.slot))
 		return
 	}
-	// The tier-one hit above is the binding check, or for a drafting tool
-	// the role check, so the call carries the granted fact grantedOf answers
-	// (spec/policyset revisions 17 and 20).
-	ev := policy.Event{
-		Kind: policy.EventToolPre, Tool: policy.ToolMCPCall, App: target.app, ToolName: target.tool,
-		Granted: grantedOf(target),
-	}
-	// Tier-2 overlay hidden set: a tool the session's policy denies is
-	// nonexistent too (policyFilter on), same -32602 as an unbound tool, no
-	// information leak. Downstream (live Evaluate, approve gate, audit) is
-	// unchanged; with policyFilter off the hidden set is empty and the deny
-	// surfaces below as the Straza reason instead.
-	if a.overlayFor(claims.Session, sub, tier1).hidden[entry] {
-		a.auditHidden(r.Context(), claims, sub, ev, target)
-		writeRPCError(w, req.ID, -32602, fmt.Sprintf("unknown tool %q", params.Name))
-		return
-	}
-
-	// Per-(session, app) rate limit from the manifest, and the drafting
-	// tools' own rates (draftingRate). Checked before the PDP so a hot loop
-	// cannot amplify policy work, and an approval is never spent on a call
-	// the rate refuses; the throttle counter keeps the rejection volume
-	// visible to operators and each refusal leaves its own record.
-	key, rps := claims.Session+"|"+target.app, a.appRPS(target.app)
-	if draftingTool(target) {
-		key, rps = draftingRate(claims.Session)
-	}
-	msg := ""
-	if !a.gateway.limiter.Allow(key, rps) {
-		msg = fmt.Sprintf("Straza: rate limit exceeded for the MCP server %q (%.0f rps). Retry shortly", target.app, rps)
-	} else if target.app == nativeAppName && target.tool == nativeToolDraftSubmit {
-		msg = a.submitRateRefusal(claims.Subject)
-	}
-	if msg != "" {
-		a.metrics.Throttle(target.app)
-		audited := a.auditRefused(r.Context(), claims, ev, target, msg)
-		writeRPCResult(w, req.ID, toolRefusal(msg, srv, deniedSlot(msg, audited, "")))
-		return
-	}
-
-	cur := a.snapshots.Current()
-	decision := cur.Engine.Evaluate(ev, sub)
-	if decision.Effect == policy.EffectAllow && decision.Classify {
-		// A classify-flagged allow is resolved here, as on the hook lane, so
-		// the classifier runs before the record names the rule.
-		decision = a.resolveClassify(r.Context(), "gateway", ev, decision)
-	}
-	a.metrics.Observe(decision.Effect, time.Since(start))
-
-	// mode:approve gate. For an approval-gated allow, strip the injected
-	// justification from the arguments (it rides the approval record, never the
-	// audit nor the upstream call) BEFORE auditing, so the cleaned arguments
-	// are what audit and upstream see.
-	callArgs := params.Arguments
-	var justification string
-	gated := decision.Effect == policy.EffectAllow && decision.Approve != nil
-	if gated {
-		callArgs, justification = stripJustification(callArgs)
-	}
-	rec := mcpAuditRecord{claims: claims, ev: ev, decision: decision, snapshotID: cur.ID, args: callArgs, target: target}
-
-	if decision.Effect != policy.EffectAllow {
-		audited := a.auditMCP(r.Context(), rec)
-		reason := decision.Reason
-		if reason == "" {
-			reason = "denied by policy (no rule allows this call)"
-		}
-		// A policy deny is a tool-level error so the model sees the reason
-		// and can adapt, mirroring the hook PEP's exit-2 semantics. The
-		// "Straza: " prefix is the session banner's contract (a refusal that
-		// starts with it is policy: relay, never retry); rule authors and the
-		// engine's synthesized reason already carry it, so add it only when
-		// it is missing, or a reason-less deny would read
-		// "Straza: Straza: blocked ...".
-		if !strings.HasPrefix(strings.TrimLeft(reason, " "), "Straza:") {
-			reason = "Straza: " + reason
-		}
-		writeRPCResult(w, req.ID, toolRefusal(reason, srv, deniedSlot(reason, audited, "")))
-		return
-	}
-
-	// Block on the human decision. approved (or a single-use exemption from a
-	// prior approval) ⇒ fall through to the upstream call with the cleaned
-	// arguments; denied, expired/timeout, or a service error ⇒ a tool-level
-	// error ends the call here (fail-closed).
-	if gated {
-		// Arguments that break the tool's own schema can never run, so the
-		// caller hears it now and no person is asked to approve them.
-		if detail := schemaMismatch(tier1.inputSchema(entry), callArgs); detail != "" {
-			msg := fmt.Sprintf(argumentsMismatchMsg, params.Name, detail)
-			rec.decision = refusedDecision(decision, msg)
-			audited := a.auditMCP(r.Context(), rec)
-			writeRPCResult(w, req.ID, toolRefusal(msg, srv, deniedSlot(msg, audited, "")))
-			return
-		}
-		// The fingerprint binds what the gateway OBSERVED: the post-strip
-		// arguments (audit/upstream bytes). Absent arguments are the observed
-		// no-argument call ("{}"), never "unobserved"; this lane always sees
-		// the payload. Attached only on the gated path; the evaluator and the
-		// ungated hot path never touch it.
-		ev.Args = callArgs
-		if len(ev.Args) == 0 {
-			ev.Args = json.RawMessage("{}")
-		}
-		// A server endpoint does not list straza__approval_await, so its
-		// pending sentence never names it.
-		if o := a.gateApprove(r.Context(), a.approval, claims, sub, ev, decision, justification, callArgs, srv == nil); !o.run {
-			rec.decision = refusedDecision(decision, o.reason)
-			audited := a.auditMCP(r.Context(), rec)
-			writeRPCResult(w, req.ID, toolRefusal(o.reason, srv, o.slot(audited)))
-			return
-		}
-	}
+	target, gate, decision, callArgs, rec := v.target, v.gate, v.decision, v.args, v.rec
 
 	// Built-in `straza` app: the gateway originates these tools instead of
 	// proxying upstream. Governed identically above (visibility + PDP + approve
 	// gate); dispatched on r.Context() so approval_await can hold its own bounded
 	// wait rather than the upstream-timeout ceiling. A drafting tool checks the
 	// role on the cached subject once more before its record, so a wrong
-	// tier one refuses instead of allowing, and the record says so.
+	// tier one refuses instead of allowing, and the record says so. An
+	// approval_request decides the call it describes and who could approve it
+	// before its record too, so a refusal is the record's decision and no ticket opens unrecorded.
 	if target.app == nativeAppName {
-		if _, msg := a.draftingSubject(claims.Session, target.tool); msg != "" {
+		_, msg := a.draftingSubject(claims.Session, target.tool)
+		var ticket approval.RequestInput
+		if msg == "" && target.tool == nativeToolApprovalRequest {
+			ticket, msg = a.describeApprovalRequest(r.Context(), callArgs, claims, sub)
+		}
+		if msg != "" {
 			rec.decision = refusedDecision(decision, msg)
 			a.auditMCP(r.Context(), rec)
 			writeRPCResult(w, req.ID, nativeToolError(msg))
@@ -257,7 +134,11 @@ func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, c
 			writeRPCResult(w, req.ID, nativeToolError(auditQueueFullMsg))
 			return
 		}
-		writeRPCResult(w, req.ID, a.callNativeStraza(r.Context(), target.tool, callArgs, claims, sub))
+		if target.tool == nativeToolApprovalRequest {
+			writeRPCResult(w, req.ID, a.openApprovalTicket(r.Context(), ticket))
+			return
+		}
+		writeRPCResult(w, req.ID, a.callNativeStraza(r.Context(), target.tool, callArgs, claims))
 		return
 	}
 
@@ -272,6 +153,12 @@ func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, c
 		Agent: sub.UserType == store.UserTypeAgent, Sponsor: sub.Sponsor, SponsorID: sub.SponsorID,
 		Session: claims.Session,
 	})
+	if err == nil && resolved.Source == manager.SourceSponsor && a.denylist.userBlocked(resolved.Owner) {
+		// A lock leaves the sponsor's status active, and the cached subject
+		// names the sponsor until the agent checks in again, so a lock or a
+		// disable must bite here, on every call.
+		err = blockedSponsorRefusal(sub, target.app)
+	}
 	if err != nil {
 		rec.decision = refusedDecision(decision, err.Error())
 		audited := a.auditMCP(r.Context(), rec)
@@ -305,7 +192,7 @@ func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, c
 	// goroutine indefinitely.
 	callCtx, cancel := context.WithTimeout(r.Context(), a.upstreamTimeout(target.app))
 	defer cancel()
-	res, err := a.manager.Call(callCtx, target.app, target.tool, callArgs, secret)
+	res, err := a.manager.Call(callCtx, target.app, target.tool, callArgs, secret, objectMeta(gate))
 	if err != nil {
 		a.rpcFail(w, r, req.ID, -32000, fmt.Sprintf("upstream call failed: %v", err), err)
 		return
@@ -314,6 +201,15 @@ func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, c
 		res = withoutUpstreamSlot(res)
 	}
 	writeRPCResult(w, req.ID, res)
+}
+
+// blockedSponsorRefusal is the deny of an agent's call to server that would
+// run on its sponsor's own row while the denylist blocks that sponsor, as a
+// lock, a disable and a deactivation do.
+func blockedSponsorRefusal(sub policy.Subject, server string) error {
+	return fmt.Errorf("agent %s runs on the %s connection of its sponsor %s, and %s is locked or disabled in Straza, so the call is refused. "+
+		"An administrator gives %s a credential of its own or a sponsor who is active, or unlocks or enables %s",
+		sub.User, server, sub.Sponsor, sub.Sponsor, sub.User, sub.Sponsor)
 }
 
 // refusedDecision is the verdict the record keeps for a call policy allowed

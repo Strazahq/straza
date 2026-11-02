@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 )
 
 // geminiTestHome wires an isolated gemini user scope + straza managed seam and
@@ -60,7 +62,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 
 	t.Run("not in use → nil", func(t *testing.T) {
 		geminiTestHome(t, false, false)
-		if c := geminiHooksCheck(Session{}, false, cwd); c != nil {
+		if c := geminiHooksCheck(nil, cwd); c != nil {
 			t.Fatalf("expected nil for an unwired machine, got %+v", c)
 		}
 	})
@@ -70,7 +72,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 		setJSONKey(t, userPath, func(doc map[string]any) {
 			doc["hooksConfig"] = map[string]any{"enabled": false}
 		})
-		c := geminiHooksCheck(Session{}, false, cwd)
+		c := geminiHooksCheck(nil, cwd)
 		if c == nil || c.Status != checkWarn {
 			t.Fatalf("expected warn, got %+v", c)
 		}
@@ -87,7 +89,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 		setJSONKey(t, userPath, func(doc map[string]any) {
 			doc["hooksConfig"] = map[string]any{"enabled": false}
 		})
-		c := geminiHooksCheck(Session{}, false, cwd)
+		c := geminiHooksCheck(nil, cwd)
 		if c == nil || c.Status != checkOK {
 			t.Fatalf("system-scope pin overrides the user opt-out (vendor precedence): %+v", c)
 		}
@@ -97,7 +99,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 		_, managedPath := geminiTestHome(t, false, true)
 		redirect := filepath.Join(t.TempDir(), "elsewhere.json")
 		t.Setenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH", redirect)
-		c := geminiHooksCheck(Session{}, false, cwd)
+		c := geminiHooksCheck(nil, cwd)
 		if c == nil || c.Status != checkWarn {
 			t.Fatalf("expected warn, got %+v", c)
 		}
@@ -110,7 +112,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 		userPath, _ := geminiTestHome(t, true, false)
 		store := filepath.Join(filepath.Dir(userPath), "trustedFolders.json")
 		setJSONKey(t, store, func(doc map[string]any) { doc[cwd] = "DO_NOT_TRUST" })
-		c := geminiHooksCheck(Session{}, false, cwd)
+		c := geminiHooksCheck(nil, cwd)
 		if c == nil || c.Status != checkWarn || !strings.Contains(c.Detail, "UNTRUSTED") {
 			t.Fatalf("expected untrusted warn, got %+v", c)
 		}
@@ -122,7 +124,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 		if err := os.WriteFile(store, []byte(`{"/other":"TRUST_FOLDER"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		c := geminiHooksCheck(Session{}, false, cwd)
+		c := geminiHooksCheck(nil, cwd)
 		if c == nil || c.Status != checkWarn || !strings.Contains(c.Detail, "no trust record") {
 			t.Fatalf("expected no-record warn, got %+v", c)
 		}
@@ -132,7 +134,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 		userPath, _ := geminiTestHome(t, true, false)
 		store := filepath.Join(filepath.Dir(userPath), "trustedFolders.json")
 		setJSONKey(t, store, func(doc map[string]any) { doc[filepath.Dir(cwd)] = "TRUST_FOLDER" })
-		c := geminiHooksCheck(Session{}, false, cwd)
+		c := geminiHooksCheck(nil, cwd)
 		if c == nil || c.Status != checkOK || !strings.Contains(c.Detail, "trusted") {
 			t.Fatalf("expected trusted ok, got %+v", c)
 		}
@@ -144,7 +146,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 		setJSONKey(t, relocated, func(doc map[string]any) { doc[filepath.Dir(cwd)] = "TRUST_FOLDER" })
 		t.Setenv("GEMINI_CLI_TRUSTED_FOLDERS_PATH", relocated)
 		// No store at the default path: only the relocated one can answer.
-		c := geminiHooksCheck(Session{}, false, cwd)
+		c := geminiHooksCheck(nil, cwd)
 		if c == nil || c.Status != checkOK || !strings.Contains(c.Detail, "trusted") {
 			t.Fatalf("GEMINI_CLI_TRUSTED_FOLDERS_PATH must be read where gemini reads it, got %+v", c)
 		}
@@ -157,7 +159,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("GEMINI_CLI_TRUST_WORKSPACE", "true")
-		c := geminiHooksCheck(Session{}, false, cwd)
+		c := geminiHooksCheck(nil, cwd)
 		if c == nil || c.Status != checkOK {
 			t.Fatalf("bypass active: trust checks are skipped, got %+v", c)
 		}
@@ -165,7 +167,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 
 	t.Run("gemini session checked in → ok on evidence", func(t *testing.T) {
 		geminiTestHome(t, true, false)
-		c := geminiHooksCheck(Session{Harness: "gemini/0.51.0"}, true, cwd)
+		c := geminiHooksCheck([]localapi.SessionStatus{{Harness: localapi.Harness{Name: "gemini", Version: "0.51.0"}}}, cwd)
 		if c == nil || c.Status != checkOK || !strings.Contains(c.Detail, "checked in") {
 			t.Fatalf("expected session-evidence ok, got %+v", c)
 		}
@@ -179,7 +181,7 @@ func TestGeminiHooksCheck(t *testing.T) {
 		}
 		// Store exists ⇒ feature evidence; unreadable ⇒ unknown ⇒ the honest
 		// no-record warn, never trusted, never untrusted.
-		c := geminiHooksCheck(Session{}, false, cwd)
+		c := geminiHooksCheck(nil, cwd)
 		if c == nil || c.Status != checkWarn || !strings.Contains(c.Detail, "no trust record") {
 			t.Fatalf("unreadable store must degrade to unknown: %+v", c)
 		}

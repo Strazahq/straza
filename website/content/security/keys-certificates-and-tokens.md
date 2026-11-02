@@ -15,12 +15,12 @@ Three files outside the store cannot be regenerated for free. They are the seali
 ## What signs what
 
 
-The session signing key is an Ed25519 key in the `signing_keys` table with the purpose `session`. It signs the 300 second session token, the 30 day device credential, the 30 day approver device token, the 10 minute login token of the built-in issuer and the 10 minute connect state. Every replica loads it into memory and verifies locally, so no request path reads the store for a signature check.
+The session signing key is an Ed25519 key in the `signing_keys` table with the purpose `session`. It signs the 300 second session token, the 30 day approver device token, the 10 minute login token of the built-in issuer and the 10 minute connect state. Every replica loads it into memory and verifies locally, so no request path reads the store for a signature check.
 
-Rotation is one command, `strazactl signing-keys rotate session`, and it runs in two phases so a replica never signs with a key another replica has not loaded. The previous key keeps verifying for 30 days after promotion, because the device and approver credentials it signed live that long. Because the database holds one active session key, replicas that start at the same moment against a new store sign with the same key.
+Rotation is one command, `strazactl signing-keys rotate session`, and it runs in two phases so a replica never signs with a key another replica has not loaded. The previous key keeps verifying for 30 days after promotion, because the approver credentials it signed live that long. So does a device credential that it signed for strazactl before strazad stopped issuing them, which must still verify to get the sentence that says why it stopped working, and a `governance.deviceTokenTTL` above 30 days lengthens the wait to match. Because the database holds one active session key, replicas that start at the same moment against a new store sign with the same key.
 
 
-The snapshot signing key is a second Ed25519 key in the same table with the purpose `snapshot`. It signs every compiled policy snapshot, and each workstation pins every public half the server publishes at `/.well-known/straza/snapshot-keys.json` into its `config.yaml` at enrollment. A hook call verifies the snapshot against that pinned set on every decision and refuses to enforce a snapshot it cannot verify.
+The snapshot signing key is a second Ed25519 key in the same table with the purpose `snapshot`. It signs every compiled policy snapshot. At enrollment, `straza service` pins every public half the server publishes at `/.well-known/straza/snapshot-keys.json` into the enrollment record it keeps for that person. It verifies each snapshot against that pinned set before it decides with it, and refuses to enforce a snapshot it cannot verify.
 
 The pin is what makes the key hard to rotate. A new key is unknown to every enrolled workstation until it enrolls again, and an old key stays trusted, as [the procedure section](#back-up-and-rotate-by-procedure) explains. Because the database holds one active snapshot key, replicas that start at the same moment against a new store sign every snapshot with the same key, and a workstation verifies it whichever replica it enrolled through.
 
@@ -46,27 +46,31 @@ The sealing key is 32 random bytes in `secret.key` under the data directory, or 
 | Approver TLS pair | `approver-tls/` in the data directory, P-256, self-signed | 820 days, with a boot warning 30 days ahead | delete the directory and restart, then every approver device enrolls again | the approver listener's identity to every pinned phone |
 | WebPush signing key | `approval.push.webpush.vapidKeyFile`, P-256, minted once | no expiry | replacing it ends every browser push subscription | pushes to those subscriptions, which carry no content |
 | Main TLS pair | `server.tls.certFile` and `server.tls.keyFile`, yours | your own PKI's term | replace the files and restart, there is no hot reload | the server's identity on the wire |
+| Proof nonce key | the settings table, row `authn.dpopNonceKey`, created at the first start and shared by every replica | until replaced | no rotation command exists | nonces strazad accepts, which are worth nothing without a machine's key |
 
 ## Tokens Straza mints
 
 
-The session token, the device credential, the approver device token, the login token and the connect state are JWTs signed under the session signing key, and each dies at its own expiry. Of those, the device credential, the approver device token and the connect state also carry a `use` claim that opens exactly one door. The login codes, the phone enroll token and the decision challenge are random values that the server checks and burns. A caller's own token for a server is that server's secret, sealed. The admin API token is the one long-lived bearer secret: 32 random bytes shown once and stored as a SHA-256 hash, so a copy of the database yields no usable token.
+The session token, the approver device token, the login token and the connect state are JWTs signed under the session signing key, and each dies at its own expiry. Of those, the approver device token and the connect state also carry a `use` claim that opens exactly one door. The login codes, the authorization codes of the browser sign-in, the phone enroll token and the decision challenge are random values that the server checks and burns. A caller's own token for a server is that server's secret, sealed. The admin API token is the one long-lived bearer secret: 32 random bytes shown once and stored as a SHA-256 hash, so a copy of the database yields no usable token. It is also the only credential strazactl runs on.
+
+
+A session token from a key enrollment also carries the thumbprint of the machine's key as `cnf.jkt`, and strazad accepts it only with a fresh DPoP proof (RFC 9449) from that key. Every session that `straza service` starts carries one, an AI agent's session included, as [Credentials and sessions]({{< relref "security/credentials-and-sessions.md#enrollment-bound-to-a-key" >}}) explains.
 
 | Kind | Lives in | Lives for | Rotate or revoke | A copy yields |
 |---|---|---|---|---|
-| Session token | `state/session.json` on the workstation, and gateway memory | 300 seconds, refreshed, inside a session that ends after 12 hours | `strazactl sessions revoke`, or disabling the user | that session's access, including refresh while the session remains active |
-| Device credential | `state/identity.json`, or `credentials.json` for strazactl | 30 days, renewed past half its life | `strazactl devices revoke`, or disabling the user | from `state/identity.json`, new coding-harness sessions as that user, renewed at each check-in past half its life, until the device is revoked. From strazactl's `credentials.json`, everything the person may do on the admin and self-service routes, enrolling a new approval device for that person included |
+| Session token | the memory of `straza service` on the workstation, and gateway memory | 300 seconds, refreshed, inside a session that ends after 12 hours | `strazactl sessions revoke`, or disabling the user | nothing without a fresh proof from the machine's key, for a token of `straza service` |
 | Approver device token | the phone, or the enrolled browser | 30 days, renewed by a signature from the phone's key | `strazactl approvers revoke` | the pending list, never a decision |
 | Login token of the built-in issuer | the workstation, briefly | 10 minutes | expires | for its 10 minutes, enrollment and every admin and self-service route open to that user, a new approval device included |
 | Connect state | the browser, during an OAuth connect | 10 minutes | expires | starting a sign-in as that user, and nothing more: strazad redeems a provider code only when the state names the user of the session that presents it, so a stolen state needs its owner's session too |
 | A caller's own token for a server | the `credentials` table, sealed under the sealing key, one row per person and server | the date the person recorded, or until removed | Remove on the Credentials tab of the self-service page, `straza disconnect <server>`, or disabling the person | that person's identity at the server, together with the sealing key |
 | Login codes of the device flow | server memory | 10 minutes, single use | expires | redeeming a pending login into a login token |
+| Authorization codes of the browser sign-in | server memory, and for a moment the redirect to the person's machine | 60 seconds, single use, bound to the client, the redirect, the PKCE challenge, the nonce and the user | expires or burns on the first redemption | nothing without the PKCE verifier, which only the waiting `straza service` or console tab holds |
 | Phone enroll token | shown once as a QR, stored as a hash | 10 minutes, single use | expires or burns on use | enrolling a foreign phone as that user's approver device |
 | Decision challenge | the `approver_challenges` table | 5 minutes, single use | expires | nothing without the phone's key |
-| Admin API token | the settings table, as a hash, with its scope | as long as it was minted for, or forever when no expiry was given | `strazactl api-token revoke` | everything in its scope |
+| Admin API token | the settings table, as a hash, with its scope, and wherever a person puts the value, such as `STRAZA_API_TOKEN` for strazactl | as long as it was minted for, or forever when no expiry was given | Revoke under Settings, API tokens in the console, or `strazactl api-token revoke` | everything in its scope, from any machine, until it expires or is revoked |
 
 
-An AI agent runs as its person and can read both `state/identity.json` and strazactl's `credentials.json`, so a person's admin login is within its reach. [The security model]({{< relref "security/security-model.md#an-agent-that-holds-its-persons-login-can-enroll-an-approval-device" >}}) explains what that allows, and [Known limits]({{< relref "security/known-limits.md" >}}) lists what reduces it.
+strazactl keeps no login. It runs only on an admin API token in `STRAZA_API_TOKEN`, so no admin credential sits on a machine unless someone puts a token there. strazad refuses the login that older versions of strazactl kept in `~/.straza/credentials.json`, so a file left from one works nowhere and can be deleted. An AI agent runs as its person and can read whatever the person leaves in its reach, so never put a token where an agent runs as you. On Linux the person's Straza key and sessions are out of its reach, because `straza service` keeps them under its own OS account. [The security model]({{< relref "security/security-model.md#an-agent-that-holds-its-persons-login-can-enroll-an-approval-device" >}}) explains what that allows, and [Known limits]({{< relref "security/known-limits.md" >}}) lists what reduces it.
 
 
 The scope on an admin API token is the whole story of what a copy yields. A token with `full` or `tokens:write` can mint itself a `full` token. A token with `identity:write` can assign `straza-admin` to any person and set the break-glass password, and one with `scim:write` writes the membership of every role, `straza-admin` included. Treat all four as root: give them to the operator, and the two `scim` scopes to the identity manager only. The identity manager's SCIM credential is the same token kind with the `scim` scopes, and [Hardening]({{< relref "security/hardening.md" >}}) walks its rotation.
@@ -77,8 +81,9 @@ The scope on an admin API token is the whole story of what a copy yields. A toke
 | Kind | Lives in | Lives for | Rotate or revoke | A copy yields |
 |---|---|---|---|---|
 | Phone signing key | the enrolled device, P-256, public half in `approver_devices` | the enrollment | `strazactl approvers revoke`, then enroll again | decisions that phone may sign, each needing a live challenge |
-| AI agent key | `state/nhi-key.json` on the agent's box, Ed25519, public half in the settings table | no expiry | `straza keygen --force` and register again, or `strazactl users nhi-key unset` | logins as that identity for as long as the public half stays registered |
-| Pinned snapshot keys | `config.yaml` on every workstation, public halves only | until the workstation enrolls again | `straza enroll`, which pins the server's whole published set again, or on a managed install `straza install --managed --server <strazad URL> <harness>` run again by an administrator | nothing to sign with, though write access to the file redirects the workstation's trust |
+| AI agent key | `key.pem` in the state directory of `straza service` on the agent's machine, Ed25519, public half in the settings table | no expiry | `straza keygen --force` and register again, or `strazactl users nhi-key unset` | logins as that identity for as long as the public half stays registered |
+| Machine key of a key enrollment | `key.pem` in the state directory of `straza service` on the enrolled machine, Ed25519, public half and thumbprint on the device row | until the sign-in deadline, `governance.signInMaxAge`, 7 days by default from the key enrollment | `strazactl devices revoke`, disabling the user, or a new key enrollment of the same machine, which replaces the key | check-ins as that person until the deadline. A copy and the machine both raise the one stored counter, so the first check-in that sends a counter at or below the last one accepted revokes the device |
+| Pinned snapshot keys | the enrollment record of `straza service` on every workstation, or the root-owned `/etc/straza/config.yaml` of a managed install, public halves only | until the workstation enrolls again | `straza enroll`, which pins the server's whole published set again, or on a managed install `straza install --managed --server <strazad URL> <harness>` run again by an administrator | nothing to sign with, though write access to the record or the managed file redirects the workstation's trust |
 
 A phone decides only by signing a fresh single-use challenge, and it renews its 30 day token the same way, so a copied approver token can neither decide nor renew. The server keeps only the public half of the key. It stores the key posture the device reports without checking it, so the key proves which enrolled device decided, and not that a person did.
 
@@ -89,13 +94,13 @@ A phone decides only by signing a fresh single-use challenge, and it renews its 
 |---|---|---|---|---|
 | Local user password | the `users` table as a bcrypt hash | no expiry | `strazactl users set-password` | a login as that user in the standalone profile |
 | Bootstrap admin password | printed once at the first boot of an empty standalone store, as the `password` field of a warning line in the server log, which keeps it in every copy of that log until the password is changed | until changed | `strazactl users set-password admin` | full administration |
-| Break-glass password | printed once, in both profiles, for an account no identity manager can disable, as the `password` field of a warning line in the first boot's server log, which keeps it in every copy of that log until the password is changed | until changed | `strazactl users set-password break-glass` from an admin session, or a new hash written into the users table as the last resort | full administration in both profiles, through the emergency sign-in in the enterprise profile |
+| Break-glass password | printed once, in both profiles, for an account no identity manager can disable, as the `password` field of a warning line in the first boot's server log, which keeps it in every copy of that log until the password is changed | until changed | `strazactl users set-password break-glass` on an admin API token, or a new hash written into the users table as the last resort | full administration in both profiles, through the emergency sign-in in the enterprise profile |
 
 [Known limits]({{< relref "security/known-limits.md" >}}) lists the copies of that first log as a limit, with what reduces it.
 
 In the enterprise profile people have no local passwords, because the identity provider owns the login and its second factor. The break-glass admin is the one exception. strazad keeps its own sign-in page mounted as the emergency sign-in, and that page accepts the break-glass account and nobody else, so a hash that `strazactl users set-password` stores on any other user opens nothing.
 
-The console offers Emergency sign-in under its sign-in button, and `strazactl login --break-glass` runs the same flow from a terminal. Every interactive login as break-glass lands on the audit chain as an alarm, in both profiles. Nobody logs in as it unnoticed.
+The console offers Emergency sign-in under its sign-in button, which is the break-glass admin's one way in. Every interactive login as break-glass lands on the audit chain as an alarm, in both profiles. Nobody logs in as it unnoticed.
 
 
 The identity provider can never become the emergency admin. An account named `break-glass` at the identity provider is refused on every sign-in route with "the account break-glass at your identity provider cannot sign in to Straza, because break-glass is the local emergency admin and signs in with its own password only. Rename or remove that account at the identity provider." Each attempt writes a login failure with the reason `external identity names the break-glass account` and a warning in the server log, and it never links the two accounts. If a server finds its break-glass row linked to an external identity by an earlier version, it keeps the link as evidence, refuses it, and warns at every start with the external id and the two steps to take: read the audit chain for actions by break-glass, and rotate its password.
@@ -105,18 +110,20 @@ The identity provider can never become the emergency admin. An account named `br
 
 The drill is the same in both profiles, and it works while the identity provider is down.
 
-1. Open the console and choose Emergency sign-in under the sign-in button. The card shows a code and opens the server's own sign-in page. From a terminal, `strazactl login --break-glass` shows the same code and page address.
-2. On that page enter the code, the username `break-glass` and the vaulted password. The console signs you in with full administration.
+1. Open the console and choose Emergency sign-in under the sign-in button. The tab goes to the server's own sign-in page and comes back to the console after it.
+2. On that page enter the username `break-glass` and the vaulted password, and the code when the page asks for one. The console signs you in with full administration.
 3. Fix what locked you out: assign `straza-admin` back to a person, or repair the identity provider settings, then sign in as yourself again.
-4. Rotate the break-glass password from a terminal, because the console has no password control. Use a strazactl login that holds full administration: your own restored one, or the one `strazactl login --break-glass` gives, which counts as an emergency sign-in of its own and raises its own alarm.
+4. Rotate the break-glass password from a terminal, because the console has no password control. While still signed in, open Settings, then API tokens, and mint a token with the scope `identity:write` and the shortest lifetime. Run strazactl on it in a terminal where no agent runs as you. `read -rs` reads the pasted token without showing it and keeps it out of the shell history.
 
 {{< command terminal="Terminal" purpose="administration" >}}
 ```sh
+export STRAZA_SERVER=https://straza.example.com
+read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
 strazactl users set-password break-glass --password '<new password>'
 ```
 {{< /command >}}
 
-The rotation runs through the admin API, so it needs an admin session or an admin API token with the `identity:write` scope. Then revoke every break-glass session under Sessions.
+The rotation needs a token with the `identity:write` scope. Then revoke that token under Settings, API tokens, and every break-glass session under Sessions.
 
 The login leaves three traces:
 
@@ -148,7 +155,7 @@ These are issued by another system and rotated there. Straza reads them from its
 | Kind | Lives in | Rotate or revoke | A copy yields |
 |---|---|---|---|
 | OAuth provider client secret | `oauth.providers.<name>.clientSecret` or its file | at the provider, then edit the config and restart | redeeming and refreshing grants for that app registration |
-| An AI agent's identity provider client secret | `STRAZA_CLIENT_SECRET` on the agent's box, never persisted by Straza | at the identity provider | logins as that AI agent |
+| An AI agent's identity provider client secret | a root-owned file that systemd passes to `straza service`, or in a container a file mounted only into the service's container, named for the agent's user id and never read from the agent's environment | at the identity provider, then replace the file | logins as that AI agent |
 | APNs key and FCM key file | `approval.push.apns.keyFile` and `approval.push.fcm.serviceAccountFile` | in the Apple and Google consoles | sending pushes to the Straza approver app |
 | Slack bot token and signing secret | `approval.channels.slack.botToken` and `signingSecret`, or their files | in the Slack app settings | the signing secret forges approval decisions arriving from Slack |
 | Sink signing secret | `sinks[].secret` or `secretFile` | edit the config and restart | forging audit deliveries into your SIEM |

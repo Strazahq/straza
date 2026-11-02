@@ -39,13 +39,13 @@ The approver listener allows 10 requests a second from each connecting address, 
 | `/mcp` and `/mcp/` followed by a server's name | The MCP gateway. `/mcp` serves every server you may reach, and a server's own address serves its tools under their own names. | MCP clients and `straza mcp` |
 | `/scim/v2/` | The SCIM 2.0 endpoint | Your identity manager, with an admin API token that carries `scim:read` and `scim:write` |
 | `/metrics` | The Prometheus metrics | Prometheus |
-| `/oidc/` and `/.well-known/openid-configuration` | Straza's own sign-in | straza, strazactl and AI agents with a key of their own |
+| `/oidc/` and `/.well-known/openid-configuration` | Straza's own sign-in | straza, the console and AI agents with a key of their own |
 
 
 `/metrics` answers anyone who reaches the listener until you set `server.metricsToken`. `/metrics` labels its counts by MCP server, sink, route, status, effect and lane. No metric names a session or a user. [Metrics and alerts]({{< relref "guides/operate/metrics-and-alerts.md" >}}) sets the token and lists every metric.
 
 
-Straza's own sign-in does a different job in each profile. Under standalone it signs in every person with the device flow, and every AI agent that has a key of its own. Under enterprise it signs in only those AI agents, through the client credentials grant, and the break-glass admin, through a device flow closed to every other account.
+Straza's own sign-in does a different job in each profile. Under standalone it signs in every person, in the browser at `/oidc/authorize` or with a code at `/oidc/device`, and every AI agent that has a key of its own. Under enterprise it signs in only those AI agents, through the client credentials grant, and the break-glass admin, on sign-in pages closed to every other account. `/oidc/authorize` sends its answer only to 127.0.0.1 or `[::1]`, the machine of the browser that signed in.
 
 ## The approver listener
 
@@ -135,10 +135,13 @@ Everything else a deployment talks to, strazad dials. Each row names the destina
 strazad makes no connection to your identity manager to sync identities. The identity manager pushes users and role membership over SCIM to `/scim/v2/`, and a pull connector reads `/v1/admin/`, both with an admin API token whose scope names its areas. An identity manager behind its own firewall therefore needs one route to strazad, and strazad needs none to it.
 
 
-An agent's machine accepts no connection, and it makes two kinds of outbound connection.
+An agent's machine accepts no network connection, and it makes two kinds of outbound connection. `straza service`, the Straza background service, listens only on a local socket, `/run/straza-service/service.sock` for the system service or `$STRAZA_HOME/service.sock` for one started with `STRAZA_HOME` set, and the hooks and the other straza commands on that machine reach it there. On Windows it listens on the named pipe `\\.\pipe\straza-service`, which refuses callers from other machines.
 
-- The straza client dials strazad's main listener for enrollment, check-in, decisions, the audit upload and the revocation stream at `/v1/push`. That stream is server-sent events on the same address, so no client ever reaches the event bus.
-- In the enterprise profile the client also dials your identity provider. A person's machine does so once, at enrollment, for the device flow. An AI agent that signs in with `STRAZA_CLIENT_ID` and `STRAZA_CLIENT_SECRET` does so at enrollment and at every session start.
+
+A browser sign-in opens one more port for a few minutes. While `straza enroll` waits for a person's browser sign-in, `straza service` listens on 127.0.0.1, never on another address, for the one redirect the identity provider sends to `http://127.0.0.1:<port>/callback`. It closes the port as soon as that answer arrives, or after 5 minutes. The port is a free one that the system picks, unless `oidc.loopbackPort` on strazad fixes it, from 1024 to 65535, for an identity provider that accepts the redirect only with the exact port registered for Straza. strazad publishes that port to the clients in `/.well-known/straza/idp.json`. No other program on the machine may hold it while a sign-in waits.
+
+- `straza service` dials strazad's main listener for enrollment, check-in, decisions, the audit upload and the revocation stream at `/v1/push`. That stream is server-sent events on the same address, so no client ever reaches the event bus. `straza doctor` also probes `/healthz` and `/version` itself, and `straza install --managed` fetches the managed wiring.
+- In the enterprise profile the service also dials your identity provider. For a person's machine it does so once, at enrollment, to redeem the browser sign-in or to run the sign-in with a code. For an AI agent whose client secret an administrator gave the service, it does so at enrollment and whenever the agent's cached ID token has run out at a session start.
 
 ## Compose and Helm
 

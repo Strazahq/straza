@@ -37,13 +37,28 @@ type SimulateRequest struct {
 }
 
 // SimulateResult is the simulate response: the active-snapshot decision, the
-// draft decision when a draft was sent, the resolved subject, and the id of
-// the snapshot the evaluation ran against.
+// draft decision when a draft was sent, the resolved subject, the id of the
+// snapshot the evaluation ran against, and the object check of a call to a
+// server that pins an object type.
 type SimulateResult struct {
 	Active   policy.Decision  `json:"active"`
 	Draft    *policy.Decision `json:"draft,omitempty"`
 	Subject  policy.Subject   `json:"subject"`
 	Snapshot string           `json:"snapshot"`
+	Object   *SimObject       `json:"object,omitempty"`
+}
+
+// SimObject is the object check of a simulated call: the server's type, the
+// tool's reach, the object the call names with its list id, and either the
+// held role that covers the call or the sentence the gateway refuses with.
+type SimObject struct {
+	Type    string `json:"type"`
+	Reach   string `json:"reach"`
+	Value   string `json:"value,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Covered bool   `json:"covered"`
+	Role    string `json:"role,omitempty"`
+	Refusal string `json:"refusal,omitempty"`
 }
 
 // SimulatePolicy runs the server-side what-if: the same endpoint, engine, and
@@ -120,7 +135,10 @@ func renderSimSingle(w io.Writer, res SimulateResult, now SimContext) {
 	for _, g := range gateLines(d) {
 		writeKeyed(w, "gate", g)
 	}
-	fmt.Fprintln(w, provenanceLine(d, now.Profile))
+	if line := objectLine(res.Object); line != "" {
+		writeKeyed(w, res.Object.Type, line)
+	}
+	fmt.Fprintln(w, decidedLine(d, res.Object, now.Profile))
 	fmt.Fprintln(w, SimContextLine)
 	if d.RuleID == "" && d.Effect == "deny" && d.Default {
 		if strings.HasPrefix(d.Reason, engineRefusal) {
@@ -148,10 +166,13 @@ func renderSimDual(w io.Writer, res SimulateResult, now SimContext) {
 		d     policy.Decision
 	}{{"live", res.Active}, {"file", *res.Draft}}
 	for _, row := range rows {
-		fmt.Fprintf(w, "%-6s  %-5s  %s\n", row.label, strings.ToUpper(row.d.Effect), provenanceLine(row.d, now.Profile))
+		fmt.Fprintf(w, "%-6s  %-5s  %s\n", row.label, strings.ToUpper(row.d.Effect), decidedLine(row.d, res.Object, now.Profile))
 		for _, g := range gateLines(row.d) {
 			fmt.Fprintf(w, "%15s%s\n", "", "gate: "+g)
 		}
+	}
+	if line := objectLine(res.Object); line != "" {
+		writeKeyed(w, res.Object.Type, line)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, simVerdict(res.Active, *res.Draft))
@@ -189,6 +210,31 @@ func outcomeWord(d policy.Decision) string {
 		w += " after approval"
 	}
 	return w
+}
+
+// objectLine names the held role that covers a call to a server that pins
+// an object type, and is empty when the object check refused the call or
+// did not run. The console's Test a call speaks the same sentence.
+func objectLine(o *SimObject) string {
+	switch {
+	case o == nil || !o.Covered:
+		return ""
+	case o.Value == "":
+		return o.Role + " covers every " + o.Type + "."
+	case o.ID == "":
+		return o.Role + " covers every " + o.Type + ", " + o.Value + " included."
+	default:
+		return o.Role + " covers " + o.Value + ", id " + o.ID + "."
+	}
+}
+
+// decidedLine is the decided-by sentence, or the object check's refusal
+// when the check refused the call, because then no policy ran.
+func decidedLine(d policy.Decision, o *SimObject, profile string) string {
+	if o != nil && o.Refusal != "" {
+		return "The " + o.Type + " check refused this call before any policy ran. " + strings.TrimPrefix(o.Refusal, "Straza: ")
+	}
+	return provenanceLine(d, profile)
 }
 
 // provenanceLine is the decided-by sentence of the console's whyOf,

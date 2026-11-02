@@ -1,0 +1,18 @@
+{
+  "specversion": "1.0",
+  "id": "019a0f3e-1c05-7e55-9abc-1f2e3d4c5b54",
+  "type": "straza.audit.authn",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-10-20T10:20:17.930Z",
+  "data": {
+    "action": "login",
+    "outcome": "failure",
+    "via": "device-key",
+    "user": "judy",
+    "userId": "0197fa3d-2222-7abc-9def-000000000002",
+    "harness": "claude-code/2.1.0",
+    "reason": "the last sign-in on this machine is older than governance.signInMaxAge",
+    "sourceIp": "203.0.113.7",
+    "userAgent": "straza/1.2.0"
+  }
+}

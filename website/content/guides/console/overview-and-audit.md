@@ -20,7 +20,7 @@ Overview is the first page the console opens, and it says what needs a person no
 
 ## Before you start {.nostep}
 
-- A console sign-in as an admin, at `/console/` on your server with **Sign in with a code**. [Your first governed session]({{< relref "get-started/first-governed-session.md" >}}) shows the sign-in on a standalone server.
+- A console sign-in as an admin, at `/console/` on your server with **Sign in**. [Your first governed session]({{< relref "get-started/first-governed-session.md" >}}) shows the sign-in on a standalone server.
 - Some decisions on the chain, such as the deny and the allow of the first session.
 
 ## Read the summary
@@ -49,7 +49,7 @@ Beside the chart, **Needs attention** lists only what a person should act on: ap
 
 {{< shot name="overview-system" caption="**Security configuration** on System details, with each relaxed setting, what it costs and the key that sets it." >}}
 
-The tiles count sessions, users, MCP servers, policies, waiting approvals and the newest record of the audit chain. **Security configuration** names each relaxed setting with what it costs, such as `Local tool default` with `A local tool no rule names runs.`, and links the row in Settings that says where to set it. **Active sessions** lists up to ten sessions with their harness, the client version and the hook configuration each one reported.
+The tiles count sessions, users, MCP servers, policies, waiting approvals and the newest record of the audit chain. **Security configuration** names each relaxed setting with what it costs, such as `Local tool default` with `A local tool no rule names runs.`, and links the row in Settings that says where to set it. **Active sessions** lists up to ten sessions with their harness, the client version and the hook configuration each one reported. A session whose client was built from a different commit than the server reads `differs from server` under its version, and its tooltip names the commit the session started on and the server's. The panel's header counts the marked sessions among the governed ones only, such as `1 client build differs from the server`, so a marked console or strazactl row is left out of it. The check compares commits, not version strings, because a release build and a build from a checkout spell the version differently. A session keeps the build it started on, so after a box upgrades, its open session stays marked until it ends. That is at most `governance.sessionMaxLifetime` after its start, 12 hours by default, and the box's next session shows the new build. Sessions that started before the server recorded commits carry none and are never marked.
 
 ## Open the audit chain
 
@@ -60,7 +60,7 @@ Above the table, the status line reads `Chain verified`, with the count of recor
 
 {{< shot name="audit-list" caption="The newest records on Audit. Each denied `rm -rf` has a red edge and a tinted row." >}}
 
-Each row shows **Seq**, **Time**, **Who**, **Type**, **Effect**, **What** and **Reason**. A denied call has a red edge and a tinted row. A run of identical records folds into its newest row with `×2 identical · show all`, and the export and the chain check still read every record of the run. **Load older** reads the 200 records before the oldest one loaded and checks that they join it.
+Each row shows **Seq**, **Time**, **Who**, **Type**, **Effect**, **What** and **Reason**. A denied call has a red edge and a tinted row. On a server that pins its objects, the **What** cell names the object after the tool, as in `ghapp.pr_create on Strazahq/pay-api` followed by the arguments, and no column of its own holds it. A run of identical records folds into its newest row with `×2 identical · show all`, and the export and the chain check still read every record of the run. **Load older** reads the 200 records before the oldest one loaded and checks that they join it.
 
 {{< see >}}`Chain verified` and a count of loaded records.{{< /see >}}
 
@@ -90,12 +90,15 @@ Select a row. The sheet is titled with the record's number and type, such as `Re
 
 {{< shot name="audit-deny" caption="The record of alice's denied `rm -rf`: the outcome, the rule and policy that decided it, and the chain check." >}}
 
+
+A call that names a repository adds a row named by the server's type, such as **Repo**, with the value the call named and its id in the list, as in `id 812345678`, or `not in the repo list` when the list did not hold it. When the object check refused the call, no policy ran, so the sheet reads `No policy rule was recorded for this call.` and then the sentence the agent read, which starts with `Straza:` and names the tool, and the repository when the call named one. Under **The record as stored**, `rolesChecked` names the held roles that bind the tool.
+
 The **Chain** box holds the record's hash and the verdict of your browser, `Hash matches the loaded chain.` A record opened from a search reads `Not verified in this browser. See the audit chain status for details.` instead, because a search result is not part of the checked tail. **The record as stored** shows the whole record, and **Copy as JSON** copies it.
 
 ## Test the call again
 
 
-Open the record of a decision, then press **Test this call** at the foot of the sheet. It opens **Test a call** with the person and the call of the record filled in. It answers against the policy version that is live now, and it writes nothing and records nothing. Use it after a policy change to see whether the same call would now get a different answer.
+Open the record of a decision, then press **Test this call** at the foot of the sheet. It opens **Test a call** with the person and the call of the record filled in. It answers against the policy version that is live now, and it writes nothing and records nothing. Use it after a policy change to see whether the same call would now get a different answer. On a server that pins its objects, the test carries the record's repository too, unless the record cut a value longer than 512 bytes, and then Test a call asks you to pick the repository.
 
 {{< shot name="audit-test-this-call" caption="**Test this call** at the foot of a record, under **The record as stored**." >}}
 

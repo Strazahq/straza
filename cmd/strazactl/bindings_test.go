@@ -26,19 +26,19 @@ func TestBindingsGroupHoldsListOnly(t *testing.T) {
 // TestBindingsApplyAnswersWithTheDraftsPath pins what the removed verb
 // answers to the invocations older skills, pages and scripts still run: one
 // sentence that names the drafts path, exit status 2 and no request, with a
-// login or without one.
+// token or without one.
 func TestBindingsApplyAnswersWithTheDraftsPath(t *testing.T) {
 	const want = "strazactl bindings apply is gone: access rows now change through a draft that a person publishes. " +
 		"Put the Role documents in a file, run strazactl drafts check -f <file>, then strazactl drafts create -f <file>"
 	for _, tc := range []struct {
 		name  string
 		args  []string
-		login bool
+		token bool
 	}{
 		{"apply with a file", []string{"bindings", "apply", "-f", "bindings.yaml"}, true},
 		{"apply with a file, prune and yes", []string{"bindings", "apply", "-f", "bindings.yaml", "--prune", "--yes"}, true},
 		{"apply alone", []string{"bindings", "apply"}, true},
-		{"apply with a file and no login", []string{"bindings", "apply", "-f", "bindings.yaml"}, false},
+		{"apply with a file and no token", []string{"bindings", "apply", "-f", "bindings.yaml"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
@@ -49,8 +49,8 @@ func TestBindingsApplyAnswersWithTheDraftsPath(t *testing.T) {
 			defer srv.Close()
 			t.Setenv("STRAZA_SERVER", "")
 			creds := noCreds(t)
-			if tc.login {
-				creds = writeCreds(t, srv.URL)
+			if tc.token {
+				creds = onToken(t, srv.URL)
 			}
 			_, _, err := runCLI(t, creds, tc.args...)
 			var ec exitCodeErr

@@ -1,0 +1,39 @@
+{
+  "specversion": "1.0",
+  "id": "019a1c2e-4f3b-7a10-8c5d-2b9e6f1a3c47",
+  "type": "straza.audit.mcp",
+  "source": "strazad",
+  "time": "2026-10-24T09:14:02.118Z",
+  "data": {
+    "session": "019a1c20-1111-7abc-9def-000000000021",
+    "user": "019a1c1f-4a1f-7d02-8e3b-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "grant",
+    "tool": "mcp.call",
+    "app": "ghapp",
+    "toolName": "git_push",
+    "arguments": "{\"repo\":\"Strazahq/straza\",\"branch\":\"main\",\"refs\":[{\"ref\":\"refs/heads/main\",\"old\":\"3f786850e387550fdab836ed7e6dc881de23001b\",\"new\":\"89e6c98d92887913cadf06b2adb97f26cde4849b\"}]}",
+    "effect": "allow",
+    "ruleId": "hold-git-push",
+    "setName": "git-policy",
+    "reason": "a person approves every git push",
+    "snapshot": "sha256:7d1e40b2",
+    "granted": true,
+    "default": false,
+    "bindingId": "019a1c20-2222-7abc-9def-000000000022",
+    "role": "developer",
+    "object": {
+      "type": "repo",
+      "reach": "argument",
+      "value": "Strazahq/straza",
+      "id": "9012331"
+    },
+    "grant": {
+      "jti": "6f1c2a9e-3b7d-4e8a-9c41-0d5e7b2f8a63",
+      "op": "push",
+      "aud": "https://ghapp.example.com",
+      "exp": "2026-10-24T09:16:02Z",
+      "approval": "019a1c2d-2f10-7c55-9a1b-000000000043"
+    }
+  }
+}

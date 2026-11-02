@@ -34,6 +34,9 @@ var writingRouteClasses = map[string]routeClass{
 	"POST /v1/admin/drafts/{id}/publish": draftDoor,
 	"POST /v1/admin/drafts/{id}/rebase":  draftDoor,
 	"POST /v1/admin/drafts/{id}/contact": draftDoor,
+	// The objects draft route opens a draft of the api door and publishes
+	// nothing, so it is a draft door outside the drafts routes.
+	"POST /v1/admin/apps/{id}/objects/draft": draftDoor,
 
 	"POST /v1/admin/apps":                                      oneItemPublish,
 	"DELETE /v1/admin/apps/{id}":                               oneItemPublish,
@@ -83,6 +86,9 @@ var writingRouteClasses = map[string]routeClass{
 	"POST /v1/admin/apps/{id}/secrets":                          immediateOperation,
 	"DELETE /v1/admin/apps/{id}/secrets":                        immediateOperation,
 	"DELETE /v1/admin/apps/{id}/secrets/{role}":                 immediateOperation,
+	"POST /v1/admin/apps/{id}/objects/refresh":                  immediateOperation,
+	"POST /v1/admin/apps/{id}/objects/credential":               immediateOperation,
+	"DELETE /v1/admin/apps/{id}/objects/credential":             immediateOperation,
 	"POST /v1/admin/apps/import":                                immediateOperation,
 	"POST /v1/admin/policies/validate":                          immediateOperation,
 	"POST /v1/admin/policies/simulate":                          immediateOperation,
@@ -108,8 +114,8 @@ func TestWritingAdminRoutesHaveOneClass(t *testing.T) {
 		switch {
 		case !named:
 			t.Errorf("%s writes and has no class: make it a draft door, a one-item publish, or name it an immediate operation in writingRouteClasses", key)
-		case (class == draftDoor) != strings.HasPrefix(rt.pattern, "/v1/admin/drafts"):
-			t.Errorf("%s is classed %d, and only the drafts routes are the draft door", key, class)
+		case (class == draftDoor) != (strings.HasPrefix(rt.pattern, "/v1/admin/drafts") || rt.pattern == "/v1/admin/apps/{id}/objects/draft"):
+			t.Errorf("%s is classed %d, and only the drafts routes and the objects draft route are the draft door", key, class)
 		}
 	}
 	var publishes []string

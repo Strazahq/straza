@@ -76,7 +76,9 @@ describe("a server admin on their server's Roles tab", () => {
 
     expect(await screen.findByText("1 role of this server")).toBeTruthy();
     const row = document.querySelector('[data-owned-role="demo-tools-readers"]') as HTMLElement;
-    expect(within(row).getAllByRole("cell")[1].textContent).toBe("2 of 3toolsecho, add");
+    const reach = within(row).getAllByRole("cell")[1];
+    expect(reach.textContent).toBe("2 of 3toolsechoadd");
+    expect(Array.from(reach.querySelectorAll("[data-tool-names] > *"), (c) => c.textContent)).toEqual(["echo", "add"]);
     expect(screen.getByText("Nobody holds it yet. Your identity manager assigns it: in midPoint it is AR:demo-tools-readers within a sync cycle.")).toBeTruthy();
 
     expect(document.querySelector("[data-refused-error]")).toBeNull();

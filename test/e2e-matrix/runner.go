@@ -130,6 +130,9 @@ func runJourneys(t *testing.T) {
 		t.Fatal(r.fatal)
 	}
 
+	if err := refuseHostService(); err != nil {
+		fatal("%v", err)
+	}
 	corpus, err := loadCorpus(filepath.Join(pkgDir, "corpus"))
 	if err != nil {
 		fatal("%v", err)
@@ -291,12 +294,12 @@ func (r *run) control(ctx context.Context, st *stack, dir string, union []string
 	if code != http.StatusOK {
 		return fmt.Errorf("activate control PolicySet: status %d: %s", code, trim(string(body)))
 	}
-	c, err := newClient("e2e-control", identity{Kind: "nhi"}, filepath.Join(r.bin, "straza"), dir, st.server)
+	c, err := newClient(ctx, "e2e-control", identity{Kind: "nhi"}, filepath.Join(r.bin, "straza"), dir, st.server)
 	if err != nil {
 		return err
 	}
 	defer c.cleanup()
-	if err := c.enroll(ctx); err != nil {
+	if err := c.enroll(ctx, ""); err != nil {
 		return err
 	}
 	for _, d := range union {
@@ -363,9 +366,9 @@ func (r *run) runScenario(ctx context.Context, t *testing.T, sc *scenario, harne
 		s.fail("boot", err.Error())
 	} else {
 		s.stack = st
-		s.vars = map[string]string{"server": st.server.URL, "upstream": st.up.URL, "bin": r.bin}
+		s.vars = map[string]string{"server": st.server.URL, "upstream": st.up.URL, "objectsUpstream": st.up.ObjectsURL, "bin": r.bin}
 		for name, id := range sc.Identities {
-			c, err := newClient(name, id, filepath.Join(r.bin, "straza"), s.dir, st.server)
+			c, err := newClient(ctx, name, id, filepath.Join(r.bin, "straza"), s.dir, st.server)
 			if err != nil {
 				s.fail("setup", err.Error())
 				break
@@ -390,7 +393,7 @@ func (r *run) runScenario(ctx context.Context, t *testing.T, sc *scenario, harne
 	r.rows = append(r.rows, resultRow{scenario: sc.ID, dialect: harness, pass: !s.stopped, detail: s.failure})
 }
 
-// cleanup stops the identities' daemons, the run's upstream and strazad by
+// cleanup stops the identities' services, the run's upstream and strazad by
 // process id, and removes the identity homes.
 func (s *scenarioRun) cleanup() {
 	for _, c := range s.clients {

@@ -8,29 +8,28 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/agentguard/trace"
 	"github.com/strazahq/straza/internal/version"
 )
 
 // `straza mcp`: the stdio MCP server a harness registers ("command":
-// "straza", "args": ["mcp"]) whose backend is the Straza gateway. It owns
-// exactly one job the harness config model cannot: keeping a ROTATING session
-// token on the wire. The proxy is convenience and session coherence, not a
-// security control: the PEP stays the gateway; bypassing the proxy buys
-// nothing without a valid token.
+// "straza", "args": ["mcp"]) whose backend is the Straza gateway, reached
+// through the Straza background service. The service puts the session token
+// and its proof on every request, so this bridge holds no credential. The
+// bridge is convenience and session coherence, not a security control: the
+// PEP stays the gateway.
 
 // mcpConnectRetries paces startup against a gateway that is still booting.
 const mcpConnectRetries = 3
 
 // RunMCPProxy serves MCP on stdio until ctx ends or stdin closes.
-// harnessOverride names the harness this proxy fronts (checkin identity,
+// harnessOverride names the harness this proxy fronts (the session it rides,
 // NEVER an admin harness; those tokens are barred from /mcp). Empty =
 // STRAZA_HARNESS env, then "claude-code". server names the one upstream
 // server to front on its own gateway endpoint (mcpproxy_views.go); empty
@@ -52,15 +51,14 @@ func runMCPProxy(ctx context.Context, harnessOverride, server string, transport 
 	if err != nil {
 		return fmt.Errorf("state unavailable: %w", err)
 	}
-	cfg, err := store.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("not configured (run `straza enroll`): %w", err)
-	}
 	harness := sessionHarness(harnessOverride)
-	client := NewClient(cfg.ServerURL)
-	ses, err := ensureSession(ctx, store, client, harness)
+	svc := NewServiceClient()
+	// Start or reuse the harness's session before the first dial, so a
+	// machine that is not enrolled, or a service that is not running, gets
+	// its own sentence instead of a failed MCP handshake.
+	ses, err := svc.StartSession(ctx, localapi.SessionRequest{Harness: localapi.Harness{Name: harness, Version: proxyHarnessVersion}})
 	if err != nil {
-		return fmt.Errorf("no session and checkin failed: %w", err)
+		return errors.New(denyLine(serviceSentence(err, outcomeNoMCP)))
 	}
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: "straza", Version: version.Version}, proxyServerOptions(server))
@@ -75,8 +73,7 @@ func runMCPProxy(ctx context.Context, harnessOverride, server string, transport 
 	p.debugSession(ses)
 	// Boot and revival dial through the same factory so a revived session is
 	// wired exactly like this first one (mcpproxy_redial.go).
-	endpoint := gatewayEndpoint(cfg.ServerURL, server)
-	p.dial = newGatewayDialer(p, store, client, harness, endpoint)
+	p.dial = newGatewayDialer(p, serviceHTTPClient(svc, harness), gatewayEndpoint(server))
 	p.logf = func(event, msg string) {
 		store.logClientError(ClientError{Kind: "mcp", Harness: harness, Event: event, Err: msg})
 	}
@@ -88,12 +85,12 @@ func runMCPProxy(ctx context.Context, harnessOverride, server string, transport 
 			break
 		}
 		if server != "" {
-			if refused := serverRefusal(server, endpoint, err); refused != nil {
+			if refused := serverRefusal(server, err); refused != nil {
 				return refused
 			}
 		}
 		if attempt+1 >= mcpConnectRetries {
-			return fmt.Errorf("Straza: gateway unreachable at %s: %w", endpoint, err) //nolint:staticcheck // ST1005: deliberate brand prefix; this text reaches the agent as the tool-failure reason
+			return gatewayUnreachable(err)
 		}
 		select {
 		case <-ctx.Done():
@@ -113,6 +110,16 @@ func runMCPProxy(ctx context.Context, harnessOverride, server string, transport 
 	go p.runPeriodicResync(ctx)
 
 	return srv.Run(ctx, transport)
+}
+
+// gatewayUnreachable is the error the bridge exits with when its boot dials
+// all failed: the service's sentence when the service itself is gone, else
+// the dial error.
+func gatewayUnreachable(err error) error {
+	if errors.Is(err, localapi.ErrUnreachable) {
+		return errors.New(denyLine(serviceSentence(err, outcomeNoMCP)))
+	}
+	return fmt.Errorf("Straza: the gateway did not answer through the Straza background service: %w", err) //nolint:staticcheck // ST1005: deliberate brand prefix; this text reaches the agent as the tool-failure reason
 }
 
 // Tunable defaults for the resync machinery. They are struct fields (not raw
@@ -342,7 +349,7 @@ func (p *mcpProxy) reconcile(tools []*mcp.Tool) {
 		}
 		p.srv.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			// The journal's view of this call: the gateway's answer (status +
-			// X-Request-Id) is observed by sessionAuthTransport through this
+			// X-Request-Id) is observed by harnessTransport through this
 			// Call, which the SDK threads into the HTTP request via ctx.
 			start := time.Now()
 			call := &trace.Call{}
@@ -400,194 +407,4 @@ func (p *mcpProxy) reconcile(tools []*mcp.Tool) {
 	if p.tr.DebugOn() {
 		p.tr.Debug("mcp.reconcile", slog.Int("added", added), slog.Int("removed", len(gone)))
 	}
-}
-
-// sessionAuthTransport injects the CURRENT session token per request and
-// does exactly one refresh-and-retry on 401. The token is read from state
-// on EVERY request (never cached in the struct):
-// hooks rotate the session underneath us and the proxy must follow.
-type sessionAuthTransport struct {
-	base    http.RoundTripper
-	store   *Store
-	client  *Client
-	harness string
-
-	refreshMu sync.Mutex
-}
-
-func (t *sessionAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	ses, err := ensureSession(req.Context(), t.store, t.client, t.harness)
-	if err != nil {
-		return nil, fmt.Errorf("Straza: no governed session: %w", err) //nolint:staticcheck // ST1005: deliberate brand prefix; this text reaches the agent as the tool-failure reason
-	}
-	resp, err := t.send(req, ses.SessionToken)
-	// The decision journal observes the gateway's answer (status + the
-	// X-Request-Id it minted) through the Call the tool handler bound into
-	// the request context; after a refresh-and-retry the retried answer wins.
-	if err == nil {
-		trace.CallFrom(req.Context()).Observe(resp.StatusCode, resp.Header.Get("X-Request-Id"))
-	}
-	if err != nil || resp.StatusCode != http.StatusUnauthorized {
-		return resp, err
-	}
-	// One refresh-and-retry. Retry needs a rewindable body.
-	fresh, rerr := t.refresh(req.Context(), ses)
-	if rerr != nil || req.GetBody == nil && req.Body != nil {
-		return resp, nil // surface the 401; the refreshed state helps the NEXT call
-	}
-	_ = resp.Body.Close()
-	if req.Body != nil {
-		body, err := req.GetBody()
-		if err != nil {
-			return nil, err
-		}
-		req.Body = body
-	}
-	retried, err := t.send(req, fresh.SessionToken)
-	if err == nil {
-		trace.CallFrom(req.Context()).Observe(retried.StatusCode, retried.Header.Get("X-Request-Id"))
-	}
-	return retried, err
-}
-
-func (t *sessionAuthTransport) send(req *http.Request, token string) (*http.Response, error) {
-	r := req.Clone(req.Context())
-	r.Header.Set("Authorization", "Bearer "+token)
-	return t.base.RoundTrip(r)
-}
-
-// refresh renews the session token, serialized so concurrent 401s spend one
-// refresh. Reload-first: another goroutine (or a hook) may already have
-// rotated it. Like the hook's refresh, it adopts the policy the renewal
-// names and settles a refusal (settlePolicy), so it never extends one.
-func (t *sessionAuthTransport) refresh(ctx context.Context, stale Session) (Session, error) {
-	t.refreshMu.Lock()
-	defer t.refreshMu.Unlock()
-	if cur, err := t.store.LoadSession(); err == nil && cur.SessionToken != stale.SessionToken {
-		return cur, nil
-	}
-	resp, err := t.client.Refresh(ctx, stale.SessionToken,
-		harnessName(stale.Harness), harnessVersion(stale.Harness), measureAttestation(harnessName(stale.Harness)))
-	if err != nil {
-		// A 401 says strazad ended this session while the enrollment may
-		// still stand, so the identity lane of a session start gets one try,
-		// as on the hook and the daemon. The session on disk is the one
-		// strazad refused, so it is not adopted again. Any other answer
-		// judged the identity or judged nothing, and checks in for neither.
-		var refuse *StatusError
-		if errors.As(err, &refuse) && refuse.Status == http.StatusUnauthorized {
-			return sessionAfter(ctx, t.store, t.client, t.harness, stale.SessionToken)
-		}
-		return ensureSession(ctx, t.store, t.client, t.harness)
-	}
-	cur, lerr := t.store.LoadSession()
-	if lerr != nil {
-		cur = stale
-	}
-	held := cur.ExpiresAt
-	cur.SessionToken = resp.SessionToken
-	cur.ExpiresAt = time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second)
-	if cfg, err := t.store.LoadConfig(); err == nil {
-		adopted, ferr := adoptSnapshot(ctx, t.client, resp.SessionToken, t.store, cfg, cur.SnapshotID, resp.SnapshotID)
-		cur.SnapshotID = adopted
-		cur.settlePolicy(resp.SnapshotID, ferr, held)
-	}
-	_ = t.store.SaveSession(cur)
-	return cur, nil
-}
-
-// ensureSession returns a live session, minting one via the enrolled
-// identity when none exists (the same headless/device/ID-token lane order a
-// hook session start uses, so Tier-3 exec and the proxy serve headless NHIs
-// too), under a cross-process lock so a simultaneously-starting hook and
-// proxy spend ONE checkin between them. A session
-// already on disk is ADOPTED, never re-minted: the hook owns
-// conversation-start semantics, the proxy follows.
-func ensureSession(ctx context.Context, store *Store, client *Client, harnessName string) (Session, error) {
-	return sessionAfter(ctx, store, client, harnessName, "")
-}
-
-// sessionAfter is ensureSession for a caller whose session token strazad
-// just refused. A session on disk that still carries refused is not adopted,
-// so the caller checks in under the lock, while a session another process
-// wrote since is adopted as usual. An empty refused adopts any live session.
-func sessionAfter(ctx context.Context, store *Store, client *Client, harnessName, refused string) (Session, error) {
-	const harnessVersion = "mcp" // the proxy checks in as the harness, versioned by its role
-	live := func(ses Session) bool {
-		return time.Until(ses.ExpiresAt) > 30*time.Second && (refused == "" || ses.SessionToken != refused)
-	}
-	if ses, err := store.LoadSession(); err == nil && live(ses) {
-		return ses, nil
-	}
-	lock := store.statePath("checkin.lock")
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) // #nosec G304 -- our own state dir
-		if err == nil {
-			_ = f.Close()
-			break
-		}
-		if fi, serr := os.Stat(lock); serr == nil && time.Since(fi.ModTime()) > 15*time.Second {
-			_ = os.Remove(lock) // stale lock from a killed process
-			continue
-		}
-		if time.Now().After(deadline) {
-			break // proceed anyway; a double checkin is wasteful, not wrong
-		}
-		time.Sleep(150 * time.Millisecond)
-		// The lock holder may have finished our work for us.
-		if ses, err := store.LoadSession(); err == nil && live(ses) {
-			return ses, nil
-		}
-	}
-	defer func() { _ = os.Remove(lock) }()
-	// Double-check under the lock.
-	prev, prevErr := store.LoadSession()
-	if prevErr == nil && live(prev) {
-		return prev, nil
-	}
-	id, err := store.LoadIdentity()
-	if err != nil {
-		return Session{}, fmt.Errorf("not enrolled (run `straza enroll`): %w", err)
-	}
-	if id.Headless == "" && id.DeviceToken == "" && id.IDToken == "" {
-		return Session{}, fmt.Errorf("no device token (re-run `straza enroll`)")
-	}
-	cfg, err := store.LoadConfig()
-	if err != nil {
-		return Session{}, fmt.Errorf("not enrolled (run `straza enroll`): %w", err)
-	}
-	resp, err := checkinWithIdentity(ctx, client, store, cfg, id, harnessName, harnessVersion)
-	if err != nil {
-		return Session{}, fmt.Errorf("checkin failed: %w", err)
-	}
-	ses := Session{
-		SessionID: resp.SessionID, SessionToken: resp.SessionToken, SnapshotID: resp.SnapshotID,
-		User: resp.User, Roles: resp.Roles,
-		Attestation: resp.Attestation, Harness: harnessLabel(harnessName, harnessVersion),
-		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second),
-	}
-	adoptIdentity(&ses, resp)
-	// Adopt the policy blob so the pin names a snapshot we actually hold: a hook
-	// reading this freshly minted session verifies blob-against-pin and would
-	// brick fail-closed on a pin with no blob (proxy mints, hook then reads on a
-	// shared session.json). The proxy fronts the gateway PEP and needs no local
-	// blob to serve calls, so a snapshot fetch failure must NOT fail the mint;
-	// adoptForMint keeps the best pin it can and a later hook/refresh heals it.
-	// A mint carries the replaced session's refusal and holds its session
-	// time, so minting never extends a refused policy (settlePolicy).
-	held := time.Now()
-	if prevErr == nil {
-		held, ses.PolicyRefused, ses.PolicyDeadline = prev.ExpiresAt, prev.PolicyRefused, prev.PolicyDeadline
-	}
-	if cfg, cfgErr := store.LoadConfig(); cfgErr == nil {
-		pin, ferr := adoptForMint(ctx, client, resp.SessionToken, store, cfg, resp.SnapshotID)
-		ses.SnapshotID = pin
-		ses.settlePolicy(resp.SnapshotID, ferr, held)
-	}
-	if err := store.SaveSession(ses); err != nil {
-		return Session{}, err
-	}
-	_ = store.ClearRevocation() // a successful checkin supersedes any previous kill
-	return ses, nil
 }

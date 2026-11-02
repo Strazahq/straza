@@ -1,6 +1,6 @@
 ---
 title: strazactl apps secret remove
-description: Remove the server's own secret, or with --role the override one role uses
+description: Remove the server's own secret, with --role the override one role uses, or with --listing the listing credential
 pagetype: reference
 weight: 27
 draft: false
@@ -15,16 +15,24 @@ keywords: strazactl, apps, secret, remove
 strazactl apps secret remove <server> [flags]
 ```
 
+## Examples
+
+```
+  strazactl apps secret remove scout-tools --role scout-role
+  strazactl apps secret remove objects-demo --listing
+```
+
 ## Options
 
 ```
+      --listing       remove the credential Straza lists the server's objects with instead of the server's own secret
       --role string   remove the override for this role instead of the server's own secret
 ```
 
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

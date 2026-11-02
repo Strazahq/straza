@@ -3,12 +3,13 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PolicyTest, type PolicyTestPrefill } from "./policy-test";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ApiError, type AppRow, type BindingRow, type SimulateAnswer, type ToolRow, type UserRow, listApps, listBindings, listTools, listUsers, simulate } from "@/lib/api";
+import { ApiError, type AppRow, type BindingRow, type ObjectsAnswer, type SimulateAnswer, type ToolRow, type UserRow, appObjects, listApps, listBindings, listTools, listUsers, simulate } from "@/lib/api";
 import { version } from "@/lib/public";
 import { ENGINE_FIELDS, LIVE_NOW, TEST_EVERY_SERVER, TEST_MISSING_WHAT, TEST_MISSING_WHO, TEST_SERVERS_HINT, WITH_EDITS, WITH_EDITS_LINE } from "@/lib/policy-words";
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
+  appObjects: vi.fn(),
   listApps: vi.fn(),
   listBindings: vi.fn(),
   listTools: vi.fn(),
@@ -209,5 +210,80 @@ describe("the Test a call sheet", () => {
     expect(alert.textContent).toContain("Test a call refused.");
     expect(alert.textContent).toContain("The server refused it: no such user. Fix what it names, then try again.");
     expect(card("live").textContent).toContain("Decided by rule dev-reads in policy dev-guardrails.");
+  });
+});
+
+describe("the Test a call sheet on a server that pins repos", () => {
+  const ghapp: AppRow = {
+    id: "a-gh", name: "ghapp", runtime: "remote", status: "running", reached_by: ["ghapp-write"],
+    manifest: { straza: { objects: { type: "repo", plural: "repos", list: { tool: "repo_list" }, tools: { pr_create: { argument: "repo" }, get_me: "none" } } } },
+  };
+  const ghTools: ToolRow[] = [
+    { id: "g1", app: "ghapp", app_id: "a-gh", name: "pr_create" },
+    { id: "g2", app: "ghapp", app_id: "a-gh", name: "get_me" },
+  ];
+  const repos: ObjectsAnswer = {
+    app: "ghapp", type: "repo", plural: "repos", total: 2,
+    objects: [{ value: "Strazahq/pay-api", id: "9012332", title: "pay-api" }, { value: "Strazahq/site", id: "9012331", title: "site" }],
+  };
+  const refusal = "Straza: pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. Check the repo's name, or ask an admin for a role that covers it.";
+
+  beforeEach(() => {
+    vi.mocked(listApps).mockReset().mockResolvedValue([...apps, ghapp]);
+    vi.mocked(listTools).mockReset().mockResolvedValue([...tools, ...ghTools]);
+    vi.mocked(listBindings).mockReset().mockResolvedValue([...bindings, { id: "b3", app: "ghapp", role: "ghapp-write", tools: ["*"] }]);
+    vi.mocked(listUsers).mockReset().mockResolvedValue({ items: [{ ...joe, effective_roles: ["ghapp-write"] }], next_cursor: "" });
+    vi.mocked(simulate).mockReset();
+    vi.mocked(appObjects).mockReset().mockResolvedValue(repos);
+    vi.mocked(version).mockReset().mockResolvedValue({ version: "t", commit: "t", go: "g", profile: "enterprise" });
+  });
+
+  it("asks for the repo, then sends it in the tool's argument and names the covering role", async () => {
+    answers({ active: { effect: "allow", reason: "allowed by role access" }, subject: { user: "u-joe" },
+      object: { type: "repo", reach: "argument", value: "Strazahq/pay-api", id: "9012332", covered: true, role: "ghapp-write" } });
+    mount();
+    await pickWho();
+    await choose("Server", "ghapp");
+    await choose("Tool", "pr_create");
+    await test();
+    expect(screen.getByText("Pick the repo this call works on.")).toBeTruthy();
+    expect(simulate).not.toHaveBeenCalled();
+    await userEvent.click(await screen.findByRole("button", { name: /Strazahq\/pay-api/ }));
+    await test();
+    await screen.findByRole("status");
+    expect(lastBody().event).toEqual({ kind: "tool.pre", tool: "mcp.call", app: "ghapp", toolName: "pr_create", args: { repo: "Strazahq/pay-api" } });
+    expect((card("live").querySelector("[data-object-line]") as HTMLElement).textContent).toBe("ghapp-write covers Strazahq/pay-api, id 9012332.");
+  });
+
+  it("shows no picker on a tool that names no repo", async () => {
+    mount();
+    await pickWho();
+    await choose("Server", "ghapp");
+    await choose("Tool", "get_me");
+    expect(document.querySelector("[data-object-picker]")).toBeNull();
+  });
+
+  it("reads the repo check's refusal on both cards, never as a profile default", async () => {
+    answers({ active: { effect: "deny", reason: refusal }, draft: { effect: "deny", reason: refusal }, subject: { user: "u-joe" },
+      object: { type: "repo", reach: "argument", value: "Strazahq/site", id: "9012331", covered: false, refusal } });
+    mount({ draft: DRAFT });
+    await pickWho();
+    await choose("Server", "ghapp");
+    await choose("Tool", "pr_create");
+    await userEvent.click(await screen.findByRole("button", { name: /Strazahq\/site/ }));
+    await test();
+    await screen.findAllByRole("status");
+    for (const mark of ["live", "draft"]) {
+      expect((card(mark).querySelector("[data-gate]") as HTMLElement).textContent).toBe("The repo check refused this call before any policy ran. " + refusal.replace("Straza: ", ""));
+      expect(card(mark).textContent).not.toContain("No policy matched");
+    }
+  });
+
+  it("tests a record's call at once with the repo the record named", async () => {
+    answers({ active: { effect: "allow" }, subject: { user: "u-joe" } });
+    mount({ prefill: { user: "joe", lane: "mcp", app: "ghapp", tool: "pr_create", object: { value: "Strazahq/site", id: "9012331" } } });
+    await screen.findByRole("status");
+    expect(lastBody().event).toEqual({ kind: "tool.pre", tool: "mcp.call", app: "ghapp", toolName: "pr_create", args: { repo: "Strazahq/site" } });
+    expect((document.querySelector("[data-picked]") as HTMLElement).textContent).toContain("Strazahq/site");
   });
 });

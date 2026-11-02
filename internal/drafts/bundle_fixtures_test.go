@@ -12,16 +12,19 @@ import (
 // intake, and writes every Role in the export's form. Each invalid bundle is
 // refused for the reason its file name gives. Intake runs only over a bundle
 // the reader accepted, because the secret scan runs there and a refusal of
-// the reader already answers the draft. The Role exports of revision 4 are
-// rows too, because every export is a valid bundle document.
+// the reader already answers the draft. The Role exports of revision 4 and
+// the covers lines of revision 7 are rows too, because every export is a
+// valid bundle document.
 func TestBundleFixtures(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
 		items   []string // the object and op of each item, in document order
 		refused []string // the code and object of each refusal
 	}{
-		"role-dev.yaml":   {items: []string{"Role/dev put"}},
-		"role-owned.yaml": {items: []string{"Role/demo-tools-readers put"}},
+		"role-dev.yaml":     {items: []string{"Role/dev put"}},
+		"role-owned.yaml":   {items: []string{"Role/demo-tools-readers put"}},
+		"role-every.yaml":   {items: []string{"Role/ghapp-read put"}},
+		"role-objects.yaml": {items: []string{"Role/ghapp-write-payments put"}},
 		"bundle-onboard.yaml": {items: []string{"App/github put", "Role/github-readers put",
 			"Role/github-writers put", "PolicySet/github-writers-access put"}},
 		"bundle-removal.yaml":              {items: []string{"App/old-tools remove"}},

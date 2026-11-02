@@ -196,8 +196,8 @@ func (p *directRun) failed(err error) {
 }
 
 // check reads the change against live, which this run read: intake whole,
-// the World completed for the draft, the stamps of a new item, Check with
-// the refusals only while admin.secondPerson is off, the
+// the World completed for the draft, the stamps of a new item, Check as a
+// direct check with the refusals only while admin.secondPerson is off, the
 // second-person rule, and the plan. It answers the request itself and
 // reports false when a step refuses or a read fails.
 func (p *directRun) check(live drafts.World, ch directChange) (directCheck, bool) {
@@ -228,7 +228,7 @@ func (p *directRun) check(live drafts.World, ch directChange) (directCheck, bool
 	}
 	d.Items = itemsOf(rows)
 	p.a.keptFacts(cw, d, in.Apps)
-	in.RefusalsOnly = !p.a.cfg.Admin.SecondPerson
+	in.RefusalsOnly, in.Direct = !p.a.cfg.Admin.SecondPerson, true
 	in.Contacted = map[string][]string{}
 	for object, o := range contactedOf(rows) {
 		in.Contacted[object] = o.Tools

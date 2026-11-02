@@ -30,7 +30,7 @@ Deactivating a user in midPoint deactivates the Straza account, revokes every se
 ## Before you start {.nostep}
 
 
-- A Straza administrator login for `strazactl`.
+- `strazactl` with `STRAZA_SERVER` and an admin API token in `STRAZA_API_TOKEN`. The steps mint another token, which takes `tokens:write`, a root-equivalent grant, so mint a **Full root** token for 30 days in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows, and revoke it when you are done.
 - A midPoint 4.10 administrator, and a midPoint that can reach your strazad address.
 - On a standalone server, a password for each midPoint-born person who signs in, because the built-in issuer checks one. Set it with `strazactl users set-password`.
 
@@ -153,6 +153,7 @@ The role object type maps the SCIM group like this. Membership is the one attrib
 | `roleKind` | extension `strazaKind`, and the archetype | fixed when Straza creates the role |
 | `server` | extension `strazaServer`, column Owning MCP server | only on an application role that belongs to one MCP server |
 | `administers` | extension `strazaAdministers`, column Administers | the MCP servers the role administers |
+| `covers` | extension `strazaCovers`, column Covers | the objects each access row of the role covers, on a server that pins an object type |
 | `description` | `description` | the role's description in Straza |
 | `apps` | the association `strazaAppGrant` to each MCP server | which servers the role grants, for a certifier |
 | `role`, `plane`, `tools`, `policies` | resource attributes only | Role (raw), Plane, Tools granted and PolicySets on the shadow |
@@ -175,6 +176,12 @@ done
 {"displayName":"demo-tools-readers","ext":{"roleKind":"application","server":"demo-tools","administers":null}}
 {"displayName":"mcp-admin-demo-tools","ext":{"roleKind":"straza","server":null,"administers":["demo-tools"]}}
 ```
+
+
+A server can pin an object type, and then each role's access row on it says which objects it covers, which the group carries in `covers` and the Straza application roles list shows in the column Covers. A value reads `<server>:<type>` and then `every`, one named object in quotes, or `none` for an access row with no covers line or one Straza cannot read, which covers nothing. The demo stack's `objects-demo` server pins the type `repo`, and its role `objects-demo-tools` reads `objects-demo:repo every`. A role that names two repos gives two values, `objects-demo:repo "Strazahq/docs-site"` and `objects-demo:repo "Strazahq/straza"`, and a repo named every would read `"every"`, so it never passes for every repo. Outside a failed read, Straza never leaves `covers` out on a role with access to such a server, because a certifier would read a missing value as every object. When a read fails, Straza leaves out `apps`, `tools` and `covers` together, so midPoint never shows tools without what they cover.
+
+
+midPoint reads `covers` and never writes it, and a PATCH on it answers `400` with `scimType` `mutability`. What a role covers changes in Straza, through a published draft, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md#covers" >}}) shows. A publish that changes a role's covers line puts that role on the change feed. A first pin or an unpin rewrites the lines of the server's roles in place, and a type change changes the type their values carry. Each puts every role it touches on the feed, together with every role that composes one. The role LiveSync task then brings the new values at its next poll. Each value is the name the server's object list holds now. A rename that a listing picks up changes the value, and Straza puts the role and every role that composes it on the change feed. An object the list no longer holds keeps the name it had when the role was published.
 
 [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md#read-a-role-and-write-its-membership" >}}) lists every attribute of the group's Straza extension.
 
@@ -203,7 +210,7 @@ strazactl roles implications add analyst midpoint-self-service
 `strazactl roles implications analyst` lists what the role composes, and `strazactl roles implications remove analyst demo-tools-readers` takes one away. A role's name and kind are fixed at create. `strazactl roles update analyst --description "..."` changes the description, the one field an update changes.
 {{< /cli >}}
 
-A business role composes application roles and the admin roles of MCP servers, and Straza refuses a composition that would close a cycle. The role's group lists in `apps` and `tools` what the composed roles reach, so a certifier sees the reach on the business role itself. The resource maps the description onto the imported role's own description, so a certifier reads your words in midPoint after the next sync.
+A business role composes application roles and the admin roles of MCP servers, and Straza refuses a composition that would close a cycle. The role's group lists in `apps`, `tools` and `covers` what the composed roles reach, so a certifier sees the reach and the objects it covers on the business role itself. The resource maps the description onto the imported role's own description, so a certifier reads your words in midPoint after the next sync.
 
 ## Create a person and watch it arrive
 

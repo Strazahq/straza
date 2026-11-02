@@ -7,7 +7,7 @@ Public:   {{ if and (include "straza.filePublicUrl" .) (not .Values.publicUrl) }
 Events:   {{ if include "straza.natsBundled" . }}bundled NATS ({{ include "straza.natsURL" . }}){{ else if .Values.nats.url }}external NATS ({{ .Values.nats.url }}){{ else }}embedded per-pod{{ end }}
 Store:    {{ if include "straza.postgresBundled" . }}bundled Postgres ({{ include "straza.fullname" . }}-postgres, secret {{ include "straza.pgSecretName" . }}){{ else if .Values.postgres.existingSecret }}Postgres (DSN from secret {{ .Values.postgres.existingSecret }}){{ else if .Values.postgres.dsn }}Postgres (values DSN){{ else }}sqlite per-pod{{ end }}
 {{- if .Values.apps.manifests }}
-Apps:     {{ len .Values.apps.manifests }} declarative manifest(s) -> /etc/straza/apps (each proposes a draft: publish it with strazactl drafts publish)
+Apps:     {{ len .Values.apps.manifests }} declarative manifest(s) -> /etc/straza/apps (each proposes a draft: a person publishes it in the console under Drafts)
 {{- end }}
 {{- if .Values.approverTLS.enabled }}
 Approver: {{ .Values.approverTLS.publicUrl }} (dedicated https listener on port {{ .Values.approverTLS.port }}, cert {{ .Values.approverTLS.existingSecret }})

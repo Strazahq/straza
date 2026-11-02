@@ -1,0 +1,33 @@
+{
+  "data": {
+    "action": "apps.binding.create",
+    "actor": "alice",
+    "actorId": "01a11576-8fbe-7c24-a4ee-b5848bc9f054",
+    "actorVia": "session",
+    "app": "objects-demo",
+    "covers": {
+      "objects": [
+        {
+          "id": "9012331",
+          "value": "Strazahq/straza"
+        },
+        {
+          "id": "8811207",
+          "value": "Strazahq/straza-mobile"
+        }
+      ]
+    },
+    "draft": "48",
+    "role": "objects-demo-s2fire",
+    "tools": [
+      "issue_create",
+      "repo_read",
+      "whoami"
+    ]
+  },
+  "id": "ee94e69e-3f7e-4b23-93d4-53dbbea297a4",
+  "source": "strazad/0a7e7bbd-3792-4c86-adcc-b8c9cdc58e6b",
+  "specversion": "1.0",
+  "time": "2026-10-19T07:43:18.480379748Z",
+  "type": "straza.audit.admin"
+}

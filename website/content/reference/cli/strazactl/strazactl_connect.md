@@ -1,6 +1,6 @@
 ---
 title: strazactl connect
-description: Connect your own account or token to an MCP server; no server lists your connections
+description: Connect a user's token to an MCP server; no server lists the user's connections
 pagetype: reference
 weight: 44
 draft: false
@@ -13,44 +13,45 @@ keywords: strazactl, connect
 
 ## Synopsis
 
-Connect your own account or token to a server that gives each caller their own credential.
+Connect another user's token to a server that gives each caller their own credential.
 
-On a server that uses sign-in, connect prints the address of your credentials page
-and waits. You sign in to Straza there and press the server's Sign in button, so the
-sign-in is stored only for the person who is signed in.
+strazactl runs on an admin API token, which is no user, so --user names the user
+whose connection changes, and the command refuses to run without it. The token
+needs apps:read and apps:write, because connect reads the user's connections
+before it changes one. A list with no server named needs apps:read alone, and
+--allow-agents on a named server sends no read, so it needs apps:write alone.
 On a server that takes a token, connect asks for the token at a hidden prompt, or
 reads it from stdin when stdin is not a terminal, and never takes it as an argument.
 The server tests the token once and keeps only a sealed copy. The answer shows its
-fingerprint. With no server named, the command lists your connections.
+fingerprint. A server that uses sign-in needs the user's own browser, so nobody
+connects on their behalf. With no server named, the command lists the user's
+connections.
 
-Administrators and scripts use this command. A person connects with
-straza connect, or on the Credentials tab of the self-service page at
-/self-service/credentials. strazactl disconnect takes a connection away.
+A person connects their own account with straza connect, or on the Credentials tab
+of the self-service page at /self-service/credentials. strazactl disconnect takes
+a connection away.
 
---user names an agent you sponsor, or any user when you are an administrator.
 --expires records the date the token stops working, as the provider shows it.
---allow-agents, on its own, lets the agents you sponsor run on your connection
-where the server permits it. --allow-agents=false takes that back.
-
-connect acts as a person with your strazactl login, so it refuses to run while
-STRAZA_API_TOKEN is set.
+--allow-agents, on its own, lets the agents the user sponsors run on the user's
+connection where the server permits it. --allow-agents=false takes that back, so
+an organization can switch it for its users from a script.
 
 ```
-strazactl connect [server] [flags]
+strazactl connect [server] --user <name> [flags]
 ```
 
 ## Options
 
 ```
-      --allow-agents     let the agents you sponsor run on this connection (on its own, changes only that)
+      --allow-agents     let the agents the user sponsors run on this connection (on its own, changes only that)
       --expires string   the date the token stops working, as YYYY-MM-DD
-      --user string      act for this user: an agent you sponsor, or anyone when you are an administrator
+      --user string      the user whose connections the command reads or changes (required)
 ```
 
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

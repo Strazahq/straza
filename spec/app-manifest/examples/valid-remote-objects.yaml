@@ -1,0 +1,40 @@
+# A remote GitHub App server whose tools act on one repository each
+# (revision 7). The server marks its tools with ai.straza/object and
+# ai.straza/lists-objects, and a person pinned that declaration here: the
+# pinned block is the only one Straza decides with. Straza lists the repos
+# with repo_list and its own listing credential. search_code reaches every
+# repo, and get_me reaches none.
+apiVersion: straza.dev/v1beta1
+kind: App
+metadata:
+  name: ghapp
+  description: GitHub App server whose tools each act on one repository
+server:
+  name: com.example/github-app
+  version: "0.4.0"
+straza:
+  runtime:
+    kind: remote
+    remote:
+      url: https://ghapp.example.com/mcp
+  credential:
+    kind: static
+    inject:
+      as: header
+      name: Authorization
+      template: "Bearer {{secret}}"
+  exposure:
+    tools: ["*"]
+  objects:
+    type: repo
+    plural: repos
+    list:
+      tool: repo_list
+      attributes:
+        - {name: team, setBy: org}
+        - {name: topic, setBy: object}
+    tools:
+      pr_create: {argument: repo}
+      pr_merge: {argument: repo}
+      search_code: all
+      get_me: none

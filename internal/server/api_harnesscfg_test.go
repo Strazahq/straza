@@ -239,7 +239,7 @@ func TestSessionsWiringStatus(t *testing.T) {
 		mk("claude-code", `{"hooks.claude-code":"sha256:`+strings.Repeat("ff", 32)+`"}`): {
 			"mismatch", "sha256:" + strings.Repeat("ff", 32)},
 		mk("claude-code", `{"self":"sha256:beef"}`): {"unmeasured", ""},
-		mk("strazactl", `{}`):                       {"", ""},
+		mk("console", `{}`):                         {"", ""},
 	}
 
 	var list []sessionPayload

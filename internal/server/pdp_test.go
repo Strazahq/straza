@@ -31,12 +31,12 @@ func firstLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// checkinToken checks the seeded user in as the admin CLI does, under the
-// harness name strazactl, and returns the session token and session id. A
+// checkinToken checks the seeded user in as the console does, under the
+// harness name console, and returns the session token and session id. A
 // test that needs the session of a coding harness names it to checkinTokenAs.
 func checkinToken(t *testing.T, app *App, base string) (string, string) {
 	t.Helper()
-	return checkinTokenAs(t, base, "strazactl")
+	return checkinTokenAs(t, base, "console")
 }
 
 // checkinTokenAs checks kim in under the given harness name and returns the

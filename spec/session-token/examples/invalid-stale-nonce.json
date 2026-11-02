@@ -1,0 +1,33 @@
+{
+  "provenance": "doc RFC 9449 and spec/session-token/SPEC.md 2026-10-20 (generated, not captured from a client: proof key from the Ed25519 seed of 32 bytes 0x07, other key from 32 bytes 0x09, nonce key the 32 bytes 0x00 to 0x1f, signed at 2026-10-20T12:00:30Z)",
+  "description": "INVALID (semantic): the nonce is from two windows ago. The server answers 401 with error=\"use_dpop_nonce\" and a fresh nonce, and checks nothing else.",
+  "at": "2026-10-20T12:00:30Z",
+  "request": {
+    "method": "POST",
+    "path": "/v1/checkin",
+    "origins": [
+      "https://straza.example",
+      "http://127.0.0.1:8420"
+    ],
+    "counter": 7
+  },
+  "proof": "eyJhbGciOiJFZERTQSIsImp3ayI6eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IjZrcHNZLUtjVWdxLTlWQjdFeTdGLVpWSGRxNi12bnVTUWg3cWFSUkcwaXcifSwidHlwIjoiZHBvcCtqd3QifQ.eyJjdHIiOjcsImh0bSI6IlBPU1QiLCJodHUiOiJodHRwczovL3N0cmF6YS5leGFtcGxlL3YxL2NoZWNraW4iLCJpYXQiOjE3OTI0OTc2MzAsImp0aSI6IjAxNDU2ZGFiOWZkZmQxMTgzMzI4MDk5OGFkNmE4MGQyIiwibm9uY2UiOiJBQUFBQUFISDJ3NkhFMFZ5Ymhvd2NnZnlPcndYWVI4YnJBdFRrbHRkNEpzM3dqRTlQQW5UaXcifQ.uMxC_AdVO4yWaTsQZ-gzH-cHF_CxouTBzmYzzKcPj6oTBMu905lfUEXxYC_Spo2Vrk1CPot_RaPua9gqfn3wDg",
+  "header": {
+    "alg": "EdDSA",
+    "jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+    },
+    "typ": "dpop+jwt"
+  },
+  "claims": {
+    "ctr": 7,
+    "htm": "POST",
+    "htu": "https://straza.example/v1/checkin",
+    "iat": 1792497630,
+    "jti": "01456dab9fdfd11833280998ad6a80d2",
+    "nonce": "AAAAAAHH2w6HE0VybhowcgfyOrwXYR8brAtTkltd4Js3wjE9PAnTiw"
+  },
+  "reason": "stale nonce"
+}

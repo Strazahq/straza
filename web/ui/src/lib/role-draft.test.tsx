@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type RoleSpec, accessItems, newRoleItems, roleItem } from "./role-draft";
 import { type Plan, emptyPlan, planFor, readOwnRules, withChoice } from "./access-plan";
 import { ApiError, type AppRow, type BindingRow, type ToolRow, getPolicy } from "./api";
-import type { GrantInput } from "./grant-commit";
+import { type GrantInput, planRows } from "./grant-commit";
 import { setMismatch, setUnreadable } from "./role-words";
 import { savedEdit } from "./save-words";
 
@@ -238,5 +238,79 @@ describe("newRoleItems", () => {
     vi.mocked(getPolicy).mockRejectedValue(new ApiError("unreachable", 0, true));
     const plan = withChoice(ticked("get-sum"), "get-sum", "approve");
     expect(await newRoleItems({ name: "scout-role", kind: "application", description: "", implies: [] }, { role: { name: "scout-role" }, app, tools, plan })).toEqual({ error: setUnreadable("scout-role-access") });
+  });
+});
+
+describe("the covers line in a save", () => {
+  // ghapp pins repos, so its access row carries a covers line.
+  const ghapp: AppRow = {
+    id: "app-1",
+    name: "ghapp",
+    runtime: "remote",
+    status: "running",
+    reached_by: [],
+    manifest: { straza: { objects: { type: "repo", plural: "repos", list: { tool: "repo_list" }, tools: { pr_create: { argument: "repo" } } } } },
+  };
+  const gh: ToolRow[] = ["pr_create", "pr_view"].map((n, i) => ({ id: "g" + i, app: "ghapp", app_id: "app-1", name: n }));
+  const GH_EXPORT = [
+    "apiVersion: straza.dev/v1beta1",
+    "kind: Role",
+    "metadata:",
+    "    name: ghapp-write",
+    "spec:",
+    "    kind: application",
+    "    server: ghapp",
+    "    bindings:",
+    "        - app: midpoint",
+    "          tools:",
+    "            - read-user",
+    "          covers: every",
+    "        - app: ghapp",
+    "          tools:",
+    "            - pr_create",
+    "          covers: every",
+    "",
+  ].join("\n");
+  const two = { objects: [{ value: "Strazahq/pay-web", id: "R2" }, { value: "Strazahq/pay-api", id: "R1" }] };
+  const save = (plan: Plan): GrantInput => ({ role: { name: "ghapp-write", id: "r-2" }, app: ghapp, tools: gh, plan, replace: null, before: emptyPlan() });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getPolicy).mockRejectedValue(new ApiError("policy set not found", 404));
+  });
+
+  // Each case is the line the editor holds and the row the put carries:
+  // values sorted, never ids, and the untouched row as the export had it.
+  const cases: [string, Plan["covers"], RoleSpec["bindings"]][] = [
+    ["every", { every: true }, [{ app: "midpoint", tools: ["read-user"], covers: "every" }, { app: "ghapp", tools: ["pr_create"], covers: "every" }]],
+    ["these repos", two, [{ app: "midpoint", tools: ["read-user"], covers: "every" }, { app: "ghapp", tools: ["pr_create"], covers: { objects: ["Strazahq/pay-api", "Strazahq/pay-web"] } }]],
+  ];
+  it.each(cases)("writes %s on the edited row and keeps the other rows' lines", async (_case, covers, want) => {
+    const answer = await accessItems(save({ ...ticked("pr_create"), covers }), GH_EXPORT);
+    if (!("items" in answer)) throw new Error(answer.error);
+    expect(docOf(answer.items[0].doc || "").spec.bindings).toEqual(want);
+  });
+
+  it("writes no covers line on a server that pins no type", async () => {
+    const answer = await accessItems(input({ ...ticked("get-sum"), covers: { every: true } }, { replace: null, before: emptyPlan() }), EXPORT);
+    if (!("items" in answer)) throw new Error(answer.error);
+    expect(docOf(answer.items[0].doc || "").spec.bindings).toEqual([{ app: "demo-tools", tools: ["get-sum"] }]);
+  });
+
+  it("refuses to save over a row that carries a key the console does not edit", async () => {
+    const text = GH_EXPORT.replace("            - pr_create\n          covers: every\n", "            - pr_create\n          where: payments\n");
+    expect(await accessItems(save({ ...ticked("pr_create"), covers: { every: true } }), text)).toEqual({
+      error: "ghapp-write's access row carries where, which this console cannot edit. Edit the role as a file: strazactl roles export ghapp-write, then strazactl drafts create -f.",
+    });
+  });
+
+  it("names the line in the row the review shows", () => {
+    expect(planRows(save({ ...ticked("pr_create"), covers: two }))[0].label).toBe("Write the new access row: pr_create, on 2 repos: Strazahq/pay-api and Strazahq/pay-web");
+  });
+
+  it("puts a new role owned by a pinned server with its covers line", async () => {
+    const answer = await newRoleItems({ name: "ghapp-read", kind: "application", description: "", implies: [] }, { role: { name: "ghapp-read" }, app: ghapp, tools: gh, plan: { ...ticked("pr_view"), covers: { every: true } } });
+    if (!("items" in answer)) throw new Error(answer.error);
+    expect(docOf(answer.items[0].doc || "").spec).toEqual({ kind: "application", server: "ghapp", bindings: [{ app: "ghapp", tools: ["pr_view"], covers: "every" }] });
   });
 });

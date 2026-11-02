@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/policy"
 )
 
@@ -384,7 +385,9 @@ func TestModernBuiltinMappings(t *testing.T) {
 		{"CronList", policy.ToolTaskSpawn},
 		{"RemoteTrigger", policy.ToolTaskSpawn},
 		{"EndConversation", policy.ToolTaskSpawn},
+		{"SubagentHandback", policy.ToolTaskSpawn},
 		// egress lane
+		{"ArtifactCheck", policy.ToolNetFetch},
 		{"Artifact", policy.ToolNetFetch},
 		{"PushNotification", policy.ToolNetFetch},
 		{"DesignSync", policy.ToolNetFetch},
@@ -492,17 +495,70 @@ func TestNormalizeUnknownToolIsOther(t *testing.T) {
 	}
 }
 
-// TestHarnessLabel pins the harness label a record carries: name/version
-// when the harness reported a version, the bare name when it did not.
-func TestHarnessLabel(t *testing.T) {
+// TestNormalizeCarriesHarnessToolName pins where the harness's own tool
+// name lands: on the event as toolName for an unclassified tool, and beside
+// the event as NativeTool for a classified one, so the canonical event stays
+// harness-neutral. A name past the cap or with a control character is
+// dropped, and the tool stays denied as nameless.
+func TestNormalizeCarriesHarnessToolName(t *testing.T) {
+	adapters := loadTestAdapters(t)
+	long := strings.Repeat("x", 129)
+	cases := []struct {
+		name, harness  string
+		payload        map[string]any
+		tool, toolName string
+		native         string
+	}{
+		{"claude-code unknown", "claude-code", map[string]any{"tool_name": "FutureTool"}, policy.ToolOther, "FutureTool", ""},
+		{"claude-code classified", "claude-code", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}}, policy.ToolShellExec, "", "Bash"},
+		{"claude-code handback", "claude-code", map[string]any{"tool_name": "SubagentHandback"}, policy.ToolTaskSpawn, "", "SubagentHandback"},
+		{"claude-code mcp keeps its own toolName", "claude-code", map[string]any{"tool_name": "mcp__github__get_repo"}, policy.ToolMCPCall, "get_repo", ""},
+		{"codex unknown", "codex", map[string]any{"tool_name": "FutureTool"}, policy.ToolOther, "FutureTool", ""},
+		{"gemini unknown", "gemini", map[string]any{"tool_name": "future_tool"}, policy.ToolOther, "future_tool", ""},
+		{"kit unmapped tool", "python-sdk", map[string]any{"tool_name": "other", "native_tool_name": "refund_order"}, policy.ToolOther, "refund_order", ""},
+		{"kit mapped tool", "python-sdk", map[string]any{"tool_name": "net.fetch", "native_tool_name": "search_orders"}, policy.ToolNetFetch, "", "search_orders"},
+		{"old kit sends no name", "python-sdk", map[string]any{"tool_name": "other"}, policy.ToolOther, "", ""},
+		{"name at the cap", "claude-code", map[string]any{"tool_name": long[:128]}, policy.ToolOther, long[:128], ""},
+		{"name past the cap", "claude-code", map[string]any{"tool_name": long}, policy.ToolOther, "", ""},
+		{"control character", "claude-code", map[string]any{"tool_name": "Bad\nName"}, policy.ToolOther, "", ""},
+		{"format character", "claude-code", map[string]any{"tool_name": "Bad\u202eName"}, policy.ToolOther, "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			payload := map[string]any{"hook_event_name": "PreToolUse", "session_id": "s1", "cwd": "/w"}
+			if c.harness == "gemini" {
+				payload["hook_event_name"] = "BeforeTool"
+			}
+			for k, v := range c.payload {
+				payload[k] = v
+			}
+			got, err := Normalize(adapters[c.harness], payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Event.Tool != c.tool || got.Event.ToolName != c.toolName || got.NativeTool != c.native {
+				t.Errorf("got tool %q toolName %q native %q, want %q %q %q",
+					got.Event.Tool, got.Event.ToolName, got.NativeTool, c.tool, c.toolName, c.native)
+			}
+			if got.Event.NativeTool != "" {
+				t.Errorf("the canonical event carries nativeTool %q, want it beside the event", got.Event.NativeTool)
+			}
+		})
+	}
+}
+
+// TestHarnessName pins the harness label doctor shows for a session:
+// name/version when the harness reported a version, the bare name when it
+// did not.
+func TestHarnessName(t *testing.T) {
 	tests := []struct{ name, version, want string }{
 		{"claude-code", "2.1", "claude-code/2.1"},
 		{"claude-code", "", "claude-code"},
 		{"", "", ""},
 	}
 	for _, tt := range tests {
-		if got := harnessLabel(tt.name, tt.version); got != tt.want {
-			t.Errorf("harnessLabel(%q, %q) = %q, want %q", tt.name, tt.version, got, tt.want)
+		if got := harnessName(localapi.Harness{Name: tt.name, Version: tt.version}); got != tt.want {
+			t.Errorf("harnessName(%q, %q) = %q, want %q", tt.name, tt.version, got, tt.want)
 		}
 	}
 }

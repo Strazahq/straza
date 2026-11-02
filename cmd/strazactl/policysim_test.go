@@ -73,12 +73,6 @@ type simServer struct {
 func (s *simServer) start(t *testing.T) (*httptest.Server, func() *ctl.Client) {
 	t.Helper()
 	mux := http.NewServeMux()
-	// The bare test token always reads as expiring, so the client refreshes
-	// first: answer the checkin like the sibling fakes do.
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"ses-1","session_token":"stok-2"}`))
-	})
 	mux.HandleFunc("/v1/admin/policies/simulate", func(w http.ResponseWriter, r *http.Request) {
 		body := new(bytes.Buffer)
 		_, _ = body.ReadFrom(r.Body)
@@ -102,10 +96,9 @@ func (s *simServer) start(t *testing.T) (*httptest.Server, func() *ctl.Client) {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	creds := writeCreds(t, srv.URL)
 	return srv, func() *ctl.Client {
 		c := ctl.NewClient(srv.URL)
-		c.CredsPath = creds
+		c.APIToken = testToken
 		return c
 	}
 }

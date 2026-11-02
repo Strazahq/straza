@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { ApiError, get } from "./api";
-import { adminAreas, adminServers, checkin, devicePoll, deviceStart, logout, onAuthLost, resume, token } from "./session";
+import { NO_ANSWER, NO_STORAGE, PLAIN_HTTP, SIGNIN_PATH, adminAreas, adminServers, beginSignIn, checkin, finishSignIn, logout, onAuthLost, resume, stashProblem, takeResume, takeSignInProblem, token } from "./session";
 import { useSession } from "./use-session";
 
 type Call = { method: string; path: string; headers: Record<string, string>; body?: string };
@@ -54,7 +54,10 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   if (realLocation) Object.defineProperty(window, "location", realLocation);
+  // A finished sign-in cleans the real address to the sign-in path.
+  window.history.replaceState(null, "", "/");
 });
 
 describe("request", () => {
@@ -155,45 +158,198 @@ describe("a session that administers MCP servers", () => {
   });
 });
 
-describe("the device flow", () => {
-  it("deviceStart posts the form to the same-origin endpoint when idp.json is absent", async () => {
-    const calls = stubFetch({ "POST /oidc/device_authorization": () => ok({ device_code: "d", user_code: "ABCD-EFGH", verification_uri: "/oidc/device", interval: 1, expires_in: 600 }) });
-    const g = await deviceStart();
-    expect(g.user_code).toBe("ABCD-EFGH");
-    const c = calls.find((x) => x.path === "/oidc/device_authorization")!;
-    expect(c.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
-    expect(c.body).toBe("client_id=console&scope=openid");
-    expect(c.headers.Authorization).toBeUndefined();
+// signInLocation stands in for the address bar of a tab on the console:
+// assign is the departure to the identity provider.
+function signInLocation(pathname = "/console/policies", search = "") {
+  const assign = vi.fn();
+  const replace = vi.fn();
+  Object.defineProperty(window, "location", { configurable: true, value: { assign, replace, origin: "https://straza.example.com", pathname, search } });
+  return { assign, replace };
+}
+
+const PENDING = "straza.signin";
+const pendingOf = () => JSON.parse(sessionStorage.getItem(PENDING) || "null") as { state: string; verifier: string; nonce: string; back: string; started: number; sheet?: string } | null;
+const b64 = (o: unknown) => btoa(JSON.stringify(o)).replace(/=+$/, "");
+const idTokenWith = (nonce: string) => "h." + b64({ nonce, sub: "alice" }) + ".sig";
+
+// leaveAndAnswer starts a sign-in, then stands the tab at the answer the
+// identity provider would send back, with params over the pending state.
+async function leaveAndAnswer(params: Record<string, string> = {}, opts: { sheet?: string; back?: string } = {}) {
+  await beginSignIn({ back: opts.back || "/console/policies", sheet: opts.sheet });
+  const p = pendingOf()!;
+  const q = new URLSearchParams({ code: "c-1", state: p.state, ...params });
+  signInLocation(SIGNIN_PATH, "?" + q.toString());
+  return p;
+}
+
+describe("the browser sign-in", () => {
+  it("leaves for the server's own page with PKCE S256, the console id and the one return address when idp.json is absent", async () => {
+    stubFetch({});
+    const { assign } = signInLocation();
+    await beginSignIn({ back: "/console/policies" });
+    const to = new URL(assign.mock.calls[0][0], "https://straza.example.com");
+    const p = pendingOf()!;
+    expect(to.pathname).toBe("/oidc/authorize");
+    const q = to.searchParams;
+    expect([q.get("response_type"), q.get("client_id"), q.get("redirect_uri"), q.get("scope"), q.get("code_challenge_method")]).toEqual(["code", "console", "https://straza.example.com/console/signin", "openid profile", "S256"]);
+    expect([q.get("state"), q.get("nonce"), q.get("prompt")]).toEqual([p.state, p.nonce, null]);
+    const sum = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(p.verifier)));
+    expect(q.get("code_challenge")).toBe(btoa(String.fromCharCode(...sum)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""));
+    expect(p.back).toBe("/console/policies");
   });
 
-  it("devicePoll returns an RFC 6749 error body as the answer instead of throwing", async () => {
-    const calls = stubFetch({ "POST /oidc/token": () => ({ status: 400, body: { error: "authorization_pending" } }) });
-    expect(await devicePoll("d")).toEqual({ error: "authorization_pending" });
-    const c = calls.find((x) => x.path === "/oidc/token")!;
-    expect(c.body).toBe("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&device_code=d&client_id=console");
+  it("leaves for the provider the server names, with the server's client id", async () => {
+    vi.resetModules(); // the discovered flow is cached per page load
+    const fresh = await import("./session");
+    stubFetch({
+      "GET /.well-known/straza/idp.json": () => ok({ issuer: "https://sso.example.com/realms/straza", client_id: "straza" }),
+      "GET https://sso.example.com/realms/straza/.well-known/openid-configuration": () => ok({ authorization_endpoint: "https://sso.example.com/auth", token_endpoint: "https://sso.example.com/token" }),
+    });
+    const { assign } = signInLocation();
+    expect(await fresh.signInHost()).toBe("sso.example.com");
+    await fresh.beginSignIn();
+    const to = new URL(assign.mock.calls[0][0]);
+    expect(to.origin + to.pathname).toBe("https://sso.example.com/auth");
+    expect(to.searchParams.get("client_id")).toBe("straza");
+  });
+
+  it("the emergency sign-in goes to the server's own page and never reads idp.json", async () => {
+    const calls = stubFetch({ "GET /.well-known/straza/idp.json": () => ok({ issuer: "https://sso.example.com", client_id: "straza" }) });
+    const { assign } = signInLocation();
+    await beginSignIn({ emergency: true });
+    expect(calls).toEqual([]);
+    expect(String(assign.mock.calls[0][0])).toMatch(/^\/oidc\/authorize\?.*client_id=console/);
   });
 
   it("names the identity provider when this browser cannot reach its discovery document", async () => {
-    vi.resetModules(); // the discovered flow is cached per page load
+    vi.resetModules();
     const fresh = await import("./session");
     stubFetch({
       "GET /.well-known/straza/idp.json": () => ok({ issuer: "http://localhost:8480/realms/straza", client_id: "straza" }),
       "GET http://localhost:8480/realms/straza/.well-known/openid-configuration": () => "down",
     });
-    await expect(fresh.deviceStart()).rejects.toThrow("This browser cannot reach your identity provider at http://localhost:8480/realms/straza. Open that address in this browser to check that it answers, then press Start again.");
+    signInLocation();
+    await expect(fresh.beginSignIn()).rejects.toThrow("This browser cannot reach your identity provider at http://localhost:8480/realms/straza. Open that address in this browser to check that it answers, then press Sign in again.");
   });
 
-  it("the emergency sign-in posts same-origin with the console id and never reads idp.json", async () => {
+  it("refuses to leave from a page without Web Crypto, as plain HTTP from a network address is", async () => {
+    vi.stubGlobal("crypto", { getRandomValues: (a: Uint8Array) => a });
+    const { assign } = signInLocation();
+    await expect(beginSignIn()).rejects.toThrow(PLAIN_HTTP);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("does not leave when the tab cannot keep the sign-in record", async () => {
+    stubFetch({});
+    const { assign } = signInLocation();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    await expect(beginSignIn()).rejects.toThrow(NO_STORAGE);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("gives a second call with the cleaned address the first call's outcome, and checks in once", async () => {
+    let p = { nonce: "" };
+    const calls = stubFetch({ "POST /oidc/token": () => ok({ id_token: idTokenWith(p.nonce) }), "POST /v1/checkin": () => ok(good) });
+    signInLocation();
+    p = await leaveAndAnswer();
+    const first = finishSignIn(window.location.search);
+    const second = finishSignIn("");
+    expect(await second).toEqual(await first);
+    expect(checkins(calls)).toBe(1);
+  });
+
+  it("finishes: cleans the address, redeems the code with the verifier, checks the nonce and checks in", async () => {
+    let p = { nonce: "" };
     const calls = stubFetch({
-      "GET /.well-known/straza/idp.json": () => ok({ issuer: "https://idp.example", client_id: "straza-console" }),
-      "POST /oidc/device_authorization": () => ok({ device_code: "d", user_code: "ABCD-EFGH", verification_uri: "/oidc/device", interval: 1, expires_in: 600 }),
-      "POST /oidc/token": () => ({ status: 400, body: { error: "authorization_pending" } }),
+      "POST /oidc/token": () => ok({ id_token: idTokenWith(p.nonce) }),
+      "POST /v1/checkin": () => ok(good),
     });
-    expect((await deviceStart(true)).user_code).toBe("ABCD-EFGH");
-    expect(await devicePoll("d", true)).toEqual({ error: "authorization_pending" });
-    expect(calls.map((c) => c.path)).toEqual(["/oidc/device_authorization", "/oidc/token"]);
-    expect(calls[0].body).toBe("client_id=console&scope=openid");
-    expect(calls[1].body).toBe("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&device_code=d&client_id=console");
+    signInLocation();
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    p = await leaveAndAnswer();
+    const done = await finishSignIn(window.location.search);
+    expect(done).toEqual({ resp: good, back: "/console/policies" });
+    expect(replaceState).toHaveBeenCalledWith(null, "", SIGNIN_PATH);
+    expect(pendingOf()).toBeNull();
+    const redeem = new URLSearchParams(calls.find((c) => c.path === "/oidc/token")!.body);
+    expect(Object.fromEntries(redeem)).toEqual({ grant_type: "authorization_code", code: "c-1", redirect_uri: "https://straza.example.com/console/signin", client_id: "console", code_verifier: (p as { verifier?: string }).verifier });
+    expect(JSON.parse(calls.find((c) => c.path === "/v1/checkin")!.body!).id_token).toBe(idTokenWith(p.nonce));
+    expect(token()).toBe("tok-1");
+  });
+
+  const refusals: { name: string; params?: Record<string, string>; token?: Answer; age?: number; nonce?: string; want: string }[] = [
+    { name: "an answer to another tab's sign-in", params: { state: "someone-else" }, want: "This sign-in answer was not started in this tab, or it is more than 10 minutes old, so Straza did not use it. Press Sign in to start again." },
+    { name: "an answer more than ten minutes late", age: 10 * 60 * 1000 + 1, want: "This sign-in answer was not started in this tab" },
+    { name: "a token for another nonce", nonce: "another", want: "This sign-in answer was not started in this tab" },
+    { name: "the provider's refusal", params: { error: "access_denied", error_description: "The user cancelled the sign-in" }, want: "Your identity provider did not sign you in. It said: The user cancelled the sign-in. Press Sign in to try again, or ask your administrator whether your account may use Straza." },
+    { name: "a spent code", token: { status: 400, body: { error: "invalid_grant", error_description: "the code is unknown" } }, want: "Your identity provider says the sign-in answer expired or was already used. Press Sign in to start again." },
+    { name: "an unreachable strazad", token: "down", want: "strazad is unreachable, state unknown. Check the server, then press Sign in again." },
+  ];
+  it.each(refusals)("refuses $name with its sentence and checks in nothing", async ({ params, token: tokenAnswer, age, nonce, want }) => {
+    let p = { nonce: "" };
+    const calls = stubFetch({ "POST /oidc/token": () => tokenAnswer || ok({ id_token: idTokenWith(nonce || p.nonce) }), "POST /v1/checkin": () => ok(good) });
+    signInLocation();
+    p = await leaveAndAnswer(params);
+    if (age) vi.setSystemTime(Date.now() + age);
+    const done = await finishSignIn(window.location.search);
+    expect("problem" in done && done.problem).toContain(want);
+    expect(checkins(calls)).toBe(0);
+    expect(pendingOf()).toBeNull();
+  });
+
+  it("says the provider must allow this origin when its token endpoint will not answer this page", async () => {
+    vi.resetModules();
+    const fresh = await import("./session");
+    stubFetch({
+      "GET /.well-known/straza/idp.json": () => ok({ issuer: "https://sso.example.com", client_id: "straza" }),
+      "GET https://sso.example.com/.well-known/openid-configuration": () => ok({ authorization_endpoint: "https://sso.example.com/auth", token_endpoint: "https://sso.example.com/token" }),
+      "POST https://sso.example.com/token": () => "down",
+    });
+    signInLocation();
+    await fresh.beginSignIn();
+    const p = pendingOf()!;
+    signInLocation(SIGNIN_PATH, "?code=c-1&state=" + p.state);
+    const done = await fresh.finishSignIn(window.location.search);
+    expect("problem" in done && done.problem).toBe("Your identity provider at sso.example.com did not let this page finish the sign-in. Straza's registration there must allow sign-ins from https://straza.example.com: a single-page application address on Entra, a web origin on Keycloak, a trusted origin on Okta. Ask your administrator, then press Sign in.");
+  });
+
+  it.each([
+    { status: 403, error: "user is disabled. Contact your administrator", want: "You signed in at your identity provider, but Straza refused the session: user is disabled. Contact your administrator." },
+    { status: 503, error: "store unavailable", want: "Straza is temporarily unavailable, try again in a moment (the sign-in itself succeeded, nothing on your side needs fixing)." },
+  ])("words a check-in answered $status", async ({ status, error, want }) => {
+    let p = { nonce: "" };
+    stubFetch({ "POST /oidc/token": () => ok({ id_token: idTokenWith(p.nonce) }), "POST /v1/checkin": () => refuse(status, error) });
+    signInLocation();
+    p = await leaveAndAnswer();
+    const done = await finishSignIn(window.location.search);
+    expect("problem" in done && done.problem).toBe(want);
+  });
+
+  it("keeps an Enable this browser name for the page to resume, once", async () => {
+    let p = { nonce: "" };
+    stubFetch({ "POST /oidc/token": () => ok({ id_token: idTokenWith(p.nonce) }), "POST /v1/checkin": () => ok(good) });
+    signInLocation("/self-service/browser");
+    p = await leaveAndAnswer({}, { back: "/self-service/browser", sheet: "Firefox on Linux" });
+    expect(await finishSignIn(window.location.search)).toEqual({ resp: good, back: "/self-service/browser" });
+    expect(takeResume()).toBe("Firefox on Linux");
+    expect(takeResume()).toBeNull();
+  });
+
+  it("returns only to this server's two pages, whatever the stored address says", async () => {
+    stubFetch({});
+    signInLocation();
+    await beginSignIn({ back: "//evil.example/x" });
+    expect(pendingOf()!.back).toBe("/console/");
+  });
+
+  it("says once that a sign-in left and never came back, and a stashed failure comes first", async () => {
+    stubFetch({});
+    signInLocation();
+    await beginSignIn();
+    stashProblem("the stashed one");
+    expect(takeSignInProblem()).toBe("the stashed one");
+    expect(takeSignInProblem()).toBe(NO_ANSWER + "https://straza.example.com/console/signin to Straza's registration there. Press Sign in to try again.");
+    expect(takeSignInProblem()).toBeNull();
   });
 });
 

@@ -17,7 +17,7 @@ const bucket = (hour: number, allowed: number, approval: number, denied: number)
 const BLOCK: DecisionsBlock = {
   since: "2026-09-13T00:00:00Z",
   buckets: [bucket(0, 10, 0, 0), bucket(1, 4, 2, 1), bucket(2, 0, 0, 0)],
-  stopped: [{ app: "demo-tools", tool: "get-env", outcome: "denied", count: 23, reason: "dumps the process environment" }],
+  stopped: [{ app: "demo-tools", tool: "get-env", outcome: "denied", count: 23, reason: "dumps the process environment", seq: 4214 }],
 };
 
 const QUIET: DecisionsBlock = { since: "2026-09-13T00:00:00Z", buckets: [bucket(0, 0, 0, 0), bucket(1, 0, 0, 0)], stopped: [] };
@@ -187,17 +187,17 @@ describe("the last hour view", () => {
 });
 
 describe("what was stopped", () => {
-  it("opens Audit filtered to the tool of the row", async () => {
+  it("opens Audit on the newest record of the row that carries the reason it shows", async () => {
     table(BLOCK);
     await userEvent.click(screen.getByRole("button", { name: stoppedRowLabel("demo-tools / get-env") }));
     expect(screen.getByRole("dialog").textContent).toContain("dumps the process environment");
-    await userEvent.click(screen.getByRole("button", { name: "Open audit for this tool" }));
-    expect(take<{ q: string }>("audit")).toEqual({ q: "demo-tools / get-env" });
+    await userEvent.click(screen.getByRole("button", { name: "Open the latest call with this reason in Audit" }));
+    expect(take<{ seq: number }>("audit")).toEqual({ seq: 4214 });
     expect(vi.mocked(navigate)).toHaveBeenCalledWith("audit");
   });
 
   it("reads the outcome as a word in its hue", () => {
-    table({ ...BLOCK, stopped: [{ app: "", tool: "shell.exec", outcome: "approval", count: 3, reason: "held for sec-approvers" }] });
+    table({ ...BLOCK, stopped: [{ app: "", tool: "shell.exec", outcome: "approval", count: 3, reason: "held for sec-approvers", seq: 4215 }] });
     const row = document.querySelector("[data-stopped]") as HTMLElement;
     expect(row.getAttribute("data-stopped")).toBe("shell.exec");
     expect(within(row).getByText("needs approval").getAttribute("data-tone")).toBe("warn");

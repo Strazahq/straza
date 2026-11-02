@@ -6,6 +6,8 @@ import { PageHead } from "@/components/page-head";
 import { type SaveNote, SaveNoteLine, useDraftSave } from "@/components/use-draft-save";
 import { AccessStep, type Act, ComposeStep, DoneStep, type Draft, NameStep, PacksStep, type Pill, ReviewStep, planOf, storedName, toolNames } from "@/components/wizard/role-steps";
 import { StepStrip } from "@/components/wizard/step-strip";
+import { pinnedOf, uncovered } from "@/lib/access-covers";
+import { fileCommands } from "@/lib/access-object-words";
 import { type Plan, emptyPlan, fixedFrom, grantMatchers, rulesFor } from "@/lib/access-plan";
 import { mayWritePolicy } from "@/lib/access-read";
 import { type ApiError, type AppRow, type PackRow, type PreviewEntry, type RoleRow, type ToolRow, bindPack, catalogPreview, exportRole, listApps, listPacks, listRoles, listTools } from "@/lib/api";
@@ -58,7 +60,7 @@ import {
   rowOn,
   rowPack,
 } from "@/lib/role-words";
-import { newRoleItems } from "@/lib/role-draft";
+import { newRoleItems, roleFile } from "@/lib/role-draft";
 import { navigate } from "@/lib/router";
 import { type RouteKey, routeByKey } from "@/lib/routes";
 import { NOTHING_SAVED, SAVE_DRAFT, SAVE_PUBLISH } from "@/lib/save-words";
@@ -109,7 +111,7 @@ export function NewRole() {
   const [railRead, setRailRead] = React.useState(false);
   const [previews, setPreviews] = React.useState<Record<string, Record<string, PreviewEntry>>>({});
   const [reach, setReach] = React.useState<Record<string, Record<string, number> | null>>({});
-  const [miss, setMiss] = React.useState<"name" | "refused" | "server" | "tools" | null>(null);
+  const [miss, setMiss] = React.useState<"name" | "refused" | "server" | "tools" | "covers" | null>(null);
   const [acts, setActs] = React.useState<Act[]>([]);
   // binding is the packs being bound after the publish, and reading the
   // own set a save starts from.
@@ -266,11 +268,14 @@ export function NewRole() {
   };
 
   // An application role is made with its server and its tools in one
-  // line, the line the Add role sheet of a server shows.
+  // line, the line the Add role sheet of a server shows. On a server that
+  // pins a type the line has no covers line to give, so the role file and
+  // the command that drafts it stand in, with what it composes in the file.
+  const fileForm = owned && current && pinnedOf(current) ? fileCommands(roleFile({ name, kind: draft.kind, description: draft.description.trim(), implies: composed.map((r) => r.name) }, inputFor(current)), roleFileName(name)) : "";
   const commands = [
-    owned ? cliCreateRole(name, draft.server, currentMatchers, draft.description.trim()) : cliCreate(name, draft.kind, draft.description.trim()),
+    fileForm || (owned ? cliCreateRole(name, draft.server, currentMatchers, draft.description.trim()) : cliCreate(name, draft.kind, draft.description.trim())),
     ...(rules ? [cliApply(ownSet), cliActivate(ownSet)] : []),
-    ...composed.map((other) => cliImply(name, other.name)),
+    ...(fileForm ? [] : composed.map((other) => cliImply(name, other.name))),
     ...draft.packs.map((id) => cliPack(packName(id), name)),
   ].join("\n");
 
@@ -294,6 +299,7 @@ export function NewRole() {
       if (check && check.level === "error") { setMiss("refused"); nameBox.current?.focus(); return; }
     }
     if (step === "access" && !currentMatchers.length) { setMiss("tools"); return; }
+    if (step === "access" && current && uncovered(current, planOf(draft, current.name).covers)) { setMiss("covers"); return; }
     setMiss(null);
     setStep(steps[Math.min(at + 1, steps.length - 1)]);
   };
@@ -421,7 +427,7 @@ export function NewRole() {
         toolsOf={toolsOf}
         problem={appsProblem}
         fromServer={fromServer}
-        miss={miss === "tools" ? null : miss}
+        miss={miss === "tools" || miss === "covers" ? null : miss}
         nameBox={nameBox}
         onKind={(kind: Kind) => { setMiss(null); setDraft((d) => ({ ...d, kind })); }}
         onPick={(server) => { setMiss(null); setDraft((d) => ({ ...d, server })); }}
@@ -443,6 +449,7 @@ export function NewRole() {
         roleName={roleName}
         readOnly={!mayWritePolicy()}
         missing={miss === "tools"}
+        uncovered={miss === "covers"}
       />
     );
   } else if (step === "compose") {

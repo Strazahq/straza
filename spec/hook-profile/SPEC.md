@@ -8,6 +8,23 @@ snake_case), and `python-sdk`, the shape straza-agentkit itself emits
 from Python agents.
 Conformance fixtures: `spec/conformance/hooks/<harness>/<version>/`.
 
+Revision (2026-10-30): **an unclassified tool carries its own name**, and
+the claude-code mapping table gains two built-ins that fell to `other`.
+`SubagentHandback`, which returns a subagent's report to the agent that
+spawned it, rides `task.spawn`, and `ArtifactCheck`, which renders a page
+for review, rides `net.fetch`. An `other` event now MUST carry the
+harness's own name of the tool in `toolName`, which the schema already
+described, and an implementation drops a name longer than 128 bytes or one
+that holds a control or format character, so the tool stays nameless and
+denied. A classified local tool keeps its canonical event unchanged, so
+events stay identical across dialects, and the PEP that forwards it for a
+decision sends the harness's own name beside the event as `nativeTool` on
+the decide request, where spec/policyset revision 26 by-name rules read
+it. The python-sdk dialect gains the field `nativeTool: native_tool_name`,
+because the kit sends a canonical kind as `tool_name`. Additive: no schema
+change, existing fixtures unchanged, and new fixtures pin both tools, an
+unclassified tool on claude-code and codex, and the kit's named tools.
+
 Revision (2026-10-13): claude-code mapping table gains six built-ins of the
 current harness that fell to `other`: `ListAgents` rides `task.spawn` beside
 `SendMessage`, `ReadNotifications` and `FetchInboxMessage` read session
@@ -93,7 +110,7 @@ observational (audit) or context-injection points (`session.start`).
 | `net.fetch` | outbound network egress | `WebFetch`, `WebSearch`, `Artifact`, `PushNotification` |
 | `mcp.call` | MCP tool call; carries `app`, `toolName`, `args` | `mcp__<app>__<tool>` |
 | `task.spawn` | spawn/manage a subagent, task, or scheduled agent run | `Task`, `Agent`, `Workflow`, `TaskStop`, `CronCreate` |
-| `other` | anything unmapped | none |
+| `other` | anything unmapped; carries the harness's own name in `toolName` | none |
 
 The full per-harness assignment lives in the mapping tables (`mappings/`).
 Assignment rule: the kind is the tool's side effect outside the

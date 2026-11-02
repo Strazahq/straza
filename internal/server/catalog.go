@@ -48,6 +48,10 @@ type sessionCatalog struct {
 	// is never in it.
 	servers map[string]*serverCatalog
 
+	// holdings keeps per app name the held bindings sorted by role name, with
+	// their covers lines compiled for the object gate (held).
+	holdings map[string][]heldBinding
+
 	// key is the cache key this catalog was built under (roles|epoch|snapshot).
 	// id is a monotonic build id, folded into overlay keys and pagination cursors
 	// so neither can outlive the exact tier-1 they were probed against. roles is
@@ -109,12 +113,13 @@ func (a *App) catalogFor(roles []string) *sessionCatalog {
 	sorted := append([]string{}, roles...)
 	sort.Strings(sorted)
 	cur := a.snapshots.Current()
-	// Tier-1 key discipline: roles|epoch|snapshotID. Tier-1 tools are
+	// Tier-1 key discipline: roles|epoch|snapshotID, each role quoted
+	// because a role name may hold a comma. Tier-1 tools are
 	// policy-independent (approve gating lives in the tier-2 overlay), so
 	// the snapshot id does not change the tier-1 result; it is kept in the
 	// key as a conservative belt-and-suspenders (the activation hook in build.go
 	// also bumps the epoch via gateway.Invalidate(), which flushes everything).
-	key := fmt.Sprintf("%s|%d|%s", strings.Join(sorted, ","), a.gateway.epoch.Load(), cur.ID)
+	key := fmt.Sprintf("%q|%d|%s", sorted, a.gateway.epoch.Load(), cur.ID)
 
 	a.gateway.mu.Lock()
 	if v, ok := a.gateway.catalogs.Get(key); ok {
@@ -166,7 +171,8 @@ func (a *App) buildCatalog(roles []string) *sessionCatalog {
 	}
 	bindings, _ := a.gateway.bindings.Load().([]gwBinding)
 
-	c := &sessionCatalog{targets: map[string]gwTarget{}, servers: map[string]*serverCatalog{}}
+	c := &sessionCatalog{targets: map[string]gwTarget{}, servers: map[string]*serverCatalog{},
+		holdings: map[string][]heldBinding{}}
 	for _, view := range a.manager.Views() {
 		if view.Status != manager.StatusRunning && view.Status != manager.StatusDegraded {
 			continue
@@ -181,6 +187,7 @@ func (a *App) buildCatalog(roles []string) *sessionCatalog {
 			continue
 		}
 		sort.SliceStable(heldBindings, func(i, j int) bool { return heldBindings[i].Role < heldBindings[j].Role })
+		c.holdings[view.Name] = compileHoldings(heldBindings)
 		sc := &serverCatalog{viewsOn: view.ViewsOn, views: view.Views}
 		for _, t := range view.Tools {
 			grant, ok := grantingBinding(heldBindings, t.Name)
@@ -381,8 +388,8 @@ func subjectDigest(sub policy.Subject) string {
 	roles := append([]string{}, sub.Roles...)
 	sort.Strings(roles)
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%t\x00%s",
-		sub.User, strings.Join(roles, ","),
+	fmt.Fprintf(h, "%s\x00%q\x00%s\x00%t\x00%s",
+		sub.User, roles,
 		sub.Attestation, sub.DeviceCert, sub.Harness)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -525,16 +532,17 @@ func changedRoles(oldBs, newBs []gwBinding) map[string]bool {
 }
 
 // roleFingerprints reduces a binding table to one canonical string per role: the
-// role's (app, sorted matchers) pairs in sorted order. Two tables that produce
-// the same fingerprint for a role expose the same tools to it, so its cached
-// catalog need not be dropped. Control-character separators keep app names and
-// glob matchers from colliding at the joins.
+// role's (app, sorted matchers, scope key) entries in sorted order. Two tables
+// that produce the same fingerprint for a role expose the same tools on the
+// same objects to it, so its cached catalog need not be dropped.
+// Control-character separators keep app names and glob matchers from colliding
+// at the joins, and the quoted scope key keeps an id from reaching one.
 func roleFingerprints(bs []gwBinding) map[string]string {
 	byRole := map[string][]string{}
 	for _, b := range bs {
 		m := append([]string{}, b.Matchers...)
 		sort.Strings(m)
-		byRole[b.Role] = append(byRole[b.Role], b.App+"\x00"+strings.Join(m, "\x01"))
+		byRole[b.Role] = append(byRole[b.Role], b.App+"\x00"+strings.Join(m, "\x01")+"\x03"+strconv.Quote(b.Scope.Key()))
 	}
 	out := make(map[string]string, len(byRole))
 	for role, entries := range byRole {

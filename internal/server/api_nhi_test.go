@@ -152,6 +152,22 @@ func TestHeadlessNHILifecycle(t *testing.T) {
 	if code, body := grant(); code != http.StatusBadRequest || body["error"] != "invalid_client" {
 		t.Errorf("grant after key removal = %d %v, want invalid_client", code, body)
 	}
+
+	// 8. The key removal also ends what the key started: the ID token minted
+	// before it starts no new session, and the running session is revoked.
+	code, checkin = postJSON(t, base+"/v1/checkin", map[string]any{
+		"id_token":    idToken,
+		"harness":     map[string]string{"name": "exec-wrapper", "version": "1.0"},
+		"attestation": map[string]any{"managed": false, "hashes": map[string]string{}},
+	})
+	if code != http.StatusUnauthorized || checkin["error"] != staleKeyStampMsg {
+		t.Errorf("check-in with the old ID token = %d %v, want 401 %q", code, checkin, staleKeyStampMsg)
+	}
+	if dcode, dec := decide(t, base, sesTok, map[string]any{
+		"kind": "tool.pre", "tool": "shell.exec", "command": "ls",
+	}); dcode != http.StatusOK || dec["effect"] != "deny" || dec["ruleId"] != "revoked" {
+		t.Errorf("decide with the old session token = %d %v, want the revoked deny", dcode, dec)
+	}
 }
 
 // TestNHIKeyRead pins the key read surface: posture only, never the key.

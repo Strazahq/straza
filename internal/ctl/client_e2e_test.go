@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -106,37 +105,58 @@ func bootStrazad(t *testing.T) (string, string) {
 	return base, password
 }
 
-// driveLogin runs client.Login, approving the device code as the admin would.
-func driveLogin(t *testing.T, client *Client, base, adminPassword string) {
+// adminTokenClient signs the admin in at the built-in issuer as the console does,
+// mints an admin API token with the full scope on that sign-in, as the
+// console's Settings page does, and answers a client that sends the token,
+// the way a person hands strazactl one.
+func adminTokenClient(t *testing.T, base, adminPassword string) *Client {
 	t.Helper()
-	loginOut := &syncBuffer{}
-	loginErr := make(chan error, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	go func() { loginErr <- client.Login(ctx, loginOut, false) }()
-
-	codeRe := regexp.MustCompile(`confirm code ([A-Z2-9]{4}-[A-Z2-9]{4})`)
-	var userCode string
-	for i := 0; i < 100 && userCode == ""; i++ {
-		if m := codeRe.FindStringSubmatch(loginOut.String()); m != nil {
-			userCode = m[1]
-		} else {
-			time.Sleep(50 * time.Millisecond)
-		}
+	resp, err := http.PostForm(base+"/oidc/device_authorization", url.Values{"client_id": {"console"}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if userCode == "" {
-		t.Fatalf("no user code printed: %q", loginOut.String())
+	var auth map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&auth)
+	_ = resp.Body.Close()
+	userCode, _ := auth["user_code"].(string)
+	deviceCode, _ := auth["device_code"].(string)
+	if userCode == "" || deviceCode == "" {
+		t.Fatalf("device authorization answered %v", auth)
 	}
-	resp, err := http.PostForm(base+"/oidc/device", url.Values{
+	resp, err = http.PostForm(base+"/oidc/device", url.Values{
 		"user_code": {userCode}, "username": {"admin"}, "password": {adminPassword},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if err := <-loginErr; err != nil {
-		t.Fatalf("Login: %v", err)
+	resp, err = http.PostForm(base+"/oidc/token", url.Values{
+		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+		"device_code": {deviceCode},
+		"client_id":   {"console"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	var tok map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&tok)
+	_ = resp.Body.Close()
+	idToken, _ := tok["id_token"].(string)
+	if idToken == "" {
+		t.Fatalf("no id_token for the admin: %v", tok)
+	}
+	// The console sends its sign-in as the bearer of the mint.
+	console := NewClient(base)
+	console.APIToken = idToken
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	minted, err := console.CreateAPIToken(ctx, "e2e", "full", time.Hour)
+	if err != nil {
+		t.Fatalf("mint an admin API token: %v", err)
+	}
+	c := NewClient(base)
+	c.APIToken = minted.Token
+	return c
 }
 
 // TestCLISetPassword pins the password rotation path: a user created without a
@@ -144,9 +164,7 @@ func driveLogin(t *testing.T, client *Client, base, adminPassword string) {
 // admin runs `users set-password`, and can afterwards.
 func TestCLISetPassword(t *testing.T) {
 	base, adminPassword := bootStrazad(t)
-	admin := NewClient(base)
-	admin.CredsPath = filepath.Join(t.TempDir(), "credentials.json")
-	driveLogin(t, admin, base, adminPassword)
+	admin := adminTokenClient(t, base, adminPassword)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -156,7 +174,7 @@ func TestCLISetPassword(t *testing.T) {
 	}
 
 	// Raw device flow: without a credential the login page refuses sam.
-	resp, err := http.PostForm(base+"/oidc/device_authorization", url.Values{"client_id": {"strazactl"}})
+	resp, err := http.PostForm(base+"/oidc/device_authorization", url.Values{"client_id": {"console"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +208,7 @@ func TestCLISetPassword(t *testing.T) {
 	resp, err = http.PostForm(base+"/oidc/token", url.Values{
 		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
 		"device_code": {auth["device_code"].(string)},
-		"client_id":   {"strazactl"},
+		"client_id":   {"console"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -203,14 +221,12 @@ func TestCLISetPassword(t *testing.T) {
 	}
 }
 
-// TestCLIEndToEnd pins login → create role → assign → list, all
-// through the strazactl client against a real strazad.
+// TestCLIEndToEnd pins create role → assign → list and the rest, all
+// through the strazactl client on an admin API token against a real strazad.
 func TestCLIEndToEnd(t *testing.T) {
 	base, adminPassword := bootStrazad(t)
 
-	client := NewClient(base)
-	client.CredsPath = filepath.Join(t.TempDir(), "credentials.json")
-	driveLogin(t, client, base, adminPassword)
+	client := adminTokenClient(t, base, adminPassword)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -343,83 +359,6 @@ spec:
 		if p.Name == "cli-block-rm" && p.Status != "draft" {
 			t.Fatalf("cli-block-rm status = %s, want draft", p.Status)
 		}
-	}
-	if _, err = client.ActivatePolicy(ctx, "cli-block-rm", "active"); err != nil {
-		t.Fatalf("re-activate: %v", err) // restore for the assertions below
-	}
-
-	// Sessions: our own strazactl session is listed; revoking it locks the
-	// CLI out (kill switch from the operator's own perspective).
-	sessions, err := client.Sessions(ctx, "active")
-	if err != nil || len(sessions) == 0 {
-		t.Fatalf("Sessions: %v (%d)", err, len(sessions))
-	}
-	creds, err := client.loadCreds()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Session revocation kills THAT session. The enrolled device credential
-	// starts a fresh one, the same model as straza restarting a harness.
-	// Durable lock-out is user disable or device revoke, pinned by
-	// TestDeviceTokenCheckin server-side.
-	revokedID := creds.SessionID
-	if err := client.RevokeSession(ctx, revokedID); err != nil {
-		t.Fatalf("RevokeSession: %v", err)
-	}
-	if _, err := client.Users(ctx); err != nil {
-		t.Fatalf("device credential did not re-establish after session revoke: %v", err)
-	}
-	creds, err = client.loadCreds()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if creds.SessionID == revokedID {
-		t.Fatal("client still rides the revoked session instead of a new one")
-	}
-}
-
-// TestCLISessionRecovery pins session recovery for the admin CLI: a dead
-// session token no longer forces a browser login, because the stored device
-// credential re-establishes the session. Without it, the CLI demands
-// `strazactl login`.
-func TestCLISessionRecovery(t *testing.T) {
-	base, adminPassword := bootStrazad(t)
-	client := NewClient(base)
-	client.CredsPath = filepath.Join(t.TempDir(), "credentials.json")
-	driveLogin(t, client, base, adminPassword)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	creds, err := client.loadCreds()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if creds.DeviceToken == "" {
-		t.Fatal("login stored no device credential")
-	}
-
-	// The admin comes back after lunch: the session token is long dead.
-	dead := creds
-	dead.SessionToken = "expired.long.ago"
-	if err := client.saveCreds(dead); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.Roles(ctx); err != nil {
-		t.Fatalf("command after session death: %v", err)
-	}
-
-	// Without the device credential, the only path is a fresh login.
-	bare, err := client.loadCreds()
-	if err != nil {
-		t.Fatal(err)
-	}
-	bare.SessionToken = "expired.long.ago"
-	bare.DeviceToken = ""
-	if err := client.saveCreds(bare); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.Roles(ctx); err == nil || !strings.Contains(err.Error(), "strazactl login") {
-		t.Fatalf("err = %v, want a login demand", err)
 	}
 }
 

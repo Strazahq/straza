@@ -244,3 +244,48 @@ func TestHardeningKnobs(t *testing.T) {
 		t.Error("STRAZA_METRICS_TOKEN did not apply")
 	}
 }
+
+// TestMCPMaxBodyBytes pins server.mcpMaxBodyBytes: 4 MiB in both profiles
+// when the file leaves it out, the range 1 to 8 MiB, and a boot failure
+// that says what to set for 0, a negative value or one above 8 MiB, so a
+// 0 never turns the cap off. A Server that never went through the Loader
+// still caps at the default.
+func TestMCPMaxBodyBytes(t *testing.T) {
+	refused := func(v string) string {
+		return "server.mcpMaxBodyBytes is " + v + ", and it must be from 1 to 8388608 bytes (8 MiB). " +
+			"The straza client can resend at most 8 MiB of a request after a proof challenge, and each MCP request holds several copies of its body in strazad's memory. " +
+			"Set a value in that range, or remove the key for the 4 MiB default"
+	}
+	cases := []struct {
+		name string
+		file string
+		want int64
+		err  string
+	}{
+		{"standalone, the key left out", "profile: standalone\n", 4 << 20, ""},
+		{"enterprise, the key left out", "profile: enterprise\nstore:\n  dsn: postgres://x\n", 4 << 20, ""},
+		{"1", "server:\n  mcpMaxBodyBytes: 1\n", 1, ""},
+		{"8388608", "server:\n  mcpMaxBodyBytes: 8388608\n", 8 << 20, ""},
+		{"0", "server:\n  mcpMaxBodyBytes: 0\n", 0, refused("0")},
+		{"-1", "server:\n  mcpMaxBodyBytes: -1\n", 0, refused("-1")},
+		{"8388609", "server:\n  mcpMaxBodyBytes: 8388609\n", 0, refused("8388609")},
+	}
+	for _, tc := range cases {
+		cfg, err := Loader{FilePath: writeFile(t, tc.file), ExplicitFile: true, Getenv: noEnv}.Load()
+		if tc.err != "" {
+			if err == nil || err.Error() != tc.err {
+				t.Errorf("%s: Load error = %v, want %q", tc.name, err, tc.err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: Load: %v", tc.name, err)
+		}
+		if cfg.Server.MCPMaxBodyBytes != tc.want || cfg.Server.MCPBodyLimit() != tc.want {
+			t.Errorf("%s: mcpMaxBodyBytes = %d and limit %d, want %d", tc.name, cfg.Server.MCPMaxBodyBytes, cfg.Server.MCPBodyLimit(), tc.want)
+		}
+	}
+	if got := (Server{}).MCPBodyLimit(); got != 4<<20 {
+		t.Errorf("a bare Server's MCP body limit = %d, want the 4 MiB default", got)
+	}
+}

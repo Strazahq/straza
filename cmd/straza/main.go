@@ -1,21 +1,31 @@
 // Command straza is the Straza client-side enforcement kit: the Policy
 // Enforcement Point inside coding-agent harnesses. It enrolls the machine,
-// wires hooks and the MCP proxy into each Tier-1 harness, and serves the
-// hook, daemon, mcp, exec, doctor, status, trace and logs commands.
+// wires hooks and the MCP proxy into each Tier-1 harness, runs the Straza
+// background service, and serves the hook, mcp, exec, doctor, status, trace
+// and logs commands.
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"time"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
 	"github.com/strazahq/straza/internal/agentguard"
+	"github.com/strazahq/straza/internal/agentguard/gitremote"
+	"github.com/strazahq/straza/internal/agentguard/localapi"
+	"github.com/strazahq/straza/internal/oidcflow"
 	"github.com/strazahq/straza/internal/version"
 )
 
 func main() {
+	// Run as git-remote-straza, the binary is git's remote helper and
+	// nothing else, so no command, hook record or flag parsing sees the run.
+	if gitremote.Invoked(os.Args[0]) {
+		os.Exit(gitremote.Main(os.Args[1:]))
+	}
 	if err := rootCmd().Execute(); err != nil {
 		// A hook deny carries the harness block exit code (e.g. 2); the
 		// response body was already written to stdout.
@@ -53,20 +63,21 @@ func rootCmd() *cobra.Command {
 		statusCmd(),
 		connectCmd(),
 		disconnectCmd(),
-		daemonCmd(),
+		serviceCmd(),
 		mcpCmd(),
 		execCmd(),
 		doctorCmd(),
 		logsCmd(),
 		traceCmd(),
-		drainCmd(),
 	)
 	root.AddCommand(devCommands...)
 	return root
 }
 
-// devCommands holds the commands a build-tagged file adds to the root, such
-// as gen-docs under the docsgen tag. A plain build leaves it empty.
+// devCommands holds the hidden commands a build-tagged file adds to the
+// root: gen-docs under the docsgen tag, and on Windows and macOS the installer
+// group that the Straza MSI or the Straza package for macOS needs. A plain
+// build for Linux leaves it empty.
 var devCommands []*cobra.Command
 
 func execCmd() *cobra.Command {
@@ -74,8 +85,8 @@ func execCmd() *cobra.Command {
 		Use:   "exec -- <command> [args...]",
 		Short: "Run a command through Straza policy, for an agent that has no hooks",
 		Long: "The execution shim for agents that have no hook surface: the command is\n" +
-			"decided as a canonical shell.exec event against the local signed snapshot\n" +
-			"(same engine, spool, and fail-closed semantics as the harness hooks), then run\n" +
+			"decided as a canonical shell.exec event by the Straza background service\n" +
+			"(same policy, audit, and fail-closed semantics as the harness hooks), then run\n" +
 			"with inherited stdio and exit-code passthrough. Denials print the rule reason\n" +
 			"and exit 2. Advisory on an open machine; boundary-grade inside a sandbox\n" +
 			"profile where this shim is the only exec surface.",
@@ -93,40 +104,20 @@ func execCmd() *cobra.Command {
 	return cmd
 }
 
-// drainCmd uploads spooled audit records once. Hidden plumbing: hooks fire it
-// detached after every governed decision so audit is near-live without a
-// daemon; it is also a manual escape hatch. Always exits 0: a failed drain
-// keeps the spool for the next trigger and must never look like an error to
-// whatever spawned it.
-func drainCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "drain",
-		Hidden: true,
-		Short:  "Upload spooled audit records once (fired automatically after decisions)",
-		RunE: func(*cobra.Command, []string) error {
-			if n, err := agentguard.DrainOnce(10 * time.Second); err == nil && n > 0 {
-				fmt.Printf("drained %d audit record(s)\n", n)
-			}
-			return nil
-		},
-	}
-}
-
-// doctorCmd runs every diagnostic: enrollment, credentials, server
-// reachability + clock skew, session, snapshot verification, hook wiring,
-// audit-spool backlog, kill-switch path. Exit 1 when anything fails so
-// scripts can gate on it.
+// doctorCmd runs every diagnostic: the background service, enrollment, server
+// reachability + clock skew, sessions, hook wiring, audit-spool backlog,
+// kill-switch path. Exit 1 when anything fails so scripts can gate on it.
 func doctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Diagnose enrollment, connectivity, snapshot, hook wiring, and the audit spool",
+		Short: "Diagnose the background service, enrollment, connectivity, hook wiring, and the audit spool",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			store, err := agentguard.OpenStore()
 			if err != nil {
 				return err
 			}
-			checks := agentguard.Doctor(cmd.Context(), store)
+			checks := agentguard.Doctor(cmd.Context(), store, agentguard.NewServiceClient())
 			failed := false
 			for _, c := range checks {
 				status := map[string]string{"ok": " ok ", "warn": "WARN", "fail": "FAIL"}[c.Status]
@@ -146,28 +137,6 @@ func doctorCmd() *cobra.Command {
 	}
 }
 
-func daemonCmd() *cobra.Command {
-	var interval time.Duration
-	cmd := &cobra.Command{
-		Use:   "daemon",
-		Short: "Keep the session fresh and apply kill-switch pushes",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			store, err := agentguard.OpenStore()
-			if err != nil {
-				return err
-			}
-			d := agentguard.NewDaemon(store, os.Stdout)
-			if interval > 0 {
-				d.PollInterval = interval
-			}
-			return d.Run(cmd.Context())
-		},
-	}
-	cmd.Flags().DurationVar(&interval, "poll", 0, "poll-refresh interval (fallback when no push; default 30s)")
-	return cmd
-}
-
 func mcpCmd() *cobra.Command {
 	var harness string
 	cmd := &cobra.Command{
@@ -175,9 +144,10 @@ func mcpCmd() *cobra.Command {
 		Short: "Serve the Straza MCP gateway to this harness over stdio (`straza install` registers it)",
 		Args:  cobra.MaximumNArgs(1),
 		Long: "An MCP stdio server whose backend is the Straza gateway (/mcp): role-computed\n" +
-			"tool catalog, server-side credential injection, rate limits, audit. The proxy\n" +
-			"keeps the rotating session token on the wire (the one thing a static MCP\n" +
-			"config cannot do) and joins the same governed session as the hooks.\n\n" +
+			"tool catalog, server-side credential injection, rate limits, audit. The Straza\n" +
+			"background service keeps the rotating session token and its proof on the wire\n" +
+			"(the one thing a static MCP config cannot do), so the proxy holds no credential\n" +
+			"and joins the harness's newest governed session.\n\n" +
 			"With a server name, it serves that one server from its own gateway endpoint,\n" +
 			"with the server's own tool names and its views, for chat apps that show MCP\n" +
 			"Apps views.",
@@ -195,36 +165,51 @@ func mcpCmd() *cobra.Command {
 	return cmd
 }
 
+// noDisplay is the refusal of a browser sign-in on a machine where no
+// browser can be opened.
+const noDisplay = "This machine has no display, so Straza cannot open a browser here. " +
+	"Run `straza enroll --use-device-code` to sign in with a code on another device, if your Straza admin allows it."
+
+// headlessDeviceCode is the refusal of the two flags together.
+const headlessDeviceCode = "--use-device-code is for a person's sign-in, and --headless enrolls an agent with its key. " +
+	"Run `straza enroll --headless` for an agent, or `straza enroll --use-device-code` for a person."
+
 func enrollCmd() *cobra.Command {
 	var server, user string
-	var headless bool
+	var headless, deviceCode bool
 	cmd := &cobra.Command{
 		Use:   "enroll",
-		Short: "Log in via the OIDC device flow and enroll this device (--headless: an AI agent with no browser)",
+		Short: "Sign in through your browser and enroll this machine with the background service (--use-device-code: sign in with a code, --headless: an AI agent)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			target := resolveEnrollServer(server, os.Getenv("STRAZA_SERVER"))
-			if target.Server == "" {
-				return fmt.Errorf("--server is required (or set STRAZA_SERVER)")
+			if headless && deviceCode {
+				return errors.New(headlessDeviceCode) //nolint:staticcheck // ST1005: the operator-facing sentence is printed as it is
 			}
+			target := resolveEnrollServer(server, os.Getenv("STRAZA_SERVER"))
 			// Before anything is contacted or written: an enrolment aimed by
 			// the environment says so, once, on stderr (resolve.go).
 			if line := target.Announce(); line != "" {
 				fmt.Fprintln(cmd.ErrOrStderr(), line)
 			}
-			store, err := agentguard.OpenStore()
-			if err != nil {
-				return err
+			req := localapi.EnrollRequest{ServerURL: target.Server, Headless: headless, Username: user}
+			switch {
+			case headless:
+				// An agent signs in with its key or client secret, on no lane.
+			case deviceCode:
+				req.Lane = localapi.LaneDeviceCode
+			case !oidcflow.CanOpenBrowser(runtime.GOOS, os.Getenv):
+				// Never a silent switch to the code lane: the person picks it.
+				return errors.New(noDisplay) //nolint:staticcheck // ST1005: the operator-facing sentence is printed as it is
+			default:
+				req.Lane = localapi.LaneBrowser
 			}
-			if headless {
-				return agentguard.EnrollHeadless(cmd.Context(), store, target.Server, user, os.Stdout)
-			}
-			return agentguard.Enroll(cmd.Context(), store, target.Server, os.Stdout)
+			return agentguard.Enroll(cmd.Context(), agentguard.NewServiceClient(), req, os.Stdout)
 		},
 	}
 	cmd.Flags().StringVar(&server, "server", "", "strazad base URL")
-	cmd.Flags().BoolVar(&headless, "headless", false, "enroll an AI agent or a service account with no browser: with its own key at the built-in issuer, or with STRAZA_CLIENT_ID and STRAZA_CLIENT_SECRET at an external identity provider. Its sessions carry no device")
-	cmd.Flags().StringVar(&user, "user", "", "the username the local key is registered under (headless, standalone; default: the name straza keygen stored)")
+	cmd.Flags().BoolVar(&deviceCode, "use-device-code", false, "sign in with a code that you confirm in a browser on another device, for a machine with no display. Your Straza admin can turn this off")
+	cmd.Flags().BoolVar(&headless, "headless", false, "enroll an AI agent or a service account with no browser: with the key straza keygen made, or with the client secret at your identity provider that an administrator gave the Straza background service. Its sessions carry no device")
+	cmd.Flags().StringVar(&user, "user", "", "the username the agent's key is registered under (headless; default: the name straza keygen stored)")
 	return cmd
 }
 
@@ -233,18 +218,14 @@ func keygenCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "keygen",
-		Short: "Generate the local Ed25519 key an AI agent enrolls with headless",
+		Short: "Have the background service generate the Ed25519 key an AI agent enrolls with headless",
 		Args:  cobra.NoArgs,
-		Long: "Generates the keypair a headless AI agent or service account authenticates with.\n" +
-			"The private half never leaves this machine; print-out includes the\n" +
-			"`strazactl users nhi-key set` line an administrator runs to register\n" +
-			"the public half, after which `straza enroll --headless` works.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			store, err := agentguard.OpenStore()
-			if err != nil {
-				return err
-			}
-			return agentguard.Keygen(store, user, force, os.Stdout)
+		Long: "Asks the Straza background service to generate the keypair a headless AI agent\n" +
+			"or service account authenticates with. The service keeps the private half;\n" +
+			"print-out includes the `strazactl users nhi-key set` line an administrator\n" +
+			"runs to register the public half, after which `straza enroll --headless` works.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return agentguard.Keygen(cmd.Context(), agentguard.NewServiceClient(), user, force, os.Stdout)
 		},
 	}
 	cmd.Flags().StringVar(&user, "user", "", "the username this key will be registered under, printed in the registration line and used by enroll when --user is left out")
@@ -296,7 +277,7 @@ func installCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&managed, "managed", false, "install the root-owned, managed layout that a user cannot edit (run with sudo, or as an administrator on Windows)")
 	cmd.Flags().StringVar(&server, "server", "", "strazad base URL the managed layout pins for every user of this machine (required with --managed)")
-	cmd.Flags().StringVar(&binDir, "bin-dir", "", "managed binary directory (default: /usr/local/bin or %ProgramData%\\straza\\bin)")
+	cmd.Flags().StringVar(&binDir, "bin-dir", "", "managed binary directory (default: /usr/bin on Linux, /opt/straza/bin on macOS, %ProgramData%\\straza\\bin on Windows). The straza package, the Straza package for macOS or the Straza MSI installs the binary there, and this command never copies it")
 	return cmd
 }
 
@@ -539,47 +520,6 @@ func uninstallHarnessHooks(harness, self string) error {
 		fmt.Printf("no Straza hooks for codex in %s\n", hooks)
 	}
 	return migrateCodexStaleHooks()
-}
-
-func statusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Show enrollment and session status",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			store, err := agentguard.OpenStore()
-			if err != nil {
-				return err
-			}
-			cfg, err := store.LoadConfig()
-			if err != nil {
-				fmt.Println("not enrolled")
-				return nil
-			}
-			fmt.Printf("server     %s\n", cfg.ServerURL)
-			if id, err := store.LoadIdentity(); err == nil {
-				fmt.Println(identityLine(id))
-			}
-			if ses, err := store.LoadSession(); err == nil {
-				fmt.Printf("session    %s (roles %v, attestation %s)\n", ses.SessionID, ses.Roles, ses.Attestation)
-				fmt.Printf("snapshot   %s\n", ses.SnapshotID)
-				fmt.Println("killswitch edge push (SSE on the server origin, /v1/push); poll-refresh is the backstop; straza doctor probes the lane")
-			} else {
-				fmt.Println("session    none (start a harness session)")
-			}
-			return nil
-		},
-	}
-}
-
-// identityLine renders the status row for the enrolled identity. A headless
-// enrollment has no device, so its row names the credential lane and says so
-// instead of printing an empty device id.
-func identityLine(id agentguard.Identity) string {
-	if id.Headless != "" {
-		return fmt.Sprintf("identity   %s (headless, %s lane, no device)", id.Username, id.Headless)
-	}
-	return fmt.Sprintf("identity   %s (device %s)", id.Username, id.DeviceID)
 }
 
 func versionCmd() *cobra.Command {

@@ -178,6 +178,81 @@
           ]
         }
       }
+    },
+    {
+      "note": "revision 21: a role on a server that pins an object type renders its covers line under covers, the server and the type word and then every; the reference server's seed created scim-repos-every on scim-repos, which pins repo, with covers every [doc: derived from the reference server's TestSCIMGroupProjectionCovers, not captured from a live wire]",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"scim-repos-every\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "Resources": [
+            {
+              "displayName": "scim-repos-every",
+              "urn:straza:params:scim:schemas:extension:2.0:Group": {
+                "role": "scim-repos-every",
+                "server": "scim-repos",
+                "apps": ["scim-repos"],
+                "covers": ["scim-repos:repo every"]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "revision 21: a covers line that names objects renders one value per object, its name as a JSON string, so a name can never read as every; the reference server's seed created scim-repos-pay on scim-repos covering the repos Strazahq/pay-api and Strazahq/pay-web [doc: derived from the reference server's TestSCIMGroupProjectionCovers, not captured from a live wire]",
+      "request": {
+        "method": "GET",
+        "path": "/scim/v2/Groups?filter=displayName eq \"scim-repos-pay\""
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "Resources": [
+            {
+              "displayName": "scim-repos-pay",
+              "urn:straza:params:scim:schemas:extension:2.0:Group": {
+                "role": "scim-repos-pay",
+                "covers": [
+                  "scim-repos:repo \"Strazahq/pay-api\"",
+                  "scim-repos:repo \"Strazahq/pay-web\""
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "revision 21: covers is read-only like the rest of the projection, because which objects a role covers is Straza's fact, so a PATCH against the bare name answers scimType mutability [doc: derived from the reference server's TestSCIMGroupProjectionCovers and TestGroupProjectionWriteRefusals, not captured from a live wire]",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Groups/{gid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "covers",
+              "value": ["scim-repos:repo every"]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 400,
+        "subset": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:Error"
+          ],
+          "scimType": "mutability"
+        }
+      }
     }
   ]
 }

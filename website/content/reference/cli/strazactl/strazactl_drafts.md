@@ -1,6 +1,6 @@
 ---
 title: strazactl drafts
-description: Check, store, review and publish drafts of changes to MCP servers, roles, access rows and policy sets
+description: Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets
 pagetype: reference
 weight: 49
 draft: false
@@ -15,20 +15,16 @@ keywords: strazactl, drafts
 
 A draft holds App, Role, PolicySet and Removal documents that publish together
 or not at all. Straza checks every draft against live state, and nothing in a
-draft changes live state until a person publishes it with strazactl drafts publish.
+draft changes live state until a person publishes it in the console under Drafts.
+strazactl runs on an admin API token, which is not a person, so it never publishes.
 
 Exit status: 0 when the command did its job and, for check, create, update,
-revert, rebase and publish, the documents can be published as they stand. 1 when
-the server looked and said no: the verdict refuses, the server refused an update,
-a revert, a rebase, a contact or a publish, or a contacted server did not answer.
+revert and rebase, the documents can be published as they stand. 1 when the
+server looked and said no: the verdict refuses, or the server refused an update,
+a revert or a rebase.
 2 when the command could not do its job, for usage, a file, the credential, a
 refusal of the caller, the network or the server. list, show and discard never
 exit 1.
-
-Inside a coding agent on your strazactl login, check, list and show run, and the
-verbs that change a draft refuse to run. With STRAZA_API_TOKEN set they run as
-that token, and publish then meets the server's refusal, because only a person
-publishes.
 
 ```
 strazactl drafts [flags]
@@ -37,18 +33,16 @@ strazactl drafts [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
 
 * [strazactl](/reference/cli/strazactl/): Straza admin CLI
 * [strazactl drafts check](/reference/cli/strazactl/strazactl_drafts_check/): Check documents against live state and print the verdict, storing nothing
-* [strazactl drafts contact](/reference/cli/strazactl/strazactl_drafts_contact/): Contact a remote server a draft proposes, once and with no credential, and list its tools
 * [strazactl drafts create](/reference/cli/strazactl/strazactl_drafts_create/): Store the documents as a new draft and print its verdict
 * [strazactl drafts discard](/reference/cli/strazactl/strazactl_drafts_discard/): Discard an open draft, which changes nothing live
 * [strazactl drafts list](/reference/cli/strazactl/strazactl_drafts_list/): List drafts, newest first, the open ones unless --state names others
-* [strazactl drafts publish](/reference/cli/strazactl/strazactl_drafts_publish/): Publish a draft whole, after acknowledging every line that widens access
 * [strazactl drafts rebase](/reference/cli/strazactl/strazactl_drafts_rebase/): Check a draft again on live state, keeping the fields it changes and taking every other field from live
 * [strazactl drafts revert](/reference/cli/strazactl/strazactl_drafts_revert/): Make a new draft that undoes a published one, checked like any other
 * [strazactl drafts show](/reference/cli/strazactl/strazactl_drafts_show/): Show a draft: who proposed it, each object against live state, its verdict and who gains what

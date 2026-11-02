@@ -70,7 +70,7 @@ test('published search finds real configuration keys and commands', { skip: !pro
   }
   assert.equal(publishedSearch(pages, 'straza connect').hits[0].entry.p, 'reference/cli/straza/straza_connect/');
   assert.match(pages.find(page => page.p === 'get-started/' && !page.a).b, /Install the three binaries Server/);
-  assert.match(pages.find(page => page.p === 'get-started/first-governed-session/' && !page.a).b, /Before you start The three binaries on your PATH/);
+  assert.match(pages.find(page => page.p === 'get-started/first-governed-session/' && !page.a).b, /Before you start A Linux machine/);
   const filtered = publishedSearch(pages, 'credential', 10, 'guides');
   assert.ok(filtered.total > 0);
   assert.ok(filtered.hits.every(hit => hit.entry.p.startsWith('guides/')));

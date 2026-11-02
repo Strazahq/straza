@@ -8,7 +8,7 @@ keywords: vocabulary story identity policy decision evidence session
 ---
 
 
-{{< diagram name="first-session" caption="Your first session. strazad signed the starter policy, the hook on your machine checked alice's two calls against its own copy, and both decisions went to the audit chain after the calls." >}}
+{{< diagram name="first-session" caption="Your first session. strazad signed the starter policy, the hook and `straza service` on your machine checked alice's two calls against the service's copy, and both decisions went to the audit chain after the calls." >}}
 
 In [Your first governed session]({{< relref "get-started/first-governed-session.md" >}}) a policy denied one command and allowed another. Straza kept three things apart to get there. Who alice is comes from her user record. What her role means comes from the policy that names it. What happens to one call is decided when the call is made. This page follows the picture from left to right.
 
@@ -36,14 +36,14 @@ You created `dev` as an application role and assigned it to alice, so her sessio
 
 A PolicySet is one YAML document. Its `match` block selects the sessions it governs. Each rule names the tools it covers, optional matchers such as command patterns, an effect and a reason.
 
-The `standalone-starter` set that denied `rm -rf` has no match block, so it governs every session. Its one rule has six deny patterns and a reason written for the model to read. A fresh standalone store seeds this set once, and once you delete it Straza never creates it again. The enterprise profile seeds no starter set.
+The `standalone-starter` set that denied `rm -rf` has no match block, so it governs every session. Its one rule has six deny patterns and a reason written for the model to read. A fresh standalone store seeds this set once, and once you delete it Straza never creates it again. The enterprise profile seeds no starter set, so a fresh enterprise server denies every local tool until an admin adds a set like the one in [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}).
 
 You change policy in two moves. `strazactl policy apply` stores a new set switched off, and `strazactl policy activate` makes it live. Activation compiles every live set into one signed snapshot, and each client downloads that snapshot and checks its signature before it uses it.
 
 ## The hook and the session
 
 
-A session is one governed agent run, bound to an identity and, for a person, to an enrolled device. Enrolling gives the machine a long-lived device credential that can only check in. Each check-in returns a session token that lasts 300 seconds and carries the user, a hash of the roles and the id of the policy snapshot. The client renews it before it expires, and `straza status` shows the current session.
+A session is one governed agent run, bound to an identity and, for a person, to an enrolled device. `straza service`, the Straza background service you started, did the enrolling: it made a key for alice that never leaves it, and the Straza server bound the device to that key. Each check-in is signed with the key and returns a session token that lasts 300 seconds and carries the user, a hash of the roles and the id of the policy snapshot. The token works only with a fresh proof from the same key, so the service holds it and the hook never sees it. The service renews the token before it expires, and `straza status` shows each session it holds.
 
 Agents without a person start headless sessions with a registered key and need no enrolled device. Every session also records an attestation level, which describes how the hooks were installed. It is `advisory` for a user-mode install, `managed` for a registered root-owned install whose hashes match, and `none` when Straza has no trusted measurement. [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) explains each credential, and [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md" >}}) lists how long each one lasts.
 
@@ -59,12 +59,12 @@ When no rule applies, the default depends on where the call runs. `git status` r
 
 Evidence is the audit record. Every decision, login and identity change becomes one record with the actor, the subject, the outcome and the reason. Each record is linked to the one before it by a hash, so `strazactl audit verify` can walk the chain and prove that nothing was removed or altered.
 
-The client keeps its records in a local spool and uploads them after the decision, never before it. A tool call therefore never waits on the audit path, and a record you look for right after a decision may arrive a moment later. Over TLS or on localhost, the Overview card re-hashes the 25 newest records in your browser, and the Audit screen re-hashes every record it has loaded, starting with the newest 200.
+The service keeps the records in a local spool and uploads them after the decision, never before it. A tool call therefore never waits on the audit path, and a record you look for right after a decision may arrive a moment later. Over TLS or on localhost, the Overview card re-hashes the 25 newest records in your browser, and the Audit screen re-hashes every record it has loaded, starting with the newest 200.
 
 ## The kill switch
 
 
-The kill switch is revocation. Revoking a session ends that session. The server pushes the revocation to the client daemon, which drops the session state so that the next tool call is denied. A client without a daemon learns of it at its next token refresh, within the 300-second token lifetime.
+The kill switch is revocation. Revoking a session ends that session. The service holds a push stream for each live session, and when the server pushes the revocation, the service marks the session revoked so that the next tool call is denied. When the stream is down, the session learns of it at the first call that renews it, once 120 seconds or less of its 300-second token remain, so at most about 180 seconds after the token was minted for a session that keeps working.
 
 Disabling a user revokes every session and refuses new ones until an administrator enables the identity again. In the enterprise profile your identity manager holds that switch. Deactivating the person over SCIM disables the user in Straza, and with the identity provider wired into the same leaver flow it disables the login too, so one action cuts both the authorization and the authentication.
 

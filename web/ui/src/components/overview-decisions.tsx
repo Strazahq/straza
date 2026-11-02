@@ -51,7 +51,7 @@ export function Stopped({ block, denied = false }: { block: DecisionsBlock | nul
   const trigger = React.useRef<HTMLButtonElement | null>(null);
   const rows = block?.stopped || [];
   React.useEffect(() => { if (!block) setRecord(null); }, [block]);
-  const openAudit = (tool: string) => { put("audit", { q: tool }); navigate("audit"); };
+  const openAudit = (seq: number) => { put("audit", { seq }); navigate("audit"); };
   return <>
     <Panel name="stopped" title={STOPPED_TITLE} help={STOPPED_HELP} right={<Door to="audit" />} flush>
       {!rows.length ? <PanelNote>{block ? STOPPED_NONE : denied ? seatLine(STOPPED_TITLE, "config:read") : STOPPED_UNREAD}</PanelNote> : <div className="overflow-x-auto">
@@ -71,7 +71,7 @@ export function Stopped({ block, denied = false }: { block: DecisionsBlock | nul
     <Sheet open={!!record} onOpenChange={(open) => { if (!open) setRecord(null); }}>
       <SheetContent className="overflow-y-auto" onCloseAutoFocus={(e) => { e.preventDefault(); trigger.current?.focus(); }}>
         <SheetHeader><SheetTitle>Tool decision evidence</SheetTitle><SheetDescription>Most frequent recorded reason for this tool and outcome in the last 24 hours.</SheetDescription></SheetHeader>
-        {record && <div className="overview-evidence"><h3 className="font-mono break-words">{toolWords(record.app, record.tool)}</h3><dl><dt>Outcome</dt><dd>{outcomeWord(record.outcome)}</dd><dt>Decisions</dt><dd>{nfmt(record.count)}</dd></dl><pre>{record.reason}</pre><Button variant="outline" onClick={() => openAudit(toolWords(record.app, record.tool))}>Open audit for this tool</Button></div>}
+        {record && <div className="overview-evidence"><h3 className="font-mono break-words">{toolWords(record.app, record.tool)}</h3><dl><dt>Outcome</dt><dd>{outcomeWord(record.outcome)}</dd><dt>Decisions</dt><dd>{nfmt(record.count)}</dd></dl><pre>{record.reason}</pre><Button variant="outline" onClick={() => openAudit(record.seq)}>Open the latest call with this reason in Audit</Button></div>}
       </SheetContent>
     </Sheet>
   </>;

@@ -14,17 +14,17 @@ keywords: straza
 ## Commands
 
 * [straza connect](/reference/cli/straza/straza_connect/): Connect your own account to an MCP server; no server lists your connections
-* [straza daemon](/reference/cli/straza/straza_daemon/): Keep the session fresh and apply kill-switch pushes
 * [straza disconnect](/reference/cli/straza/straza_disconnect/): Remove your own connection to an MCP server
-* [straza doctor](/reference/cli/straza/straza_doctor/): Diagnose enrollment, connectivity, snapshot, hook wiring, and the audit spool
-* [straza enroll](/reference/cli/straza/straza_enroll/): Log in via the OIDC device flow and enroll this device (--headless: an AI agent with no browser)
+* [straza doctor](/reference/cli/straza/straza_doctor/): Diagnose the background service, enrollment, connectivity, hook wiring, and the audit spool
+* [straza enroll](/reference/cli/straza/straza_enroll/): Sign in through your browser and enroll this machine with the background service (--use-device-code: sign in with a code, --headless: an AI agent)
 * [straza exec](/reference/cli/straza/straza_exec/): Run a command through Straza policy, for an agent that has no hooks
 * [straza hook](/reference/cli/straza/straza_hook/): Hook entrypoint: normalize a harness payload and decide (reads stdin)
 * [straza install](/reference/cli/straza/straza_install/): Write hook wiring for Tier-1 harnesses (user mode, or --managed system layout)
-* [straza keygen](/reference/cli/straza/straza_keygen/): Generate the local Ed25519 key an AI agent enrolls with headless
-* [straza logs](/reference/cli/straza/straza_logs/): Print the client error log (hook/spool/drain failures; never payload content)
+* [straza keygen](/reference/cli/straza/straza_keygen/): Have the background service generate the Ed25519 key an AI agent enrolls with headless
+* [straza logs](/reference/cli/straza/straza_logs/): Print the client error log (hook, capture and MCP bridge failures; never payload content)
 * [straza mcp](/reference/cli/straza/straza_mcp/): Serve the Straza MCP gateway to this harness over stdio (`straza install` registers it)
-* [straza status](/reference/cli/straza/straza_status/): Show enrollment and session status
+* [straza service](/reference/cli/straza/straza_service/): Run the Straza background service that holds this machine's keys and sessions
+* [straza status](/reference/cli/straza/straza_status/): Show enrollment, sessions and the audit spool the background service holds for you
 * [straza trace](/reference/cli/straza/straza_trace/): Decision journal and debug trace (content-free): on, off, status, show
 * [straza uninstall](/reference/cli/straza/straza_uninstall/): Remove Straza hook wiring from harness settings
 * [straza version](/reference/cli/straza/straza_version/): Print version information

@@ -17,7 +17,7 @@ import {
   CHAIN_TIP, CHAIN_UNVERIFIED, CHAIN_WORD, CHECKING_TEXT, CHECKING_TIP, CHECKING_WORD, EMPTY_CHAIN, EMPTY_LENS, EMPTY_LOADING, EMPTY_SEARCH, EMPTY_UNREAD, LENSES, type Row,
   SEARCH_TIP, SEARCH_WORD, TAIL_KEEP, TAIL_WINDOW, UNREAD_TEXT, UNREAD_WORD, UNVERIFIED_WORD,
   ceRow, chainBroken, chainVerified, csvOf, effectTone, effectWord, foldAdjacent, jsonlOf, loadedWords,
-  matchWords, revokeBody, revokedWords, searchLine, sevTone, shortType, shownWords, typeMatches,
+  matchWords, recordMissing, revokeBody, revokedWords, searchLine, sevTone, shortType, shownWords, typeMatches,
 } from "@/lib/audit-words";
 import { canHash, verifyChain } from "@/lib/chain";
 import { take } from "@/lib/handoff";
@@ -254,12 +254,13 @@ const ENTER = "motion-safe:animate-in motion-safe:fade-in";
 // still says the person asked the system for reduced motion.
 const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-type Preset = { user?: string; session?: string; q?: string };
+type Preset = { user?: string; session?: string; q?: string; seq?: number };
 
 type Props = {
   // preset opens the screen on one subject, for the doors on the Sessions
-  // and Users screens: as a prop from the address, or through the
-  // hand-off box when a sheet sends the person here.
+  // and Users screens, or on one record by seq, for the Overview's stopped
+  // calls: as a prop from the address, or through the hand-off box when a
+  // sheet sends the person here.
   preset?: Preset;
 };
 
@@ -416,6 +417,23 @@ export function Audit({ preset }: Props) {
     const t = setTimeout(() => setQ(typed.trim()), 300);
     return () => clearTimeout(t);
   }, [typed]);
+
+  // A preset seq opens that one record in the sheet. It is read on its own,
+  // because it may sit before the window the tail loads.
+  React.useEffect(() => {
+    const seq = seed.seq;
+    if (!seq) return;
+    let alive = true;
+    listAudit(query({ after: seq - 1, limit: 1 })).then((batch) => {
+      if (!alive) return;
+      const hit = (batch || []).find((r) => r.seq === seq);
+      if (hit) setRecord(ceRow(hit));
+      else notify.failed(recordMissing(seq));
+    }, (e) => {
+      if (alive && (e as ApiError).status !== 401) notify.failed(readFailed("Record " + seq, e as ApiError));
+    });
+    return () => { alive = false; };
+  }, [seed.seq]);
 
   const loadOlder = async () => {
     const cur = tailRef.current;
@@ -583,7 +601,7 @@ export function Audit({ preset }: Props) {
           onOpenChange={(o) => { if (!o) setRecord(null); }}
           onRevoke={(r) => { setRefusal(null); setAsk(r); }}
           revoked={revoked.has(record.session)}
-          verified={!searching && canHash && !!tail.lastRead && tail.broken === 0}
+          verified={!searching && canHash && !!tail.lastRead && tail.broken === 0 && tail.rows.some((r) => r.seq === record.seq)}
         />
       )}
 

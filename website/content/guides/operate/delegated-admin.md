@@ -6,7 +6,7 @@ weight: 100
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server in an Alpine 3.20 container on Linux, with the map entry added to its config file and the server restarted, and the refused entries checked by booting a second server on each. The admin's strazactl ran on an admin API token minted in the console, and omar and mara signed in with strazactl login from their own home directories, so every command on the page ran, the unassign included. In headless Chromium the console's assign step and the role's Areas tab were clicked as the root admin, and omar's sign-in, sidebar and locked panel were read. The refusal of AI agents on admin routes was checked against the code and not run, because no command hands an agent's session token to another client
+  platform: A throwaway standalone server in an Alpine 3.20 container on Linux, with the map entry added to its config file and the server restarted, and the refused entries checked by booting a second server on each. The admin's strazactl ran on an admin API token minted in the console, so the assign and the unassign ran. In that run omar and mara probed their rights with strazactl after strazactl login from their own home directories, and strazactl no longer signs in, so the probe on a token's own scope was written on 2026-11-01 and not walked. In headless Chromium the console's assign step and the role's Areas tab were clicked as the root admin, and omar's sign-in, sidebar and locked panel were read. The refusal of AI agents on admin routes was checked against the code and not run, because no command hands an agent's session token to another client. In that walk omar's console sign-in used a code, and the browser sign-in that replaced it was written from the code on 2026-10-22 and not walked
   date: 2026-10-06
 applies_to: both
 who: You, as the root admin
@@ -104,51 +104,16 @@ Give the role to people. Only a person uses the admin API, so an AI agent or a s
 ## Sign in as the holder and probe both sides
 
 
-The holder signs in through the same device flow as any user. On every request the server resolves the session's roles, unions their scopes through the map and checks the area of the route. Inside the area everything works as it does for root.
+The holder signs in the same way as any user, with **Sign in** in the console, which goes through the browser. On every request the server resolves the session's roles, unions their scopes through the map and checks the area of the route. Inside the area everything works as it does for root.
 
 
 {{< console >}}
-Omar signs in at `/console/` with **Sign in with a code**. His sidebar holds **Sessions**, **Audit** and **Transcripts**, the three areas his role reads, and no other.
+Omar signs in at `/console/` with **Sign in**. His sidebar holds **Sessions**, **Audit** and **Transcripts**, the three areas his role reads, and no other.
 {{< /console >}}
 
 {{< cli >}}
-Omar signs in with `strazactl login --server`. This is omar, holding only `auditor`, listing sessions, trimmed to the first three rows:
 
-{{< command terminal="Terminal" purpose="as omar" >}}
-```sh
-strazactl sessions list
-```
-{{< /command >}}
-
-```table
-ID                                    USER   HARNESS                         CLIENT                ATTESTATION  WIRING      STATUS   LAST SEEN
-01a11331-3860-7408-94a6-ea1fbbb8cbb5  omar   strazactl/v1.1.0-117-g106081a8  v1.1.0-117-g106081a8  none         -           active   2026-10-06 21:49:15
-01a11330-c0b1-7ddc-8fd6-99bc446e34e0  mara   claude-code                     v1.1.0-117-g106081a8  advisory     unmeasured  active   2026-10-06 21:48:44
-01a11330-61e3-7c41-ac2b-4570d59264b7  carol  console/1                       -                     none         -           active   2026-10-06 21:48:23
-```
-
-
-Outside the area the server names the scope that is missing, and the command exits 1:
-
-{{< command terminal="Terminal" purpose="as omar" >}}
-```sh
-strazactl users list
-```
-{{< /command >}}
-
-```text
-strazactl: session lacks scope identity:read
-```
-
-{{< command terminal="Terminal" purpose="as omar" >}}
-```sh
-strazactl policy list
-```
-{{< /command >}}
-
-```text
-strazactl: session lacks scope policy:read
-```
+strazactl does not carry a person's roles. It runs on an admin API token, whose scope a person fixes when minting it, so omar probes his rights in the console, as its form of this step shows. A token meets the same area check: on a token that holds only `sessions:read`, `strazactl sessions list` answers. `strazactl users list` is refused with `strazactl: token lacks scope identity:read` and exits 1.
 {{< /cli >}}
 
 

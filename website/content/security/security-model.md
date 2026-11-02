@@ -8,7 +8,7 @@ keywords: security model invariants threat residual risk fail closed known limit
 ---
 
 
-A security reviewer or an auditor reads this page to learn what Straza defends, where each defense holds, what each one costs and which limits stay with you. Straza protects the actions an agent takes under an identity, so that a session can do only what its roles allow, every decision leaves a record that cannot be edited in place, and a revoked identity is refused by the gateway on its next call and by the workstation within seconds while the client daemon is connected. The design rests on eleven invariants, and [Known limits]({{< relref "security/known-limits.md" >}}) lists in one table every risk they leave with you.
+A security reviewer or an auditor reads this page to learn what Straza defends, where each defense holds, what each one costs and which limits stay with you. Straza protects the actions an agent takes under an identity, so that a session can do only what its roles allow, every decision leaves a record that cannot be edited in place, and a revoked identity is refused by the gateway on its next call and by the workstation within seconds while `straza service` holds the session's push stream. The design rests on eleven invariants, and [Known limits]({{< relref "security/known-limits.md" >}}) lists in one table every risk they leave with you.
 
 It is the security reading of the system that [Trust model and limits]({{< relref "concepts/trust-model-and-non-goals.md" >}}) describes.
 
@@ -43,6 +43,33 @@ Two residuals remain, and the image's own README states them. Computation inside
 
 The last boundary is the record. Every decision becomes an event on a hash chain, written after the decision and never in its path, and a sink you configure keeps a copy of every event off the box, where a database owner cannot rewrite it. [Evidence and audit]({{< relref "concepts/evidence.md" >}}) explains the chain and what it can and cannot prove.
 
+## The object boundary
+
+
+A server whose one credential reaches many objects, such as every repository of a GitHub organization, can pin an object type, and each role's access row on it then says which objects the role covers. The gateway holds that line on every `tools/call` to the server, on `/mcp` and on the server's own endpoint alike. The check runs after the tool check and the rate limit and before the policy engine. It reads the pinned declaration, the caller's held roles and this replica's copy of the object list, all from memory, so it adds no database read to the request path. A call that no held role covers is refused with a reason, never reaches policy or a person's approval, and leaves one `straza.audit.mcp` record that names the object and the held roles that bind the tool.
+
+
+The gateway reads the object from the one argument the declaration names. It refuses arguments that are not valid UTF-8, that repeat a key at any depth, that nest deeper than 128 levels, that carry the argument a second time under a spelling that differs only in case, or that send it as anything but a string. Each refusal removes a way for the server to read another value than the gate did. The value is then looked up byte for byte, with no trimming, case folding or decoding beyond JSON's own, so a spelling the list does not hold is an unknown object.
+
+
+Every state the gateway cannot vouch for narrows access:
+
+- An access row on a pinned server without a covers line covers nothing, and a draft refuses to publish one. A row whose covers line Straza cannot read leaves the gateway altogether, with an error in the server log.
+- A listing that fails, runs out of time or goes over a limit changes nothing, so the last good list stays, and the server's tab shows the reason.
+- With `apps.objects.enabled` false, no listing runs and only a role on every object may call a tool that names an object, so turning the check off never widens access.
+- A call that names an object the list does not hold gets the same refusal as an object no held role covers, so an agent cannot learn which objects exist. It also asks for one new listing of the server, and Straza lists a server at most once a minute this way, so a new repository reaches the list in about two minutes when a refused call comes again after that minute, and otherwise at the next 10-minute listing.
+- Tools the pinned declaration does not name count as reaching every object, and so does a tool whose live mark the pinned reach no longer meets, names another type or no longer parses, until a person publishes the change.
+- When a published change gives the server another type, listing tool or set of kept attributes, its list starts over and Straza lists it again at once. Until that listing lands, a role that names its objects is refused.
+
+
+The server receives what the gate checked. Straza forwards the arguments as the agent sent them and never rewrites them into a canonical copy, because that form would change how numbers are written, and the refusals above make the raw bytes mean one thing to every reader. On a call that waits for a person's approval, Straza first takes out the justification field the approval asked for. When a role that names its objects grants a call, Straza adds the object's id from its list as `params._meta["ai.straza/object-id"]`, so a server that keeps ids can refuse a call on an object that was deleted and made again since the last listing. A call through a role on every object carries no id. Straza drops the `_meta` an agent sends, so that key always comes from Straza. The server's listing credential goes to its listing tool alone and never rides a tool call.
+
+
+The role that grants a call is the first held role by name whose covers line covers the object, and the audit record and the credential broker both name it. An approval binds the object's type and value, so a ticket approved for one repository never runs a call on another, and the gateway checks coverage again when the ticket is used. The audit record of a call on a tool that names its object carries the object's type, reach, value and id. The attributes a listing keeps never leave the box in it.
+
+
+Only the gateway holds this boundary. The hook's decision on the agent's machine never runs the object check, and a server a person adds to their own harness has none, so register every server whose objects matter behind the gateway. The boundary also rests on three promises the server makes about what its tools touch, which [Trust model and limits]({{< relref "concepts/trust-model-and-non-goals.md#what-the-object-check-trusts" >}}) states. [Known limits]({{< relref "security/known-limits.md" >}}) lists what it leaves with you.
+
 ## The invariants and what each one costs
 
 Eleven invariants hold the design together. Each one below names the mechanism that holds it and what it costs you.
@@ -62,7 +89,7 @@ Each session token lives 300 seconds, is signed with Ed25519, and is verified ag
 
 Revoking a session, a user or a device writes a record and adds the target to an in-memory denylist on every replica. A session entry is never lifted again.
 
-The cost is a window. With the client daemon connected, the revocation lands in under two seconds on the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}), except that a session the daemon started again after a refusal learns of its own revoke at the next 30-second poll. Without the daemon, the hook keeps allowing from its cache until the token expires, at most 300 seconds after the mint in both profiles, while the gateway refuses the revoked token at once. Only a standalone hook whose renewal cannot learn the server's judgment, because strazad cannot be reached or something in front of it answers instead, adds its offline grace, up to 1,200 seconds after the mint. [Known limits]({{< relref "security/known-limits.md" >}}) lists this window with what shortens it, and [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) follows a machine's credential from enrollment to lockout.
+The cost is a window. With the session's push stream connected, which `straza service` holds for each live session, the revocation lands in under two seconds on the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}). While the stream is down, the revocation reaches the hooks at the first call that renews the session, once 120 seconds or less of the token remain, so at most about 180 seconds after the mint in both profiles for a session that keeps working, while the gateway refuses the revoked token at once. Only a standalone service whose renewal cannot learn the server's judgment, because strazad cannot be reached or something in front of it answers instead, adds its offline grace, up to 1,200 seconds after the mint. [Known limits]({{< relref "security/known-limits.md" >}}) lists this window with what shortens it, and [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) follows a machine's credential from enrollment to lockout.
 
 ### Audit is asynchronous
 
@@ -81,12 +108,12 @@ Any gateway instance can serve any session, and sticky routing is only an optimi
 ### Upstream credentials never reach the agent
 
 
-Injection happens on the gateway side, no API returns an upstream secret to a client, and the tests scan the bytes an agent can see for the injected value. The agent's own Straza credentials, the device credential and the session token, do sit on its machine, as [Credentials and sessions]({{< relref "security/credentials-and-sessions.md#what-sits-on-disk" >}}) shows. The cost is that a credentialed tool works only through a reachable gateway, since there is no way to hand the agent the secret for an offline call.
+Injection happens on the gateway side, no API returns an upstream secret to a client, and the tests scan the bytes an agent can see for the injected value. The agent's own Straza credentials do sit on its machine. On Linux the key and the session tokens sit with `straza service` under its own OS account. strazactl keeps no login, so an admin credential sits on the machine only when someone puts an admin API token there, as [Credentials and sessions]({{< relref "security/credentials-and-sessions.md#what-sits-on-disk" >}}) shows. The cost is that a credentialed tool works only through a reachable gateway, since there is no way to hand the agent the secret for an offline call.
 
 ### Every decision fails closed
 
 
-An unknown state is a deny that carries a reason the agent can read and act on. The clearest cost is the offline grace period. While the server is unreachable, a client keeps deciding from its verified snapshot for at most `governance.offlineGraceTTL` past its token's expiry, which is 15 minutes in the standalone profile and zero in the enterprise profile, as [the profile comparison]({{< relref "reference/standalone-and-enterprise.md#offline" >}}) shows. Then every governed action is denied with the words `session token expired`, the age, and the instruction to reconnect and run `straza doctor`. A bad deploy of strazad in an enterprise deployment therefore halts every agent within five minutes, which is the intended behavior and the thing to plan for.
+An unknown state is a deny that carries a reason the agent can read and act on. The clearest cost is the offline grace period. While the server is unreachable, `straza service` keeps deciding from its verified snapshot for at most `governance.offlineGraceTTL` past its token's expiry, which is 15 minutes in the standalone profile and zero in the enterprise profile, as [the profile comparison]({{< relref "reference/standalone-and-enterprise.md#offline" >}}) shows. Then every governed action is denied with the words `session token expired`, the age, and the instruction to reconnect and run `straza doctor`. A bad deploy of strazad in an enterprise deployment therefore halts every agent within five minutes, which is the intended behavior and the thing to plan for.
 
 Audit is the deliberate exception in the standalone profile, where a decision proceeds when its record cannot be written. In the enterprise profile a decision waits for room in the audit queue instead, so a long database outage stops decisions, as [Audit records can be lost](#audit-records-can-be-lost) explains.
 
@@ -140,22 +167,23 @@ Straza refuses to dial a link-local, cloud metadata or unspecified address for a
 The standalone issuer authenticates with passwords, hashed with bcrypt, because passkeys for it are not built. The server cannot verify from the wire that a session came from the sandbox image, so treat that claim as your deployment's and keep high-blast-radius permissions on managed sessions.
 
 
+Admin work from a terminal or a script runs on an admin API token, which a person mints in the console with a scope and an expiry. strazactl keeps no login of its own, so no admin credential sits on a machine unless someone puts a token there. Where a token goes is yours to decide. It is a bearer credential, and whoever holds it acts with its scope until it expires or is revoked, so never put one where an agent runs as you.
+
+
 Two things are out of scope by design. Model traffic is never proxied, so prompts and completions stay on whatever stack you run and Straza never sees them unless a policy turns on conversation recording at the hook. Computation inside a process is ungoverned, in the sandbox and everywhere else, because the interpreter is the agent.
 
 ## The limits in detail {#known-limits}
 
-Each limit below describes the code as it stands in v1.1.0, together with what you can do about it today. [Known limits]({{< relref "security/known-limits.md" >}}) lists every limit in one table, and the rows for these link here for the mechanism.
+Each limit below describes the code as it stands in 2.0.0, together with what you can do about it today. [Known limits]({{< relref "security/known-limits.md" >}}) lists every limit in one table, and the rows for these link here for the mechanism.
 
 ### An agent that holds its person's login can enroll an approval device
 
 
-A decision signed by an enrolled phone or browser proves which device decided, and it does not prove that a person acted. A person who holds `straza-admin` can mint an enroll token for their own user, and so can a person who holds `straza-enroll-mobile` or `straza-enroll-browser`, for that kind of device. The server stores the platform and the attestation that the enrolling device reports without checking them, so any program that makes a P-256 key can enroll as a phone.
+A decision signed by an enrolled phone or browser proves which device decided, and it does not prove that a person acted. No admin route or console screen enrolls a device in another person's name. The self route enrolls a device for whoever is signed in as the person, who mints the enroll token for that user on the self-service page or in the console. Minting needs `straza-admin`, or `straza-enroll-mobile` or `straza-enroll-browser` for that kind of device. strazad mints no enroll token for anyone else, whoever asks, and an admin API token mints none at all. Whoever can sign in as the person can still enroll a device as them. On the standalone profile strazad is the identity provider, so a credential that may set a person's password, such as an admin API token with the identity scope, can sign in as that person. The `straza.audit.admin` record `user.update` with `changed` `password` names that credential, and the person's own password stops working. The server stores the platform and the attestation that the enrolling device reports without checking them, so any program that makes a P-256 key can enroll as a phone.
 
-strazactl keeps its login in `~/.straza/credentials.json`, which every process that runs as the person can read. An AI agent that runs as the person can therefore enroll a device of its own. That device then decides every request the person may decide, including one the agent raised itself when the rule leaves the decision to that person.
+An AI agent that runs as the person can read every file the person can read. strazactl keeps no login there, because it runs only on an admin API token that a person mints in the console, and such a token mints no enroll token itself. On the standalone profile, a token with the identity area can set the person's password and then sign in as them, as the paragraph above says. The agent can still use a sign-in of the person that it can read, such as the person's unexpired ID token. With it, the agent can enroll a device of its own as the person. That device then decides every request the person may decide, including one the agent raised itself when the rule leaves the decision to that person.
 
-What you can do is keep a person's login away from their agents. Inside Claude Code, the Gemini CLI and Codex installed from npm, strazactl sees the variables those agents set and refuses every command that changes Straza on the stored login, minting an enroll token included. That guard stops a mistake or a naive prompt injection. It does not stop an agent that unsets the variables or reads the credentials file itself.
-
-So do admin work on a machine or an account where no agent runs as you, or run `strazactl logout` when you finish, which revokes the stored session and deletes the file. `strazactl approvers list` shows every enrolled approval device with its owner, and `strazactl approvers revoke` removes one that nobody recognizes. [Known limits]({{< relref "security/known-limits.md" >}}) lists this limit with the confirmation step that the roadmap plans for it.
+What you can do is keep every credential of a person away from their agents. Never put an admin API token where an agent runs as you: not in a shell profile, not in a file an agent can read, not in a terminal an agent shares. Give a token for a terminal the scopes the work needs and a short lifetime, and revoke it when the work is done. Keep tokens with the identity area few, because on the standalone profile each one can take over a person's sign-in. The enterprise profile closes that path, because there your identity provider signs people in and the built-in issuer signs in only the break-glass admin. `strazactl approvers list` shows every enrolled approval device with its owner, and `strazactl approvers revoke` removes one that nobody recognizes. [Known limits]({{< relref "security/known-limits.md" >}}) lists this limit with the confirmation step that the roadmap plans for it.
 
 ### The hook lane is not a security boundary
 
@@ -183,7 +211,7 @@ An allowed built-in given a very large value, such as `regex.match` over many me
 
 A managed install keeps the binary, the configuration and the hook wiring in root-owned system paths, so a person without administrator rights cannot change them. The server compares the hashes the client reports with its registry when a session starts. It registers the hook wiring hashes itself from its own rendering of the harness configuration, and the binary and the configuration count only once an admin registers their hashes with `strazactl attestation add`.
 
-The device credential and the session state stay in the person's home directory even on a managed install, where any process of that person can read them. A process that runs as the person can therefore send a check-in of its own with the registered hashes and receive a `managed` session. So `managed` shows that the reported files match the registry. It does not prove which program sent the report. Treat it as a guard against changed enforcement files, and never as the only thing between an agent and an action that must not happen.
+On Linux, `straza service` measures its own binary and the root-owned managed files itself, under its own OS account, and keeps the person's key and sessions out of reach of the person's processes. The hashes stay the client's report all the same. A program of the person's own that holds a fresh sign-in of the person can enroll a key it keeps itself, report the `account` custody, send a check-in with the registered hashes and receive a `managed` session. So `managed` shows that the reported files match the registry. It does not prove which program sent the report. Treat it as a guard against changed enforcement files, and never as the only thing between an agent and an action that must not happen.
 
 ### Audit records can be lost
 
@@ -203,6 +231,8 @@ A record can be lost in each of these cases:
 | strazad cannot write an admin, identity, authentication or approval record to its database | The record is lost, and strazad logs one warning line, with no retry and no counter |
 | The client spool cannot be written | The decision proceeds without a record |
 | The client spool holds more than 32 MiB of parked records, or one record is 3 MiB or larger | The oldest parked files, or that record, are dropped, and a loss marker records it for `straza doctor` |
+| A record is over 256 KiB of JSON when strazad writes it to its database, for example a hook command of hundreds of kilobytes, whose record escapes each `<`, `>` and `&` into six bytes | strazad cuts the longest strings of the record to one common length at which it fits, each followed by `... (<n> bytes, sha256 <hex>)`, its whole length and the hash of the whole string, so you can check a cut command against the client's own copy. The rest of each cut string is lost. A record that cutting cannot fit, such as one with thousands of paths, keeps only who acted, on what, the outcome and reason, and the command, workspace and arguments, each cut at 256 bytes the same way. Its other fields, the paths among them, are lost, and its `dataOmitted` gives the length and the hash of the whole record |
+| A row in the database outbox is larger than the event bus's maximum message size, which happens only when an external NATS server's `max_payload` is below 256 KiB or a row was written to the database past strazad | The relay sets the row aside, so its record never reaches the chain or the sinks, and every later record is published. `straza_outbox_set_aside_total` counts it, and strazad logs one error line with its id, subject and size and the bus's `max_payload` |
 | A client uploads a spooled record that names a session of another user or another device, an unknown session or a value that is not a session id, or a batch names more than 1000 sessions other than the uploader's | The server leaves the record out of the chain, logs one warning line for each session the upload names this way, with the count of records it covers, the first record's id and the uploader's session (one more line with the count for the records past the 1000), and counts each record in `straza_audit_refused_total`. The client spool has already deleted it with the rest of the batch |
 
 Under `block`, the enterprise default of `governance.auditBackpressure`, strazad keeps each record in its queue until the database takes it. While the database is down, the queue fills after 4,096 server decisions, about 7 minutes at 10 decisions per second or 41 seconds at 100. After that each new decision waits up to 25 seconds for room and is then refused with a reason that says the database cannot be reached. Nothing runs without its audit record, and strazad holds at most 25 seconds of waiting decisions.
@@ -213,7 +243,7 @@ The decisions that ran before the queue filled have their records in memory only
 
 Keep the database reachable and watch it. On the server and its clients, watch these:
 
-- `straza_audit_dropped_total`, `straza_audit_lost_total`, `straza_audit_refused_total` and `straza_failclosed_total` on the server.
+- `straza_audit_dropped_total`, `straza_audit_lost_total`, `straza_audit_refused_total`, `straza_outbox_set_aside_total` and `straza_failclosed_total` on the server.
 - The error lines that name each lost record, and the warning lines of admin, identity, authentication and approval records.
 - Each `audit batch:` warning line, which counts the refused spooled records.
 - The loss marker that `straza doctor` reports on each client.

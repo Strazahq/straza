@@ -43,12 +43,27 @@ func TestBareApproveRoutesToSponsor(t *testing.T) {
 	}
 }
 
+// TestBareApproveUnroutableDenies pins that Routable answers what Request
+// answers for the same call and writes nothing: the same cause for each
+// sponsor that cannot decide, nil when a pending ticket already covers the
+// call, and the same error when the ticket lookup meets a store fault.
 func TestBareApproveUnroutableDenies(t *testing.T) {
 	ctx := context.Background()
+	// agentOf creates the agent nova sponsored by sponsor.
+	agentOf := func(t *testing.T, h *harness, sponsor string) store.User {
+		u, err := h.st.Users().Create(ctx, store.User{Username: "nova", Email: "n@x.io",
+			UserType: store.UserTypeAgent, Sponsor: sponsor})
+		if err != nil {
+			t.Fatalf("Create nova: %v", err)
+		}
+		return u
+	}
 	cases := []struct {
 		name      string
 		requester func(t *testing.T, h *harness) store.User
-		wantCause []string
+		ticket    bool     // the rule is class ticket
+		wantCause []string // the UnroutableError cause both answer
+		wantFault error    // the store error both answer instead
 	}{
 		{
 			name: "no sponsor",
@@ -72,6 +87,17 @@ func TestBareApproveUnroutableDenies(t *testing.T) {
 				return u
 			},
 			wantCause: []string{`sponsor "ghost" is not known to Straza`, "Fix:"},
+		},
+		{
+			name: "disabled sponsor",
+			requester: func(t *testing.T, h *harness) store.User {
+				if _, err := h.st.Users().Create(ctx, store.User{Username: "gone", Email: "g@x.io", Status: store.UserDisabled}); err != nil {
+					t.Fatalf("Create gone: %v", err)
+				}
+				return agentOf(t, h, "gone")
+			},
+			ticket:    true,
+			wantCause: []string{`sponsor "gone" is not an active user`, "Fix:"},
 		},
 		{
 			name: "NHI sponsor",
@@ -99,25 +125,92 @@ func TestBareApproveUnroutableDenies(t *testing.T) {
 			},
 			wantCause: []string{`sponsor "carol" is the requester`},
 		},
+		{
+			// The lookup runs first, as in Request, so the ticket that
+			// covers the call still answers after its sponsor is disabled.
+			name: "a pending ticket for the same call routes after its sponsor is disabled",
+			requester: func(t *testing.T, h *harness) store.User {
+				grace := h.seedUser(t, "grace")
+				nova := agentOf(t, h, "grace")
+				spec := bareSpec()
+				spec.Class = policy.ClassTicket
+				if _, err := h.svc.Request(ctx, req("s-0", nova.ID, "nova", spec)); err != nil {
+					t.Fatalf("open the ticket: %v", err)
+				}
+				grace.Status = store.UserDisabled
+				if _, err := h.st.Users().Update(ctx, grace); err != nil {
+					t.Fatalf("disable grace: %v", err)
+				}
+				return nova
+			},
+			ticket: true,
+		},
+		{
+			name: "a store fault on the ticket lookup",
+			requester: func(t *testing.T, h *harness) store.User {
+				h.seedUser(t, "grace")
+				nova := agentOf(t, h, "grace")
+				h.svc.st = &flakyStore{Store: h.st, ticketErr: pgDown}
+				return nova
+			},
+			ticket:    true,
+			wantFault: pgDown,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
 			u := tc.requester(t, h)
-			_, err := h.svc.Request(ctx, req("s-1", u.ID, u.Username, bareSpec()))
-			var un *UnroutableError
-			if !errors.As(err, &un) {
-				t.Fatalf("Request err = %v, want *UnroutableError", err)
+			spec := bareSpec()
+			if tc.ticket {
+				spec.Class = policy.ClassTicket
 			}
-			for _, want := range tc.wantCause {
-				if !strings.Contains(un.Cause, want) {
-					t.Errorf("cause %q missing %q", un.Cause, want)
+			in := req("s-1", u.ID, u.Username, spec)
+			// rows counts the approval rows and the outbox rows in the real
+			// store, which a faulted service still writes to.
+			rows := func() (int, int) {
+				t.Helper()
+				recs, err := h.st.Approvals().List(ctx, "")
+				if err != nil {
+					t.Fatal(err)
 				}
+				evs, err := h.st.Outbox().ListUnpublished(ctx, 1000)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return len(recs), len(evs)
 			}
-			// Denied at request means denied WITHOUT a doomed record.
-			pending, err := h.st.Approvals().List(ctx, string(StatePending))
-			if err != nil || len(pending) != 0 {
-				t.Errorf("pending rows = %d (%v), want 0", len(pending), err)
+			approvals, outbox := rows()
+			checked := h.svc.Routable(ctx, in)
+			if a, o := rows(); a != approvals || o != outbox {
+				t.Errorf("Routable wrote %d approval rows and %d outbox rows, want none", a-approvals, o-outbox)
+			}
+			_, err := h.svc.Request(ctx, in)
+			// Denied at request means denied WITHOUT a doomed record, and a
+			// joined ticket is the one already there.
+			if a, o := rows(); a != approvals || o != outbox {
+				t.Errorf("Request wrote %d approval rows and %d outbox rows, want none", a-approvals, o-outbox)
+			}
+			var un, checkedUn *UnroutableError
+			switch {
+			case tc.wantCause != nil:
+				if !errors.As(err, &un) || !errors.As(checked, &checkedUn) {
+					t.Fatalf("Request err = %v and Routable err = %v, want *UnroutableError from both", err, checked)
+				}
+				if checkedUn.Cause != un.Cause {
+					t.Errorf("Routable cause %q, want Request's %q", checkedUn.Cause, un.Cause)
+				}
+				for _, want := range tc.wantCause {
+					if !strings.Contains(un.Cause, want) {
+						t.Errorf("cause %q missing %q", un.Cause, want)
+					}
+				}
+			case tc.wantFault != nil:
+				if !errors.Is(err, tc.wantFault) || errors.As(err, &un) || checked == nil || checked.Error() != err.Error() {
+					t.Errorf("Routable err = %v, Request err = %v, want the same store fault from both", checked, err)
+				}
+			case checked != nil || err != nil:
+				t.Errorf("Routable err = %v, Request err = %v, want both to join the pending ticket", checked, err)
 			}
 		})
 	}

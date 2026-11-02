@@ -80,6 +80,9 @@ func (p *publishTx) putApp(ctx context.Context, i int) error {
 		if err := p.affectOne(res, err, it.Ref); err != nil {
 			return err
 		}
+		if out.Repinned, err = p.pinScopes(ctx, lo.app, a.Manifest); err != nil {
+			return err
+		}
 		out.ID = lo.app.ID
 		out.AdminRole, err = p.roleByID(ctx, lo.app.AdminRoleID)
 		return err
@@ -220,16 +223,17 @@ func (p *publishTx) putRoleRow(ctx context.Context, i int) error {
 }
 
 // putRoleLinks writes an explicit role put's access row and edges. The row
-// is replaced with a new id only when its server or its tools differ from
-// the live row. The edges the item drops are deleted and the ones it adds
-// are inserted, their names resolved inside the transaction.
+// is replaced with a new id only when its server, its tools or its scope
+// key differ from the live row. The edges the item drops are deleted and
+// the ones it adds are inserted, their names resolved inside the
+// transaction.
 func (p *publishTx) putRoleLinks(ctx context.Context, i int) error {
 	it, lo, out := p.plan.Items[i], &p.live[i], p.outcomes[i]
 	if it.Ref.Kind != kindRole || it.Op != opPut || it.Implied {
 		return nil
 	}
 	cfg := it.Role
-	if cfg.Server != lo.server || !slices.Equal(sortedNames(cfg.Tools), sortedNames(lo.tools)) {
+	if cfg.Server != lo.server || !slices.Equal(sortedNames(cfg.Tools), sortedNames(lo.tools)) || cfg.Scope.Key() != lo.scope.Key() {
 		if lo.binding != nil {
 			if _, err := p.tx.ExecContext(ctx, p.r.s.q(`DELETE FROM tool_bindings WHERE role_id = $1`), lo.role.ID); err != nil {
 				return p.r.s.mapErr(err)
@@ -279,7 +283,7 @@ func (p *publishTx) putRoleLinks(ctx context.Context, i int) error {
 }
 
 // insertAccess inserts the access row cfg names for the role, on the live
-// server of its name, with a new id.
+// server of its name, with a new id and cfg's covers line.
 func (p *publishTx) insertAccess(ctx context.Context, ref ObjectRef, roleID string, cfg *RoleConfig) (ToolBinding, error) {
 	appID, err := p.one(ctx, `SELECT id FROM apps WHERE name = $1 AND deleted_at IS NULL`, cfg.Server)
 	if err != nil {
@@ -292,9 +296,14 @@ func (p *publishTx) insertAccess(ctx context.Context, ref ObjectRef, roleID stri
 	if err != nil {
 		return ToolBinding{}, err
 	}
-	b := ToolBinding{ID: newID(), RoleID: roleID, AppID: appID, ToolMatcher: string(matcher), Effect: "allow", CreatedAt: p.at}
-	_, err = p.tx.ExecContext(ctx, p.r.s.q(`INSERT INTO tool_bindings (id, role_id, app_id, tool_matcher, effect, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`), b.ID, b.RoleID, b.AppID, b.ToolMatcher, b.Effect, p.r.s.tArg(b.CreatedAt))
+	scope, err := encodeScope(cfg.Scope)
+	if err != nil {
+		return ToolBinding{}, err
+	}
+	b := ToolBinding{ID: newID(), RoleID: roleID, AppID: appID, ToolMatcher: string(matcher), Effect: "allow",
+		Scope: canonicalScope(cfg.Scope), CreatedAt: p.at}
+	_, err = p.tx.ExecContext(ctx, p.r.s.q(`INSERT INTO tool_bindings (id, role_id, app_id, tool_matcher, effect, object_scope, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`), b.ID, b.RoleID, b.AppID, b.ToolMatcher, b.Effect, scope, p.r.s.tArg(b.CreatedAt))
 	return b, p.r.s.mapErr(err)
 }
 
@@ -497,7 +506,9 @@ func (p *publishTx) insertRecords(ctx context.Context) (int, error) {
 			created := base.Add(time.Duration(i)*time.Microsecond + time.Nanosecond)
 			n := 4 * (i - at)
 			values = append(values, fmt.Sprintf("($%d, $%d, $%d, FALSE, 0, $%d)", n+1, n+2, n+3, n+4))
-			args = append(args, e.ID, e.Subject, e.CE, p.r.s.tArg(created))
+			// The records follow from this transaction's outcome, so they
+			// are bounded inside it.
+			args = append(args, e.ID, e.Subject, boundRecord(e.CE), p.r.s.tArg(created))
 		}
 		if _, err := p.tx.ExecContext(ctx, p.r.s.q(`INSERT INTO events_outbox (id, subject, ce, published, attempts, created_at)
 			VALUES `+strings.Join(values, ", ")), args...); err != nil {

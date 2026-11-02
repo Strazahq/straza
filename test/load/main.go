@@ -45,7 +45,7 @@ func main() {
 		soak        = flag.Duration("soak", 0, "soak window (30m at reference scale; 0 = skip): sustained gateway mix, zero goroutine/heap leak")
 		fleetN      = flag.Int("fleet", 0, "standing-fleet rig size (0 = skip): N real sessions each holding push SSE + /mcp SSE + a poll checkin loop")
 		fleetDur    = flag.Duration("fleet-duration", 90*time.Second, "fleet steady-state window")
-		fleetPoll   = flag.Duration("fleet-poll", 30*time.Second, "fleet checkin refresh interval (the real daemon poll)")
+		fleetPoll   = flag.Duration("fleet-poll", 30*time.Second, "fleet checkin refresh interval (30 s is harsher than straza service, which renews a 300 s token at 120 s left)")
 		fleetCapPct = flag.Int("fleet-capture-pct", 10, "percent of the fleet emitting capture turns (the customer 5-10%% shape; 100 = everyone)")
 		fleetTurn   = flag.Duration("fleet-turn-every", 20*time.Second, "captured agent turn interval (1 turn = 2 CEs, ~2KiB each)")
 		fleetMcpPct = flag.Int("fleet-mcp-pct", 100, "percent of the fleet holding a standing /mcp SSE stream")

@@ -8,8 +8,9 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { FetchError, RefusedError } from "@/components/error-state";
 import { Section } from "@/components/sheet-parts";
 import { type PickedUser, UserPicker } from "@/components/user-picker";
+import { ObjectPicker, argumentOf, gateOf, objectLine, objectMissing, pinnedOf } from "@/components/test-a-call";
 import { Outcome, WhyCard, decidersLine, wireLine } from "@/components/why-card";
-import { type ApiError, type AppRow, type BindingRow, type Decision, type SimulateAnswer, type SimulateRequest, type ToolRow, type UserRow, listApps, listBindings, listTools, listUsers, query, simulate } from "@/lib/api";
+import { type ApiError, type AppRow, type BindingRow, type Decision, type ObjectRow, type SimulateAnswer, type SimulateRequest, type ToolRow, type UserRow, listApps, listBindings, listTools, listUsers, query, simulate } from "@/lib/api";
 import { version } from "@/lib/public";
 import {
   CLOSE, DECIDED_LIVE, LANE_LABEL, LIVE_NOW, NET_LINE, SERVER, SUBJECT_SERVERS, TEST, TEST_ANSWER, TEST_COMMAND,
@@ -32,6 +33,9 @@ export type PolicyTestPrefill = {
   tool?: string;
   command?: string;
   path?: string;
+  // object is the object the recorded call named, on a server that pins
+  // an object type.
+  object?: ObjectRow;
 };
 
 export type PolicyTestProps = {
@@ -64,14 +68,16 @@ type Catalog = { apps: AppRow[]; tools: ToolRow[]; bindings: BindingRow[] };
 type Read = { kind: "loading" } | { kind: "ready"; catalog: Catalog } | { kind: "failed"; detail: string };
 
 // Ask is one filled-in question, passed whole so a prefilled open can test
-// before its state updates land.
-type Ask = { user: string; lane: Lane; app: string; toolName: string; command: string; path: string };
+// before its state updates land. args carry the object a tool's argument
+// names on a server that pins an object type.
+type Ask = { user: string; lane: Lane; app: string; toolName: string; command: string; path: string; args?: Record<string, unknown> };
 
 function eventOf(ask: Ask): SimulateRequest["event"] {
   const event: SimulateRequest["event"] = { kind: "tool.pre", tool: TOOL_OF[ask.lane] };
   if (ask.lane === "mcp") {
     event.app = ask.app;
     event.toolName = ask.toolName;
+    if (ask.args) event.args = ask.args;
   }
   if (ask.lane === "shell") event.command = ask.command;
   if (ask.lane === "files") event.paths = [ask.path];
@@ -88,6 +94,17 @@ const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompar
 // does not list it, so the trigger never reads empty for a call that was
 // really made.
 const withCurrent = (names: string[], current: string) => (current && !names.includes(current) ? [...names, current] : names);
+
+// pinnedIn reads the pinned block of the server named app from the catalog,
+// null when the server pins no object type or the catalog is not read.
+function pinnedIn(catalog: Catalog | null, app: string) {
+  const block = catalog?.apps.find((a) => a.name === app)?.manifest?.straza?.objects;
+  return block ? pinnedOf(block) : null;
+}
+
+// argsOf is the arguments a test sends: the picked object in the argument
+// that names it, or none.
+const argsOf = (arg: string, target: ObjectRow | null) => (arg && target ? { [arg]: target.value } : undefined);
 
 // Body is the form and its answer. It mounts on every open, so the reads
 // run once per open and the last answer does not linger.
@@ -106,6 +123,11 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
   const [refusal, setRefusal] = React.useState<string | null>(null);
   const [missWho, setMissWho] = React.useState(false);
   const [missWhat, setMissWhat] = React.useState(false);
+  const [target, setTarget] = React.useState<ObjectRow | null>(prefill?.object || null);
+  const [missObject, setMissObject] = React.useState(false);
+  // prefilled is the resolved person of a prefilled open, waiting for the
+  // catalog, which says whether the call names an object.
+  const [prefilled, setPrefilled] = React.useState<string | null>(null);
 
   // fire asks the server, and keeps the answer on screen when the next ask
   // is refused, so a refusal never empties the sheet.
@@ -153,17 +175,25 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
         setRow(found);
         setWho({ id: found.id, username: found.username });
       }
-      void fire({
-        user: found?.id || named,
-        lane: prefill?.lane || "mcp",
-        app: prefill?.app || "",
-        toolName: prefill?.tool || "",
-        command: prefill?.command || "",
-        path: prefill?.path || "",
-      });
+      setPrefilled(found?.id || named);
     });
     return () => { alive = false; };
   }, []);
+
+  React.useEffect(() => {
+    if (prefilled === null || read.kind === "loading") return;
+    setPrefilled(null);
+    const pinnedApp = pinnedIn(read.kind === "ready" ? read.catalog : null, prefill?.app || "");
+    void fire({
+      user: prefilled,
+      lane: prefill?.lane || "mcp",
+      app: prefill?.app || "",
+      toolName: prefill?.tool || "",
+      command: prefill?.command || "",
+      path: prefill?.path || "",
+      args: argsOf(argumentOf(pinnedApp, prefill?.tool || ""), prefill?.object || null),
+    });
+  }, [prefilled, read]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Any change to the question drops the old answer, so a card on screen
   // always belongs to the call beside it.
@@ -172,6 +202,7 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
     setRefusal(null);
     setMissWho(false);
     setMissWhat(false);
+    setMissObject(false);
   };
 
   const pick = (picked: PickedUser | null) => {
@@ -181,16 +212,21 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
     if (picked) void resolve(picked.username).then((found) => { if (found) setRow(found); });
   };
 
+  const catalog = read.kind === "ready" ? read.catalog : null;
+  const pinned = lane === "mcp" ? pinnedIn(catalog, app) : null;
+  const arg = argumentOf(pinned, toolName);
+  const appRow = catalog?.apps.find((a) => a.name === app);
+
   const test = () => {
     const user = row?.id || who?.username || "";
     const what = lane === "mcp" ? toolName : lane === "shell" ? command.trim() : lane === "files" ? path.trim() : TOOL_OF.net;
     setMissWho(!user);
     setMissWhat(!what);
-    if (!user || !what) return;
-    void fire({ user, lane, app, toolName, command: command.trim(), path: path.trim() });
+    setMissObject(!!arg && !target);
+    if (!user || !what || (arg && !target)) return;
+    void fire({ user, lane, app, toolName, command: command.trim(), path: path.trim(), args: argsOf(arg, target) });
   };
 
-  const catalog = read.kind === "ready" ? read.catalog : null;
   // reached narrows the servers to the ones a role this person holds can
   // call; without a resolved person every server is offered.
   const reached = React.useMemo(() => {
@@ -203,6 +239,11 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
   const servers = withCurrent((reached || catalog?.apps || []).map((a) => a.name), app);
   const tools = withCurrent((catalog?.tools || []).filter((t) => t.app === app).map((t) => t.name).sort(), toolName);
   const roles = (answer && answer.subject.roles) || [];
+  const obj = answer?.object;
+  const covered = obj ? objectLine(obj) : "";
+  // context is the sentence under an outcome, after the object line of a
+  // call a held role covers.
+  const context = (d: Decision, which: string) => <>{covered && <span className="block text-text-2" data-object-line>{covered}</span>}{contextLine(d, which)}</>;
 
   return (
     <>
@@ -234,7 +275,7 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
           {lane === "mcp" && (
             <div className="flex flex-col gap-1.5">
               <div className="flex flex-wrap items-center gap-2">
-                <Select value={app} onValueChange={(v) => { touch(); setApp(v); setToolName(""); }}>
+                <Select value={app} onValueChange={(v) => { touch(); setApp(v); setToolName(""); setTarget(null); }}>
                   <SelectTrigger aria-label={SERVER} className="h-9 w-[220px]"><SelectValue placeholder={SERVER} /></SelectTrigger>
                   <SelectContent>
                     {servers.map((s) => <SelectItem key={s} value={s} className="font-mono">{s}</SelectItem>)}
@@ -250,6 +291,13 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
               {reached && reached.length === 0
                 ? <p className={HINT} data-no-servers>{TEST_NO_SERVERS}</p>
                 : <p className={HINT}>{reached ? TEST_SERVERS_HINT : TEST_EVERY_SERVER}</p>}
+            </div>
+          )}
+
+          {pinned && arg && appRow && (
+            <div className="flex flex-col gap-1.5">
+              <ObjectPicker app={appRow} pinned={pinned} arg={arg} picked={target} onPick={(o) => { touch(); setTarget(o); }} />
+              {missObject && <p className={ERROR} role="alert">{objectMissing(pinned)}</p>}
             </div>
           )}
 
@@ -283,8 +331,9 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
                 mark="live"
                 caption={answer.draft ? LIVE_NOW : undefined}
                 head={<Outcome d={answer.active} />}
-                context={contextLine(answer.active, DECIDED_LIVE)}
+                context={context(answer.active, DECIDED_LIVE)}
                 wire={wireLine(answer.active, answer.snapshot, "live")}
+                gate={gateOf(obj)}
               />
             )}
             {answer && answer.draft && (
@@ -294,8 +343,9 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
                 mark="draft"
                 caption={WITH_EDITS}
                 head={<Outcome d={answer.draft} />}
-                context={contextLine(answer.draft, WITH_EDITS_LINE)}
+                context={context(answer.draft, WITH_EDITS_LINE)}
                 wire={wireLine(answer.draft, answer.snapshot, "draft")}
+                gate={gateOf(obj)}
               />
             )}
           </Section>

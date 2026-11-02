@@ -12,7 +12,7 @@ applies_to: both
 who: You, on the machine where your MCP client runs
 where: A terminal, and a browser for the approval
 steps: true
-keywords: mcp client gateway tier 2
+keywords: mcp client gateway tier 2 straza service socket
 ---
 
 
@@ -24,7 +24,7 @@ The client talks to the gateway in place of the upstream MCP servers. The gatewa
 ## Before you start {.nostep}
 
 
-- This machine enrolled, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows.
+- This machine enrolled, with `straza service` running, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. The service runs on Linux, macOS and Windows.
 - An MCP client that can start a stdio MCP server.
 - A role that gives you a catalog. The example runs as a person who holds the seeded `developer` and `demo-tools-readers` roles of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}), against `http://127.0.0.1:8420`. Put your own server's address in its place.
 - A session at or above the server's `governance.minAttestation`, because the gateway refuses one below it. The enterprise profile sets that minimum to `managed`, as [Attestation levels]({{< relref "guides/govern-an-agent/enroll-a-machine.md#attestation-levels" >}}) explains.
@@ -35,7 +35,7 @@ On a standalone server you sign in as a local user. Its catalog starts empty, be
 ## Register the proxy in your client
 
 
-Register `straza mcp` as a stdio MCP server in your client. The client's config then carries no credential at all. The proxy keeps the rotating session token on the wire for you and joins the same governed session as any hooks on the machine.
+Register `straza mcp` as a stdio MCP server in your client. The client's config then carries no credential at all, and neither does the proxy. It passes the client's messages to `straza service`, which keeps the rotating session token and its proof on the wire and joins the harness's newest governed session on the machine.
 
 Its `--harness` flag names the harness the session checks in under. Without the flag it takes the `STRAZA_HARNESS` environment variable, and without that it uses `claude-code`. With a server name, such as `straza mcp views-demo`, the proxy serves that one server with its own tool names and views, as [Show MCP Apps views]({{< relref "guides/serve-mcp-apps/show-views.md" >}}) shows.
 
@@ -68,7 +68,17 @@ With no MCP servers installed on a standalone server, the second line is `{"json
 ## Call a tool
 
 
-Behind the proxy, the gateway speaks streamable HTTP at `POST /mcp` on your server, with the session token as a bearer. The token lives 300 seconds, and `straza mcp` renews it for you. Straza has no command today that hands a session token to a client it did not start, so connect clients through the proxy. The requests below show the gateway's answers on the wire, with `$STRAZA_SESSION_TOKEN` standing for the token of a live session.
+Behind the proxy, the gateway speaks streamable HTTP at `POST /mcp` on your server, and each request carries the session token. A token that `straza service` holds is bound to the service's key, so every request with it also needs a fresh proof from that key, and a copy of it works nowhere else. Each token lives 300 seconds, and the service renews it for `straza mcp`. The service never hands a session token to a client, so connect clients through the proxy.
+
+The requests below show the gateway's answers on the wire, recorded with a bearer session token that `$STRAZA_SESSION_TOKEN` stands for. To send one yourself, send it through the service's socket instead. The service picks your newest live session of the harness that the `Straza-Harness` header names, starts one when none is live, and adds the token and its proof:
+
+```sh
+curl -s --max-time 15 --unix-socket "$STRAZA_HOME/service.sock" -X POST http://straza-service/local/v1/mcp \
+  -H 'Straza-Harness: claude-code' -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"demo-tools__echo","arguments":{"message":"hello from any MCP client"}}}'
+```
+
+With the service run for the whole machine, the socket is `/run/straza-service/service.sock`. On Windows the service listens on the named pipe `\\.\pipe\straza-service` instead, which `curl` cannot send to.
 
 
 An allowed call runs upstream and returns its result.
@@ -134,7 +144,7 @@ While the command waits, open `/self-service/` on the same server in a browser y
 
 In the example, a script enrolled a key the way **Enable this browser** does and signed the approval. The request's record then named the person as the decider and `browser` as the channel, with the reason given.
 
-The console and `strazactl` refuse a decision on your own request, because an agent on your machine could make the same call. Only a device that signs confirms it, unless the operator sets `approval.unsignedOwnDecisions`. [Approve in the console]({{< relref "guides/approve/console.md" >}}) covers each place a person decides.
+The console refuses a decision on your own request, because an agent on your machine could make the same call. Only a device that signs confirms it, unless the operator sets `approval.unsignedOwnDecisions`. [Approve in the console]({{< relref "guides/approve/console.md" >}}) covers each place a person decides.
 
 
 When nobody answers within the window, the call comes back as a tool-level error that the model can read. The same call made again opens a new request.

@@ -2,107 +2,63 @@ package agentguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"os"
-	"strings"
-	"time"
+
+	"github.com/strazahq/straza/internal/agentguard/localapi"
+	"github.com/strazahq/straza/internal/oidcflow"
 )
 
-// Enroll runs the OIDC device-code flow at the issuer strazad advertises
-// (the external IdP in enterprise, the built-in issuer in standalone),
-// registers this device, pins the snapshot verification keys, and persists
-// identity + config. Progress goes to w.
-func Enroll(ctx context.Context, store *Store, serverURL string, w io.Writer) error {
-	client := NewClient(serverURL)
-
-	flow, err := client.DiscoverLogin(ctx)
+// Enroll asks the Straza background service to enroll the caller at
+// req.ServerURL: a person at the issuer strazad advertises, by the browser
+// sign-in or by device code as req.Lane says, or with req.Headless set the
+// AI agent req.Username with the key or client secret the service holds for
+// it. The service keeps the key and every token. Enroll prints what the
+// service streams to w: the code and link to open, or the link it opens in
+// the person's browser, its progress notes, and the result.
+func Enroll(ctx context.Context, svc *localapi.Client, req localapi.EnrollRequest, w io.Writer) error {
+	res, err := svc.Enroll(ctx, req, func(ev localapi.EnrollEvent) {
+		switch ev.Event {
+		case localapi.EnrollCode:
+			fmt.Fprintf(w, "To authorize this device, open:\n  %s\nand confirm code %s\n", ev.VerificationURI, ev.UserCode)
+		case localapi.EnrollBrowser:
+			oidcflow.OpenBrowser(w, ev.VerificationURI)
+		case localapi.EnrollNote:
+			fmt.Fprintln(w, ev.Text)
+		}
+	})
 	if err != nil {
-		return err
+		return errors.New(ServiceSentence(err))
 	}
-	if flow.Issuer != strings.TrimSuffix(serverURL, "/") {
-		fmt.Fprintf(w, "Signing in at your identity provider: %s\n", flow.Issuer)
+	if res.Kind == localapi.KindAgent {
+		fmt.Fprintf(w, "Enrolled headless as %s. The Straza background service holds this agent's key and starts each of its sessions.\n", res.Username)
+		return nil
 	}
-	auth, err := client.StartDeviceFlow(ctx, flow)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "To authorize this device, open:\n  %s\nand confirm code %s\n", auth.VerificationURI, auth.UserCode)
-
-	interval := time.Duration(auth.Interval) * time.Second
-	if interval <= 0 {
-		interval = 2 * time.Second
-	}
-	deadline := time.Now().Add(time.Duration(auth.ExpiresIn) * time.Second)
-	fmt.Fprintln(w, "waiting for approval in the browser…")
-	var idToken string
-	for polls := 0; time.Now().Before(deadline); {
-		// Poll first: the user has usually already approved in the browser, so
-		// a wait before the first poll is pure latency they eat every run. The
-		// wait belongs between polls (loop bottom). A cancelled context must
-		// fail closed here without an HTTP call, returning a clean ctx.Err()
-		// rather than a wrapped transport error.
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		tok, pending, err := client.PollToken(ctx, flow, auth.DeviceCode)
-		if err != nil {
-			return err
-		}
-		if !pending {
-			idToken = tok
-			break
-		}
-		polls++
-		// A human staring at a silent terminal cannot tell "waiting" from
-		// "hung", so say so and repeat the code they must approve, because
-		// the most common failure is approving a stale code from an old
-		// browser tab.
-		if polls%8 == 0 {
-			fmt.Fprintf(w, "still waiting: approve code %s (this run's code; old tabs show stale ones). Expires in %s.\n",
-				auth.UserCode, time.Until(deadline).Round(time.Second))
-		}
-		// Wait between polls (never before the first); cancellation during the
-		// wait still returns ctx.Err().
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(interval):
-		}
-	}
-	if idToken == "" {
-		return fmt.Errorf("the device code expired before it was approved. Run enroll again and approve the NEWLY printed code (a browser tab from an earlier attempt shows a stale one)")
-	}
-
-	host, _ := os.Hostname()
-	enrolled, err := client.Enroll(ctx, idToken, host, hostPlatform(), deviceFingerprint(host))
-	if err != nil {
-		return err
-	}
-
-	keys, err := client.SnapshotKeys(ctx)
-	if err != nil {
-		return fmt.Errorf("fetch snapshot keys: %w", err)
-	}
-	if err := store.SaveConfig(Config{ServerURL: serverURL, SnapshotKeys: keys}); err != nil {
-		return err
-	}
-	if err := store.SaveIdentity(Identity{
-		IDToken: idToken, DeviceID: enrolled.DeviceID, Username: enrolled.Username,
-		DeviceToken: enrolled.DeviceToken,
-	}); err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "Enrolled as %s (device %s).\n", enrolled.Username, enrolled.DeviceID)
+	fmt.Fprintf(w, "Enrolled as %s (device %s). The Straza background service holds this machine's key.\n", res.Username, res.DeviceID)
 	return nil
 }
 
-func hostPlatform() string {
-	return osName()
-}
-
-// deviceFingerprint is a stable per-host id for user-mode enroll. A real
-// device keypair or certificate is the managed-mode second factor.
-func deviceFingerprint(host string) string {
-	return "host:" + host
+// Keygen asks the service to make the caller's agent key and prints the
+// public half plus the registration an administrator runs. The private half
+// never leaves the service. The "Public key: " line is parsed by scripts, so
+// its shape is fixed.
+func Keygen(ctx context.Context, svc *localapi.Client, username string, force bool, w io.Writer) error {
+	ans, err := svc.Keygen(ctx, localapi.KeygenRequest{Username: username, Force: force})
+	if err != nil {
+		return errors.New(ServiceSentence(err))
+	}
+	name := ans.Username
+	if name == "" {
+		name = username
+	}
+	if name == "" {
+		name = "<nhi-username>"
+	}
+	fmt.Fprintln(w, "NHI key generated (the Straza background service holds the private half).")
+	fmt.Fprintf(w, "Public key: %s\n\n", ans.PublicKey)
+	fmt.Fprintf(w, "An administrator registers it with:\n  strazactl users nhi-key set %s %s\n", name, ans.PublicKey)
+	fmt.Fprintf(w, "(or: PUT /v1/admin/users/{id}/nhi-key {\"public_key\":\"%s\"})\n", ans.PublicKey)
+	fmt.Fprintf(w, "Then enroll headless:\n  straza enroll --server <strazad-url> --headless --user %s\n", name)
+	return nil
 }

@@ -143,12 +143,16 @@ type LiveState struct {
 	RoleIDs    map[string]string
 	Implies    map[string][]string
 	ReadAt     time.Time
+	// Unreadable says, one sentence per row, which access rows Access
+	// leaves out because their covers line cannot be read, and what to do.
+	Unreadable []string
 }
 
 // LiveAccess is one access row as the gateway holds it.
 type LiveAccess struct {
 	ID, Role, App string
 	Matchers      []string
+	Scope         *ObjectScope
 }
 
 // PublishPlan is a checked draft ready to publish: what the check saw and
@@ -236,9 +240,12 @@ type ClosedDraft struct {
 // that ended with every role a removal deleted, and Removed those roles. An
 // App remove also names in LostAccess the roles whose access row on the
 // server went. An App remove, and an App put that revives a removed row,
-// count the credential rows they deleted. A Role put names the
-// access rows it replaced and the implied roles it added and dropped, and
-// an implied Role put names the removed roles it no longer implies. A
+// count the credential rows they deleted. An App put that pins a first
+// type, changes the type or unpins names in Repinned the roles with an
+// access row on the server, by id, since it changes their covers lines or
+// type in place with no access row record. A Role put names the access
+// rows it replaced and the implied roles it added and dropped, and an
+// implied Role put names the removed roles it no longer implies. A
 // PolicySet says whether its stored text changed and whether it was and is
 // on.
 type ItemOutcome struct {
@@ -251,6 +258,7 @@ type ItemOutcome struct {
 	Removed                        []Role
 	LostAccess                     []string
 	Credentials                    int
+	Repinned                       []string
 	BindingsRemoved, BindingsAdded []ToolBinding
 	ImpliesAdded, ImpliesRemoved   []string
 	TextChanged, WasOn, On         bool

@@ -26,7 +26,7 @@ Creating, binding, unbinding or deleting a pack writes no audit record today.
 ## Before you start {.nostep}
 
 
-- `strazactl` logged in as an admin. Packs belong to the identity area of the admin API, so a delegated admin needs write access to that area.
+- `strazactl` on an admin API token in `STRAZA_API_TOKEN`, minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows. Packs belong to the identity area of the admin API, so the token needs `identity:read` and `identity:write`.
 - A role of kind application or business to carry the pack. The examples use `dev`, which alice holds.
 - A machine enrolled as alice, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows, to see the result.
 

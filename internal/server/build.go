@@ -165,14 +165,17 @@ func (a *App) buildStore(ctx context.Context, cfg config.Config, log *slog.Logge
 	return nil
 }
 
-// buildIdentity wires the token service, the role resolver, the persistent
-// project identity and the optional external OIDC verifier.
+// buildIdentity wires the token and DPoP proof services, the role resolver,
+// the persistent project identity and the optional external OIDC verifier.
 func (a *App) buildIdentity(ctx context.Context, cfg config.Config, log *slog.Logger, st store.Store) error {
 	tokens, err := authn.NewTokenService(ctx, st.SigningKeys(), cfg.Server.PublicURL, authn.DefaultTokenTTL)
 	if err != nil {
 		return err
 	}
 	a.tokens = tokens
+	if err := a.loadProofVerifier(ctx, st); err != nil {
+		return err
+	}
 	a.resolver = identity.NewResolver(st)
 
 	pid, err := resolveProjectID(ctx, st)
@@ -309,7 +312,7 @@ func (a *App) buildApproval(cfg config.Config, log *slog.Logger, st store.Store,
 	// lock lands on the revocation lane, never on users.status, so a status
 	// check alone would let a locked user's phone keep minting capability.
 	a.approval.UserBlocked = a.denylist.userBlocked
-	a.relay = spine.NewRelay(st, bus, log)
+	a.relay = spine.NewRelay(st, bus, log, a.metrics.OutboxSetAside)
 	return nil
 }
 
@@ -444,7 +447,7 @@ func newOAuthHTTPClient() *http.Client {
 }
 
 // buildManagerAndGateway constructs the app manager and the MCP gateway and
-// loads apps and bindings.
+// loads apps, bindings and the object lists.
 func (a *App) buildManagerAndGateway(ctx context.Context, cfg config.Config, log *slog.Logger, st store.Store) error {
 	providers := make([]string, 0, len(a.oauthProviders))
 	for name := range a.oauthProviders {
@@ -473,7 +476,7 @@ func (a *App) buildManagerAndGateway(ctx context.Context, cfg config.Config, log
 	if err := a.refreshBindings(ctx); err != nil {
 		return err
 	}
-	return nil
+	return a.buildObjects(ctx, log)
 }
 
 // buildConvergence subscribes the multi-pod convergence consumer.

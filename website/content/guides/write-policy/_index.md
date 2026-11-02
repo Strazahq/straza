@@ -1,5 +1,6 @@
 ---
 title: Policies
+seo_title: Write policies
 description: Write the rules that decide what an agent may do.
 pagetype: index
 weight: 50

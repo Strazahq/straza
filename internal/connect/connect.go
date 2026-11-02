@@ -13,7 +13,7 @@ import (
 )
 
 // API is the authenticated strazad client a tool brings: strazactl its
-// logged-in session, straza the enrolled caller's session.
+// admin API token, straza the enrolled caller's session.
 type API interface {
 	Do(ctx context.Context, method, path string, body, out any) error
 }

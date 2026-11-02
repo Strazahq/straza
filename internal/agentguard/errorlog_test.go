@@ -256,13 +256,14 @@ func TestClientErrorsCheck(t *testing.T) {
 	}
 }
 
-// TestDoctorSurfacesClientErrorsUnenrolled pins the early-return gap: an
-// un-enrolled box (wiped config, live wiring) is exactly where hook failures
-// pile up, and doctor must still show them there.
+// TestDoctorSurfacesClientErrorsUnenrolled pins the early-return gap: a box
+// whose background service does not answer (live wiring, nothing behind it)
+// is exactly where hook failures pile up, and doctor must still show them
+// there.
 func TestDoctorSurfacesClientErrorsUnenrolled(t *testing.T) {
 	store := testErrorStore(t)
 	store.logClientError(ClientError{Kind: "hook", Harness: "codex", Err: "boom", Exit: 2})
-	checks := Doctor(context.Background(), store)
+	checks := Doctor(context.Background(), store, NewServiceClient())
 	found := false
 	for _, c := range checks {
 		if c.Name == "client-errors" && c.Status == checkWarn {
@@ -274,17 +275,19 @@ func TestDoctorSurfacesClientErrorsUnenrolled(t *testing.T) {
 	}
 }
 
-func TestLogSpoolError(t *testing.T) {
+// TestCaptureFailureIsLogged pins that conversation text the hook could not
+// hand to the background service lands in the error log with the sentence
+// that says why, and never reaches the harness.
+func TestCaptureFailureIsLogged(t *testing.T) {
 	store := testErrorStore(t)
-	n := Normalized{HarnessName: "codex", NativeEvent: "PreToolUse"}
-	store.logSpoolError(n, nil) // nil error must be a no-op
-	if errs, _ := ClientErrors(store); len(errs) != 0 {
-		t.Fatalf("nil error logged: %+v", errs)
-	}
-	store.logSpoolError(n, fmt.Errorf("disk full"))
+	d := serviceDecider{store: store, svc: NewServiceClient()}
+	d.capture(Normalized{HarnessName: "codex", NativeEvent: "Stop"}, "reply", "the reply text")
 	errs, _ := ClientErrors(store)
-	if len(errs) != 1 || errs[0].Kind != "spool" || errs[0].Harness != "codex" ||
-		errs[0].Event != "PreToolUse" || errs[0].Err != "disk full" {
-		t.Fatalf("spool error record wrong: %+v", errs)
+	if len(errs) != 1 || errs[0].Kind != "capture" || errs[0].Harness != "codex" ||
+		errs[0].Event != "Stop" || !strings.Contains(errs[0].Err, "isn't running") {
+		t.Fatalf("capture error record wrong: %+v", errs)
+	}
+	if strings.Contains(errs[0].Err, "the reply text") {
+		t.Errorf("the error log carries the captured text: %+v", errs[0])
 	}
 }

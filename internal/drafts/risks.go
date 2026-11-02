@@ -1,6 +1,7 @@
 package drafts
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"sort"
@@ -49,12 +50,13 @@ const (
 // strazad should not reach, a credential shared with agents, wider OAuth
 // scopes, whose tokens stay valid when the scopes narrow again, reach into
 // a Straza role, a held role gaining a tool that runs with no gate or that
-// its requester may approve, recording turned on, a Rego module and a
-// server removal. Every other risk is a tick, and policy.guardrail-changed
-// is typed where its set applies to the proposer.
+// its requester may approve, recording turned on, a Rego module, a server
+// removal and an agent's loosening of a set that binds it. Every other
+// risk is a tick, and policy.guardrail-changed is typed where its set
+// applies to the proposer.
 var typedRisks = map[string]bool{
 	codeRunsCode: true, codeCredentialHost: true, codePlainHTTP: true, codeUnusualHost: true, codeAgentsCred: true, codeScopesWider: true,
-	codeStrazaReach: true, codeUngated: true, codeSelfApproval: true, codeRecordingOn: true, codeRego: true, codeRemoval: true,
+	codeStrazaReach: true, codeUngated: true, codeSelfApproval: true, codeRecordingOn: true, codeRego: true, codeRemoval: true, codeAgentGuardrail: true,
 }
 
 // agentsSponsor is the agents value that lets an agent without a
@@ -73,14 +75,16 @@ func risk(code, object, typed, sentence, before, after string) Finding {
 	return f
 }
 
-// risks answers step 6: the risks of who gains, of the roles, servers and
-// sets the draft changes, folded by code and object.
+// risks answers step 6: the risks of who gains, of the objects the roles
+// cover, of the roles, servers and sets the draft changes, folded by code
+// and object, each with its group.
 func (c *check) risks(rows []gainRow) []Finding {
 	out := gainRisks(rows)
+	out = append(out, coversRisks(c.v.Objects)...)
 	out = append(out, c.roleRisks()...)
 	out = append(out, c.serverRisks()...)
 	out = append(out, c.policyRisks()...)
-	return foldRisks(out)
+	return c.grouped(foldRisks(out))
 }
 
 // foldRisks folds the risks of one code and object into one finding, in
@@ -266,14 +270,28 @@ func checkDropped(b, a probe) bool {
 	return (b.classify && !a.classify) || (b.serverCheck && !a.serverCheck)
 }
 
-// ownReach refuses an agent's draft that widens what the agent itself
-// reaches (agent.own-reach), read over its whole subject in each world:
-// the roles it holds directly, each closed over that world's implications,
-// its username and its typology. It answers one refusal for each server
-// and way the reach widens. A server nobody has listed on either side
-// widens when the agent's rows on it come to admit more names.
+// ownReach answers ownReachOf for each subject of the proposer, so an
+// agent's draft may widen its reach at no instant its roles change, each
+// refusal once.
 func (c *check) ownReach() []Finding {
-	sub := c.proposerSubjects()
+	var out []Finding
+	for _, sub := range c.proposerSubjects() {
+		out = append(out, c.ownReachOf(sub)...)
+	}
+	return dedupe(out)
+}
+
+// ownReachOf refuses an agent's draft that widens what the agent itself
+// reaches (agent.own-reach), read over its whole subject sub in each
+// world: the roles it holds directly in one set, each closed over that
+// world's implications, its username and its typology. It answers one
+// refusal for each server and way the reach widens. A server nobody has
+// listed on either side widens when the agent's rows on it come to admit
+// more names. On a server that pins an object type in either world, a
+// tool the probes leave alone widens when the agent comes to reach every
+// object through it, or an object id its roles do not cover today, as
+// objectReach reads them.
+func (c *check) ownReachOf(sub [2]policy.Subject) []Finding {
 	var keys []toolKey
 	tools := map[toolKey][]string{}
 	add := func(server, how, tool string) {
@@ -308,6 +326,26 @@ func (c *check) ownReach() []Finding {
 			add(s, string(OutcomeUnknown), "*")
 		}
 	}
+	for _, s := range sortedKeys(mw, ma) {
+		live := c.w.Apps[s].Pinned
+		if live == nil && c.after.Apps[s].Pinned == nil {
+			continue
+		}
+		for _, t := range unionSorted(pinnedTools(c.w.Apps[s], mw[s]), pinnedTools(c.after.Apps[s], ma[s])) {
+			if slices.ContainsFunc(keys, func(k toolKey) bool { return k.server == s && slices.Contains(tools[k], t) }) {
+				continue
+			}
+			bEvery, bIDs := objectReach(c.w, live, sub[0].Roles, s, t)
+			aEvery, aIDs := objectReach(c.after, live, sub[1].Roles, s, t)
+			switch {
+			case bEvery:
+			case aEvery:
+				add(s, "every", t)
+			case slices.ContainsFunc(aIDs, func(id string) bool { return !slices.Contains(bIDs, id) }):
+				add(s, "objects", t)
+			}
+		}
+	}
 	var out []Finding
 	for _, k := range keys {
 		names, where, object := listWords(tools[k], "and"), "on "+k.server, "App/"+k.server
@@ -324,11 +362,47 @@ func (c *check) ownReach() []Finding {
 			words = fmt.Sprintf("reach %s %s with an approval", names, where)
 		case "check":
 			words = fmt.Sprintf("reach %s %s without a check a classifier or the server makes today", names, where)
+		case "every":
+			// An unpin leaves the type to the live pin.
+			words = fmt.Sprintf("reach %s on every %s of %s", globWords(tools[k]), cmp.Or(c.after.Apps[k.server].Pinned, c.w.Apps[k.server].Pinned).Type, k.server)
+		case "objects":
+			words = fmt.Sprintf("reach %s on %s of %s that your roles do not cover today", globWords(tools[k]), c.after.Apps[k.server].Pinned.Plural, k.server)
 		}
 		out = append(out, refusal(codeAgentOwnReach, visible(object), visible("This draft would let you "+words+", which widens your own reach. An agent's draft may not."),
 			"Leave that change out. A person can make it."))
 	}
 	return out
+}
+
+// pinnedTools answers the tools matchers bind on app as boundTools reads
+// them, and each tool that app's pinned block names and the matchers
+// admit, so a glob meets a pinned tool the server does not offer yet.
+func pinnedTools(app App, matchers []string) []string {
+	out := boundTools(app, matchers)
+	if app.Pinned != nil {
+		for tool := range app.Pinned.Reach {
+			if matchAnyGlob(matchers, tool) {
+				out = append(out, tool)
+			}
+		}
+	}
+	return out
+}
+
+// globWords names tools for an agent.own-reach sentence, joined by "and": a
+// glob as the tools matching it, and a name that a glob of tools matches
+// through that glob alone.
+func globWords(tools []string) string {
+	var words []string
+	for _, t := range tools {
+		switch {
+		case strings.Contains(t, "*"):
+			words = append(words, "tools matching "+t)
+		case !slices.ContainsFunc(tools, func(g string) bool { return strings.Contains(g, "*") && matchGlob(g, t) }):
+			words = append(words, t)
+		}
+	}
+	return listWords(words, "and")
 }
 
 // roleRisks answers the risks of the roles after the draft: a Straza role

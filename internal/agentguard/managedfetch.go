@@ -3,6 +3,8 @@ package agentguard
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -11,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/strazahq/straza/internal/harnesscfg"
+	"github.com/strazahq/straza/internal/policy"
 )
 
 // The install fetch lane (spec/harness-config): a default-layout box writes
@@ -43,7 +46,8 @@ func (c *Client) FetchHarnessConfig(ctx context.Context, harness, goos string) (
 }
 
 // fetchServedWiring decides one harness's install lane. A non-nil document
-// means the server lane: verified, name-checked, ready to write verbatim.
+// means the server lane: verified, name-checked, checked to run binPath, and
+// ready to write verbatim.
 // A nil document with a note means the local lane, and the note is printed
 // so the operator knows which lane ran and why. An error aborts the install.
 func fetchServedWiring(ctx context.Context, cfg Config, harness, binPath string) (*harnesscfg.Document, string, error) {
@@ -51,7 +55,7 @@ func fetchServedWiring(ctx context.Context, cfg Config, harness, binPath string)
 	if binPath != vendorDefaultBinPath(goos) {
 		return nil, "custom binary path " + binPath + " (the server publishes the vendor-default layout)", nil
 	}
-	lookup, err := keyLookup(cfg.SnapshotKeys)
+	lookup, err := KeyLookup(cfg.SnapshotKeys)
 	if err != nil {
 		return nil, "", err
 	}
@@ -72,6 +76,10 @@ func fetchServedWiring(ctx context.Context, cfg Config, harness, binPath string)
 			return nil, "", fmt.Errorf("served document carries unknown artifact %q; refusing to write it anywhere (this client maps only hooks.%s and mcp.%s to paths)", art.Name, harness, harness)
 		}
 	}
+	if other := servedRunsElsewhere(harness, &doc, binPath); other != "" {
+		return nil, "", fmt.Errorf("The Straza server at %s renders %s hooks that run %s, but this machine's Straza is %s, so those hooks would never run. "+ //nolint:staticcheck // ST1005: the operator-facing sentence is printed as it is
+			"Upgrade the Straza server first, then run `straza install --managed` again.", cfg.ServerURL, harness, other, binPath)
+	}
 	// Disk already equal to the served artifacts is by definition
 	// server-published state (an earlier fetch-lane run), so the foreignness
 	// heuristics below must not get a vote: they cannot tell a NEWER server
@@ -88,6 +96,43 @@ func fetchServedWiring(ctx context.Context, cfg Config, harness, binPath string)
 	return &doc, "", nil
 }
 
+// servedRunsElsewhere returns the first path that a served document's hook
+// commands or straza MCP entry run other than binPath, or "" when they all
+// run binPath. A server older than this client renders the path its own
+// release installed to, and wiring that runs a missing binary never governs.
+// A Windows codex shim runs binPath when it is the shim install writes
+// beside binPath, and no file the served wiring names is ever read.
+func servedRunsElsewhere(harness string, doc *harnesscfg.Document, binPath string) string {
+	shimTarget := func(shim string) (string, bool) {
+		if strings.EqualFold(shim, codexShimPathFor("windows", binPath)) {
+			return binPath, true
+		}
+		return shim, true
+	}
+	for _, art := range doc.Artifacts {
+		var paths []string
+		switch art.Name {
+		case "hooks." + harness:
+			paths = wiringBinPaths(harness, art.Content, shimTarget)
+		case "mcp." + harness:
+			var mcp struct {
+				Servers map[string]struct {
+					Command string `json:"command"`
+				} `json:"mcpServers"`
+			}
+			if json.Unmarshal(art.Content, &mcp) == nil && mcp.Servers[mcpServerName].Command != "" {
+				paths = append(paths, mcp.Servers[mcpServerName].Command)
+			}
+		}
+		for _, p := range paths {
+			if p != binPath {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
 // servedMatchesDisk reports whether every served artifact already sits on
 // disk byte for byte.
 func servedMatchesDisk(harness string, doc *harnesscfg.Document) bool {
@@ -96,7 +141,7 @@ func servedMatchesDisk(harness string, doc *harnesscfg.Document) bool {
 		var err error
 		switch art.Name {
 		case "hooks." + harness:
-			path, err = managedHookPath(harness)
+			path, err = ManagedHookPath(harness)
 		case "mcp." + harness:
 			path, err = ManagedMCPConfigPath(harness)
 		}
@@ -116,7 +161,7 @@ func servedMatchesDisk(harness string, doc *harnesscfg.Document) bool {
 // the printed lane reason. Foreign content forces the local (merge) lane so
 // nothing an operator added is ever dropped.
 func managedWiringForeign(harness string) (bool, string, error) {
-	path, err := managedHookPath(harness)
+	path, err := ManagedHookPath(harness)
 	if err != nil {
 		return false, "", err
 	}
@@ -225,7 +270,7 @@ func writeServedArtifacts(harness string, doc *harnesscfg.Document, binPath stri
 		var err error
 		switch art.Name {
 		case "hooks." + harness:
-			path, err = managedHookPath(harness)
+			path, err = ManagedHookPath(harness)
 		case "mcp." + harness:
 			path, err = ManagedMCPConfigPath(harness)
 			if err == nil && path == "" {
@@ -276,4 +321,21 @@ func servedArtifactID(harness string, doc *harnesscfg.Document) string {
 		}
 	}
 	return ""
+}
+
+// KeyLookup builds a policy.KeyLookup from base64-encoded pinned keys. A key
+// that is not standard base64 fails it, naming its key id.
+func KeyLookup(keys map[string]string) (policy.KeyLookup, error) {
+	decoded := map[string]ed25519.PublicKey{}
+	for kid, b64 := range keys {
+		raw, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return nil, fmt.Errorf("bad pinned key %s: %w", kid, err)
+		}
+		decoded[kid] = ed25519.PublicKey(raw)
+	}
+	return func(kid string) (ed25519.PublicKey, bool) {
+		k, ok := decoded[kid]
+		return k, ok
+	}, nil
 }

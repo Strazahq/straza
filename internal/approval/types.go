@@ -56,8 +56,8 @@ var (
 	ErrNHIDecider = errors.New("approval: non-human identities may not decide approvals")
 	// ErrUnsignedOwnDecision: the decider is the requester and no enrolled
 	// device signed the decision (→403). An agent on the requester's machine
-	// can reach the console and strazactl credentials but not a device key,
-	// so only the signed lane proves the person decided. The
+	// can reach the console's credential but not a device key, so only the
+	// signed lane proves the person decided. The
 	// approval.unsignedOwnDecisions config switch lifts it.
 	ErrUnsignedOwnDecision = errors.New("approval: your own request needs a decision signed by your enrolled phone or browser")
 	// ErrConflict: the record is already resolved with the other verdict (→409).

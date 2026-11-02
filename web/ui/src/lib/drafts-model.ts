@@ -3,6 +3,7 @@
 // verdict's lines by class, who gains what by role, and the facts of each
 // item's document. No React here, and no sentence: drafts-words.ts words
 // what this file answers.
+import { type Covers, coversOf } from "./access-covers";
 import type { DraftConflict, DraftDetail, DraftFinding, DraftGain, DraftItem, DraftKind, DraftOp, DraftPublishBody, DraftVerdict, FindingClass, ManifestDoc } from "./api";
 import { callerKind, changeRows } from "./manifest-edit";
 import { type RuleView, openDoc, rulesOf } from "./policy-model";
@@ -10,51 +11,53 @@ import { KIND_NAME, exposeWords, rpsWords, sentWords, timeoutWords, transportWor
 import { agentsLine } from "./words";
 
 // Acks is what the person did in the publish dialog: the tick of each tick
-// line and the text typed for each typed line, both keyed by the finding's
-// key.
+// block and the text typed into each typed block, both keyed by the
+// confirm block's id.
 export type Acks = { ticked: Record<string, boolean>; typed: Record<string, string> };
 
 // typedMatches compares a typed acknowledgment the way the server and
 // strazactl do: spaces trimmed, case ignored.
 export const typedMatches = (typed: string, entered: string) => entered.trim().toLowerCase() === typed.trim().toLowerCase();
 
-// acknowledged says whether the person acknowledged one risk. A typed risk
-// whose text was cut for this reader cannot be typed here, so it does not
-// hold the dialog: the server answers its own refusal for it.
-export function acknowledged(f: DraftFinding, a: Acks): boolean {
-  if (f.ack === "typed") return !f.typed || typedMatches(f.typed, a.typed[f.key] || "");
-  return !!a.ticked[f.key];
+// acknowledged says whether the person confirmed one block: its tick set,
+// or typed text that matches what it asks for. A blocked block is never
+// confirmed, because this reader cannot see the text one of its lines
+// needs, and the server refuses such a publish.
+export function acknowledged(b: ConfirmBlock, a: Acks): boolean {
+  if (b.blocked) return false;
+  return b.kind === "tick" ? !!a.ticked[b.id] : typedMatches(b.expect, a.typed[b.id] || "");
 }
 
-// typedWrongly says a typed risk holds text that is not its typed text, a
-// line the person answered and got wrong rather than left empty.
-export function typedWrongly(f: DraftFinding, a: Acks): boolean {
-  const text = a.typed[f.key] || "";
-  return f.ack === "typed" && !!f.typed && text.trim() !== "" && !typedMatches(f.typed, text);
+// typedWrongly says a typed block holds text that can no longer become
+// what it asks for, so the dialog says so while the person types and stays
+// quiet on a start that still fits.
+export function typedWrongly(b: ConfirmBlock, a: Acks): boolean {
+  const text = (a.typed[b.id] || "").trim().toLowerCase();
+  return b.kind !== "tick" && !b.blocked && text !== "" && !b.expect.trim().toLowerCase().startsWith(text);
 }
 
-// firstMissing is the key of the first risk left unacknowledged, in the
-// verdict's order, or null.
-export function firstMissing(risks: DraftFinding[], a: Acks): string | null {
-  const f = risks.find((r) => !acknowledged(r, a));
-  return f ? f.key : null;
+// firstMissing is the id of the first block left unconfirmed, in the
+// dialog's order, or null.
+export function firstMissing(blocks: ConfirmBlock[], a: Acks): string | null {
+  const b = blocks.find((x) => !acknowledged(x, a));
+  return b ? b.id : null;
 }
 
 // publishBody is the body of a publish: the revision and the risk digest
-// the person reviewed, and the key of every line they acknowledged with the
-// text they typed. Every key is the server's, echoed, never computed.
+// the person reviewed, and for every confirmed block the key of each of
+// its lines, with each typed line's own typed text. A count block thus
+// sends the name of each line its count stands for, the body the server
+// checks line by line, and every key is the server's, echoed, never
+// computed.
 export function publishBody(revision: number, v: DraftVerdict, a: Acks): DraftPublishBody {
+  const risks = v.risks || [];
+  const done = new Set(confirmBlocks(risks).filter((b) => acknowledged(b, a)).flatMap((b) => b.lines.map((f) => f.key)));
   const ticked: string[] = [];
   const typed: Record<string, string> = {};
-  for (const f of v.risks || []) {
-    if (f.ack === "typed") {
-      const text = a.typed[f.key] || "";
-      if (!f.typed || !text.trim()) continue;
-      ticked.push(f.key);
-      typed[f.key] = text;
-    } else if (a.ticked[f.key]) {
-      ticked.push(f.key);
-    }
+  for (const f of risks) {
+    if (!done.has(f.key)) continue;
+    ticked.push(f.key);
+    if (f.ack === "typed" && f.typed) typed[f.key] = f.typed;
   }
   return { revision, risk_digest: v.risk_digest || "", ticked, typed };
 }
@@ -82,6 +85,54 @@ export const STALE_CODE = "draft.stale";
 // UNLISTED_CODE is the line of a server whose tools nobody read, where
 // Contact it now sits.
 export const UNLISTED_CODE = "unchecked.tools";
+// AGENT_LOOSEN_CODE is the risk of an agent's draft that loosens a set
+// binding that same agent, which the page warns about loudly.
+export const AGENT_LOOSEN_CODE = "agent.guardrail";
+// COVERS_WIDER_CODE is the risk of a held role that reaches more objects.
+export const COVERS_WIDER_CODE = "role.covers-wider";
+
+// ConfirmBlock is one thing the person confirms when publishing: a tick, a
+// typed name, or a typed count over several typed lines of one group.
+// lines are the risks it confirms in the verdict's order, expect is the
+// text to type, empty for a tick, and blocked says a line's typed text was
+// cut for this reader, so the block cannot be confirmed here.
+export type ConfirmBlock = { id: string; kind: "tick" | "name" | "count"; group: string; lines: DraftFinding[]; expect: string; blocked: boolean };
+
+// confirmBlocks groups the risks the way a publish asks for them. Typed
+// lines with no group share a block per object and typed text. Typed lines
+// of one group share a block, confirmed by their count when there are
+// several and by the name when there is one. Tick lines of one group share
+// one tick, and a tick line with no group stands alone, as every line of a
+// server that sends no group does. Name blocks come first, then counts,
+// then ticks, each in the order of its first line.
+export function confirmBlocks(risks: DraftFinding[]): ConfirmBlock[] {
+  const byId = new Map<string, ConfirmBlock>();
+  const order: string[] = [];
+  const add = (id: string, kind: ConfirmBlock["kind"], group: string, f: DraftFinding) => {
+    let b = byId.get(id);
+    if (!b) {
+      b = { id, kind, group, lines: [], expect: "", blocked: false };
+      byId.set(id, b);
+      order.push(id);
+    }
+    b.lines.push(f);
+  };
+  for (const f of risks) {
+    const group = f.group || "";
+    if (f.ack !== "typed") add(group ? "tick:" + group : "tick:" + f.key, "tick", group, f);
+    else if (group) add("typed:" + group, "count", group, f);
+    else if (!f.typed) add("cut:" + f.key, "name", group, f);
+    else add("name:" + (f.object || "") + "\n" + f.typed.trim().toLowerCase(), "name", "", f);
+  }
+  const rank = { name: 0, count: 1, tick: 2 };
+  const out = order.map((id) => byId.get(id) as ConfirmBlock);
+  for (const b of out) {
+    b.blocked = b.kind !== "tick" && b.lines.some((f) => !f.typed);
+    if (b.kind === "count" && b.lines.length === 1) b.kind = "name";
+    b.expect = b.kind === "count" ? String(b.lines.length) : b.kind === "name" ? b.lines[0].typed || "" : "";
+  }
+  return out.map((b, i) => ({ b, i })).sort((x, y) => rank[x.b.kind] - rank[y.b.kind] || x.i - y.i).map((x) => x.b);
+}
 // HIDDEN_CODE is the note that verdictFor left out rows of who gains what
 // this reader may not read.
 export const HIDDEN_CODE = "info.gains-hidden";
@@ -224,7 +275,10 @@ export function appRows(before: ManifestDoc, after: ManifestDoc): [string, strin
   return changeRows(before, after).map(([label, was, now]) => [label, withPuny(label, was), withPuny(label, now)]);
 }
 
-export type RoleView = { kind: string; description: string; server: string; implies: string[]; bindings: { app: string; tools: string[] }[] };
+// RoleView is a Role document as the draft views read it. A row's covers
+// is its covers line as the file writes it, values without ids, absent when
+// the row has none.
+export type RoleView = { kind: string; description: string; server: string; implies: string[]; bindings: { app: string; tools: string[]; covers?: Covers }[] };
 
 const strings = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
 
@@ -239,7 +293,12 @@ export function roleOf(text: string | undefined): RoleView | null {
     description: String(spec.description || ""),
     server: String(spec.server || ""),
     implies: strings(spec.implies),
-    bindings: bindings.map((b) => ({ app: String((b as Record<string, unknown>).app || ""), tools: strings((b as Record<string, unknown>).tools) })),
+    bindings: bindings.map((b) => {
+      const row = b as Record<string, unknown>;
+      const covers = coversOf(row.covers as Parameters<typeof coversOf>[0]);
+      const out = { app: String(row.app || ""), tools: strings(row.tools) };
+      return covers ? { ...out, covers } : out;
+    }),
   };
 }
 

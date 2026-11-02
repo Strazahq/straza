@@ -2,7 +2,7 @@
 title: strazactl sessions transcript
 description: Print a session's recorded conversation (recording is policy-opted-in)
 pagetype: reference
-weight: 90
+weight: 86
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl sessions transcript <session-id> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

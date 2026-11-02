@@ -23,7 +23,7 @@ For a server problem, send the output of `strazad version`, the profile you run
 token masked.
 
 For a client problem, send the output of `straza doctor` on the affected machine. It
-reports the enrollment, the identity, the server and the approver surface, and each
+reports the background service, the enrollment, the server and the approver surface, and each
 warning it prints is followed by the command that fixes it. Add the exact error text
 the agent or the command showed you.
 

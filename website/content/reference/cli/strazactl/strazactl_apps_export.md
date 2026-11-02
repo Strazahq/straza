@@ -2,7 +2,7 @@
 title: strazactl apps export
 description: Print a server's stored manifest as app.yaml on stdout, the document apps install takes
 pagetype: reference
-weight: 19
+weight: 16
 draft: false
 sources:
   - cmd/strazactl
@@ -32,7 +32,7 @@ strazactl apps export <server> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

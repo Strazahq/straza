@@ -17,10 +17,12 @@ import (
 // the name of the server that owns it, its one access row by server name
 // and tool matchers, and the names of the roles it implies directly.
 type RoleConfig struct {
-	Role    Role
-	Owner   string
-	Server  string
-	Tools   []string
+	Role   Role
+	Owner  string
+	Server string
+	Tools  []string
+	// Scope is the access row's covers line, nil when it has none.
+	Scope   *ObjectScope
 	Implies []string
 }
 
@@ -52,10 +54,12 @@ func FingerprintApp(manifest string) (string, error) {
 }
 
 // FingerprintRole answers the hex sha256 of a role's config: name,
-// description, wire kind, owner, access row server and sorted tools, and
-// sorted implied names. The zero RoleConfig answers "".
+// description, wire kind, owner, access row server, sorted tools and scope
+// key, and sorted implied names. The zero RoleConfig answers "". A role
+// with no covers line hashes the bytes it hashed before covers existed, so
+// an open draft's base stays valid across the upgrade.
 func FingerprintRole(c RoleConfig) string {
-	if c.Role == (Role{}) && c.Owner == "" && c.Server == "" && len(c.Tools) == 0 && len(c.Implies) == 0 {
+	if c.Role == (Role{}) && c.Owner == "" && c.Server == "" && len(c.Tools) == 0 && c.Scope == nil && len(c.Implies) == 0 {
 		return ""
 	}
 	kind := c.Role.Kind
@@ -71,7 +75,8 @@ func FingerprintRole(c RoleConfig) string {
 		Server      string   `json:"server"`
 		Tools       []string `json:"tools"`
 		Implies     []string `json:"implies"`
-	}{c.Role.Name, c.Role.Description, kind, c.Owner, c.Server, sortedNames(c.Tools), sortedNames(c.Implies)})
+		Covers      string   `json:"covers,omitempty"`
+	}{c.Role.Name, c.Role.Description, kind, c.Owner, c.Server, sortedNames(c.Tools), sortedNames(c.Implies), c.Scope.Key()})
 	return fingerprint("Role\n", doc)
 }
 

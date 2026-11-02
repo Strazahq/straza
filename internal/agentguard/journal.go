@@ -30,7 +30,7 @@ type decisionFacts struct {
 	status      int
 	correlation string
 	spooled     bool
-	spoolErr    error
+	spoolErr    string // the class of a failed spool append ("" = none)
 	failClosed  bool
 }
 
@@ -76,7 +76,7 @@ func journalDecision(tl *trace.Logger, n Normalized, d policy.Decision, f decisi
 		attrs = append(attrs, slog.String("correlation", f.correlation))
 	}
 	attrs = append(attrs, slog.Int64("duration_ms", time.Since(f.start).Milliseconds()))
-	if f.spooled {
+	if f.spooled || f.spoolErr != "" {
 		attrs = append(attrs, slog.String("spool", spoolOutcome(f.spoolErr)))
 	}
 	if d.Default {
@@ -90,11 +90,11 @@ func journalDecision(tl *trace.Logger, n Normalized, d policy.Decision, f decisi
 
 // spoolOutcome renders the spool append result for the journal: "ok" or
 // "err:<class>" (never the error text, which can name a path).
-func spoolOutcome(err error) string {
-	if err == nil {
+func spoolOutcome(class string) string {
+	if class == "" {
 		return "ok"
 	}
-	return "err:" + errClass(err)
+	return "err:" + class
 }
 
 // errClass names an error's class for the journal without quoting it:

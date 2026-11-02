@@ -3,13 +3,12 @@ package agentguard
 import (
 	"bytes"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/agentguard/trace"
 )
 
@@ -25,15 +24,37 @@ const (
 	journalGeminiDeny   = `{"event":"BeforeTool","toolName":"run_shell_command","args":{"command":"rm -rf /tmp/CANARY-trace-7f3a9"}}`
 )
 
-// journalHookStore seeds a fully enrolled-looking client under a fresh
-// STRAZA_HOME (config with pinned keys, a verified snapshot of
-// offlinePolicyDoc, a live session) so RunHook decides locally: `git status`
-// reads as the default allow, `rm -rf` as the no-rm rule deny.
+// journalPolicyDoc denies `rm -rf` for the dev role and leaves the rest to
+// the default allow.
+const journalPolicyDoc = `
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata: {name: offline-gate-test}
+spec:
+  match: {roles: [dev]}
+  rules:
+    - id: no-rm
+      tools: [shell.exec]
+      command: {denyPatterns: ["rm -rf *"]}
+      effect: deny
+      reason: "Straza: rule-level deny"
+`
+
+// journalHookStore starts a fake service that decides with journalPolicyDoc
+// under a fresh STRAZA_HOME, so RunHook decides through it: `git status`
+// reads as the default allow, `rm -rf` as the no-rm rule deny. It returns
+// the thin client's store and the snapshot the service's answers name.
 func journalHookStore(t *testing.T) (*Store, string) {
 	t.Helper()
-	priv, keys := testSnapshotKey(t)
-	signed, id := testSignedPolicy(t, priv, offlinePolicyDoc)
-	return reacquireStore(t, "http://127.0.0.1:9", keys, signed, id, time.Hour, false), id
+	svc := newFakeService(t)
+	svc.engine = compilePolicy(t, journalPolicyDoc)
+	return svc.store(t), svc.session.SnapshotID
+}
+
+// writeTraceConfig sets the trace field of the user's config.yaml.
+func writeTraceConfig(t *testing.T, store *Store, level string) {
+	t.Helper()
+	writeUserConfig(t, store, Config{Trace: level})
 }
 
 // runJournalHook pipes one payload through RunHook under the current
@@ -147,11 +168,16 @@ func TestHookJournalDecisionRecord(t *testing.T) {
 	}
 }
 
-// TestHookJournalFailClosedNoSession: a box with no session fails closed,
-// and the journal says so (fail_closed, no escalation, no server facts).
-func TestHookJournalFailClosedNoSession(t *testing.T) {
-	store := daemonStore(t)
-	_, _, err := runJournalHook(t, "claude-code", journalAllowPayload)
+// TestHookJournalFailClosedNoService: a box whose background service does
+// not answer fails closed, and the journal says so (fail_closed, no
+// escalation, no server facts).
+func TestHookJournalFailClosedNoService(t *testing.T) {
+	noService(t)
+	store, err := OpenStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = runJournalHook(t, "claude-code", journalAllowPayload)
 	if denyCode(t, err) != 2 {
 		t.Fatalf("want the fail-closed exit 2, got %v", err)
 	}
@@ -159,56 +185,49 @@ func TestHookJournalFailClosedNoSession(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("decision records = %d, want 1", len(recs))
 	}
-	assertAttrs(t, "no-session", recs[0], map[string]any{
+	assertAttrs(t, "no-service", recs[0], map[string]any{
 		"lane": "hook", "harness": "claude-code", "event": "tool.pre", "tool": "shell.exec",
 		"effect": "deny", "escalation": "none", "fail_closed": true,
 	}, "rule", "status", "correlation", "snapshot", "spool", "default")
-	assertDuration(t, "no-session", recs[0])
+	assertDuration(t, "no-service", recs[0])
 }
 
-// TestHookSessionStartJournalCarriesCheckinCorrelation: the session.start
-// decision record names the check-in's HTTP status and the X-Request-Id the
-// server answered with, the id that joins this laptop line to the strazad log.
-func TestHookSessionStartJournalCarriesCheckinCorrelation(t *testing.T) {
-	priv, keys := testSnapshotKey(t)
-	signed, id := testSignedPolicy(t, priv, offlinePolicyDoc)
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/checkin", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-Request-Id", "corr-checkin-7")
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"session_id": "s-new", "session_token": "tok-new", "expires_in": 300,
-			"user": "kim", "roles": []string{"dev"}, "snapshot_id": id, "attestation": "advisory",
-		})
-	})
-	mux.HandleFunc("GET /v1/snapshot", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-Straza-Snapshot-Id", id)
-		_, _ = w.Write(signed)
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
+// TestHookJournalCarriesServiceFacts: the decision record names what the
+// service reported about the decision: the escalation lane, the server's
+// status and correlation id, the spool outcome as an error class only, and a
+// fail-closed deny. The session.start record names the snapshot the service
+// started the session on.
+func TestHookJournalCarriesServiceFacts(t *testing.T) {
+	svc := newFakeService(t)
+	svc.engine = compilePolicy(t, journalPolicyDoc)
+	svc.journal = &localapi.Journal{Snapshot: "snap-7", Escalation: "server", Status: 200,
+		Correlation: "corr-decide-7", SpoolError: "open", FailClosed: true}
+	store := svc.store(t)
 
-	store := daemonStore(t)
-	if err := store.SaveConfig(Config{ServerURL: srv.URL, SnapshotKeys: keys}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SaveIdentity(Identity{DeviceID: "d1", Username: "kim", DeviceToken: "dev-tok"}); err != nil {
-		t.Fatal(err)
-	}
 	stdout, _, err := runJournalHook(t, "claude-code",
 		`{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/work"}`)
 	if err != nil {
 		t.Fatalf("session.start: %v (stdout %q)", err, stdout)
 	}
+	if _, _, err := runJournalHook(t, "claude-code", journalAllowPayload); err != nil {
+		t.Fatalf("allow: %v", err)
+	}
 	recs := recordsNamed(journalRecords(t, store), "decision")
-	if len(recs) != 1 {
-		t.Fatalf("decision records = %d, want 1", len(recs))
+	if len(recs) != 2 {
+		t.Fatalf("decision records = %d, want 2", len(recs))
 	}
 	assertAttrs(t, "session.start", recs[0], map[string]any{
 		"lane": "hook", "harness": "claude-code", "event": "session.start", "effect": "allow",
-		"status": float64(200), "correlation": "corr-checkin-7", "snapshot": id, "escalation": "none",
-	}, "fail_closed", "spool", "rule")
-	assertDuration(t, "session.start", recs[0])
+		"snapshot": svc.session.SnapshotID, "escalation": "none",
+	}, "fail_closed", "spool", "rule", "status", "correlation")
+	assertAttrs(t, "tool.pre", recs[1], map[string]any{
+		"lane": "hook", "event": "tool.pre", "effect": "allow", "snapshot": "snap-7",
+		"escalation": "server", "status": float64(200), "correlation": "corr-decide-7",
+		"spool": "err:open", "fail_closed": true,
+	}, "rule")
+	for _, r := range recs {
+		assertDuration(t, r.Msg, r)
+	}
 }
 
 // TestHookStdoutPureWithTraceDebug: with the debug window open, every dialect
@@ -234,23 +253,13 @@ func TestHookStdoutPureWithTraceDebug(t *testing.T) {
 		return out
 	}
 
-	cfg, err := store.LoadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Trace = "off"
-	if err := store.SaveConfig(cfg); err != nil {
-		t.Fatal(err)
-	}
+	writeTraceConfig(t, store, "off")
 	want := run()
 	if recs := journalRecords(t, store); len(recs) != 0 {
 		t.Fatalf("trace: off still wrote %d record(s)", len(recs))
 	}
 
-	cfg.Trace = ""
-	if err := store.SaveConfig(cfg); err != nil {
-		t.Fatal(err)
-	}
+	writeTraceConfig(t, store, "")
 	if err := trace.WriteToggle(store.stateDir(), trace.Toggle{Level: "debug", Until: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}

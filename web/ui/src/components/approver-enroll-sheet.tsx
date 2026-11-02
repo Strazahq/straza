@@ -2,11 +2,10 @@ import * as React from "react";
 import { CopyIcon, Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { RefusedError } from "@/components/error-state";
+import { FetchError, RefusedError } from "@/components/error-state";
 import { ToneBadge } from "@/components/overview-parts";
 import { Section } from "@/components/sheet-parts";
-import { type PickedUser, UserPicker } from "@/components/user-picker";
-import { type ApiError, type EnrollTokenAnswer, getUser, mintEnrollToken } from "@/lib/api";
+import { type ApiError, type EnrollTokenAnswer, readSelf, selfEnrollToken } from "@/lib/api";
 import {
   ADD_PHONE,
   ADD_PHONE_SUB,
@@ -18,28 +17,29 @@ import {
   COPY,
   CREATE_ANOTHER,
   CREATE_QR,
+  ENROLL_TEXT_TITLE,
+  FOR_OTHERS_LINE,
+  FOR_OTHERS_TITLE,
   MINT_VERB,
-  PERSON_HINT,
-  PERSON_LABEL,
+  NO_ENROLL_ROLE,
   QR_LABEL,
   QR_TOO_BIG,
   SCAN_LINE,
   SCAN_TITLE,
   SERVERS_NONE,
   SERVERS_TITLE,
+  SUBJECT_SELF,
   TRUST_TITLE,
-  agentPicked,
   codeLeft,
   selfPhoneLine,
   trustPosture,
 } from "@/lib/approval-words";
 import { copyText } from "@/lib/clipboard";
 import { type QrDrawing, qrDrawing } from "@/lib/qr";
-import { refused } from "@/lib/say";
-import { kindWord } from "@/lib/user-words";
+import { readFailed, refused } from "@/lib/say";
 
-// EnrollSheet is Add a phone: pick the person, mint
-// the one-time code, and show the QR the Straza approver app scans beside
+// EnrollSheet is Add a phone: mint a one-time code for the signed-in
+// person's own phone, and show the QR the Straza approver app scans beside
 // the code itself, the servers the phone will try and how it will trust
 // them. The code lives in this component's state alone and goes when the
 // sheet closes; nothing writes it anywhere.
@@ -47,9 +47,8 @@ import { kindWord } from "@/lib/user-words";
 const HINT = "text-[13px] leading-snug text-muted-foreground";
 const LINE = "text-[13px] leading-snug text-text-2";
 
-// SelfMint is the self-service page's lane: the person is the signed-in one
-// and the mint is their own, so the sheet skips the picker and the person
-// check, and everything after the mint is the console's.
+// SelfMint is the person's own lane: the person is the signed-in one and
+// the mint is their own, and everything after the mint is the console's.
 export type SelfMint = { username: string; mint: () => Promise<EnrollTokenAnswer> };
 
 type Props = {
@@ -59,38 +58,64 @@ type Props = {
   // device enrolled since the last poll is on screen while the operator
   // watches for the new one.
   onMinted?: () => void;
-  // self hands in the person's own mint; the console names none and picks.
+  // self hands in the self-service page's mint. The console names none, so
+  // the sheet reads who is signed in and mints that person's own phone.
   self?: SelfMint;
 };
 
 // Draw is the QR's own state: the encoder loads on first use, and a text no
-// QR code can carry is said in words rather than drawn.
-type Draw = { kind: "drawing" } | { kind: "ready"; qr: QrDrawing } | { kind: "toobig" };
+// QR code can carry is said in words and handed over as text instead.
+type Draw = { kind: "drawing" } | { kind: "ready"; qr: QrDrawing } | { kind: "toobig"; text: string };
+
+// Who is the console's read of GET /v1/self: the signed-in name, and
+// whether the account may enroll a phone, from the same server code that
+// gates the mint.
+type Who = { kind: "reading" } | { kind: "ready"; username: string; mobile: boolean } | { kind: "error"; message: string };
 
 export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
-  const [picked, setPicked] = React.useState<PickedUser | null>(null);
-  const [checking, setChecking] = React.useState(false);
-  const [notPerson, setNotPerson] = React.useState(false);
+  const [who, setWho] = React.useState<Who>({ kind: "reading" });
   const [minted, setMinted] = React.useState<EnrollTokenAnswer | null>(null);
   const [refusal, setRefusal] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [draw, setDraw] = React.useState<Draw>({ kind: "drawing" });
   const [left, setLeft] = React.useState(0);
-  const seq = React.useRef(0);
 
   const start = React.useCallback(() => {
-    setPicked(null);
-    setChecking(false);
-    setNotPerson(false);
     setMinted(null);
     setRefusal(null);
     setDraw({ kind: "drawing" });
-    seq.current++;
   }, []);
 
-  // Every open starts from an empty picker, and closing drops the code from
-  // state, so a sheet opened again never shows the last person's code.
+  // Closing drops the code from state, so a sheet opened again never shows
+  // the last code.
   React.useEffect(() => { start(); }, [open, start]);
+
+  // The console reads who is signed in on every open, so a role the
+  // identity manager granted since the last open counts.
+  React.useEffect(() => {
+    if (!open || self) return undefined;
+    let alive = true;
+    setWho({ kind: "reading" });
+    readSelf().then(
+      (a) => { if (alive) setWho({ kind: "ready", username: a.username, mobile: (a.enroll_channels || []).includes("mobile") }); },
+      (e: ApiError) => { if (alive && e.status !== 401) setWho({ kind: "error", message: readFailed(SUBJECT_SELF, e) }); },
+    );
+    return () => { alive = false; };
+  }, [open, self]);
+
+  // lane is the one mint the sheet offers: the self-service page's, or the
+  // console person's own phone once the read says the account may enroll
+  // one. The self route mints for the signed-in caller alone, so nothing
+  // here names a person.
+  const own = who.kind === "ready" && who.mobile ? who.username : "";
+  const lane: SelfMint | null = self || (own ? {
+    username: own,
+    mint: async () => {
+      const a = await selfEnrollToken("mobile");
+      return { ...a, servers: a.servers || [], user: { id: (a.user && a.user.id) || "", username: (a.user && a.user.username) || own } };
+    },
+  } : null);
+  const noRole = !self && who.kind === "ready" && !who.mobile;
 
   // The QR carries the server's own payload where it sent one, so the phone
   // reads exactly what strazad meant; the fallback is the same envelope the
@@ -101,8 +126,8 @@ export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
     let alive = true;
     setDraw({ kind: "drawing" });
     qrDrawing(text).then(
-      (qr) => { if (alive) setDraw(qr ? { kind: "ready", qr } : { kind: "toobig" }); },
-      () => { if (alive) setDraw({ kind: "toobig" }); },
+      (qr) => { if (alive) setDraw(qr ? { kind: "ready", qr } : { kind: "toobig", text }); },
+      () => { if (alive) setDraw({ kind: "toobig", text }); },
     );
     return () => { alive = false; };
   }, [minted]);
@@ -117,28 +142,12 @@ export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
     return () => clearInterval(t);
   }, [minted]);
 
-  const pick = (u: PickedUser | null) => {
-    setPicked(u);
-    setNotPerson(false);
-    setRefusal(null);
-    const my = ++seq.current;
-    if (!u) { setChecking(false); return; }
-    // The picker answers with the id and the name alone, so what the
-    // identity is comes from its own record. A record that cannot be read
-    // leaves the button enabled, since the server refuses an agent itself.
-    setChecking(true);
-    getUser(u.id).then(
-      (d) => { if (my === seq.current) { setNotPerson(kindWord(d) !== "person"); setChecking(false); } },
-      () => { if (my === seq.current) setChecking(false); },
-    );
-  };
-
   const mint = async () => {
-    if ((!picked && !self) || busy) return;
+    if (!lane || busy) return;
     setBusy(true);
     setRefusal(null);
     try {
-      const answer = self ? await self.mint() : await mintEnrollToken(picked ? picked.id : "");
+      const answer = await lane.mint();
       setMinted(answer);
       if (onMinted) onMinted();
     } catch (e) {
@@ -152,7 +161,10 @@ export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
   };
 
   // copyText says Copied in its own toast, so the button keeps one label.
-  const copy = (token: string) => copyText(token, COPIED);
+  const copy = (text: string) => copyText(text, COPIED);
+  // The self-service page is served beside the console, so its address
+  // is this page's own origin.
+  const selfService = window.location.origin + "/self-service/";
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -164,19 +176,24 @@ export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
           {minted ? (
-            <Code minted={minted} draw={draw} left={left} onCopy={() => copy(minted.enroll_token)} />
-          ) : self ? (
-            <div className="flex flex-col gap-1" data-self-phone={self.username}>
-              <span className={LINE}>{selfPhoneLine(self.username)}</span>
-              {refusal && <RefusedError subject={MINT_VERB} message={refusal} />}
-            </div>
+            <Code minted={minted} draw={draw} left={left} onCopy={copy} />
           ) : (
-            <div className="flex flex-col gap-1">
-              <UserPicker value={picked} onChange={pick} label={PERSON_LABEL} />
-              <span className={HINT}>{PERSON_HINT}</span>
-              {notPerson && picked && <span className="text-[13px] leading-snug text-danger" role="alert" data-agent-picked>{agentPicked(picked.username)}</span>}
-              {refusal && <RefusedError subject={MINT_VERB} message={refusal} />}
-            </div>
+            <>
+              <div className="flex flex-col gap-1" data-self-phone={lane ? lane.username : undefined}>
+                {lane && <span className={LINE}>{selfPhoneLine(lane.username)}</span>}
+                {noRole && <span className="text-[13px] leading-snug text-warn" data-no-enroll-role>{NO_ENROLL_ROLE}</span>}
+                {who.kind === "error" && <FetchError subject={SUBJECT_SELF} detail={who.message} />}
+                {refusal && <RefusedError subject={MINT_VERB} message={refusal} />}
+              </div>
+              {/* The self-service page is where everyone else enrolls, so
+                  only the console says how to send someone there. */}
+              {!self && (
+                <Section title={FOR_OTHERS_TITLE}>
+                  <span className={HINT} data-for-others>{FOR_OTHERS_LINE}</span>
+                  <CopyBox text={selfService} attr="data-self-service" onCopy={() => copy(selfService)} />
+                </Section>
+              )}
+            </>
           )}
         </div>
 
@@ -190,7 +207,7 @@ export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
             ) : (
               <>
                 <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>{CANCEL}</Button>
-                <Button disabled={self ? false : (!picked || checking || notPerson)} aria-busy={busy || undefined} onClick={() => void mint()}>
+                <Button disabled={!lane} aria-busy={busy || undefined} onClick={() => void mint()}>
                   {busy && <Loader2Icon className="animate-spin" />} {CREATE_QR}
                 </Button>
               </>
@@ -204,7 +221,7 @@ export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
 
 // Code is the sheet after the mint: the QR, the code beside it with its
 // countdown, the servers the phone tries and the transport it will get.
-function Code({ minted, draw, left, onCopy }: { minted: EnrollTokenAnswer; draw: Draw; left: number; onCopy: () => void }) {
+function Code({ minted, draw, left, onCopy }: { minted: EnrollTokenAnswer; draw: Draw; left: number; onCopy: (text: string) => void }) {
   const servers = (minted.servers || []).filter((s) => (s || "").trim() !== "");
   const trust = trustPosture(minted.servers || [], minted.tls_spki_pin);
   return (
@@ -239,13 +256,18 @@ function Code({ minted, draw, left, onCopy }: { minted: EnrollTokenAnswer; draw:
           </Section>
 
           <Section title={CODE_TITLE}>
-            <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2">
-              <code className="min-w-0 flex-1 select-all break-all font-mono text-[13px] text-foreground" data-enroll-token>{minted.enroll_token}</code>
-              <Button variant="outline" size="sm" onClick={onCopy}><CopyIcon /> {COPY}</Button>
-            </div>
+            <CopyBox text={minted.enroll_token} attr="data-enroll-token" onCopy={() => onCopy(minted.enroll_token)} />
           </Section>
         </div>
       </div>
+
+      {/* The approver app's Enter the code manually takes exactly the text
+          the QR would have carried. */}
+      {draw.kind === "toobig" && (
+        <Section title={ENROLL_TEXT_TITLE}>
+          <CopyBox text={draw.text} attr="data-enroll-text" onCopy={() => onCopy(draw.text)} />
+        </Section>
+      )}
 
       <Section title={SERVERS_TITLE}>
         {servers.length === 0 ? (
@@ -265,5 +287,17 @@ function Code({ minted, draw, left, onCopy }: { minted: EnrollTokenAnswer; draw:
         <span className={trust.tone === "warn" ? "text-[13px] leading-snug text-warn" : HINT} data-trust-line>{trust.line}</span>
       </Section>
     </>
+  );
+}
+
+// CopyBox is a value with its Copy button: the one-time code, the
+// self-service address or the enrollment text. attr marks the value for
+// tests and walks.
+function CopyBox({ text, attr, onCopy }: { text: string; attr: string; onCopy: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2">
+      <code className="min-w-0 flex-1 select-all break-all font-mono text-[13px] text-foreground" {...{ [attr]: true }}>{text}</code>
+      <Button variant="outline" size="sm" onClick={onCopy}><CopyIcon /> {COPY}</Button>
+    </div>
   );
 }

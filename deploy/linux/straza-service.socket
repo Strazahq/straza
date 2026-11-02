@@ -1,0 +1,19 @@
+# The socket of the Straza background service. systemd owns the socket, keeps
+# it open across service restarts and upgrades, and starts
+# straza-service.service on the first connection. Every local user may
+# connect, because the service checks each caller's uid.
+
+[Unit]
+Description=Straza background service socket
+Documentation=https://straza.ai
+
+[Socket]
+ListenStream=/run/straza-service/service.sock
+SocketUser=straza-service
+SocketGroup=straza-service
+SocketMode=0666
+DirectoryMode=0755
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

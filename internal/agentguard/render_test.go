@@ -26,7 +26,7 @@ func TestRenderMatchesManagedInstall(t *testing.T) {
 				}
 				binPath := filepath.Join(binDir, "straza")
 
-				settings, err := managedHookPath(harness)
+				settings, err := ManagedHookPath(harness)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -79,13 +79,14 @@ func TestRenderMatchesManagedInstall(t *testing.T) {
 
 // TestRenderDefaultBinPath pins the default-layout render the server
 // publishes: deterministic across calls, and the hook command points at the
-// per-GOOS default managed binary (the path install --managed copies to).
+// per-GOOS default managed binary, where the straza package, the Straza
+// package for macOS or the Straza MSI installs it.
 func TestRenderDefaultBinPath(t *testing.T) {
 	cases := []struct {
 		goos, wantPath string
 	}{
-		{"linux", "/usr/local/bin/straza"},
-		{"darwin", "/usr/local/bin/straza"},
+		{"linux", "/usr/bin/straza"},
+		{"darwin", "/opt/straza/bin/straza"},
 		{"windows", `C:\\ProgramData\\straza\\bin\\straza.exe`}, // JSON-escaped in settings bytes
 	}
 	for _, tc := range cases {
@@ -101,8 +102,10 @@ func TestRenderDefaultBinPath(t *testing.T) {
 			if !bytes.Equal(a["hooks.claude-code"], b["hooks.claude-code"]) {
 				t.Fatal("render is not deterministic")
 			}
-			if !bytes.Contains(a["hooks.claude-code"], []byte(tc.wantPath)) {
-				t.Fatalf("hooks render does not invoke the default managed binary %s:\n%s", tc.wantPath, a["hooks.claude-code"])
+			for _, name := range []string{"hooks.claude-code", "mcp.claude-code"} {
+				if !bytes.Contains(a[name], []byte(tc.wantPath)) {
+					t.Fatalf("%s render does not invoke the default managed binary %s:\n%s", name, tc.wantPath, a[name])
+				}
 			}
 		})
 	}
@@ -111,6 +114,27 @@ func TestRenderDefaultBinPath(t *testing.T) {
 	}
 	if _, err := RenderManagedArtifacts("claude-code", "plan9", ""); err == nil {
 		t.Fatal("unsupported GOOS accepted")
+	}
+}
+
+// TestRenderDefaultEveryHarness pins that every harness renders on every
+// GOOS from the default binary path, because strazad renders them all at
+// boot and refuses to boot on an error, and the codex render refuses a
+// path with whitespace. On darwin each hook runs /opt/straza/bin/straza.
+func TestRenderDefaultEveryHarness(t *testing.T) {
+	for _, harness := range []string{"claude-code", "codex", "gemini"} {
+		for _, goos := range SupportedGOOS {
+			t.Run(harness+"/"+goos, func(t *testing.T) {
+				arts, err := RenderManagedArtifacts(harness, goos, "")
+				if err != nil {
+					t.Fatalf("default render: %v", err)
+				}
+				hook := []byte("/opt/straza/bin/straza hook --harness " + harness)
+				if goos == "darwin" && !bytes.Contains(arts["hooks."+harness], hook) {
+					t.Errorf("hooks.%s does not run %s:\n%s", harness, hook, arts["hooks."+harness])
+				}
+			})
+		}
 	}
 }
 

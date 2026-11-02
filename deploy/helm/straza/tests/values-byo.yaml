@@ -1,5 +1,6 @@
 # Golden scenario: bring-your-own backends (the usual production shape), external
-# Postgres via secret DSN + external NATS + shared KEK + native TLS. Must
+# Postgres via secret DSN + external NATS + shared KEK + native TLS, and an
+# IdP that needs a fixed loopback port. Must
 # render ZERO bundled StatefulSets: bring-your-own wins over the turnkey
 # defaults, so existing installs upgrade without growing duplicate backends.
 postgres:
@@ -8,6 +9,7 @@ nats:
   url: nats://nats.straza.svc:4222
 oidc:
   issuer: https://idp.example.com/realms/prod
+  loopbackPort: 8765
 secrets:
   kekExistingSecret: straza-kek
 tls:

@@ -22,13 +22,15 @@ func roleKindEnum(kind string) string {
 
 // RoleSpec is a role as a create request names it. Kind is in the words of
 // the admin API: business, application, approver or straza, and empty for
-// the default. Server and Tools name the owning server and the tools of the
-// role's one access row, and are empty for a global role.
+// the default. Server, Tools and Covers name the owning server and the
+// tools and covers line of the role's one access row, and are empty for a
+// global role.
 type RoleSpec struct {
 	Name   string
 	Kind   string
 	Server string
 	Tools  []string
+	Covers *Scope
 }
 
 // RoleCreateRefusal refuses the creation of the role spec names, or answers
@@ -75,7 +77,9 @@ func RoleCreateRefusal(w World, st Standing, spec RoleSpec) *Refusal {
 // ownedRoleRefusal applies the server-owned role rules to spec, which names
 // a server: the server exists, the caller administers it, the role is an
 // application role named with the server's prefix, it lists its tools, only
-// a full standing gives it the every-tool matcher, and its name is free.
+// a full standing gives it the every-tool matcher, a server admin covers
+// every object only as admin.serverAdminsCoverEvery allows, and its name is
+// free.
 func ownedRoleRefusal(w World, st Standing, spec RoleSpec) *Refusal {
 	app, ok := w.Apps[spec.Server]
 	if !ok {
@@ -96,6 +100,9 @@ func ownedRoleRefusal(w World, st Standing, spec RoleSpec) *Refusal {
 	}
 	if len(spec.Tools) == 0 || (!st.Full && hasCatalogGlob(spec.Tools)) {
 		return refused(RefusalInvalid, OwnedRoleToolsErr)
+	}
+	if ref := coverEveryRefusal(w, st, spec.Name, spec.Server, spec.Covers != nil && spec.Covers.Every); ref != nil {
+		return ref
 	}
 	if _, ok := w.Roles[spec.Name]; ok {
 		return RoleExists(spec.Name)

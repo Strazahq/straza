@@ -13,7 +13,7 @@ aliases:
   - /guides/operate/enterprise-compose-stack/
 tested:
   version: v1.1.0-104-g07d2df0e
-  platform: Read only against the demo stack running on this Linux host with Docker Engine 29.4.0 and the four compose files, for the version answer, the role, server, policy and user listings as alice on a session from the Keycloak password grant, the compose listing, the config mount, the seeder verdict, the Elasticsearch count, the Keycloak query, the volumes and the docs check. The description of midpoint-operations is quoted from the seeder, because this stack kept the older wording it was first seeded with. The launcher, the CLI login, the midPoint disable and re-enable with what they change in Straza and Keycloak, and the teardown were not run because each writes to the shared stack, so the seeder lines, the disabled row and the audit record come from the walk of 2026-09-28 on v1.1.0. The console steps were not clicked
+  platform: Read only against the demo stack running on this Linux host with Docker Engine 29.4.0 and the four compose files, for the version answer, the role, server, policy and user listings as alice on a session from the Keycloak password grant, the compose listing, the config mount, the seeder verdict, the Elasticsearch count, the Keycloak query, the volumes and the docs check. The description of midpoint-operations is quoted from the seeder, because this stack kept the older wording it was first seeded with. The launcher, the midPoint disable and re-enable with what they change in Straza and Keycloak, and the teardown were not run because each writes to the shared stack, so the seeder lines, the disabled row and the audit record come from the walk of 2026-09-28 on v1.1.0. The compose listing was captured again on 2026-10-21 at v1.0.0-1571-g753a266a after the rebuild that added the two service containers. The console steps were not clicked. The console's browser sign-in was written from the code on 2026-10-22 and not walked. strazactl ran on alice's session in that run and no longer signs in, so the step that mints alice's admin API token and hands it to strazactl was written on 2026-11-01 and not walked
   date: 2026-10-06
 applies_to: enterprise
 keywords: demo eval stack compose midpoint keycloak enterprise operate overlays loopback tunnels seeder volumes cast
@@ -77,7 +77,7 @@ The lines below are trimmed to the ones that matter, with the lines between the 
 [seed] explicit Keycloak login) holds the developer role and sam (autonomous
 [seed] SRE agent, key lane only) the operator role. Both are sponsored by
 [seed] alice: Straza sends their gated calls to her phone.
-[seed] Business roles: developer (joe) composes demo-tools-sandbox, views-demo-tools and midpoint-self-service,
+[seed] Business roles: developer (joe) composes demo-tools-sandbox, views-demo-tools, objects-demo-tools and midpoint-self-service,
 [seed] operator (sam) composes demo-tools-readers and midpoint-operations, and
 [seed] analyst (nobody yet) composes demo-tools-readers and midpoint-self-service.
 [seed] Landing page: http://localhost:8400  <- start here
@@ -90,40 +90,33 @@ The lines below are trimmed to the ones that matter, with the lines between the 
 
 Open every address of the stack as `localhost`, not `127.0.0.1`. The stack advertises itself as `localhost`, and Keycloak binds its sign-in cookie to that name. alice is an administrator because midPoint assigned her the admin role.
 
-{{< console >}}
 Open the landing page at `http://localhost:8400`. It lists the stack's accounts and services with copy buttons, and walkthroughs that each say who you act as, what they need and what you see. Then open the console at `http://localhost:8420/console/`.
 
-1. Press **Sign in with a code**. The console shows a code and the button **Open the sign-in page**.
-2. Press **Open the sign-in page**. Keycloak opens.
-3. Sign in as `alice` with the password `alice`, and grant the device flow access.
+1. Press **Sign in**. Keycloak opens in the same tab.
+2. Sign in as `alice` with the password `alice`.
+3. Keycloak sends the tab back to the console, which says `Signing you in`.
 
 {{< see >}}The console opens on **Overview**, on its **Summary** tab.{{< /see >}}
 
 {{< shot name="demo-overview" caption="The Summary tab counts the MCP servers running of the total, the active sessions, the active users and the active policies." >}}
 
 Once your browser has re-hashed the newest audit records and the chain held, the tab ends in the line `Latest records verified (up to 25)`.
-{{< /console >}}
 
 {{< cli >}}
-Log in with the admin command line. `login` needs the server address once and remembers it.
+The admin command line has no sign-in of its own. It runs on an admin API token that alice mints in the console.
+
+{{< clicks "Settings" "API tokens" "New API token" >}}
+
+Name it `alice-terminal`, pick `expires in 30 days` and the job **Full root**, press **Mint token**, and copy the token from the sheet that follows, because it is shown only once. Then give it and the server address to `strazactl`. Paste the token at the `read` line and press Enter. `read -rs` reads the pasted token without showing it and keeps it out of the shell history.
 
 {{< command terminal="Terminal" purpose="administration" >}}
 ```sh
-strazactl login --server http://localhost:8420
+export STRAZA_SERVER=http://localhost:8420
+read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
 ```
 {{< /command >}}
 
-Open the address it prints, sign in as `alice` with the password `alice`, and press **Yes** on the page that asks whether to grant Straza the device flow access. Keycloak then says "Signed in".
-
-{{< see >}}`Logged in as alice.` and a note that asks you to keep this login away from coding agents.{{< /see >}}
-
-```text
-Signing in at your identity provider: http://localhost:8480/realms/straza
-Open http://localhost:8480/realms/straza/device?user_code=MTZN-EPBL
-and confirm code MTZN-EPBL
-Logged in as alice.
-note: this login can change Straza's configuration. Keep it away from coding agents. Automation uses an admin API token in STRAZA_API_TOKEN, and an agent proposes config changes through the built-in straza MCP server.
-```
+Whoever holds the token acts as an administrator until it expires or is revoked, so keep it in this terminal and never where an agent runs as you. Revoke it under **Settings**, **API tokens** when you are done with it.
 {{< /cli >}}
 
 {{< fails >}}
@@ -185,29 +178,32 @@ strazactl policy list
 The listings are trimmed to what the seeder made, and the role ids are left out.
 
 ```table
-NAME                     KIND         SERVER      DESCRIPTION
-analyst                  business     -           The analyst role: composes demo-tools-readers and midpoint-self-service. Nobody holds it at boot; assign it to nina in midPoint and watch her land in Straza.
-auditor                  straza       -           Read-only oversight: audit, sessions and transcripts. Opens the console, never agent tools.
-demo-tools-readers       application  demo-tools  Read-only reach into the demo-tools server: the tools that only read or compute, named one by one. Defined by that server's own admin and assigned by the identity manager.
-demo-tools-sandbox       application  demo-tools  Every tool of the demo-tools server, tools added later included. Composed by the developer role; get-sum is a hold and get-env is a ticket in demo-tools-sandbox-access.
-developer                business     -           The developer role: composes demo-tools-sandbox, every tool of the demo-tools server, views-demo-tools, the MCP Apps example server, and midpoint-self-service, the midPoint reads plus request_role. joe holds it from midPoint.
-mcp-admin-demo-tools     straza       -           Administers the MCP server demo-tools: its connection, credentials, settings and health, never its removal. It opens the console's MCP servers area for that server only.
-mcp-admin-midpoint       straza       -           Administers the MCP server midpoint: its connection, credentials, settings and health, never its removal. It opens the console's MCP servers area for that server only.
-mcp-admin-views-demo     straza       -           Administers the MCP server views-demo: its connection, credentials, settings and health, never its removal. It opens the console's MCP servers area for that server only.
-midpoint-operations      application  midpoint    Every tool of the midPoint server. Composed by the operator role; every write waits for the person behind the call in midpoint-operations-access.
-midpoint-self-service    application  midpoint    The midPoint reads plus the self-service pair whoami, ping, list_requestable_roles and request_role. Composed by the developer and analyst roles; request_role needs approval in midpoint-self-service-access.
-operator                 business     -           The operator role: composes demo-tools-readers, the read-only tools the demo-tools server's admin defined, and midpoint-operations, every midPoint tool with every write needing approval. sam holds it from midPoint.
-sec-approvers            approver     -           The deciders of approval requests for governed agents. Reaches no tools. The identity manager assigns and certifies its holders.
-straza-admin             straza       -           Straza administration
-straza-draft-config      straza       -           Lets an agent propose config drafts through the built-in straza MCP server's tools straza__draft_submit and straza__draft_status. A person publishes them. It opens no console area, and straza-admin does not include it.
-straza-enroll-browser    straza       -           May enroll a signed-in browser as an approval device.
-straza-enroll-mobile     straza       -           May enroll their own phone as an approval device.
-straza-global-mcp-admin  straza       -           Administers every MCP server: registration, changes, credentials and reach. It opens the console's MCP servers area, never agent tools.
-views-demo-tools         application  views-demo  Every tool of the views-demo server, the MCP Apps example whose get-time opens a clock view. Composed by the developer role.
-NAME        VERSION    RUNTIME  STATUS   REASON  SOURCE  TOOLS  REACHED BY                                 CHECKED
-demo-tools  2026.8.31  remote   running  -       api     14     demo-tools-readers,demo-tools-sandbox      10s ago
-midpoint    0.6.0      remote   running  -       api     39     midpoint-operations,midpoint-self-service  10s ago
-views-demo  2.0.3      remote   running  -       api     1      views-demo-tools                           10s ago
+NAME                     KIND         SERVER        DESCRIPTION
+analyst                  business     -             The analyst role: composes demo-tools-readers and midpoint-self-service. Nobody holds it at boot; assign it to nina in midPoint and watch her land in Straza.
+auditor                  straza       -             Read-only oversight: audit, sessions and transcripts. Opens the console, never agent tools.
+demo-tools-readers       application  demo-tools    Read-only reach into the demo-tools server: the tools that only read or compute, named one by one. Defined by that server's own admin and assigned by the identity manager.
+demo-tools-sandbox       application  demo-tools    Every tool of the demo-tools server, tools added later included. Composed by the developer role; get-sum is a hold and get-env is a ticket in demo-tools-sandbox-access.
+developer                business     -             The developer role: composes demo-tools-sandbox, every tool of the demo-tools server, views-demo-tools, the MCP Apps example server, objects-demo-tools, the repo server, and midpoint-self-service, the midPoint reads plus request_role. joe holds it from midPoint.
+mcp-admin-demo-tools     straza       -             Administers the MCP server demo-tools: its connection, credentials, settings and health, never its removal. It opens the console's MCP servers area for that server only.
+mcp-admin-midpoint       straza       -             Administers the MCP server midpoint: its connection, credentials, settings and health, never its removal. It opens the console's MCP servers area for that server only.
+mcp-admin-objects-demo   straza       -             Administers the MCP server objects-demo: its connection, credentials, settings and health, never its removal. It opens the console's MCP servers area for that server only.
+mcp-admin-views-demo     straza       -             Administers the MCP server views-demo: its connection, credentials, settings and health, never its removal. It opens the console's MCP servers area for that server only.
+midpoint-operations      application  midpoint      Every tool of the midPoint server. Composed by the operator role; every write waits for the person behind the call in midpoint-operations-access.
+midpoint-self-service    application  midpoint      The midPoint reads plus the self-service pair whoami, ping, list_requestable_roles and request_role. Composed by the developer and analyst roles; request_role needs approval in midpoint-self-service-access.
+objects-demo-tools       application  objects-demo  Every tool of the objects-demo server, ten repos behind tools that name the repo they reach. Composed by the developer role.
+operator                 business     -             The operator role: composes demo-tools-readers, the read-only tools the demo-tools server's admin defined, and midpoint-operations, every midPoint tool with every write needing approval. sam holds it from midPoint.
+sec-approvers            approver     -             The deciders of approval requests for governed agents. Reaches no tools. The identity manager assigns and certifies its holders.
+straza-admin             straza       -             Straza administration
+straza-draft-config      straza       -             Lets an agent propose config drafts through the built-in straza MCP server's tools straza__draft_submit and straza__draft_status. A person publishes them. It opens no console area, and straza-admin does not include it.
+straza-enroll-browser    straza       -             May enroll a signed-in browser as an approval device.
+straza-enroll-mobile     straza       -             May enroll their own phone as an approval device.
+straza-global-mcp-admin  straza       -             Administers every MCP server: registration, changes, credentials and reach. It opens the console's MCP servers area, never agent tools.
+views-demo-tools         application  views-demo    Every tool of the views-demo server, the MCP Apps example whose get-time opens a clock view. Composed by the developer role.
+NAME          VERSION    RUNTIME  STATUS   REASON  SOURCE  TOOLS  REACHED BY                                 CHECKED
+demo-tools    2026.8.31  remote   running  -       api     14     demo-tools-readers,demo-tools-sandbox      10s ago
+midpoint      0.6.0      remote   running  -       api     39     midpoint-operations,midpoint-self-service  10s ago
+objects-demo  1.0.0      remote   running  -       api     5      objects-demo-tools                         10s ago
+views-demo    2.0.3      remote   running  -       api     1      views-demo-tools                           10s ago
 NAME                          PRIORITY  STATUS  ID
 agent-guardrails              150       Live    01a0f844-67f1-7749-b8fe-244b01441916
 demo-tools-readers-access     100       Live    01a0f844-6779-7965-872f-a37289bf3957
@@ -242,11 +238,12 @@ Every person and agent with the origin `scim` was created in midPoint and provis
 
 Four kinds of role appear. `developer`, `operator` and `analyst` are business roles that people hold. Each of them composes application roles, and those application roles are what the active PolicySets match. An application role reaches one server and belongs to it, so the server column names that server and midPoint shows the role as that server's role. `sec-approvers` decides approvals and holds no tools. A Straza role such as `auditor` carries rights inside Straza itself and no agent tools.
 
-The seeder installed the three MCP servers through the admin API, so the console and `strazactl` can change them:
+The seeder installed the four MCP servers through the admin API, so the console and `strazactl` can change them:
 
 - `demo-tools` is a reference MCP server that no port publishes.
 - The identity manager's own MCP server is `midpoint`. Its tools run as the signed-in person, and its four views, the approval inbox, Get access, My requests and My team's access, are turned on.
 - `views-demo` is the official MCP Apps example server with its views turned on. A chat app that shows MCP Apps views renders its clock card through `/mcp/views-demo`, as [Show MCP Apps views]({{< relref "guides/serve-mcp-apps/show-views.md" >}}) walks through.
+- `objects-demo` holds ten repos behind tools that mark which argument names the repo, and its manifest pins them under `straza.objects`. Straza lists them with the server's listing credential, and its page in the console gains a Repos tab, as [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md#objects" >}}) shows.
 
 The seeder also removed the admin role from its own bootstrap account and disabled that account's login in Keycloak. [The cast](#the-cast) below says who each person and agent is and what they hold.
 
@@ -375,34 +372,37 @@ docker compose -f compose.yaml -f compose.loopback.yaml -f compose.siem.yaml -f 
 {{< /command >}}
 
 ```table
-SERVICE                    IMAGE                                                                                                                STATUS                    PORTS
-agent-keys-init            busybox:1.36                                                                                                         Exited (0) 5 days ago
-connector-jar              curlimages/curl:8.7.1                                                                                                Exited (0) 2 days ago
-demo                       straza-eval-demo                                                                                                     Up 5 days
-demo-tools                 straza-eval-demo-tools                                                                                               Up 5 days
-docs-build                 ghcr.io/gohugoio/hugo:v0.165.0@sha256:608a19e34f86de36773503adbaab174fc28a6e338dc7904e03c70320b003a153               Exited (0) 5 days ago
-docs-publish               python:3.13-alpine                                                                                                   Exited (0) 5 days ago
-elasticsearch              docker.elastic.co/elasticsearch/elasticsearch:8.14.3                                                                 Up 5 days (healthy)       127.0.0.1:9200->9200/tcp, 9300/tcp
-eval-seed                  alpine:3.20                                                                                                          Exited (0) 2 days ago
-kc-connector-build         maven:3.9-eclipse-temurin-17                                                                                         Exited (0) 2 days ago
-keycloak                   quay.io/keycloak/keycloak:26.0                                                                                       Up 5 days (healthy)       8443/tcp, 9000/tcp, 127.0.0.1:8480->8080/tcp
-kibana                     docker.elastic.co/kibana/kibana:8.14.3                                                                               Up 5 days                 127.0.0.1:5601->5601/tcp
-kibana-setup               docker.elastic.co/elasticsearch/elasticsearch:8.14.3                                                                 Exited (0) 5 days ago
-landing                    nginx:1.27-alpine                                                                                                    Up 5 days                 127.0.0.1:8400->80/tcp
-mcp-midpoint-http          ghcr.io/strazahq/midpoint-mcp-server:0.6.0@sha256:0b24ff42bb60eeb78a756f5db8b24e25a3cfc7887517cf8151e9c4e957194a00   Up 2 days
-midpoint                   evolveum/midpoint:4.10.3-alpine                                                                                      Up 5 days (healthy)       127.0.0.1:8087->8080/tcp
-midpoint-db                postgres:16-alpine                                                                                                   Up 5 days                 5432/tcp
-midpoint-init              evolveum/midpoint:4.10.3-alpine                                                                                      Exited (0) 2 days ago
-midpoint-partition-guard   postgres:16-alpine                                                                                                   Exited (0) 2 days ago
-nats                       nats:2                                                                                                               Up 5 days                 4222/tcp, 6222/tcp, 8222/tcp
-siem-setup                 docker.elastic.co/elasticsearch/elasticsearch:8.14.3                                                                 Exited (0) 11 hours ago
-straza-data-init           busybox:1.36                                                                                                         Exited (0) 11 hours ago
-straza-db                  postgres:16                                                                                                          Up 5 days (healthy)       5432/tcp
-strazad                    straza-eval-strazad                                                                                                  Up 11 hours               127.0.0.1:8420->8420/tcp, 127.0.0.1:8443->8443/tcp
-uni-connector-build        curlimages/curl:8.7.1                                                                                                Exited (0) 2 days ago
-views-demo                 straza-eval-views-demo                                                                                               Up 5 days
-straza-harness             straza-eval-straza-harness                                                                                           Up 5 days
-agent-sam                  straza-eval-agent-sam                                                                                                Up 5 days (healthy)
+SERVICE                    IMAGE                                                                                                                STATUS                          PORTS
+agent-keys-init            busybox:1.36                                                                                                         Exited (0) 2 days ago           
+connector-jar              curlimages/curl:8.7.1                                                                                                Exited (0) 2 days ago           
+demo                       straza-eval-demo                                                                                                     Up 2 days                       
+demo-tools                 straza-eval-demo-tools                                                                                               Up 2 days                       
+docs-build                 ghcr.io/gohugoio/hugo:v0.165.0@sha256:608a19e34f86de36773503adbaab174fc28a6e338dc7904e03c70320b003a153               Exited (0) 2 days ago           
+docs-publish               python:3.13-alpine                                                                                                   Exited (0) 2 days ago           
+elasticsearch              docker.elastic.co/elasticsearch/elasticsearch:8.14.3                                                                 Up 2 minutes (healthy)          127.0.0.1:9200->9200/tcp, 9300/tcp
+eval-seed                  alpine:3.20                                                                                                          Exited (0) 2 days ago           
+kc-connector-build         maven:3.9-eclipse-temurin-17                                                                                         Exited (0) 2 days ago           
+keycloak                   quay.io/keycloak/keycloak:26.0                                                                                       Up 2 days (healthy)             8443/tcp, 9000/tcp, 127.0.0.1:8480->8080/tcp
+kibana                     docker.elastic.co/kibana/kibana:8.14.3                                                                               Up About a minute               127.0.0.1:5601->5601/tcp
+kibana-setup               docker.elastic.co/elasticsearch/elasticsearch:8.14.3                                                                 Exited (0) 2 days ago           
+landing                    nginx:1.27-alpine                                                                                                    Up 2 days                       127.0.0.1:8400->80/tcp
+mcp-midpoint-http          ghcr.io/strazahq/midpoint-mcp-server:0.6.0@sha256:0b24ff42bb60eeb78a756f5db8b24e25a3cfc7887517cf8151e9c4e957194a00   Up 2 days                       
+midpoint                   evolveum/midpoint:4.10.3-alpine                                                                                      Up 2 days (healthy)             127.0.0.1:8087->8080/tcp
+midpoint-db                postgres:16-alpine                                                                                                   Up 2 days                       5432/tcp
+midpoint-init              evolveum/midpoint:4.10.3-alpine                                                                                      Exited (0) 2 days ago           
+midpoint-partition-guard   postgres:16-alpine                                                                                                   Exited (0) 2 days ago           
+nats                       nats:2                                                                                                               Up 2 days                       4222/tcp, 6222/tcp, 8222/tcp
+objects-demo               straza-eval-objects-demo                                                                                             Up 2 days                       3002/tcp
+siem-setup                 docker.elastic.co/elasticsearch/elasticsearch:8.14.3                                                                 Exited (0) About a minute ago   
+straza-data-init           busybox:1.36                                                                                                         Exited (0) 18 hours ago         
+straza-db                  postgres:16                                                                                                          Up 2 days (healthy)             5432/tcp
+strazad                    straza-eval-strazad                                                                                                  Up 8 minutes                    127.0.0.1:8420->8420/tcp, 127.0.0.1:8443->8443/tcp
+uni-connector-build        curlimages/curl:8.7.1                                                                                                Exited (0) 2 days ago           
+views-demo                 straza-eval-views-demo                                                                                               Up 2 days                       
+straza-harness             straza-eval-straza-harness                                                                                           Up 11 minutes                   
+straza-harness-service     straza-eval-straza-harness-service                                                                                   Up 11 minutes (healthy)         
+agent-sam                  straza-eval-agent-sam                                                                                                Up 11 minutes (healthy)         
+agent-sam-service          straza-eval-agent-sam-service                                                                                        Up 11 minutes (healthy)         
 ```
 
 
@@ -412,8 +412,8 @@ The long-running services form these groups:
 |---|---|
 | Identity | `keycloak`, Keycloak 26 in dev mode, which imports the realm `straza` at boot. `midpoint`, midPoint 4.10.3, with its own `midpoint-db`. |
 | Straza | `strazad` in the enterprise profile with the console embedded, `straza-db`, and `nats`. NATS publishes no port, because agents receive the kill-switch push over strazad's own `/v1/push` endpoint. |
-| The governed side | `demo-tools`, the MCP reference server that only the gateway can reach. `views-demo`, the MCP Apps example server, whose views a chat app reaches only through `/mcp/views-demo`. `mcp-midpoint-http`, the midPoint MCP server that runs every call as the signed-in person. `landing`, the nginx behind the landing page and the published docs under `/docs/`. |
-| Agents | `agent-sam`, the always-on autonomous agent. `straza-harness`, a pinned Claude Code in a box that you drive with `docker exec`. `demo`, the scripted chat face on 127.0.0.1:8477. |
+| The governed side | `demo-tools`, the MCP reference server that only the gateway can reach. `views-demo`, the MCP Apps example server, whose views a chat app reaches only through `/mcp/views-demo`. `objects-demo`, the server whose ten repos Straza lists. `mcp-midpoint-http`, the midPoint MCP server that runs every call as the signed-in person. `landing`, the nginx behind the landing page and the published docs under `/docs/`. |
+| Agents | `agent-sam`, the always-on autonomous agent, with `agent-sam-service` beside it. `straza-harness`, a pinned Claude Code in a box that you drive with `docker exec`, with `straza-harness-service` beside it. Each of the two service containers runs `straza service`, the Straza background service, from the same image under its own account, uid 64000, keeps the agent's key in a volume only it mounts, and shares only the socket directory with its agent. `demo`, the scripted chat face on 127.0.0.1:8477, has no service, because its gateway lane asks Keycloak for a realm and a client this stack does not have. |
 | SIEM, from the siem overlay | `elasticsearch` and `kibana`. |
 
 
@@ -430,10 +430,10 @@ Everything listed as `Exited (0)` is a one-shot job that ran to completion while
 
 Every person and agent except two local accounts is born in midPoint and provisioned from there. The seeder works in this order:
 
-1. It signs in as the transient `seed-bootstrap` user and mints the admin API token midPoint holds under the name `midpoint`.
+1. It signs in as the transient `seed-bootstrap` user the way the console does, and mints a full-scope admin API token named `eval-seed` for its own run. That token expires two hours after the mint and is revoked when the seeder exits. Then it mints the admin API token midPoint holds under the name `midpoint`.
 2. Next it creates the Straza-born roles: the business roles `developer`, `operator` and `analyst`, the approver role `sec-approvers` and the Straza role `auditor`.
 3. It imports the midPoint objects and waits for midPoint to provision the working agents.
-4. Each application role is created on the one server it reaches, with its access row: `demo-tools-sandbox` on `demo-tools`, `views-demo-tools` on `views-demo`, and `midpoint-self-service` and `midpoint-operations` on `midpoint`.
+4. Each application role is created on the one server it reaches, with its access row: `demo-tools-sandbox` on `demo-tools`, `views-demo-tools` on `views-demo`, `objects-demo-tools` on `objects-demo`, and `midpoint-self-service` and `midpoint-operations` on `midpoint`.
 5. It registers the agents' Ed25519 public keys and activates the policy set of each application role together with `agent-guardrails`.
 6. dave gets the role that administers every MCP server, and carol the role the `demo-tools` server names at its own registration.
 7. Last, the seeder locks itself.
@@ -458,7 +458,7 @@ Sponsorship is the accountability edge. alice sponsors joe and sam, so when eith
 | break-glass | local emergency admin strazad creates on every store | standing admin | printed once in the strazad log at first boot, used only on the emergency sign-in |
 
 
-Every login in the stack is public by design, which is the reason the hardened shape below binds every port to loopback. The console and the CLI sign in through Keycloak as `alice` / `alice`. The landing page's Accounts table lists the logins of alice, ivan, carol, dave and joe beside those of the midPoint, Keycloak and Kibana administrators. Its lab shortcuts name the mcp-service and seed-bootstrap accounts as committed too, without printing their passwords. Both passwords live only in the seed objects, and operating the stack never needs them.
+Every login in the stack is public by design, which is the reason the hardened shape below binds every port to loopback. The console signs in through Keycloak as `alice` / `alice`, and the CLI runs on an admin API token that alice mints there. The landing page's Accounts table lists the logins of alice, ivan, carol, dave and joe beside those of the midPoint, Keycloak and Kibana administrators. Its lab shortcuts name the mcp-service and seed-bootstrap accounts as committed too, without printing their passwords. Both passwords sit in committed files of the stack, the mcp-service one in `compose.yaml` and the seed-bootstrap one in `seed/seed.sh`, and operating the stack never needs them.
 
 ### Demo defaults and the hardened shape
 
@@ -546,11 +546,11 @@ docker compose -f compose.yaml -f compose.loopback.yaml -f compose.siem.yaml -f 
 A seeder that dies is run again with `up eval-seed` on the same files, and it converges, because every step is idempotent. Roles answer that they are already present, earlier tokens are revoked and minted again, and a PolicySet that exists is never touched.
 
 
-State lives in twelve named volumes. `down` without `-v` removes every container and keeps everything that matters:
+State lives in fifteen named volumes. `down` without `-v` removes every container and keeps everything that matters:
 
 - both Postgres stores and midPoint's home
 - strazad's data volume with the key-encryption key, the auto-minted approver TLS pair, the WebPush key and the relay token
-- the agents' private keys and enrollments
+- the state volumes of the two `straza service` containers, with the agents' private keys and enrollments, and the socket volumes they share with their agents
 - the Maven cache and the docs
 
 The next `up -d` brings the same stack back with the same certificate pin, so enrolled phones keep working. Keycloak is the exception. It runs in dev mode with no volume, so anything you changed in its admin console is gone after `down`, while the realm import and midPoint recreate every login the stack owns. `down -v --remove-orphans` wipes the volumes, and the next boot is a virgin boot with new keys and a new pin, so phones scan again.

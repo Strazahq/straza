@@ -11,7 +11,7 @@ modes: [console, cli]
 mode_default: cli
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A Linux host with Helm 3.16.4 and no Kubernetes cluster, so the cluster, the image build and load, the install, the pod checks, the port-forward and the teardown were not run, and their pasted outputs come from the kind walk of 2026-09-19 at v1.0.0-1235-ge8f5cdea. The install's values and the chart's notes were rendered with helm template from chart 1.1.0, and the version and readiness checks, the login with the form post the sign-in page sends and the simulated deny ran against a standalone strazad in an Alpine 3.20 container. The console steps were not clicked
+  platform: A Linux host with Helm 3.16.4 and no Kubernetes cluster, so the cluster, the image build and load, the install, the pod checks, the port-forward and the teardown were not run, and their pasted outputs come from the kind walk of 2026-09-19 at v1.0.0-1235-ge8f5cdea. The install's values and the chart's notes were rendered with helm template from chart 1.1.0, and the version and readiness checks, the login with the form post the sign-in page sends and the simulated deny ran against a standalone strazad in an Alpine 3.20 container. The console steps were not clicked. The browser sign-ins of the console and of strazactl login were written from the code on 2026-10-22 and not walked, and strazactl no longer signs in
   date: 2026-10-06
 applies_to: standalone
 keywords: kubernetes kind helm chart tutorial port-forward
@@ -117,7 +117,7 @@ The load copies the image into the node's own image store. That is what lets the
 ## Install the chart
 
 
-The chart's defaults describe the enterprise shape: two replicas, a bundled Postgres, a bundled NATS and an external identity provider. Three values turn it into the one-pod standalone shape of this tutorial. The image is `ghcr.io/strazahq/straza` at the chart's appVersion, which is 1.1.0 for this release.
+The chart's defaults describe the enterprise shape: two replicas, a bundled Postgres, a bundled NATS and an external identity provider. Three values turn it into the one-pod standalone shape of this tutorial. The image is `ghcr.io/strazahq/straza` at the chart's appVersion, which is 2.0.0 for this release.
 
 {{< command terminal="Terminal 1" purpose="the repository root" >}}
 ```sh
@@ -128,7 +128,7 @@ helm install straza deploy/helm/straza \
 ```
 {{< /command >}}
 
-{{< see >}}The release status `deployed`, followed by the chart's notes. They name the release `straza-straza`, the image `ghcr.io/strazahq/straza:1.1.2` or your own tag, the profile `standalone`, one replica, the public address `http://127.0.0.1:18420`, embedded per-pod events and a per-pod SQLite store.{{< /see >}}
+{{< see >}}The release status `deployed`, followed by the chart's notes. They name the release `straza-straza`, the image `ghcr.io/strazahq/straza:2.0.0` or your own tag, the profile `standalone`, one replica, the public address `http://127.0.0.1:18420`, embedded per-pod events and a per-pod SQLite store.{{< /see >}}
 
 Each value has a reason:
 
@@ -136,7 +136,7 @@ Each value has a reason:
 |---|---|
 | `profile=standalone` | Selects the embedded store and broker, and drops the bundled backends, which the chart renders only under the enterprise profile. |
 | `replicaCount=1` | Has to go with the standalone profile. The chart refuses to render a standalone release with more than one replica, because each pod would own its own SQLite file. |
-| `publicUrl` | The address your clients dial. It becomes the issuer inside every session token and the base of every link the server hands out, including the sign-in address the login command prints in a moment, so it has to be the port-forward address you open next. Left empty, the chart derives the in-cluster Service name `http://straza-straza.default.svc:8420`, which is right for clients inside the cluster and unreachable from your browser. |
+| `publicUrl` | The address your clients dial. It becomes the issuer inside every session token and the base of every link the server hands out, including the sign-in page the console sends you to in a moment, so it has to be the port-forward address you open next. Left empty, the chart derives the in-cluster Service name `http://straza-straza.default.svc:8420`, which is right for clients inside the cluster and unreachable from your browser. |
 
 `--wait` returns once the pod passes its readiness probe. Check the pod:
 
@@ -214,51 +214,38 @@ The first answer is one line of JSON. Its `version` is the one in the image, and
 ## Sign in
 
 
-{{< console >}}
-Open `http://127.0.0.1:18420/console/` in your browser and press **Sign in with a code**. The console shows a one-time code.
+Both forms of this step start in the console, where a person signs in. Open `http://127.0.0.1:18420/console/` in your browser and press **Sign in**.
 
-{{< shot name="signin-code" caption="Press Open the sign-in page. Your code is different." >}}
+{{< shot name="signin" caption="The console's sign-in card." >}}
 
-1. Press **Open the sign-in page**. A new tab opens on the page titled Sign in to Straza, with the code filled in.
-2. Check that the code matches, enter `admin` and the password from the pod log, and press **Sign in**.
-3. The tab says *Signed in. You can close this tab.* Go back to the console.
+1. The tab goes to the page titled Sign in to Straza.
+2. Enter `admin` and the password from the pod log, and press **Sign in**.
+3. The tab comes back to the console, which says `Signing you in`.
 
 {{< see >}}The console opens on **Overview**. The foot of the sidebar says `standalone` and the server's build.{{< /see >}}
-{{< /console >}}
+
+The address of the sign-in page is the `publicUrl` from the install, and that is the reason the value had to be the port-forward address.
 
 {{< cli >}}
-Log in. `login` is the one command that takes the server address, and it remembers it for every later command.
+`strazactl` has no sign-in of its own. It runs on an admin API token that you mint in the console.
+
+{{< clicks "Settings" "API tokens" "New API token" >}}
+
+Name it `admin-terminal`, pick `expires in 30 days` and the job **Full root**, press **Mint token**, and copy the token from the sheet that follows, because it is shown only once. Then give it and the server address to `strazactl`. Paste the token at the `read` line and press Enter. `read -rs` reads the pasted token without showing it and keeps it out of the shell history.
 
 {{< command terminal="Terminal 1" purpose="administration" >}}
 ```sh
-strazactl login --server http://127.0.0.1:18420
+export STRAZA_SERVER=http://127.0.0.1:18420
+read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
 ```
 {{< /command >}}
 
-```text
-Open http://127.0.0.1:18420/oidc/device?user_code=5FN6-5GP8
-and confirm code 5FN6-5GP8
-Logged in as admin.
-note: this login can change Straza's configuration. Keep it away from coding agents. Automation uses an admin API token in STRAZA_API_TOKEN, and an agent proposes config changes through the built-in straza MCP server.
-```
-
-Between the second and the third line the command waits for you.
-
-1. Open the printed address in a browser. The page titled Sign in to Straza shows the code already filled in.
-2. Enter `admin` and the password from the pod log, and press **Sign in**. The page answers "Signed in" and says you can close the tab.
-3. Go back to the terminal.
-
-{{< see >}}`Logged in as admin.` and a note that asks you to keep this login away from coding agents.{{< /see >}}
+Whoever holds the token acts as an administrator until it expires or is revoked, so keep it in this terminal and never where an agent runs as you. It goes away with the pod's store when you delete the cluster.
 {{< /cli >}}
-
-The address of the sign-in page is the `publicUrl` from the install, and that is the reason the value had to be the port-forward address.
 
 {{< fails >}}
 An address at `straza-straza.default.svc`
 : The release was installed without `publicUrl`, and a browser on your machine cannot resolve that name. Run `helm uninstall straza` and run the install block again with the value. Then read the new admin password from the new pod's log, because the data directory went away with the old pod.
-
-`login timed out (device code expired)`
-: More than ten minutes passed before you approved the code. Run the command again and approve the code it prints this time.
 {{< /fails >}}
 
 ## Read the deny

@@ -2,7 +2,7 @@
 title: strazactl sinks list
 description: List configured sinks with backlog, parked count, and the last failure
 pagetype: reference
-weight: 96
+weight: 92
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl sinks list [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

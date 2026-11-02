@@ -75,7 +75,7 @@ func (f *doctorContentFixture) serve(t *testing.T, harness string, contents map[
 
 func (f *doctorContentFixture) writeManaged(t *testing.T, harness string, content []byte) {
 	t.Helper()
-	path, err := managedHookPath(harness)
+	path, err := ManagedHookPath(harness)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,6 +14,7 @@ keywords: reference cli configuration api events spec
 - [Events and the audit record]({{< relref "reference/events.md" >}}) lists every audit event Straza emits and the fields of the audit record.
 - [Ports and network]({{< relref "reference/ports-and-network.md" >}}) lists the listeners, ports and connection directions of a deployment.
 - [The spec]({{< relref "reference/spec.md" >}}) points to the wire-format specifications Straza publishes and says what each one fixes.
+- [Object marks for server authors]({{< relref "reference/object-marks.md" >}}) gives the author of an MCP server the tool marks, the listing answer and the promises that let Straza limit a role to some of the server's objects.
 - [Glossary]({{< relref "reference/glossary.md" >}}) defines each term the docs use, one name per concept.
 
 - [Requirements and sizing]({{< relref "reference/requirements-and-sizing.md" >}}) gives the processors, memory and disk for each shape of Straza, what each number rests on, and the platforms Straza was tested with.

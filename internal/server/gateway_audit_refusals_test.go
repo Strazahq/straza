@@ -128,12 +128,64 @@ func awaitMCPRecords(t *testing.T, app *App, want int, sel func(map[string]any) 
 	return got
 }
 
+// rawMCPRecord returns the stored CloudEvent of the one straza.audit.mcp
+// record whose data satisfies sel, as the chain holds it.
+func rawMCPRecord(t *testing.T, app *App, sel func(map[string]any) bool) string {
+	t.Helper()
+	recs, err := app.store.Audit().List(context.Background(), 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	for _, r := range recs {
+		var ce struct {
+			Type string         `json:"type"`
+			Data map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(r.CE), &ce); err != nil {
+			t.Fatal(err)
+		}
+		if ce.Type == "straza.audit.mcp" && sel(ce.Data) {
+			found = append(found, r.CE)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("%d matching straza.audit.mcp records, want exactly 1", len(found))
+	}
+	return found[0]
+}
+
+// TestCutUnresolved pins the cut of a name the catalog did not resolve:
+// whole up to 256 bytes, and past that the first 256 bytes, or fewer on a
+// rune boundary, with the full length after them.
+func TestCutUnresolved(t *testing.T) {
+	t.Parallel()
+	straddle := strings.Repeat("a", 255) + "é" + strings.Repeat("b", 10)
+	rows := []struct {
+		name, in, want string
+	}{
+		{"empty", "", ""},
+		{"short", "echo", "echo"},
+		{"exactly 256 bytes", strings.Repeat("a", 256), strings.Repeat("a", 256)},
+		{"257 bytes", strings.Repeat("a", 257), strings.Repeat("a", 256) + "... (257 bytes)"},
+		{"64 KiB of <", strings.Repeat("<", 64<<10), strings.Repeat("<", 256) + "... (65536 bytes)"},
+		{"an é across byte 256", straddle, strings.Repeat("a", 255) + "... (267 bytes)"},
+	}
+	for _, row := range rows {
+		if got := cutUnresolved(row.in); got != row.want {
+			t.Errorf("%s: cutUnresolved = %q, want %q", row.name, got, row.want)
+		}
+	}
+}
+
 // TestGatewayRefusalsAudited pins that every gateway refusal the PDP never
 // sees still leaves one straza.audit.mcp deny record: an unbound or unknown
 // name, a tool the session's overlay hides under policyFilter, and a call
 // the manifest rate cap throttles. The client answers are unchanged, the
 // served calls before the cap keep one allow record each, and fifty probes
-// of an unbound name leave fifty records.
+// of an unbound name leave fifty records. A long unknown name is cut in the
+// answer and the record alike, its record stays under 4 KiB, and a served
+// tools/list after it shows that no second record follows.
 func TestGatewayRefusalsAudited(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t, func(c *config.Config) { c.Apps.Catalog.PolicyFilter = true })
@@ -160,23 +212,43 @@ spec:
       effect: allow
 `)
 	tok, sid := gatewaySession(t, base, "kim")
+	longName, longAngles := strings.Repeat("n", 64<<10), strings.Repeat("<", 64<<10)
+	cutName, cutAngles := strings.Repeat("n", 256)+"... (65536 bytes)", strings.Repeat("<", 256)+"... (65536 bytes)"
+	unboundReason := func(name string) string {
+		return `unknown tool "` + name + `": no access row for this session's roles admits it`
+	}
 
 	rows := []struct {
 		name       string
 		tool       string
 		warm       bool
+		long       bool
 		wantClient string
 		sel        func(map[string]any) bool
 		want       map[string]any
 	}{
-		{"unbound name", "refapp__nothing", false, `unknown tool "refapp__nothing"`,
+		{"a 64 KiB unknown name is cut", longName, false, true, `unknown tool "` + cutName + `"`,
+			func(d map[string]any) bool { return d["toolName"] == cutName },
+			map[string]any{
+				"effect": "deny", "app": "", "toolName": cutName, "ruleId": "", "setName": "",
+				"granted": false, "default": false, "session": sid, "user": user.ID,
+				"reason": unboundReason(cutName),
+			}},
+		{"64 KiB of < is cut", longAngles, false, true, `unknown tool "` + cutAngles + `"`,
+			func(d map[string]any) bool { return d["toolName"] == cutAngles },
+			map[string]any{
+				"effect": "deny", "app": "", "toolName": cutAngles, "ruleId": "", "setName": "",
+				"granted": false, "default": false, "session": sid, "user": user.ID,
+				"reason": unboundReason(cutAngles),
+			}},
+		{"unbound name", "refapp__nothing", false, false, `unknown tool "refapp__nothing"`,
 			func(d map[string]any) bool { return d["toolName"] == "refapp__nothing" },
 			map[string]any{
 				"effect": "deny", "app": "", "toolName": "refapp__nothing", "ruleId": "", "setName": "",
 				"granted": false, "default": false, "session": sid, "user": user.ID,
 				"reason": `unknown tool "refapp__nothing": no access row for this session's roles admits it`,
 			}},
-		{"hidden tool", "refapp__env", false, `unknown tool "refapp__env"`,
+		{"hidden tool", "refapp__env", false, false, `unknown tool "refapp__env"`,
 			func(d map[string]any) bool { return d["app"] == "refapp" && d["toolName"] == "env" },
 			map[string]any{
 				"effect": "deny", "app": "refapp", "toolName": "env", "ruleId": "deny-env", "setName": "ref-policy",
@@ -184,7 +256,7 @@ spec:
 				"bindingId": binding.ID, "role": "dev",
 				"reason": "env reads are blocked for role dev",
 			}},
-		{"throttled", "refapp__echo", true, "rate limit exceeded",
+		{"throttled", "refapp__echo", true, false, "rate limit exceeded",
 			func(d map[string]any) bool {
 				return d["app"] == "refapp" && d["toolName"] == "echo" && d["effect"] == "deny"
 			},
@@ -195,6 +267,7 @@ spec:
 				"reason": `Straza: rate limit exceeded for the MCP server "refapp" (1 rps). Retry shortly`,
 			}},
 	}
+	lists := 0
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			var answer string
@@ -220,11 +293,25 @@ spec:
 			if row.warm && served == 0 {
 				t.Fatal("the first capped call was not served")
 			}
+			if row.long && answer != row.wantClient {
+				t.Fatalf("client answer is %d bytes, want exactly %q", len(answer), row.wantClient)
+			}
 			rec := awaitMCPRecords(t, app, 1, row.sel)[0]
 			for k, v := range row.want {
 				if rec[k] != v {
 					t.Errorf("record %s = %v, want %v", k, rec[k], v)
 				}
+			}
+			if row.long {
+				if size := len(rawMCPRecord(t, app, row.sel)); size >= 4<<10 {
+					t.Errorf("the marshalled record is %d bytes, want under 4 KiB", size)
+				}
+				lists++
+				if _, res, raw := mcpCall(t, base, tok, "tools/list", nil); res["result"] == nil {
+					t.Fatalf("control tools/list = %s", raw)
+				}
+				awaitMCPRecords(t, app, lists, func(d map[string]any) bool { return d["event"] == "tools.list" })
+				awaitMCPRecords(t, app, 1, row.sel)
 			}
 			if row.warm {
 				awaitMCPRecords(t, app, served, func(d map[string]any) bool {

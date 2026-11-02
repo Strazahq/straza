@@ -35,6 +35,7 @@ func (a *App) Run(ctx context.Context) error {
 	go a.runSessionJanitor(ctx) // #nosec G118 (session janitor, control plane)
 	go a.runKeyRotation(ctx)    // #nosec G118 (signing key reload and rotation, control plane)
 	go a.runDraftsChecker(ctx)  // #nosec G118 (drafts checker, control plane)
+	go a.runObjects(ctx)        // #nosec G118 (object lists, control plane)
 	if a.watcher != nil {
 		go a.runAppsWatcher(ctx) // #nosec G118
 	}

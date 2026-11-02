@@ -1,6 +1,7 @@
 ---
 title: Start
-description: Run a local server, enroll a user and see a policy deny a command, then explore the setup that fits your team.
+seo_title: "Quickstart: run Straza and see a policy deny"
+description: "Quickstart: run a local server, enroll a user and see a policy deny a command, then explore the setup that fits your team."
 heading: See Straza in action.
 layout: start
 pagetype: index

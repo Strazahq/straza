@@ -1,8 +1,8 @@
 ---
 title: strazactl users nhi-key set
-description: Register (or rotate) the agent identity's Ed25519 public key
+description: Register the agent identity's Ed25519 public key, or rotate it and end the agent's running sessions
 pagetype: reference
-weight: 113
+weight: 109
 draft: false
 sources:
   - cmd/strazactl
@@ -18,7 +18,7 @@ strazactl users nhi-key set <username> <publicKeyBase64> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

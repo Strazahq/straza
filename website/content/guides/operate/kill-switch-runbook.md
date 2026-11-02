@@ -6,7 +6,7 @@ weight: 80
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server in an Alpine 3.20 container on Linux, with mara's machine in a second container that ran two harness sessions through the Claude Code hook and straza daemon for the push half. Every strazactl and curl block ran, the admin's strazactl on an admin API token minted in the console and the curl blocks on the token the page mints. The lock was checked with a refused session start, enroll and strazactl login, and the path without the daemon with a hook that denied five minutes after its check-in. In headless Chromium the session revoke, disable, enable, lock, unlock and audit trail steps were clicked, and the device revoke and fleet stand-down were not. The identity manager route was not run
+  platform: A throwaway standalone server in an Alpine 3.20 container on Linux, with mara's machine in a second container that ran two harness sessions through the Claude Code hook, and the push half then ran in the client's earlier daemon. On 2026-10-21 the session list, the disable, the hook deny and the service's log lines were captured again in an Alpine 3.20 container against a standalone server built from a working tree as v1.0.0-1570-gaf326165-dirty, where straza service, started with STRAZA_HOME, held the push stream. Every strazactl and curl block ran, the admin's strazactl on an admin API token minted in the console and the curl blocks on the token the page mints. The confirmation line of `strazactl devices revoke` was reworded after that run and is quoted from the code. The lock was checked with a refused session start, enroll and strazactl login, and strazactl no longer signs in, so that last check no longer applies. The path without push was checked with a hook that denied five minutes after its check-in. In headless Chromium the session revoke, disable, enable, lock, unlock and audit trail steps were clicked, and the device revoke and fleet stand-down were not. The identity manager route was not run
   date: 2026-10-06
 applies_to: both
 who: You, as the admin, or a delegated admin who holds the identity and sessions areas
@@ -14,7 +14,7 @@ where: The console or a terminal with strazactl, and the agent's machine for the
 steps: true
 modes: [console, cli]
 mode_default: console
-keywords: kill switch revoke deactivate incident disable lock daemon
+keywords: kill switch revoke deactivate incident disable lock push straza service
 ---
 
 
@@ -26,7 +26,7 @@ Stop one identity, one machine or every agent session during an incident, and co
 | Keep an identity out until someone lets it back | Disable the user, or lock the user when your identity manager must not lift it. |
 | Cut one machine and leave the person untouched | Revoke that device on the user's sheet, or with `strazactl devices revoke`. |
 
-Every lever writes the audit chain and reaches every server replica over the event bus. An enrolled machine learns of it within a second when its `straza daemon` holds the push lane, and otherwise at its next check-in, which is at most the session token lifetime of five minutes away. [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#sessions-and-the-client" >}}) lists every lifetime a revoke waits on.
+Every lever writes the audit chain and reaches every server replica over the event bus. An enrolled machine learns of it within a second while `straza service`, the Straza background service, holds the push stream of the session, and otherwise at the first call that renews the session, which is at most about three minutes after its token was minted for a session that keeps working. [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#sessions-and-the-client" >}}) lists every lifetime a revoke waits on.
 
 
 {{< diagram name="kill-switch" caption="A disable in your identity manager, the leaver route. A disable in the console or with strazactl starts the same cascade at the second box." >}}
@@ -50,9 +50,9 @@ strazactl sessions list --status active
 {{< /command >}}
 
 ```table
-ID                                    USER   HARNESS      CLIENT                ATTESTATION  WIRING      STATUS  LAST SEEN
-01a11329-67ad-7b95-9eda-43f6eec4fe45  mara   claude-code  v1.1.0-117-g106081a8  advisory     unmeasured  active  2026-10-06 21:40:43
-01a11329-6654-78a3-9508-63868a613e56  mara   claude-code  v1.1.0-117-g106081a8  advisory     unmeasured  active  2026-10-06 21:40:42
+ID                                    USER   HARNESS                                CLIENT                       ATTESTATION  WIRING      STATUS  LAST SEEN
+01a15d8e-7298-782d-815b-356eaeecf7e3  mara   claude-code                            v1.0.0-1570-gaf326165-dirty  advisory     unmeasured  active  2026-10-21 08:22:58
+01a15d8e-726c-757c-ad72-47783dd1d129  mara   claude-code                            v1.0.0-1570-gaf326165-dirty  advisory     unmeasured  active  2026-10-21 08:22:58
 ```
 
 The listing is trimmed to her rows.
@@ -86,7 +86,7 @@ disabled mara. Sessions revoked, lift with `strazactl users enable mara`
 {{< /cli >}}
 
 
-On a machine where `straza daemon` runs, the next hook call denies, and the daemon logs the revocation and exits. A hook payload sent by hand on that machine shows the answer the harness gets:
+On mara's machine, `straza service` receives the revocation on the push stream of each session, marks the session revoked and logs it, and the next hook call denies. The service keeps running for every other user of the machine. A hook payload sent by hand on that machine shows the answer the harness gets:
 
 {{< command terminal="Terminal" purpose="on mara's machine" >}}
 ```sh
@@ -100,20 +100,19 @@ Straza: session revoked (kill-switch push from the server). Tool calls stay deni
 ```
 
 ```text
-daemon: edge push subscribing; poll-refresh remains the backstop
-daemon: kill-switch push active (gateway edge)
-daemon: revocation received. Session state dropped, hooks now deny
+time=2026-10-21T08:23:01.123Z level=WARN msg="the server revoked a session, so its window is denied until it starts again" uid=0 session=01a15d8e-726c-757c-ad72-47783dd1d129
+time=2026-10-21T08:23:01.124Z level=WARN msg="the server revoked a session, so its window is denied until it starts again" uid=0 session=01a15d8e-7298-782d-815b-356eaeecf7e3
 ```
 
 
-Without the daemon, the hook keeps deciding from its cached state until its session token runs out, at most five minutes, and then denies with the server's refusal. That holds in both profiles, for a person and for a headless AI agent alike, because a renewal the server refused ends the offline grace at once.
+While the push stream is down, `straza service` learns of the revocation at the first call that renews the session, once 120 seconds or less of its 300-second token remain, so at most about three minutes after the token was minted for a session that keeps working. A stream that reconnects and is refused makes the service renew at once. The refused renewal marks the session revoked with the server's sentence, so that call and every later one deny, in both profiles, for a person and for a headless AI agent alike. A session that makes no call decides nothing in the meantime. Here strazad restarted under mara's running session, and the disable landed before the stream came back:
 
 ```text
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Straza: session renewal was refused: this device or user has been revoked. Contact your administrator"}}
-Straza: session renewal was refused: this device or user has been revoked. Contact your administrator
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Straza: session revoked (this device or user has been revoked. Contact your administrator). Tool calls stay denied until a new session starts and checks in again. If only this session was revoked, that check-in starts a new session. If the device or user was disabled, the check-in is refused until an administrator re-enables it. Inform the user and stop."}}
+Straza: session revoked (this device or user has been revoked. Contact your administrator). Tool calls stay denied until a new session starts and checks in again. If only this session was revoked, that check-in starts a new session. If the device or user was disabled, the check-in is refused until an administrator re-enables it. Inform the user and stop.
 ```
 
-Budget for five minutes on machines that do not run the daemon. Treat a hook that keeps allowing past that as a machine whose renewals do not reach strazad.
+Budget for about three minutes on machines whose push stream is down. Treat a hook that keeps allowing past that as a machine whose renewals do not reach strazad.
 
 {{< details summary="When a standalone hook can keep allowing for twenty minutes" >}}
 The standalone profile's offline grace of fifteen minutes applies only when the renewal cannot learn the server's judgment:
@@ -174,7 +173,7 @@ A SIEM fed by a sink holds the same event under the same id, and [Sinks and SIEM
 ## Revoke the sessions and keep the identity {.nostep}
 
 
-To interrupt every session of one identity without locking it out, revoke its sessions instead of disabling it. A session revoke is a stand-down: the enrolled machine holds a device credential that starts a new session at its next check-in.
+To interrupt every session of one identity without locking it out, revoke its sessions instead of disabling it. A session revoke is a stand-down: the machine stays enrolled, and `straza service` starts a new session with the machine's key when the harness starts its next session. A window that sat unused when its session was revoked never heard the revoke, so its next call starts a new session the same way.
 
 {{< console >}}
 On **Sessions**, keep **active** and mara under **User**, tick the box in the table's header, and press the revoke button, which names the count.
@@ -202,6 +201,17 @@ curl -s -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" -H 'Content-Type: ap
 {"revoked":1}
 ```
 {{< /cli >}}
+
+
+A revoke writes the session's new status, its revocation record and the event that tells the other servers in one transaction. When the database refuses any of them, nothing changes, and the answer says so.
+
+{{< fails >}}
+`session SESSION-ID was not revoked: Straza could not write the revocation to its database, so nothing changed and the session stays active. This server already refuses it, but the other servers do not. Run strazactl sessions revoke SESSION-ID again. The strazad log names the cause under request id REQUEST-ID.`
+: The server that answered refuses the session at once, and the other servers keep admitting it. Run the same revoke again once the database answers, and look up REQUEST-ID in the strazad log for the cause. SESSION-ID and REQUEST-ID stand for the ids in your answer.
+
+`Straza ended 0 sessions and could not end the rest of the set, because its database refused the write, so those stay active. Run the same stand-down again: it ends only the sessions still active. The strazad log names the cause under request id REQUEST-ID.`
+: The bulk route answers this, with the count that did end in place of 0. Send the same request again: it ends only the sessions still active, so nothing ends twice.
+{{< /fails >}}
 
 ## Cut one machine {.nostep}
 
@@ -232,11 +242,17 @@ ID                                    NAME         PLATFORM  STATUS  ENROLLED
 ```
 
 ```text
-revoked device 01a11329-4ee8-7217-88b2-4dca17bf54d2 of mara: its device credential is dead; re-enrolling needs a fresh login
+revoked device 01a11329-4ee8-7217-88b2-4dca17bf54d2 of mara. Its key starts no more sessions. To use the machine again, enroll it again with straza enroll.
 ```
 {{< /cli >}}
 
-The device credential can no longer start a session, sessions bound to that device stop refreshing, and a running `straza daemon` there is stood down by push. The person brings the machine back with a new `straza enroll` and a fresh sign-in.
+The machine's key can no longer start a session, sessions bound to that device stop refreshing, and `straza service` on that machine marks each live session revoked when the push arrives. The person brings the machine back with a new `straza enroll` and a fresh sign-in.
+
+
+{{< fails >}}
+`device DEVICE-ID was not revoked: Straza could not write the revocation to its database, so nothing changed and the device stays enrolled. This server already refuses it, but the other servers do not. Run the revoke again. The strazad log names the cause under request id REQUEST-ID.`
+: Straza deletes the device row and writes its revocation record and the event for the other servers as one write, and the database refused it. Only the server that answered refuses the device now, while the other servers still let it start sessions. Run the same revoke again once the database answers, and look up REQUEST-ID in the strazad log for the cause.
+{{< /fails >}}
 
 ## Stop every agent {.nostep}
 
@@ -302,7 +318,7 @@ locked mara. Sessions revoked; the identity manager sees it read-only, lift with
 `--origin external` marks a lock that a SOAR or SIEM automation applied. Only the CLI sets it, and the console's lock records the admin origin.
 {{< /cli >}}
 
-A fresh sign-in at the identity provider does not get a locked person back in. Enroll, session start, the approval routes and the admin plane all answer 403, and each refusal is a login failure on the chain with the reason `user is locked`. That holds for a locked administrator too, who cannot lift their own lock.
+A fresh sign-in at the identity provider does not get a locked person back in. Enroll, session start, the approval routes and the admin plane all answer 403, and each refusal is a login failure on the chain with the reason `user is locked`. That holds for a locked administrator too, who cannot lift their own lock. A lock or a disable does not reach the admin API tokens the person minted, because a token belongs to no person, so revoke those under **Settings**, **API tokens**, where the list names who minted each one.
 
 {{< fails >}}
 `the user mara is locked, so this sign-in is refused. An administrator lifts the lock with strazactl users unlock mara.`
@@ -350,7 +366,7 @@ strazactl users enable mara
 {{< /command >}}
 
 ```text
-enabled mara. The status is active and the user's revocations are lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or its device credential expired meanwhile: such a device needs straza enroll again
+enabled mara. The status is active and the user's revocations are lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or the sign-in it enrolled with grew older than governance.signInMaxAge meanwhile. Such a device needs straza enroll again
 ```
 
 Automation sends `{"status":"active"}` to the same admin route, which answers with the user record, its `status` now `active`:

@@ -26,7 +26,7 @@ func RunHookConformance(hio HookIO, policyFile string) error {
 	if err != nil {
 		return fail(hio, "Straza: conformance policy compile failed: %v", err)
 	}
-	return runHook(hio, nil, conformanceDecider{engine: eng})
+	return runHook(hio, nil, nil, conformanceDecider{engine: eng})
 }
 
 // conformanceDecider evaluates against a local engine with a fixed anonymous

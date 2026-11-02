@@ -89,9 +89,10 @@ func TestFailClosedGeminiHarnessOverride(t *testing.T) {
 }
 
 // TestFailClosedGeminiSessionStartCheckinFails: a gemini session.start whose
-// checkin fails must emit the gemini block, not just exit 2. An empty store has
-// no config/identity, so SessionStart fails deterministically with no network.
+// session start fails must emit the gemini block, not just exit 2. No service
+// listens in a fresh home, so the start fails deterministically.
 func TestFailClosedGeminiSessionStartCheckinFails(t *testing.T) {
+	noService(t)
 	store := &Store{root: t.TempDir()}
 	var out, errb bytes.Buffer
 	err := runHook(HookIO{
@@ -99,7 +100,7 @@ func TestFailClosedGeminiSessionStartCheckinFails(t *testing.T) {
 		Stdout:  &out,
 		Stderr:  &errb,
 		Environ: func() []string { return []string{"GEMINI_CLI=1"} },
-	}, store, allowAll{})
+	}, store, NewServiceClient(), allowAll{})
 	assertGeminiDeny(t, out.String(), denyCode(t, err), errb.String())
 }
 

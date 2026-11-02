@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -157,6 +159,37 @@ func TestPublishRecordsFollowThePlan(t *testing.T) {
 			},
 		},
 		{
+			name:    "a server put that rewrote covers lines in place names each role with a row there and each role implying one",
+			items:   []store.PlanItem{withApp(put("App", "jira"), "remote")},
+			changed: map[string][]string{"jira": {"straza.objects.type"}},
+			out: store.PublishOutcome{Items: []store.ItemOutcome{
+				{Ref: ref("App", "jira"), Op: "put", ID: "app-jira", AdminRole: role("r-adm-jira", "mcp-admin-jira"), Repinned: []string{"r-jt", "r-ju"}},
+			}},
+			want: []string{
+				admin + `{"action":"apps.install","adminRole":"mcp-admin-jira","app":"jira","changed":["straza.objects.type"],"runtime":"remote","update":true}`,
+				identity + `{"id":"r-jt"}`,
+				identity + `{"id":"r-ju"}`,
+				identity + `{"id":"r-ops"}`,
+				publishEvent(`"jira"`),
+			},
+		},
+		{
+			name: "a role the same publish puts and the server put rewrote is named once",
+			items: []store.PlanItem{withApp(put("App", "github"), "remote"), withRole(put("Role", "devs"),
+				store.RoleConfig{Role: store.Role{Name: "devs", Description: "Builders."}, Server: "github", Tools: []string{"get_*"}, Implies: []string{"readers"}})},
+			out: store.PublishOutcome{Items: []store.ItemOutcome{
+				{Ref: ref("App", "github"), Op: "put", ID: "app-gh", AdminRole: role("r-adm-gh", "mcp-admin-github"), Repinned: []string{"r-devs", "r-old"}},
+				{Ref: ref("Role", "devs"), Op: "put", ID: "r-devs"},
+			}},
+			want: []string{
+				admin + `{"action":"apps.install","adminRole":"mcp-admin-github","app":"github","runtime":"remote","update":true}`,
+				admin + `{"action":"roles.update","role":"devs","target":"r-devs"}`,
+				identity + `{"id":"r-devs"}`,
+				identity + `{"id":"r-old"}`,
+				publishEvent(`"github"`),
+			},
+		},
+		{
 			name: "a removed server with its admin role, an owned role and the roles that lose a row or an edge",
 			items: []store.PlanItem{remove("App", "jira"), implied(remove("Role", "jira-triage")), implied(put("Role", "jira-users")),
 				implied(put("Role", "ops"))},
@@ -246,6 +279,26 @@ func TestPublishRecordsFollowThePlan(t *testing.T) {
 				identity + `{"id":"r-devs"}`,
 				apps + `{"app":"github","change":"binding"}`,
 				apps + `{"app":"jira","change":"binding"}`,
+				publishEvent(``),
+			},
+		},
+		{
+			name: "a role whose covers line alone changed names both covers lines as objects",
+			items: []store.PlanItem{withRole(put("Role", "devs"), store.RoleConfig{Role: store.Role{Name: "devs", Description: "Developers."},
+				Server: "github", Tools: []string{"get_*"}, Implies: []string{"readers"},
+				Scope: &store.ObjectScope{Objects: []store.CoveredObject{{ID: "11", Value: "org/pay-api"}}}})},
+			out: store.PublishOutcome{Items: []store.ItemOutcome{
+				{Ref: ref("Role", "devs"), Op: "put", ID: "r-devs",
+					BindingsRemoved: []store.ToolBinding{{ID: "b-devs", RoleID: "r-devs", AppID: "app-gh", ToolMatcher: `["get_*"]`,
+						Scope: &store.ObjectScope{Every: true}}},
+					BindingsAdded: []store.ToolBinding{{ID: "b-new", RoleID: "r-devs", AppID: "app-gh", ToolMatcher: `["get_*"]`,
+						Scope: &store.ObjectScope{Objects: []store.CoveredObject{{ID: "11", Value: "org/pay-api"}}}}}},
+			}},
+			want: []string{
+				admin + `{"action":"apps.binding.delete","app":"github","bindingId":"b-devs","covers":{"every":true},"role":"devs","tools":["get_*"]}`,
+				admin + `{"action":"apps.binding.create","app":"github","covers":{"objects":[{"id":"11","value":"org/pay-api"}]},"role":"devs","tools":["get_*"]}`,
+				identity + `{"id":"r-devs"}`,
+				apps + `{"app":"github","change":"binding"}`,
 				publishEvent(``),
 			},
 		},
@@ -408,6 +461,40 @@ func TestPublishRecordsFollowThePlan(t *testing.T) {
 	}
 }
 
+// TestBindingCoversMatchesTheSchema pins that the covers line a binding
+// record and an access row answer carry is the Covers object of the
+// openapi document, in both forms, and that neither form alone is not.
+func TestBindingCoversMatchesTheSchema(t *testing.T) {
+	t.Parallel()
+	sch := openAPISchema(t, "Covers")
+	cases := []struct {
+		name  string
+		scope any
+		valid bool
+	}{
+		{"every", &store.ObjectScope{Every: true}, true},
+		{"objects", &store.ObjectScope{Objects: []store.CoveredObject{{ID: "11", Value: "org/pay-api"}}}, true},
+		{"neither form", map[string]any{}, false},
+		{"both forms", map[string]any{"every": true, "objects": []any{map[string]any{"value": "org/pay-api"}}}, false},
+		{"an unknown key", map[string]any{"every": true, "where": map[string]any{}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var v any
+			if err := json.Unmarshal(raw, &v); err != nil {
+				t.Fatal(err)
+			}
+			if err := sch.Validate(v); (err == nil) != tc.valid {
+				t.Errorf("%s validates = %v (%v), want %v", raw, err == nil, err, tc.valid)
+			}
+		})
+	}
+}
+
 // TestPublishRecordsCarryTheEnvelope pins the envelope recordsFor puts
 // around every record of a publish: this replica's instance as the source,
 // so its converge consumer skips it, the subject as the type, and the
@@ -445,6 +532,64 @@ func TestPublishRecordsCarryTheEnvelope(t *testing.T) {
 			t.Errorf("audit record %v, want kim as its actor", ce.Data)
 		case !audit && hasActor:
 			t.Errorf("%s carries an actor: %v", ev.Subject, ce.Data)
+		}
+	}
+}
+
+// TestRepinReadsAsRoleUpdatesOnTheChangeFeed pins what midPoint's LiveSync
+// reads after a server put that rewrites covers lines in place: a first
+// pin, a type change and an unpin each add one role update to the change
+// feed per role with a row on the server and per role that implies one,
+// and a put that keeps the type adds none.
+func TestRepinReadsAsRoleUpdatesOnTheChangeFeed(t *testing.T) {
+	t.Parallel()
+	f := newDraftsFixture(t, nil)
+	ctx := context.Background()
+	if code, a := f.publishAll(t, f.root, f.create(t, f.root, typedRole("github-pay", "github", "get_me")).Draft.ID); code != http.StatusOK {
+		t.Fatalf("publish of github-pay = %d %q %+v", code, a.Error, a.Verdict)
+	}
+	pay, err := f.app.store.Roles().GetByName(ctx, "github-pay")
+	if err != nil {
+		t.Fatal(err)
+	}
+	team, err := f.app.store.Roles().Create(ctx, store.Role{Name: "pay-team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.app.store.Roles().AddImplication(ctx, team.ID, pay.ID); err != nil {
+		t.Fatal(err)
+	}
+	feed := func(since string) changesResponse {
+		t.Helper()
+		var out changesResponse
+		if code := adminReq(t, http.MethodGet, f.base+"/v1/admin/changes?types=role&limit=1000&since="+since, f.root, nil, &out); code != http.StatusOK {
+			t.Fatalf("change feed = %d", code)
+		}
+		return out
+	}
+	both := map[string]int{pay.ID: 1, team.ID: 1}
+	steps := []struct {
+		name, doc string
+		want      map[string]int
+	}{
+		{"a first pin", pinnedGithub(), both},
+		{"a put that keeps the type", strings.Replace(pinnedGithub(), "The GitHub server.", "GitHub.", 1), map[string]int{}},
+		{"a type change", strings.Replace(pinnedGithub(), "type: repo", "type: project", 1), both},
+		{"an unpin", plainGithub(), both},
+	}
+	for _, step := range steps {
+		head := feed("").Head
+		if code, a := f.publishAll(t, f.root, f.create(t, f.root, step.doc).Draft.ID); code != http.StatusOK {
+			t.Fatalf("%s: publish = %d %q %+v", step.name, code, a.Error, a.Verdict)
+		}
+		got := map[string]int{}
+		for _, c := range feed(head).Changes {
+			if c.Type == "role" && c.Op == "update" {
+				got[c.ID]++
+			}
+		}
+		if !reflect.DeepEqual(got, step.want) {
+			t.Errorf("%s: role updates %v, want %v (github-pay %s, pay-team %s)", step.name, got, step.want, pay.ID, team.ID)
 		}
 	}
 }

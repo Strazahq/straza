@@ -1,0 +1,33 @@
+{
+  "specversion": "1.0",
+  "id": "019a1c31-8d0e-7b62-a4f9-5c3e2d1b0a98",
+  "type": "straza.audit.mcp",
+  "source": "strazad",
+  "time": "2026-10-24T09:20:41.507Z",
+  "data": {
+    "session": "019a1c20-1111-7abc-9def-000000000021",
+    "user": "019a1c1f-4a1f-7d02-8e3b-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "grant",
+    "tool": "mcp.call",
+    "app": "ghapp",
+    "toolName": "git_fetch",
+    "arguments": "{\"repo\":\"Strazahq/docs-site\"}",
+    "effect": "deny",
+    "ruleId": "",
+    "setName": "",
+    "reason": "Straza: git_fetch on Strazahq/docs-site was refused: none of your roles on ghapp covers that repo. Your roles cover git_fetch on Strazahq/straza. Check the repo's name, or ask an admin for a role that covers it.",
+    "snapshot": "sha256:7d1e40b2",
+    "granted": false,
+    "default": false,
+    "object": {
+      "type": "repo",
+      "reach": "argument",
+      "value": "Strazahq/docs-site",
+      "id": "7730016"
+    },
+    "rolesChecked": [
+      "developer"
+    ]
+  }
+}

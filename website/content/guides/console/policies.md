@@ -1,5 +1,6 @@
 ---
 title: Policies
+seo_title: Policies in the console
 description: You read which rules decide each call, build a policy with the New policy wizard, change a policy on its own page, and test a call before and after you publish.
 pagetype: how-to
 weight: 30

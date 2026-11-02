@@ -35,19 +35,20 @@ type findingPayload struct {
 // verdictPayload is a verdict as a route answers it: the fields of
 // drafts.Verdict, cut for the reader by verdictFor, every finding keyed.
 type verdictPayload struct {
-	Draft      string           `json:"draft"`
-	Revision   int              `json:"revision"`
-	Snapshot   string           `json:"snapshot"`
-	CheckedAt  string           `json:"checked_at"`
-	Refused    []findingPayload `json:"refused"`
-	Risks      []findingPayload `json:"risks"`
-	Warnings   []findingPayload `json:"warnings"`
-	Unchecked  []findingPayload `json:"unchecked"`
-	Passed     []findingPayload `json:"passed"`
-	Info       []findingPayload `json:"info"`
-	Gains      []drafts.Gain    `json:"gains"`
-	Needs      []drafts.Need    `json:"needs"`
-	RiskDigest string           `json:"risk_digest"`
+	Draft      string            `json:"draft"`
+	Revision   int               `json:"revision"`
+	Snapshot   string            `json:"snapshot"`
+	CheckedAt  string            `json:"checked_at"`
+	Refused    []findingPayload  `json:"refused"`
+	Risks      []findingPayload  `json:"risks"`
+	Warnings   []findingPayload  `json:"warnings"`
+	Unchecked  []findingPayload  `json:"unchecked"`
+	Passed     []findingPayload  `json:"passed"`
+	Info       []findingPayload  `json:"info"`
+	Gains      []drafts.Gain     `json:"gains"`
+	Objects    []drafts.Coverage `json:"objects,omitempty"`
+	Needs      []drafts.Need     `json:"needs"`
+	RiskDigest string            `json:"risk_digest"`
 }
 
 // agentNameCodes are the warnings an agent reads whole on a draft whose
@@ -61,14 +62,14 @@ var agentNameCodes = map[string]bool{"ready.tool-unknown": true, "ready.rule-nam
 // agent reads the refusals, risks, warnings and unchecked lines ForAgent
 // keeps, and nothing else, with its lines cut as a person's are but for the
 // lines of agentNameCodes on a draft whose every revision it wrote. Anyone
-// else reads v with three cuts. A gain row on a server the caller may not
-// read, without the scope apps:read or the server's admin role, or of a role
-// that unreadObjects finds, is left out, and one info line counts the rows
-// left out. The built-in straza app's rows pass the server rule, because
-// its tools are the product's own. A risk, warning, unchecked or info line
-// that names a server the caller may not read, or a role or set that
-// unreadObjects finds, loses its words, as cutFinding says. Holders are
-// named only for root and a holder of identity:read, and counted for everyone.
+// else reads v with three cuts. A gain row or coverage entry on a server the
+// caller may not read, without apps:read or the server's admin role, or of a
+// role that unreadObjects finds, is left out, and one info line counts them
+// all as rows. The built-in straza app's rows pass the server rule,
+// because its tools are the product's own. A risk, warning, unchecked or info
+// line that names a server the caller may not read, or a role or set that
+// unreadObjects finds, loses its words, as cutFinding says. Holders are named
+// only for root and a holder of identity:read, and counted for everyone.
 func verdictFor(c draftCaller, w drafts.World, d drafts.Draft, v drafts.Verdict) verdictPayload {
 	unread, objects := c.unreadServers(w, d), c.unreadObjects(w, d, v)
 	if !c.adminAPI() && !c.person {
@@ -88,10 +89,12 @@ func verdictFor(c draftCaller, w drafts.World, d drafts.Draft, v drafts.Verdict)
 	names, everyServer := c.p.root || g["identity:read"], c.p.root || g["apps:read"]
 	gains := make([]drafts.Gain, 0, len(v.Gains))
 	hidden, byRole := 0, false
+	hiddenPairs := map[[2]string]bool{}
 	for _, gain := range v.Gains {
 		role := slices.Contains(objects, gain.Role)
 		if role || !everyServer && gain.Server != builtinApp && !c.holdsAdminRoleOf(gain.Server) {
 			hidden, byRole = hidden+1, byRole || role
+			hiddenPairs[[2]string{gain.Role, gain.Server}] = true
 			continue
 		}
 		if !names {
@@ -99,19 +102,35 @@ func verdictFor(c draftCaller, w drafts.World, d drafts.Draft, v drafts.Verdict)
 		}
 		gains = append(gains, gain)
 	}
+	// A coverage entry counts as a row of its own only where no gain row
+	// of the same role and server was left out.
+	var covered []drafts.Coverage
+	for _, cov := range v.Objects {
+		role := slices.Contains(objects, cov.Role)
+		if role || !everyServer && !c.holdsAdminRoleOf(cov.Server) {
+			if !hiddenPairs[[2]string{cov.Role, cov.Server}] {
+				hidden, byRole = hidden+1, byRole || role
+			}
+			continue
+		}
+		if !names {
+			cov.Holders = nil
+		}
+		covered = append(covered, cov)
+	}
 	info := keyed(v.Info, unread, objects)
 	if hidden > 0 {
-		sentence := fmt.Sprintf("%d rows of who gains what are on servers you cannot read, so this view leaves them out. "+
+		sentence := fmt.Sprintf("%d rows under Access after publishing are on servers you cannot read, so this view leaves them out. "+
 			"Ask an administrator for the scope apps:read to see them.", hidden)
 		switch {
 		case byRole && hidden == 1:
-			sentence = "1 row of who gains what names a role or a server you cannot read, so this view leaves it out. " +
+			sentence = "1 row under Access after publishing names a role or a server you cannot read, so this view leaves it out. " +
 				"Ask an administrator for the grant that reads it."
 		case byRole:
-			sentence = fmt.Sprintf("%d rows of who gains what name roles or servers you cannot read, so this view leaves them out. "+
+			sentence = fmt.Sprintf("%d rows under Access after publishing name roles or servers you cannot read, so this view leaves them out. "+
 				"Ask an administrator for the grants that read them.", hidden)
 		case hidden == 1:
-			sentence = "1 row of who gains what is on a server you cannot read, so this view leaves it out. " +
+			sentence = "1 row under Access after publishing is on a server you cannot read, so this view leaves it out. " +
 				"Ask an administrator for the scope apps:read to see it."
 		}
 		// The line names no object, so it sorts first, as Check sorts by
@@ -121,7 +140,7 @@ func verdictFor(c draftCaller, w drafts.World, d drafts.Draft, v drafts.Verdict)
 	return verdictPayload{Draft: v.Draft, Revision: v.Revision, Snapshot: v.Snapshot, CheckedAt: v.CheckedAt,
 		Refused: keyed(v.Refused, nil, nil), Risks: keyed(v.Risks, unread, objects), Warnings: keyed(v.Warnings, unread, objects),
 		Unchecked: keyed(v.Unchecked, unread, objects), Passed: keyed(v.Passed, nil, nil), Info: info,
-		Gains: gains, Needs: v.Needs, RiskDigest: v.RiskDigest}
+		Gains: gains, Objects: covered, Needs: v.Needs, RiskDigest: v.RiskDigest}
 }
 
 // unreadServers answers the servers of live state w and of draft d that c
@@ -150,10 +169,10 @@ func (c draftCaller) unreadServers(w drafts.World, d drafts.Draft) []string {
 // v of draft d over live state w touches: the items of d and the objects
 // its removals take with them, the object of each line, a live role or set
 // that a line's before, after or typed words name as a whole name, and the
-// role of each gain row. It answers none for root and a holder of
-// drafts:read. A live role or set the verdict does not touch is left out,
-// so a role named with a common word, such as person, cuts no line whose
-// prose holds that word.
+// role of each gain row and coverage entry. It answers none for root and a
+// holder of drafts:read. A live role or set the verdict does not touch is
+// left out, so a role named with a common word, such as person, cuts no
+// line whose prose holds that word.
 func (c draftCaller) unreadObjects(w drafts.World, d drafts.Draft, v drafts.Verdict) []string {
 	if c.p.root || c.p.scope.Grants["drafts:read"] {
 		return nil
@@ -169,6 +188,9 @@ func (c draftCaller) unreadObjects(w drafts.World, d drafts.Draft, v drafts.Verd
 	}
 	for _, g := range v.Gains {
 		objects = append(objects, drafts.Item{Kind: drafts.KindRole, Name: g.Role})
+	}
+	for _, cov := range v.Objects {
+		objects = append(objects, drafts.Item{Kind: drafts.KindRole, Name: cov.Role})
 	}
 	named := strings.Join(words, "\n")
 	for name := range w.Roles {

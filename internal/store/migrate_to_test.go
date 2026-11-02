@@ -258,12 +258,12 @@ func TestMigrateToRefuses(t *testing.T) {
 func TestMigrateRefusesADatabaseBelowTheFirstMigration(t *testing.T) {
 	forEachStore(t, func(t *testing.T, s Store) {
 		sq := s.(*sqlStore)
-		first, _, err := sq.migrationRange()
+		first, head, err := sq.migrationRange()
 		if err != nil {
 			t.Fatal(err)
 		}
 		setSchemaRow(t, sq, "version", int64(first)-1)
-		t.Cleanup(func() { setSchemaRow(t, sq, "version", int64(first)) })
+		t.Cleanup(func() { setSchemaRow(t, sq, "version", int64(head)) })
 		err = s.Migrate(context.Background())
 		if err == nil {
 			t.Fatal("Migrate started on a database below the first migration, want a refusal")

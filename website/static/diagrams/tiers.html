@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Enforcement tiers · Straza</title>
 <style>
@@ -248,10 +249,10 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
 
 <g class="node cell c1" id="i1" tabindex="0" aria-label="Tier 1 identity story">
   <rect class="box" x="140" y="396" width="196" height="86" rx="6"/>
-  <text class="d" x="152" y="416" style="fill:var(--text)">OIDC device-flow enroll</text>
-  <text class="d" x="152" y="432">token binds user + device</text>
-  <text class="d" x="152" y="448">+ harness + session &#183; 300 s</text>
-  <text class="d" x="152" y="464">attestation at checkin</text>
+  <text class="d" x="152" y="416" style="fill:var(--text)">browser sign-in with PKCE</text>
+  <text class="d" x="152" y="432">machine key, DPoP at checkin</text>
+  <text class="d" x="152" y="448">token: user + device + harness</text>
+  <text class="d" x="152" y="464">+ session &#183; 300 s &#183; attestation</text>
 </g>
 <g class="node cell c2" id="i2" tabindex="0" aria-label="Tier 2 identity story">
   <rect class="box" x="350" y="396" width="196" height="86" rx="6"/>
@@ -323,7 +324,7 @@ var FACTS={
  t2:'<strong>Tier 2 trust</strong>: boundary-grade by construction; the PEP is server-side, bypassing client machinery yields nothing without a valid session token, and upstream credentials never reach the agent.',
  t3:'<strong>Tier 3 trust, stated honestly</strong>: advisory on an open machine (an agent that can run anything can skip the shim); boundary-grade only where the environment makes the shim exclusive: the documented sandbox/container profile, or the managed layout.',
  t4:'<strong>Agentkit trust, stated honestly</strong>: advisory and strictly weaker than user-mode hooks: the shim shares the agent&#8217;s address space (it can be monkeypatched), but it cannot corrupt the engine&#8217;s evaluation or forge audit records, which live in the spawned Go binary. Sessions carry attestation=advisory at best.',
- i1:'<strong>Tier 1 identity</strong>: OIDC device-flow enroll binds the human; the device token opens exactly one door (/v1/checkin); each 300 s session token binds user + device + harness + session.',
+ i1:'<strong>Tier 1 identity</strong>: a person enrolls the machine once through a browser sign-in with PKCE, and <code>straza service</code> keeps the machine&#8217;s Ed25519 key. Each check-in carries a DPoP proof from that key, and strazad reads the attestation level there. Each 300 s session token binds user + device + harness + session and works only with a fresh proof from the key.',
  i2:'<strong>Tier 2 identity</strong>: the session token is the whole story at the gateway, and minAttestation is re-enforced from token claims. A client reaches the gateway through the straza mcp proxy, which keeps the session token current.',
  i3:'<strong>Tier 3 identity</strong>: sessions ensure themselves lazily under harness <code>exec-wrapper/&lt;version&gt;</code> (a distinct identity), so PolicySets can gate what a Tier-3 session may ever be allowed.',
  i4:'<strong>Agentkit identity</strong>: sessions check in under <code>python-sdk/&lt;framework&gt;@&lt;version&gt;</code>, using the machine&#8217;s straza enrollment; headless deployments (CI, services) enroll with a registered key or with client credentials.'

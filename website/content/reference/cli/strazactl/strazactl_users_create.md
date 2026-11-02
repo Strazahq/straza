@@ -2,7 +2,7 @@
 title: strazactl users create
 description: Create a local user
 pagetype: reference
-weight: 106
+weight: 102
 draft: false
 sources:
   - cmd/strazactl
@@ -26,7 +26,7 @@ strazactl users create <username> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also

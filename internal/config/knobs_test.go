@@ -302,3 +302,35 @@ func TestKnobNotesArePlainSentences(t *testing.T) {
 		}
 	}
 }
+
+// TestObjectScopeKnobs pins apps.objects.enabled and
+// admin.serverAdminsCoverEvery: true in both profiles when nothing sets
+// them, false from the file, and off from the environment only on false or
+// 0, so an unrelated value never turns the object checks off or changes
+// who may write covers: every.
+func TestObjectScopeKnobs(t *testing.T) {
+	cases := []struct {
+		name, file string
+		env        map[string]string
+		want       bool
+	}{
+		{"standalone, the keys left out", "profile: standalone\n", nil, true},
+		{"enterprise, the keys left out", "profile: enterprise\nstore:\n  dsn: postgres://x\n", nil, true},
+		{"the keys false in the file", "apps:\n  objects:\n    enabled: false\nadmin:\n  serverAdminsCoverEvery: false\n", nil, false},
+		{"the variables false", "profile: standalone\n", map[string]string{"STRAZA_APPS_OBJECTS_ENABLED": "false", "STRAZA_ADMIN_SERVER_ADMINS_COVER_EVERY": "false"}, false},
+		{"the variables 0", "profile: standalone\n", map[string]string{"STRAZA_APPS_OBJECTS_ENABLED": "0", "STRAZA_ADMIN_SERVER_ADMINS_COVER_EVERY": "0"}, false},
+		{"the variables no", "profile: standalone\n", map[string]string{"STRAZA_APPS_OBJECTS_ENABLED": "no", "STRAZA_ADMIN_SERVER_ADMINS_COVER_EVERY": "no"}, true},
+		{"the variables true over a false file", "apps:\n  objects:\n    enabled: false\nadmin:\n  serverAdminsCoverEvery: false\n",
+			map[string]string{"STRAZA_APPS_OBJECTS_ENABLED": "true", "STRAZA_ADMIN_SERVER_ADMINS_COVER_EVERY": "1"}, true},
+	}
+	for _, tc := range cases {
+		cfg, err := Loader{FilePath: writeFile(t, tc.file), ExplicitFile: true, Getenv: envMap(tc.env)}.Load()
+		if err != nil {
+			t.Fatalf("%s: Load: %v", tc.name, err)
+		}
+		if cfg.Apps.Objects.Enabled != tc.want || cfg.Admin.ServerAdminsCoverEvery != tc.want {
+			t.Errorf("%s: apps.objects.enabled = %v, admin.serverAdminsCoverEvery = %v, want both %v",
+				tc.name, cfg.Apps.Objects.Enabled, cfg.Admin.ServerAdminsCoverEvery, tc.want)
+		}
+	}
+}

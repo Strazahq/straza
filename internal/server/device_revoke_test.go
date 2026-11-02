@@ -10,9 +10,9 @@ import (
 )
 
 // TestDeviceRevokeAdmin pins DELETE /v1/admin/users/{id}/devices/{deviceId}:
-// the enroll-credential kill switch. Revocation is row-backed like the
-// approver-device sibling (the device row is deleted, so the long-lived
-// device token fails closed at every later use), plus the kill-switch cascade
+// the enrollment kill switch. Revocation is row-backed like the
+// approver-device sibling (the device row is deleted, so the machine's key
+// fails closed at every later check-in), plus the kill-switch cascade
 // (revocation row, in-memory denylist, target-scoped push) for the in-flight
 // window and peer pods.
 func TestDeviceRevokeAdmin(t *testing.T) {
@@ -23,33 +23,19 @@ func TestDeviceRevokeAdmin(t *testing.T) {
 	adminTok, _ := checkinToken(t, app, base)
 	ctx := context.Background()
 
-	// Enroll a device and prove the credential works BEFORE the revoke: the
-	// positive control that makes the later 403s meaningful.
-	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
-	code, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "windows", "fingerprint": "sha256:revoke-me"},
-	})
-	if code != http.StatusOK {
-		t.Fatalf("enroll = %d %v", code, enroll)
+	// Enroll a machine key and prove its session refreshes BEFORE the revoke:
+	// the positive control that makes the later 403s meaningful.
+	key := newKeyHolder(t, base)
+	key.enroll(loginDeviceFlow(t, base, "kim", "hunter2!"), "sha256:revoke-me")
+	deviceID := key.device
+	deviceSessionToken, _ := key.mustCheckin()
+	refresh := func() (int, map[string]any) {
+		return key.call("/v1/checkin", deviceSessionToken, map[string]any{"session_token": deviceSessionToken,
+			"harness": map[string]string{"name": "claude-code", "version": "2.1.0"}})
 	}
-	deviceID := enroll["device_id"].(string)
-	deviceToken := enroll["device_token"].(string)
-	checkinBody := func(auth map[string]any) map[string]any {
-		body := map[string]any{
-			"harness":     map[string]string{"name": "claude-code", "version": "2.1.0"},
-			"attestation": map[string]any{"managed": false, "hashes": map[string]string{}},
-		}
-		for k, v := range auth {
-			body[k] = v
-		}
-		return body
+	if code, body := refresh(); code != http.StatusOK {
+		t.Fatalf("pre-revoke refresh = %d %v, want 200", code, body)
 	}
-	code, mint := postJSON(t, base+"/v1/checkin", checkinBody(map[string]any{"device_token": deviceToken}))
-	if code != http.StatusOK {
-		t.Fatalf("pre-revoke device-token checkin = %d %v, want 200", code, mint)
-	}
-	deviceSessionToken := mint["session_token"].(string)
 
 	// Refusals first: the sibling admin routes' auth matrix and 404 shape.
 	bare, err := app.store.Users().Create(ctx, store.User{Username: "somebody-else"})
@@ -108,16 +94,14 @@ func TestDeviceRevokeAdmin(t *testing.T) {
 		t.Error("revoked device not on the in-memory denylist")
 	}
 
-	// Fail closed at checkin, both lanes. Both die on the in-memory denylist
-	// before any store read (the refresh lane reads the device binding from
-	// the token's claims); past it the deleted row would refuse as well. A
-	// live session on a revoked device cannot outlast its 300 s token.
-	if code, body := postJSON(t, base+"/v1/checkin", checkinBody(map[string]any{"device_token": deviceToken})); code != http.StatusForbidden ||
-		!strings.Contains(body["error"].(string), "revoked") {
-		t.Errorf("device-token checkin after revoke = %d %v, want 403 naming the revocation", code, body)
+	// Fail closed at checkin, both lanes. The key check-in finds no row, and
+	// the refresh dies on the in-memory denylist before any store read (it
+	// reads the device binding from the token's claims). A live session on a
+	// revoked device cannot outlast its 300 s token.
+	if code, body := key.checkin(); code != http.StatusForbidden || body["error"] != keyNotEnrolledMsg {
+		t.Errorf("key checkin after revoke = %d %v, want 403 with %q", code, body, keyNotEnrolledMsg)
 	}
-	if code, body := postJSON(t, base+"/v1/checkin", checkinBody(map[string]any{"session_token": deviceSessionToken})); code != http.StatusForbidden ||
-		!strings.Contains(body["error"].(string), "revoked") {
+	if code, body := refresh(); code != http.StatusForbidden || !strings.Contains(body["error"].(string), "revoked") {
 		t.Errorf("session refresh after device revoke = %d %v, want 403 naming the revocation", code, body)
 	}
 
@@ -136,15 +120,8 @@ func TestDeviceRevokeRequiresAdmin(t *testing.T) {
 	user := seedIdentity(t, app) // kim, role dev, NOT straza-admin
 	token, _ := checkinToken(t, app, base)
 
-	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
-	code, enroll := postJSON(t, base+"/v1/enroll", map[string]any{
-		"id_token": idToken,
-		"device":   map[string]string{"name": "kim-laptop", "platform": "windows", "fingerprint": "sha256:mine"},
-	})
-	if code != http.StatusOK {
-		t.Fatalf("enroll = %d %v", code, enroll)
-	}
-	deviceID := enroll["device_id"].(string)
+	d, _ := mintDevice(t, app, user.ID, store.DeviceClientKit, "sha256:mine")
+	deviceID := d.ID
 
 	if code := adminReq(t, http.MethodDelete, base+"/v1/admin/users/"+user.ID+"/devices/"+deviceID, token, nil, nil); code != http.StatusForbidden {
 		t.Fatalf("non-admin device revoke = %d, want 403", code)

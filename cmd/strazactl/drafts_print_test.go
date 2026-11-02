@@ -11,7 +11,7 @@ import (
 // risk or a warning whose before and after words differ prints each side it
 // has, indented under the line, and nothing else does.
 func TestVerdictLineShowsBeforeAndAfter(t *testing.T) {
-	const line = "  widens    App/wiki Publishing starts python3 wiki.py on the Straza host. Type wiki to publish.\n"
+	const line = "  widens    App/wiki Publishing starts python3 wiki.py on the Straza host.\n"
 	risk := func(before, after string) ctl.DraftFinding {
 		return ctl.DraftFinding{Class: "risk", Ack: "typed", Object: "App/wiki", Typed: "wiki",
 			Sentence: "Publishing starts python3 wiki.py on the Straza host.", Before: before, After: after}
@@ -113,7 +113,7 @@ func TestDraftsShowNamesEveryRevision(t *testing.T) {
 	start, end := strings.Index(detail, `"revisions":[`), strings.Index(detail, `"live":`)
 	_, srv := newDraftsServer(t, map[string]draftReply{"GET /v1/admin/drafts/41": {body: detail[:start] + revisions + detail[end:]}})
 	t.Setenv("STRAZA_SERVER", "")
-	stdout, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", "drafts", "show", "41")
+	stdout, _, code, err := runDrafts(t, onToken(t, srv.URL), "", "drafts", "show", "41")
 	if code != 0 {
 		t.Fatalf("exit %d (%v), want 0", code, err)
 	}
@@ -142,11 +142,41 @@ func TestDraftsShowNamesWhoDiscarded(t *testing.T) {
 			detail := strings.Replace(fixDetail("discarded", "", "", false, ""), `"created_at":"2026-09-24T10:14:03Z"`, by+tc.reason+`"created_at":"2026-09-24T10:14:03Z"`, 1)
 			_, srv := newDraftsServer(t, map[string]draftReply{"GET /v1/admin/drafts/41": {body: detail}})
 			t.Setenv("STRAZA_SERVER", "")
-			stdout, _, code, err := runDrafts(t, writeCreds(t, srv.URL), "", "drafts", "show", "41")
+			stdout, _, code, err := runDrafts(t, onToken(t, srv.URL), "", "drafts", "show", "41")
 			if code != 0 {
 				t.Fatalf("exit %d (%v), want 0", code, err)
 			}
 			wantInOrder(t, stdout, "Revision 1 by joe-java-developer-agent", "\n"+tc.want+"The note, which Straza did not check:")
 		})
 	}
+}
+
+// TestCoverageInTheServersWords pins the coverage list show prints: one
+// table per server, headed in that server's own plural, each role's
+// objects now and after publishing, every object in the server's type, a
+// role that covers none as nothing, and the holders by name or counted.
+// The object types are invented, so a noun strazactl hardcoded would show.
+func TestCoverageInTheServersWords(t *testing.T) {
+	tickets := []ctl.DraftObjectName{{ID: "t1", Value: "T-1"}, {ID: "t2", Value: "T-2"}}
+	var b strings.Builder
+	err := printCoverage(&b, []ctl.DraftCoverage{
+		{Role: "desk-eu", Server: "helpdesk", Type: "ticket", Plural: "tickets", HoldersCount: 3, Before: tickets[:1], After: tickets},
+		{Role: "board", Server: "tracker", Type: "lane", Plural: "lanes", Holders: []string{"alice", "dana"}, HoldersCount: 2, EveryAfter: true,
+			Before: []ctl.DraftObjectName{{ID: "l1", Value: "intake"}}},
+		{Role: "desk-new", Server: "helpdesk", Type: "ticket", Plural: "tickets", After: tickets[1:]},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
+	if len(rows) != 7 {
+		t.Fatalf("printed %d lines, want a heading, a header and the rows of each server:\n%s", len(rows), b.String())
+	}
+	if rows[0] != "Tickets on helpdesk, now and after publishing:" || rows[4] != "Lanes on tracker, now and after publishing:" {
+		t.Errorf("headings = %q and %q, want each server's own plural", rows[0], rows[4])
+	}
+	wantInOrder(t, rows[1], "ROLE", "NOW", "AFTER", "HOLDERS")
+	wantInOrder(t, rows[2], "desk-eu", "T-1", "T-1, T-2", "3")
+	wantInOrder(t, rows[3], "desk-new", "nothing", "T-2", "0")
+	wantInOrder(t, rows[6], "board", "intake", "every lane", "alice, dana")
 }

@@ -6,7 +6,7 @@ weight: 25
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server in an Alpine container on Linux, started with this page's provider block for an identity provider that does not exist, and two servers that point at the demo stack's MCP reference server, github with each caller's token and midpoint with each caller's keycloak sign-in. alice ran straza at a terminal in her own container, and the AI agents joe, sponsored by alice, and ivy, with no sponsor, called through straza mcp in theirs. Three steps did not run. A sign-in itself needs a running provider, the expired-token deny needs a date that has passed, and strazactl connect and disconnect with --user need a person's strazactl login, which the coding-agent guard refuses in this session. The console steps were read from the console's source and not clicked
+  platform: A throwaway standalone server in an Alpine container on Linux, started with this page's provider block for an identity provider that does not exist, and two servers that point at the demo stack's MCP reference server, github with each caller's token and midpoint with each caller's keycloak sign-in. alice ran straza at a terminal in her own container, and the AI agents joe, sponsored by alice, and ivy, with no sponsor, called through straza mcp in theirs. Three steps did not run. A sign-in itself needs a running provider, the expired-token deny needs a date that has passed, and strazactl connect and disconnect with --user were not run for this page. strazactl no longer signs in, so those two run on an admin API token, which needs apps:read and apps:write for connect and apps:write for disconnect. The console steps were read from the console's source and not clicked
   date: 2026-10-06
 applies_to: both
 keywords: caller token oauth sign-in connect sponsor agents
@@ -107,7 +107,7 @@ github    token  -         true       70c1         2026-12-31T00:00:00Z  sponsor
 midpoint  oauth  keycloak  false      -            -                     sponsor               -
 ```
 
-`straza disconnect github` takes the row away and prints `disconnected github`. `strazactl connect` takes the same flags as `straza connect` and adds `--user`, for an administrator who acts for another user and for scripts. An administrator or a sponsor removes an agent's row with `strazactl disconnect github --user joe`.
+`straza disconnect github` takes the row away and prints `disconnected github`. `strazactl connect` and `strazactl disconnect` change another user's connection, named with `--user`, for an administrator and for scripts, on an admin API token that holds `apps:read` and `apps:write`, because `strazactl connect` reads the user's connections before it changes one. `strazactl connect github --user joe` pastes a token for the agent joe the same way, and `strazactl disconnect github --user joe` removes it. A sponsor sets or removes an agent's token in the sponsored-agent rows of the Credentials tab.
 {{< /cli >}}
 
 
@@ -197,17 +197,17 @@ A person never falls back to another credential. Only an agent does, and only wh
 On the self-service page, open **Credentials** and turn on **My agents may use this** on your own row of the server.
 {{< /console >}}
 
-{{< cli >}}
-{{< command terminal="Person's machine" purpose="client" >}}
+Your own switch has no command. A session that `straza` started on your machine can be used by an agent running as you, so from a session strazad turns the opt-in on, and changes another user's connection, only on your own sign-in in a browser. From any other session it answers that it needs your own sign-in in a browser and names the Credentials tab, and the audit chain records the refusal as `connection.refused`.
+
+An organization that wants agents to run on people's connections by default switches the opt-in for each user from a script, on an admin API token that holds `apps:write`. `--allow-agents=false` takes it back.
+
+{{< command terminal="Terminal" purpose="administration" >}}
 ```sh
-straza connect github --allow-agents
+strazactl connect github --user alice --allow-agents
 ```
 {{< /command >}}
 
-{{< see >}}`agents may use your github connection where the server permits it`{{< /see >}}
-
-`--allow-agents=false` takes the opt-in back.
-{{< /cli >}}
+The `straza.identity.updated` record of a change made on a token carries `setBy` with the token's id and `actorVia` set to `api-token`, and the `SET BY` column of the connection's listing names the token. A change a person makes carries no `actorVia`.
 
 Before the switch, an agent joe sponsored by alice is denied with "agent joe has no token for app github, and its sponsor alice has not allowed agents on their github connection. alice allows it on their credentials page at https://straza.example/self-service/credentials, or an administrator sets the agent's own with strazactl connect github --user joe". After it, joe's calls carry alice's token, and the record of each call reads `credentialSource: sponsor` with `credentialOwner` holding alice's user id, so a review can tell an agent acting on its sponsor's account from alice acting on her own. The same switch exists on a sign-in connection, so an `oauth` server with `agents: sponsor` behaves the same way.
 
@@ -233,6 +233,11 @@ Nobody can finish a sign-in for an agent, and the agent cannot finish one either
 | An agent with no sponsor | Nothing itself. An administrator picks Use a shared account in the wizard, which writes `credential.agents: shared`, or sets `client_credentials` in the manifest. | agent joe has no midpoint sign-in of its own. An agent cannot sign in through a browser. An administrator sets credential.agents on midpoint to shared or client_credentials |
 
 The wizard's sign-in card starts on `agents: sponsor` for that reason, and `agents: own` on a sign-in server means an agent gets nothing. On the sponsor's Credentials tab the agent's row reads "Not signed in" with the reason, and "Uses your sign-in" once the sponsor's switch covers it.
+
+## When Straza lists a server's objects {.nostep}
+
+
+A server with `kind: token` or `kind: oauth` can pin its objects as well, as [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md#objects" >}}) shows. Straza then calls the server's listing tool itself, with no person's session behind the call. That call carries the server's listing credential, a static secret stored for the listing alone, and never a person's token or sign-in, a sponsor's, the shared secret, or a token that `client_credentials` gets. Straza renders the listing credential through the manifest's `inject` block like any other credential, so with an `inject` block such as the two above, the listing sends `Authorization: Bearer` and the listing credential. Give it a token the upstream accepts on its listing tool, and store it once the pin is published, with `strazactl apps secret set` and `--listing`. Without one the listing fails, and Straza lists nothing for that server. A remote server that takes no credential is listed without one.
 
 ## Caveats {.nostep}
 

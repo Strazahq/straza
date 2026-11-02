@@ -1,8 +1,8 @@
 ---
 title: straza logs
-description: Print the client error log (hook/spool/drain failures; never payload content)
+description: Print the client error log (hook, capture and MCP bridge failures; never payload content)
 pagetype: reference
-weight: 13
+weight: 12
 draft: false
 sources:
   - cmd/straza

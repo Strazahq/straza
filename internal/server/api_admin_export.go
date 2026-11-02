@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,7 +41,8 @@ func (a *App) handleRoleExport(w http.ResponseWriter, r *http.Request) {
 
 // buildRoleExport reads the canonical document of role, the spec/objects
 // face of a role that drafts.RoleDoc's one serializer writes for the export
-// and for every draft alike.
+// and for every draft alike. A covers line names each object by its value
+// now.
 func (a *App) buildRoleExport(r *http.Request, role store.Role) (drafts.RoleDoc, error) {
 	ctx := r.Context()
 	doc := drafts.RoleDoc{
@@ -79,7 +81,9 @@ func (a *App) buildRoleExport(r *http.Request, role store.Role) (drafts.RoleDoc,
 		return doc, err
 	}
 	for _, b := range bindings {
-		if b.RoleID != role.ID {
+		// A row whose covers line cannot be read grants nothing, and
+		// exporting it without the line would grant by tools elsewhere.
+		if b.RoleID != role.ID || b.ScopeFault != "" {
 			continue
 		}
 		app, err := a.store.Apps().GetByID(ctx, b.AppID)
@@ -89,7 +93,11 @@ func (a *App) buildRoleExport(r *http.Request, role store.Role) (drafts.RoleDoc,
 		var tools []string
 		_ = json.Unmarshal([]byte(b.ToolMatcher), &tools)
 		sort.Strings(tools)
-		doc.Spec.Bindings = append(doc.Spec.Bindings, drafts.RoleBinding{App: app.Name, Tools: tools})
+		covers, err := a.currentCovers(ctx, b, app.Manifest)
+		if err != nil {
+			return doc, err
+		}
+		doc.Spec.Bindings = append(doc.Spec.Bindings, drafts.RoleBinding{App: app.Name, Tools: tools, Covers: covers})
 	}
 	sort.Slice(doc.Spec.Bindings, func(i, j int) bool { return doc.Spec.Bindings[i].App < doc.Spec.Bindings[j].App })
 
@@ -114,4 +122,20 @@ func (a *App) buildRoleExport(r *http.Request, role store.Role) (drafts.RoleDoc,
 		sort.Strings(doc.Spec.Packs)
 	}
 	return doc, nil
+}
+
+// currentCovers is the covers line of the binding b on the server whose
+// stored manifest is manifest, with the value the server's object list
+// holds now for each id (currentValues), so the export and the binding list
+// name a renamed object by its new name, sorted by value.
+func (a *App) currentCovers(ctx context.Context, b store.ToolBinding, manifest string) (*drafts.Scope, error) {
+	covers := draftScope(b.Scope)
+	if covers == nil || len(covers.Objects) == 0 {
+		return covers, nil
+	}
+	values, err := a.currentValues(ctx, b.AppID, manifest, coversIDs(covers))
+	if err != nil {
+		return nil, err
+	}
+	return withCurrentValues(covers, values), nil
 }

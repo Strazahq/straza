@@ -2,7 +2,7 @@
 title: strazactl apps logs
 description: Show recent runtime log lines for a server
 pagetype: reference
-weight: 23
+weight: 20
 draft: false
 sources:
   - cmd/strazactl
@@ -24,7 +24,7 @@ strazactl apps logs <server> [flags]
 ## Options inherited from parent commands
 
 ```
-      --server string   strazad base URL (overrides $STRAZA_SERVER and the server you logged into)
+      --server string   strazad base URL (overrides $STRAZA_SERVER)
 ```
 
 ## See also
