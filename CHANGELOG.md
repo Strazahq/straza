@@ -10,7 +10,7 @@ Straza numbers its binaries, its API and its wire formats.
 
 ## [Unreleased]
 
-## [2.0.0]
+## [2.0.0] - 2026-11-02
 
 Straza 2.0.0 moves every credential on a person's machine into a local service that AI agents
 running as that person cannot read. It adds roles that cover some objects of a server, git through
