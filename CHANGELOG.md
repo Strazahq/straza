@@ -12,8 +12,8 @@ Straza numbers its binaries, its API and its wire formats.
 
 ## [2.0.1] - 2026-11-02
 
-Straza 2.0.1 fixes two security faults and two bugs that an outside review of 2.0.0 found. It
-changes no wire format and no database schema, so the upgrade is the binary or the package alone.
+Straza 2.0.1 is a security and bug-fix release for 2.0.0. It changes no wire format and no
+database schema, so the upgrade is the binary or the package alone.
 The Linux, macOS and Windows packages restart `straza service`. If you run `straza service` from the
 archive, restart it after the upgrade, because the classify and exec fixes run in it.
 
