@@ -55,4 +55,4 @@ emDash = "---"
 # version is the Straza release these docs describe, the appVersion in
 # deploy/helm/straza/Chart.yaml. The footer prints it on every page.
 [params]
-version = "2.0.0"
+version = "2.0.1"

@@ -45,7 +45,7 @@ func (d serviceDecider) Decide(n Normalized) policy.Decision {
 		return dec
 	}
 	j := ans.Journal
-	if unresolved(ans.Decision) {
+	if Unresolved(ans.Decision) {
 		// The service resolves every escalation before it answers, so an
 		// allow that still needs one is a fault there, and fails closed.
 		ans.Decision, j.FailClosed = policy.Decision{Effect: policy.EffectDeny,
@@ -91,9 +91,10 @@ func (d serviceDecider) Decide(n Normalized) policy.Decision {
 const unresolvedReason = "the background service answered an allow it had not resolved (a server check, a classifier or an approval was still open), " +
 	"so Straza denied this call. Run `straza doctor`, and tell your Straza administrator if it happens again."
 
-// unresolved reports whether d is an allow that still carries an escalation
-// only the service can resolve, as conformanceDecider refuses one.
-func unresolved(d policy.Decision) bool {
+// Unresolved reports whether d is an allow that still carries an escalation
+// only the service can resolve, as conformanceDecider refuses one. The
+// service must never answer one, and the hook denies one fail-closed.
+func Unresolved(d policy.Decision) bool {
 	return d.Effect == policy.EffectAllow && (d.ServerCheck || d.Classify || d.Approve != nil)
 }
 

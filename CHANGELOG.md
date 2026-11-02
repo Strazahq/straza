@@ -10,6 +10,34 @@ Straza numbers its binaries, its API and its wire formats.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-02
+
+Straza 2.0.1 is a security and bug-fix release for 2.0.0. It changes no wire format and no
+database schema, so the upgrade is the binary or the package alone.
+The Linux, macOS and Windows packages restart `straza service`. If you run `straza service` from the
+archive, restart it after the upgrade, because the classify and exec fixes run in it.
+
+### Security
+
+- `straza exec` applies interpreter rules. It sent commands without the interpreter tag that the
+  harness hook adds, so a rule such as `interpreters: {deny: ["python*"]}` held on a hook and not on
+  exec, which is also the path of a hookless sandbox's wrappers. The background service now tags an
+  untagged shell command the way strazad does, so after the upgrade an exec call that an interpreter
+  rule denies or sends to the classifier is denied or classified.
+- The standalone SQLite database is created readable by its owner only. It was created 0644, and the
+  standalone guide made its data directory 0755, so any local user could read the audit records,
+  password hashes and server settings in it. strazad also narrows an existing database and its WAL
+  and SHM files to 0600 when it starts, and logs each file it changes.
+
+### Fixed
+
+- A call that a classify rule allows runs again. In 2.0.0 the background service kept the classify
+  mark on a classifier allow, so the hook denied every such call as unresolved while its audit record
+  said allow.
+- An API token request with `expires_in` sent as text, such as `"1h"`, answers that it must be a
+  whole number of seconds, where it answered "name is required". A body that is not valid JSON on the
+  API token, pack and role create routes says so, and "name is required" now means only that.
+
 ## [2.0.0] - 2026-11-02
 
 Straza 2.0.0 moves every credential on a person's machine into a local service that AI agents
@@ -249,7 +277,8 @@ The first public release.
 - Signed release archives for Linux, macOS and Windows, the container image
   `ghcr.io/strazahq/straza` and the Helm chart under `deploy/helm/straza`.
 
-[Unreleased]: https://github.com/strazahq/straza/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/strazahq/straza/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/strazahq/straza/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/strazahq/straza/compare/v1.1.2...v2.0.0
 [1.1.2]: https://github.com/strazahq/straza/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/strazahq/straza/compare/v1.1.0...v1.1.1

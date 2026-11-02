@@ -293,8 +293,9 @@ func TestDecideApproveLane(t *testing.T) {
 }
 
 // TestDecideClassifyLane pins mode classify: the classifier runs before any
-// online lane under its one second bound, and a not-allowed verdict or any
-// classifier failure denies with the firing rule and set kept.
+// online lane under its one second bound, a not-allowed verdict or any
+// classifier failure denies with the firing rule and set kept, and an allow
+// it resolves carries no escalation the hook would deny as unresolved.
 func TestDecideClassifyLane(t *testing.T) {
 	py := policy.Event{Kind: policy.EventToolPre, Tool: policy.ToolShellExec,
 		Command: `python3 -c "import shutil; shutil.rmtree('/tmp/x')"`, Interpreter: "python3"}
@@ -327,6 +328,9 @@ func TestDecideClassifyLane(t *testing.T) {
 			}
 			if j.Escalation != "classify" {
 				t.Errorf("escalation = %q, want classify", j.Escalation)
+			}
+			if agentguard.Unresolved(d) {
+				t.Errorf("decision = %+v still carries an escalation, which the hook denies", d)
 			}
 		})
 	}
@@ -540,4 +544,36 @@ func nonEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// TestDecideTagsAnUntaggedShellEvent pins interpreter tagging on the
+// service: a shell event that arrives without the tag, as straza exec sends
+// one, meets the same interpreter rule as the hook's tagged event.
+func TestDecideTagsAnUntaggedShellEvent(t *testing.T) {
+	doc := `
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata: {name: interpreter-gate}
+spec:
+  match: {roles: [dev]}
+  rules:
+    - id: deny-python
+      tools: [shell.exec]
+      interpreters: {deny: ["python*"]}
+      effect: deny
+      reason: "Straza: no python for this role"
+`
+	argv := []string{"python3", "-c", "print(2+2)"}
+	exec := shellReq(strings.Join(argv, " "))
+	exec.Event.Argv = argv
+	hook := exec
+	hook.Event.Interpreter = policy.DetectInterpreter(exec.Event.Command, argv)
+	for name, req := range map[string]localapi.DecideRequest{"exec, untagged": exec, "hook, tagged": hook} {
+		f := gateDouble(t, 900, time.Hour, Renewal{})
+		f.engine = apiEngine(t, doc, 900)
+		a, _ := testAPI(f, false)
+		if d := decideVia(t, a, req).Decision; d.Effect != policy.EffectDeny || d.RuleID != "deny-python" {
+			t.Errorf("%s: decision = %+v, want the deny-python rule", name, d)
+		}
+	}
 }

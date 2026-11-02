@@ -13,9 +13,11 @@ Straza keeps its changelog in [CHANGELOG.md](https://github.com/strazahq/straza/
 ## Latest release
 
 
-The latest release is [Straza 2.0.0](https://github.com/strazahq/straza/releases/tag/v2.0.0), a major release. strazad 2.0.0 refuses the machines that a 1.x `straza` client enrolled and the sign-in of a 1.x `strazactl`, so every governed machine gets a new client and every person enrolls again. [Upgrade from 1.1.2 to 2.0.0]({{< relref "guides/operate/backup-and-upgrade.md#upgrade-from-112-to-200" >}}) lists the steps in their order. Its notes list the changes, name each break of a wire format, and link the steps that verify your download.
+The latest release is [Straza 2.0.1](https://github.com/strazahq/straza/releases/tag/v2.0.1), a security and bug-fix release. Interpreter rules now apply to `straza exec`, the standalone database is readable by its owner only, and calls that a classify rule allows run again.
 
-Before it came [1.1.2](https://github.com/strazahq/straza/releases/tag/v1.1.2), a bug-fix release, [1.1.1](https://github.com/strazahq/straza/releases/tag/v1.1.1), a security update, and [1.1.0](https://github.com/strazahq/straza/releases/tag/v1.1.0), the first public release.
+Before it came [Straza 2.0.0](https://github.com/strazahq/straza/releases/tag/v2.0.0), a major release. strazad 2.0.0 refuses the machines that a 1.x `straza` client enrolled and the sign-in of a 1.x `strazactl`, so every governed machine gets a new client and every person enrolls again. [Upgrade from 1.1.2 to 2.0.0]({{< relref "guides/operate/backup-and-upgrade.md#upgrade-from-112-to-200" >}}) lists the steps in their order. Its notes list the changes, name each break of a wire format, and link the steps that verify your download.
+
+Before that came [1.1.2](https://github.com/strazahq/straza/releases/tag/v1.1.2), a bug-fix release, [1.1.1](https://github.com/strazahq/straza/releases/tag/v1.1.1), a security update, and [1.1.0](https://github.com/strazahq/straza/releases/tag/v1.1.0), the first public release.
 
 ## How versions are numbered
 
