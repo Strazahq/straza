@@ -14,6 +14,7 @@ import (
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/logging"
 	"github.com/strazahq/straza/internal/server"
+	"github.com/strazahq/straza/internal/store"
 	"github.com/strazahq/straza/internal/version"
 )
 
@@ -100,6 +101,11 @@ func serveCmd() *cobra.Command {
 				return err
 			}
 			log := logging.New(cfg.Log, os.Stderr)
+			if cfg.Store.Driver == config.DriverSQLite {
+				if err := store.OwnerOnly(cfg.SQLitePath(), log); err != nil {
+					return err
+				}
+			}
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()

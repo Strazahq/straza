@@ -9,7 +9,7 @@ keywords: known limits residual risk limitation mitigation roadmap attestation c
 ---
 
 
-Straza leaves some risks with you, and this page names each one as it stands in 2.0.0. A security reviewer or an auditor reads the table as the list of residual risks to accept, reduce or track. Each row gives the limit and the mechanism behind it, what it means for your deployment, what reduces it today, and what is planned. The link in each row leads to the page that explains the mechanism in full. The Planned column quotes only what the [roadmap]({{< relref "project/roadmap.md" >}}) states, and a row the roadmap does not name says so.
+Straza leaves some risks with you, and this page names each one as it stands in 2.0.1. A security reviewer or an auditor reads the table as the list of residual risks to accept, reduce or track. Each row gives the limit and the mechanism behind it, what it means for your deployment, what reduces it today, and what is planned. The link in each row leads to the page that explains the mechanism in full. The Planned column quotes only what the [roadmap]({{< relref "project/roadmap.md" >}}) states, and a row the roadmap does not name says so.
 
 
 

@@ -174,7 +174,7 @@ Two things are out of scope by design. Model traffic is never proxied, so prompt
 
 ## The limits in detail {#known-limits}
 
-Each limit below describes the code as it stands in 2.0.0, together with what you can do about it today. [Known limits]({{< relref "security/known-limits.md" >}}) lists every limit in one table, and the rows for these link here for the mechanism.
+Each limit below describes the code as it stands in 2.0.1, together with what you can do about it today. [Known limits]({{< relref "security/known-limits.md" >}}) lists every limit in one table, and the rows for these link here for the mechanism.
 
 ### An agent that holds its person's login can enroll an approval device
 

@@ -198,7 +198,7 @@ func (a *App) handleRolesCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case err != nil || req.Name == "":
-		apiError(w, http.StatusBadRequest, "name is required")
+		apiError(w, http.StatusBadRequest, bodyRefusal("a role", err))
 		return
 	case req.Covers != nil && req.Server == "":
 		apiError(w, http.StatusBadRequest, "covers needs the server the role is owned by, because a covers line belongs to one server's access row. Add server, or drop covers.")

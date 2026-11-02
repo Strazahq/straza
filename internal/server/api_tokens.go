@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -105,7 +106,16 @@ func (a *App) handleAPITokenCreate(w http.ResponseWriter, r *http.Request) {
 		Scope     string `json:"scope"`
 		ExpiresIn int64  `json:"expires_in"` // seconds; 0 = never
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+	err := json.NewDecoder(r.Body).Decode(&req)
+	var typeErr *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &typeErr) && typeErr.Field == "expires_in":
+		apiError(w, http.StatusBadRequest, "expires_in must be a whole number of seconds, such as 3600 for one hour, or 0 for a token that never expires.")
+		return
+	case err != nil:
+		apiError(w, http.StatusBadRequest, bodyRefusal("an API token", err)+" Send name, scope and expires_in in seconds.")
+		return
+	case req.Name == "":
 		apiError(w, http.StatusBadRequest, "name is required")
 		return
 	}

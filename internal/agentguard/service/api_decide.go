@@ -62,6 +62,12 @@ func (a *api) decide(w http.ResponseWriter, r *http.Request) {
 func (a *api) decideFor(ctx context.Context, c Caller, s Session, req localapi.DecideRequest) localapi.DecideAnswer {
 	ans := localapi.DecideAnswer{Journal: localapi.Journal{Snapshot: s.SnapshotID}}
 	req.Event.NativeTool = req.NativeTool
+	// A shell event that arrives without an interpreter tag, as straza exec
+	// sends one, is tagged here the way strazad's tagInterpreter does, so
+	// interpreter rules hold on every lane. A client's tag is kept.
+	if req.Event.Tool == policy.ToolShellExec && req.Event.Interpreter == "" {
+		req.Event.Interpreter = policy.DetectInterpreter(req.Event.Command, req.Event.Argv)
+	}
 	pctx, cancel := context.WithTimeout(ctx, policyBudget)
 	eng, maxAge, snapshot, err := a.creds.Policy(pctx, s)
 	cancel()
@@ -192,6 +198,9 @@ func (a *api) classifyCheck(ctx context.Context, ev policy.Event, local policy.D
 		return policy.Decision{Effect: policy.EffectDeny, RuleID: local.RuleID, SetName: local.SetName,
 			Reason: "Straza: classifier: " + v.Reason}
 	}
+	// The classifier resolved the escalation, so its flag goes: the hook
+	// denies an allow that still carries one (agentguard.Unresolved).
+	local.Classify = false
 	return local
 }
 

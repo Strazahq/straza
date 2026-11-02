@@ -488,3 +488,14 @@ func wireRoleKind(r store.Role) string {
 	}
 	return r.Kind
 }
+
+// bodyRefusal words a create route's 400 for a body that did not decode, or
+// decoded without a name. A decode error names the object the route creates
+// and the decoder's complaint, so a mistyped field never reads as a missing
+// name, and only a nil err says "name is required".
+func bodyRefusal(what string, err error) string {
+	if err != nil {
+		return "The request body is not valid JSON for " + what + ": " + err.Error() + "."
+	}
+	return "name is required"
+}

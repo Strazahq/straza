@@ -6,7 +6,7 @@ weight: 10
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: An Alpine 3.20 container with the static binaries and curl, in the standalone profile, where every terminal block on this page but the token step ran in order. In that run strazactl signed in with strazactl login, answered with the form post the built-in sign-in page sends, and strazactl no longer signs in, so the token step was written on 2026-11-01 and not walked. The console sign-in was not clicked, because the server listened on the container's loopback address. The console's browser sign-in was written from the code on 2026-10-22 and not walked
+  platform: An Alpine 3.20 container with the static binaries and curl, in the standalone profile, where every terminal block on this page but the token step ran in order. In that run strazactl signed in with strazactl login, answered with the form post the built-in sign-in page sends, and strazactl no longer signs in, so the token step was written on 2026-11-01 and not walked. The console sign-in was not clicked, because the server listened on the container's loopback address. The console's browser sign-in was written from the code on 2026-10-22 and not walked. On 2026-11-02 the data directory listing and the system-service block ran again on a build of main with the owner-only database
   date: 2026-10-06
 applies_to: standalone
 who: You, as the operator of the host
@@ -67,23 +67,23 @@ ls -la data data/approver-tls
 
 ```text
 data:
-drwx------    2 root     root          4096 Oct  6 21:36 approver-tls
-drwxr-x---    2 root     root          4096 Oct  6 21:36 apps
-drwx------    3 root     root          4096 Oct  6 21:36 nats
--rw-------    1 root     root            32 Oct  6 21:36 secret.key
--rw-r--r--    1 root     root          4096 Oct  6 21:36 straza.db
--rw-r--r--    1 root     root         32768 Oct  6 21:36 straza.db-shm
--rw-r--r--    1 root     root       1380232 Oct  6 21:36 straza.db-wal
+drwx------    2 root     root          4096 Nov  2 14:33 approver-tls
+drwxr-x---    2 root     root          4096 Nov  2 14:33 apps
+drwx------    3 root     root          4096 Nov  2 14:33 nats
+-rw-------    1 root     root            32 Nov  2 14:33 secret.key
+-rw-------    1 root     root          4096 Nov  2 14:33 straza.db
+-rw-------    1 root     root         32768 Nov  2 14:33 straza.db-shm
+-rw-------    1 root     root       1545032 Nov  2 14:33 straza.db-wal
 
 data/approver-tls:
--rw-r--r--    1 root     root           672 Oct  6 21:36 cert.pem
--rw-------    1 root     root           227 Oct  6 21:36 key.pem
+-rw-r--r--    1 root     root           676 Nov  2 14:33 cert.pem
+-rw-------    1 root     root           227 Nov  2 14:33 key.pem
 ```
 
 
 | Entry | What it is |
 |---|---|
-| `straza.db`, with `-shm` and `-wal` | The SQLite store, with its write-ahead log beside it. |
+| `straza.db`, with `-shm` and `-wal` | The SQLite store, with its write-ahead log beside it. Only its owner can read it, and strazad narrows an older database to that mode when it starts. |
 | `nats` | The storage of the embedded event bus. |
 | `apps` | The directory the server watches for declarative MCP server manifests. |
 | `secret.key` | The 32-byte key-encryption key that seals stored credentials. |
@@ -156,11 +156,12 @@ strazad reads one config file, and these rules decide which one:
 
 A data directory in a system location and a text log format are the two settings most hosts want in the file. Stop the first server with Ctrl-C, because the next one listens on the same address, 127.0.0.1:8420.
 
-The block below creates directories under `/srv` and `/var/lib`, so run it as root. Or create the two directories with `sudo mkdir -p` and hand them to the user that runs strazad with `sudo chown`.
+The block below creates directories under `/srv` and `/var/lib`, so run it as root. Or create the two directories with `sudo mkdir -p` and hand them to the user that runs strazad with `sudo chown`. Keep `/var/lib/straza` at mode 0750, because it holds the database and the key.
 
 {{< command terminal="Terminal 1" purpose="server, as root" >}}
 ```sh
-mkdir -p /srv/straza /var/lib/straza
+mkdir -p /srv/straza
+mkdir -p -m 0750 /var/lib/straza
 cat > /srv/straza/straza.yaml <<'EOF'
 profile: standalone
 dataDir: /var/lib/straza
