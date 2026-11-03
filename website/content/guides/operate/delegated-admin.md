@@ -1,12 +1,18 @@
 ---
 title: Delegated admin
 description: Give a person admin rights over chosen areas of Straza, such as the audit chain or sessions, without the root role.
+summary: >-
+  The map `admin.roleAreas` in the server's config file gives a Straza role a slice of the admin
+  plane, such as `audit:read`. Whoever holds that role, assigned by your IGA or an admin,
+  administers those areas and no others. The server checks the area on every request, and only a
+  person, never an AI agent, uses the admin API.
 pagetype: how-to
 weight: 100
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in an Alpine 3.20 container on Linux, with the map entry added to its config file and the server restarted, and the refused entries checked by booting a second server on each. The admin's strazactl ran on an admin API token minted in the console, so the assign and the unassign ran. In that run omar and mara probed their rights with strazactl after strazactl login from their own home directories, and strazactl no longer signs in, so the probe on a token's own scope was written on 2026-11-01 and not walked. In headless Chromium the console's assign step and the role's Areas tab were clicked as the root admin, and omar's sign-in, sidebar and locked panel were read. The refusal of AI agents on admin routes was checked against the code and not run, because no command hands an agent's session token to another client. In that walk omar's console sign-in used a code, and the browser sign-in that replaced it was written from the code on 2026-10-22 and not walked
+  except: the token scope probe, the refusal of AI agents and omar's browser sign-in, written from the code
   date: 2026-10-06
 applies_to: both
 who: You, as the root admin

@@ -1,6 +1,11 @@
 ---
 title: Approve on a phone
 description: A person enrolls their own phone as an approver device on the self-service page, decides a held call in the Straza approver app, and signs each answer with its own key.
+summary: >-
+  A person enrolls their own phone in the Straza approver app by scanning a one-time QR code
+  from the self-service page. The phone keeps its signing key in secure hardware and signs each
+  verdict against a challenge that works once. Push only wakes the app, which fetches the
+  request from your server itself.
 pagetype: how-to
 weight: 30
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in a Linux container. A shell script with an openssl P-256 key stood in for the phone. It paired with an enroll token from strazactl, fetched the pending request and signed the decision against the approver listener on port 8443, and the call it decided was a real hold that dana's hook call raised. The QR scan and the tap in the app on a real phone were not run, and the console form was not walked in a browser. The enroll token of that run came from strazactl, which no longer mints one. The role step and the person's own Add a phone were written from the code on 2026-11-01 and not walked
   date: 2026-10-06
+  except: the QR scan and tap on a real phone, and the role and Add a phone steps, which were not walked
 applies_to: both
 keywords: phone approver enroll push signature
 who: The person who decides on their phone, after you as the admin give them the role
@@ -124,6 +130,8 @@ In the example run, a script that speaks the app's contract performed the same e
 When a rule holds a call, Straza sends the request to the person's phone as a push notification. Its payload is only a version, a reference and a kind, never the command, the arguments or a name. The app fetches the detail itself from your server. While the app is open it also polls the pending queue, at an interval the app sets, so a phone without push still decides.
 
 The app shows the request with the requester, the rule, the tool and the redacted call preview, and a fresh challenge that is valid for one decision. The person approves or denies, and the app signs the request id, the verdict, the challenge and the time with the phone's key.
+
+![Replay: a push wakes the Straza approver app, the app fetches the held request with the agent's unverified reason, and the approver's tap signs the decision with the phone's key](../../../static/replays/phone-approval.png)
 
 ```text
 {"id":"01a1130f-1ad9-7546-a960-0be1759b7fce","expires_at":"2026-10-06T21:16:59Z","requester":{"username":"dana","kind":"human"},"rule_id":"hold-kubectl-apply","set_name":"kubectl-apply-hold","summary":{"tool":"shell.exec"},"challenge":"JMte","class":"hold","args_preview":"kubectl apply -f deploy/app.yaml"}

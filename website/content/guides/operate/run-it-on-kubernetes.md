@@ -1,8 +1,15 @@
 ---
 title: Run it on Kubernetes
 description: Run strazad on a throwaway kind cluster through the Helm chart, sign in through a port-forward, and read one deny with its reason.
+summary: >-
+  You install the Helm chart on a throwaway kind cluster in the standalone profile: one pod with
+  its own store, event broker and sign-in page. Through a port-forward you sign in as the admin
+  and ask what the server decides for `rm -rf`. The starter policy denies it with its reason,
+  and you delete the cluster.
+aliases:
+  - /get-started/run-it-on-kubernetes/
 pagetype: tutorial
-weight: 35
+weight: 31
 draft: false
 who: You, as the admin
 where: Two terminals and a browser, on a machine with Docker
@@ -12,6 +19,7 @@ mode_default: cli
 tested:
   version: v1.1.0-117-g106081a8
   platform: A Linux host with Helm 3.16.4 and no Kubernetes cluster, so the cluster, the image build and load, the install, the pod checks, the port-forward and the teardown were not run, and their pasted outputs come from the kind walk of 2026-09-19 at v1.0.0-1235-ge8f5cdea. The install's values and the chart's notes were rendered with helm template from chart 1.1.0, and the version and readiness checks, the login with the form post the sign-in page sends and the simulated deny ran against a standalone strazad in an Alpine 3.20 container. The console steps were not clicked. The browser sign-ins of the console and of strazactl login were written from the code on 2026-10-22 and not walked, and strazactl no longer signs in
+  except: every cluster step from kind to teardown, whose outputs come from an earlier walk, the console steps and the browser sign-ins
   date: 2026-10-06
 applies_to: standalone
 keywords: kubernetes kind helm chart tutorial port-forward
@@ -27,7 +35,7 @@ The chart runs in its standalone profile here: one pod with an embedded database
 
 - Docker Engine, kind, kubectl and Helm.
 - A clone of the repository, because the commands read the chart from `deploy/helm/straza`.
-- `strazactl` on your PATH, from [Install]({{< relref "get-started/install.md" >}}).
+- `strazactl` on your PATH, from [Install]({{< relref "guides/operate/install.md" >}}).
 
 The chart pulls the release image `ghcr.io/strazahq/straza` by default, and building your own image from the repository is an optional section below. One terminal is enough for everything except the port-forward, which holds a second one.
 
@@ -286,7 +294,7 @@ note      this verdict applies once this snapshot reaches the client;
 The rule applies to everyone, so the role `dev` needs no definition for the answer to come back. The same command with `git status` answers "This call would be allowed." and names the profile default as the reason, since no rule mentions it. The snapshot id names the exact policy state that decided. A governed client downloads that same compiled snapshot and decides against it locally, which is what the note at the end of the answer means.
 {{< /cli >}}
 
-The rule belongs to the starter PolicySet that a fresh standalone store seeds at its first boot, the one [Your first governed session]({{< relref "get-started/first-governed-session.md" >}}) showed in full.
+The rule belongs to the starter PolicySet that a fresh standalone store seeds at its first boot, the one [Your first governed session]({{< relref "evaluate/try-it-on-one-laptop.md" >}}) showed in full.
 
 ## Delete the cluster
 
@@ -323,4 +331,4 @@ Three things stay in Docker afterwards:
 ## Next {.nostep}
 
 - [Kubernetes with Helm]({{< relref "guides/operate/kubernetes-with-helm.md" >}}) is the production shape on a cluster you keep, with Postgres and NATS behind the pods and your identity provider in front.
-- [What just happened]({{< relref "get-started/how-that-worked.md" >}}) names each piece that acted here.
+- [What just happened]({{< relref "evaluate/how-it-works.md" >}}) names each piece that acted here.

@@ -1,6 +1,11 @@
 ---
 title: Record a conversation
 description: One role's conversations are recorded with secrets masked, and you have read a recorded prompt back.
+summary: >-
+  Recording is a policy decision: a policy set that matches a role and carries a `capture` block
+  records that role's prompts and replies. The agent and the person are told at session start
+  that recording is on. In `redact` mode, credential shapes are masked before anything leaves
+  the machine.
 pagetype: how-to
 weight: 50
 draft: false

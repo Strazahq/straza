@@ -1,6 +1,11 @@
 ---
 title: Gemini CLI
 description: Gemini CLI on this machine hands every tool call to your Straza policy, and you have seen a destructive command denied with a reason.
+summary: >-
+  Gemini CLI passes every tool call to `straza hook` through its BeforeTool event, and the
+  Straza background service decides it against a signed policy snapshot. Gemini runs no hooks
+  when they are switched off, or in a folder it does not trust, and `straza doctor` checks
+  both. An enterprise server requires the managed install by default.
 pagetype: how-to
 weight: 30
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: An Alpine 3.20 container against a standalone server, as the local user alice enrolled by the device flow, where the SessionStart, BeforeTool deny, allow and no-session payloads and the managed-attestation refusal were fired and the four hook events were read from the server's rendered managed config, while straza install, the doctor's gemini-hooks line and straza uninstall were not run because this box never runs straza install and has no Gemini, and the demo stack's guardrails reason was read from its seed policy and the agent-sam log instead of fired, because the demo stack takes no writes
   date: 2026-10-06
+  except: straza install, the doctor's gemini-hooks line and straza uninstall, which were not run
 applies_to: both
 who: You, on the machine where Gemini CLI runs
 where: A terminal on that machine
@@ -25,7 +31,7 @@ Before Gemini runs a tool, it passes the call to `straza hook`, which hands it t
 
 
 - Gemini CLI on this machine.
-- A role whose policy allows your local tools. A fresh enterprise server holds no PolicySet and denies every local tool that no rule allows, so an admin first sets up the role and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}) and gives you its `developer` role. The seeded `developer` role of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) is such a role already. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
+- A role whose policy allows your local tools. A fresh enterprise server holds no PolicySet and denies every local tool that no rule allows, so an admin first sets up the role and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}) and gives you its `developer` role. The seeded `developer` role of the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) is such a role already. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
 
 ## Enroll this machine
 
@@ -184,4 +190,4 @@ When a Gemini CLI release adds a tool that this Straza client does not know yet,
 
 - [Write your first deny]({{< relref "guides/write-policy/first-deny.md" >}}) turns one dangerous command into a deny with your own reason.
 - [What the agent reads back]({{< relref "guides/govern-an-agent/what-the-agent-reads-back.md" >}}) lists every answer the model can get from Straza.
-- For work where an advisory hook is not enough, route the agent's tool calls through the gateway, as [Any MCP client]({{< relref "guides/govern-an-agent/any-mcp-client.md" >}}) shows, or run it in the sandbox image of [Hookless processes]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}). [The trust model]({{< relref "concepts/trust-model-and-non-goals.md" >}}) explains why those two hold at a boundary.
+- For work where an advisory hook is not enough, route the agent's tool calls through the gateway, as [Any MCP client]({{< relref "guides/govern-an-agent/any-mcp-client.md" >}}) shows, or run it in the sandbox image of [Hookless processes]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}). [The trust model]({{< relref "evaluate/security-model.md" >}}) explains why those two hold at a boundary.

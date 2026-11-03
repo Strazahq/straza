@@ -1,0 +1,23 @@
+{{- /* One stop of a journey, inside stops. page names the page by its
+content path, and a missing page fails the build. label replaces the page's
+own title, and anchor adds a heading's id to the link. kind replaces the page
+type chip, which otherwise comes from the page: Security for a page under
+security/, else its page type. group starts a titled group and takes no page.
+gap marks a step that has no page of its own yet, with label as its title and
+the inner text saying where its facts sit. */ -}}
+{{- $kinds := dict "explanation" "Concept" "tutorial" "Tutorial" "how-to" "How-to" "worked-example" "Worked example" "reference" "Reference" "journey" "Journey" "index" "Section" -}}
+{{- with .Get "group" }}
+<li class="grp"><span class="jgroup">{{ . }}</span></li>
+{{- else }}
+{{- $text := .Inner | .Page.RenderString -}}
+{{- if eq (.Get "gap") "true" }}
+<li><span class="jt">{{ .Get "label" }}</span><span class="jk"><span class="chip unknown">No page yet</span></span><span class="jd">{{ $text }}</span></li>
+{{- else }}
+{{- $p := site.GetPage (.Get "page") -}}
+{{- if not $p }}{{ errorf "%s: stop page %q names no page. Use the content path of a page, such as evaluate/how-it-works.md." .Position (.Get "page") }}{{ end -}}
+{{- $kind := .Get "kind" | default (cond (eq $p.Section "security") "Security" (index $kinds ($p.Params.pagetype | default "explanation") | default "Page")) }}
+{{- $href := $p.RelPermalink -}}
+{{- with .Get "anchor" }}{{ $href = printf "%s#%s" $href . }}{{ end }}
+<li><span class="jt"><a href="{{ $href }}">{{ .Get "label" | default $p.LinkTitle }}</a></span><span class="jk"><span class="chip plain">{{ $kind }}</span></span><span class="jd">{{ $text }}</span></li>
+{{- end }}
+{{- end }}

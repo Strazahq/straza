@@ -1,0 +1,3 @@
+If this fails:
+
+{{ .Inner }}

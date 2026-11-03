@@ -1,12 +1,18 @@
 ---
 title: Metrics and alerts
 description: Scrape strazad's metrics with a token, read what each one counts, and alert on the counters that mean a person must act.
+summary: >-
+  strazad serves its own counts at `/metrics` in the Prometheus text format, labelled by server,
+  sink, route, status, effect and lane, never by session or user. Set `server.metricsToken` and
+  scrape every replica at its own address. Alert on the counters that mean a person must act,
+  such as lost audit records.
 pagetype: how-to
 weight: 92
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: An Alpine 3.20 container with a standalone strazad, where the /metrics answer of a fresh boot, the answer after one request to /version, and both requests of the token step against a server started with STRAZA_METRICS_TOKEN were run with curl on the default address. The Prometheus scrape job and the alert rules were written from the metric names and the Prometheus configuration page and were not loaded into a Prometheus server
+  except: the Prometheus scrape job and the alert rules, never loaded into Prometheus
   date: 2026-10-06
 applies_to: both
 who: You, as the operator who runs strazad

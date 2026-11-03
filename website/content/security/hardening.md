@@ -1,6 +1,11 @@
 ---
 title: Hardening
 description: Every security setting checked against its default in both profiles, and each control the profiles leave to you turned on, with the command that proves it.
+summary: >-
+  The enterprise profile starts strict: unmatched local tools are denied, a lost server means a
+  deny at token expiry, the audit queue waits instead of dropping, and a harness needs a managed
+  install. A standalone server relaxes all four. Each security setting is listed with both
+  defaults, and each control left to you comes with the command that proves it.
 pagetype: how-to
 weight: 13
 draft: false
@@ -44,7 +49,7 @@ Its rows cover the settings that decide who can reach strazad, what it shows wit
 | `governance.minAttestation` | The lowest attestation that a check-in gets a session for | `none`, any install | `managed`, hashes that match the registry |
 | `governance.offlineGraceTTL` | How long `straza service` keeps deciding from its last signed policy after its token expires, while strazad cannot be reached | 15 minutes | 0, so it denies once the token expires |
 | `governance.sessionMaxLifetime` | The longest a session lives from its start | 12 hours | 12 hours |
-| `governance.signInMaxAge` | How long a person's key enrollment lasts, counted from the enrollment, which needs a sign-in at the identity provider, and never renewed by use. Whether that sign-in makes the person authenticate again is the identity provider's own session policy, so an admin who lowers this setting for an AAL2 policy also sets the identity provider's reauthentication period to match | 7 days | 7 days |
+| `governance.signInMaxAge` | How long a person's key enrollment lasts, counted from the sign-in at the identity provider that the enrollment records, its `auth_time`, or from the enrollment when the provider sends none, and never renewed by use. Whether that sign-in makes the person authenticate again is the identity provider's own session policy, so an admin who lowers this setting for an AAL2 policy also sets the identity provider's reauthentication period to match | 7 days | 7 days |
 | `governance.minCustody` | The lowest custody the client may report for a person's machine key, checked at enrollment, at every key check-in and at every refresh: `account` for a key that `straza service` holds under its own OS account, `user` for a key in the person's own account. strazad checks the client's report and cannot verify it | `user` | `account` |
 | `governance.localToolDefault` | The decision for a call that no rule matches and that is not an MCP tool call: a local tool, a tool Straza does not know, or a call that names no tool | `allow` | `deny` |
 | Fixed | An MCP server that runs as a command | Runs as a child process of strazad, with its user, files and network | Refused, with no setting to allow it |
@@ -66,7 +71,7 @@ Two settings in the table open a known limit when you change them. Setting `appr
 ## Read the plaintext warning as your signal
 
 
-Until you give the enterprise profile a certificate pair, its listener serves plaintext and says so once at boot, whether or not an ingress in front of it terminates TLS. That line is the check for this control: while it appears, session tokens and admin API tokens cross the wire unencrypted. The [enterprise demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) runs the plaintext shape on purpose, and the log of its server container, `straza-eval-strazad-1`, carries the warning:
+Until you give the enterprise profile a certificate pair, its listener serves plaintext and says so once at boot, whether or not an ingress in front of it terminates TLS. That line is the check for this control: while it appears, session tokens and admin API tokens cross the wire unencrypted. The [enterprise demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) runs the plaintext shape on purpose, and the log of its server container, `straza-eval-strazad-1`, carries the warning:
 
 ```sh
 docker logs straza-eval-strazad-1 2>&1 | grep -m1 PLAINTEXT

@@ -1,6 +1,11 @@
 ---
 title: Simulate a call
 description: You have asked the live policy about one call, tested a change before it is live, replayed a recorded call, and read which policies govern each role.
+summary: >-
+  A simulation asks the live policy what one call would do for one subject, with no client, and
+  writes nothing. It can lay an unpublished change over the live policies or replay a call from
+  the audit log. The console's By role view counts, for each application role, the live rules
+  that deny, need approval and allow.
 pagetype: how-to
 weight: 60
 draft: false
@@ -77,6 +82,9 @@ Decided by rule hold-kubectl-apply in policy kubectl-apply-hold: Straza: kubectl
 
 The output is trimmed to the verdict lines. The subject, snapshot and wire lines follow as above.
 {{< /cli >}}
+
+
+![Replay: strazactl policy simulate answers for one call with the outcome, the deciding rule and its reason, and the snapshot the verdict came from](../../../static/replays/policy-simulate.png)
 
 ### When the call names an object {#object .nostep}
 

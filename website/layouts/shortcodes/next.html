@@ -1,0 +1,6 @@
+{{- /* The one link a page ends on: {{< next "concepts/objects.md" >}}. It
+names the page by its content path, like relref, and a missing page fails
+the build. */ -}}
+{{- $p := site.GetPage (.Get 0) -}}
+{{- if not $p }}{{ errorf "%s: next %q names no page. Use the content path of a page, such as concepts/objects.md." .Position (.Get 0) }}{{ end -}}
+<a class="nextone" href="{{ $p.RelPermalink }}"><span class="k">Next</span><span class="t">{{ $p.LinkTitle }}</span><span class="a" aria-hidden="true">→</span></a>

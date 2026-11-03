@@ -1,6 +1,11 @@
 ---
 title: Okta login
 description: People sign in to Straza with their Okta account, in a browser on the machine they enroll, and strazad trusts your Okta authorization server's ID tokens.
+summary: >-
+  People sign in to Straza with their Okta account, in a browser on the machine they enroll,
+  and Straza never holds their password. You create a native app with PKCE and a fixed
+  127.0.0.1 redirect port, and point strazad at your authorization server. Your IGA, or Okta
+  itself, provisions the people over SCIM.
 pagetype: how-to
 weight: 34
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.0.0-1577-ged23b225-dirty
   platform: Not walked. The Okta steps follow Okta's documentation as read on 2026-10-22, and the Straza side follows the code of the working tree of the browser sign-in before its commit. No step ran against an Okta org. The console address step and the console's sign-in were written from the code on 2026-10-22 and not walked
   date: 2026-10-22
+  except: every Okta step, which has not run against a real Okta org
 applies_to: enterprise
 who: You, as the Okta admin and the Straza admin
 where: The Okta Admin Console, strazad's configuration file, and a terminal on a person's machine
@@ -124,7 +130,8 @@ A console sentence that starts `Your identity provider at` and goes on `did not 
 ## Caveats {.nostep}
 
 
-Deactivating a person in Okta stops new sign-ins and enrollments. Okta's SCIM deactivation, when Okta provisions Straza, also cuts the person's running Straza sessions and every enrollment. While Okta cannot sign anyone in, the break-glass admin still signs in through **Emergency sign-in** on the console's sign-in card, which opens Straza's own sign-in page, and mints a token there when strazactl is needed.
+
+Deactivating a person in Okta stops new sign-ins and enrollments. Okta's SCIM deactivation, when Okta provisions Straza, also cuts the person's running Straza sessions and refuses every check-in from their machines until Okta reactivates them. While Okta cannot sign anyone in, the break-glass admin still signs in through **Emergency sign-in** on the console's sign-in card, which opens Straza's own sign-in page, and mints a token there when strazactl is needed.
 
 ## Next {.nostep}
 

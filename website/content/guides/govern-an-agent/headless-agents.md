@@ -1,6 +1,11 @@
 ---
 title: Headless agents
 description: An AI agent with no person at the keyboard holds a key of its own, enrolls without a browser, and has a destructive command denied by your policy.
+summary: >-
+  An AI agent with no person at the keyboard gets an identity of its own and an Ed25519 key,
+  which the Straza background service on its machine holds, so the private half never reaches
+  the agent. An admin registers the public key, the agent enrolls with no browser, and `straza
+  exec` puts each command it runs under your policy.
 pagetype: how-to
 weight: 70
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.0.0-1570-gaf326165-dirty
   platform: An Alpine 3.20 container against a standalone server, both built from a development working tree before its commit, where straza service ran with STRAZA_HOME in the agent's home directory, every curl and strazactl step ran with the page's admin API token, the assign step ran on a developer role made with strazactl roles create, and keygen, the headless enrollment, both wrapper calls and doctor ran through that service. The key revoke was run on 2026-10-06 at v1.1.0-117-g106081a8. The sentences that say a key change ends the agent's sessions and that the server refuses an ID token issued for an old key were written from the code on 2026-10-27 and not walked. The console forms were checked against the console's source and not clicked, and the demo stack's role list was read there and its guardrails reason and wrapper output come from its seed policy and the walk of 2026-09-19, because the demo stack takes no writes. The sentences on a fresh enterprise server and the section that hands an enrolled OS account to an agent were written from the code on 2026-11-01 and not walked
   date: 2026-10-21
+  except: the console forms, the session end at a key change, the fresh enterprise server and the OS account handoff, none walked
 applies_to: both
 who: You, as the admin
 where: The console or a terminal with strazactl, and a terminal on the agent's machine
@@ -26,9 +32,9 @@ You give an AI agent that runs with no person at the keyboard, such as a build j
 ## Before you start {.nostep}
 
 
-- The `straza` binary on the agent's machine, a Linux, macOS or Windows machine, with `straza service` running. Run the service under an OS account other than the agent's, as the [sandbox]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}) and the demo stack do with a service container of their own, so the agent cannot read its key. The `straza` package for Linux does that too, because it runs the service under the straza-service OS account, as [Install]({{< relref "get-started/install.md#install-the-package-on-linux" >}}) shows. On Windows the service always runs under its own OS account, as the Windows service that [Install]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) sets up, and on a Mac the Straza package for macOS runs it under its own OS account, as [Install]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) shows. On a Linux or macOS machine with no system service and no managed install, a service the agent's own user starts with `STRAZA_HOME` set works too, and then the key sits where the agent can read it.
+- The `straza` binary on the agent's machine, a Linux, macOS or Windows machine, with `straza service` running. Run the service under an OS account other than the agent's, as the [sandbox]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}) and the demo stack do with a service container of their own, so the agent cannot read its key. The `straza` package for Linux does that too, because it runs the service under the straza-service OS account, as [Install]({{< relref "guides/operate/install.md#install-the-package-on-linux" >}}) shows. On Windows the service always runs under its own OS account, as the Windows service that [Install]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) sets up, and on a Mac the Straza package for macOS runs it under its own OS account, as [Install]({{< relref "guides/operate/install.md#install-the-service-on-macos" >}}) shows. On a Linux or macOS machine with no system service and no managed install, a service the agent's own user starts with `STRAZA_HOME` set works too, and then the key sits where the agent can read it.
 - An admin's console sign-in, or `strazactl` on an admin API token in `STRAZA_API_TOKEN`, minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows.
-- A role to assign the agent. The example assigns the role `developer`, which the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) seeds on `http://127.0.0.1:8420`. A fresh enterprise server holds no such role and no PolicySet, and it denies every local tool that no rule allows, so an admin first creates the roles and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}). A standalone server has no `developer` role, and the agent needs none there, because the seeded `standalone-starter` PolicySet governs every identity, one with no roles included.
+- A role to assign the agent. The example assigns the role `developer`, which the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) seeds on `http://127.0.0.1:8420`. A fresh enterprise server holds no such role and no PolicySet, and it denies every local tool that no rule allows, so an admin first creates the roles and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}). A standalone server has no `developer` role, and the agent needs none there, because the seeded `standalone-starter` PolicySet governs every identity, one with no roles included.
 - For the `curl` calls, an admin API token in `ADMIN_API_TOKEN`, minted with `strazactl api-token create --name docs --scope identity:read,identity:write`. The token belongs to a person and never to the agent, because an AI agent is refused on every admin route, whatever role it holds.
 
 ## Create the agent identity
@@ -315,4 +321,4 @@ An agent that an older Straza client enrolled kept its key in a file of its own 
 - [AI agents as identities]({{< relref "guides/connect-identity/nhi-provisioning.md" >}}) provisions agents from your identity manager.
 - [Hookless processes]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}) runs the agent inside the sandbox image, where the wrapper is the only way to run a process.
 - [Who may draft and publish]({{< relref "guides/changes/who-may-draft.md" >}}) shows how an agent proposes a config change. It uses the drafting tools of the built-in `straza` app, which the gateway lists to holders of the `straza-draft-config` role, and a person publishes the draft.
-- [Identities and roles]({{< relref "concepts/identities.md" >}}) explains the identity model behind people and agents.
+- [People, agents and sponsors]({{< relref "concepts/identities.md" >}}) explains the identity model behind people and agents.

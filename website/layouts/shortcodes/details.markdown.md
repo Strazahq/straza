@@ -1,0 +1,3 @@
+{{ .Get "summary" }}:
+
+{{ .Inner }}

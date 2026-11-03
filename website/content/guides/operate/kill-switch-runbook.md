@@ -1,12 +1,18 @@
 ---
 title: Kill-switch runbook
 description: Stop one identity or stand down every session, and confirm the stop landed.
+summary: >-
+  Three levers stop agents: revoke sessions to interrupt work and keep access, disable or lock a
+  user to keep them out, or revoke one device to cut one machine. Each writes the audit chain
+  and reaches every replica. An enrolled machine learns of it over its push stream, or else at
+  its next renewal, within about three minutes.
 pagetype: how-to
 weight: 80
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in an Alpine 3.20 container on Linux, with mara's machine in a second container that ran two harness sessions through the Claude Code hook, and the push half then ran in the client's earlier daemon. On 2026-10-21 the session list, the disable, the hook deny and the service's log lines were captured again in an Alpine 3.20 container against a standalone server built from a working tree as v1.0.0-1570-gaf326165-dirty, where straza service, started with STRAZA_HOME, held the push stream. Every strazactl and curl block ran, the admin's strazactl on an admin API token minted in the console and the curl blocks on the token the page mints. The confirmation line of `strazactl devices revoke` was reworded after that run and is quoted from the code. The lock was checked with a refused session start, enroll and strazactl login, and strazactl no longer signs in, so that last check no longer applies. The path without push was checked with a hook that denied five minutes after its check-in. In headless Chromium the session revoke, disable, enable, lock, unlock and audit trail steps were clicked, and the device revoke and fleet stand-down were not. The identity manager route was not run
+  except: the console's device revoke and fleet stand-down, and the route from the IGA
   date: 2026-10-06
 applies_to: both
 who: You, as the admin, or a delegated admin who holds the identity and sessions areas
@@ -26,7 +32,8 @@ Stop one identity, one machine or every agent session during an incident, and co
 | Keep an identity out until someone lets it back | Disable the user, or lock the user when your identity manager must not lift it. |
 | Cut one machine and leave the person untouched | Revoke that device on the user's sheet, or with `strazactl devices revoke`. |
 
-Every lever writes the audit chain and reaches every server replica over the event bus. An enrolled machine learns of it within a second while `straza service`, the Straza background service, holds the push stream of the session, and otherwise at the first call that renews the session, which is at most about three minutes after its token was minted for a session that keeps working. [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#sessions-and-the-client" >}}) lists every lifetime a revoke waits on.
+
+Every lever writes the audit chain and reaches every server replica over the event bus. An enrolled machine learns of it in under two seconds at the 99th percentile, the project's budget for the push path, while `straza service`, the Straza background service, holds the push stream of the session. Otherwise it learns of it at the first call that renews the session, which is at most about three minutes after its token was minted for a session that keeps working. [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#sessions-and-the-client" >}}) lists every lifetime a revoke waits on.
 
 
 {{< diagram name="kill-switch" caption="A disable in your identity manager, the leaver route. A disable in the console or with strazactl starts the same cascade at the second box." >}}
@@ -325,7 +332,7 @@ A fresh sign-in at the identity provider does not get a locked person back in. E
 : The lock holds until an administrator who is not locked lifts it with **Unlock user** or `strazactl users unlock mara`.
 {{< /fails >}}
 
-The leaver process itself belongs in the identity manager, where one disable deactivates the identity over SCIM and its login at the same time. [The demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) runs that route live on the seeded agent joe.
+The leaver process itself belongs in the identity manager, where one disable deactivates the identity over SCIM and its login at the same time. [The demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) runs that route live on the seeded agent joe.
 
 ## Use the admin API {.nostep}
 

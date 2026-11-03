@@ -1,25 +1,27 @@
-{{- /* The walk record at the foot of a page: the walk from the tested
-front matter, then the builds the page's screenshots show, which the shot
-shortcode stores while the content renders. A platform that starts with a
-lowercase word, such as "in a Linux container", reads inside the sentence.
-Any other platform follows as its own sentence. Call this after the content,
-so the shots are known. */ -}}
-{{- $line := slice -}}
+{{- /* The walk record at the foot of a page: one line with the version and
+the date from the tested front matter, plus tested.except, a short clause for
+a step that did not run on the real system. The platform and the builds the
+page's screenshots show fold below that line. The shot shortcode stores the
+builds while the content renders, so call this after the content. */ -}}
+{{- $line := "" -}}
+{{- $more := slice -}}
 {{- with .Params.tested -}}
   {{- if and .version .date -}}
-    {{- $date := .date | time.Format "2006-01-02" -}}
-    {{- $platform := strings.TrimRight ". " (.platform | default "") -}}
-    {{- if findRE `^[a-z]` $platform -}}
-      {{- $line = $line | append (printf "Walked on %s %s on %s." .version $platform $date) -}}
-    {{- else -}}
-      {{- $line = $line | append (printf "Walked on %s on %s." .version $date) -}}
-      {{- with $platform }}{{ $line = $line | append (printf "%s." .) }}{{ end -}}
-    {{- end -}}
+    {{- $line = printf "Walked on <b>%s</b> on %s" (.version | htmlEscape) (.date | time.Format "2006-01-02") -}}
+    {{- with .except }}{{ $line = printf "%s, except %s" $line (strings.TrimRight ". " . | htmlEscape) }}{{ end -}}
+    {{- $line = printf "%s." $line -}}
+  {{- end -}}
+  {{- with strings.TrimRight ". " (.platform | default "") -}}
+    {{- if findRE `^[a-z]` . }}{{ $more = $more | append (printf "Walked %s." .) }}{{ else }}{{ $more = $more | append (printf "%s." .) }}{{ end -}}
   {{- end -}}
 {{- end -}}
 {{- with .Store.Get "shotbuilds" -}}
-  {{- $line = $line | append (printf "Console screenshots show %s." (delimit . ", " " and ")) -}}
+  {{- $more = $more | append (printf "Console screenshots show %s." (delimit . ", " " and ")) -}}
 {{- end -}}
-{{- with $line }}
-<p class="walk-record">{{ delimit . " " }}</p>
+{{- if and $line $more }}
+<details class="fold walk"><summary>{{ $line | safeHTML }}</summary><div class="in"><p>{{ delimit $more " " }}</p></div></details>
+{{- else if $line }}
+<p class="walk-record">{{ $line | safeHTML }}</p>
+{{- else if $more }}
+<p class="walk-record">{{ delimit $more " " }}</p>
 {{- end -}}

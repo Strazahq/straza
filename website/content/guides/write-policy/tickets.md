@@ -1,12 +1,18 @@
 ---
 title: Tickets
 description: The command terraform apply needs a ticket, an approver grants it once, and a later session runs it once.
+summary: >-
+  A ticket is an approval that outlives the moment it was asked for: a person has a day to
+  decide, and nothing waits meanwhile. An approval leaves a single-use grant that one later
+  matching call consumes, from the same session or a new one. A denied ticket keeps the call
+  denied until its window closes.
 pagetype: how-to
 weight: 30
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in a Linux container, with the admin steps on an admin API token, the hook events fed to straza hook by hand on a machine enrolled as dana, and lena deciding with strazactl from her own login. strazactl no longer signs in or decides, so lena now decides in the console, on the self-service page or on her phone. The console form was not walked in a browser, and its words were read at source
+  except: lena's decisions in the console, which replaced the strazactl ones of the walk, and the console form, read at source
   date: 2026-10-06
 applies_to: both
 keywords: ticket grant consume window
@@ -132,7 +138,7 @@ ID                                    STATE    REQUESTER  SUMMARY               
 {{< /cli >}}
 
 
-When the approver has a phone enrolled, Straza sends the request to the phone when the ticket is raised and once more two hours before it lapses undecided (`approval.push.ticketReminderBefore`).
+When the approver has a phone enrolled, Straza sends the request to the phone when the ticket is raised and once more two hours before it lapses undecided (`approval.push.ticketReminderBefore`). The reminder replaces the first notification on the phone instead of adding one, and one server sends it even when several replicas run.
 
 ## Approve it
 

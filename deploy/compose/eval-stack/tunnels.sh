@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SSH tunnels to a remote Straza eval stack
-# (https://docs.straza.ai/get-started/enterprise-demo-stack/#demo-defaults-and-the-hardened-shape). Forwards every service port to localhost, then keeps the connection
+# (https://docs.straza.ai/guides/operate/demo-stack-defaults/). Forwards every service port to localhost, then keeps the connection
 # open (Ctrl+C to stop):
 #   8400 landing page        8420 strazad + console   8443 approver https (phone)
 #   8480 Keycloak            8087 midPoint            5601 Kibana (compose.siem.yaml overlay)

@@ -239,8 +239,8 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
   events. Propagation races on three lanes: (1) a target-scoped push: strazad publishes
   <code>straza.push.user.&lt;id&gt;</code> on core NATS (pod-internal), the pod holding the SSE
   stream that <code>straza service</code> keeps for the session relays a <code>revocation</code> event over
-  <code>GET /v1/push</code>, and the service revokes the session with a p99 under 2 seconds (the CI-gated budget at 100k
-  simulated clients); this works in every profile, standalone included, because no broker
+  <code>GET /v1/push</code>, and the service revokes the session with a p99 under 2 seconds (the load rig's budget, run weekly in CI at 5,000
+  clients and at 100,000 on a reference box); this works in every profile, standalone included, because no broker
   is client-reachable; (2) JetStream replay of <code>straza.revocation.user</code> that converges every
   gateway pod's denylist (boot also seeds from the revocations table, fail-closed on read
   error); (3) with the stream down, a call starts the session's next refresh once
@@ -267,7 +267,7 @@ var FACTS={
  n3:'<strong>revokeUserCtx</strong>: revocation row + in-memory denylist + session rows revoked + CE <code>straza.revocation.user</code> + core-NATS push publish (relayed to <code>straza service</code> over SSE), in one server-side action.',
  trace:'<strong>hash-chained trace</strong>: <code>straza.audit.identity</code> (user.killed / user.reactivated) is the kill switch&#8217;s tamper-evident record; revocation events converge enforcement but only straza.audit.&gt; enters the chain.',
  la:'<strong>push relay</strong>: strazad publishes the target-scoped subjects <code>straza.push.{user,session,device}.&lt;id&gt;</code> on core NATS (pod-internal); the pod holding the session&#8217;s SSE stream from <code>straza service</code> (<code>GET /v1/push</code>, session-token auth) forwards only the subjects derived from that token&#8217;s own claims (no cross-principal visibility). Works in every profile, standalone included: no broker is client-reachable.',
- ea:'<strong><code>straza service</code></strong>: a <code>revocation</code> event on a session&#8217;s SSE stream revokes that session and drops its token; budget p99 &lt; 2 s at 100k simulated clients. Hooks fail closed even when the service is down.',
+ ea:'<strong><code>straza service</code></strong>: a <code>revocation</code> event on a session&#8217;s SSE stream revokes that session and drops its token; budget p99 &lt; 2 s, run weekly in CI at 5,000 clients and at 100,000 on a reference box. Hooks fail closed even when the service is down.',
  lb:'<strong>JetStream replay</strong>: every pod runs an ephemeral DeliverAll consumer on <code>straza.revocation.&gt;</code> and rebuilds its denylist; the data plane stays stateless.',
  eb:'<strong>gateway denylists</strong>: user/session/device/jti checks are in-memory on every call; no per-call DB lookups.',
  lc:'<strong>refresh fallback</strong>: with the stream down, <code>straza service</code> refreshes the session at a call that finds 120 s or less of its 300 s token left, at most about 180 s after the token was minted. The refresh answers 403 because the user is disabled, and the service marks the session revoked at once, so it denies from that call on. An idle session decides nothing meanwhile.',
@@ -331,7 +331,7 @@ function kill(){
        
       slide('pa',1100,function(){
         mark('ea',true);label('ta',true);
-        nar.innerHTML='<strong style="color:var(--danger)">&lt; 2 s</strong>: the target-scoped push is relayed over the session&#8217;s SSE stream and <code>straza service</code> revokes the session (p99 &lt; 2 s @ 100k clients).';
+        nar.innerHTML='<strong style="color:var(--danger)">&lt; 2 s</strong>: the target-scoped push is relayed over the session&#8217;s SSE stream and <code>straza service</code> revokes the session (p99 &lt; 2 s in the load rig, 5,000 clients weekly in CI and 100,000 on a reference box).';
       });
       slide('pb',1500,function(){
         mark('eb',true);label('tb',true);

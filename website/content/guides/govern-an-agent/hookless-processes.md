@@ -1,6 +1,11 @@
 ---
 title: Hookless processes
 description: A process with no hook surface runs inside the Straza sandbox image, where every command it runs meets your policy and its obvious bypasses fail.
+summary: >-
+  `straza exec` decides each command against policy before it runs, but on an open machine an
+  agent can skip it. Inside the Straza sandbox image the wrapper is the only way to run a
+  program, and a service container keeps the key, so every command the process runs meets your
+  policy.
 pagetype: how-to
 weight: 60
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: An Alpine 3.20 container against a standalone server, where the three wrapper commands ran under a headless key enrollment and again under a workstation enrollment, the staging copy ran as root without sudo, and the key revocation of the take-down ran, and its sentence that the revocation ends the running sessions and refuses the held ID token was written from the code on 2026-10-27 and not walked, while building the sandbox image and every docker run step were not run because this walk may not run docker build, so their output is the recorded walk of 2026-09-19 against the demo stack
   date: 2026-10-06
+  except: building the sandbox image and every docker run step, whose output comes from an earlier recorded walk
 applies_to: both
 who: You, on the machine that runs the process
 where: A terminal with Docker
@@ -19,14 +25,14 @@ keywords: sandbox exec hookless tier 3 straza service background service
 You run a process that has no hook surface, such as a script or an agent framework without hooks, inside the Straza sandbox image. You work in a terminal with Docker on the machine that runs the process. At the end, every command the process runs is a policy decision, and you have seen its obvious bypasses fail.
 
 
-`straza exec` decides each command against policy before the child runs. On an open machine it is exactly as advisory as a user-mode hook, because an agent that can run anything can skip the wrapper. Inside the sandbox image the wrapper becomes the process's only way to make the kernel run anything. That makes the image one of the lanes that hold at a boundary, as [the trust model]({{< relref "concepts/trust-model-and-non-goals.md" >}}) explains.
+`straza exec` decides each command against policy before the child runs. On an open machine it is exactly as advisory as a user-mode hook, because an agent that can run anything can skip the wrapper. Inside the sandbox image the wrapper becomes the process's only way to make the kernel run anything. That makes the image one of the lanes that hold at a boundary, as [the security model]({{< relref "evaluate/security-model.md#what-each-enforcement-point-is-worth" >}}) explains.
 
 ## Before you start {.nostep}
 
 
 - For the first step, the `straza` binary on your PATH, with `straza service` running and enrolled against your Straza server. A person's machine enrolls as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows, and an AI agent enrolls with a key as [Headless agents]({{< relref "guides/govern-an-agent/headless-agents.md" >}}) shows.
 - Docker on Linux, for the image. The sandbox enrolls through a service container of its own, so it needs no enrollment from the host.
-- A role whose policy covers the commands the process runs. The example runs as the AI agent `sandbox-bot`, which holds the seeded `demo-tools-sandbox` role of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}), against `http://127.0.0.1:8420`. A fresh enterprise server holds no PolicySet and denies every command that no rule allows, so an admin first sets up the role and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}) and gives the agent its `developer` role. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
+- A role whose policy covers the commands the process runs. The example runs as the AI agent `sandbox-bot`, which holds the seeded `demo-tools-sandbox` role of the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}), against `http://127.0.0.1:8420`. A fresh enterprise server holds no PolicySet and denies every command that no rule allows, so an admin first sets up the role and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}) and gives the agent its `developer` role. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
 
 ## Run a command through the wrapper
 

@@ -1,12 +1,18 @@
 ---
 title: Show MCP Apps views
 description: Let one MCP server show its interactive views in a chat app, with every click decided, held or refused like any other tool call.
+summary: >-
+  With `views: true` in its manifest, an MCP server shows its interactive views beside tool
+  results in a chat app that supports MCP Apps. Every click in a view is an ordinary tool call,
+  decided, held or refused like an agent's. So a view gives nobody a tool they could not already
+  call.
 pagetype: how-to
 weight: 35
 draft: false
 tested:
   version: v1.1.0-32-g2d89c4db
   platform: Linux, against the enterprise demo stack and its views-demo server, with the gateway called over curl and through straza mcp views-demo on stdin as the AI agent joe, and alice approving and denying the holds over the admin API. The Claude Desktop steps were not run on this walk. On 2026-10-01 Claude Desktop chat on macOS rendered the midpoint server's approval inbox through straza mcp midpoint on the same stack
+  except: the Claude Desktop steps
   date: 2026-10-01
 applies_to: both
 keywords: mcp apps views ui resources claude desktop
@@ -53,7 +59,7 @@ The demo stack ships two servers with views on. `views-demo`, the official MCP A
 Straza's combined endpoint, `/mcp`, names every tool after its server, as `views-demo__get-time`, while a view calls its tools by the server's own names. Views are therefore served only on the server's own endpoint, `/mcp/views-demo`. That endpoint lists the server's tools under their own names with their view links, applies the same rules, holds and records as `/mcp`, and lists none of the built-in straza tools.
 
 
-`straza mcp views-demo` connects a chat app to that endpoint over stdio, on a machine whose `straza service`, the Straza background service, holds your enrollment. On a Mac that service comes from the Straza package for macOS, as [Install]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) shows, and `/usr/local/bin/straza` is the package's link to its binary. Claude Desktop on macOS reads the entry from `~/Library/Application Support/Claude/claude_desktop_config.json`, with the path of your own `straza` binary, after a restart:
+`straza mcp views-demo` connects a chat app to that endpoint over stdio, on a machine whose `straza service`, the Straza background service, holds your enrollment. On a Mac that service comes from the Straza package for macOS, as [Install]({{< relref "guides/operate/install.md#install-the-service-on-macos" >}}) shows, and `/usr/local/bin/straza` is the package's link to its binary. Claude Desktop on macOS reads the entry from `~/Library/Application Support/Claude/claude_desktop_config.json`, with the path of your own `straza` binary, after a restart:
 
 ```json
 {

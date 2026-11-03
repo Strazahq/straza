@@ -1,16 +1,19 @@
 ---
-title: The security model
+title: The security model in depth
 description: What Straza defends, where each defense holds, the invariants behind it with what each one costs, and the mechanism behind the limits it leaves with you.
 pagetype: explanation
 weight: 10
 draft: false
+summary: >-
+  Straza protects the actions an agent takes under an identity: a session does only what its
+  roles allow, every decision leaves a record that cannot be edited in place, and a revoked
+  identity is refused. Eleven invariants hold that design, each with its cost, and Known limits
+  lists every risk they leave with you.
 keywords: security model invariants threat residual risk fail closed known limits
 ---
 
 
-A security reviewer or an auditor reads this page to learn what Straza defends, where each defense holds, what each one costs and which limits stay with you. Straza protects the actions an agent takes under an identity, so that a session can do only what its roles allow, every decision leaves a record that cannot be edited in place, and a revoked identity is refused by the gateway on its next call and by the workstation within seconds while `straza service` holds the session's push stream. The design rests on eleven invariants, and [Known limits]({{< relref "security/known-limits.md" >}}) lists in one table every risk they leave with you.
-
-It is the security reading of the system that [Trust model and limits]({{< relref "concepts/trust-model-and-non-goals.md" >}}) describes.
+A security reviewer or an auditor reads this page to learn what Straza defends, where each defense holds, what each one costs and which limits stay with you. Straza protects the actions an agent takes under an identity, so that a session can do only what its roles allow, every decision leaves a record that cannot be edited in place, and a revoked identity is refused by the gateway on its next call and by the workstation within seconds while `straza service` holds the session's push stream. The design rests on eleven invariants, and [Known limits]({{< relref "security/known-limits.md" >}}) lists in one table every risk they leave with you. [The security model]({{< relref "evaluate/security-model.md" >}}) gives the same answer on one page for an evaluator.
 
 ## The problem
 
@@ -68,7 +71,7 @@ The server receives what the gate checked. Straza forwards the arguments as the 
 The role that grants a call is the first held role by name whose covers line covers the object, and the audit record and the credential broker both name it. An approval binds the object's type and value, so a ticket approved for one repository never runs a call on another, and the gateway checks coverage again when the ticket is used. The audit record of a call on a tool that names its object carries the object's type, reach, value and id. The attributes a listing keeps never leave the box in it.
 
 
-Only the gateway holds this boundary. The hook's decision on the agent's machine never runs the object check, and a server a person adds to their own harness has none, so register every server whose objects matter behind the gateway. The boundary also rests on three promises the server makes about what its tools touch, which [Trust model and limits]({{< relref "concepts/trust-model-and-non-goals.md#what-the-object-check-trusts" >}}) states. [Known limits]({{< relref "security/known-limits.md" >}}) lists what it leaves with you.
+Only the gateway holds this boundary. The hook's decision on the agent's machine never runs the object check, and a server a person adds to their own harness has none, so register every server whose objects matter behind the gateway. The boundary also rests on three promises the server makes about what its tools touch, which [Objects]({{< relref "concepts/objects.md#where-objects-are-checked" >}}) states. [Known limits]({{< relref "security/known-limits.md" >}}) lists what it leaves with you.
 
 ## The invariants and what each one costs
 
@@ -89,7 +92,7 @@ Each session token lives 300 seconds, is signed with Ed25519, and is verified ag
 
 Revoking a session, a user or a device writes a record and adds the target to an in-memory denylist on every replica. A session entry is never lifted again.
 
-The cost is a window. With the session's push stream connected, which `straza service` holds for each live session, the revocation lands in under two seconds on the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}). While the stream is down, the revocation reaches the hooks at the first call that renews the session, once 120 seconds or less of the token remain, so at most about 180 seconds after the mint in both profiles for a session that keeps working, while the gateway refuses the revoked token at once. Only a standalone service whose renewal cannot learn the server's judgment, because strazad cannot be reached or something in front of it answers instead, adds its offline grace, up to 1,200 seconds after the mint. [Known limits]({{< relref "security/known-limits.md" >}}) lists this window with what shortens it, and [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) follows a machine's credential from enrollment to lockout.
+The cost is a window. With the session's push stream connected, which `straza service` holds for each live session, the revocation lands in under two seconds on the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}). While the stream is down, the revocation reaches the hooks at the first call that renews the session, once 120 seconds or less of the token remain, so at most about 180 seconds after the mint in both profiles for a session that keeps working, while the gateway refuses the revoked token at once. Only a standalone service whose renewal cannot learn the server's judgment, because strazad cannot be reached or something in front of it answers instead, adds its offline grace, up to 1,200 seconds after the mint. [Known limits]({{< relref "security/known-limits.md" >}}) lists this window with what shortens it, and [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) follows a machine's credential from enrollment to lockout.
 
 ### Audit is asynchronous
 
@@ -188,7 +191,7 @@ What you can do is keep every credential of a person away from their agents. Nev
 ### The hook lane is not a security boundary
 
 
-A hook inside an agent's process on a machine the agent controls can be skipped by an agent that can run anything, so it is advisory there, as [Trust model and limits]({{< relref "concepts/trust-model-and-non-goals.md" >}}) says. An MCP server that a person adds to their own harness, outside the gateway, is outside what Straza governs at a boundary. Only that advisory hook sees its calls, the gateway never does, and its credentials sit on the person's machine. Governing and protecting such a server is that person's responsibility. Register every MCP server that holds a credential in Straza instead, so the gateway decides its calls and the credential stays on the server.
+A hook inside an agent's process on a machine the agent controls can be skipped by an agent that can run anything, so it is advisory there, as [The security model]({{< relref "evaluate/security-model.md#what-each-enforcement-point-is-worth" >}}) says. An MCP server that a person adds to their own harness, outside the gateway, is outside what Straza governs at a boundary. Only that advisory hook sees its calls, the gateway never does, and its credentials sit on the person's machine. Governing and protecting such a server is that person's responsibility. Register every MCP server that holds a credential in Straza instead, so the gateway decides its calls and the credential stays on the server.
 
 ### Manifest values are stored in plain text
 

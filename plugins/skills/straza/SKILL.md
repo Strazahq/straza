@@ -9,7 +9,7 @@ compatibility: Straza 2.x from v2.0.0, where strazactl runs on an admin API toke
 
 Straza is the control plane between an identity manager and AI agents. Identity flows in over SCIM 2.0 or the admin API. At every tool call, a shell command, a file write or an MCP tool call becomes one event that is decided against signed policy before it runs and lands as one audit record after. Decisions are local and fail closed. Disable a person in the identity manager and the sessions of their agents die with them. Prompts and completions never pass through Straza.
 
-This skill is a map. Read the rules, pick the job, open the one reference file it names, and follow that file. Every command comes from the public docs at https://docs.straza.ai/ and its machine index at https://docs.straza.ai/llms.txt. When this skill and a docs page disagree, the page wins, and say so.
+This skill is a map. Read the rules, pick the job, open the one reference file it names, and follow that file. Every command comes from the public docs at https://docs.straza.ai/. Each docs page has a Markdown copy at its address plus `index.md`, and the links in this skill name those copies, because a copy costs fewer tokens to read than the page. https://docs.straza.ai/llms.txt lists every copy. When you give a person a docs link, drop the trailing `index.md` so it opens the page in their browser. When this skill and a docs page disagree, the page wins, and say so.
 
 ## Rules that hold for every job
 
@@ -53,6 +53,6 @@ A person publishes every draft in the console under Drafts and confirms there ea
 
 ## Where the docs are
 
-- Start: https://docs.straza.ai/get-started/first-governed-session/
-- Concepts: https://docs.straza.ai/concepts/how-straza-works/
-- Reference: https://docs.straza.ai/reference/ for the CLI, the configuration keys and the API
+- Start: https://docs.straza.ai/evaluate/try-it-on-one-laptop/index.md
+- Concepts: https://docs.straza.ai/evaluate/how-it-works/index.md
+- Reference: https://docs.straza.ai/reference/index.md for the CLI, the configuration keys and the API

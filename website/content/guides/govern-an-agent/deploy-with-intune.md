@@ -1,6 +1,11 @@
 ---
 title: Deploy with Intune
 description: Ship the Straza MSI to Windows machines as an Intune Win32 app that runs in System context, and the signed Straza pkg to Macs as a macOS PKG app with a shell script and a Managed Login Items profile, each with the managed install for your Straza server.
+summary: >-
+  Intune puts the Straza background service on Windows machines and Macs, with the managed
+  install for your Straza server. On Windows one Win32 app runs the MSI and the managed install
+  in System context. On a Mac a PKG app installs the package, a script runs the managed
+  install, and a Managed Login Items profile keeps the service on.
 pagetype: how-to
 weight: 6
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.0.0-1614-g5e1d90de-dirty
   platform: Not walked. The Windows part was written on 2026-10-23 from the working tree of the Windows MSI before its commit, and from Microsoft's pages on adding a Win32 app to Intune and on the Win32 Content Prep Tool, read the same day. The macOS part was written on 2026-10-26 from the working tree of the release workflow that adds the pkg, before any release carried one, and from Microsoft's pages on macOS PKG apps and macOS shell scripts, read the same day. No Intune tenant, no Windows machine and no Mac has run this recipe. Outside Intune, MSIs built from the source tree at v1.0.0-1600-g3c02a286 were installed, upgraded, uninstalled and purged on a Windows 10 machine by a test script on 2026-10-26. On 2026-10-27 a pkg built at v1.0.0-1615-g272946e5, signed with the Developer ID and notarized by Apple, passed spctl on a Mac, and a test script installed, upgraded, uninstalled and purged it in a macOS 26.6.2 virtual machine that no device management tool manages
   date: 2026-10-26
+  except: every Intune step, which has not run on a tenant, a Windows machine or a Mac
 applies_to: both
 who: You, as the Intune administrator of the machines whose agents you govern
 where: A Windows machine for the packaging, and the Microsoft Intune admin center
@@ -16,12 +22,12 @@ keywords: intune win32 app msi intunewin content prep tool windows fleet deploy 
 ---
 
 
-Intune can put `straza service` on every Windows machine and every Mac of a fleet. For Windows, this page packages the Straza MSI and the managed install for your Straza server as one Win32 app that Intune runs in System context. Those are the two steps that [Install the service on Windows]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) takes by hand. Each person then enrolls once, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md#a-windows-machine" >}}) shows. For Macs, [Deploy to macOS](#deploy-to-macos) adds the Straza package for macOS, the managed install and a profile that keeps the service switched on.
+Intune can put `straza service` on every Windows machine and every Mac of a fleet. For Windows, this page packages the Straza MSI and the managed install for your Straza server as one Win32 app that Intune runs in System context. Those are the two steps that [Install the service on Windows]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) takes by hand. Each person then enrolls once, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md#a-windows-machine" >}}) shows. For Macs, [Deploy to macOS](#deploy-to-macos) adds the Straza package for macOS, the managed install and a profile that keeps the service switched on.
 
 ## Before you start {.nostep}
 
 
-- The Straza MSI, `straza_<version>_windows_amd64.msi`, from 2.0.0 or a later release, checked with cosign and its checksum as [Install]({{< relref "get-started/install.md#download-a-release-and-verify-it" >}}) shows. It carries no Authenticode signature yet, so the checksum is what shows that it came from the release job.
+- The Straza MSI, `straza_<version>_windows_amd64.msi`, from 2.0.0 or a later release, checked with cosign and its checksum as [Install]({{< relref "guides/operate/install.md#download-a-release-and-verify-it" >}}) shows. It carries no Authenticode signature yet, so the checksum is what shows that it came from the release job.
 - Windows machines on amd64, because the MSI installs on amd64 only.
 - Microsoft's Win32 Content Prep Tool, `IntuneWinAppUtil.exe`, on the machine where you package.
 - The address of your Straza server, and the harnesses the machines run: `claude-code`, `codex` or `gemini`.
@@ -48,6 +54,9 @@ exit /b %errorlevel%
 ```
 
 `install.cmd` stops on any exit code of the MSI other than `0` and `3010`. It then runs the managed install with the `straza.exe` the MSI installed, and it hands Intune the MSI's exit code. A `3010` means the install succeeded and a restart finishes removing an old file that was in use, and Intune counts it as a soft reboot.
+
+
+Claude Code uses only its highest managed settings source, so on a Windows machine with a registry policy for Claude Code or server-managed settings that lack Straza's hooks, Claude Code skips them with no warning, as [Claude Code skips Straza's hooks under a higher managed source]({{< relref "security/known-limits.md" >}}) in Known limits says.
 
 Then package the folder.
 
@@ -104,9 +113,9 @@ Intune runs both scripts as the Windows SYSTEM account, which is no person's acc
 ## Deploy to macOS {.nostep}
 
 
-On a Mac fleet, Intune installs the Straza package for macOS as a macOS app, runs the managed install as a shell script of its own, and installs a profile that keeps the service switched on. Those are the steps that [Install the service on macOS]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) takes by hand, and each person then enrolls once, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md#a-macos-machine" >}}) shows. You need the following:
+On a Mac fleet, Intune installs the Straza package for macOS as a macOS app, runs the managed install as a shell script of its own, and installs a profile that keeps the service switched on. Those are the steps that [Install the service on macOS]({{< relref "guides/operate/install.md#install-the-service-on-macos" >}}) takes by hand, and each person then enrolls once, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md#a-macos-machine" >}}) shows. You need the following:
 
-- The Straza pkg, `straza_<version>_darwin_universal.pkg`, from 2.0.0 or a later release, checked with cosign and its checksum as [Install]({{< relref "get-started/install.md#download-a-release-and-verify-it" >}}) shows. The release job signs it with the Developer ID of SynapTech s. r. o., team WMPWM57KYK, and Apple notarizes it.
+- The Straza pkg, `straza_<version>_darwin_universal.pkg`, from 2.0.0 or a later release, checked with cosign and its checksum as [Install]({{< relref "guides/operate/install.md#download-a-release-and-verify-it" >}}) shows. The release job signs it with the Developer ID of SynapTech s. r. o., team WMPWM57KYK, and Apple notarizes it.
 - Macs on macOS 13 or later, enrolled in Intune through Automated Device Enrollment or with an enrollment the person approved, which the profile of the last step needs.
 - The address of your Straza server, and the harnesses the Macs run: `claude-code`, `codex` or `gemini`.
 
@@ -153,6 +162,9 @@ Then open Devices, then By platform, macOS, Manage devices, Scripts, and add the
 | Max number of times to retry if script fails | 3 |
 
 Intune runs scripts and app installs side by side, so the script waits up to 30 minutes for the binary that the pkg installs. A nonzero exit, from that wait or from the managed install, shows as Failed in the script's Device status, so a Mac whose managed install failed stands out there. The managed install runs as root, outside sudo, so for codex it writes no Straza MCP registration into any person's `config.toml` and says so. The managed codex hooks still govern every codex tool call.
+
+
+Claude Code uses only its highest managed settings source, so on a Mac with a Claude Code profile or server-managed settings that lack Straza's hooks, Claude Code skips them with no warning, as [Claude Code skips Straza's hooks under a higher managed source]({{< relref "security/known-limits.md" >}}) in Known limits says.
 
 ### Keep the service switched on
 

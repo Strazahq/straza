@@ -218,6 +218,13 @@ func TestViolations(t *testing.T) {
 			want: "link https://docs.straza.ai/guides/write-policy/first-denial/ has no page",
 		},
 		{
+			name: "dead Markdown copy link",
+			mutate: func(t *testing.T, root string) {
+				write(t, root, "plugins/skills/straza/SKILL.md", strings.Replace(goodSkill, "write-policy/first-deny/", "write-policy/first-denial/index.md", 1))
+			},
+			want: "link https://docs.straza.ai/guides/write-policy/first-denial/ has no page",
+		},
+		{
 			name: "example the validator rejects",
 			mutate: func(t *testing.T, root string) {
 				write(t, root, "plugins/skills/straza/references/examples/deny.yaml", strings.Replace(goodPolicy, "effect: deny", "effect: refuse", 1))
@@ -329,6 +336,23 @@ func TestSegmentsHonorQuotesAndSeparators(t *testing.T) {
 	}
 	if segs[0][2] != `{"a":"b|c;d"}` {
 		t.Fatalf("quoted JSON was split: %v", segs[0])
+	}
+}
+
+func TestMarkdownCopyLinksPass(t *testing.T) {
+	root := fixture(t)
+	skill := strings.NewReplacer(
+		"write-policy/first-deny/", "write-policy/first-deny/index.md",
+		"https://docs.straza.ai/reference/", "https://docs.straza.ai/reference/index.md",
+		"https://docs.straza.ai/llms.txt.", "https://docs.straza.ai/index.md.",
+	).Replace(goodSkill)
+	write(t, root, "plugins/skills/straza/SKILL.md", skill)
+	got, err := run(root, walkPlugins)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no findings, got %v", got)
 	}
 }
 

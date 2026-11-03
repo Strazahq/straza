@@ -176,10 +176,12 @@ condition = "AND"
 description = """The eval stack's midPoint administrator login, typed into a \
 curl -u on the demo-stack tutorial page. It is the PUBLISHED demo login of the \
 opt-in loopback compose stack: the seeder prints it at the end of every boot \
-and the site's demo stack tutorial, get-started/enterprise-demo-stack/, prints it. No deployment \
+and the site's demo stack tutorial, evaluate/try-it-on-the-demo-stack/ and before it \
+get-started/enterprise-demo-stack/, prints it. No deployment \
 outside that stack has ever used it."""
 paths = [
   '''website/content/get-started/enterprise-demo-stack\.md''',
+  '''website/content/evaluate/try-it-on-the-demo-stack\.md''',
   '''website/content/guides/connect-identity/midpoint\.md''',
   '''website/content/guides/serve-mcp-apps/limit-a-role-to-some-objects\.md''',
 ]
@@ -189,12 +191,13 @@ condition = "AND"
 
 [[allowlists]]
 description = """The eval stack's Elasticsearch login, typed into a curl -u on the \
-demo stack page and the sinks guide. It is the PUBLISHED demo login of the opt-in \
+demo stack defaults page and the sinks guide. It is the PUBLISHED demo login of the opt-in \
 loopback SIEM overlay (compose.siem.yaml prints it in its header and the \
 allowlist entry above covers that file); nothing outside that stack has ever \
 used it."""
 paths = [
   '''website/content/get-started/enterprise-demo-stack\.md''',
+  '''website/content/guides/operate/demo-stack-defaults\.md''',
   '''website/content/guides/audit/sinks-and-siem\.md''',
 ]
 regexes = ['''elastic:strazasiem''']

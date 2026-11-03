@@ -3,7 +3,7 @@
 # ports past firewalld/ufw (its own iptables rules run first), so
 # "the firewall will cover it" is false. This override rebinds every
 # published port to 127.0.0.1; reach the stack through SSH tunnels only
-# (https://docs.straza.ai/get-started/enterprise-demo-stack/#demo-defaults-and-the-hardened-shape).
+# (https://docs.straza.ai/guides/operate/demo-stack-defaults/).
 #
 #   docker compose -f compose.yaml -f compose.loopback.yaml up -d --build
 #

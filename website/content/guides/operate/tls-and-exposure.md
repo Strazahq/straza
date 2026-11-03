@@ -1,12 +1,18 @@
 ---
 title: TLS and exposure
 description: Serve strazad over HTTPS, give phones their own TLS listener, and keep every route that should stay private off the internet.
+summary: >-
+  strazad has two listeners: the main one on port 8420 serves everything, and the approver
+  listener on port 8443 serves only the phone's routes, over TLS with a pinned key. Terminate
+  TLS on strazad or at an edge on a trusted network. Only the approver routes and `/readyz` are
+  built to face the internet.
 pagetype: how-to
 weight: 50
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: Alpine 3.20 container in the standalone profile, laid out as the standalone host guide describes, for the self-signed pair, the native TLS restart, both curl checks, the SSL_CERT_FILE hint with strazactl status, the approver port refusal and the version check. The enterprise plaintext warning and the approver listener line were read from the log of the running demo stack at v1.1.0-104-g07d2df0e, and the console row was not clicked
+  except: the console row, not clicked
   date: 2026-10-06
 applies_to: both
 who: You, as the operator of the server
@@ -34,7 +40,7 @@ The phone trusts the approver listener by a pinned key rather than a certificate
 | Phones to reach a separate TLS listener | Dedicated approver listener | [Give the phone its own listener](#give-the-phone-its-own-listener) |
 | An ingress that already serves approver routes with a trusted certificate | `server.approverPublicUrl` | [Give the phone its own listener](#give-the-phone-its-own-listener) |
 
-Only approver routes and `/readyz` are designed to face a hostile network. Keep the console, admin API, gateway, SCIM endpoint, and metrics on a restricted network. [Decide what faces the internet](#decide-what-faces-the-internet) explains the boundary.
+Only approver routes and `/readyz` are designed to face a hostile network. Keep the console, admin API, gateway, SCIM endpoint, and metrics on a restricted network. [Decide what faces the internet](#decide-what-faces-the-internet) explains the boundary. A cloud IGA such as Okta needs only `/scim/v2/` to reach it, and that section says how.
 
 ## Put TLS on the main listener
 
@@ -133,6 +139,11 @@ Only the approver routes and `/readyz` are designed to face a hostile network. E
 | `/metrics` | The private network only. It is unauthenticated unless `server.metricsToken` is set. |
 
 /metrics labels its counts by MCP server, sink, route, status, effect and lane. No metric names a session or a user. Its count of each route's answers by status still shows whether the policy snapshot route answers 200 or 503, so never route it through a public ingress. [Metrics and alerts]({{< relref "guides/operate/metrics-and-alerts.md" >}}) sets the token and says what each metric counts.
+
+
+{{< details summary="When cloud Okta provisions over SCIM" >}}
+Cloud Okta, set up as [Okta]({{< relref "guides/connect-identity/okta.md" >}}) shows, sends SCIM from the internet, so publish `/scim/v2/` alone through your edge and keep the other routes of that row restricted. Every SCIM request must carry an admin API token, and Okta's token, scoped to `scim:read,scim:write`, opens no admin API route.
+{{< /details >}}
 
 A plain Kubernetes Ingress cannot express a host and path allowlist with a rate limit. Deployments that split the surface therefore route with their provider's own objects and leave the chart's ingress off.
 

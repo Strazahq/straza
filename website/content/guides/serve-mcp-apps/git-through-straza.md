@@ -1,12 +1,18 @@
 ---
 title: Git through Straza
 description: Let agents run plain git against GitHub with no GitHub credential on their machines, while Straza decides each fetch and push on ghapp with the roles, repositories and approvals of any tool call.
+summary: >-
+  An agent runs plain git against GitHub with no GitHub credential on its machine. `straza
+  service` asks Straza for a grant per fetch or push, which Straza decides as a call of ghapp's
+  `git_fetch` or `git_push` with the roles, repositories and approvals of any tool call. ghapp
+  then runs it with a GitHub token that never leaves ghapp.
 pagetype: how-to
 weight: 33
 draft: false
 tested:
   version: v1.0.0-1592-g4ede0baf
   platform: The Linux steps were fired on the enterprise eval stack on 2026-10-24 at v1.0.0-1592-g4ede0baf with a ghapp build of the same day, as the agent joe-java-developer-agent in a Linux harness container with git 2.39.5 and no GitHub credential. The clone, the push, the hand-off of a public repo, a submodule, the refusal of a push to an uncovered repo, a held push with its wait lines and its expiry, and the grant records all ran. The git block and the roles went in through the admin API rather than this page's drafts, and the hold used a 90-second window. The manifest and the PolicySet on this page passed strazactl spec validate built from the working tree of that version, and the two manifest refusals quoted here are that build's own output. The Windows lines were written on 2026-10-24 from the working tree before their commit. On 2026-10-26 a Windows 10 machine with the MSI ran git clone, a push, the expiry of a held push and an approved push through the helper, in a run that did not follow this page's steps. The macOS lines were written on 2026-10-26 from the working tree. On 2026-10-26 a macOS 26.6.2 virtual machine with an unsigned package built from the source tree at v1.0.0-1610-g366fac50 pushed to GitHub through the helper, in a run that did not follow this page's steps. The ghapp settings and start lines were read from ghapp's code on 2026-11-01
+  except: the Windows and macOS steps, run only outside this page, and ghapp's settings and start lines, read from its code
   date: 2026-10-24
 applies_to: both
 who: You, as the admin of ghapp, and the people whose agents run git
@@ -243,6 +249,9 @@ A person sets up nothing. Their agent runs git as before, and git prints its usu
 : Straza relays clones, fetches and pushes only.
 {{< /fails >}}
 
+
+Each git grant is bound to the key of the session that asked for it, taken from the verified session and never from the request.
+
 ## How git reaches Straza {#how-git-reaches-straza .nostep}
 
 
@@ -266,7 +275,7 @@ Git therefore hands every URL under `https://github.com/` to `git-remote-straza`
 
 An install whose server has no git block changes nothing for git: the host file stays empty, git rewrites no URL, and the helper never runs. The file lists exactly the hosts that some server's git block names, never every https URL, so Git LFS keeps working for every other host. A server added or removed later reaches a machine at its next session start or renewal, and a session that keeps working renews about 3 minutes after its last token was minted.
 
-When the settings already held another value for one of the three entries, the install replaces it and says so on stderr, as in `NOTE: Straza replaced GIT_CONFIG_COUNT=2 in the env of /etc/claude-code/managed-settings.json with its own git settings, and uninstalling Straza does not put them back, so if you still need them, restore them from a backup of that file before you rely on this install.` A machine that upgrades the package or the MSI keeps its old wiring until you run the install again, `sudo straza install --managed --server https://straza.example.com claude-code` or `straza install claude-code`. On Windows the managed install runs as [Install the service on Windows]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) shows, and the `install.cmd` of [Deploy with Intune]({{< relref "guides/govern-an-agent/deploy-with-intune.md" >}}) runs it with each upgrade. Until then, the `managed-content` line of `straza doctor` reports that the managed wiring does not match this build.
+When the settings already held another value for one of the three entries, the install replaces it and says so on stderr, as in `NOTE: Straza replaced GIT_CONFIG_COUNT=2 in the env of /etc/claude-code/managed-settings.json with its own git settings, and uninstalling Straza does not put them back, so if you still need them, restore them from a backup of that file before you rely on this install.` A machine that upgrades the package or the MSI keeps its old wiring until you run the install again, `sudo straza install --managed --server https://straza.example.com claude-code` or `straza install claude-code`. On Windows the managed install runs as [Install the service on Windows]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) shows, and the `install.cmd` of [Deploy with Intune]({{< relref "guides/govern-an-agent/deploy-with-intune.md" >}}) runs it with each upgrade. Until then, the `managed-content` line of `straza doctor` reports that the managed wiring does not match this build.
 
 ## Read the record {.nostep}
 

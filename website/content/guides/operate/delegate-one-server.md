@@ -1,12 +1,18 @@
 ---
 title: Delegate one MCP server
 description: Let the people who own one MCP server administer it and nothing else, through the server admin role Straza creates with it.
+summary: >-
+  Registering an MCP server creates its server admin role, `mcp-admin-` followed by the server's
+  name. A holder changes that server and no other, its version, secrets and the roles that reach
+  it, but never its address, runtime or removal. Your IGA, or an admin on standalone, hands the
+  role out like any other.
 pagetype: how-to
 weight: 105
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in an Alpine 3.20 container on Linux, beside the demo stack's MCP reference server registered as demo-tools, with the admin's strazactl and the team-wiki registration on an admin API token minted in the console, so the registration ran as that token and not as dave. In headless Chromium, carol's check-in answer, server list, sidebar and Server administration card were read. Her refusal outside the MCP servers area came from strazactl on her own login in that run, and strazactl no longer signs in. The refusals of a write by carol were checked against the code and not run, and the server prefix and admin role refusals were run as the root admin. The four roles were read on the demo stack as alice, and the Add role sheet and the Remove server dialog were not clicked
+  except: carol's refused writes, read at source, and the Add role sheet and Remove server dialog, never clicked
   date: 2026-10-06
 applies_to: both
 who: You, as the global MCP admin, and the server admins you hand a server to
@@ -25,7 +31,7 @@ Every MCP server names one Straza role when it is registered, its server admin r
 ## Know the server admin role
 
 
-Registering an MCP server creates a server admin role for it in the same step. The name is the prefix `mcp-admin-` followed by the server's name, so the server `jira` gets `mcp-admin-jira`. A manifest's `metadata.namespace` plays no part in it. The link is set once and never changes. No route repoints a server at a different role, and no role is shared between two servers.
+Registering an MCP server creates a server admin role for it in the same step. Deleting that role on its own is refused, because the server would be left with no admin role. The name is the prefix `mcp-admin-` followed by the server's name, so the server `jira` gets `mcp-admin-jira`. A manifest's `metadata.namespace` plays no part in it. The link is set once and never changes. No route repoints a server at a different role, and no role is shared between two servers.
 
 Straza also creates one product role at boot, `straza-global-mcp-admin`, which administers every server and cannot be deleted. These are the four the demo stack carries after its seed, read as the root admin:
 

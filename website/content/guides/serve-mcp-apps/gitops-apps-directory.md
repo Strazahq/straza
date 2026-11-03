@@ -1,12 +1,18 @@
 ---
 title: The apps directory
 description: A manifest file you keep under version control proposes a draft, a person publishes it, and deleting the file proposes the server's removal.
+summary: >-
+  strazad watches one directory of MCP server manifests. A file that appears or changes becomes
+  a draft, and a file that goes becomes a draft that removes its server. A person publishes or
+  discards each draft, so a file never changes a server by itself, and Straza never writes to
+  the directory.
 pagetype: how-to
 weight: 40
 draft: false
 tested:
   version: v1.1.0
   platform: Linux container, standalone profile, for where the directory lives and the log line that names it. The steps that propose, publish and remove a server through a draft, and the refused file, ran on the enterprise demo stack with the file copied into its strazad container and a server name of its own in place of gitops-tools. strazactl no longer publishes or discards a draft the directory proposed, so a person now does both in the console. The ghapp git sentences were read from ghapp's code on 2026-11-01
+  except: the ghapp git sentences, read from ghapp's code
   date: 2026-09-28
 applies_to: both
 keywords: gitops apps directory manifest
@@ -42,7 +48,7 @@ The container image `ghcr.io/strazahq/straza` sets the data directory to `/var/l
 
 {{< only form="cli" >}}The file and its checks live in your repository and your terminal.{{< /only >}}
 
-The file name is yours, and the server's name comes from `metadata.name`. Replace the address with your MCP server's. On the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}), `http://demo-tools:3001/mcp` reaches its demo server. Validate the file where you write it, and in your repository's checks, with the same parser strazad runs:
+The file name is yours, and the server's name comes from `metadata.name`. Replace the address with your MCP server's. On the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}), `http://demo-tools:3001/mcp` reaches its demo server. Validate the file where you write it, and in your repository's checks, with the same parser strazad runs:
 
 {{< command terminal="Terminal" purpose="your repository" >}}
 ```sh

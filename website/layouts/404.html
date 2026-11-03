@@ -3,9 +3,9 @@ site has no file for. It links back into the docs, so a broken link does not
 end on a page with no way back. A missing target fails the build rather than
 dropping its link. */ -}}
 {{ define "main" }}
-{{- $start := site.GetPage "/get-started" -}}
+{{- $start := site.GetPage "/evaluate" -}}
 {{- $ref := site.GetPage "/reference" -}}
-{{- if not (and $start $ref) }}{{ errorf "404.html: /get-started or /reference is missing. Update the links in layouts/404.html." }}{{ end }}
+{{- if not (and $start $ref) }}{{ errorf "404.html: /evaluate or /reference is missing. Update the links in layouts/404.html." }}{{ end }}
 {{- /* The base element in the head resolves #main from the site root, so
 the skip link would open the home page. This points it at the address the
 reader is on. */}}
@@ -18,7 +18,7 @@ reader is on. */}}
 <p>There is no page at this address. The page may have moved, or the link may be wrong.</p>
 <ul>
   <li><a href="{{ site.Home.RelPermalink }}">Docs home</a>: what Straza is and where to start for each task.</li>
-  <li><a href="{{ $start.RelPermalink }}">{{ $start.LinkTitle }}</a>: install Straza and run a first governed session.</li>
+  <li><a href="{{ $start.RelPermalink }}">{{ $start.LinkTitle }}</a>: what Straza is, how it works, and two ways to try it.</li>
   <li><a href="{{ $ref.RelPermalink }}">{{ $ref.LinkTitle }}</a>: commands, configuration, the API and the audit events.</li>
 </ul>
 </div>

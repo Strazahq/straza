@@ -1,6 +1,6 @@
 # Govern one agent in five minutes
 
-The standalone profile runs on one machine: one server binary with an embedded database, an embedded event broker and a built-in sign-in page. No Docker, no Postgres, no external identity provider. At the end an agent session starts with a governance line naming the person and the signed policy in force, and a destructive command is denied inside the agent before it runs. The docs page this follows is https://docs.straza.ai/get-started/first-governed-session/.
+The standalone profile runs on one machine: one server binary with an embedded database, an embedded event broker and a built-in sign-in page. No Docker, no Postgres, no external identity provider. At the end an agent session starts with a governance line naming the person and the signed policy in force, and a destructive command is denied inside the agent before it runs. The docs page this follows is https://docs.straza.ai/evaluate/try-it-on-one-laptop/index.md.
 
 You need a Linux machine with the three binaries `strazad`, `strazactl` and `straza` on the PATH, four terminals, and the agent harness on the same machine. The client starts sessions on Linux, macOS and Windows, and this quickstart uses Linux. Take them from a release archive on https://github.com/strazahq/straza/releases, or build them from a clone of the repository with Go 1.26 or newer, Git and Make; the binaries land under `bin`:
 
@@ -154,6 +154,6 @@ Do not create an approver role for alice and name it in the rule: she would be i
 
 ## Where next
 
-- Enterprise: Postgres, SCIM from the identity manager, external sign-in and the managed install are https://docs.straza.ai/guides/operate/enterprise-shape/, and `identity.md` maps the roles.
-- Kubernetes: https://docs.straza.ai/get-started/run-it-on-kubernetes/
-- The full demo stack with midPoint and Keycloak: https://docs.straza.ai/get-started/enterprise-demo-stack/
+- Enterprise: Postgres, SCIM from the identity manager, external sign-in and the managed install are https://docs.straza.ai/guides/operate/enterprise-shape/index.md, and `identity.md` maps the roles.
+- Kubernetes: https://docs.straza.ai/guides/operate/run-it-on-kubernetes/index.md
+- The full demo stack with midPoint and Keycloak: https://docs.straza.ai/evaluate/try-it-on-the-demo-stack/index.md

@@ -1,12 +1,18 @@
 ---
 title: Each caller's own credential
 description: Each person reaches an upstream MCP server with their own token or sign-in, and you decide what agents run on.
+summary: >-
+  Two credential kinds let an upstream MCP server see each person instead of one shared account:
+  each caller's own pasted token, or each caller's own sign-in through a provider you configure.
+  The gateway adds that person's token to every call. You decide what AI agents with no token or
+  sign-in of their own run on.
 pagetype: how-to
 weight: 25
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in an Alpine container on Linux, started with this page's provider block for an identity provider that does not exist, and two servers that point at the demo stack's MCP reference server, github with each caller's token and midpoint with each caller's keycloak sign-in. alice ran straza at a terminal in her own container, and the AI agents joe, sponsored by alice, and ivy, with no sponsor, called through straza mcp in theirs. Three steps did not run. A sign-in itself needs a running provider, the expired-token deny needs a date that has passed, and strazactl connect and disconnect with --user were not run for this page. strazactl no longer signs in, so those two run on an admin API token, which needs apps:read and apps:write for connect and apps:write for disconnect. The console steps were read from the console's source and not clicked
+  except: a real sign-in, the expired-token deny, strazactl connect and disconnect with --user, and the console steps
   date: 2026-10-06
 applies_to: both
 keywords: caller token oauth sign-in connect sponsor agents

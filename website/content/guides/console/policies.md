@@ -2,6 +2,11 @@
 title: Policies
 seo_title: Policies in the console
 description: You read which rules decide each call, build a policy with the New policy wizard, change a policy on its own page, and test a call before and after you publish.
+summary: >-
+  Policies holds the rules that decide every call: what is denied, what needs approval and what
+  runs at once. You read the rules per policy or per role, build one with the New policy
+  wizard, and change one on its own page before you publish it. Test a call shows what a call
+  would get, and records nothing.
 pagetype: how-to
 weight: 30
 draft: false
@@ -9,6 +14,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server on Linux with the starter policy and a hold policy for the role dev, read and edited as the admin in headless Chromium. The wizard was opened and not saved
   date: 2026-10-06
+  except: saving from the New policy wizard, which was opened and not saved
 applies_to: both
 who: You, as an admin
 where: The console in a browser

@@ -1,6 +1,11 @@
 ---
 title: Push delivery and connectivity
 description: Every enrolled phone can reach the approver listener, push wakes it for each request, and you have checked both from the server.
+summary: >-
+  A phone reaches strazad over HTTPS on the approver listener, at an address it must be able to
+  open from wherever the approver stands. Push only wakes the app and never carries the
+  command, its arguments or a name. Without push, the app still decides by polling while it is
+  open.
 pagetype: how-to
 weight: 40
 who: You, as the admin who runs strazad
@@ -16,6 +21,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: Read only against the demo stack on this box, which runs v1.1.0-104-g07d2df0e under the enterprise profile, where the version endpoint, the push lines of the strazad log, the channel status route with an admin session and the approver listener's three answers were read live. The two boot refusals of the listener and the ingress shape's enroll output were run on a throwaway standalone server at v1.1.0-117-g106081a8. No phone, tunnel, relay send, direct Firebase or APNs lane was run, and the console's Channels tab was read at source
   date: 2026-10-06
+  except: a real phone, a tunnel, any push send and the console's Channels tab, none of which ran
 applies_to: both
 keywords: push delivery relay webpush ntfy unifiedpush firebase apns phone approval connectivity tunnel listener approver network
 ---

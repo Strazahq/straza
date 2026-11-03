@@ -1,6 +1,10 @@
 ---
 title: Knowledge packs
 description: A role carries a knowledge pack, and every agent session of that role starts with the pack's text in its context.
+summary: >-
+  A knowledge pack is text you write once and bind to an application or business role. Every
+  agent session of a holder of that role starts with the text in its context, right after the
+  Straza banner. Creating, binding and deleting a pack writes no audit record yet.
 pagetype: how-to
 weight: 90
 draft: false
@@ -8,6 +12,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: An Alpine Linux container against a standalone server, with strazactl as the admin and the session start piped into straza hook as alice. The console steps were read in the console source, not clicked
   date: 2026-10-06
+  except: the console steps, read in the console source and not clicked
 applies_to: both
 who: You, as the admin
 where: A terminal, the console, and the agent's machine
@@ -106,6 +111,9 @@ Each session receives the packs of every role its person holds, a role held thro
 `no pack named "team-conventions"`
 : strazactl finds a pack by its name. Check the name with `strazactl packs list`.
 {{< /fails >}}
+
+
+strazad stores each pack with a checksum of its text, and a session's check-in answer carries the pack with that checksum.
 
 ## See it at the next session start
 

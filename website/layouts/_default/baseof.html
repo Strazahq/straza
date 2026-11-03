@@ -28,7 +28,9 @@ stands for no address of its own. */}}
 {{ with (.Params.seo_description | default .Description) }}<meta name="description" content="{{ . }}">
 {{ end }}<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="%23d6a63a" d="M12 2 4 5v6.2c0 4.9 3.3 9.3 8 10.8 4.7-1.5 8-5.9 8-10.8V5l-8-3Z"/><path fill="%230d1117" d="m12 6.2 1.4 3.6 3.8.2-3 2.4 1 3.7L12 14l-3.2 2.1 1-3.7-3-2.4 3.8-.2L12 6.2Z"/></svg>'>
 <link rel="preload" href="{{ "assets/fonts/atkinson-hyperlegible-next-latin.woff2" | relURL }}" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="{{ printf "assets/site.css?v=%s" (readFile "static/assets/site.css" | sha256) | relURL }}">
+{{- /* The page's Markdown copy for agents, at its address plus index.md. */}}
+{{ with .OutputFormats.Get "markdown" }}<link rel="alternate" type="text/markdown" href="{{ .RelPermalink }}">
+{{ end }}<link rel="stylesheet" href="{{ printf "assets/site.css?v=%s" (readFile "static/assets/site.css" | sha256) | relURL }}">
 <script> 
 (function(){var d=document.documentElement;d.className+=" js";try{var t=localStorage.getItem("straza-theme");if(t==="light"||t==="dark")d.setAttribute("data-theme",t);var m=localStorage.getItem("straza-mode");if(m==="console"||m==="cli")d.setAttribute("data-mode",m)}catch(e){}})();</script>
 <script src="{{ printf "assets/docs-search.js?v=%s" (readFile "static/assets/docs-search.js" | sha256) | relURL }}" defer></script>

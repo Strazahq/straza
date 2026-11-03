@@ -2,9 +2,15 @@
 description as the outcome line. Tutorials and how-tos add the task strip
 from the front matter fields who, where, applies_to and time. */ -}}
 {{- $trail := where .Ancestors "IsHome" false -}}
+{{- /* The bar above the title holds the trail and, at its right, the link to
+the page's Markdown copy, so a person can hand the page to an agent and an
+agent that reads the page text finds the copy. */}}
+<div class="pagebar">
 {{- with $trail }}
 <nav class="crumb" aria-label="Breadcrumb">
-  <ol>
+  {{- /* The class keeps the prose rule for plain lists, which spaces each
+  item after the first, off the trail. */}}
+  <ol class="trail">
     {{- range .Reverse }}
     <li><a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a></li>
     {{- end }}
@@ -12,6 +18,10 @@ from the front matter fields who, where, applies_to and time. */ -}}
   </ol>
 </nav>
 {{- end }}
+{{- with .OutputFormats.Get "markdown" }}
+<a class="mdcopy" href="{{ .RelPermalink }}" type="text/markdown" title="This page as Markdown, for an AI agent">Markdown</a>
+{{- end }}
+</div>
 <h1>{{ .Params.heading | default .Title }}</h1>
 {{- with .Description }}
 <p class="outcome">{{ . }}</p>
@@ -47,4 +57,16 @@ like the diagram hook's src. */ -}}
   <figcaption><a href="{{ .url }}" rel="noopener">Watch the narrated video</a> on {{ (urls.Parse .url).Host }}</figcaption>
 </figure>
 {{- end }}
+{{- end }}
+{{- /* In short: the summary from the front matter, two or three sentences
+that carry the whole idea. A concept page that names a noun also shows the
+model diagram with that noun lit. */ -}}
+{{- with .Params.summary }}
+<div class="inshort">
+  <p class="lbl">In short</p>
+  <p>{{ . | markdownify }}</p>
+  {{- with $.Params.noun }}
+  <figure class="fig"><div class="canvas">{{ partial "model-svg.html" (dict "lit" (slice | append .)) }}</div></figure>
+  {{- end }}
+</div>
 {{- end }}

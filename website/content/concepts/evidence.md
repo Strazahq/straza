@@ -1,82 +1,100 @@
 ---
-title: Evidence and audit
-description: See what each audit record holds, how it reaches the hash chain, and how you prove later that no record was changed.
+title: Audit and evidence
+description: What each audit record holds, how the hash chain shows an edit or a removal, how records reach your SIEM, and what an auditor can prove with them.
 pagetype: explanation
-weight: 50
+weight: 100
 draft: false
-keywords: audit evidence chain event record sink
+summary: >-
+  Straza writes an audit record for every decision. The record names who acted, what was asked, which rule decided and under which policy. Each record carries the hash of the one before it, so an edited or removed record breaks the chain. A sink copies the records to your SIEM, and that copy proves later that nobody rewrote the chain.
+noun: audit
+keywords: audit evidence record hash chain sink siem verify snapshot transcript sentinel auditor
 ---
 
 
-Every decision Straza makes leaves an audit record that says who acted, what was asked, which rule decided and under which policy. The records form a hash chain, so you can check later that none was edited or removed. Records are written after the decision, so in normal operation a tool call never waits for its record. A sink forwards the records to a system you control, such as your SIEM. Conversation text is recorded only when a policy turns it on.
+Every decision Straza makes about what an [agent]({{< relref "concepts/identities.md" >}}) may do leaves an audit record. Straza records allows as well as denies, because a missing decision would look the same as an allowed one. Each step a [person]({{< relref "concepts/identities.md" >}}) took on an [approval]({{< relref "concepts/approvals-model.md" >}}) is recorded too. The records form a hash chain, so you can check later that none was edited or removed. A sink copies them to a system you control, such as your SIEM.
 
 ## What a record holds
 
 
-A record of a local tool decision names the session, the user and the harness that acted. It holds the event kind, the tool and the command, plus the paths and the workspace when the event carried them. It also holds the effect, the rule id, the name of the PolicySet whose rule decided, the reason and the id of the snapshot the decision was made under. A record is at most 256 KiB, so a longer one keeps only a prefix of its longest strings, such as a huge command, each followed by its whole length and SHA-256. One that cutting cannot fit, such as a record of thousands of paths, keeps who acted, the decision and the command, and names the size and hash of the whole record in `dataOmitted`, as [Events and the audit record]({{< relref "reference/events.md#the-envelope" >}}) explains.
+An auditor can answer these questions about a decision from its record alone:
 
-A gateway decision holds the same identity fields plus the MCP server, the server's own tool name and the tool arguments as sent, capped at 8 KiB with a marker when cut. When no rule fired and a profile default decided, the rule id and the set name are empty instead of a guess. The snapshot id matters most later. Policy text can change tomorrow, and the record still names the exact state that governed.
+| The question | What the record holds |
+|---|---|
+| Who acted | The user, the session and the coding tool or MCP client it came from |
+| What was asked | The tool and the command, or the MCP server, its tool and the arguments as sent |
+| What was decided | The effect and the reason the agent read |
+| By which rule | The rule's id and the name of the [policy]({{< relref "concepts/policy-model.md" >}}) set it belongs to |
+| Under which policy | The id of the signed snapshot the decision was made under |
+
+The snapshot id names the exact policy state that governed the decision, and it still does after the policy text changes. When no rule fired and a default decided, the rule and the set are left empty. On a server that declares [objects]({{< relref "concepts/objects.md" >}}), a gateway record also names the object, such as the space eng on the invented wiki server or the database sales_eu on postgres.
 
 
-The chain carries more than tool decisions. Every admin change names the principal who made it and the credential path it came through, so a leaked token shows as the token that acted. Sign-ins and refused sign-ins, session ends, the kill switch and its lift, each phase of an approval with its decider, and the verdicts of the audit sentinel all ride the same chain. [Overview and Audit]({{< relref "guides/console/overview-and-audit.md" >}}) shows how to find and read them in the console.
+Besides tool decisions, the chain records every admin change with the person or token that made it and the credential it came through, so a leaked token shows as the token that acted. It also records sign-ins and refused sign-ins, session ends, the kill switch and its lift, each phase of an approval with its decider, and every [draft]({{< relref "concepts/drafts.md" >}}) from its creation to its publish or discard. [Events and the audit record]({{< relref "reference/events.md" >}}) lists every type and field.
 
 ## How a record reaches the chain
 
 
-`straza service`, the Straza background service on the agent's machine, writes the decisions of each user to a local spool and uploads them in batches. The server files each record under the signed-in user. A client may submit only tool decisions and recorded prompts and replies, so it can never write an admin, sign-in or identity record into the chain.
+The Straza service on the agent's [machine]({{< relref "concepts/machines-and-sessions.md" >}}) writes its decisions to a local spool and uploads them in batches. The Straza server, strazad, files each record under the signed-in user. A client may send only tool decisions and recorded conversation turns, so it can never write an admin or sign-in record into the chain. strazad's own decisions go to a queue in memory, then to a durable outbox in its database, then through its event bus into the chain.
 
-Server decisions enter an in-memory queue first. From there each record moves to a durable outbox in the database, then through the event bus into the hash chain. The record therefore trails its decision by a short time, and revocations and other control events go ahead of audit traffic.
+Records are written after the decision, so in normal operation a tool call never waits for its record. A log that slowed every command would push operators to turn it off. Writing after the decision leaves a short window in which a record can be lost. If strazad crashes, the records still in memory are lost, and a full or unwritable spool on the machine loses records too. When strazad's queue is full, the enterprise profile makes new decisions wait for room and then refuses them, so nothing runs without its record. The standalone profile drops such records and counts the loss. [Known limits]({{< relref "security/known-limits.md" >}}) says how to watch for it. A record can also take a moment to appear after a step, because the service uploads in batches and strazad appends through a queue.
 
-
-Records can be lost before they are durable. A server crash loses the records still in memory, and the client's spool is bounded, so a full or unwritable spool loses records too. When the server's queue is full, the enterprise profile makes new server decisions wait for room and then refuses them, so nothing runs without its record. The standalone profile drops such records and counts the loss, as [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#backpressure" >}}) shows. [Known limits]({{< relref "security/known-limits.md" >}}) lists how to watch for loss.
-
-## Why the chain can be trusted after the fact
+## The hash chain
 
 
-Each record stores the hash of the record before it, and its own hash covers that link and its own bytes. Changing or removing a record breaks the chain at that point. `strazactl audit verify` walks the records in order and prints the count of verified records, or the sequence number where the chain broke. Over TLS or on localhost, the Overview card re-hashes the 25 newest records in your browser, and the Audit screen re-hashes every record it has loaded, starting with the newest 200.
+Each record stores the hash of the record before it, and its own hash covers that link and its own bytes. Changing or removing a record breaks the chain at that point. A verify run walks the records in order and names the first record where the chain broke. [The console]({{< relref "guides/console/overview-and-audit.md" >}}) also checks the chain. Over TLS or on localhost, the Overview re-hashes the 25 newest records in your browser, and the Audit screen re-hashes every record it has loaded, starting with the newest 200.
 
 
-The chain proves that no record was edited or removed in place. It does not by itself defeat someone who owns the database and rewrites every later record too, because a verify run inside that database recomputes the rewritten chain and finds it consistent. An off-box copy defeats that attack. Forward the records to a sink you control, and a rewritten record no longer matches the copy the sink already holds.
+The chain proves that no record was edited or removed in place. It does not by itself defeat someone who owns the database and rewrites every later record too, because a verify run inside that database recomputes the rewritten chain and finds it consistent. A copy outside the box defeats that attack, because a rewritten record no longer matches the copy your SIEM already holds.
 
-## Sinks and what the default leaves out
-
-
-A sink forwards records to another system. Webhook sinks send signed HTTP requests, one record each or batches as newline-delimited JSON. File sinks append records and sync before they acknowledge them.
-
-Delivery is at least once, so a receiver must tolerate duplicates. An outage delays delivery, and a delivery the receiver refuses can be parked and replayed. Watch delivery failures and retention limits instead of treating a configured sink as proof that every record arrived.
-
-Without a subject filter, a sink receives every record except recorded conversation content. Forwarding transcripts takes an explicit choice in its configuration. [Sinks and SIEM]({{< relref "guides/audit/sinks-and-siem.md" >}}) sets one up.
-
-## Transcripts are opt-in
+## Delivery to your SIEM
 
 
-Conversation recording is off until a PolicySet that matches the session turns it on, and the session is told that it is recorded. Prompts and replies are hashed in full before any redaction or size cap, so the chain witnesses what it did not store. When two matched sets disagree, the redacting mode wins.
+Sinks forward records to another system. A webhook sink sends each record, or a batch of them, as an HTTP request that it signs when you give it a secret. A file sink appends records and syncs the file before it counts them as delivered. Delivery is at least once, so a receiver must drop duplicates by the record's id. An outage delays delivery. A delivery the receiver refuses is parked and can be replayed. Watch delivery failures, because a configured sink alone does not prove that every record arrived.
 
-The chain keeps the hash and the size of each turn, never its text. The text lives only in the transcripts store, which deletes it after 30 days by default, or in an object store you configure for the enterprise profile. A search for a leaked secret hashes the value on your side and matches the hash, so the plaintext never travels. [Record a conversation]({{< relref "guides/write-policy/capture.md" >}}) turns recording on.
+A sink with no filter receives every record except conversation text. Sending transcripts off the box needs an explicit setting in that sink's configuration. [Sinks and SIEM]({{< relref "guides/audit/sinks-and-siem.md" >}}) covers the setup.
 
-## The sentinel is detection, never prevention
-
-
-The audit sentinel reads the records after the fact and judges whole sessions instead of single events. Its detectors are rules that look for bursts of denies, a deny followed by a variant of the same command, a write followed by running what was written, and similar patterns. Its verdicts land on the same chain. Unlike every decision path, it fails open with an alarm, so a stopped sentinel blocks nothing and leaves a gap in detection. It is off by default and never revokes anything on its own, as [The sentinel]({{< relref "guides/audit/sentinel.md" >}}) explains.
-
-## Why the record works this way
+## What an auditor can prove
 
 
-A log that can be edited proves nothing, and a log that slows the agent gets turned off. An audit trail for agents has to be complete, because a missing decision looks the same as an allowed one. It has to show tampering, because the first question after an incident is whether the record itself was touched. Staying off the agent's path matters too, since a shell command that waits on a database write is a tax every developer feels. Straza answers with a pipeline that runs after the decision and ends in a hash chain, and each record is shaped so a reviewer can say who did what, under which rule and which policy, from the record alone.
+With the chain and a copy in your SIEM, an auditor can show:
 
-{{< details summary="How it works inside" >}}
+- that a given call was decided, by which rule, under which exact policy, and what the agent was told,
+- who approved a held call, where they decided it, and which enrolled device signed a person's own decision,
+- who published each change to servers, roles and policy, and which lines that widen access they confirmed,
+- that no record was changed or removed since your SIEM received it.
 
-A record's own hash is the SHA-256 of the previous record's hash, a newline and the record's bytes. The bytes are stored as text and never re-rendered, because a store that reformatted them would hash a representation instead of the record. The verifier reports the first record whose previous hash does not equal its predecessor's hash, or whose own hash does not recompute. Names the admin API adds for display, such as the username behind a user id, live outside the hashed bytes, so that enrichment can never invalidate a record.
+An action that never reached Straza, such as a command on a machine without the hook, leaves no record, as [the security model]({{< relref "evaluate/security-model.md" >}}) sets out. A signed decision proves which device decided, but not that the person acted. [Compliance mapping]({{< relref "security/compliance.md" >}}) shows which NIS2 measures and ISO/IEC 27001 controls these records supply evidence for.
+
+## Conversations and the sentinel
 
 
-After the server accepts a batch from the service's spool, the service removes it, and event ids let the server drop a retried duplicate. On ingest, an event that names no session takes the uploader's session. One that names an earlier session of the same user on the same device keeps it, which happens when a client uploads records it spooled before a new check-in. A record that names a session of another user or another device, an unknown session, or a value that is not a session id is refused. It stays out of the chain, strazad logs one warning line for each session an upload names this way with the count of records it covers, and `straza_audit_refused_total` counts each record. The client has already deleted it. The server files any other event type a client sends as a tool decision.
+Straza records the text of a conversation only when a policy set that matches the session turns recording on, and the session is told. The chain keeps only the hash and the size of each turn. The text goes to a separate store that deletes it after 30 days by default. [Record a conversation]({{< relref "guides/write-policy/capture.md" >}}) shows how to turn recording on.
 
 
-Once a record is committed to the transactional outbox, a relay publishes it to the event bus, NATS JetStream, and a consumer appends it to the audit chain. The relay drains control events such as revocations before audit traffic. [The security model]({{< relref "security/security-model.md" >}}) describes the queue and spool limits.
+After the fact, the audit sentinel reads the records and judges whole sessions, such as a burst of denies. Its verdicts are written to the same chain. It is off by default and never blocks or revokes anything. When it fails, it fails open and raises an alarm, as [The sentinel]({{< relref "guides/audit/sentinel.md" >}}) explains.
 
-The detailed view below follows a recorded conversation from the governed session through the policy gate, hashing, redaction and the spool to the chain.
+{{< details summary="What an expert needs here" >}}
+
+A record's own hash is the SHA-256 of the previous record's hash, a newline and the record's bytes. The bytes are stored as text and never re-rendered, because a reformatted record would no longer match its hash. Names the admin API adds for display, such as the username behind a user id, are kept outside the hashed bytes, so adding them can never invalidate a record.
+
+
+Each record is at most 256 KiB. A longer one keeps a prefix of its longest strings, each followed by its whole length and SHA-256, so you can hash your own copy of a huge command and compare. When cutting cannot make it fit, the record keeps who acted, the decision and the command, and names the size and hash of the whole record. Gateway records keep the call's arguments up to 8 KiB, with a marker when cut.
+
+
+After strazad accepts a batch from a machine's spool, the service removes the batch from the spool. Event ids let strazad drop a retried duplicate. An uploaded record that names no session takes the uploader's session, and one that names an earlier session of the same user on the same device keeps it. strazad files any other event type a client sends as a tool decision. An uploaded record that names a session of another user or another device, an unknown session, or a value that is not a session id is refused and stays out of the chain. strazad logs one warning line for each such session with the count of records, and `straza_audit_refused_total` counts each record. By then the client has already deleted the record. [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#backpressure" >}}) shows how each profile handles a full queue.
+
+
+Once a record is committed to the outbox, a relay publishes it to the event bus, NATS JetStream, and a consumer appends it to the chain. The relay sends control events such as revocations ahead of audit traffic.
+
+
+On enterprise, when strazad cannot queue a record because its database is down, the decision is refused with a reason that starts `Straza: this action did not run, because its audit record could not be written`.
+
+
+Prompts and replies are hashed in full before any redaction or size cap, so the chain holds the hash of text it did not store. When two matched sets disagree on recording, the set that redacts applies. On enterprise the text can live in an object store you configure instead. A search for a leaked secret hashes the value on your side and matches the hash, so the secret itself is never sent.
+
+A recorded conversation passes from the governed session through the policy gate, hashing, redaction and the spool to the chain.
 
 ![Diagram: the recording pipeline from a governed session through the policy gate, hashing, redaction and the spool to the chain and the transcripts screen](../../static/diagrams/capture-pipeline.png)
 {{< /details >}}
 
-Read next: [MCP servers and the gateway]({{< relref "concepts/mcp-apps-and-the-gateway.md" >}}) explains the path where the gateway decisions above are made.
+{{< next "guides/set-up-straza-for-a-team.md" >}}

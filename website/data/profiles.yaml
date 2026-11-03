@@ -61,7 +61,7 @@
     # internal/server/build.go 200-215; internal/server/admin_bootstrap.go 301-349
     - id: starter-policy
       what: A policy on a new install
-      standalone: "`standalone-starter`, seeded on an empty database. It denies recursive force-delete, such as `rm -rf`."
+      standalone: "`standalone-starter`, seeded on an empty database. Its one rule denies `rm -rf *`, `rm -fr *`, `rm -r -f *`, `rm -f -r *` and the first two with `sudo`."
       enterprise: None. You write the first policy.
     # internal/config/config.go 93, 122; internal/config/knobs.go 126; internal/agentguard/service/api_decide.go, decideFor and expiredReason
     - id: offline

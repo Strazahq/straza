@@ -1,0 +1,128 @@
+{{- /* The demo stack as it runs: what a person opens in the browser, the
+identity systems and agents that feed strazad, strazad with its database and
+broker, and the MCP servers and the SIEM it feeds. The facts come from
+deploy/compose/eval-stack: the compose files, seed/seed.sh and seed/apps.
+Drawn wide and tall through zone-diagram.html, like the landing diagram. */ -}}
+{{- $icons := partial "diagram-icons.html" . -}}
+{{- $page := dict
+  "midpoint" "guides/connect-identity/midpoint.md" "keycloak" "guides/connect-identity/keycloak-login.md"
+  "sam" "guides/govern-an-agent/headless-agents.md" "joe" "guides/govern-an-agent/claude-code.md"
+  "strazad" "evaluate/how-it-works.md" "mcp" "concepts/mcp-apps-and-the-gateway.md"
+  "demo-tools" "guides/serve-mcp-apps/add-a-server.md" "views" "guides/serve-mcp-apps/show-views.md"
+  "objects" "guides/serve-mcp-apps/limit-a-role-to-some-objects.md" "siem" "guides/audit/sinks-and-siem.md"
+  "credential" "concepts/credentials.md"
+-}}
+{{- $href := dict -}}
+{{- range $k, $p := $page -}}
+  {{- $pg := site.GetPage $p -}}
+  {{- if not $pg }}{{ errorf "diagrams/eval-stack.html: the page %q for %q is missing" $p $k }}{{ end -}}
+  {{- $href = merge $href (dict $k $pg) -}}
+{{- end -}}
+{{- $title := "The demo stack. In the browser you open the landing page, the console, the phone approver, Keycloak, midPoint, Kibana and the chat face. midPoint, the IGA, sends people, agents and roles to strazad over SCIM, reads Straza's users, servers and roles back by live sync, and makes Keycloak accounts for people, and Keycloak signs them in. The agents sam and joe each run beside a Straza service that holds the agent's key and checks in with strazad, and joe's MCP calls go through the gateway in strazad, which adds each server's credential. strazad keeps its configuration and records in Postgres, uses NATS as its event broker, and posts every event to Elasticsearch, which Kibana searches. The seeder creates alice, joe and sam in midPoint, the roles developer, operator and sec-approvers, and the policy set agent-guardrails." -}}
+{{- $variants := slice
+  (dict "id" "es-w" "cls" "es-w" "title" $title "view" "0 0 704 812" "bloom" (dict "cx" 368 "cy" 420 "rx" 300 "ry" 300)
+    "pad" (dict "ix" 14 "iy" 11 "tx" 42 "ty" 27 "sy" 47 "oiy" 9 "oty" 25)
+    "zones" (slice
+      (dict "z" "people" "x" 12 "y" 12 "w" 680 "h" 104 "l" "Your browser" "lx" 26 "ly" 36 "ns" (slice "on the Docker host, or through the SSH tunnels") "nx" 136 "ny" 36)
+      (dict "z" "id" "x" 12 "y" 140 "w" 224 "h" 266 "l" "Identity" "lx" 26 "ly" 164 "ns" (slice "midPoint 4.10.3, Keycloak 26.0" "live sync every 10 seconds") "nx" 26 "ny" 190)
+      (dict "z" "people" "x" 12 "y" 426 "w" 224 "h" 238 "l" "Agents" "lx" 26 "ly" 450)
+      (dict "z" "straza" "x" 12 "y" 684 "w" 224 "h" 116 "l" "Seeded at start" "lx" 26 "ly" 708 "ns" (slice "roles developer, operator" "approver sec-approvers" "policy agent-guardrails" "alice sponsors joe and sam") "nx" 26 "ny" 732)
+      (dict "brand" true "x" 264 "y" 140 "w" 208 "h" 570 "mx" 280 "my" 147 "ms" 0.75 "l" "Straza" "lx" 304 "ly" 164)
+      (dict "z" "audit" "x" 500 "y" 140 "w" 192 "h" 200 "l" "SIEM" "lx" 514 "ly" 164 "ns" (slice "siem overlay") "nx" 556 "ny" 164))
+    "heads" (slice
+      (dict "k" "mcp" "i" "server" "t" "MCP servers" "s" "behind the gateway" "x" 500 "y" 364 "w" 192 "h" 382 "hx" 508 "hy" 372 "hw" 176 "hh" 50 "ix" 516 "iy" 379 "tx" 544 "ty" 396 "sx" 516 "sy" 416))
+    "cards" (slice
+      (dict "k" "u0" "chip" true "z" "people" "x" 22 "y" 52 "w" 88 "h" 48 "t" "Landing" "tag" ":8400" "ln" "none")
+      (dict "k" "u1" "chip" true "z" "people" "x" 116 "y" 52 "w" 88 "h" 48 "t" "Console" "tag" ":8420" "ln" "none")
+      (dict "k" "u2" "chip" true "z" "people" "x" 210 "y" 52 "w" 88 "h" 48 "t" "Approver" "tag" ":8443" "ln" "none")
+      (dict "k" "u3" "chip" true "z" "people" "x" 304 "y" 52 "w" 88 "h" 48 "t" "Keycloak" "tag" ":8480" "ln" "none")
+      (dict "k" "u4" "chip" true "z" "people" "x" 398 "y" 52 "w" 88 "h" 48 "t" "midPoint" "tag" ":8087" "ln" "none")
+      (dict "k" "u5" "chip" true "z" "people" "x" 492 "y" 52 "w" 88 "h" 48 "t" "Kibana" "tag" ":5601" "ln" "none")
+      (dict "k" "u6" "chip" true "z" "people" "x" 586 "y" 52 "w" 88 "h" 48 "t" "Chat face" "tag" ":8477" "ln" "none")
+      (dict "k" "midpoint" "z" "id" "x" 24 "y" 226 "w" 200 "h" 60 "t" "midPoint" "s" "the IGA" "i" "iga")
+      (dict "k" "keycloak" "z" "id" "x" 24 "y" 330 "w" 200 "h" 60 "t" "Keycloak" "s" "the identity provider" "i" "idp")
+      (dict "k" "sam" "z" "people" "x" 24 "y" 466 "w" 200 "h" 74 "t" "sam" "tag" "operator" "s" "SRE agent, straza exec" "ls" (slice "service holds sam's key") "i" "agent")
+      (dict "k" "joe" "z" "people" "x" 24 "y" 552 "w" 200 "h" 92 "t" "joe" "tag" "developer" "s" "Claude Code" "ls" (slice "demo overlay" "service holds joe's key") "i" "agent")
+      (dict "k" "strazad" "z" "straza" "x" 276 "y" 176 "w" 184 "h" 454 "t" "strazad" "s" "the enterprise profile" "i" "shield"
+        "rows" (slice (dict "y" 256 "t" "SCIM in, live sync out" "l" true) (dict "y" 296 "t" "audit sink" "r" true) (dict "y" 360 "t" "OIDC sign-in" "l" true)
+          (dict "y" 404 "t" "console and admin API") (dict "y" 444 "t" "phone approver on 8443") (dict "y" 503 "t" "machine check-in" "l" true) (dict "y" 598 "t" "MCP gateway" "l" true "r" true)))
+      (dict "k" "postgres" "chip" true "z" "straza" "x" 276 "y" 646 "w" 88 "h" 48 "t" "Postgres" "tag" "records" "ln" "none")
+      (dict "k" "nats" "chip" true "z" "straza" "x" 372 "y" 646 "w" 88 "h" 48 "t" "NATS" "tag" "events" "ln" "none")
+      (dict "k" "kibana" "z" "audit" "x" 512 "y" 180 "w" 168 "h" 56 "t" "Kibana" "s" "searches events" "i" "chart" "ln" "siem")
+      (dict "k" "es" "z" "audit" "x" 512 "y" 268 "w" 168 "h" 56 "t" "Elasticsearch" "s" "each event" "i" "search" "ln" "siem")
+      (dict "k" "m0" "z" "server" "x" 524 "y" 436 "w" 160 "h" 56 "t" "demo-tools" "s" "echo and add tools" "i" "tool" "ln" "demo-tools")
+      (dict "k" "m1" "z" "server" "x" 524 "y" 496 "w" 160 "h" 56 "t" "views-demo" "s" "a tool with a view" "i" "window" "ln" "views")
+      (dict "k" "m2" "z" "server" "x" 524 "y" 556 "w" 160 "h" 56 "t" "objects-demo" "s" "object scope" "i" "object" "ln" "objects")
+      (dict "k" "m3" "z" "server" "x" 524 "y" 616 "w" 160 "h" 56 "t" "midpoint" "s" "IGA, gated writes" "i" "iga" "ln" "none")
+      (dict "k" "m4" "z" "server" "x" 524 "y" 676 "w" 160 "h" 56 "t" "postgres" "s" "four demo databases" "i" "db" "ln" "none" "tag" "pg"))
+    "flows" (slice
+      (dict "d" "M228 256H272" "c" "f-id run" "m" "id" "ms" "id")
+      (dict "d" "M224 360H272" "c" "f-id" "m" "id")
+      (dict "d" "M124 286V326" "c" "f-id" "m" "id" "l" "accounts" "lx" 132 "ly" 311)
+      (dict "d" "M224 503H272" "c" "f-call" "m" "call")
+      (dict "d" "M224 598H272" "c" "f-call" "m" "call")
+      (dict "d" "M460 296H508" "c" "f-rec run" "m" "rec")
+      (dict "d" "M596 268V240" "c" "f-rec" "m" "rec")
+      (dict "d" "M460 598H512" "c" "f-ok" "m" "")
+      (dict "d" "M512 464V704" "c" "f-ok" "m" "")
+      (dict "d" "M512 464H520" "c" "f-ok" "m" "ok")
+      (dict "d" "M512 524H520" "c" "f-ok" "m" "ok")
+      (dict "d" "M512 584H520" "c" "f-ok" "m" "ok")
+      (dict "d" "M512 644H520" "c" "f-ok" "m" "ok")
+      (dict "d" "M512 704H520" "c" "f-ok" "m" "ok"))
+    "keys" (slice (dict "x" 486 "y" 598))
+    "pkt" "M224 598H512V524H520"
+    "g" (dict "joe" 0 "strazad" 0.68 "m1" 4.7))
+  (dict "id" "es-t" "cls" "es-t" "title" $title "view" "0 0 360 1972"
+    "pad" (dict "ix" 12 "iy" 9 "tx" 38 "ty" 24 "sy" 44 "oiy" 11 "oty" 27)
+    "zones" (slice
+      (dict "z" "people" "x" 10 "y" 8 "w" 340 "h" 252 "l" "Your browser" "lx" 24 "ly" 30)
+      (dict "z" "id" "x" 10 "y" 280 "w" 340 "h" 196 "l" "Identity" "lx" 24 "ly" 302)
+      (dict "z" "people" "x" 10 "y" 496 "w" 340 "h" 228 "l" "Agents" "lx" 24 "ly" 518)
+      (dict "brand" true "x" 10 "y" 764 "w" 340 "h" 412 "mx" 22 "my" 771 "ms" 0.7 "l" "Straza" "lx" 44 "ly" 788)
+      (dict "z" "audit" "x" 10 "y" 1216 "w" 340 "h" 182 "l" "SIEM" "lx" 24 "ly" 1238 "ns" (slice "siem overlay") "nx" 66 "ny" 1238)
+      (dict "z" "straza" "x" 10 "y" 1840 "w" 340 "h" 120 "l" "Seeded at start" "lx" 24 "ly" 1862 "ns" (slice "roles developer, operator" "approver sec-approvers" "policy agent-guardrails" "alice sponsors joe and sam") "nx" 24 "ny" 1886))
+    "heads" (slice
+      (dict "k" "mcp" "i" "server" "t" "MCP servers" "s" "behind the gateway" "x" 10 "y" 1438 "w" 340 "h" 382 "hx" 18 "hy" 1446 "hw" 200 "hh" 50 "ix" 26 "iy" 1453 "tx" 54 "ty" 1470 "sx" 26 "sy" 1490))
+    "cards" (slice
+      (dict "k" "u0" "chip" true "z" "people" "x" 20 "y" 40 "w" 156 "h" 48 "t" "Landing" "tag" ":8400" "ln" "none")
+      (dict "k" "u1" "chip" true "z" "people" "x" 184 "y" 40 "w" 156 "h" 48 "t" "Console" "tag" ":8420" "ln" "none")
+      (dict "k" "u2" "chip" true "z" "people" "x" 20 "y" 94 "w" 156 "h" 48 "t" "Approver" "tag" ":8443" "ln" "none")
+      (dict "k" "u3" "chip" true "z" "people" "x" 184 "y" 94 "w" 156 "h" 48 "t" "Keycloak" "tag" ":8480" "ln" "none")
+      (dict "k" "u4" "chip" true "z" "people" "x" 20 "y" 148 "w" 156 "h" 48 "t" "midPoint" "tag" ":8087" "ln" "none")
+      (dict "k" "u5" "chip" true "z" "people" "x" 184 "y" 148 "w" 156 "h" 48 "t" "Kibana" "tag" ":5601" "ln" "none")
+      (dict "k" "u6" "chip" true "z" "people" "x" 20 "y" 202 "w" 156 "h" 48 "t" "Chat face" "tag" ":8477" "ln" "none")
+      (dict "k" "midpoint" "z" "id" "x" 20 "y" 316 "w" 320 "h" 60 "t" "midPoint" "s" "the IGA" "i" "iga")
+      (dict "k" "keycloak" "z" "id" "x" 20 "y" 400 "w" 320 "h" 60 "t" "Keycloak" "s" "the identity provider" "i" "idp")
+      (dict "k" "sam" "z" "people" "x" 20 "y" 532 "w" 320 "h" 74 "t" "sam" "tag" "operator" "s" "SRE agent, straza exec" "ls" (slice "service holds sam's key") "i" "agent")
+      (dict "k" "joe" "z" "people" "x" 20 "y" 618 "w" 320 "h" 92 "t" "joe" "tag" "developer" "s" "Claude Code" "ls" (slice "demo overlay" "service holds joe's key") "i" "agent")
+      (dict "k" "strazad" "z" "straza" "x" 20 "y" 800 "w" 320 "h" 300 "t" "strazad" "s" "the enterprise profile" "i" "shield"
+        "rows" (slice (dict "y" 880 "t" "SCIM in, live sync out") (dict "y" 914 "t" "OIDC sign-in") (dict "y" 948 "t" "console and admin API")
+          (dict "y" 982 "t" "phone approver on 8443") (dict "y" 1016 "t" "machine check-in") (dict "y" 1050 "t" "MCP gateway" "r" true) (dict "y" 1084 "t" "audit sink")))
+      (dict "k" "postgres" "chip" true "z" "straza" "x" 20 "y" 1114 "w" 156 "h" 48 "t" "Postgres" "tag" "records" "ln" "none")
+      (dict "k" "nats" "chip" true "z" "straza" "x" 184 "y" 1114 "w" 156 "h" 48 "t" "NATS" "tag" "events" "ln" "none")
+      (dict "k" "es" "z" "audit" "x" 20 "y" 1252 "w" 320 "h" 56 "t" "Elasticsearch" "s" "each event" "i" "search" "ln" "siem")
+      (dict "k" "kibana" "z" "audit" "x" 20 "y" 1328 "w" 320 "h" 56 "t" "Kibana" "s" "searches events" "i" "chart" "ln" "siem")
+      (dict "k" "m0" "z" "server" "x" 24 "y" 1510 "w" 296 "h" 56 "t" "demo-tools" "s" "echo and add tools" "i" "tool" "ln" "demo-tools")
+      (dict "k" "m1" "z" "server" "x" 24 "y" 1570 "w" 296 "h" 56 "t" "views-demo" "s" "a tool with a view" "i" "window" "ln" "views")
+      (dict "k" "m2" "z" "server" "x" 24 "y" 1630 "w" 296 "h" 56 "t" "objects-demo" "s" "object scope" "i" "object" "ln" "objects")
+      (dict "k" "m3" "z" "server" "x" 24 "y" 1690 "w" 296 "h" 56 "t" "midpoint" "s" "IGA, gated writes" "i" "iga" "ln" "none")
+      (dict "k" "m4" "z" "server" "x" 24 "y" 1750 "w" 296 "h" 56 "t" "postgres" "s" "four demo databases" "i" "db" "ln" "none" "tag" "pg"))
+    "flows" (slice
+      (dict "d" "M100 376V396" "c" "f-id" "m" "id" "l" "accounts" "lx" 108 "ly" 392)
+      (dict "d" "M16 346H5V880H16" "c" "f-id run" "m" "id" "ms" "id" "l" "SCIM and sign-in" "lx" 14 "ly" 748)
+      (dict "d" "M180 724V796" "c" "f-call" "m" "call" "l" "check-in and MCP calls" "lx" 188 "ly" 748)
+      (dict "d" "M180 1176V1248" "c" "f-rec run" "m" "rec" "l" "events" "lx" 188 "ly" 1210)
+      (dict "d" "M180 1308V1324" "c" "f-rec" "m" "rec")
+      (dict "d" "M340 1050H354V1642H342" "c" "f-ok" "m" "")
+      (dict "d" "M342 1538V1778" "c" "f-ok" "m" "")
+      (dict "d" "M342 1538H324" "c" "f-ok" "m" "ok")
+      (dict "d" "M342 1598H324" "c" "f-ok" "m" "ok")
+      (dict "d" "M342 1658H324" "c" "f-ok" "m" "ok")
+      (dict "d" "M342 1718H324" "c" "f-ok" "m" "ok")
+      (dict "d" "M342 1778H324" "c" "f-ok" "m" "ok"))
+    "keys" (slice (dict "x" 354 "y" 1410)))
+-}}
+{{- range $v := $variants }}
+{{ partial "zone-diagram.html" (dict "v" $v "href" $href "icons" $icons) }}
+{{- end }}

@@ -1,12 +1,18 @@
 ---
 title: Classify
 description: Send a call to the inline classifier when a static rule cannot tell whether it is safe.
+summary: >-
+  A rule with `mode: classify` keeps an allow only after a classifier has looked at the call,
+  and no answer in time means a deny. The built-in heuristic has no model and no network. It
+  denies shell commands with a clear sign of hidden intent, such as a download piped into a
+  shell, and allows when in doubt.
 pagetype: how-to
 weight: 40
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in a Linux container, with strazactl on an admin API token and the hook events fed to straza hook by hand on a machine enrolled as dana. The classifier's timeout path was read at source and not provoked, and the console's Write YAML door was not walked in a browser
+  except: the classifier's timeout and the console's Write YAML door, read at source
   date: 2026-10-06
 applies_to: both
 keywords: classify classifier inline deadline

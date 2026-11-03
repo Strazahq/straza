@@ -1,6 +1,11 @@
 ---
 title: Doctor and logs
 description: Find out why a hook denies or a server misbehaves, from straza doctor on the agent's machine and the strazad log on the server.
+summary: >-
+  `straza doctor` reads one agent machine: whether it reaches the server, holds a session and
+  delivers its audit, with the fix on every line that is not ok. The strazad log on standard
+  error says what the server did, line by line. Neither is evidence, which lives in the
+  hash-chained audit record.
 pagetype: how-to
 weight: 90
 draft: false
@@ -33,7 +38,7 @@ These ten symptoms are common ones. Each links the step whose failure help quote
 
 | What you see | Where the fix is |
 |---|---|
-| The sign-in page answers `Invalid username or password.` for the admin | [Sign in as the admin]({{< relref "get-started/first-governed-session.md#sign-in-as-the-admin" >}}) on Your first governed session |
+| The sign-in page answers `Invalid username or password.` for the admin | [Sign in to the console]({{< relref "evaluate/try-it-on-one-laptop.md#sign-in-to-the-console" >}}) on Your first governed session |
 | `straza enroll` stops with `The browser sign-in did not finish within 5 minutes`, with `the sign-in code expired before it was approved`, or with an error that ends `connect: connection refused` | [Sign in and enroll]({{< relref "guides/govern-an-agent/enroll-a-machine.md#sign-in-and-enroll" >}}) on Enroll a machine |
 | Every governed call is denied with `Straza: no active Straza session. Restart the session so straza can check in` | [Check a deny and an allow]({{< relref "guides/govern-an-agent/claude-code.md#check-a-deny-and-an-allow" >}}) on Claude Code |
 | A session start is refused with `attestation level "advisory" is below the required level "managed"` | [Open a session]({{< relref "guides/govern-an-agent/claude-code.md#open-a-session" >}}) on Claude Code |

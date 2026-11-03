@@ -1,12 +1,18 @@
 ---
 title: Hold a call for a person
 description: The command kubectl apply waits for a holder of an approver role, and the agent runs it once after the approval.
+summary: >-
+  A hold is an allow that needs approval first: a rule with `mode: approve` waits for a holder
+  of a named approver role. The hook denies the first call with a reference, and the same call
+  passes once after the approval. A timeout, a no or an unreachable approval service ends in a
+  deny.
 pagetype: how-to
 weight: 20
 draft: false
 tested:
   version: v1.1.0
   platform: Linux, against the enterprise demo stack under the enterprise profile, with the hook events fed to straza hook by hand in a Linux container enrolled as dana. The waiting row was read in the console and on the self-service page in a headless browser, and the approver decided with strazactl from her own login, which reaches the endpoint the console decides on. strazactl no longer signs in or decides, so a person now decides in the console, on the self-service page or on a phone
+  except: the decision in the console, which replaced the strazactl decision of the walk
   date: 2026-09-28
 applies_to: both
 keywords: approve hold approver timeout confirm

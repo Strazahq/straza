@@ -1,12 +1,18 @@
 ---
 title: Backup and upgrade
 description: Take a backup that restores the whole server, restore it and rehearse the restore, upgrade strazad without logging anyone out, and know the way back.
+summary: >-
+  A backup is the store, SQLite or Postgres, plus three key files beside it: the key-encryption
+  key, the approver TLS pair and the WebPush key. An upgrade restarts on the newer binary, which
+  migrates the store at boot, and `strazad migrate --to` or a restore is the way back. Only an
+  upgrade from 1.1.2 to 2.0.0 makes people enroll again.
 pagetype: how-to
 weight: 70
 draft: false
 tested:
   version: v1.0.0-1500-g0cd3e356
   platform: Alpine 3.20 containers in the standalone profile, laid out as the standalone host guide describes. One container ran the backup, two restores that left out secret.key and approver-tls, a restore without secret.key over a store that held a client assertion key, the restore steps, the Verify list with a governed tool call and straza doctor on a client enrolled before the backup, the upgrade block with a copy of the same build standing in for the new binary because no later release exists, the migrate refusal and the refusal of a store set to version 30. A second container ran the drill, where a form post with the admin password stood in for the browser sign-in. The pg_dump and pg_restore commands and dropdb ran against a Postgres 16 container with strazad in the standalone profile on that database. The enterprise profile, Kubernetes, the WebPush key, the apps export and the console sentences were not run. On 2026-10-21 the two straza doctor outputs were captured again in a third Alpine container with a working tree of the background service as v1.0.0-1570-gaf326165-dirty, where straza service ran with STRAZA_HOME, alice enrolled and started a session before a copy of the data directory was put back, and admin enrolled and started one session after it. That container also put a copy of a service's state directory back and saw the next session start refused as a copied machine. The upgrade text for older clients was not run, and the section Upgrade from 1.1.2 to 2.0.0 was written from the code on 2026-11-01 and not walked. The Windows sentences were written from the code on 2026-10-22 and 2026-10-23 and not run by these steps. On 2026-10-26 a test script installed MSIs built from the source tree at v1.0.0-1600-g3c02a286 on a Windows 10 machine, upgraded one while hooks ran, saw an older one refused, and uninstalled and purged them. The macOS sentences were written from the code on 2026-10-26. An unsigned package built from the source tree was upgraded in place, uninstalled, installed again and purged in a macOS 26.6.2 virtual machine on 2026-10-26 at v1.0.0-1610-g366fac50, by a test script and not by these steps. On 2026-10-27 the same script did the same with a pkg built at v1.0.0-1615-g272946e5, signed with the Developer ID and notarized by Apple
+  except: the enterprise, Kubernetes and Windows steps, the WebPush key, the console, and the upgrade from 1.1.2 to 2.0.0, written from the code
   date: 2026-10-07
 applies_to: both
 who: You, as whoever is on call for the server
@@ -112,7 +118,7 @@ An upgrade is a restart on the new binary. At boot, before the line `store ready
 
 To upgrade from 1.1.2 to 2.0.0, follow [Upgrade from 1.1.2 to 2.0.0](#upgrade-from-112-to-200) first, because that release also changes every governed machine and the order of the steps matters.
 
-On the standalone host, download and verify the new release as [Install]({{< relref "get-started/install.md" >}}) describes. Then, from the directory that holds the new `strazad` and as the user that owns the installed one, stop the server, put the new binary in place of the old one and start it again.
+On the standalone host, download and verify the new release as [Install]({{< relref "guides/operate/install.md" >}}) describes. Then, from the directory that holds the new `strazad` and as the user that owns the installed one, stop the server, put the new binary in place of the old one and start it again.
 
 {{< command terminal="Terminal" purpose="on the strazad host" >}}
 ```sh
@@ -126,13 +132,13 @@ cd /srv/straza && strazad serve
 {{< see >}}The `strazad serving` line names the new version, and the `project identity` line names the same project as before the upgrade. That is the sign that the new binary found its store.{{< /see >}}
 
 
-A later release upgrades the `straza` package the way [Install]({{< relref "get-started/install.md#install-the-package-on-linux" >}}) installs it, from the new release's file. The upgrade restarts `straza service` on the new binary while systemd keeps its socket open, and the service reloads the sessions it saved, so harness windows that are open keep their sessions.
+A later release upgrades the `straza` package the way [Install]({{< relref "guides/operate/install.md#install-the-package-on-linux" >}}) installs it, from the new release's file. The upgrade restarts `straza service` on the new binary while systemd keeps its socket open, and the service reloads the sessions it saved, so harness windows that are open keep their sessions.
 
 
-On Windows a later release upgrades through its MSI, installed the way [Install]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) installs it, while harness windows stay open. The upgrade stops `straza service` while it replaces `straza.exe` in place, then starts the service on the new binary, and the service reloads the sessions it saved. A hook that runs while the service is stopped is refused with the sentence that the background service isn't running, and the tool call does not go through. An exit code of `3010` means the upgrade succeeded and a restart finishes removing an old file that was in use. An older MSI than the installed one refuses to install.
+On Windows a later release upgrades through its MSI, installed the way [Install]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) installs it, while harness windows stay open. The upgrade stops `straza service` while it replaces `straza.exe` in place, then starts the service on the new binary, and the service reloads the sessions it saved. A hook that runs while the service is stopped is refused with the sentence that the background service isn't running, and the tool call does not go through. An exit code of `3010` means the upgrade succeeded and a restart finishes removing an old file that was in use. An older MSI than the installed one refuses to install.
 
 
-On a Mac a later version upgrades through a new Straza package for macOS, the pkg of a later release or a package built from the source tree, installed the way [Install]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) shows, while harness windows stay open. When one of the package's checks refuses the upgrade, it does so before any file lands, and the old service keeps running. Otherwise the Installer replaces `/opt/straza/bin/straza`, the package then stops the old service and starts the new one, and the service reloads the sessions it saved. A hook that runs while the service is stopped is refused with the sentence that the background service isn't running, and the tool call does not go through.
+On a Mac a later version upgrades through a new Straza package for macOS, the pkg of a later release or a package built from the source tree, installed the way [Install]({{< relref "guides/operate/install.md#install-the-service-on-macos" >}}) shows, while harness windows stay open. When one of the package's checks refuses the upgrade, it does so before any file lands, and the old service keeps running. Otherwise the Installer replaces `/opt/straza/bin/straza`, the package then stops the old service and starts the new one, and the service reloads the sessions it saved. A hook that runs while the service is stopped is refused with the sentence that the background service isn't running, and the tool call does not go through.
 
 
 This release's migrations start at version 37. Only a build from before the first public release can have made a store below that version.
@@ -227,9 +233,9 @@ strazactl has no sign-in in 2.0.0. A strazactl 1.1.x that signed in before the u
 
 1.1.2 shipped archives only, and 2.0.0 brings the client in packages that also install `straza service`, the background service that holds each machine's keys and sessions. On each governed machine, an administrator installs the package and then runs the managed install again with the new binary, so the hooks run it. The managed install no longer copies a binary, and it refuses to run until the package is installed.
 
-- Install the deb or rpm package on Linux as [Install the package on Linux]({{< relref "get-started/install.md#install-the-package-on-linux" >}}) shows. Run the managed install by the package's full path, `sudo /usr/bin/straza install --managed --server <server-url> claude-code`, with each harness the machine governs. The full path matters, because `/usr/local/bin` comes before `/usr/bin` on the usual PATH and still holds the 1.1.2 binary. Then delete `/usr/local/bin/straza`, which the 1.1.2 archive or its managed install left, so that `straza` on the PATH is the package's.
-- On Windows, install the MSI and run the managed install with its `straza.exe`, as [Install the service on Windows]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) shows.
-- A Mac gets the pkg, and then an administrator runs `sudo /opt/straza/bin/straza install --managed --server <server-url> claude-code`, as [Install the service on macOS]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) shows. The pkg replaces the `/usr/local/bin/straza` that a 1.1.2 managed install copied there with a link to its own binary.
+- Install the deb or rpm package on Linux as [Install the package on Linux]({{< relref "guides/operate/install.md#install-the-package-on-linux" >}}) shows. Run the managed install by the package's full path, `sudo /usr/bin/straza install --managed --server <server-url> claude-code`, with each harness the machine governs. The full path matters, because `/usr/local/bin` comes before `/usr/bin` on the usual PATH and still holds the 1.1.2 binary. Then delete `/usr/local/bin/straza`, which the 1.1.2 archive or its managed install left, so that `straza` on the PATH is the package's.
+- On Windows, install the MSI and run the managed install with its `straza.exe`, as [Install the service on Windows]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) shows.
+- A Mac gets the pkg, and then an administrator runs `sudo /opt/straza/bin/straza install --managed --server <server-url> claude-code`, as [Install the service on macOS]({{< relref "guides/operate/install.md#install-the-service-on-macos" >}}) shows. The pkg replaces the `/usr/local/bin/straza` that a 1.1.2 managed install copied there with a link to its own binary.
 
 A machine without a managed install, where a person wired their own harness with `straza install`, runs `straza install claude-code` again as that person with the new binary, because the old wiring runs the old binary. [Deploy with Intune]({{< relref "guides/govern-an-agent/deploy-with-intune.md" >}}) and [Deploy with Jamf Pro]({{< relref "guides/govern-an-agent/deploy-with-jamf.md" >}}) roll the MSI and the pkg out to a fleet.
 
@@ -554,7 +560,7 @@ To retire a machine, take three steps in order:
 Revoking closes the time in which a copy of the machine's keys, such as one in a disk image, could still start a session.
 
 
-On a Windows machine, an administrator removes the Straza MSI in an elevated PowerShell, with the install command of [its step]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) and `/x` in place of `/i`. The `PURGE` property decides what happens to the keys in `C:\ProgramData\straza-service`.
+On a Windows machine, an administrator removes the Straza MSI in an elevated PowerShell, with the install command of [its step]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) and `/x` in place of `/i`. The `PURGE` property decides what happens to the keys in `C:\ProgramData\straza-service`.
 
 | Uninstall | What it does |
 |---|---|

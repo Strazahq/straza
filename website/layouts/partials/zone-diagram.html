@@ -1,0 +1,129 @@
+{{- /* zone-diagram draws one SVG of zones, linked cards and flows from a
+variant's data, in the style of the landing page's model diagram. Call it
+with (dict "v" variant "href" pages "icons" icons): pages maps a link key to a
+page and icons maps an icon key to SVG path markup. Variant fields:
+  id, view       the id prefix and the viewBox
+  title          the SVG title, the sentence a screen reader reads
+  pad            card text offsets: ix iy tx ty sy, and oiy oty for one line
+  bloom          optional glow behind the drawing: cx cy rx ry
+  zones          z (color), x y w h, label l at lx ly, optional note lines ns
+                 from nx ny,
+                 and brand true for the Straza zone, with its mark at mx my ms
+  heads          a zone whose header links: k, i icon, ln link, t, s, zone box
+                 x y w h, hit box hx hy hw hh, icon ix iy, title tx ty, sub sx sy
+  flows          d path, c class, m end marker, ms start marker, optional label
+                 l at lx ly, anchor a
+  pkt            optional path of the call dot, and g the glow delay per card
+  model          true to mark each part for steps and lighting: data-n holds
+                 the part key, steps maps a part key to its steps, a flow's st
+                 holds its steps, lit lists the parts to light, and say holds
+                 the sentences of the step buttons
+  keys           x y of each credential key
+  pills          x y w h, text t at tx ty, link ln, aria
+  cards          k, z, x y w h, t, optional s and more lines ls, tag, icon i,
+                 link ln, rows: t at y with a port on the left edge for l and
+                 on the right edge for r, where flows meet a panel card, and
+                 chip true for a small card of a title over its tag
+A card or head whose link key is not in pages draws without a link. */ -}}
+{{- $v := .v }}{{ $href := .href }}{{ $icons := .icons }}
+{{- $id := $v.id }}
+{{- $m := $v.model }}{{ $lit := $v.lit | default slice }}{{ $steps := $v.steps | default dict }}
+<svg class="hero-model {{ $v.cls }}{{ if and $m $lit }} litmode{{ end }}" viewBox="{{ $v.view }}" role="group" aria-labelledby="{{ $id }}-t"{{ with $v.say }} data-say='{{ jsonify . }}'{{ end }}>
+<title id="{{ $id }}-t">{{ $v.title }}</title>
+<defs>
+  <linearGradient id="{{ $id }}-zg" x1="0" y1="0" x2="1" y2="1"><stop class="g0" offset="0"/><stop class="g1" offset="1"/></linearGradient>
+  <radialGradient id="{{ $id }}-bloom"><stop class="b0" offset="0"/><stop class="b1" offset="1"/></radialGradient>
+  <pattern id="{{ $id }}-grid" width="22" height="22" patternUnits="userSpaceOnUse"><path class="gridln" d="M22 0H0V22"/></pattern>
+  <filter id="{{ $id }}-glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  {{- range slice "call" "ok" "ask" "id" "rec" "pub" }}
+  <marker id="{{ $id }}-ah-{{ . }}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path class="ah ah-{{ . }}" d="M0 .8 9.2 5 0 9.2 2.2 5z"/></marker>
+  {{- end }}
+</defs>
+{{- with $v.bloom }}
+<ellipse class="bloom" cx="{{ .cx }}" cy="{{ .cy }}" rx="{{ .rx }}" ry="{{ .ry }}" fill="url(#{{ $id }}-bloom)"/>
+{{- end }}
+{{- range $z := $v.zones }}
+{{- if $z.brand }}
+<rect class="zone z-straza" x="{{ $z.x }}" y="{{ $z.y }}" width="{{ $z.w }}" height="{{ $z.h }}" rx="20" fill="url(#{{ $id }}-zg)"/>
+<rect class="zgrid" x="{{ $z.x }}" y="{{ $z.y }}" width="{{ $z.w }}" height="{{ $z.h }}" rx="20" fill="url(#{{ $id }}-grid)"/>
+<rect class="zone-edge" x="{{ $z.x }}" y="{{ $z.y }}" width="{{ $z.w }}" height="{{ $z.h }}" rx="20"/>
+<g class="mark" transform="translate({{ $z.mx }} {{ $z.my }}) scale({{ $z.ms }})"><path class="mk-s" d="M12 2 4 5v6.2c0 4.9 3.3 9.3 8 10.8 4.7-1.5 8-5.9 8-10.8V5l-8-3Z"/><path class="mk-x" d="m12 6.2 1.4 3.6 3.8.2-3 2.4 1 3.7L12 14l-3.2 2.1 1-3.7-3-2.4 3.8-.2L12 6.2Z"/></g>
+<text class="zl z-straza brandl" x="{{ $z.lx }}" y="{{ $z.ly }}">{{ $z.l }}</text>
+{{- else }}
+<rect class="zone z-{{ $z.z }}" x="{{ $z.x }}" y="{{ $z.y }}" width="{{ $z.w }}" height="{{ $z.h }}" rx="18"/>
+<text class="zl z-{{ $z.z }}" x="{{ $z.lx }}" y="{{ $z.ly }}">{{ $z.l }}</text>
+{{- end }}
+{{- range $i, $t := $z.ns }}<text class="zn" x="{{ $z.nx }}" y="{{ add $z.ny (mul $i 20) }}">{{ $t }}</text>{{ end }}
+{{- end }}
+{{- range $hz := $v.heads }}
+{{- $hp := index $href ($hz.ln | default $hz.k) }}
+<rect class="zone z-server" x="{{ $hz.x }}" y="{{ $hz.y }}" width="{{ $hz.w }}" height="{{ $hz.h }}" rx="18"/>
+<a class="hn hd z-server{{ if $m }} n{{ if in $lit $hz.k }} lit{{ end }}{{ end }}"{{ if $m }} data-n="{{ $hz.k }}"{{ with index $steps $hz.k }} data-s="{{ . }}"{{ end }}{{ end }} href="{{ $hp.RelPermalink }}" aria-label="{{ $hz.t }}{{ with $hz.s }}: {{ . }}{{ end }}. Opens {{ $hp.LinkTitle }}.">
+  <rect class="hit" x="{{ $hz.hx }}" y="{{ $hz.hy }}" width="{{ $hz.hw }}" height="{{ $hz.hh }}" rx="10"/>
+  <g class="ic" transform="translate({{ $hz.ix }} {{ $hz.iy }}) scale(.8333)">{{ index $icons ($hz.i | default $hz.k) | safeHTML }}</g>
+  <text class="ht" x="{{ $hz.tx }}" y="{{ $hz.ty }}">{{ $hz.t }}</text>
+  {{- with $hz.s }}<text class="hs" x="{{ $hz.sx }}" y="{{ $hz.sy }}">{{ . }}</text>{{ end }}
+</a>
+{{- end }}
+{{- /* The flows, drawn under the cards so the call dot passes behind them. */}}
+<g class="flows">
+{{- range $f := $v.flows }}
+  {{- if and $m $f.st }}<g data-s="{{ $f.st }}">{{ end }}
+  <path class="ln {{ $f.c }}" d="{{ $f.d }}"{{ with $f.m }} marker-end="url(#{{ $id }}-ah-{{ . }})"{{ end }}{{ with $f.ms }} marker-start="url(#{{ $id }}-ah-{{ . }})"{{ end }}/>
+  {{- with $f.l }}<text class="lab" x="{{ $f.lx }}" y="{{ $f.ly }}"{{ with $f.a }} text-anchor="{{ . }}"{{ end }}>{{ . }}</text>{{ end }}
+  {{- if and $m $f.st }}</g>{{ end }}
+{{- end }}
+</g>
+{{- with $v.pkt }}
+<g class="pkt" aria-hidden="true">
+  <circle class="halo" r="12"><animateMotion dur="6s" repeatCount="indefinite" path="{{ . }}" calcMode="linear" keyPoints="0;1;1" keyTimes="0;.8;1"/></circle>
+  <circle class="dot" r="5" filter="url(#{{ $id }}-glow)"><animateMotion dur="6s" repeatCount="indefinite" path="{{ . }}" calcMode="linear" keyPoints="0;1;1" keyTimes="0;.8;1"/></circle>
+</g>
+{{- end }}
+{{- /* A key sits where an allowed call enters a server: the gateway adds the
+server's credential there, so the agent never holds it. */}}
+{{- range $v.keys }}
+<a class="hn key{{ if $m }} n{{ if in $lit "credential" }} lit{{ end }}{{ end }}"{{ if $m }} data-n="credential"{{ with index $steps "credential" }} data-s="{{ . }}"{{ end }}{{ end }} href="{{ $href.credential.RelPermalink }}" aria-label="The server's credential. Straza adds it at the gateway, so the agent never holds it. Opens {{ $href.credential.LinkTitle }}.">
+  <title>Straza adds the server’s credential here, so the agent never holds it</title>
+  <circle class="kb" cx="{{ .x }}" cy="{{ .y }}" r="12"/>
+  <g class="ic" transform="translate({{ sub .x 7 }} {{ sub .y 7 }}) scale(.5833)">{{ index $icons "idp" | safeHTML }}</g>
+</a>
+{{- end }}
+{{- range $p := $v.pills }}
+{{- $pp := index $href $p.ln }}
+<a class="hn z-people{{ if $m }} n{{ if in $lit $p.k }} lit{{ end }}{{ end }}"{{ if $m }} data-n="{{ $p.k }}"{{ with index $steps $p.k }} data-s="{{ . }}"{{ end }}{{ end }} href="{{ $pp.RelPermalink }}" aria-label="{{ $p.aria }} Opens {{ $pp.LinkTitle }}."><rect class="pill" x="{{ $p.x }}" y="{{ $p.y }}" width="{{ $p.w }}" height="{{ $p.h }}" rx="{{ div $p.h 2 }}"/><text class="pt" x="{{ $p.tx }}" y="{{ $p.ty }}" text-anchor="middle">{{ $p.t }}</text></a>
+{{- end }}
+{{- $pad := $v.pad }}
+{{- range $c := $v.cards }}
+{{- $pg := index $href ($c.ln | default $c.k) }}
+{{- $ic := index $icons ($c.i | default $c.k) }}
+{{- if $pg }}
+<a class="hn z-{{ $c.z }}{{ if $m }} n{{ if in $lit $c.k }} lit{{ end }}{{ end }}"{{ if $m }} data-n="{{ $c.k }}"{{ with index $steps $c.k }} data-s="{{ . }}"{{ end }}{{ end }} href="{{ $pg.RelPermalink }}" aria-label="{{ $c.t }}{{ with $c.s }}: {{ . }}{{ end }}{{ range $c.ls }}, {{ . }}{{ end }}. Opens {{ $pg.LinkTitle }}.">
+{{- else }}
+<g class="hn z-{{ $c.z }}">
+{{- end }}
+  <rect class="card" x="{{ $c.x }}" y="{{ $c.y }}" width="{{ $c.w }}" height="{{ $c.h }}" rx="12"/>
+  {{- if $c.chip }}
+  <text class="ct" x="{{ add $c.x 12 }}" y="{{ add $c.y 22 }}">{{ $c.t }}</text>
+  <text class="tg" x="{{ add $c.x 12 }}" y="{{ add $c.y 40 }}">{{ $c.tag }}</text>
+  {{- else }}
+  {{- if and $v.pkt $v.g (isset $v.g $c.k) }}<rect class="glow" x="{{ $c.x }}" y="{{ $c.y }}" width="{{ $c.w }}" height="{{ $c.h }}" rx="12" style="animation-delay:{{ index $v.g $c.k }}s" aria-hidden="true"/>{{ end }}
+  {{- if $c.s }}
+  <g class="ic" transform="translate({{ add $c.x $pad.ix }} {{ add $c.y $pad.iy }}) scale(.8333)">{{ $ic | safeHTML }}</g>
+  <text class="ht" x="{{ add $c.x $pad.tx }}" y="{{ add $c.y $pad.ty }}">{{ $c.t }}</text>
+  <text class="hs" x="{{ add $c.x $pad.ix }}" y="{{ add $c.y $pad.sy }}">{{ $c.s }}</text>
+  {{- range $i, $l := $c.ls }}<text class="hs" x="{{ add $c.x $pad.ix }}" y="{{ add (add $c.y $pad.sy) (mul (add $i 1) 18) }}">{{ $l }}</text>{{ end }}
+  {{- else }}
+  <g class="ic" transform="translate({{ add $c.x $pad.ix }} {{ add $c.y $pad.oiy }}) scale(.8333)">{{ $ic | safeHTML }}</g>
+  <text class="ht" x="{{ add $c.x $pad.tx }}" y="{{ add $c.y $pad.oty }}">{{ $c.t }}</text>
+  {{- end }}
+  {{- with $c.tag }}<text class="tg" x="{{ sub (add $c.x $c.w) 12 }}" y="{{ add $c.y (cond (ne $c.s "") 20 (sub $pad.oty 1)) }}" text-anchor="end">{{ . }}</text>{{ end }}
+  {{- range $c.rows }}{{ if .l }}<circle class="port" cx="{{ $c.x }}" cy="{{ .y }}" r="3.5"/>{{ end }}{{ if .r }}<circle class="port" cx="{{ add $c.x $c.w }}" cy="{{ .y }}" r="3.5"/>{{ end }}<text class="hr" x="{{ add $c.x $pad.ix }}" y="{{ add .y 4.5 }}">{{ .t }}</text>{{ end }}
+  {{- end }}
+{{- if $pg }}
+</a>
+{{- else }}
+</g>
+{{- end }}
+{{- end }}
+</svg>

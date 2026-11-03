@@ -139,9 +139,10 @@ The landing page lists every address, account and walkthrough. Four things to tr
    the midpoint row and allow her agents. sam's reads then run in midPoint as alice, and its call
    to `midpoint__assign_role` waits for her approval.
 
-The [demo stack guide](https://docs.straza.ai/get-started/enterprise-demo-stack/) covers the cast,
-the tunnels, Elasticsearch and Kibana for the audit records, and
-[the hardened shape](https://docs.straza.ai/get-started/enterprise-demo-stack/#demo-defaults-and-the-hardened-shape).
+The [demo stack tutorial](https://docs.straza.ai/evaluate/try-it-on-the-demo-stack/) watches an
+agent be allowed, denied and held, then stopped from midPoint.
+[Demo stack defaults and the hardened shape](https://docs.straza.ai/guides/operate/demo-stack-defaults/)
+covers the cast, the tunnels, Elasticsearch and Kibana for the audit records, and the loopback shape.
 
 ## Quickstart
 
@@ -160,7 +161,7 @@ strazad serve --profile standalone
 In a second terminal, start `straza service`, the Straza background service, which holds this
 machine's key and sessions. Here it runs as you for the `STRAZA_HOME` you set, which works on
 Linux and macOS. On Windows it runs only as the Windows service an administrator installs, as
-[Install](https://docs.straza.ai/get-started/install/#install-the-service-on-windows) shows:
+[Install](https://docs.straza.ai/guides/operate/install/#install-the-service-on-windows) shows:
 
 ```sh
 export STRAZA_HOME="$HOME/.straza"
@@ -185,9 +186,9 @@ Straza starter policy: recursive force-delete is denied. Delete files individual
 
 The command never runs, and `straza exec` exits with status 2. `straza install claude-code` puts
 the same decision in front of every tool call Claude Code makes.
-[Your first governed session](https://docs.straza.ai/get-started/first-governed-session/) repeats
-these steps as a person it creates, shows which rule decided with `strazactl policy simulate`, and
-wires a live agent.
+[Try it on one laptop](https://docs.straza.ai/evaluate/try-it-on-one-laptop/) repeats
+these steps as a person it creates, wires Claude Code, and ends with your own approval of a call
+the agent made.
 
 ## How it works
 
@@ -235,7 +236,7 @@ Recording of prompts and replies is off unless a policy set turns it on.
 | Agent | A process with no hook surface, through `straza exec` and the sandbox image | [Hookless processes](https://docs.straza.ai/guides/govern-an-agent/hookless-processes/) |
 | Agent | Headless CI and fleet agents, enrolled with an Ed25519 key | [Headless agents](https://docs.straza.ai/guides/govern-an-agent/headless-agents/) |
 | MCP | Any MCP client, through the gateway at `/mcp` | [Any MCP client](https://docs.straza.ai/guides/govern-an-agent/any-mcp-client/) |
-| Identity | midPoint over SCIM 2.0, the reference IGA, which runs in the demo stack | [midPoint](https://docs.straza.ai/guides/connect-identity/midpoint/) |
+| Identity | midPoint over SCIM 2.0 through the [universal REST connector](https://github.com/Strazahq/universal-rest-connector), the reference IGA, which runs in the demo stack | [midPoint](https://docs.straza.ai/guides/connect-identity/midpoint/) |
 | Identity | Any other system that provisions over SCIM 2.0 | [Generic SCIM](https://docs.straza.ai/guides/connect-identity/generic-scim/) |
 | Identity | Okta. The guide's SCIM requests were replayed, not yet run against an Okta tenant | [Okta](https://docs.straza.ai/guides/connect-identity/okta/) |
 | Identity | An OIDC identity provider, Keycloak in the demo stack, or strazad's built-in sign-in | [Keycloak login](https://docs.straza.ai/guides/connect-identity/keycloak-login/) |
@@ -269,8 +270,8 @@ sha256sum -c checksums.txt --ignore-missing
 The identity pattern pins the signing certificate to this repository, its release workflow and a
 version tag, so a signature made anywhere else does not verify. It spells the organization
 `Strazahq` as GitHub writes it into the certificate, and the match is case-sensitive. The
-[install guide](https://docs.straza.ai/get-started/install/) and
-[Run it on Kubernetes](https://docs.straza.ai/get-started/run-it-on-kubernetes/) cover the rest.
+[install guide](https://docs.straza.ai/guides/operate/install/) and
+[Run it on Kubernetes](https://docs.straza.ai/guides/operate/run-it-on-kubernetes/) cover the rest.
 
 ## Security model
 
@@ -296,7 +297,7 @@ root and does not replace your IGA. [docs/compliance.md](docs/compliance.md) map
 controls to ISO/IEC 27001 Annex A and NIS2 Article 21(2), and whether that meets a regulation is
 your assessment. The [security model](https://docs.straza.ai/security/security-model/) lists the
 invariants and the known limits, the
-[trust model](https://docs.straza.ai/concepts/trust-model-and-non-goals/) says what each lane is
+[security model in one page](https://docs.straza.ai/evaluate/security-model/#what-each-enforcement-point-is-worth) says what each lane is
 worth, and [Outbound connections](https://docs.straza.ai/reference/ports-and-network/#outbound-connections)
 lists every destination strazad dials.
 
@@ -334,7 +335,7 @@ adapters and plugins, and the mobile approver app are Apache-2.0, as the table b
 | `strazad`, `straza`, `strazactl`, the console, and everything else in this repository that the rows below do not name, including `cmd/`, `internal/`, `web/`, `deploy/`, `docs/`, `test/`, `tools/` and `website/` | [AGPL-3.0-only](LICENSE) |
 | `spec/`, `kits/`, `pkg/`, `adapters/` and `plugins/`, the copy of the plugin skill and its catalog files that the docs site serves from `website/static/.well-known/`, `.claude-plugin/marketplace.json`, and the mobile approver app in its own repository | [Apache-2.0](LICENSE-APACHE) |
 | Third-party source: the QR encoder `web/ui/src/vendor/qrcodegen.js` by Project Nayuki, and the 18 interface components in `web/ui/src/components/ui/` generated from shadcn/ui | MIT, with the notices in the files and in `web/ui/src/components/ui/LICENSE` |
-| The prebuilt connector `deploy/compose/eval-stack/midpoint/connectors/universal-rest-connector.jar` for the evaluation stack, a separate program | Apache-2.0, its own license, with the license and notice files beside it |
+| The prebuilt connector `deploy/compose/eval-stack/midpoint/connectors/universal-rest-connector.jar` for the evaluation stack, a separate program whose source is the [universal-rest-connector repository](https://github.com/Strazahq/universal-rest-connector) | Apache-2.0, its own license, with the license and notice files beside it |
 
 Each part is licensed under the one license its row names, and no later version of the
 AGPL applies. The licenses grant no right to use the Straza name or logo, and

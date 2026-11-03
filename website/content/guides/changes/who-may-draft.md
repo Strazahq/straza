@@ -1,6 +1,11 @@
 ---
 title: Who may draft and publish
 description: Decide who may draft a change to servers, roles, access rows and policy sets, who publishes it, and when a second person must.
+summary: >-
+  A person with admin rights drafts what their read grants show, an admin API token creates and
+  checks drafts, and an agent proposes through the built-in straza MCP server. Only a person
+  publishes. With `admin.secondPerson` on, a change that widens access or removes a server
+  needs a publisher other than its author.
 pagetype: how-to
 weight: 20
 who: You, as the admin who delegates admin rights or runs automation that proposes changes
@@ -12,6 +17,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in an Alpine container on Linux, with admin.secondPerson turned on in its config for the second-person checks. The token commands and their refusals ran, and so did the refused direct write, the pause, the coding-agent refusal of a publish, and a publish in headless Chromium by the person who minted the token that wrote the draft. An AI agent's call to an admin route did not run, because it needs a session token that no command hands to another client. A publish on a person's strazactl login did not run either, and strazactl no longer signs in or publishes
   date: 2026-10-06
+  except: an AI agent's refused call to an admin route, which did not run
 applies_to: both
 keywords: drafts publish second person secondPerson admin api token agent drafting tools
 ---
