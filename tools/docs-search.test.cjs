@@ -69,7 +69,7 @@ test('published search finds real configuration keys and commands', { skip: !pro
     assert.equal(new Set(result.hits.map((hit) => hit.entry.p)).size, result.hits.length);
   }
   assert.equal(publishedSearch(pages, 'straza connect').hits[0].entry.p, 'reference/cli/straza/straza_connect/');
-  assert.match(pages.find(page => page.p === 'evaluate/decide-whether-straza-fits/' && !page.a).b, /Each stop settles one question/);
+  assert.match(pages.find(page => page.p === 'evaluate/decide-whether-straza-fits/' && !page.a).b, /describes the model that the later pages build on/);
   assert.match(pages.find(page => page.p === 'guides/operate/install/' && !page.a).b, /Straza is three executables/);
   const filtered = publishedSearch(pages, 'credential', 10, 'guides');
   assert.ok(filtered.total > 0);
