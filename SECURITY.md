@@ -58,7 +58,7 @@ proves before the draft release exists. The pkg is signed with the Developer ID 
 SynapTech s. r. o. and notarized by Apple, so `pkgutil --check-signature` and
 `spctl -a -vvv -t install` check it on a Mac. Releases from 1.1.2 and earlier carry the
 archives only.
-The verification recipe is at https://docs.straza.ai/get-started/install/, and
+The verification recipe is at https://docs.straza.ai/guides/operate/install/, and
 https://docs.straza.ai/security/supply-chain/ explains each check.
 At runtime, policy snapshots and session tokens are Ed25519-signed. A client refuses a
 policy snapshot it cannot verify against the keys it pinned at enrollment, and strazad

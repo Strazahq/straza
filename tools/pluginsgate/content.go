@@ -27,9 +27,9 @@ var manifestFiles = []string{
 	".codex-plugin/plugin.json",
 }
 
-// checkLinks maps every docs.straza.ai link in the file to a page under
-// website/content or a served file under website/static. The site root and
-// llms.txt need no page.
+// checkLinks maps every docs.straza.ai link in the file, or the Markdown
+// copy it names, to a page under website/content or a served file under
+// website/static. The site root and llms.txt need no page.
 func checkLinks(root, rel string, data []byte) []finding {
 	var out []finding
 	for n, line := range strings.Split(string(data), "\n") {
@@ -39,6 +39,9 @@ func checkLinks(root, rel string, data []byte) []finding {
 				p = p[:k]
 			}
 			p = strings.Trim(strings.TrimRight(p, ".,;:"), "/")
+			// A link may name the page's Markdown copy, its address plus
+			// index.md, which the site builds for every page.
+			p = strings.TrimSuffix(strings.TrimSuffix(p, "index.md"), "/")
 			if p == "" || p == "llms.txt" {
 				continue
 			}

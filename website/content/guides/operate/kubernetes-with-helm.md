@@ -1,12 +1,18 @@
 ---
 title: Kubernetes with Helm
 description: Install strazad on your cluster with the Helm chart, set the values that decide its shape, and know the way to upgrade and roll back.
+summary: >-
+  The Helm chart runs two stateless strazad pods under the enterprise profile, with a bundled
+  Postgres and NATS unless you name your own, and mounts every secret from a Secret you create.
+  It refuses to render shapes that boot green and misbehave. A rollback runs `strazad migrate
+  --to` with the newer image before the older one starts.
 pagetype: how-to
 weight: 30
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: Helm 3.16.4 rendering and linting chart 1.1.0 from the repository on a Linux host with no cluster, for the render and its object list, the trimmed Deployment, the values tables, the chart's release notes and the render refusals. The Secrets, the install, the port-forward, the upgrade and the rollback were not run for want of a cluster, the /readyz body is the one a standalone strazad at the same build returned, and the rollback's pod was built offline from the rendered Deployment with the page's jq program. On 2026-11-01 the render of the trimmed Deployment ran again with chart 2.0.0, Helm 3.16.4, and only its image tag had changed
+  except: the Secrets, install, port-forward, upgrade and rollback, for want of a cluster
   date: 2026-10-06
 applies_to: enterprise
 who: You, as the operator of the cluster
@@ -32,6 +38,9 @@ Four values make the smallest real install:
 
 
 At the identity provider, Straza's client, `oidc.clientId`, takes two redirects. The console and the self-service page return to the address people open the console at, normally `publicUrl`, followed by `/console/signin`. `straza enroll` returns to `http://127.0.0.1/callback` on a port each sign-in picks, or on the port `oidc.loopbackPort` fixes for a provider that matches ports exactly. [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}), [Okta login]({{< relref "guides/connect-identity/okta-login.md" >}}) and [Keycloak login]({{< relref "guides/connect-identity/keycloak-login.md" >}}) show where each provider takes them.
+
+
+The chart takes those two as the values `oidc.clientId`, `straza` by default, and `oidc.loopbackPort`, 0 by default, beside `oidc.issuer`. `oidc.jitProvision` has no chart value, and the enterprise profile, the chart's default, already sets it to false, so put it in `configYaml` only to state it.
 
 The key-encryption key seals stored credentials, and every replica needs the same one, so the chart mounts it at `/etc/straza/secret.key`. Without it each pod mints an ephemeral key in its own empty data directory, and secrets stop surviving a restart. Create the namespace and three Secrets first, the third holding the password of the bundled database at the data key `password`.
 

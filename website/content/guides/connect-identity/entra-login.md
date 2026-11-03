@@ -1,6 +1,11 @@
 ---
 title: Entra ID login
 description: People sign in to Straza with their Microsoft Entra ID account, in a browser on the machine they enroll, and strazad trusts your tenant's ID tokens.
+summary: >-
+  People sign in to Straza with their Entra ID account, in a browser on the machine they
+  enroll, and Straza never holds their password. You register Straza in Entra as a public
+  client with a 127.0.0.1 redirect and the auth_time claim, and point strazad at your tenant.
+  Your IGA provisions the people over SCIM.
 pagetype: how-to
 weight: 32
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.0.0-1577-ged23b225-dirty
   platform: Not walked. The Entra steps follow Microsoft's documentation as read on 2026-10-22, and the Straza side follows the code of the working tree of the browser sign-in before its commit. No step ran against an Entra tenant. The console address step and the console's sign-in were written from the code on 2026-10-22 and not walked
   date: 2026-10-22
+  except: every Entra step, which has not run against a real tenant
 applies_to: enterprise
 who: You, as the Entra admin and the Straza admin
 where: The Microsoft Entra admin center, strazad's configuration file, and a terminal on a person's machine
@@ -159,7 +165,7 @@ A console sentence that starts `Your identity provider` and says it refused the 
 ## Caveats {.nostep}
 
 
-Disabling a person in Entra stops new sign-ins and enrollments and nothing more. Your identity manager's SCIM deactivation cuts the person's running Straza sessions and every enrollment, so a leaver flow triggers both. While Entra cannot sign anyone in, the break-glass admin still signs in through **Emergency sign-in** on the console's sign-in card, which opens Straza's own sign-in page, and mints a token there when strazactl is needed.
+Disabling a person in Entra stops new sign-ins and enrollments and nothing more. Your IGA's SCIM deactivation cuts the person's running Straza sessions and refuses every check-in from their machines until your IGA reactivates them, so a leaver flow triggers both. While Entra cannot sign anyone in, the break-glass admin still signs in through **Emergency sign-in** on the console's sign-in card, which opens Straza's own sign-in page, and mints a token there when strazactl is needed.
 
 ## Next {.nostep}
 

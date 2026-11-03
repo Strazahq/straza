@@ -1,6 +1,11 @@
 ---
 title: Keycloak login
 description: strazad trusts your Keycloak realm, people sign in to Straza with their own Keycloak identity, and Straza never holds a password.
+summary: >-
+  strazad trusts the ID tokens of your Keycloak realm, so people sign in with their own
+  Keycloak identity and Straza holds no password. You create a client without a secret and
+  point strazad at the realm. Your IGA still decides who exists, and a sign-in finds the
+  account your IGA provisioned.
 pagetype: how-to
 weight: 30
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0
   platform: A Linux container on the demo stack's host, with Keycloak 26.0 and the shipped realm import. The device flow ran from the container, and the browser step was driven headless as alice. The client settings for the browser sign-in and its steps were written on 2026-10-22 from the code and from the shipped realm and were not walked. The console's browser sign-in, with its redirect address and web origin, was written from the code on 2026-10-22 and not walked
   date: 2026-09-28
+  except: the browser sign-in of straza enroll and of the console, written from the code and not walked
 applies_to: enterprise
 who: You, as the Keycloak admin and the Straza admin
 where: The Keycloak admin console, strazad's configuration file, and a terminal with strazactl
@@ -28,7 +34,7 @@ In the enterprise profile a person signs in at Keycloak, and strazad verifies th
 - Keycloak administration for one realm.
 - A shell with `strazactl`, and access to strazad's configuration.
 
-The examples ran against the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}). Its realm `straza` at `http://localhost:8480` is imported from a file in the repository, so every setting below is the one that file carries.
+The examples ran against the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}). Its realm `straza` at `http://localhost:8480` is imported from a file in the repository, so every setting below is the one that file carries.
 
 ## Create the client
 
@@ -191,7 +197,8 @@ Press **Revoke** on the token's row, then **Revoke token**. The next call on it 
 ## Caveats {.nostep}
 
 
-Disabling a person in Keycloak stops new logins and enrollments and nothing more. strazad verifies the Keycloak token at login only, and it verifies its own session tokens against its own keys. The identity manager's SCIM deactivation cuts running Straza sessions and every enrollment of the person, such as a machine key that `straza service` holds. A leaver flow therefore triggers both: Keycloak for the authentication cut, and SCIM for the authorization cut.
+
+Disabling a person in Keycloak stops new logins and enrollments and nothing more. strazad verifies the Keycloak token at login only, and it verifies its own session tokens against its own keys. Your IGA's SCIM deactivation cuts the person's running Straza sessions and refuses every check-in from their machines until your IGA reactivates them. A leaver flow therefore triggers both: Keycloak for the authentication cut, and SCIM for the authorization cut.
 
 
 While Keycloak is down, nobody signs in through it. The break-glass admin still signs in through **Emergency sign-in** on the console's sign-in card, which opens Straza's own sign-in page instead of your identity provider, and mints a token there when strazactl is needed. [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#break-glass" >}}) shows the break-glass admin in both profiles.
@@ -201,7 +208,8 @@ The demo stack's issuer is `http://localhost:8480/realms/straza`, the address yo
 
 ## Next {.nostep}
 
+
 - [midPoint]({{< relref "guides/connect-identity/midpoint.md" >}}) provisions the accounts that Keycloak logins then sign in to.
 - [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) signs a workstation in for an agent with `straza enroll`.
 - [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}) and [Okta login]({{< relref "guides/connect-identity/okta-login.md" >}}) set up the same sign-in at those providers.
-- [Identities and roles]({{< relref "concepts/identities.md" >}}) explains who exists and where each fact comes from.
+- [People, agents and sponsors]({{< relref "concepts/identities.md" >}}) explains who exists and where each fact comes from.

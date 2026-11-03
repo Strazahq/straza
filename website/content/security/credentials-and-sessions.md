@@ -1,6 +1,11 @@
 ---
 title: Credentials and sessions
 description: Which credential sits where on a machine, how long each one lives, how a session renews, and how to stop each one.
+summary: >-
+  `straza service` keeps each person's Ed25519 enrollment key under its own OS account, out of
+  the agent's reach. It starts a 300-second session token per harness window, bound to that key,
+  so a copied token works nowhere else. A session revoke, a device revoke or a user disable
+  stops it, through the push stream or at the next renewal.
 pagetype: explanation
 weight: 15
 draft: false
@@ -275,7 +280,7 @@ The sign-in routes carry one per-address limit, `server.loginPerIPRPS`, at 2 req
 
 The phone approver holds a P-256 key. Both a decision and the 30 day renewal of its token cost a fresh signature over a single-use challenge, so a copied approver token can neither decide nor renew. That key proves which device decided, and it does not prove that a person acted. An AI agent that runs as the person can enroll an approval device of its own with any credential of the person it can read, such as an admin API token left in its reach, as [the security model]({{< relref "security/security-model.md#an-agent-that-holds-its-persons-login-can-enroll-an-approval-device" >}}) explains. [Known limits]({{< relref "security/known-limits.md" >}}) lists what reduces that today.
 
-On Linux, macOS and Windows, `straza service` holds an AI agent's Ed25519 key, or reads its identity provider client secret from a file only the service can read, and mints a short token per session. Agents therefore have no device credential and their sessions are deviceless, as [Identities and roles]({{< relref "concepts/identities.md" >}}) describes.
+On Linux, macOS and Windows, `straza service` holds an AI agent's Ed25519 key, or reads its identity provider client secret from a file only the service can read, and mints a short token per session. Agents therefore have no device credential and their sessions are deviceless, as [Machines and sessions]({{< relref "concepts/machines-and-sessions.md#an-agent-with-its-own-identity" >}}) describes.
 
 ### Limits on Windows
 
@@ -284,7 +289,7 @@ This version leaves four gaps on Windows:
 
 - Commands that Codex CLI and Gemini CLI run inside their sandboxes run as another account or at a lower integrity level, and they cannot reach the service. A Straza command run there, such as `straza exec`, gets no session and stops. Claude Code on Windows runs its commands outside a sandbox, so they reach the service.
 - An agent that runs inside WSL2 is not governed, because nothing connects WSL2 to the service yet.
-- The Windows binaries and the MSI carry no Authenticode signature yet, so SmartScreen may warn when one runs for the first time. The cosign-signed checksums of [Install]({{< relref "get-started/install.md" >}}) show where a file came from.
+- The Windows binaries and the MSI carry no Authenticode signature yet, so SmartScreen may warn when one runs for the first time. The cosign-signed checksums of [Install]({{< relref "guides/operate/install.md" >}}) show where a file came from.
 - After a power cut the service may have lost its last check-in counter, and the machine must then enroll again, as [Enrollment bound to a key](#enrollment-bound-to-a-key) explains.
 
 [Known limits]({{< relref "security/known-limits.md" >}}) lists each gap with what reduces it today.
@@ -294,7 +299,7 @@ This version leaves four gaps on Windows:
 
 This version leaves four gaps on macOS:
 
-- A package built from the source tree without a Developer ID is unsigned and not notarized. Releases from 2.0.0 carry the Straza package for macOS signed with a Developer ID and notarized by Apple, as [Install]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) shows, and releases from 1.1.2 and earlier carry none.
+- A package built from the source tree without a Developer ID is unsigned and not notarized. Releases from 2.0.0 carry the Straza package for macOS signed with a Developer ID and notarized by Apple, as [Install]({{< relref "guides/operate/install.md#install-the-service-on-macos" >}}) shows, and releases from 1.1.2 and earlier carry none.
 - On a Mac without a Managed Login Items profile, which only a device management tool installs, the service can be switched off under Login Items & Extensions, and while it is off every governed tool call is refused. [Deploy with Intune]({{< relref "guides/govern-an-agent/deploy-with-intune.md#deploy-to-macos" >}}) and [Deploy with Jamf Pro]({{< relref "guides/govern-an-agent/deploy-with-jamf.md" >}}) install that profile.
 - Claude Code uses only the highest of its managed sources, and a Claude Code profile from a device management tool ranks above the managed settings file. On a Mac with such a profile, Claude Code skips Straza's hooks with no warning.
 - A shell command that Claude Code runs in its sandbox, when an administrator turns the sandbox on, cannot reach the service's socket, because the wiring does not name it in the sandbox's `allowUnixSockets` setting.

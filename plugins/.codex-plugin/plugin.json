@@ -1,6 +1,6 @@
 {
   "name": "straza",
-  "version": "0.6.35",
+  "version": "0.6.37",
   "description": "One skill for operating Straza, the control plane between your identity manager and your AI agents.",
   "skills": "./skills"
 }

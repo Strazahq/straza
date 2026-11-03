@@ -1,12 +1,18 @@
 ---
 title: Add a server
 description: Register an MCP server, check that Straza reaches it, and give a role access to its tools.
+summary: >-
+  Registering an MCP server tells Straza how to reach it and which credential to add to its
+  calls, and gives nobody access. Straza checks the connection and creates the server's own
+  admin role with it. A session sees the server's tools only once a role it holds has access to
+  them.
 pagetype: how-to
 weight: 10
 draft: false
 tested:
   version: v1.1.0
   platform: Linux, against the enterprise demo stack, with strazactl logged in as an administrator and curl from the host. The server was installed under a name of the tester's own, and the install, list and removal lines shown here match what it printed apart from that name. The console steps were read from the console's source, not run in a browser
+  except: the console steps, read from the console's source
   date: 2026-09-28
 applies_to: both
 keywords: mcp server app manifest register wizard
@@ -51,7 +57,7 @@ For a server you run, enter its address. The step checks the manifest it writes 
 
 
 {{< cli >}}
-The example uses the `demo-tools` server of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) and registers it again as `scout-tools`. Its address is reachable from Straza on the Compose network and from no other host, so put your own endpoint in its place on another deployment.
+The example uses the `demo-tools` server of the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) and registers it again as `scout-tools`. Its address is reachable from Straza on the Compose network and from no other host, so put your own endpoint in its place on another deployment.
 
 `metadata.name` is the server's identity in policy and the prefix of its tool names on the wire. Straza keeps the `server` block, the server's registry record, as data. What Straza needs sits in the `straza` block.
 
@@ -301,7 +307,7 @@ A `command` server is a process of strazad itself, on strazad's host and as stra
 ## Import a registry record {.nostep}
 
 
-A registry `server.json` converts into a manifest without touching the server. Its first `streamable-http` remote becomes a `remote` runtime, a stdio container package becomes `oci`, an npm or PyPI package becomes `command`, and one secret header or variable becomes a static credential. When a record offers several, the remote wins, then the container, then npm, then PyPI. `--runtime remote`, `--runtime oci` or `--runtime command` restricts the choice to one kind, and the import fails with a sentence such as `registry import: no stdio oci package in server.json` when the record has none. Under the enterprise profile, a record whose only package is npm or PyPI converts to a `command` server, which the install then refuses. In the console, the card `A registry server.json` runs the same conversion and fills the wizard's cards.
+`strazactl apps import` turns an MCP Registry entry, its `server.json`, into a manifest without touching the server. Its first `streamable-http` remote becomes a `remote` runtime, a stdio container package becomes `oci`, an npm or PyPI package becomes `command`, and exactly one secret header or variable becomes the credential declaration, a static credential. A record with two secrets is refused. When a record offers several, the remote wins, then the container, then npm, then PyPI. `--runtime remote`, `--runtime oci` or `--runtime command` restricts the choice to one kind, and the import fails with a sentence such as `registry import: no stdio oci package in server.json` when the record has none. Under the enterprise profile, a record whose only package is npm or PyPI converts to a `command` server, which the install then refuses. In the console, the card `A registry server.json` runs the same conversion and fills the wizard's cards.
 
 {{< command terminal="Terminal" purpose="administration" >}}
 ```sh

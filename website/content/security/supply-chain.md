@@ -1,6 +1,11 @@
 ---
 title: Supply chain
 description: What a release holds, how to verify its signatures and the macOS pkg's Developer ID signature and notarization, how to rebuild its binaries from source, and what CI checks before a tag.
+summary: >-
+  A GitHub Actions job builds each release from a version tag and signs its checksums and image
+  with keyless cosign. You verify a download by that signature, then its checksum, and `make
+  verify-release` rebuilds every binary from the tag to compare it bit for bit. The macOS pkg
+  also carries a Developer ID signature and Apple's notarization.
 pagetype: explanation
 weight: 50
 draft: false
@@ -34,7 +39,7 @@ A tag first lands as a draft release, which the maintainer publishes by hand. Th
 ## How you verify one
 
 
-Every binary in a release is reachable from `checksums.txt`, and that one file is what cosign signs, so verifying takes two steps. First you verify the signature on the checksums file against the identity of the release workflow, under the issuer `https://token.actions.githubusercontent.com`. Then you verify your download against the checksums file. The two commands are in the [Install]({{< relref "get-started/install.md" >}}) guide.
+Every binary in a release is reachable from `checksums.txt`, and that one file is what cosign signs, so verifying takes two steps. First you verify the signature on the checksums file against the identity of the release workflow, under the issuer `https://token.actions.githubusercontent.com`. Then you verify your download against the checksums file. The two commands are in the [Install]({{< relref "guides/operate/install.md" >}}) guide.
 
 The identity pattern pins the repository `Strazahq/straza`, its release workflow `.github/workflows/release.yml` and a version tag. It spells the organization `Strazahq` as GitHub writes it into the certificate, and the match is case-sensitive, so a pattern in lowercase fails. A certificate from another repository, another workflow or a branch does not match. The container image verifies with the same identity:
 

@@ -1,12 +1,18 @@
 ---
 title: Access per role
 description: One application role reaches chosen tools of one MCP server, and you have read what its sessions see and why.
+summary: >-
+  A session's tools are an intersection: what the server lists, capped by its manifest and
+  narrowed to what the session's roles have access to. An application role's access row opens a
+  tool, and policy then gates it with a deny, an approval or a record. A server that no role of
+  the session reaches does not exist for it.
 pagetype: how-to
 weight: 30
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in an Alpine container on Linux, with the demo stack's MCP reference server installed as demo-tools and as scout-tools, strazactl on an admin API token minted in the console, and the live session made through straza mcp from the enrolled machine of alice, who holds scout-tools-readers alone. Every CLI step ran, apps bind included. The console steps were read from the console's source and not clicked
+  except: the console steps, read from the console's source
   date: 2026-10-06
 applies_to: both
 keywords: catalog role access binding visibility

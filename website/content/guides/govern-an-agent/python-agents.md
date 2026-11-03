@@ -2,6 +2,11 @@
 title: Python agents
 seo_title: Govern Python agents with the agentkit
 description: Govern a Python agent with the Straza agent kit so every tool call passes through policy.
+summary: >-
+  The Straza agent kit lets a Python agent with its own tool loop ask Straza about each tool
+  call before it runs. The kit holds no policy logic: every check spawns the local `straza`
+  binary, so the agent gets the same signed snapshot and audit trail as a harness. A broken
+  setup fails closed.
 pagetype: how-to
 weight: 40
 draft: false
@@ -9,6 +14,7 @@ tested:
   version: v1.1.0
   platform: A Linux container against the demo stack, with the kit from the release source on PYTHONPATH and an identity that holds the seeded developer role. The standalone notes come from an earlier development build run against a standalone server. The paragraph on a fresh enterprise server was written from the code on 2026-11-01 and not run
   date: 2026-09-28
+  except: the paragraph on a fresh enterprise server, written from the code and not run
 applies_to: both
 keywords: python agentkit sdk tool call
 ---
@@ -17,10 +23,10 @@ keywords: python agentkit sdk tool call
 You build a Python agent with its own tool loop and no harness hooks, and want each tool call decided by your Straza policy before it runs. By the end of this page one script asks Straza about two shell commands, and you have seen the destructive one denied with a reason.
 
 
-The Straza agent kit is a small standard-library package with no policy logic inside it. Every decision spawns the local `straza` binary with a `python-sdk` payload, so your agent gets the same signed snapshot, the same fail-closed behavior, and the same audit trail as the harness hooks. You enroll the machine, install the kit, and put one `check` call in front of each tool, and a deny stops the call before it runs. The kit sits in the same tier as the harness hooks with the same caveat: it governs the tool calls your framework routes through it, never computation inside the process, so it is advisory on an open machine. The lanes that hold at a boundary are the MCP gateway and the sandbox image, as [the trust model]({{< relref "concepts/trust-model-and-non-goals.md" >}}) explains.
+The Straza agent kit is a small standard-library package with no policy logic inside it. Every decision spawns the local `straza` binary with a `python-sdk` payload, so your agent gets the same signed snapshot, the same fail-closed behavior, and the same audit trail as the harness hooks. You enroll the machine, install the kit, and put one `check` call in front of each tool, and a deny stops the call before it runs. The kit sits in the same tier as the harness hooks with the same caveat: it governs the tool calls your framework routes through it, never computation inside the process, so it is advisory on an open machine. The lanes that hold at a boundary are the MCP gateway and the sandbox image, as [the trust model]({{< relref "evaluate/security-model.md" >}}) explains.
 
 
-You need the `straza` binary on your PATH (or in `STRAZA_BIN`), with `straza service` running and the machine enrolled against your Straza server as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows, and Python 3.9 or newer. When you started the service yourself with `STRAZA_HOME`, run the agent with the same value, because the `straza` the kit spawns finds that service through it. On a machine with a system service or a managed install, it ignores the variable and reaches the system service. The example ran on a machine enrolled against the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) as an identity that holds the seeded `developer` role.
+You need the `straza` binary on your PATH (or in `STRAZA_BIN`), with `straza service` running and the machine enrolled against your Straza server as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows, and Python 3.9 or newer. When you started the service yourself with `STRAZA_HOME`, run the agent with the same value, because the `straza` the kit spawns finds that service through it. On a machine with a system service or a managed install, it ignores the variable and reaches the system service. The example ran on a machine enrolled against the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) as an identity that holds the seeded `developer` role.
 
 
 A fresh enterprise server holds no PolicySet and denies every local tool that no rule allows, so the kit's `shell.exec` checks come back denied there. An admin first sets up the role and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}) and gives the identity its `developer` role.

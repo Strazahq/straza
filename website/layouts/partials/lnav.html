@@ -19,14 +19,14 @@ panel, with the header's sections at its top. */ -}}
   <ul>
     <li><a href="{{ $section.RelPermalink }}"{{ if eq $current $section }} aria-current="page"{{ end }}>Overview</a></li>
     {{- range $section.RegularPages.ByWeight }}
-    <li><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
+    <li{{ if eq .Params.pagetype "journey" }} class="jr"{{ end }}><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
     {{- end }}
   </ul>
   {{- range $section.Sections.ByWeight }}
   <h3 class="lnav-h"><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></h3>
   <ul>
     {{- range .RegularPages.ByWeight }}
-    <li><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
+    <li{{ if eq .Params.pagetype "journey" }} class="jr"{{ end }}><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
     {{- end }}
     {{- range .Sections.ByWeight }}
     <li>
@@ -34,7 +34,7 @@ panel, with the header's sections at its top. */ -}}
       {{- if or (eq $current .) (.IsAncestor $current) }}
       <ul>
         {{- range .Pages.ByWeight }}
-        <li><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
+        <li{{ if eq .Params.pagetype "journey" }} class="jr"{{ end }}><a href="{{ .RelPermalink }}"{{ if eq $current . }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
         {{- end }}
       </ul>
       {{- end }}

@@ -65,7 +65,7 @@ When an ingress with a publicly trusted certificate already serves the approver 
 ## What the two profiles bind, observed
 
 
-The [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) runs the enterprise profile under Docker Compose with the loopback override, which rebinds the two published ports to `127.0.0.1`. The base compose file alone publishes `8420` and `8443` on every interface.
+The [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) runs the enterprise profile under Docker Compose with the loopback override, which rebinds the two published ports to `127.0.0.1`. The base compose file alone publishes `8420` and `8443` on every interface.
 
 {{< command terminal="Docker host" purpose="the demo stack" >}}
 ```sh

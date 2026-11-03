@@ -1,115 +1,80 @@
 ---
-title: Identities and roles
-description: See who each session belongs to, where users and roles come from, and how one disable stops an identity on every machine.
+title: People, agents and sponsors
+description: Who a governed action belongs to, how Straza tells a person from an AI agent, and which person is accountable for an agent.
 pagetype: explanation
-weight: 20
+weight: 60
 draft: false
-keywords: identity user agent nhi session principal scim sponsor
+summary: >-
+  A person is a human who signs in. An AI agent either runs as its person, as a coding agent
+  does, or is its own user with a key instead of a password. A sponsor is the person
+  accountable for an agent, and decides its held calls. Your IGA sends them, or an admin
+  creates them on standalone.
+noun: [person, agent, sponsor]
+keywords: identity person user agent nhi service account sponsor scim usertype agency mode accountable
 ---
 
 
-Every governed action belongs to a session, and every session belongs to a user. A user is a person, an AI agent or a service account. In the enterprise profile your identity manager provides the users and decides who holds which role. In the standalone profile you manage them yourself. A session's roles decide which MCP servers and tools it reaches, which policies apply to it and which knowledge packs it receives. When a user is disabled, Straza ends that user's sessions on every machine.
+Every governed action belongs to a [session]({{< relref "concepts/machines-and-sessions.md" >}}), and every session belongs to a single user of Straza. That user is a person or an AI agent. Straza applies the agent rules below to a service account, a technical account with no agency of its own. A sponsor is the person Straza records as accountable for another user.
 
-## Kinds of identity
+## A person
 
 
-Straza records whether an identity is a person when it creates it. An identity created with the agentic SCIM extension, or with the admin API kind `nhi`, is an AI agent or a service account. `nhi` is the wire word for both.
+A person is a human user. On enterprise they sign in at your [identity provider]({{< relref "evaluate/identity-and-your-iga.md" >}}), and on standalone strazad signs them in with a password. Only a person can enroll a [machine]({{< relref "concepts/machines-and-sessions.md" >}}), open the console or the self-service page, and decide an [approval]({{< relref "concepts/approvals-model.md" >}}). An agent's own sign-in is refused on the admin API. Straza checks these rights on the user itself and ignores the user's [roles]({{< relref "concepts/roles-and-access.md" >}}), so an admin or approver role assigned to an agent by mistake gives it none of them.
 
-Your identity manager also keeps attributes on each identity that can change:
 
-| Attribute | What it says |
+On enterprise Straza refuses a person's sign-in at the identity provider until your IGA has sent that person over SCIM. On standalone the first start creates the admin `admin` and prints its password once, and an admin creates everyone else. [Identity and your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}) explains which system checks what.
+
+## An agent
+
+Straza governs an agent that runs as its person and an agent with its own identity.
+
+
+| | An agent that runs as its person | An agent with its own identity |
+|---|---|---|
+| Example | A coding agent such as Claude Code, Codex CLI or Gemini CLI on the person's laptop | A worker in CI, or an agent that runs with no person at the keyboard |
+| Who it is in Straza | The person. It has no user of its own | A user of its own, typed agent or service |
+| How it proves itself | Through the person's enrolled machine and its key | With its own Ed25519 key that an admin registered, or its own client at your identity provider |
+| Whose roles apply | The person's | Its own |
+| Who decides a held call whose rule names no approver role | The person, or the person's sponsor when they have one | Its sponsor. With no sponsor the call is denied at once |
+
+
+An agent that runs as its person needs no user of its own, in your IGA or from an admin on standalone. Its sessions carry the person's identity and name the coding tool, so every decision and audit record shows both. Because such an agent can reach everything the person can on that machine, a person decides their own request, by default, only with a signature from a phone or browser they enrolled.
+
+
+An agent with its own identity has no password and uses no browser. The Straza service on the machine where it runs keeps its key or its client secret and checks the agent in at each session start, as [Machines and sessions]({{< relref "concepts/machines-and-sessions.md#an-agent-with-its-own-identity" >}}) explains. Straza registers an agent's key only for an agent and enrolls a machine key only for a person, so neither kind of key can be used in place of the other.
+
+
+On enterprise your IGA sends an agent as a SCIM user. Straza stores it as an agent when the user carries the IETF agent extension of SCIM, or when its user type is agent or service. A user sent with neither becomes a person, with everything a person may do. On standalone an admin creates the agent with its type and then registers its key. [AI agents as identities]({{< relref "guides/connect-identity/nhi-provisioning.md" >}}) shows what your IGA sends.
+
+## A sponsor
+
+
+A sponsor is the person accountable for an agent, or for any user who has one, such as a contractor. Straza keeps the sponsor as a username on the user. When a held call's rule names no approver role, the request goes to the requester's sponsor. Straza reads the sponsor when the request is raised and keeps it on the request, so a later change of sponsor never moves an open request.
+
+
+A usable sponsor is an active person other than the requester. An agent cannot sponsor an agent, because that leaves no person accountable.
+
+
+When an agent has no usable sponsor and the rule names no approver role, Straza denies the call at once, because a request that nobody is told about could only expire. The reason names the cause and the fix. Set the sponsor before the agent goes to work.
+
+
+A person needs no sponsor. When a rule names no approver role, a person with no sponsor decides their own request, and a person with a sponsor waits for that sponsor. [Approvals]({{< relref "concepts/approvals-model.md" >}}) covers who decides in full.
+
+
+These rules do not depend on the identity provider. User type, agency mode and sponsor arrive from your IGA over SCIM, or from an admin on standalone, whether people sign in with Entra ID, Okta or Keycloak. Straza stores the sponsor name as it arrives and checks it only when a request needs it. The sponsor must therefore be the username of an existing user. A name that matches nobody denies the agent's first held call, and the reason says that the sponsor is not known to Straza.
+
+{{< details summary="What your IGA records on each user" >}}
+
+Besides the sponsor, your IGA, or an admin on standalone, keeps the attributes below on a user, and they can change at any time. Straza reads them again whenever a session checks in or renews. A [policy]({{< relref "concepts/policy-model.md" >}}) can match on each.
+
+| Attribute | Values |
 |---|---|
-| User type | Human, agent or service |
-| Agency mode | Interactive, supervised or autonomous |
-| Sponsor | The accountable person |
-| Swarm ID | An optional name for a fleet |
-
-An identity typed as an agent or a service counts as `nhi` even when its connector cannot send the agentic extension. Policy can select on these attributes. An AI agent or a service account is refused on the admin API and on every route that decides a request, whatever roles it holds, and it can never decide an approval on any channel, Slack included. [AI agents as identities]({{< relref "guides/connect-identity/nhi-provisioning.md" >}}) shows how your identity manager sends them.
-
-## Where users and roles come from
+| User type | `human`, `agent` or `service` |
+| Agency mode | `interactive`, `supervised` or `autonomous` |
+| Swarm ID | An optional name for a fleet of agents |
 
 
-In the enterprise profile, identity arrives over SCIM 2.0 from your identity manager or IGA. Without a system that speaks SCIM, the admin API and the CLI create users. Over SCIM, users are created, replaced, patched and deactivated, and Straza's roles appear as SCIM groups. Membership in such a group is the role assignment.
-
-Roles are born in Straza. Your identity manager imports them and decides who holds each one, and SCIM refuses a request to create or delete a role.
-
-In the standalone profile there is no identity manager. The first start creates a local admin, and you create users in the console or with the CLI. [Connect identity]({{< relref "guides/connect-identity/_index.md" >}}) connects midPoint, Okta or any other SCIM client.
-
-## Roles
-
-
-Each role has one kind:
-
-| Role kind | What it represents |
-|---|---|
-| Business | The job or responsibility assigned to a person or agent |
-| Application | Access to one MCP server and the tools on it |
-| Approver | Authority to decide approval requests, with no tool access of its own |
-| Straza | Administrative rights inside Straza, with no agent tool access of its own |
-
-A business role composes application roles. A session's effective roles are its direct assignments plus every role they compose. Someone who works across several MCP servers can therefore hold one business role that composes one application role per server.
-
-Policies match application roles, because those roles carry tool access. The SCIM view of a role also shows the servers, tools and policies behind it, so an identity governance review sees both who holds a business role and what it grants. A role can also carry a knowledge pack, text that each session of the role starts with, as [Knowledge packs]({{< relref "guides/govern-an-agent/knowledge-packs.md" >}}) shows.
-
-A role added or removed in the identity manager reaches a running session at its next check-in. The gateway then tells the MCP client to list its tools again.
-
-![Replay: a business role assigned in midPoint reaches a running session at its next check-in, and the tool list refreshes without a restart](../../static/replays/role-live-refresh.png)
-
-## The accountable human
-
-
-An agent that needs a person's decision goes to its sponsor by default. The sponsor is a link your identity manager keeps on the agent's user. Straza reads it when an approval is raised and stores it on the request, so a later change of sponsor never moves an open request. A usable sponsor is an active person other than the requester. An agent cannot sponsor an agent, because that leaves no person accountable.
-
-When a rule names no approver role and the agent has no usable sponsor, the request is denied at once, and the reason names the cause and the fix. An agent without a sponsor therefore cannot raise an approval until your identity manager records one. That is on purpose. Model the accountable person before the agent goes to work.
-
-A person needs no sponsor. When a person runs their own agent under such a rule, that person is the accountable one, and the call waits for their own confirmation on a phone or browser enrolled as them. If your identity manager records a sponsor on a person, as it may for a contractor, that sponsor decides instead. [Approvals]({{< relref "concepts/approvals-model.md" >}}) covers who decides in full.
-
-## Devices and sessions
-
-
-A coding assistant on a laptop, a fleet worker deploying from CI and a personal agent acting for a manager all look alike at the tool boundary. Straza tells them apart by treating each session as an identity of its own. A session is one run of a harness, and its token names the user, the device, the harness and the session. Decisions, approvals and audit records therefore all point at one accountable chain, and you can revoke one session or one device without touching the user's other machines.
-
-
-A person enrolls each machine once with `straza enroll`, which signs the person in through a browser on that machine, and the machine becomes a device of that user. Each check-in measures the install, and the session gets an attestation level of `none`, `advisory` or `managed`. By default the enterprise profile issues no session below `managed`, and the demo stack lowers that minimum to `none` for a local lab. The gateway checks the deployment's minimum again on every call. [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) explains each level and the key that `straza service`, the Straza background service, keeps for the machine.
-
-
-AI agents and service accounts run sessions without a device, because a fleet worker has no laptop to enroll. They never hold a password and never see a browser. A headless agent proves itself with its own Ed25519 key that an admin registered, or with your identity provider's client credentials. At every session start the service checks the agent in with a fresh proof from the key it holds for the agent, and it gets a new ID token with the key or the client credentials once the one it holds runs out. The service holds that key or client secret for the agent, and binds each of the agent's sessions to the key it holds. Straza refuses such a key for a person, so a stolen key can never stand in for a person's password. Deleting the key stops new sessions once the ID token the service holds for the agent expires, at most 10 minutes later, and running sessions keep going until you revoke them. [Headless agents]({{< relref "guides/govern-an-agent/headless-agents.md" >}}) sets one up.
-
-## The kill switch from the identity manager
-
-{{< diagram name="kill-switch" caption="One disable in your identity manager ends that identity's sessions on every machine. A machine whose background service holds the session's push stream hears it at once, and any other machine when it next renews its session token." >}}
-
-
-Disabling a user in your identity manager sends a SCIM deactivate, and Straza revokes every session of that user. On a machine whose `straza service` holds the push stream of the session, the revocation arrives as a push and the session denies from then on, and the project's target for that path is two seconds. When the stream is down, the machine learns of it at the first call that renews the session, once 120 seconds or less of its 300-second token remain, so at most about 180 seconds after the token was minted for a session that keeps working. The gateway refuses the session's next call at once. [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#sessions-and-the-client" >}}) lists these bounds, with the offline grace of a standalone client that cannot reach strazad.
-
-A revocation of the user is a lockout, and the client never retries it. When an admin revokes one session instead, only that session ends. The client's next session start opens a new one, which every check-in gate judges again.
-
-
-Reactivation is deliberate and partial. Setting the user active again over SCIM lifts only the revocations your identity manager created. A lock placed from the console or by a security automation survives any reconciliation from the identity manager, and the refused lift lands on the audit chain. Existing sessions stay revoked, and the user's next check-in opens a new session without a new enrollment.
-
-A SCIM deactivation also deletes the user's own credentials on MCP servers, the OAuth grants and pasted tokens, so a reactivated user connects those servers again. A disable by a Straza admin leaves them in place. The kill and the lift each leave an identity record on the audit chain that names where it came from, so an auditor can see which authority acted.
-
-## Why the identity manager stays the master
-
-
-Straza could own users and roles itself and ask you to keep two directories in step. It does not, because the joiner, mover and leaver processes, the certification campaigns and the recertification evidence already live in your IGA. A second source of truth is where offboarding gaps come from.
-
-The cost is a dependency. An enterprise deployment without a SCIM feed or an admin API integration has no users. The admin API token that carries provisioning, through its `scim:write` scope, can also assign the admin role, because your identity manager masters every role, the ones Straza defines included. Control that at the identity manager, where role assignment is decided anyway. An AI agent that holds the admin role is still refused on every admin route.
-
-{{< details summary="How it works inside" >}}
-
-Straza keeps no separate group object. A SCIM group is a role in the shape identity systems speak, and a request to create or delete one answers 501.
-
-Every device has a status of its own, which each check-in reads again. A session is fixed at its start to its device and its attestation level, and every audit record and approval it produces names it. Enrollment turns the short login token of the device sign-in, ten minutes at the built-in issuer, into a key enrollment. The device row holds the thumbprint of a key that `straza service` keeps, every check-in carries a fresh proof from that key, and each one is checked against the denylist, the user and device status and the sign-in deadline. [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) follows it through its whole life.
-
-
-On a SCIM deactivate, strazad marks the user disabled, writes a revocation and adds the user to its in-memory denylist. It then revokes the session rows and emits a revocation event. Every other strazad instance replays that event into its own denylist, and `straza service` receives it over the push stream of each session it holds. The service marks those sessions revoked at once, and every hook call in them denies from then on.
-
-The next gateway call from a revoked session answers 403 with the reason that the session was revoked, and the decide endpoint answers a deny that carries the same reason. Automatic renewal on the client never retries a 403.
-
-The detailed view below follows the race after a disable over the push stream, the event replay and the token lifetime.
-
-![Diagram: the kill-switch race after an identity manager disable, over the push stream, the event replay and the token lifetime](../../static/diagrams/kill-switch.png)
+SCIM also returns `kind`, either `human` or `nhi`. Only the agent extension sets it, and only when the user is created. An agent that your IGA typed by user type alone therefore shows `kind` `human` over SCIM, while Straza treats it as an agent on every route. A certifier who sorts people from agents reads `userType`.
 {{< /details >}}
 
-Read next: [Policies]({{< relref "concepts/policy-model.md" >}}) explains what a role's policies are made of.
+{{< next "concepts/machines-and-sessions.md" >}}

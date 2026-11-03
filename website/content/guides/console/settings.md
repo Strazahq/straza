@@ -1,6 +1,11 @@
 ---
 title: Settings
 description: You read every configuration value with the key that sets it, compose a config change to paste into your deployment, keep the attestation registry, and mint and revoke admin API tokens.
+summary: >-
+  Settings shows every configuration value with the key that sets it and changes none of them:
+  its sheet composes a change for you to deploy. It keeps the attestation registry, the hook
+  hashes a managed install is checked against, and it mints and revokes admin API tokens, each
+  shown once and stored as a hash.
 pagetype: how-to
 weight: 40
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server on Linux, read as the admin in headless Chromium. The New API token sheet and the config change sheet were opened and closed, and no token was minted and no hash retired
   date: 2026-10-06
+  except: minting a token and retiring a hash, which were not done
 applies_to: both
 who: You, as an admin
 where: The console in a browser

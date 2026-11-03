@@ -1,12 +1,18 @@
 ---
 title: Standalone host
 description: Run strazad on one Linux host in the standalone profile, with its settings in a file and all its state in one directory.
+summary: >-
+  In the standalone profile one strazad on one host signs people in itself, keeps users, policy
+  and the audit record in one SQLite file and runs its event bus inside the process. One data
+  directory therefore holds all its state. It listens on 127.0.0.1:8420 until you set an
+  address, a public URL and TLS.
 pagetype: how-to
 weight: 10
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: An Alpine 3.20 container with the static binaries and curl, in the standalone profile, where every terminal block on this page but the token step ran in order. In that run strazactl signed in with strazactl login, answered with the form post the built-in sign-in page sends, and strazactl no longer signs in, so the token step was written on 2026-11-01 and not walked. The console sign-in was not clicked, because the server listened on the container's loopback address. The console's browser sign-in was written from the code on 2026-10-22 and not walked. On 2026-11-02 the data directory listing and the system-service block ran again on a build of main with the owner-only database
+  except: the token step and the console's browser sign-in, written from the code
   date: 2026-10-06
 applies_to: standalone
 who: You, as the operator of the host
@@ -18,7 +24,7 @@ keywords: standalone host binary profile data directory
 ---
 
 
-You run strazad as one binary on one Linux host in the standalone profile, from a terminal on that host. You need the `strazad` and `strazactl` binaries from [Install]({{< relref "get-started/install.md" >}}). At the end the server runs from a config file, you are signed in as its first administrator, and you know which directory holds everything it knows.
+You run strazad as one binary on one Linux host in the standalone profile, from a terminal on that host. You need the `strazad` and `strazactl` binaries from [Install]({{< relref "guides/operate/install.md" >}}). At the end the server runs from a config file, you are signed in as its first administrator, and you know which directory holds everything it knows.
 
 In the standalone profile strazad is its own login provider. It keeps users, policy and the audit record in one SQLite file and runs the event bus inside the process, so a single directory holds all of its state. The standalone profile binds its main listener to 127.0.0.1:8420. Unless `server.approverTLS.autoMint` is false, it also serves the phone approver routes on port 8443 on every interface, with a self-signed certificate it creates in the data directory.
 

@@ -5,7 +5,7 @@
 # URL. Wrong pick on a multi-adapter machine? Override and mint again:
 #   STRAZA_APPROVER_TLS_PUBLIC_URL=https://<ip>:8443 ./up.sh
 # Internet-reachable host? Do not use this: run the loopback overlay chain
-# from https://docs.straza.ai/get-started/enterprise-demo-stack/#demo-defaults-and-the-hardened-shape
+# from https://docs.straza.ai/guides/operate/demo-stack-defaults/
 # instead.
 set -eu
 cd "$(dirname "$0")"
@@ -41,4 +41,4 @@ echo "Console: http://localhost:8420/console/"
 echo "Phone: install the Straza approver app, then console -> Approvals -> Approver devices"
 echo "  -> Add a phone -> scan the QR."
 echo "Demo defaults assume a network you trust. On any other network, use the loopback"
-echo "overlay chain: https://docs.straza.ai/get-started/enterprise-demo-stack/#demo-defaults-and-the-hardened-shape"
+echo "overlay chain: https://docs.straza.ai/guides/operate/demo-stack-defaults/"

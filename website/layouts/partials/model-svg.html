@@ -1,0 +1,136 @@
+{{- /* model-svg draws the model of Straza: every core part, a color per
+zone, an icon per part and the flows between them, each part a link to the
+page that explains it. Call it with a dict. With trace true, as How it works
+does, the drawing carries the steps of one tool call, which site.js turns into
+step buttons. With lit, a list of part keys, as a concept page does under In
+short, those parts stand out and the rest fade. With neither, as the landing
+page does, a call dot travels from the agent to the object. id sets the prefix
+of the drawing's element ids. It draws twice, wide for a desktop and tall for a
+phone, from the data below through zone-diagram.html, and the CSS shows one. A
+part's page that does not exist fails the build, and tools/docslint holds the
+part keys a page may light. Motion stops under prefers-reduced-motion. */ -}}
+{{- $lit := .lit | default slice -}}
+{{- $trace := .trace | default false -}}
+{{- $idp := .id | default "hm" -}}
+{{- $model := or $trace (gt (len $lit) 0) -}}
+{{- $icons := partial "diagram-icons.html" dict -}}
+{{- $page := dict
+  "person" "concepts/identities.md" "agent" "concepts/identities.md" "sponsor" "concepts/identities.md"
+  "draft" "concepts/drafts.md" "approval" "concepts/approvals-model.md"
+  "role" "concepts/roles-and-access.md" "policy" "concepts/policy-model.md"
+  "machine" "concepts/machines-and-sessions.md" "local" "concepts/machines-and-sessions.md"
+  "server" "concepts/mcp-apps-and-the-gateway.md" "tool" "concepts/mcp-apps-and-the-gateway.md" "object" "concepts/objects.md"
+  "credential" "concepts/credentials.md"
+  "idp" "evaluate/identity-and-your-iga.md" "iga" "evaluate/identity-and-your-iga.md" "audit" "concepts/evidence.md"
+-}}
+{{- $href := dict -}}
+{{- range $k, $p := $page -}}
+  {{- $pg := site.GetPage $p -}}
+  {{- if not $pg }}{{ errorf "model-svg.html: the page %q for the noun %q is missing" $p $k }}{{ end -}}
+  {{- $href = merge $href (dict $k $pg) -}}
+{{- end -}}
+{{- /* Each card: k noun, z zone, x y w h box, t title, s subtitle. A card
+without a subtitle is one line. Each flow: d path, c class, m marker (empty
+for none), and an optional label l at lx ly, anchored by a. g holds the
+delay of each card's glow, the time the call dot reaches it. */ -}}
+{{- $title := "The parts of Straza. A person sponsors an agent, and the agent calls a tool. Straza checks the call against the agent’s roles and the policy, and a rule can ask a person to approve it. An allowed call runs the tool, on the agent’s machine for a local tool such as a shell command, or on an MCP server, where a tool acts on an object. Your identity provider checks sign-in, your IGA says who holds which role, an agent or a person proposes a change as a draft and a person publishes it, and every decision becomes an audit record. Each part links to its page." -}}
+{{- /* steps maps each part to the steps of the trace that light it. */ -}}
+{{- $steps := dict "person" "1 5 8" "agent" "1 2 8" "sponsor" "5" "draft" "8" "approval" "5" "role" "1 3" "policy" "4"
+  "tool" "2 6" "object" "3 6" "idp" "1" "iga" "1" "audit" "7" "machine" "2 6" "local" "2 6" "server" "2 6" "credential" "6" -}}
+{{- $say := slice
+  "The core parts of Straza. Press a step to follow a tool call from the request to the audit record."
+  "1. Your IGA, or an admin on standalone, tells Straza who the people and agents are and which roles they hold. A person signs in at your identity provider, or at strazad itself on the standalone profile."
+  "2. An agent asks to call a tool. A tool on its own machine, such as a shell command, is decided there by the Straza service, which the straza hook asks. A tool of an MCP server behind Straza is decided at the gateway."
+  "3. The roles of the session set what it reaches. At the gateway a role names the tools it may call and, on a server that declares objects, which objects. On a machine the roles pick which policy applies."
+  "4. The policy then allows the call, denies it, or asks a person. On the machine the agent reads the reason, and at the gateway a tool denied for the whole session is left out of its list."
+  "5. A held call waits for a person: a holder of an approver role that the rule names, or else the requester’s sponsor. A person with no sponsor says yes themselves on an enrolled phone or browser."
+  "6. An allowed call runs. At the gateway, Straza adds the server’s credential, so the agent never holds it."
+  "7. Every decision becomes an audit record in a hash chain, which Straza can send to your SIEM."
+  "8. A change to servers, roles or policy is a draft. An agent can propose one, and it waits until a person publishes it. By default an admin’s own change publishes at once."
+-}}
+{{- $variants := slice
+  (dict "id" (printf "%s-w" $idp) "cls" "hm-w" "model" $model "lit" $lit "steps" $steps "say" (cond $trace $say slice) "title" $title "view" "0 0 1000 496" "bloom" (dict "cx" 509 "cy" 180 "rx" 330 "ry" 200)
+    "pad" (dict "ix" 14 "iy" 11 "tx" 42 "ty" 27 "sy" 47 "oiy" 14 "oty" 30)
+    "zones" (slice
+      (dict "z" "people" "x" 24 "y" 44 "w" 182 "h" 272 "l" "People and agents" "lx" 38 "ly" 302)
+      (dict "z" "id" "x" 24 "y" 388 "w" 508 "h" 100 "l" "Identity" "lx" 38 "ly" 410)
+      (dict "brand" true "x" 266 "y" 44 "w" 486 "h" 272 "mx" 284 "my" 51 "ms" 0.75 "l" "Straza" "lx" 308 "ly" 68))
+    "heads" (slice
+      (dict "k" "machine" "t" "Machine" "s" "where the agent runs" "x" 806 "y" 14 "w" 184 "h" 128 "hx" 814 "hy" 22 "hw" 168 "hh" 50 "ix" 822 "iy" 29 "tx" 850 "ty" 46 "sx" 822 "sy" 66)
+      (dict "k" "server" "t" "Server" "s" "an MCP server" "x" 806 "y" 152 "w" 184 "h" 212 "hx" 814 "hy" 160 "hw" 168 "hh" 52 "ix" 822 "iy" 166 "tx" 850 "ty" 183 "sx" 822 "sy" 204))
+    "pills" (slice (dict "x" 67 "y" 166 "w" 96 "h" 28 "tx" 115 "ty" 185 "k" "sponsor" "t" "Sponsor" "ln" "sponsor" "aria" "Sponsor: the person who answers for an agent."))
+    "cards" (slice
+      (dict "k" "person" "z" "people" "x" 38 "y" 84 "w" 154 "h" 60 "t" "Person" "s" "a human user")
+      (dict "k" "agent" "z" "people" "x" 38 "y" 216 "w" 154 "h" 60 "t" "Agent" "s" "an AI agent")
+      (dict "k" "draft" "z" "straza" "x" 284 "y" 84 "w" 216 "h" 60 "t" "Draft" "s" "a proposed change")
+      (dict "k" "approval" "z" "straza" "x" 518 "y" 84 "w" 216 "h" 60 "t" "Approval" "s" "a person decides a call")
+      (dict "k" "role" "z" "straza" "x" 284 "y" 216 "w" 216 "h" 60 "t" "Role" "s" "which tools, which objects")
+      (dict "k" "policy" "z" "straza" "x" 518 "y" 216 "w" 216 "h" 60 "t" "Policy" "s" "allow, deny or ask a person")
+      (dict "k" "local" "z" "server" "x" 820 "y" 82 "w" 158 "h" 48 "t" "Local tool" "s" "")
+      (dict "k" "tool" "z" "server" "x" 820 "y" 222 "w" 158 "h" 48 "t" "Tool" "s" "")
+      (dict "k" "object" "z" "server" "x" 820 "y" 294 "w" 158 "h" 48 "t" "Object" "s" "")
+      (dict "k" "idp" "z" "id" "x" 38 "y" 420 "w" 228 "h" 56 "t" "Your identity provider" "s" "checks who signs in")
+      (dict "k" "iga" "z" "id" "x" 280 "y" 420 "w" 238 "h" 56 "t" "Your IGA" "s" "people, agents, role holders")
+      (dict "k" "audit" "z" "audit" "x" 806 "y" 412 "w" 184 "h" 64 "t" "Audit record" "s" "every decision, chained"))
+    "flows" (slice
+      (dict "d" "M192 246H280" "st" "2" "c" "f-call" "m" "call" "l" "calls" "lx" 212 "ly" 238)
+      (dict "d" "M500 246H514" "st" "3 4" "c" "f-call" "m" "call")
+      (dict "d" "M734 246H816" "st" "6" "c" "f-ok" "m" "ok" "l" "allowed" "lx" 757 "ly" 274)
+      (dict "d" "M766 246V106H816" "st" "6" "c" "f-ok" "m" "ok")
+      (dict "d" "M899 270V290" "st" "6" "c" "f-ok" "m" "ok" "l" "acts on" "lx" 907 "ly" 285)
+      (dict "d" "M626 216V148" "st" "4 5" "c" "f-ask run" "m" "ask" "l" "when a rule asks" "lx" 634 "ly" 186)
+      (dict "d" "M115 84V24H626V80" "st" "5" "c" "f-ask" "m" "ask" "l" "decides" "lx" 340 "ly" 17)
+      (dict "d" "M192 114H280" "st" "8" "c" "f-pub" "m" "pub" "l" "publishes" "lx" 206 "ly" 106)
+      (dict "d" "M176 216V180H330V148" "st" "8" "c" "f-pub dash" "m" "pub" "l" "proposes" "lx" 209 "ly" 172)
+      (dict "d" "M38 448H10V114H34" "st" "1" "c" "f-id" "m" "id" "l" "signs in" "lx" 18 "ly" 360)
+      (dict "d" "M392 420V280" "st" "1" "c" "f-id" "m" "id" "l" "who holds which role" "lx" 400 "ly" 372)
+      (dict "d" "M690 318V446H802" "st" "7" "c" "f-rec run" "m" "rec" "l" "every decision" "lx" 698 "ly" 372)
+      (dict "d" "M115 144V216" "st" "5" "c" "f-id dash" "m" ""))
+    "keys" (slice (dict "x" 789 "y" 246))
+    "pkt" (cond $model "" "M192 246H899V318")
+    "g" (dict "agent" 0 "role" 1.23 "policy" 2.67 "tool" 4.36 "object" 4.75))
+  (dict "id" (printf "%s-t" $idp) "cls" "hm-t" "model" $model "lit" $lit "steps" $steps "say" (cond $trace $say slice) "title" $title "view" "0 0 360 850" "bloom" (dict "cx" 180 "cy" 430 "rx" 200 "ry" 170)
+    "pad" (dict "ix" 12 "iy" 9 "tx" 38 "ty" 24 "sy" 44 "oiy" 11 "oty" 27)
+    "zones" (slice
+      (dict "z" "id" "x" 18 "y" 8 "w" 324 "h" 158 "l" "Identity" "lx" 30 "ly" 28)
+      (dict "z" "people" "x" 18 "y" 190 "w" 324 "h" 128 "l" "People and agents" "lx" 30 "ly" 210)
+      (dict "brand" true "x" 18 "y" 340 "w" 324 "h" 180 "mx" 28 "my" 348 "ms" 0.7 "l" "Straza" "lx" 50 "ly" 364))
+    "heads" (slice
+      (dict "k" "machine" "t" "Machine" "s" "" "x" 18 "y" 572 "w" 158 "h" 120 "hx" 26 "hy" 580 "hw" 110 "hh" 36 "ix" 34 "iy" 586 "tx" 62 "ty" 603)
+      (dict "k" "server" "t" "Server" "s" "an MCP server" "x" 184 "y" 572 "w" 158 "h" 188 "hx" 192 "hy" 580 "hw" 142 "hh" 50 "ix" 200 "iy" 587 "tx" 228 "ty" 603 "sx" 200 "sy" 622))
+    "pills" (slice (dict "x" 140 "y" 284 "w" 80 "h" 24 "tx" 180 "ty" 301 "k" "sponsor" "t" "Sponsor" "ln" "sponsor" "aria" "Sponsor: the person who answers for an agent."))
+    "cards" (slice
+      (dict "k" "idp" "z" "id" "x" 30 "y" 38 "w" 300 "h" 54 "t" "Your identity provider" "s" "checks who signs in")
+      (dict "k" "iga" "z" "id" "x" 30 "y" 100 "w" 300 "h" 54 "t" "Your IGA" "s" "people, agents, role holders")
+      (dict "k" "person" "z" "people" "x" 30 "y" 220 "w" 136 "h" 54 "t" "Person" "s" "a human user")
+      (dict "k" "agent" "z" "people" "x" 194 "y" 220 "w" 136 "h" 54 "t" "Agent" "s" "an AI agent")
+      (dict "k" "draft" "z" "straza" "x" 30 "y" 376 "w" 136 "h" 54 "t" "Draft" "s" "a proposed change")
+      (dict "k" "role" "z" "straza" "x" 194 "y" 376 "w" 136 "h" 54 "t" "Role" "s" "tools and objects")
+      (dict "k" "approval" "z" "straza" "x" 30 "y" 452 "w" 136 "h" 54 "t" "Approval" "s" "a person decides")
+      (dict "k" "policy" "z" "straza" "x" 194 "y" 452 "w" 136 "h" 54 "t" "Policy" "s" "allow, deny or ask")
+      (dict "k" "local" "z" "server" "x" 30 "y" 626 "w" 134 "h" 54 "t" "Local tool" "s" "shell or file write")
+      (dict "k" "tool" "z" "server" "x" 194 "y" 640 "w" 136 "h" 44 "t" "Tool" "s" "")
+      (dict "k" "object" "z" "server" "x" 194 "y" 704 "w" 136 "h" 44 "t" "Object" "s" "")
+      (dict "k" "audit" "z" "audit" "x" 30 "y" 784 "w" 300 "h" 54 "t" "Audit record" "s" "every decision, in a hash chain"))
+    "flows" (slice
+      (dict "d" "M30 65H12V234H26" "st" "1" "c" "f-id" "m" "id" "l" "signs in" "lx" 24 "ly" 182)
+      (dict "d" "M330 127H350V403H334" "st" "1" "c" "f-id" "m" "id" "l" "who holds which role" "lx" 340 "ly" 182 "a" "end")
+      (dict "d" "M290 274V372" "st" "2" "c" "f-call" "m" "call" "l" "calls" "lx" 298 "ly" 333)
+      (dict "d" "M128 274V372" "st" "8" "c" "f-pub" "m" "pub" "l" "publishes" "lx" 122 "ly" 333 "a" "end")
+      (dict "d" "M250 274V333H150V372" "st" "8" "c" "f-pub dash" "m" "pub" "l" "proposes" "lx" 200 "ly" 328 "a" "middle")
+      (dict "d" "M150 274V296H140" "st" "5" "c" "f-id dash" "m" "")
+      (dict "d" "M210 274V296H220" "st" "5" "c" "f-id dash" "m" "")
+      (dict "d" "M290 430V448" "st" "3 4" "c" "f-call" "m" "call")
+      (dict "d" "M194 479H170" "st" "4 5" "c" "f-ask run" "m" "ask" "l" "asks" "lx" 180 "ly" 445 "a" "middle")
+      (dict "d" "M30 258H5V479H26" "st" "5" "c" "f-ask" "m" "ask" "l" "decides" "lx" 34 "ly" 446)
+      (dict "d" "M310 506V636" "st" "6" "c" "f-ok" "m" "ok")
+      (dict "d" "M310 544H150V622" "st" "6" "c" "f-ok" "m" "ok" "l" "allowed" "lx" 230 "ly" 537 "a" "middle")
+      (dict "d" "M262 684V700" "st" "6" "c" "f-ok" "m" "ok" "l" "acts on" "lx" 270 "ly" 697)
+      (dict "d" "M342 500H350V811H334" "st" "7" "c" "f-rec run" "m" "rec" "l" "every decision" "lx" 340 "ly" 775 "a" "end"))
+    "keys" (slice (dict "x" 310 "y" 572))
+    "pkt" (cond $model "" "M290 274V479H310V662H262V726")
+    "g" (dict "agent" 0 "role" 1.19 "policy" 1.89 "tool" 3.77 "object" 4.7))
+-}}
+{{- range $v := $variants }}
+{{ partial "zone-diagram.html" (dict "v" $v "href" $href "icons" $icons) }}
+{{- end }}

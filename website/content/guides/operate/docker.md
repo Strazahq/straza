@@ -1,12 +1,18 @@
 ---
 title: Docker
 description: Run a standalone strazad in a container, with all of its state on one named volume you can back up.
+summary: >-
+  The release image holds `strazad` and `strazactl`, runs as user 65532 and keeps all its state
+  in `/var/lib/straza`, which you mount as one named volume owned by that user. Its default
+  command is the enterprise profile, so a standalone container passes `serve --profile
+  standalone`. Back up that volume and you hold the whole standalone server.
 pagetype: how-to
 weight: 20
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: Linux with Docker Engine 29.4.0, where the release image was not published yet, so the pull, the run, the log, the verify block and the container removal were not run. The inspect command and a listing of the image's files ran against the demo stack's strazad image, built locally from deploy/Dockerfile at v1.1.0-104-g07d2df0e, the volume ownership step and the volume removal ran with busybox:1.36 on a scratch volume, and the permission-denied line and the list of what the data directory holds come from strazad at the tested version in an Alpine 3.20 container. The enterprise compose file passed docker compose config and was not brought up
+  except: the pull, run, log, verify and removal of the release image, unpublished then, and the enterprise compose file
   date: 2026-10-06
 applies_to: both
 who: You, as the operator of the Docker host

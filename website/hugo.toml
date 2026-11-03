@@ -43,8 +43,19 @@ baseName = "llms"
 isPlainText = true
 notAlternative = true
 
+# markdown is each page's copy for agents, served at its address plus
+# index.md and linked from the page head and from llms.txt, so an agent reads
+# the docs without the markup. tools/site-publish.py refuses a page without one.
+# Every shortcode has a Markdown form beside its HTML one.
+[outputFormats.markdown]
+mediaType = "text/markdown"
+baseName = "index"
+isPlainText = true
+
 [outputs]
-home = ["html", "searchindex", "llms"]
+home = ["html", "searchindex", "llms", "markdown"]
+page = ["html", "markdown"]
+section = ["html", "markdown"]
 
 # The writing rules allow no en or em dash, so the typographer keeps a written
 # "--" or "---" as typed. Curly quotes stay on.

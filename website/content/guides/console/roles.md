@@ -1,6 +1,11 @@
 ---
 title: Roles
 description: You read what a role gives and who holds it on the role's own page, and you change its access, its composition, its holders and its knowledge packs from there.
+summary: >-
+  Each role has a page that shows what holding it gives and who holds it. From there you change
+  what an application role reaches, compose a business role, give an approver or Straza role to
+  a person and bind knowledge packs. When your IGA writes membership over SCIM, a change you
+  make here is drift.
 pagetype: how-to
 weight: 20
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server on Linux with the MCP reference server registered as demo-tools, read and edited as the admin in headless Chromium. Assigning from a role's page, composing and binding a pack were set up with strazactl and read back in the console, and no role was saved from the New role wizard
   date: 2026-10-06
+  except: assigning, composing and binding in the console, set up with strazactl instead, and saving from the New role wizard
 applies_to: both
 who: You, as an admin
 where: The console in a browser
@@ -16,13 +22,13 @@ keywords: console roles role page access edit access compose holders assign area
 ---
 
 
-Roles is where you read what holding a role gives a person or an agent. Straza has four kinds of role. An application role reaches tools on one MCP server, a business role composes other roles into one assignment, an approver role decides approval requests, and a Straza role administers Straza itself. Every role has its own page, and the page offers what fits its kind. [Identities and roles]({{< relref "concepts/identities.md" >}}) explains the kinds, and the task guides linked below walk each change in full.
+Roles is where you read what holding a role gives a person or an agent. Straza has four kinds of role. An application role reaches tools on one MCP server, a business role composes other roles into one assignment, an approver role decides approval requests, and a Straza role administers Straza itself. Every role has its own page, and the page offers what fits its kind. [Roles and access]({{< relref "concepts/roles-and-access.md" >}}) explains the kinds, and the task guides linked below walk each change in full.
 
 ## Before you start {.nostep}
 
 
 - A console sign-in that holds the `identity` area, which opens Users and Roles. The Reach and Tools columns also read the MCP servers, which needs `apps:read`, and a column your session may not read says so in its cells.
-- When your identity manager writes role membership over SCIM, it masters who holds each role. A change you make here lasts until its next reconciliation.
+- When your identity manager writes role membership over SCIM, it masters who holds each role. Each assignment records where it came from, `scim` or `admin`. A change you make here lasts until its next reconciliation.
 
 ## Find a role
 

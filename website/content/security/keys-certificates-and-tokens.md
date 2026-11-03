@@ -1,6 +1,11 @@
 ---
 title: Keys, certificates and tokens
 description: Every key and token Straza holds, where it lives, how long it lasts, how to rotate or revoke it, and what a stolen copy yields.
+summary: >-
+  One server key signs every token Straza hands out, a second signs the policy every workstation
+  trusts, and a sealing key opens every secret the server stores. A copy of the database mints
+  tokens for any user but opens no sealed credential. Back up the store with three files: the
+  sealing key, the approver TLS pair and the WebPush key.
 pagetype: explanation
 weight: 17
 draft: false
@@ -139,7 +144,8 @@ If the vaulted password is lost as well, the last resort is the database. Write 
 UPDATE users SET password_hash = '$2y$10$...' WHERE username = 'break-glass';
 ```
 
-This edit leaves no audit record, so note it in your own incident record.
+
+This edit leaves no audit record, so note it in your own incident record. Never delete the data directory of a real deployment to get back in.
 
 A role assignment inserted by hand is a different matter and not a recovery path. The running server caches role resolution until an admin write bumps it, so the row takes effect only after a restart. It carries no origin and no actor, and the identity manager's next reconciliation removes it. Sign in as break-glass and assign the role through the console or the CLI instead. When an identity manager writes role membership over SCIM, restore the membership there as well, or its next full membership write removes the console assignment too.
 

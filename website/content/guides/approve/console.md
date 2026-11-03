@@ -1,6 +1,11 @@
 ---
 title: Approve in the console
 description: You approve a held call from the console, and the agent's retry runs on your decision. strazactl lists the requests and reads the decisions.
+summary: >-
+  An admin decides held calls in the Approvals area of the console, where every call that a
+  `mode: approve` rule holds waits. An approval lets the held gateway call run, or the agent's
+  identical retry run once, and an unanswered request expires into a deny. strazactl lists
+  requests and reads decisions, and never decides.
 pagetype: how-to
 weight: 10
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: The CLI form on a throwaway standalone server in a Linux container, where the admin decided a hook hold and a ticket that dana's machine raised and revoked the session that asked. Those decisions came from strazactl, which no longer decides. The console form and the gateway retry were walked in headless Chromium against the demo stack on v1.1.0 on 2026-09-28 and not again, because deciding there writes to the shared stack. That walk's held call was the agent joe's gateway call to demo-tools get-sum, and the denied one his get-env ticket. The console's browser sign-in was written from the code on 2026-10-22 and not walked
   date: 2026-10-06
+  except: the console's browser sign-in, written from the code and not walked
 applies_to: both
 keywords: console approve hold retry
 who: You, as an admin who decides held calls
@@ -165,6 +171,8 @@ Press **Approve**, on the row or at the foot of the sheet. A second dialog asks 
 {{< shot name="approval-approve" caption="The Approve question, here for dana's `kubectl apply`, with the optional reason." >}}
 
 {{< see >}}A toast says `Approved. get-sum runs now for joe-java-developer-agent.`, and the row leaves the Waiting filter.{{< /see >}}
+
+![Replay: an agent's MCP call waits on a hold while its sponsor approves it in the console's Approvals area, and then the held call runs](../../../static/replays/approval-flow.png)
 
 
 Deny asks in the same shape. On the example's ticket row it asked `Deny get-env for joe-java-developer-agent?`, with `The call is denied and the agent is told who denied it.` under the question, and its button read `Deny request`. Once every request is decided, Waiting reads `No pending approval requests.`

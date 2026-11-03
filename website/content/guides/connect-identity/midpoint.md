@@ -1,6 +1,11 @@
 ---
 title: midPoint
 description: midPoint provisions people and AI agents into Straza over SCIM, hands them Straza roles through access packages, and takes both away again.
+summary: >-
+  midPoint masters who exists in Straza and who holds which role. It provisions people and AI
+  agents over SCIM, and hands out Straza roles, which are born in Straza and imported into
+  midPoint, through access packages. Disabling a user in midPoint deactivates the Straza
+  account and revokes its sessions.
 pagetype: how-to
 weight: 10
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0
   platform: A Linux container against the demo stack, with midPoint 4.10 driven over its REST interface. The midPoint browser console was not opened, so its archetype labels, list names and two role columns were read from the live system configuration over the same REST interface
   date: 2026-09-28
+  except: the midPoint browser console, whose labels and lists were read over REST and not opened
 applies_to: both
 who: You, as the admin of Straza and of midPoint
 where: A terminal with strazactl and curl, and your midPoint
@@ -34,7 +40,7 @@ Deactivating a user in midPoint deactivates the Straza account, revokes every se
 - A midPoint 4.10 administrator, and a midPoint that can reach your strazad address.
 - On a standalone server, a password for each midPoint-born person who signs in, because the built-in issuer checks one. Set it with `strazactl users set-password`.
 
-The examples ran on the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}). There midPoint answers at `http://localhost:8087/midpoint` as `administrator` with the demo stack's default password `StrazaEval5ecr3t!`, and it reaches strazad as `http://strazad:8420`. The SCIM endpoint is the same in both profiles.
+The examples ran on the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}). There midPoint answers at `http://localhost:8087/midpoint` as `administrator` with the demo stack's default password `StrazaEval5ecr3t!`, and it reaches strazad as `http://strazad:8420`. The SCIM endpoint is the same in both profiles.
 
 ## Mint the token
 
@@ -91,7 +97,7 @@ Name the token after the system that holds it. The demo stack's seeder names its
 ## Install the connector
 
 
-The reference integration is one midPoint resource on universal-rest-connector. It is a separate ConnId connector under its own license, Apache-2.0, and its connector class is `ai.straza.connector.rest.UniversalRestConnector`.
+The reference integration is one midPoint resource on universal-rest-connector. It is a separate ConnId connector under its own license, Apache-2.0, with its source in the [universal-rest-connector repository](https://github.com/Strazahq/universal-rest-connector), and its connector class is `ai.straza.connector.rest.UniversalRestConnector`.
 
 A prebuilt copy sits in the repository as `deploy/compose/eval-stack/midpoint/connectors/universal-rest-connector.jar`. The `SHA256SUMS` file beside it pins the jar, and its license and notice files sit there too. Add the jar to your midPoint's connector bundles. The demo stack loads it from midPoint's `icf-connectors` directory.
 
@@ -100,13 +106,14 @@ A prebuilt copy sits in the repository as `deploy/compose/eval-stack/midpoint/co
 
 The objects live under `deploy/compose/eval-stack/midpoint/objects/`. Import them in this order, because each one uses what the ones before it define. The demo stack's seeder runs the same imports in the same order.
 
+
 1. `schema/straza-extension.xsd`, the Straza items on users and roles. The seeder uploads it as a midPoint schema object, with the file as its definition. It must exist before any object that carries one of its items.
 2. `templates/straza-agent-template.xml`, which derives an agent's `strazaSponsor` username from the sponsor reference `strazaSponsorRef`. The two agent archetypes use it.
 3. The archetypes in `archetypes/`. The persona archetypes set a user's type and agency mode, and the role archetypes file each imported role under its kind.
 4. `roles/role-straza-metarole.xml` and `roles/role-ar-straza-account.xml`. The metarole must exist before the resource, because the resource assigns it to every role it imports.
 5. `system/admin-gui-views.patch.xml`, if you want the Straza lists in the menu. It is a modification of the system configuration object, `00000000-0000-0000-0000-000000000001`, sent over midPoint's REST interface. It adds views and keeps the stock ones.
 6. `resources/straza-resource.xml`, with your values in three configuration properties: `baseUrl` is your strazad address, `apiToken` is the token from the first step, and `schemaFilePath` is where midPoint reads `deploy/compose/eval-stack/midpoint/straza-schema.json`.
-7. `tasks/livesync-tasks.xml`, three LiveSync tasks for accounts, roles and MCP servers. Each one reads the admin API change feed, `GET /v1/admin/changes`, every ten seconds.
+7. `tasks/livesync-tasks.xml`, three LiveSync tasks for accounts, roles and MCP servers. Each one reads the admin API change feed, `GET /v1/admin/changes`, every ten seconds. The feed's cursor only moves forward and delivery is at least once, so a change can arrive twice, and a reconciliation from time to time stays the safety net.
 8. `tasks/initial-recon-tasks.xml`, three one-time reconciliations that pull what already exists, because LiveSync starts from the moment it first runs. The role reconciliation must finish before you assign an imported role.
 
 The resource presents the token on `/scim/v2` for users and role membership. It presents the same token on the admin API to read MCP servers and the change feed. Roles reach midPoint as SCIM groups and never cross the admin API.
@@ -128,6 +135,9 @@ The resource's account object type maps these items. `agencyMode`, `sponsor`, `s
 | extension `strazaPersona` | `kind` | read back from Straza, `human` or `nhi` |
 | extension `strazaOrigin` | `origin` | read back from Straza, `local` or `scim` |
 | activation `administrativeStatus` | `active` | native activation, the kill switch |
+
+
+Certifiers read `strazaUserType` to tell an agent from a person. `kind` is fixed at the create and reads `human` for an agent sent without the agent extension, such as one typed agent only after its create.
 
 ## Check the imported roles
 
@@ -371,7 +381,8 @@ dana-kovac                disabled  scim    dana.kovac@example.com          01a0
 {{< /cli >}}
 
 
-Setting the status back to `enabled` re-activates the account, and the render returns to `active: true`. Sessions revoked in between stay revoked, so the person enrolls again. A lock placed in Straza with `strazactl users lock` survives the enable on purpose. An enable from the identity manager can never lift a lock your security team placed, and midPoint sees the lock read-only in the user's extension.
+
+Setting the status back to `enabled` re-activates the account, and the render returns to `active: true`. Sessions revoked in between stay revoked, and the next check-in from the person's enrolled machine opens a new session with no new enrollment. A lock placed in Straza with `strazactl users lock` survives the enable on purpose. An enable from the identity manager can never lift a lock your security team placed, and midPoint sees the lock read-only in the user's extension.
 
 ## Undo
 
@@ -401,6 +412,7 @@ A LiveSync task that hits a fatal error stays suspended, and midPoint does not r
 
 ## Next {.nostep}
 
+
 - [AI agents as identities]({{< relref "guides/connect-identity/nhi-provisioning.md" >}}) gives a provisioned agent a key, so it signs in with no browser.
 - [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) gives an application role a server's tools.
-- [Identities and roles]({{< relref "concepts/identities.md" >}}) explains the four role kinds.
+- [Roles and access]({{< relref "concepts/roles-and-access.md" >}}) explains the four role kinds.

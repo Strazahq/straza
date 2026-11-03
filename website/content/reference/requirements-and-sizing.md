@@ -102,7 +102,7 @@ To size the database, multiply the audit records a day by 1 KB. An agent that ma
 ## Tested with
 
 
-This table records what the docs and the tests ran on, and it makes no promise of support for each version. `straza service` runs on Linux, macOS and Windows. On Windows an administrator installs the service from the Straza MSI, as [Install]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) shows. On macOS an administrator installs it from the Straza package for macOS, which releases from 2.0.0 carry signed and notarized, or from the same package built on a Mac from the source tree, as [Install]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) shows. The MSI and package rows below say what ran. The other macOS rows were run before the service reached macOS, and the Windows rows other than the service and MSI rows before it reached Windows.
+This table records what the docs and the tests ran on, and it makes no promise of support for each version. `straza service` runs on Linux, macOS and Windows. On Windows an administrator installs the service from the Straza MSI, as [Install]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) shows. On macOS an administrator installs it from the Straza package for macOS, which releases from 2.0.0 carry signed and notarized, or from the same package built on a Mac from the source tree, as [Install]({{< relref "guides/operate/install.md#install-the-service-on-macos" >}}) shows. The MSI and package rows below say what ran. The other macOS rows were run before the service reached macOS, and the Windows rows other than the service and MSI rows before it reached Windows.
 
 | Component | Version | How it was tested |
 |---|---|---|

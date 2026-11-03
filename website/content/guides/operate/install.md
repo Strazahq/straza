@@ -1,8 +1,15 @@
 ---
 title: Install
 description: Put the three Straza binaries on your PATH and check that they came from the Straza release job.
+summary: >-
+  Straza is three binaries: `strazad` runs the server, `strazactl` administers it and `straza`
+  checks policy beside an agent. You verify a release by its cosign signature and checksums, or
+  build from source. A machine whose agents you govern gets `straza` from a package instead, a
+  deb, rpm, MSI or pkg, which also installs `straza service`.
+aliases:
+  - /get-started/install/
 pagetype: how-to
-weight: 10
+weight: 5
 draft: false
 who: You, on each machine that runs Straza
 where: A terminal, or PowerShell on Windows
@@ -10,6 +17,7 @@ steps: true
 tested:
   version: v1.1.0-117-g106081a8
   platform: An Alpine 3.20 linux/amd64 container that held only the three binaries of this build, copied into /usr/local/bin, where the three version commands ran and the state folders of the undo step were seen. The release download, the cosign check and the checksum check ran later on Linux against the published release 1.1.2 on 2026-10-14, and they run against 2.0.0 only after its tag. Every Windows step was not run, and the build from source was not run because this walk ran no git or make. The Windows service step now installs from the MSI. MSIs built from the source tree at v1.0.0-1600-g3c02a286 ran on a Windows 10 machine on 2026-10-26, by a test script and not by these steps, where the install, the uninstall, an upgrade while hooks ran, the refused downgrade and the purge passed. The service it registers ran on 2026-10-22 on a Windows 10 machine at v1.0.0-1585-gb30a22d7, installed with the managed install and the sc.exe commands of that version, and again as an upgrade to v1.0.0-1586-g3a9b10d6 while a Claude Code window stayed open. The macOS steps were written on 2026-10-26 from the package sources and the code, and the steps for the release pkg the same day from the release workflow and its scripts, before any release carried a pkg. An unsigned package built from the source tree ran in a macOS 26.6.2 virtual machine on 2026-10-26 at v1.0.0-1610-g366fac50, installed by a test script and not by these steps. On 2026-10-27 a pkg built from the source tree at v1.0.0-1615-g272946e5, signed with the Developer ID and notarized by Apple, passed spctl on a Mac, and the same test script installed, upgraded, uninstalled, installed again and purged it in a macOS 26.6.2 virtual machine
+  except: the build from source, and the Windows and macOS steps, which only a test script ran
   date: 2026-10-06
 applies_to: both
 keywords: install download verify checksum signature binary windows powershell service straza-service named pipe msi msiexec macos pkg launchd shasum notarized notarization developer id gatekeeper pkgutil spctl jamf intune
@@ -394,13 +402,13 @@ The server also ships as the container image `ghcr.io/strazahq/straza`, signed w
 | [The container image with Docker]({{< relref "guides/operate/docker.md" >}}) | Standalone, or enterprise with the repository's compose file | One host | You run your services as containers. |
 | [The enterprise shape]({{< relref "guides/operate/enterprise-shape.md" >}}) | Enterprise | Replicas behind one load balancer, sharing one Postgres and one NATS | You sign people in through your own identity provider, or you need more than one replica. |
 | [Kubernetes with Helm]({{< relref "guides/operate/kubernetes-with-helm.md" >}}) | Enterprise by default, or standalone with one replica | Two replicas by default, with Postgres and NATS bundled or your own | You run Kubernetes. |
-| [The demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) | Enterprise, with demo defaults | One machine with 4 cores and 8 GB | You want to try the whole product on one machine, with midPoint, Keycloak and a SIEM. |
+| [The demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) | Enterprise, with demo defaults | One machine with 4 cores and 8 GB | You want to try the whole product on one machine, with midPoint, Keycloak and a SIEM. |
 
-`straza` goes onto the machines of the people and agents you govern, and `strazactl` onto the machines of the people who administer Straza. On a Linux machine you govern, the `straza` package installs the client and runs `straza service` beside the agents under its own OS account. On a Windows machine the [Straza MSI](#install-the-service-on-windows) does the same, and on a Mac the [Straza package for macOS](#install-the-service-on-macos). [Your first governed session]({{< relref "get-started/first-governed-session.md" >}}) starts the service by hand instead, as your own user. [Run Straza]({{< relref "guides/operate/_index.md" >}}) lists every operations guide.
+`straza` goes onto the machines of the people and agents you govern, and `strazactl` onto the machines of the people who administer Straza. On a Linux machine you govern, the `straza` package installs the client and runs `straza service` beside the agents under its own OS account. On a Windows machine the [Straza MSI](#install-the-service-on-windows) does the same, and on a Mac the [Straza package for macOS](#install-the-service-on-macos). [Your first governed session]({{< relref "evaluate/try-it-on-one-laptop.md" >}}) starts the service by hand instead, as your own user. [Run Straza]({{< relref "guides/operate/_index.md" >}}) lists every operations guide.
 
 ## Undo {.nostep}
 
 
 Installing from the archive writes nothing beyond the binaries, so removing Straza from a machine where it was only installed means deleting the three files. On Windows, also take the folder out of your user Path. The Straza MSI comes off in an elevated PowerShell with the install command of its step, with `/x` in place of `/i`. The uninstall removes the wiring of every harness the managed install wired, stops and removes the service and removes `straza.exe` and its copy `git-remote-straza.exe`. With them goes the MSI's PATH entry. It keeps `C:\ProgramData\straza-service` with the machine's keys, so the MSI installed again resumes every enrollment, unless you add `PURGE=1` after `/qn`, which deletes them. A macOS package has no uninstall of its own, so the Straza package for macOS comes off with `sudo /opt/straza/bin/straza installer uninstall`. It stops the service, removes the wiring of Claude Code, Codex CLI and Gemini CLI and then the package's files, and keeps `/var/db/straza-service` with the Mac's keys for a reinstall, unless you add `--purge`. The `straza` package comes off with its package manager, and [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md#remove-straza-from-a-client-machine" >}}) says what each removal keeps on the machine and what stays at the server. Once `strazad serve` has run, it keeps its state in a `data` directory where it was started. `strazactl` keeps nothing on the machine. An older `strazactl` that signed in left a `credentials.json` in `.straza` under your home directory. That file works nowhere and can be deleted. `straza service` keeps each enrollment in its state directory, which is `service` inside `STRAZA_HOME` when you start it with `STRAZA_HOME` set, as the first governed session does. If you connected Claude Code, run `straza uninstall claude-code` first to remove the hook wiring. Stop `straza service` if it runs, then remove `data` and `.straza` for a clean machine.
 
-[Your first governed session]({{< relref "get-started/first-governed-session.md" >}}) starts the server and takes you to the first policy decision.
+[Your first governed session]({{< relref "evaluate/try-it-on-one-laptop.md" >}}) starts the server and takes you to the first policy decision.

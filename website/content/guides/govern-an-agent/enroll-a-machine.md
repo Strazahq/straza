@@ -1,6 +1,11 @@
 ---
 title: Enroll a machine
 description: The Straza background service on this machine holds a key for your Straza identity, and straza status and straza doctor show it ready for an agent.
+summary: >-
+  You enroll a machine once, before any agent runs on it. You sign in, in a browser on that
+  machine, and `straza service`, the Straza background service, keeps a key for you, so every
+  agent session there checks in as you without another sign-in. `straza status` and `straza
+  doctor` then show the machine ready.
 pagetype: how-to
 weight: 5
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.0.0-1570-gaf326165-dirty
   platform: An Alpine 3.20 container against a standalone server, both built from a development working tree before its commit, with straza service started with STRAZA_HOME and the sign-in page answered by a form post. The person alice ran as root with the home directory /root. The attestation refusal came from a second container whose server was restarted with STRAZA_MIN_ATTESTATION=managed. The enterprise sign-in output was not run in this walk. The browser sign-in, its refusals and the --use-device-code flag were written from the code on 2026-10-22 and not walked. The Windows machine section ran on 2026-10-22 on a Windows 10 machine at v1.0.0-1585-gb30a22d7, where alice enrolled through the browser and status and doctor answered through the pipe, and a second, standard account saw itself as not enrolled. The administrator's step there now installs from the MSI. A Windows 10 machine installed, upgraded and removed that MSI on 2026-10-26 in a run that did not follow these steps. Its other Windows sentences were written from the code and not run. The macOS section was written on 2026-10-26 from the package sources and the code, and its release pkg the same day from the release workflow, before any release carried a pkg. An unsigned package built from the source tree ran in a macOS 26.6.2 virtual machine on 2026-10-26 at v1.0.0-1610-g366fac50, where a person enrolled through the browser sign-in by a test script and not by these steps, and no signed pkg has run on a Mac yet. The section on moving a machine to another server was written from the code on 2026-11-01 and not walked
   date: 2026-10-21
+  except: the browser sign-in and its refusals, the macOS section and moving a machine to another server, written from the code and not walked
 applies_to: both
 who: You, on the machine where your agent runs
 where: A terminal and a browser
@@ -22,7 +28,7 @@ You enroll a machine once, before you connect any agent on it. Enrolling signs y
 
 
 - A Linux, macOS or Windows machine, where `straza service` runs.
-- On Linux, the `straza` package installed or the `straza` binary on your PATH. On macOS, the Straza package for macOS that an administrator installed, or the `straza` binary on your PATH. On Windows, the Windows service that an administrator installed. [Install]({{< relref "get-started/install.md" >}}) shows each one.
+- On Linux, the `straza` package installed or the `straza` binary on your PATH. On macOS, the Straza package for macOS that an administrator installed, or the `straza` binary on your PATH. On Windows, the Windows service that an administrator installed. [Install]({{< relref "guides/operate/install.md" >}}) shows each one.
 - The address of your Straza server. The commands below use `http://127.0.0.1:8420`, so put your own address in its place.
 - An account the server knows. A standalone server keeps its own users, so an admin creates yours with `strazactl users create` and gives you its password. An enterprise server signs you in at your identity provider, and your identity manager provisions your account to Straza over SCIM.
 - A browser on this machine for the sign-in. A machine with no display signs in with a code instead, as the sign-in step shows.
@@ -32,7 +38,7 @@ An AI agent with no person at the keyboard enrolls with a key of its own instead
 ## A machine with the straza package {.nostep}
 
 
-On a Linux machine with the `straza` package from [Install]({{< relref "get-started/install.md#install-the-package-on-linux" >}}), the work splits between an administrator and each person:
+On a Linux machine with the `straza` package from [Install]({{< relref "guides/operate/install.md#install-the-package-on-linux" >}}), the work splits between an administrator and each person:
 
 1. An administrator installs the package, which puts `straza service` in place under its own OS account.
 2. The administrator runs the managed install for each harness. It pins the Straza server for every user of the machine and wires the harness's hooks to `/usr/bin/straza`.
@@ -52,7 +58,7 @@ On Linux the command runs only where the package installed `/usr/bin/straza`, be
 
 {{< fails >}}
 `` `straza install --managed` found no /usr/bin/straza, which the Straza package installs. Install the straza package for this distribution first, then run this command again. ``
-: The package is not installed on this machine. Install it as [Install]({{< relref "get-started/install.md#install-the-package-on-linux" >}}) shows, then run the managed install again.
+: The package is not installed on this machine. Install it as [Install]({{< relref "guides/operate/install.md#install-the-package-on-linux" >}}) shows, then run the managed install again.
 
 ``The Straza server at https://straza.example.com renders claude-code hooks that run /usr/local/bin/straza, but this machine's Straza is /usr/bin/straza, so those hooks would never run. Upgrade the Straza server first, then run `straza install --managed` again.``
 : The server is older than the client and renders the path its own release installed to. The install wrote no wiring for that harness. Upgrade the server, then run the managed install again.
@@ -70,7 +76,7 @@ Environment=HTTPS_PROXY=http://proxy.example.com:3128
 
 On a Windows machine the work splits the same way:
 
-1. An administrator installs the Straza MSI, which puts `straza.exe` in `C:\ProgramData\straza\bin`, locks `C:\ProgramData\straza` to administrators and installs `straza service` as the Windows service straza-service. The administrator then runs the managed install for each harness, which pins the Straza server for every user of the machine and wires the harness's hooks to that `straza.exe`. [Install the service on Windows]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) shows both, and [Deploy with Intune]({{< relref "guides/govern-an-agent/deploy-with-intune.md" >}}) does both on a fleet.
+1. An administrator installs the Straza MSI, which puts `straza.exe` in `C:\ProgramData\straza\bin`, locks `C:\ProgramData\straza` to administrators and installs `straza service` as the Windows service straza-service. The administrator then runs the managed install for each harness, which pins the Straza server for every user of the machine and wires the harness's hooks to that `straza.exe`. [Install the service on Windows]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) shows both, and [Deploy with Intune]({{< relref "guides/govern-an-agent/deploy-with-intune.md" >}}) does both on a fleet.
 2. Each person runs `straza enroll` with no `--server`, in a PowerShell of their own, because the service enrolls at the server that the managed configuration names.
 
 The MSI adds `C:\ProgramData\straza\bin` to the machine PATH, so a PowerShell window started after your next sign-in finds `straza` by name. Until then, run it by its full path, as below.
@@ -88,7 +94,7 @@ The service names each caller by the Windows account the pipe reports, so every 
 
 On a Mac the work splits the same way:
 
-1. An administrator installs the Straza package for macOS, the signed pkg of release 2.0.0 or later or a package built from the source tree, which puts `straza` in `/opt/straza/bin`, links `/usr/local/bin/straza` to it and starts `straza service` as the launchd daemon ai.straza.service. The administrator then runs the managed install for each harness, which pins the Straza server for every user of the Mac and wires the harness's hooks to `/opt/straza/bin/straza`. [Install the service on macOS]({{< relref "get-started/install.md#install-the-service-on-macos" >}}) shows both, and [Deploy with Intune]({{< relref "guides/govern-an-agent/deploy-with-intune.md#deploy-to-macos" >}}) and [Deploy with Jamf Pro]({{< relref "guides/govern-an-agent/deploy-with-jamf.md" >}}) do both on a fleet.
+1. An administrator installs the Straza package for macOS, the signed pkg of release 2.0.0 or later or a package built from the source tree, which puts `straza` in `/opt/straza/bin`, links `/usr/local/bin/straza` to it and starts `straza service` as the launchd daemon ai.straza.service. The administrator then runs the managed install for each harness, which pins the Straza server for every user of the Mac and wires the harness's hooks to `/opt/straza/bin/straza`. [Install the service on macOS]({{< relref "guides/operate/install.md#install-the-service-on-macos" >}}) shows both, and [Deploy with Intune]({{< relref "guides/govern-an-agent/deploy-with-intune.md#deploy-to-macos" >}}) and [Deploy with Jamf Pro]({{< relref "guides/govern-an-agent/deploy-with-jamf.md" >}}) do both on a fleet.
 2. Each person runs `straza enroll` with no `--server`, in a Terminal window of their own, because the service enrolls at the server that the managed configuration names.
 
 {{< command terminal="Terminal" purpose="as yourself, not with sudo" >}}
@@ -125,7 +131,7 @@ A service that runs as you keeps your key in your own account, where every proce
 : A service for this `STRAZA_HOME` already runs. Use that one, or stop it before you start another.
 
 `` `straza service` runs as the Windows service straza-service and cannot run from a console. Start it from an administrator PowerShell with `Start-Service straza-service`. ``
-: You ran `straza service` in a terminal on Windows, where the service runs only when the Service Control Manager starts it. An administrator starts it as the sentence says, or installs it first as [Install]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) shows.
+: You ran `straza service` in a terminal on Windows, where the service runs only when the Service Control Manager starts it. An administrator starts it as the sentence says, or installs it first as [Install]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) shows.
 {{< /fails >}}
 
 ## Sign in and enroll
@@ -222,7 +228,7 @@ A machine enrolled with a sign-in code, by `--use-device-code` or by a Straza cl
 : The service is not running for this `STRAZA_HOME`, here alice's `/home/alice/.straza`, or this terminal exports another value. Start the service as the step before shows.
 
 ``Straza's background service isn't running on this machine, so this command can't reach your Straza session. Run `straza doctor` to see why, or ask IT to reinstall Straza. On Windows, `Get-Service straza-service` shows whether it runs, and the Application event log under straza-service shows why it stopped.``
-: On Windows the service straza-service is stopped or not installed. An administrator checks it as [Install]({{< relref "get-started/install.md#install-the-service-on-windows" >}}) shows.
+: On Windows the service straza-service is stopped or not installed. An administrator checks it as [Install]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) shows.
 
 ``Straza refused this machine because its key is kept in your own account instead of by the Straza background service, and your Straza admin requires the service. Install Straza from your software portal, then run `straza enroll`.``
 : The server accepts only the custody `account`, and this service runs as you. Ask your IT team for the service they run under its own account.
@@ -325,6 +331,9 @@ Every session carries an attestation level, which says how far the server can tr
 | `managed` | The hooks came from `sudo straza install --managed --server <server-url> <harness>`, or the same command in an elevated PowerShell on Windows, and every hash the service reports matches one the server registered for that harness and platform. | The wiring is unchanged, and on Linux it is root-owned. |
 | `advisory` | No managed install exists, after `straza install` without `--managed` or with no install at all, as in the steps above. A managed install lands here too while the server holds no hash for its harness and platform. | Nothing verified the wiring. An agent that can run commands can turn user-mode hooks off. |
 | `none` | The check-in carried no hashes, or a managed install reported a file whose hash the server does not hold. | A mismatch is a sign that the managed files changed. |
+
+
+The server registers those hashes itself. At each start strazad renders the managed hook wiring of Claude Code, Codex CLI and Gemini CLI for Linux, macOS and Windows, which a managed install fetches from it, and stores each hash. [Settings]({{< relref "guides/console/settings.md#keep-the-attestation-registry" >}}) lists them under **Attestation registry**.
 
 
 A server refuses a session below its `governance.minAttestation`. A standalone server defaults to `none`, so any enrolled machine checks in. An enterprise server defaults to `managed`, so a user-mode machine gets no session, and the agent reads the server's refusal at session start:

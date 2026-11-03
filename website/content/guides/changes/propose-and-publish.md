@@ -1,6 +1,10 @@
 ---
 title: Propose and publish a change
 description: A change to an MCP server, a role or a policy set waits as a checked draft until a person publishes it, and a published change can be taken back with a second draft.
+summary: >-
+  A change to an MCP server, a role or a policy set waits as a draft that Straza checks against
+  live state. Nothing in it is live until a person publishes it, and then all of it goes live
+  together or not at all. An undo is a second draft that holds the state from before.
 pagetype: how-to
 weight: 10
 draft: false

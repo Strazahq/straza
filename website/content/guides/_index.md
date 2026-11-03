@@ -7,8 +7,10 @@ draft: false
 keywords: guides how-to tasks
 ---
 
+[Set up Straza for a team]({{< relref "guides/set-up-straza-for-a-team.md" >}}) lists the guides below in the order an enterprise setup needs them.
+
 - [Run Straza]({{< relref "guides/operate/_index.md" >}}) deploys, exposes, backs up, upgrades and debugs strazad, and stops an identity or every agent when you must.
-- [Connect identity]({{< relref "guides/connect-identity/_index.md" >}}) brings people, AI agents and their role membership in from your identity manager.
+- [Connect identity]({{< relref "guides/connect-identity/_index.md" >}}) brings people, AI agents and their role membership in from your IGA.
 - [Govern agents]({{< relref "guides/govern-an-agent/_index.md" >}}) puts one agent under Straza policy, harness by harness.
 - [MCP servers]({{< relref "guides/serve-mcp-apps/_index.md" >}}) registers MCP servers, holds their credentials and decides which role reaches which tool.
 - [Policies]({{< relref "guides/write-policy/_index.md" >}}) writes the rules that decide what an agent may do.

@@ -1,4 +1,6 @@
-{{- define "line" }}- [{{ .Title }}]({{ .Permalink }}){{ with .Description }}: {{ . }}{{ end }}
+{{- /* Each line links the page's Markdown copy, which an agent reads
+without the site's markup. */ -}}
+{{- define "line" }}- [{{ .Title }}]({{ with .OutputFormats.Get "markdown" }}{{ .Permalink }}{{ else }}{{ .Permalink }}{{ end }}){{ with .Description }}: {{ . }}{{ end }}
 {{ end -}}
 {{- /* The generated command line reference, one page per command, is listed
 last under Optional: the llms.txt section a reader may skip when its context

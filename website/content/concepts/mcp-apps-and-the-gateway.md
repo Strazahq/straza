@@ -1,134 +1,85 @@
 ---
-title: MCP servers and the gateway
-description: See how the gateway picks the tools a session sees, decides each call, and adds the server's credential without handing it to the agent.
+title: Servers and the gateway
+description: How an MCP server sits behind Straza's gateway, which tools a session sees, and what the gateway does with each tool call.
 pagetype: explanation
-weight: 60
+weight: 80
 draft: false
-keywords: mcp app gateway catalog manifest credential
+summary: >-
+  An agent connects to Straza's gateway and reaches every MCP server behind it through that
+  connection. A session sees only the tools its roles reach. The gateway checks each call against
+  policy, adds the server's credential and records the call. The credential stays at the gateway,
+  which makes the gateway a security boundary.
+noun: [server, tool]
+keywords: mcp server tool gateway catalog manifest runtime rate limit timeout views
 ---
 
 
-The MCP gateway gives an agent one connection to every MCP server you register in Straza. A session sees only the tools its roles reach, and by default the tools that policy denies are hidden from it. On each call the gateway decides with policy, asks a person when a rule says so, and adds the server's credential itself, so the agent never holds it. Every call leaves an audit record with its arguments.
+An MCP server offers tools to an [agent]({{< relref "concepts/identities.md" >}}) over the Model Context Protocol. In Straza every server sits behind the gateway, and an agent reaches all of them through its connection to the gateway. A tool is an action an agent can take, such as `read_rows` on a database server.
+
+## A server and its manifest
 
 
-The gateway governs the calls that go through it. An agent that has its own route or credential to an MCP server can skip the gateway, so remove those routes when you deploy.
+Each server has a manifest, a YAML document that keeps the server's entry in the MCP Registry format and adds a block for Straza. The Straza block says how to reach the server: a process Straza starts, a remote server it calls over HTTP, or a container image. It can also cap the tools the server exposes and set a call rate and a timeout. It declares the server's credential and, where the server has them, its [objects]({{< relref "concepts/objects.md" >}}). A field Straza does not know fails the install, so a typo cannot pass as a setting that has no effect. A person publishes a manifest in a [draft]({{< relref "concepts/drafts.md" >}}), and an MCP Registry entry can be turned into a manifest.
+
+
+The server's name is its identity in policy and the prefix of its tools. On the demo stack the server postgres runs adaptive-pg-mcp, and the agent sees its tool as `postgres__read_rows`.
+
+
+The enterprise profile refuses a server that would run as a process inside Straza, where it could reach Straza's keys and database. Run it as its own service and add it as a remote server instead, as [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#command" >}}) shows. A container starts in a sandbox by default. Its root is read-only, every capability is dropped, it gains no new privileges and it has no network.
+
+## The tools a session sees
 
 {{< diagram name="gateway-catalog" caption="A tool reaches the list only when the server lists it, its manifest exposes it and one of the session's roles has access to it. The credential joins the call only at the gateway." >}}
 
-## From MCP server to manifest
+
+To build a session's tool list, the gateway first keeps each tool that the server lists now, that its manifest exposes, and that an access row of one of the session's [roles]({{< relref "concepts/roles-and-access.md" >}}) names. Then it runs the [policy]({{< relref "concepts/policy-model.md" >}}) for the session. By default a tool that policy denies is hidden, and a tool that needs a person's [approval]({{< relref "concepts/approvals-model.md" >}}) stays visible and asks the agent for a reason. A tool without access and a hidden tool get the same unknown-tool answer, so the answer never reveals that a hidden tool exists.
 
 
-A manifest is one YAML document that declares an MCP server. It keeps the `server.json` document of the MCP Registry format and adds a Straza block for governance and runtime settings.
+When [your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}), or an admin on standalone, changes the roles of a person or an agent, a running session takes the change at its next check-in. The gateway then tells the client that the tool list changed, and the client lists again without a restart.
 
-The server's name becomes both its policy identity and its tool namespace. Policy can select `apps: [github]`, for example, and a tool reaches the agent under a name such as `github__create_issue`.
-
-The Straza block picks one of three runtimes, a child process that speaks MCP over standard input and output, a remote server over streamable HTTP, or a container image. It can also limit the tools the server exposes, set a request rate and an upstream timeout, and declare how Straza adds a credential. Unknown fields fail the install instead of being ignored. The enterprise profile refuses a command server and asks you to run it as its own service, as [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#command" >}}) shows.
-
-`strazactl apps import` turns an MCP Registry entry into a manifest. It prefers a remote over streamable HTTP, then a container image, an npm package or a Python package. Exactly one secret variable or header becomes the credential declaration. [MCP servers]({{< relref "guides/serve-mcp-apps/_index.md" >}}) adds, imports and runs servers.
-
-## The catalog each role sees
+## What happens to a tool call
 
 
-The gateway builds a session's tool list in two stages:
-
-1. Straza intersects the tools the server lists now with the manifest's exposure list and the access rows of the session's roles. Only the tools in all three become candidates.
-2. The gateway runs policy for the session. With policy filtering on, which is the default, a tool that policy denies is hidden. A tool that needs a person's approval stays visible and asks for a justification.
-
-An access row already admits a tool, so a candidate that no rule gates runs. A tool without access and a tool hidden by policy return the same unknown-tool error, so the error never reveals whether a hidden tool exists.
-
-
-A role assigned in the identity manager reaches a running session at its next check-in. The gateway then tells the client that the tool list changed, so the client lists again without a restart. Before any agent starts, `strazactl catalog preview` shows what a role or a user would see, with one status per tool and a sentence that says why: runs, gated by approval, denied by a rule, no access, not in the role's access row, or not running. [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) grants access and checks the preview.
-
-![Replay: the connected straza server in Claude Code lists a policy-narrowed set of tools, and the write tool is absent rather than denied](../../static/replays/mcp-catalog.png)
-
-## The objects a role covers
-
-
-Some MCP servers reach many separate objects with one credential. A server that acts on the repositories of a GitHub organization through one GitHub App is an example: its credential reaches every repository the App was installed on. An access row names tools, so a role that may call a write tool on that server may call it on every one of those repositories. With a thousand repositories, one write role means write on all thousand.
-
-
-Three steps close that gap. The server's tools carry marks that say which argument names the object and which tool lists the objects, and a person pins that declaration in the server's manifest, so Straza decides only from the pinned copy. Straza then calls the listing tool itself, every 10 minutes, and keeps the result as the server's object list. Each role's access row on the server says which objects it covers: `covers: every`, or `covers: {objects: [Strazahq/pay-api]}` with each object named. A named object is bound to its id in the list, so a renamed repository stays covered. A server's author reads the marks and the listing answer in [Object marks for server authors]({{< relref "reference/object-marks.md" >}}).
-
-
-The gateway checks every call to such a server against all the roles the session holds, before policy runs. The first role by name that binds the tool and covers the object grants the call, and the audit record and the credential lookup both name that role. When no held role covers the object, the call is refused. The agent reads which tool and object were refused, which objects its own roles cover for that tool, ten at most, and a hint to check the object's name or ask an admin for a role that covers it. An object the list does not hold gets the same sentence, so a refusal never tells an agent which objects exist.
-
-
-The declaration gives each tool one of four reaches, and the reach decides which roles may call it:
-
-| Reach | What the tool does | Which held role may call it |
-|---|---|---|
-| `argument` | Names one object in an argument, such as `repo` | A role that covers that object |
-| `all` | Can reach every object at once, such as a search across repositories | A role on every object |
-| `none` | Touches no object, such as a tool that answers who the caller is | Any role that binds the tool |
-| `credential` | Does not name the object, and leaves the limit to the credential the call carries | A role on every object, because Straza does not check what a role's own login reaches yet |
-
-
-A tool the pinned declaration does not name counts as `all` until a person decides, so a tool the server adds later never reaches a role on some objects. A draft refuses a role on some objects that binds an `all` or `credential` tool, and it says to make a role on every object for that tool. One server pins one object type. A tool with reach `argument` names its object in one argument, a required top-level string of its input schema. Drafts check that against the input schema only while the server runs and lists the tool. For a server that is not running, the draft gets a line saying nothing was compared, and that line does not block the publish. Whatever the draft saw, the gateway refuses a call that does not carry the argument as a string.
-
-
-`every` means every object of the type, including the objects the server lists later. A holder of a role on every object can call a tool on a repository created a minute ago, before any listing has seen it. A role that names its objects cannot, until a person adds that repository to its covers line. When a person first pins a server's type, every existing access row on it gets `covers: every`, which is the reach the row already had, so the pin changes no role's coverage until someone narrows a role. From the pin on, the gateway does refuse a call whose object argument it cannot read, such as one with the argument missing, sent as another type than a string, or repeated under a second spelling, whatever role the caller holds. An approval or ticket given before the pin is asked for again, because from then on the approval key of a call that names an object carries the object. An access row on a pinned server without a covers line covers nothing. A server's admin may write `covers: every` on a role the server owns unless `admin.serverAdminsCoverEvery` is false, which leaves it to a global admin, as [the configuration reference]({{< relref "reference/configuration.md#config-reference" >}}) lists.
-
-
-Your IGA sees the same line. The role's SCIM group carries a read-only `covers` attribute that names the server, the type, and `every` or each named object, so a certifier sees that a role reaches two repositories and not all of them. The [midPoint guide]({{< relref "guides/connect-identity/midpoint.md#check-the-imported-roles" >}}) shows it in the Covers column.
-
-## Credentials stay on the gateway
-
-
-A manifest picks one credential kind:
-
-| Kind | How it works |
-|---|---|
-| `none` | The server needs no credential |
-| `static` | An admin stores a server secret and may add overrides for particular roles |
-| `token` | Starts with the caller's own pasted token. A configured agent can fall back to its sponsor's token or a shared one. |
-| `oauth` | Starts with the caller's own browser grant. A configured agent can use its sponsor's grant, a shared one or a client-credentials path. |
-
-Straza adds a static value as a header for a remote server, or as an environment variable for a child process. `oauth` and `token` belong to the caller and work only with remote servers. Straza resolves the current caller's own credential for each call, and a person who has none is denied. For an agent without its own, the manifest can deny the call or name a sponsor, shared or client-credentials path.
-
-For every kind that needs a credential, a missing one denies the call instead of reaching the server without it. Straza's management APIs show metadata, never stored values, and server lists and exports mask the secret-shaped values in a manifest. The agent's Straza session token is never forwarded to the server. The server receives the credential and can return its own content, so it stays part of the trusted integration. [Credentials]({{< relref "guides/serve-mcp-apps/credentials.md" >}}) stores one.
-
-## The gateway on the path
-
-
-
-strazad serves the gateway at `/mcp`. To an agent it is one MCP server named Straza MCP Gateway, and every request carries a session token. For a tool call, the gateway checks these in order:
+For each tool call, the gateway checks these in order:
 
 1. Whether the session may see the tool.
 2. The server's rate limit for this session.
-3. On a server that pins an object type, whether a role the session holds covers the object the call names.
-4. Policy, against the live snapshot.
+3. On a server that declares objects, whether a role the session holds covers the object the call names.
+4. Policy, against the policy snapshot in force.
 5. A person's approval, when the rule asks for one.
-6. The server's credential.
-7. An audit record with the arguments. The gateway queues it before the call and does not wait for it to be written.
-8. The call itself, with a 30-second timeout by default.
-
-A deny comes back as a tool error whose text starts with the Straza prefix and carries the reason, so the model reads the reason instead of taking it for a transport fault. The built-in MCP server named `straza` adds three approval tools on the same surface, and policy decides whether they are visible.
+6. The server's [credential]({{< relref "concepts/credentials.md" >}}).
+7. An [audit record]({{< relref "concepts/evidence.md" >}}) with the arguments, which the gateway queues before the call. It does not wait for the record to be written.
+8. The call itself, which times out after 30 seconds unless the manifest or the deployment sets another limit.
 
 
-A harness that already runs hooks reaches the gateway through `straza mcp`, a stdio proxy that `straza install` registers as the one MCP server the harness knows. The harness then puts its own prefix in front of the server and tool names. Container runtimes start under a sandbox by default, with a read-only root, all capabilities dropped, no new privileges and no network. [Any MCP client]({{< relref "guides/govern-an-agent/any-mcp-client.md" >}}) connects a client without hooks.
+A manifest can set a rate limit, which caps the calls a session makes to that server each second. The limit runs before policy, so a runaway loop costs no policy work and spends no approval. Each refused call still leaves its record.
+
+
+A deny comes back as a tool error whose text starts with `Straza:` and carries the reason. The model reads the reason and can tell the deny apart from a connection fault.
+
+## How an agent connects
+
+
+An agent sees the gateway as a single MCP server named Straza MCP Gateway, and every request carries the session's token. A coding tool that runs Straza's hooks reaches it through a local proxy, which the Straza install registers in that tool as an MCP server named straza. The coding tool then puts its own prefix in front of the server and tool names. Any other MCP client connects to the gateway directly, as [Any MCP client]({{< relref "guides/govern-an-agent/any-mcp-client.md" >}}) shows.
+
+
+The gateway also offers a built-in server named `straza`. Its tools let an agent ask for an approval and wait for the answer, and holders of the drafting role also get tools to propose a draft. Policy decides whether an agent sees these tools, as it does for any other tool. A server whose manifest allows it can show MCP Apps views, which the gateway serves on that server's own address, as [Show MCP Apps views]({{< relref "guides/serve-mcp-apps/show-views.md" >}}) explains.
 
 ## Why a gateway, and what it costs
 
 
-The alternative hands each agent its own credentials and trusts the agent's machine to use them well. Straza rejects that, because a credential on the agent's machine is one the model can read, print and send, and no hook on an open machine can stop a process that already holds it. Keeping the secret on the gateway makes the gateway path hold at a boundary even when the agent's machine does not.
+A hook on the agent's machine is advisory, because an agent that can run anything can skip it. The gateway is a security boundary, because the server's credential stays there and a call that goes around the gateway has none. This is true only while agents have no other route to the server, so remove such routes when you deploy. [The security model]({{< relref "evaluate/security-model.md" >}}) says which paths are a boundary.
 
-The price is a hop and a dependency. Every governed MCP call crosses the gateway, an unreachable gateway means no MCP tools at all, and the gateway is one more service to run at the scale of your fleet. It is designed to be stateless, so instances scale sideways and any instance serves any session.
+
+Every governed MCP call crosses the gateway, which adds a network hop. When the gateway cannot be reached, the agent has no MCP tools at all. You also run one more service, sized to your fleet. The gateway is built to keep no state of its own, so you scale it by adding instances and any instance can serve any session.
 
 {{< details summary="How it works inside" >}}
 
-The gateway verifies each request's session token against cached keys, then checks the denylist and the required attestation. If this strazad instance has not seen the session since its last restart, it asks the client to check in again.
+strazad serves the gateway at `/mcp`, and each server's own endpoint under `/mcp/` and the server's name. The gateway checks each request's session token against cached keys. Then it checks the revocation list and the deployment's minimum attestation. If this instance has not seen the session since its last restart, it asks the client to check in again.
 
 
-Large catalogs come in pages behind a cursor that checks itself against the catalog it was issued for. An access row or policy change under a paging client fails the cursor, and the client lists again from the start.
+A large tool list comes in pages, and each page cursor is checked against the list it was issued for. When an access row or a policy changes while a client is paging, its cursor fails and the client lists again from the start.
 
-
-For a static credential, Straza first looks for an override on the role whose access row admitted the call. If that role has none, it checks the overrides of the session's other roles in role-name order, and then uses the server secret. The server secret also feeds the health probe.
-
-Static rows stay sealed in an in-memory broker and are decrypted when Straza resolves them, so the request path never reads the store. A command or container server that needs a static credential stays pending until one is configured. A remote server with a static credential needs it for its inventory and its health checks as well as for tool calls.
-
-The detailed view below shows the two stages a candidate tool passes before it appears in a tools list.
-
-![Diagram: candidate tools pass two gates, a shared role catalog of bound tools and a per-session policy overlay, before they appear in a tools list](../../static/diagrams/two-tier-catalog.png)
 {{< /details >}}
 
-Read next: [Trust model and limits]({{< relref "concepts/trust-model-and-non-goals.md" >}}) states what each enforcement path is worth.
+{{< next "concepts/credentials.md" >}}

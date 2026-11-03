@@ -1,6 +1,11 @@
 ---
 title: Approve in the browser
 description: A person who is not an admin enables their own browser on the self-service page and decides the requests routed to them, each decision signed by a key that never leaves that browser.
+summary: >-
+  A person who is not an admin decides the held calls routed to them on the self-service page,
+  in a browser they enabled once. Enabling makes a signing key that never leaves that browser,
+  so every decision is signed and nobody can decide for them from a copied link. The person
+  needs the role `straza-enroll-browser`.
 pagetype: how-to
 weight: 15
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server on Linux. The approver lena signed in on the self-service page in headless Chromium, enabled the browser and approved alice's held kubectl apply, which her machine then ran through the Claude Code hook. That sign-in was the code sign-in of its time, and the browser sign-in that replaced it was written from the code on 2026-10-22 and not walked
   date: 2026-10-06
+  except: the browser sign-in, written from the code and not walked
 applies_to: both
 who: A person who decides requests, after you as the admin give them the role
 where: A browser on the self-service page

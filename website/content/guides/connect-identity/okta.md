@@ -1,6 +1,10 @@
 ---
 title: Okta
 description: Okta provisions people and their Straza role membership over SCIM, and you know what each request Okta sends does in Straza.
+summary: >-
+  Okta provisions people into Straza as it does any SCIM 2.0 application: it creates, updates
+  and deactivates users. Straza roles are made in Straza and reach Okta as groups to link, and
+  Okta writes only their membership. A deactivation revokes the person's sessions in Straza.
 pagetype: how-to
 weight: 20
 draft: false
@@ -8,6 +12,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in an Alpine 3.20 container on Linux, with the token minted with strazactl on the admin's login and every SCIM request the page shows replayed with curl on that token, the example role created there as an application role with no server. The Okta console steps were not walked, because no Okta tenant was available, and the Straza console forms of the token, verify and undo steps were checked against the console's source, not clicked
   date: 2026-10-06
+  except: the Okta console steps, with no Okta tenant, and the Straza console forms, read at source
 applies_to: both
 who: You, as the Okta admin and the Straza admin
 where: The Okta admin console, and a terminal with strazactl and curl
@@ -237,7 +242,8 @@ The next request with the old token answers `401` with the detail "admin API tok
 Straza roles render like every other group, so an Okta administrator who can assign group membership can assign `straza-admin`. That makes a person an administrator, while an AI agent that holds the role still gets no admin route, because only a person can use the admin API. The same holds for `straza-global-mcp-admin`, which administers every MCP server, and for each server's admin role, whose group is the server's name behind the prefix `mcp-admin-`. Scope who may manage those groups in Okta the way you scope any admin-grade role.
 
 
-Okta reactivation lifts what Okta deactivated and nothing else. A lock placed with `strazactl users lock` stays until a Straza administrator lifts it. Existing sessions stay revoked, so the person enrolls again.
+
+Okta reactivation lifts what Okta deactivated and nothing else. A lock placed with `strazactl users lock` stays until a Straza administrator lifts it. Existing sessions stay revoked, and the next check-in from the person's enrolled machine opens a new session with no new enrollment.
 
 ## Next {.nostep}
 

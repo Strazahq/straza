@@ -1,6 +1,11 @@
 ---
 title: Slack
 description: strazad posts each held call to a Slack channel as a card, and a tap on Approve or Deny there decides it.
+summary: >-
+  strazad posts each held call to one Slack channel as a card with Approve and Deny buttons. A
+  tap decides only when the tapper's Slack profile email maps to a Straza user that the request
+  names as a decider. The console keeps working underneath, so a Slack outage costs a
+  notification, never a decision.
 pagetype: how-to
 weight: 20
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: Not run against a Slack workspace, so the app settings, the card, the taps and the email mapping were read at source. The five configuration refusals and the enabled switch were run at the boot of a throwaway standalone server in a Linux container, where a notify edit was also stored and published with strazactl on an admin API token. The console and slack channel rows were read from the demo stack's channel status route, and their console words at source
   date: 2026-10-06
+  except: the Slack app, the card and the taps, read at source and not run against a workspace
 applies_to: both
 keywords: slack approve channel
 who: You, as the admin, with admin rights on the Slack workspace

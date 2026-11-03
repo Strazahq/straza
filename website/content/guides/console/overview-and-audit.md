@@ -1,6 +1,11 @@
 ---
 title: Overview and Audit
 description: You read the deployment's health on Overview, then find any decision on Audit, check it against the hash chain and test the same call again.
+summary: >-
+  Overview is the first page of the console and lists what needs a person now, such as waiting
+  approvals, failed servers or a broken audit chain. Audit is the hash-chained record of every
+  decision and change, which your browser re-hashes as it loads. From any decision, Test this
+  call asks the policy that is live now again.
 pagetype: how-to
 weight: 10
 draft: false
@@ -20,8 +25,14 @@ Overview is the first page the console opens, and it says what needs a person no
 
 ## Before you start {.nostep}
 
-- A console sign-in as an admin, at `/console/` on your server with **Sign in**. [Your first governed session]({{< relref "get-started/first-governed-session.md" >}}) shows the sign-in on a standalone server.
+- A console sign-in as an admin, at `/console/` on your server with **Sign in**. [Try it on one laptop]({{< relref "evaluate/try-it-on-one-laptop.md" >}}) shows the sign-in on a standalone server.
 - Some decisions on the chain, such as the deny and the allow of the first session.
+
+
+{{< fails >}}
+`This sign-in answer was not started in this tab, or it is more than 10 minutes old, so Straza did not use it. Press Sign in to start again.`
+: The answer that came back from the sign-in was started in another tab, or more than 10 minutes ago. Press **Sign in** again.
+{{< /fails >}}
 
 ## Read the summary
 
@@ -29,6 +40,12 @@ Overview is the first page the console opens, and it says what needs a person no
 {{< clicks "Overview" >}}
 
 The page opens on the **Summary** tab. The strip at the top counts the MCP servers running, the active sessions, the active users and the active policies. Under it, **Tool decisions** charts the calls the gateway and the hooks decided, with totals for allowed, denied and required approval. Switch its window between **Last 24 hours** and **Last hour** to see the last hour by the minute.
+
+
+The console adds no users. People and agents arrive over SCIM from your IGA, or an admin creates them with `strazactl`.
+
+
+The foot of the menu names the profile and the strazad build, and its tooltip adds the commit and the Go version.
 
 {{< shot name="overview" caption="The **Summary** tab: the counts at the top, and **Tool decisions** with its switch between **Last 24 hours** and **Last hour**." >}}
 

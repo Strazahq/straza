@@ -1,6 +1,11 @@
 ---
 title: Sinks and SIEM
 description: Send the audit record to a SIEM or a file sink and confirm nothing is lost on the way.
+summary: >-
+  A sink posts the audit record to a webhook, such as your SIEM, or appends it to a file. Its
+  position lives on the server, so a receiver outage delays events without dropping them. An
+  event the receiver keeps refusing is parked until you replay it, and the event id lets the
+  receiver drop duplicates.
 pagetype: how-to
 weight: 10
 who: You, as the operator who owns the evidence
@@ -38,7 +43,7 @@ sinks:
 The Authorization value is the base64 of the demo stack's `elastic:strazasiem`. Put your receiver's own credential there.
 
 
-The name becomes the durable consumer's name, so renaming a sink restarts it from the beginning of the stream's retention, which is also how you backfill a new receiver. `secret` or `secretFile` adds an HMAC-SHA256 signature over every body, and the file form keeps the key out of the config document. Leave `subjects` out to get the default set, or write `["straza.>"]` to forward the recorded conversation as well, which is one explicit line. `batch: 64` switches a sink to one POST or one fsync per batch, which the default of one event per delivery cannot keep up with at recording-scale volumes. A file sink needs only `type: file` and `path`, and it syncs each line to disk before the event is acknowledged.
+The name becomes the durable consumer's name, so renaming a sink restarts it from the beginning of the stream's retention, which is also how you backfill a new receiver. `secret` or `secretFile` adds an HMAC-SHA256 signature over every body, and the file form keeps the key out of the config document. Leave `subjects` out to get the default set, or write `["straza.>"]` to forward the recorded conversation as well, which is one explicit line. `batch: 64` switches a sink to one POST or one fsync per batch, which the default of one event per delivery cannot keep up with at recording-scale volumes. A file sink needs only `type: file` and `path`, and it syncs each line to disk before the event is acknowledged. With `batch` above 1, a webhook sink sends up to that many records in one POST as newline-delimited JSON, with the Content-Type `application/x-ndjson` and the count in the `X-Straza-Batch` header, and the signature covers the whole body.
 
 ## Check the boot line and the list
 

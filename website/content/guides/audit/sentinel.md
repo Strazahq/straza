@@ -1,6 +1,11 @@
 ---
 title: The sentinel
 description: The audit sentinel watches each session's decisions as they reach the audit chain and records a verdict when an agent probes the policy edge, and you read and act on the verdicts in Audit.
+summary: >-
+  The audit sentinel reads each session's decisions as they reach the audit chain and records a
+  verdict there when it sees a pattern, such as an agent that keeps retrying denied commands.
+  It only alerts and never blocks or revokes. It is off by default. You read its verdicts in
+  Audit and revoke a session yourself.
 pagetype: how-to
 weight: 20
 draft: false

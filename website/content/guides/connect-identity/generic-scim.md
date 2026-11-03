@@ -1,6 +1,11 @@
 ---
 title: Generic SCIM
 description: Your SCIM 2.0 client holds a token for Straza, and you know each request Straza accepts, what it does and how Straza refuses the rest.
+summary: >-
+  Straza accepts a strict subset of SCIM 2.0 from a client that holds an admin API token with
+  the `scim` area. The client creates, updates and deactivates users. Roles are made in Straza
+  and reach the client as groups whose only writable fact is membership, and a request outside
+  the subset is refused with a SCIM error.
 pagetype: how-to
 weight: 40
 draft: false
@@ -28,7 +33,7 @@ Straza implements a strict, documented subset of SCIM 2.0. Your client creates, 
 - `strazactl` with `STRAZA_SERVER` and an admin API token in `STRAZA_API_TOKEN`, or a console session that holds the tokens area. The steps mint another token, which takes `tokens:write`, a root-equivalent grant, so mint a **Full root** token for 30 days in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows, and revoke it when you are done.
 - `curl` and `jq` on a machine that reaches strazad.
 
-The examples ran against the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) at `http://localhost:8420`.
+The examples ran against the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) at `http://localhost:8420`.
 
 ## Mint a token
 
@@ -305,6 +310,7 @@ A token with `scim:write` can assign `straza-admin`, because Straza roles render
 
 ## Next {.nostep}
 
+
 - [midPoint]({{< relref "guides/connect-identity/midpoint.md" >}}) and [Okta]({{< relref "guides/connect-identity/okta.md" >}}) apply this profile to one product each.
 - [AI agents as identities]({{< relref "guides/connect-identity/nhi-provisioning.md" >}}) provisions an agent with the agent schema.
-- [Identities and roles]({{< relref "concepts/identities.md" >}}) explains the four role kinds.
+- [Roles and access]({{< relref "concepts/roles-and-access.md" >}}) explains the four role kinds.

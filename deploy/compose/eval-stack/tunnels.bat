@@ -1,6 +1,6 @@
 @echo off
 rem SSH tunnels to a remote Straza eval stack
-rem (https://docs.straza.ai/get-started/enterprise-demo-stack/#demo-defaults-and-the-hardened-shape).
+rem (https://docs.straza.ai/guides/operate/demo-stack-defaults/).
 rem Uses the OpenSSH client that ships with Windows 10+.
 rem Usage:  tunnels.bat user@host
 rem Then open http://localhost:8400 (Ctrl+C here stops the tunnels). Use

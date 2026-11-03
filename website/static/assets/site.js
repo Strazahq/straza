@@ -266,15 +266,20 @@
    
 
   function initDiagrams() {
-    var svgs = document.querySelectorAll(".fig svg[data-say]");
-    for (var i = 0; i < svgs.length; i++) {
-      (function (svg) {
+    var figs = [];
+    var all = document.querySelectorAll(".fig svg[data-say]");
+    for (var f = 0; f < all.length; f++) {
+      var owner = all[f].closest(".fig");
+      if (figs.indexOf(owner) < 0) { figs.push(owner); }
+    }
+    for (var i = 0; i < figs.length; i++) {
+      (function (fig) {
+        var svgs = fig.querySelectorAll("svg[data-say]");
         var say;
-        try { say = JSON.parse(svg.getAttribute("data-say")); } catch (e) { return; }
-        var groups = svg.querySelectorAll("[data-s]");
+        try { say = JSON.parse(svgs[0].getAttribute("data-say")); } catch (e) { return; }
+        var groups = fig.querySelectorAll("svg[data-say] [data-s]");
         if (!Array.isArray(say) || say.length < 2 || groups.length === 0) { return; }
-        var fig = svg.closest(".fig");
-        var canvas = svg.closest(".canvas");
+        var canvas = svgs[0].closest(".canvas");
         var ctl = document.createElement("div");
         ctl.className = "ctl";
         ctl.setAttribute("role", "group");
@@ -285,9 +290,9 @@
         var buttons = [];
         function show(n) {
           for (var b = 0; b < buttons.length; b++) { buttons[b].setAttribute("aria-pressed", String(b === n)); }
-          svg.classList.toggle("stepping", n > 0);
+          for (var s = 0; s < svgs.length; s++) { svgs[s].classList.toggle("stepping", n > 0); }
           for (var g = 0; g < groups.length; g++) {
-            groups[g].classList.toggle("lit", parseInt(groups[g].getAttribute("data-s"), 10) === n);
+            groups[g].classList.toggle("lit", groups[g].getAttribute("data-s").split(/\s+/).indexOf(String(n)) >= 0);
           }
           line.textContent = say[n];
         }
@@ -302,7 +307,7 @@
         fig.insertBefore(ctl, canvas);
         canvas.insertAdjacentElement("afterend", line);
         show(0);
-      })(svgs[i]);
+      })(figs[i]);
     }
   }
 

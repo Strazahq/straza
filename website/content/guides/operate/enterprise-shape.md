@@ -1,12 +1,18 @@
 ---
 title: The enterprise shape
 description: Run strazad as identical replicas behind one load balancer, all sharing one database, one event bus and one key file.
+summary: >-
+  Under the enterprise profile strazad replicas keep no request state of their own, so any
+  replica serves any session. They share one Postgres database, one NATS server with JetStream
+  and one key file that seals stored credentials. A new server allows agents no local tool until
+  a policy does, so the page adds a starter set.
 pagetype: how-to
 weight: 25
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: Alpine 3.20 container running one enterprise strazad from this page's config, with a local Postgres 16, a local NATS server with JetStream and the built-in issuer of a second, standalone strazad standing in for the identity provider, for the boot lines, the break-glass line, /readyz, strazactl status, the refusal of a key that is not 32 bytes, the missing-issuer sentence, STRAZA_EVENTS_URL on its own and the auditBackpressure values. The kubectl commands, the load balancer, the several-replica claims and the database outage were not run, because this host has no cluster and the walk stayed at one replica, and the console sentence was not clicked. The section that gives agents their local tools was walked on 2026-11-01 on the enterprise demo stack at v1.0.0-1676-g9d9ad66e, with the same commands and PolicySet under scratch names and a token holding exactly identity:read, identity:write and policy:write. Every command printed the line this page quotes, and strazactl policy simulate for a subject holding only the application role allowed ls, a file read, a fetch, a subagent and the three approval tools, and denied rm -rf and a write to .env.local with the set's two reasons. A user who held the business role was denied rm -rf through the implication. The roles, the set and the assignment were removed afterwards, and no harness session ran under the set
+  except: the kubectl commands, the load balancer, more than one replica, the database outage and the console sentence
   date: 2026-10-06
 applies_to: enterprise
 who: You, as the operator who outgrew one host

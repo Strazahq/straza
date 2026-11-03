@@ -10,6 +10,47 @@ Straza numbers its binaries, its API and its wire formats.
 
 ## [Unreleased]
 
+### Changed
+
+- The docs are reorganized around a model of Straza, with reading paths for evaluators,
+  operators and newcomers. A new Evaluate section replaces Start: What Straza is, How it works
+  with a diagram of the core parts, the security model, Identity and your IGA, and two tutorials.
+  Short concept pages explain each part and open with the same diagram, with that part
+  highlighted. Journey pages list in order the pages for deciding whether Straza fits, setting it
+  up for a team, and a first approval on a laptop. Tutorials, how-tos and concept pages open
+  with In short, walk records fold to one line, and the glossary links the concept pages. Moved
+  pages keep their old addresses as redirects. In a reader test before the change, an architect,
+  an operator and a newcomer each needed 22 to 27 pages to answer five core questions.
+- Every docs page has a Markdown copy for agents at its address plus `index.md`, and `llms.txt`
+  lists every copy. A Markdown link at the top of each page opens the copy, because most agents
+  fetch the page itself and never read the alternate link in the page head.
+- The diagram of Straza on the landing page, How it works and the concept pages is redrawn. It
+  shows that Straza decides on the agent's machine as well as in front of MCP servers, that an
+  agent can propose a draft for a person to publish, and that Straza adds a server's credential
+  at the gateway. Each part links to its page, How it works steps through a tool call on it, each
+  concept page highlights its own parts, and on a phone it stacks top to bottom.
+- The Evaluate and concept pages, the FAQ and the landing page are reworded in plain technical
+  prose. They state that no AI model takes part in a decision as how Straza works today.
+- Try it on the demo stack opens with a diagram of the whole stack and ends with what else the
+  stack shows: live sync from Straza back to midPoint, the access packages and approvals seeded
+  in midPoint, and the MCP servers and overlays.
+- Try it on one laptop ends with how to remove Straza. The hooks come off while the service still
+  runs, because with the service stopped the hook denies every call. The page also says how long
+  the enrollment lasts and how to keep the phone approver's port 8443 closed on a shared network.
+- The README and the midPoint guide link the source of universal-rest-connector, the connector
+  midPoint uses to reach Straza.
+- The agent skill plugin moves to 0.6.37. Its links point at the Markdown copies of the docs
+  pages, which an agent that fetches with curl reads in two to three times fewer tokens than the
+  HTML page. The skill tells the agent to give a person the normal page address.
+
+### Fixed
+
+- Several docs pages described older behavior and now match the code. Deleting or replacing an
+  agent's key ends its running sessions at once. A SCIM deactivation leaves the person's machines
+  enrolled, so a reactivation needs no new enrollment. A tool that policy hides at the gateway
+  answers as an unknown tool, and only the audit record keeps the rule's reason. `straza exec`
+  decides only the command it is given and not the processes that command starts.
+
 ## [2.0.1] - 2026-11-02
 
 Straza 2.0.1 is a security and bug-fix release for 2.0.0. It changes no wire format and no

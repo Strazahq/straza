@@ -1,12 +1,18 @@
 ---
 title: Credentials
 description: Store one shared secret for an MCP server, so the gateway adds it to every call and no agent ever sees it.
+summary: >-
+  A server that declares a `static` credential takes one shared secret, which Straza seals with
+  its key-encryption key. The gateway adds it to every upstream call, so no agent ever sees it,
+  and a role can carry its own override. Every view names a stored secret by its fingerprint,
+  never by its value.
 pagetype: how-to
 weight: 20
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
   platform: A throwaway standalone server in an Alpine container on Linux, beside the demo stack's MCP reference server, with strazactl on an admin API token minted in the console and the gateway call made through straza mcp from alice's enrolled machine in a second container. Every CLI step ran. The console steps were read from the console's source and not clicked
+  except: the console steps, read from the console's source
   date: 2026-10-06
 applies_to: both
 keywords: credential secret injection upstream fingerprint

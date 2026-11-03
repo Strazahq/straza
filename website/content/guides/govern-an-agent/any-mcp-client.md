@@ -1,6 +1,11 @@
 ---
 title: Any MCP client
 description: Your MCP client reaches its tools through the Straza gateway, and you have seen what the gateway answers when it allows a call and when it holds one for a person.
+summary: >-
+  An MCP client without hooks reaches its tools through `straza mcp`, a stdio proxy to the
+  Straza gateway, and its config holds no credential. The gateway serves each session the tools
+  its roles reach and decides every call against policy. It holds a gated call open until a
+  person decides or the wait runs out.
 pagetype: how-to
 weight: 50
 draft: false
@@ -26,7 +31,7 @@ The client talks to the gateway in place of the upstream MCP servers. The gatewa
 
 - This machine enrolled, with `straza service` running, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. The service runs on Linux, macOS and Windows.
 - An MCP client that can start a stdio MCP server.
-- A role that gives you a catalog. The example runs as a person who holds the seeded `developer` and `demo-tools-readers` roles of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}), against `http://127.0.0.1:8420`. Put your own server's address in its place.
+- A role that gives you a catalog. The example runs as a person who holds the seeded `developer` and `demo-tools-readers` roles of the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}), against `http://127.0.0.1:8420`. Put your own server's address in its place.
 - A session at or above the server's `governance.minAttestation`, because the gateway refuses one below it. The enterprise profile sets that minimum to `managed`, as [Attestation levels]({{< relref "guides/govern-an-agent/enroll-a-machine.md#attestation-levels" >}}) explains.
 
 

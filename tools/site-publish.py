@@ -14,7 +14,8 @@ shown inside code samples is HTML-escaped (&lt;!--) so it never matches,
 and the code stripper is string-aware, so a route glob like
 /v1/approver/* inside a string literal is never mistaken for a comment.
 Markdown is never copied, except the agent skill files under
-.well-known/skills.
+.well-known/skills and each page's Markdown copy for agents, the index.md
+beside its index.html, which is comment-stripped like a page.
 
 After writing, the OUTPUT tree is scanned for publish-blocking tells
 (the names of three maintainer files, paths into the repository's docs/
@@ -141,6 +142,43 @@ def scan(out: pathlib.Path) -> int:
     return findings
 
 
+FENCE = re.compile(r"(?ms)^[ \t]*(```|~~~).*?^[ \t]*\1[ \t]*$")
+CODE_SPAN = re.compile(r"`[^`\n]*`")
+LEFTOVER = re.compile(r"\{\{[<%]|<!--|<(?:div|figure|svg|details|summary|span|ol|li|dl|table|section|nav)\b")
+
+
+def check_twins(out: pathlib.Path) -> int:
+    """Every page is served as Markdown for agents.
+
+    An index.html that is a page, not the redirect left at a moved page's
+    old address, needs its index.md beside it. Outside code, the copy may
+    carry no shortcode, no comment and no HTML block, which is what a
+    shortcode without a Markdown form leaves behind.
+    """
+    findings = 0
+    for page in sorted(out.rglob("index.html")):
+        if 'http-equiv="refresh"' in page.read_text(encoding="utf-8", errors="replace"):
+            continue
+        twin = page.with_name("index.md")
+        rel = twin.relative_to(out)
+        if not twin.is_file():
+            print(f"{rel}: [markdown] missing: every page is served as Markdown for agents, "
+                  "so add the markdown output for this kind of page in website/hugo.toml",
+                  file=sys.stderr)
+            findings += 1
+            continue
+        text = twin.read_text(encoding="utf-8")
+        text = FENCE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+        for n, line in enumerate(text.split("\n"), 1):
+            m = LEFTOVER.search(CODE_SPAN.sub("", line))
+            if m:
+                print(f"{rel}:{n}: [markdown] {m.group(0)!r} is left in the Markdown copy: give the "
+                      "shortcode that writes it a Markdown form beside its HTML one",
+                      file=sys.stderr)
+                findings += 1
+    return findings
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--src", default="build/site", type=pathlib.Path)
@@ -158,10 +196,13 @@ def main() -> int:
         if path.is_dir():
             continue
         rel = path.relative_to(args.src)
-        # Markdown is never served, with one exception: the agent skill files
-        # under .well-known/skills are SKILL.md by the Agent Skills spec and
-        # are copied verbatim, then held to the same tell scan as a page.
-        if path.suffix.lower() == ".md" and rel.parts[:2] != (".well-known", "skills"):
+        # Markdown is never served, with two exceptions. The agent skill
+        # files under .well-known/skills are SKILL.md by the Agent Skills spec
+        # and are copied verbatim. A page's Markdown copy for agents is the
+        # index.md that Hugo writes beside its index.html, and it
+        # is comment-stripped like the page. Both are held to the tell scan.
+        twin = path.name == "index.md" and (path.parent / "index.html").is_file()
+        if path.suffix.lower() == ".md" and rel.parts[:2] != (".well-known", "skills") and not twin:
             continue
         # diagrams/alt/ is the styling workbench (its gallery page says so
         # itself): comparison material, never part of the served site.
@@ -180,7 +221,7 @@ def main() -> int:
             dest.write_text(clean, encoding="utf-8")
             pages += 1
             stripped += n
-        elif suffix == ".svg":
+        elif suffix == ".svg" or twin:
             dest.write_text(COMMENT.sub("", path.read_text(encoding="utf-8")), encoding="utf-8")
         elif suffix == ".css":
             dest.write_text(strip_code_comments(path.read_text(encoding="utf-8"), line_comments=False),
@@ -191,7 +232,7 @@ def main() -> int:
         else:
             shutil.copy2(path, dest)
 
-    findings = scan(args.out)
+    findings = scan(args.out) + check_twins(args.out)
     if findings:
         print(f"site-publish: {findings} tell(s) in {args.out}: DO NOT SERVE this tree",
               file=sys.stderr)

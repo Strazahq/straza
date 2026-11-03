@@ -1,6 +1,11 @@
 ---
 title: AI agents as identities
 description: An AI agent provisioned by your identity manager signs in to Straza with its own key and no browser, and leaves again when the identity manager retires it.
+summary: >-
+  Your IGA creates and retires AI agents over SCIM the way it does people, each marked as an
+  agent and naming its sponsor. An agent signs in with its own Ed25519 key, which the Straza
+  background service on its machine holds, and never with a browser. Revoking the key or
+  deactivating the agent ends its running sessions.
 pagetype: how-to
 weight: 50
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.0.0-1570-gaf326165-dirty
   platform: An Alpine 3.20 container against a standalone server, both built from an uncommitted working tree, where the SCIM request, the role made with strazactl roles create and its members PATCH, every strazactl and curl block, and keygen, the headless enrollment, status and the refused enrollment through a straza service started with STRAZA_HOME in the agent's home directory all ran. That run came before strazactl stopped signing in, so the admin API token the steps now hand to strazactl was written in on 2026-11-01 and not walked. The administrator's commands and the agent's commands ran as the same OS user with separate home directories. The console steps and the midPoint notes describe the demo stack and were not run. The Undo sentences that say a key removal ends the running sessions and refuses the held ID token, and the dialog text there, were written from the code on 2026-10-27 and not walked
   date: 2026-10-21
+  except: the console steps, the midPoint notes, the admin API token and the session end at a key revoke, none of them walked
 applies_to: both
 who: You, as the admin, and the AI agent's machine
 where: A terminal with strazactl and curl, and a terminal on the agent's machine
@@ -34,7 +40,7 @@ The identity manager cuts an agent the way it cuts a person. Once the record is 
 - The `straza` binary on the agent's machine.
 - An admin API token in `ADMIN_API_TOKEN`, for the SCIM request and the two admin API reads below. Mint it with `strazactl api-token create --name idm-agents --scope scim:read,scim:write,identity:read`. In the console, mint it under **Settings**, **API tokens**, **New API token** with the job **Custom**, **scim** set to **read and write** and **identity** set to **read**.
 
-The command examples ran against a standalone server at `http://localhost:8420`, with the agent's side on the same host. The console steps and the midPoint notes describe the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}).
+The command examples ran against a standalone server at `http://localhost:8420`, with the agent's side on the same host. The console steps and the midPoint notes describe the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}).
 
 ## Provision the identity
 

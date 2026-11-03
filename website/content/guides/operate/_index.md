@@ -7,7 +7,7 @@ draft: false
 keywords: operate deploy docker kubernetes helm run
 ---
 
-[Requirements and sizing]({{< relref "reference/requirements-and-sizing.md" >}}) gives the processors, memory and disk for each shape below, and [Install]({{< relref "get-started/install.md#choose-how-to-run-the-server" >}}) compares the shapes in one table.
+[Requirements and sizing]({{< relref "reference/requirements-and-sizing.md" >}}) gives the processors, memory and disk for each shape below, and [Install]({{< relref "guides/operate/install.md#choose-how-to-run-the-server" >}}) compares the shapes in one table.
 
 - [Standalone host]({{< relref "guides/operate/standalone-host.md" >}}) runs strazad as one binary on one host with the standalone profile.
 - [Docker]({{< relref "guides/operate/docker.md" >}}) runs a standalone server in a container with persistent storage.

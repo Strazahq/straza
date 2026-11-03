@@ -5,7 +5,7 @@
 #
 #   docker compose -f deploy/compose/eval-stack/compose.yaml up -d --build
 #
-# Walkthrough: https://docs.straza.ai/get-started/enterprise-demo-stack/.
+# Walkthrough: https://docs.straza.ai/evaluate/try-it-on-the-demo-stack/.
 name: straza-eval
 
 # midPoint repository settings shared by the init job and the server
@@ -613,6 +613,7 @@ services:
     volumes:
       - ./landing:/usr/share/nginx/html:ro,z
       - site_public:/usr/share/nginx/html/docs:ro
+      - ./landing-markdown.conf:/etc/nginx/conf.d/markdown.conf:ro,z
 
   eval-seed:
     # one-shot zero-touch seeder: bootstrap login -> its own admin API token -> midPoint

@@ -1,0 +1,3 @@
+With the CLI:
+
+{{ .Inner }}

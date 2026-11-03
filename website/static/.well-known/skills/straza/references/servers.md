@@ -2,7 +2,7 @@
 
 This file takes one MCP server from nothing to a role whose sessions call its tools, with the calls that need a person held for that person. You write the server's manifest, its roles and the role's approval set as YAML files, check them against live state, and hand them to the person as one draft. The person publishes the draft, and Straza applies all of it in one step, with the approval set in force before the access row it gates, so no half-built setup is ever live. A published role reaches nobody until it is assigned, so the assignment comes last.
 
-Every command here acts as an administrator on the server in `STRAZA_SERVER`, on the person's admin API token. You run the offline checks `strazactl spec validate` and `strazactl policy validate` yourself. The person runs every command that reaches the server in their own terminal and shares the output: `strazactl policy simulate`, `strazactl drafts check`, `strazactl drafts show`, every export and list, `strazactl drafts create`, the secret of section 3, the phone enrollment of section 7 and every `assign`. The person publishes the draft in the console, as the SKILL.md section Reads, checks and changes says. The walks behind this file are https://docs.straza.ai/guides/serve-mcp-apps/add-a-server/, https://docs.straza.ai/guides/serve-mcp-apps/credentials/, https://docs.straza.ai/guides/serve-mcp-apps/caller-credentials/ and https://docs.straza.ai/guides/serve-mcp-apps/catalogs-per-role/.
+Every command here acts as an administrator on the server in `STRAZA_SERVER`, on the person's admin API token. You run the offline checks `strazactl spec validate` and `strazactl policy validate` yourself. The person runs every command that reaches the server in their own terminal and shares the output: `strazactl policy simulate`, `strazactl drafts check`, `strazactl drafts show`, every export and list, `strazactl drafts create`, the secret of section 3, the phone enrollment of section 7 and every `assign`. The person publishes the draft in the console, as the SKILL.md section Reads, checks and changes says. The walks behind this file are https://docs.straza.ai/guides/serve-mcp-apps/add-a-server/index.md, https://docs.straza.ai/guides/serve-mcp-apps/credentials/index.md, https://docs.straza.ai/guides/serve-mcp-apps/caller-credentials/index.md and https://docs.straza.ai/guides/serve-mcp-apps/catalogs-per-role/index.md.
 
 ## 0. Ask before you write
 
@@ -152,7 +152,7 @@ A business role is refused access of its own with "business role: it composes ap
 
 ### On a server that pins its objects
 
-Some servers reach many separate objects with one credential, such as every repository of an organization. Such a server's manifest can pin one object type under `straza.objects`, and then every access row on it says which of those objects the role covers. Ask the person for the output of `strazactl apps objects <server>` first. On a pinned server it prints the object list, each object with its value, its id and the roles that cover it. On a server that pins nothing it prints the block the server's tool marks declare. What a server's author marks is at https://docs.straza.ai/reference/object-marks/, and https://docs.straza.ai/guides/serve-mcp-apps/add-a-server/ walks the person through pinning it.
+Some servers reach many separate objects with one credential, such as every repository of an organization. Such a server's manifest can pin one object type under `straza.objects`, and then every access row on it says which of those objects the role covers. Ask the person for the output of `strazactl apps objects <server>` first. On a pinned server it prints the object list, each object with its value, its id and the roles that cover it. On a server that pins nothing it prints the block the server's tool marks declare. What a server's author marks is at https://docs.straza.ai/reference/object-marks/index.md, and https://docs.straza.ai/guides/serve-mcp-apps/add-a-server/index.md walks the person through pinning it.
 
 On a pinned server the access row carries `covers` in one of two forms. This role, on a server named `ghapp` that pins the type `repo`, names two repositories:
 
@@ -290,7 +290,7 @@ approval:
       tokenFile: /var/lib/straza/push-relay-token   # any path strazad may write; it mints the token there at first boot
 ```
 
-The environment faces are `STRAZA_APPROVAL_PUSH_RELAY_ENABLED` and `STRAZA_APPROVAL_PUSH_RELAY_TOKEN_FILE`, and a change takes a restart. The direct lanes are at https://docs.straza.ai/guides/approve/push-and-connectivity/#choose-how-push-reaches-the-phone.
+The environment faces are `STRAZA_APPROVAL_PUSH_RELAY_ENABLED` and `STRAZA_APPROVAL_PUSH_RELAY_TOKEN_FILE`, and a change takes a restart. The direct lanes are in the section "Choose how push reaches the phone" of https://docs.straza.ai/guides/approve/push-and-connectivity/index.md.
 
 A browser can stand in for a phone. `strazactl assign straza-enroll-browser --user alice` lets alice open `/self-service/` on the server, sign in, and choose Enable this browser on the This browser tab. The same tab offers Add a phone to an account that holds `straza-enroll-mobile`.
 

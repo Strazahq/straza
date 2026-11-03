@@ -1,6 +1,11 @@
 ---
 title: Claude Code
 description: Claude Code on this machine hands every tool call to your Straza policy, and you have seen a destructive command denied with a reason.
+summary: >-
+  Claude Code passes every tool call to `straza hook`, and the Straza background service
+  decides it against a signed policy snapshot before the tool runs. A user-mode install is
+  advisory, because an agent that can run any command can turn it off. An enterprise server
+  requires the root-owned managed install by default.
 pagetype: how-to
 weight: 10
 draft: false
@@ -8,6 +13,7 @@ tested:
   version: v1.1.0-117-g106081a8
   platform: An Alpine 3.20 container against a standalone server, as the local user alice enrolled by the device flow, where the SessionStart, deny, allow and no-session payloads and the managed-attestation refusal were fired and the hook entries were read from the server's rendered managed config, while straza install, both managed steps and straza uninstall were not run because this box never runs straza install, and the demo stack's guardrails reason was read from its seed policy and the agent-sam log instead of fired, because the demo stack takes no writes
   date: 2026-10-06
+  except: straza install, the managed install and straza uninstall, which were not run
 applies_to: both
 who: You, on the machine where Claude Code runs
 where: A terminal on that machine
@@ -25,7 +31,7 @@ Before Claude Code runs a tool, it passes the call to `straza hook`. The hook ha
 
 
 - Claude Code on this machine.
-- A role whose policy allows your local tools. A fresh enterprise server holds no PolicySet and denies every local tool that no rule allows, so an admin first sets up the role and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}) and gives you its `developer` role. The seeded `developer` role of the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}) is such a role already. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
+- A role whose policy allows your local tools. A fresh enterprise server holds no PolicySet and denies every local tool that no rule allows, so an admin first sets up the role and the PolicySet of [Give agents their local tools]({{< relref "guides/operate/enterprise-shape.md#give-agents-their-local-tools" >}}) and gives you its `developer` role. The seeded `developer` role of the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) is such a role already. A standalone server needs no role, because its seeded `standalone-starter` PolicySet applies to every identity.
 
 ## Enroll this machine
 
@@ -174,4 +180,4 @@ When a Claude Code release adds a tool that this Straza client does not know yet
 
 - [Write your first deny]({{< relref "guides/write-policy/first-deny.md" >}}) turns one dangerous command into a deny with your own reason.
 - [What the agent reads back]({{< relref "guides/govern-an-agent/what-the-agent-reads-back.md" >}}) lists every answer the model can get from Straza.
-- For work where an advisory hook is not enough, route the agent's tool calls through the gateway, as [Any MCP client]({{< relref "guides/govern-an-agent/any-mcp-client.md" >}}) shows, or run it in the sandbox image of [Hookless processes]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}). [The trust model]({{< relref "concepts/trust-model-and-non-goals.md" >}}) explains why those two hold at a boundary.
+- For work where an advisory hook is not enough, route the agent's tool calls through the gateway, as [Any MCP client]({{< relref "guides/govern-an-agent/any-mcp-client.md" >}}) shows, or run it in the sandbox image of [Hookless processes]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}). [The trust model]({{< relref "evaluate/security-model.md" >}}) explains why those two hold at a boundary.

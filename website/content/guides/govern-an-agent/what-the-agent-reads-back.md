@@ -1,6 +1,11 @@
 ---
 title: What the agent reads back
 description: The exact words an agent reads from Straza, from the session banner to a deny, a pending approval, a ticket and the built-in approval tools.
+summary: >-
+  An agent reads Straza's words in two places: a banner when its session starts, and an answer
+  on each call that does not run at once. A deny carries the rule's own reason, and a held call
+  names who decides and where. Straza fails closed, so a call it cannot decide is denied with
+  what to fix.
 pagetype: reference
 weight: 80
 draft: false

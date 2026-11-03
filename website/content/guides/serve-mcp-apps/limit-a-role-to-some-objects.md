@@ -1,12 +1,18 @@
 ---
 title: Limit a role to some objects
 description: Pin the repositories ghapp reaches, then give each role the repositories it covers, so an agent with write tools writes only where one of its roles allows.
+summary: >-
+  On ghapp, a role with `pr_create` could open pull requests in every repository the App
+  reaches. You pin ghapp's repositories in its manifest, store a listing credential so Straza
+  lists them, and give each role the repositories it covers. The gateway then refuses a call
+  whose `repo` no role of the caller covers.
 pagetype: how-to
 weight: 32
 draft: false
 tested:
   version: v1.0.0-1561-g98d49634
   platform: The enterprise demo stack on Rocky Linux 10.1, with ghapp started beside it from its own deploy kit on a private GitHub App installed on the organization ghapp-straza-test. Every strazactl step but the two publishes ran on an admin API token, and the note strazactl then printed on stderr on a token is left out of the output. Both drafts were then published on the admin's own strazactl login, with y answered at the prompt. strazactl no longer signs in or publishes, so a person publishes each draft in the console, and the last line of each draft's output, which names that way, was written from the code on 2026-11-01 and not run. Both secrets were set from STRAZA_SECRET_VALUE, so no hidden prompt shows. The SCIM read ran on a token with scim:read alone. midPoint had imported both roles before the assignment loop ran, so it did not wait. The four refusals in the table were checked with strazactl drafts check on edited copies of the two role files. The agent's calls ran as joe-java-developer-agent through straza mcp ghapp in the demo stack's harness container, a Debian 12 machine with straza v1.1.0-138-g8cd72d69. The console steps were read from the console's source and not clicked. A fix then changed three sentences, so the second and fourth rows of the refusal table, the agent's calls and the audit records were walked again on 2026-10-20 at v1.0.0-1561-g98d49634. The other steps ran on 2026-10-19 at v1.0.0-1556-ge9afd09a.
+  except: the console steps, read from source, and the last line of each draft's output, written from the code
   date: 2026-10-20
 applies_to: both
 keywords: object scope covers repos repositories pin listing credential ghapp github app objects draft scim midpoint strazaCovers refusal
@@ -533,7 +539,7 @@ Straza checks repositories in its gateway only, and its harness hooks never run 
 
 ## Next {.nostep}
 
-- [The objects a role covers]({{< relref "concepts/mcp-apps-and-the-gateway.md#the-objects-a-role-covers" >}}) explains the model behind these steps.
+- [Objects]({{< relref "concepts/objects.md" >}}) explains the model behind these steps.
 - [Object marks for server authors]({{< relref "reference/object-marks.md" >}}) is the contract for a server that wants the same limits.
 - [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) previews which tools a role's sessions see and puts a tool behind approval.
 - [midPoint]({{< relref "guides/connect-identity/midpoint.md" >}}) hands the roles out through access packages and takes them away again.

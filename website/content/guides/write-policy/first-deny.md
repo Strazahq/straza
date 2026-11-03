@@ -1,6 +1,10 @@
 ---
 title: Your first deny
 description: One role's agents cannot run a recursive force-delete, and each denial tells the agent why.
+summary: >-
+  A policy set is one YAML document that says what a role's sessions may do. Each rule matches
+  an event, such as a shell command, and allows or denies it, and a deny wins over every allow.
+  Here one rule denies `rm -rf` for a role, with a reason the agent reads back to its user.
 pagetype: how-to
 weight: 10
 draft: false
@@ -32,7 +36,7 @@ strazactl assign local-tools --user dana
 ```
 {{< /command >}}
 
-Under the enterprise profile, a session from a machine whose install is not managed is refused at check-in, because `governance.minAttestation` defaults to `managed`. The outputs on this page come from a server at `http://localhost:8420` where it is set to `none`, as on the [demo stack]({{< relref "get-started/enterprise-demo-stack.md" >}}), which is why the banner below says `attestation advisory`.
+Under the enterprise profile, a session from a machine whose install is not managed is refused at check-in, because `governance.minAttestation` defaults to `managed`. The outputs on this page come from a server at `http://localhost:8420` where it is set to `none`, as on the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}), which is why the banner below says `attestation advisory`.
 
 ## Write the document
 

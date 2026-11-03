@@ -6,6 +6,43 @@
 <h1>{{ .Title }}</h1>
 {{ with .Description }}<p class="position">{{ . }}</p>{{ end }}
 {{ .Content }}
+{{- /* The model diagram, then the three reading paths and the quick links
+from the front matter: paths lists who each path is for, its pages in order
+and its journey page, and quick lists the pages a returning reader wants. A
+page path that names no page fails the build. */ -}}
+{{- $how := site.GetPage "evaluate/how-it-works.md" -}}
+{{- if not $how }}{{ errorf "index.html: evaluate/how-it-works.md is missing. Update the caption link in layouts/index.html." }}{{ end }}
+<figure class="fig hero"><div class="canvas">{{ partial "model-svg.html" (dict "id" "hm") }}</div><figcaption>The parts of Straza. Each part opens its page, and <a href="{{ $how.RelPermalink }}">How it works</a> traces a tool call through them step by step. The key marks where Straza adds a server’s credential, so the agent never holds it.</figcaption></figure>
+<h2 id="pick-your-path">Pick your path</h2>
+<div class="paths">
+{{- range $i, $path := .Params.paths }}
+{{- $j := site.GetPage $path.journey -}}
+{{- if not $j }}{{ errorf "_index.md: the journey %q names no page" $path.journey }}{{ end }}
+<div class="path{{ if eq $i 0 }} first{{ end }}">
+<p class="who">{{ $path.who }}</p>
+<h3>{{ $path.title }}</h3>
+<ol>
+{{- range $path.pages }}
+{{- $p := site.GetPage .page -}}
+{{- if not $p }}{{ errorf "_index.md: the path page %q names no page" .page }}{{ end }}
+<li><a href="{{ $p.RelPermalink }}">{{ .label | default $p.LinkTitle }}</a></li>
+{{- end }}
+</ol>
+<a class="go" href="{{ $j.RelPermalink }}">{{ $j.LinkTitle }} <span aria-hidden="true">→</span></a>
+</div>
+{{- end }}
+</div>
+<h2 id="already-running-straza">Already running Straza</h2>
+<div class="quick">
+{{- range .Params.quick }}
+{{- $p := site.GetPage .page -}}
+{{- if not $p }}{{ errorf "_index.md: the quick link %q names no page" .page }}{{ end }}
+<a href="{{ $p.RelPermalink }}">{{ .label | default $p.LinkTitle }}</a>
+{{- end }}
+</div>
+{{- with .OutputFormats.Get "llms" }}
+<p class="agents">For agents: <a href="{{ .RelPermalink }}">llms.txt</a> lists every page with a link to its Markdown copy, and the Markdown link at the top of each page opens that page's copy.</p>
+{{- end }}
 </div>
 </main>
 </div>
