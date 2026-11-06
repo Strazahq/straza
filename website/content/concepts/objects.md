@@ -37,7 +37,7 @@ A server declares one object type. For each tool it says which argument names th
 | Tools that reach every one | `space_list` and `search` | `list_databases` |
 
 
-Pinning a declaration keeps a copy of it in Straza. A person publishes that copy in a [draft]({{< relref "concepts/drafts.md" >}}), and Straza decides with it. What the server reports while it runs can only narrow a call, so a server cannot widen its own reach. If a tool later differs from the pinned copy, roles on some objects cannot use that tool until a person publishes a new copy.
+Pinning a declaration keeps a copy of it in Straza. A person publishes that copy in a [draft]({{< relref "concepts/drafts.md" >}}), and Straza decides with it. On the server's page in the console, the button named with the server's own word, such as **Pin databases**, makes that draft. What the server reports while it runs can only narrow a call, so a server cannot widen its own reach. If a tool later differs from the pinned copy, roles on some objects cannot use that tool until a person publishes a new copy. [When the server's tools change]({{< relref "guides/serve-mcp-apps/add-a-server.md#tool-changes" >}}) says when Straza notices.
 
 ## What a role covers
 

@@ -48,7 +48,7 @@ func TestUserUpdateFields(t *testing.T) {
 			}
 			id := u.ID
 			if tc.deleted {
-				if _, err := s.Users().SoftDelete(ctx, id); err != nil {
+				if _, err := s.Users().SoftDelete(ctx, id, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -56,7 +56,7 @@ func TestUserUpdateFields(t *testing.T) {
 				id = "no-such-user"
 			}
 			before, _ := s.Users().GetByID(ctx, id)
-			got, err := s.Users().UpdateFields(ctx, id, tc.f)
+			got, err := s.Users().UpdateFields(ctx, id, tc.f, nil)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Errorf("%s: UpdateFields = %v, want %v", tc.name, err, tc.wantErr)
@@ -105,10 +105,10 @@ func TestUserUpdateFields(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.Users().UpdateFields(ctx, u.ID, UserFields{Email: str("ada@y.io")}); err != nil {
+		if _, err := s.Users().UpdateFields(ctx, u.ID, UserFields{Email: str("ada@y.io")}, nil); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.Users().UpdateFields(ctx, u.ID, UserFields{Title: str("Lead")}); err != nil {
+		if _, err := s.Users().UpdateFields(ctx, u.ID, UserFields{Title: str("Lead")}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if got, err := s.Users().GetByID(ctx, u.ID); err != nil || got.Email != "ada@y.io" || got.Title != "Lead" {

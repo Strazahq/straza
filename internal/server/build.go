@@ -312,6 +312,7 @@ func (a *App) buildApproval(cfg config.Config, log *slog.Logger, st store.Store,
 	// lock lands on the revocation lane, never on users.status, so a status
 	// check alone would let a locked user's phone keep minting capability.
 	a.approval.UserBlocked = a.denylist.userBlocked
+	a.approval.OnRecordLost = a.recordLost
 	a.relay = spine.NewRelay(st, bus, log, a.metrics.OutboxSetAside)
 	return nil
 }
@@ -515,14 +516,12 @@ func (a *App) buildMainListener(cfg config.Config) error {
 		return fmt.Errorf("listen %s: %w", cfg.Server.Listen, err)
 	}
 	a.ln = ln
-	// No ReadTimeout/WriteTimeout by design: GET /mcp SSE, the
-	// gateway approval hold and approval_await are legitimately long-lived.
-	// IdleTimeout bounds idle keep-alive connections only; ErrorLog routes
-	// Go's own server lines (TLS handshake noise, superfluous WriteHeader)
-	// into the structured log at Warn instead of stderr.
+	// No WriteTimeout: streams and long polls outlive any bound, and
+	// bodyReadTimeout says why ReadTimeout spares them.
 	a.http = &http.Server{
 		Handler:           a.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       bodyReadTimeout,
 		IdleTimeout:       120 * time.Second,
 		ErrorLog:          slog.NewLogLogger(a.log.Handler(), slog.LevelWarn),
 	}
@@ -582,6 +581,7 @@ func (a *App) buildApproverListener(cfg config.Config, autoMinted bool) error {
 		a.approverHTTP = &http.Server{
 			Handler:           perIPLimit(ratelimit.New(), at.PerIPRPS, approverSurfaceOnly(a.http.Handler)),
 			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       bodyReadTimeout,
 			IdleTimeout:       120 * time.Second,
 			ErrorLog:          slog.NewLogLogger(a.log.Handler(), slog.LevelWarn),
 			TLSConfig: &tls.Config{

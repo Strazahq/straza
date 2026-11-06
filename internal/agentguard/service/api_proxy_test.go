@@ -3,7 +3,9 @@ package service
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -207,28 +209,63 @@ func TestProxySession(t *testing.T) {
 	})
 }
 
-// TestProxyFailures pins the proxy's own refusals: strazad that cannot be
-// reached is a 502 sentence, and a transport the credential half refused
-// passes that refusal's status and sentence.
+// TestProxyFailures pins the proxy's own refusals. strazad that cannot be
+// dialed is a 503 sentence, because the request never left this machine
+// and a later try can pass. Any other transport failure is a 502 sentence,
+// because strazad may have run the request before its answer was lost. A
+// transport the credential half refused passes that refusal's status and
+// sentence. Every refusal made before the send, and only those, carries
+// HeaderNotSent, so the MCP bridge can tell it from an ingress's 503.
 func TestProxyFailures(t *testing.T) {
+	dial := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
 	for _, row := range []struct {
-		name   string
-		err    error
-		status int
-		says   string
+		name       string
+		err        error
+		sessionErr error // the refusal of the session lookup, before any send
+		status     int
+		says       string
+		notSent    bool
 	}{
-		{"strazad cannot be reached", errors.New("dial tcp 127.0.0.1:1: connect: connection refused"), http.StatusBadGateway, "could not reach the Straza server"},
-		{"the session was revoked", &Refused{Status: http.StatusUnauthorized, Sentence: "This Straza session was revoked."}, http.StatusUnauthorized, "was revoked"},
+		{name: "strazad cannot be dialed", err: dial, status: http.StatusServiceUnavailable, says: "could not reach the Straza server", notSent: true},
+		{name: "a wrapped dial failure", err: fmt.Errorf("send: %w", dial), status: http.StatusServiceUnavailable,
+			says: "could not reach the Straza server", notSent: true},
+		{name: "the answer was lost", err: &net.OpError{Op: "read", Net: "tcp", Err: io.ErrUnexpectedEOF}, status: http.StatusBadGateway,
+			says: "did not get an answer from the Straza server"},
+		{name: "the session was revoked", err: &Refused{Status: http.StatusUnauthorized, Sentence: "This Straza session was revoked."},
+			status: http.StatusUnauthorized, says: "was revoked", notSent: true},
+		{name: "the service waits for a check-in", sessionErr: &Refused{Status: http.StatusServiceUnavailable, Sentence: waitingSentence},
+			status: http.StatusServiceUnavailable, says: "waiting for the server", notSent: true},
+		{name: "too many starts", sessionErr: &Refused{Status: http.StatusTooManyRequests, Sentence: tooManyStarts},
+			status: http.StatusTooManyRequests, says: "too many", notSent: true},
 	} {
 		t.Run(row.name, func(t *testing.T) {
-			f := &apiDouble{session: liveSession(), transport: failingTransport{row.err}}
+			f := &apiDouble{session: liveSession(), transport: failingTransport{row.err}, sessionErr: row.sessionErr}
 			a, logs := testAPI(f, false)
 			w := httptest.NewRecorder()
 			a.routes().ServeHTTP(w, asCaller(proxyReq(http.MethodPost, localapi.RouteMCP, "{}"), "1000"))
 			if w.Code != row.status || !strings.Contains(refusalOf(t, w), row.says) || len(logLines(t, logs)) != 1 {
 				t.Errorf("answer = %d %q with log %s, want %d saying %q and one log line", w.Code, w.Body.String(), logs, row.status, row.says)
 			}
+			if got := w.Header().Get(localapi.HeaderNotSent) != ""; got != row.notSent {
+				t.Errorf("not-sent mark = %v, want %v", got, row.notSent)
+			}
 		})
+	}
+}
+
+// TestProxyDropsUpstreamNotSent pins that only the service marks a refusal
+// as made before the send: the mark on an answer strazad, or anything in
+// front of it, sends is removed, and a passed-through answer carries none.
+func TestProxyDropsUpstreamNotSent(t *testing.T) {
+	f, _ := proxyDouble(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(localapi.HeaderNotSent, "1")
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	a, _ := testAPI(f, false)
+	w := httptest.NewRecorder()
+	a.routes().ServeHTTP(w, asCaller(proxyReq(http.MethodPost, localapi.RouteMCP, "{}"), "1000"))
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get(localapi.HeaderNotSent) != "" {
+		t.Errorf("answer = %d with mark %q, want strazad's 503 without the mark", w.Code, w.Header().Get(localapi.HeaderNotSent))
 	}
 }
 

@@ -53,7 +53,7 @@ describe("the sentences of a held role", () => {
   it("says what holding freezes, once per standing, and who assigns a role nobody holds", () => {
     expect(heldRule(false)).toBe("A held role keeps its tools and cannot be deleted until the identity manager removes the holders.");
     expect(heldRule(true)).toBe("A held role keeps its tools for its server admin and cannot be deleted until the identity manager removes the holders.");
-    expect(unheldLine("demo-tools-readers")).toBe("Nobody holds it yet. Your identity manager assigns it: in midPoint it is AR:demo-tools-readers within a sync cycle.");
+    expect(unheldLine("demo-tools-readers")).toBe("Nobody holds it yet. Your IGA assigns it as AR:demo-tools-readers, within a sync cycle.");
   });
 
   it("counts the roles of the server and names the prefix in the empty state", () => {
@@ -64,8 +64,22 @@ describe("the sentences of a held role", () => {
 });
 
 describe("the live preview of a new role", () => {
-  it("reads as the stored name, the identity manager's name and the same strazactl line", () => {
-    expect(previewParts("demo-tools-readers")).toEqual({ lead: "Stored as ", stored: "demo-tools-readers", mid: ", in midPoint as ", ar: "AR:demo-tools-readers", end: "." });
+  // Each case is the role's kind and the line it reads: the kind, the
+  // stored name and the name an IGA imports, BR: for a business role and
+  // AR: for every other kind.
+  const kinds: [string, string, string][] = [
+    ["application", "demo-tools-readers", "Application role, stored as demo-tools-readers. An IGA imports it as AR:demo-tools-readers."],
+    ["business", "analysts", "Business role, stored as analysts. An IGA imports it as BR:analysts."],
+    ["approver", "pay-approvers", "Approver role, stored as pay-approvers. An IGA imports it as AR:pay-approvers."],
+  ];
+  it.each(kinds)("reads the name line of a %s role", (kind, name, want) => {
+    const p = previewParts(kind, name);
+    expect(p.lead + p.stored + p.mid + p.iga + p.end).toBe(want);
+    expect(p.stored).toBe(name);
+    expect(want).not.toContain("midPoint");
+  });
+
+  it("reads as the same strazactl line", () => {
     expect(cliCreateRole("demo-tools-readers", "demo-tools", ["echo", "add"])).toBe("strazactl roles create demo-tools-readers --app demo-tools --tools echo,add");
     expect(cliCreateRole("demo-tools-", "demo-tools", [])).toBe("strazactl roles create demo-tools- --app demo-tools --tools …");
   });

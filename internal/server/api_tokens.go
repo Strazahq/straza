@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/strazahq/straza/internal/store"
 	"github.com/strazahq/straza/internal/tokenscopes"
 )
 
@@ -49,36 +51,69 @@ type apiTokenMeta struct {
 	CreatedBy string `json:"created_by,omitempty"`
 }
 
+// errAPITokenRejected is the answer of apiTokenAuthenticate for a token that
+// is unknown, expired or revoked, or whose stored row no longer parses.
+var errAPITokenRejected = errors.New("admin API token rejected")
+
 // apiTokenAuthenticate verifies an admin API token against the stored hash.
-func (a *App) apiTokenAuthenticate(ctx context.Context, bearer string) (apiTokenMeta, bool) {
+// It answers errAPITokenRejected for a token it refuses. Any other error is
+// a failed read of the store, which says nothing about the token, and the
+// caller refuses the request as an outage.
+func (a *App) apiTokenAuthenticate(ctx context.Context, bearer string) (apiTokenMeta, error) {
 	var meta apiTokenMeta
 	sum := sha256.Sum256([]byte(bearer))
 	key := apiTokenKeyPrefix + hex.EncodeToString(sum[:])
 	raw, err := a.store.Settings().Get(ctx, key)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return apiTokenMeta{}, err
+	}
 	if err != nil || json.Unmarshal([]byte(raw), &meta) != nil {
-		return apiTokenMeta{}, false
+		return apiTokenMeta{}, errAPITokenRejected
 	}
 	if meta.Expires != nil && time.Now().After(*meta.Expires) {
 		// Fail closed: an expired credential is no credential. The row stays
 		// listable (with its deadline) until revoked, so the operator can
 		// see WHY a connector died.
-		return apiTokenMeta{}, false
+		return apiTokenMeta{}, errAPITokenRejected
 	}
 	if meta.LastUsed == nil || time.Since(*meta.LastUsed) > time.Hour {
 		a.stampAPITokenUse(ctx, key, meta)
 	}
-	return meta, true
+	return meta, nil
 }
+
+// rejectedAPITokenMsg is the 401 sentence for an admin API token that is
+// unknown, expired or revoked. It names the three cases together on purpose.
+// A revoke deletes the row, so a revoked token reads as an unknown one, and
+// singling out an expired token would confirm to whoever holds a leaked
+// value that it was once real. The caller holds no working token, so the
+// next step it names needs none.
+const rejectedAPITokenMsg = "admin API token rejected: this token is unknown, expired or revoked. " +
+	"Mint a new token in the console under Settings, API tokens, or ask a Straza administrator to mint one. " +
+	"Then set STRAZA_API_TOKEN, or the token setting of the connector that sent this request, to the new token."
+
+// apiTokenOutageMsg is the 503 sentence for an admin API token that Straza
+// could not look up, formatted with the request id. It depends only on the
+// failed read, so a real token and a forged one get the same answer, and
+// the cause goes to the log alone.
+const apiTokenOutageMsg = "Straza could not check this admin API token, because its database did not answer, so it refused the request. " +
+	"Try again in a moment. If this keeps happening, ask a Straza administrator to check strazad's log, which names the cause under request id %s."
 
 // verifyAPIToken authenticates an admin API token and parses its stored
 // scope. On a refusal it answers the request itself and reports false: 401
-// for an unknown, expired or revoked token, and 403 for a stored scope that
+// for an unknown, expired or revoked token, 503 with Retry-After and one
+// Error record when the token read failed, and 403 for a stored scope that
 // no longer parses, such as the retired word read or a corrupted row, which
 // fails closed because minting a new token is the migration.
 func (a *App) verifyAPIToken(w http.ResponseWriter, r *http.Request, raw string) (apiTokenMeta, tokenscopes.Scope, bool) {
-	meta, ok := a.apiTokenAuthenticate(r.Context(), raw)
-	if !ok {
-		apiError(w, http.StatusUnauthorized, "admin API token rejected: unknown, expired or revoked (strazactl api-token list)")
+	meta, err := a.apiTokenAuthenticate(r.Context(), raw)
+	switch {
+	case errors.Is(err, errAPITokenRejected):
+		apiError(w, http.StatusUnauthorized, rejectedAPITokenMsg)
+		return apiTokenMeta{}, tokenscopes.Scope{}, false
+	case err != nil:
+		w.Header().Set("Retry-After", loginOutageRetryAfter)
+		a.fail(w, r, http.StatusServiceUnavailable, fmt.Sprintf(apiTokenOutageMsg, reqID(r.Context())), fmt.Errorf("admin API token: %w", err))
 		return apiTokenMeta{}, tokenscopes.Scope{}, false
 	}
 	scope, err := tokenscopes.Parse(meta.Scope)

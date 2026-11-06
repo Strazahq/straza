@@ -9,7 +9,7 @@ import { FetchError, RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { OriginLine } from "@/components/origin-line";
 import { PageHead } from "@/components/page-head";
-import { PolicyDecisions } from "@/components/policy-decisions";
+import { PolicyDecisions, openPolicyAudit } from "@/components/policy-decisions";
 import { PolicyFacts, RecChip } from "@/components/policy-facts";
 import { PolicyProof } from "@/components/policy-proof";
 import { PolicyPublish } from "@/components/policy-publish";
@@ -389,7 +389,7 @@ export function PolicyPage({ name, tab }: Props) {
           </TabsContent>
 
           <TabsContent value="decisions">
-            <PolicyDecisions name={name} onOpenAudit={() => navigate("audit")} />
+            <PolicyDecisions name={name} onOpenAudit={() => openPolicyAudit(name)} />
           </TabsContent>
         </Tabs>
       </div>

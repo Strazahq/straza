@@ -176,7 +176,7 @@ export const DETAIL: DraftDetail = {
       { kind: "App", name: "old-tools", op: "remove", existed: true, base: "fp4" },
       { kind: "Role", name: "secret-role", op: "put", existed: true, withheld: "Straza leaves out the document of Role/secret-role, because reading a role needs the scope identity:read. Ask an administrator for that grant." },
     ],
-    title: "Add server github, 2 roles and 1 approval set and then change server demo-tools",
+    title: "Add server github, 2 roles and 1 policy set and then change server demo-tools",
     created_at: "2026-09-24T10:40:00Z", updated_at: "2026-09-24T10:42:00Z", expires_at: "2026-10-08T10:42:00Z",
   },
   verdict: VERDICT,

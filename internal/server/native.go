@@ -42,6 +42,7 @@ const (
 	nativeToolApprovalAwait   = "approval_await"
 	nativeToolDraftSubmit     = "draft_submit"
 	nativeToolDraftStatus     = "draft_status"
+	nativeToolWhoami          = "whoami"
 
 	// awaitDefaultSeconds / awaitMaxSeconds bound the server-side wait so a slow
 	// agent cannot pin a gateway goroutine for the day-scale ticketTTL.
@@ -164,16 +165,27 @@ var nativeStrazaTools = []nativeTool{
 			},
 		},
 	},
+	{
+		Name:        nativeToolWhoami,
+		Title:       "Who am I",
+		Description: "Read who this session acts as and what it may do: its roles, whether it is recorded, its knowledge packs, and every tool it can call, with whether a person approves each call first and which objects it may touch. Takes no input and has no side effects.",
+		InputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties":           map[string]any{},
+		},
+	},
 }
 
 // appendNativeCatalog originates the built-in `straza` tools into a tier-1
 // catalog for the role set roles. Unlike a proxied app (visibility = role
 // bindings), the native tools need no binding row; there is no apps-table row
 // to bind (the tool_bindings FK would reject a synthetic id). The approval
-// tools are candidates for every role set, and the drafting tools only for
-// one holding straza-draft-config (nativeListed). The per-session tier-2
-// overlay (buildOverlay) then HIDES an approval tool unless the session's
-// policy authorizes `mcp.call straza:<tool>`, so default-deny holds.
+// tools and whoami are candidates for every role set, and the drafting tools
+// only for one holding straza-draft-config (nativeListed). The per-session
+// tier-2 overlay (buildOverlay) then HIDES an approval tool unless the
+// session's policy authorizes `mcp.call straza:<tool>`, so default-deny
+// holds, and hides whoami only when a rule denies it.
 func (a *App) appendNativeCatalog(c *sessionCatalog, roles []string) {
 	for _, nt := range nativeStrazaTools {
 		if !nativeListed(nt.Name, roles) {
@@ -192,6 +204,8 @@ func (a *App) appendNativeCatalog(c *sessionCatalog, roles []string) {
 // resolved) upstream in handleToolCall; this only originates the tool result.
 // approval_request is not dispatched here: the gateway runs its two steps,
 // describeApprovalRequest and openApprovalTicket, on either side of its record.
+// The gateway runs approval_await and draft_submit in two steps too
+// (nativeCall), and here each runs both steps with no record between.
 func (a *App) callNativeStraza(ctx context.Context, tool string, args json.RawMessage, claims authn.Claims) *mcp.CallToolResult {
 	switch tool {
 	case nativeToolApprovalStatus:
@@ -257,10 +271,10 @@ type nativeApprovalRequestArgs struct {
 // A ticket a person denied whose window is still open refuses the same call,
 // as the real call's lane does, so approval_request cannot reopen it. A
 // ticket nobody could decide is refused with the cause and the fix, and a
-// database that cannot be read for either lookup is refused with the
-// sentence that says to retry, so neither record says allow. The fingerprint
-// (EventKey) is computed server-side, so a later real call binds to the
-// ticket. Fail closed.
+// database that cannot be read is refused with a sentence that says to
+// retry, so no such record says allow. The fingerprint (EventKey) is
+// computed server-side, so a later real call binds to the ticket. Fail
+// closed.
 func (a *App) describeApprovalRequest(ctx context.Context, args json.RawMessage, claims authn.Claims, sub policy.Subject) (ticket approval.RequestInput, refusal string) {
 	var in nativeApprovalRequestArgs
 	if err := json.Unmarshal(args, &in); err != nil {
@@ -327,11 +341,11 @@ func (a *App) describeApprovalRequest(ctx context.Context, args json.RawMessage,
 		Confirm: d.Confirm,
 	}
 	if err := a.approval.Routable(ctx, req); err != nil {
-		a.failClosed(ctx, "native", d.RuleID, err)
 		var un *approval.UnroutableError
-		if errors.As(err, &un) {
-			return ticket, a.approveRequestDenyReason(err)
+		if errors.As(err, &un) || errors.Is(err, approval.ErrDeciderUnreadable) || errors.Is(err, approval.ErrTooManyRequests) {
+			return ticket, a.approveRequestRefused(ctx, "native", d.RuleID, err)
 		}
+		a.failClosed(ctx, "native", d.RuleID, err)
 		return ticket, approvalStoreDownReason
 	}
 	return req, ""
@@ -372,12 +386,12 @@ func (a *App) openApprovalTicket(ctx context.Context, in approval.RequestInput) 
 	if err != nil {
 		// describeApprovalRequest checked the route before the record, so an
 		// error here comes at write time: the insert failed, the store
-		// faulted after the check, the sponsor changed in between, or the
-		// pending ticket the check found expired or was decided in between.
+		// faulted after the check, the sponsor changed in between, the
+		// request rate filled in between, or the pending ticket the check
+		// found expired or was decided in between.
 		// The record already says allow, so the failClosed Error line, or the
 		// unroutable counter for a route that changed, is the trail.
-		a.failClosed(ctx, "native", in.RuleID, err)
-		return nativeToolError(a.approveRequestDenyReason(err))
+		return nativeToolError(a.approveRequestRefused(ctx, "native", in.RuleID, err))
 	}
 	return nativeToolOK(map[string]any{
 		"ref":        rec.ID,
@@ -390,6 +404,10 @@ type nativeRefArgs struct {
 	Ref string `json:"ref"`
 }
 
+// noSuchApprovalMsg begins the refusal of a ref that names no ticket of the
+// caller's, which approval_status and approval_await end with the ref.
+const noSuchApprovalMsg = "Straza: no such approval "
+
 // nativeApprovalStatus reads one ticket the caller owns. Another user's ref (or
 // an unknown ref) is a not-found error; a requester never learns another user's
 // ticket exists.
@@ -400,7 +418,7 @@ func (a *App) nativeApprovalStatus(ctx context.Context, args json.RawMessage, cl
 	}
 	rec, err := a.approval.Get(ctx, in.Ref)
 	if err != nil || rec.UserID != claims.Subject {
-		return nativeToolError("Straza: no such approval " + in.Ref)
+		return nativeToolError(noSuchApprovalMsg + in.Ref)
 	}
 	return nativeToolOK(nativeStatusPayload(rec))
 }
@@ -410,36 +428,53 @@ type nativeAwaitArgs struct {
 	MaxWaitSeconds int    `json:"max_wait_seconds"`
 }
 
-// nativeApprovalAwait blocks up to a bounded wait (capped at 60s, default 30s)
-// for a ticket the caller owns to be decided, returning the status shape plus a
+// nativeApprovalAwait runs both steps of awaitTicket with no record between
+// them and answers the tool result.
+func (a *App) nativeApprovalAwait(ctx context.Context, args json.RawMessage, claims authn.Claims) *mcp.CallToolResult {
+	wait, msg := a.awaitTicket(ctx, args, claims)
+	if wait == nil {
+		return nativeToolError(msg)
+	}
+	return wait()
+}
+
+// awaitTicket is the first step of approval_await, which runs before the
+// call's record: it reads the ticket the caller owns and answers the step
+// that waits for its decision, or nil and the refusal of an empty ref or
+// of a ref that is unknown or another user's. The gateway writes the
+// record between the two, so the record precedes the wait and a full
+// audit queue refuses before any wait. The step blocks up to a bounded
+// wait (capped at 60s, default 30s) and answers the status shape plus a
 // timed_out flag. An already-resolved ticket returns at once; a bound that
 // elapses returns state=pending (timed_out=true); a timeout is not a deny.
-func (a *App) nativeApprovalAwait(ctx context.Context, args json.RawMessage, claims authn.Claims) *mcp.CallToolResult {
+func (a *App) awaitTicket(ctx context.Context, args json.RawMessage, claims authn.Claims) (func() *mcp.CallToolResult, string) {
 	var in nativeAwaitArgs
 	if err := json.Unmarshal(args, &in); err != nil || in.Ref == "" {
-		return nativeToolError("Straza: approval_await requires a ref")
+		return nil, "Straza: approval_await requires a ref"
 	}
 	rec, err := a.approval.Get(ctx, in.Ref)
 	if err != nil || rec.UserID != claims.Subject {
-		return nativeToolError("Straza: no such approval " + in.Ref)
+		return nil, noSuchApprovalMsg + in.Ref
 	}
-	if rec.State != approval.StatePending {
-		return nativeToolOK(withTimedOut(nativeStatusPayload(rec), false))
-	}
-
-	wctx, cancel := context.WithTimeout(ctx, time.Duration(clampAwaitSeconds(in.MaxWaitSeconds))*time.Second)
-	defer cancel()
-	final, err := a.approval.Await(wctx, in.Ref)
-	if err != nil {
-		// The bound elapsed (or ctx canceled) with no decision: re-read and report
-		// the current (still-pending) state. Never a deny.
-		cur := rec
-		if again, e := a.approval.Get(ctx, in.Ref); e == nil {
-			cur = again
+	return func() *mcp.CallToolResult {
+		if rec.State != approval.StatePending {
+			return nativeToolOK(withTimedOut(nativeStatusPayload(rec), false))
 		}
-		return nativeToolOK(withTimedOut(nativeStatusPayload(cur), cur.State == approval.StatePending))
-	}
-	return nativeToolOK(withTimedOut(nativeStatusPayload(final), final.State == approval.StatePending))
+
+		wctx, cancel := context.WithTimeout(ctx, time.Duration(clampAwaitSeconds(in.MaxWaitSeconds))*time.Second)
+		defer cancel()
+		final, err := a.approval.Await(wctx, in.Ref)
+		if err != nil {
+			// The bound elapsed (or ctx canceled) with no decision: re-read and report
+			// the current (still-pending) state. Never a deny.
+			cur := rec
+			if again, e := a.approval.Get(ctx, in.Ref); e == nil {
+				cur = again
+			}
+			return nativeToolOK(withTimedOut(nativeStatusPayload(cur), cur.State == approval.StatePending))
+		}
+		return nativeToolOK(withTimedOut(nativeStatusPayload(final), final.State == approval.StatePending))
+	}, ""
 }
 
 // nativeStatusPayload is the shared status view (approval_status and

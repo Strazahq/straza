@@ -3,13 +3,16 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io/fs"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/strazahq/straza/internal/agentguard"
 	"github.com/strazahq/straza/internal/agentguard/localapi"
@@ -34,13 +37,22 @@ const (
 // the full original, so the record witnesses what was cut.
 const captureMaxBytes = 64 << 10
 
+// toolTextMax caps what a tool record keeps of the command and of the
+// paths, as captureMaxBytes caps a turn. A cut value adds <field>Truncated
+// and the <field>Hash of the whole value, so the record still witnesses
+// what the call named.
+const toolTextMax = 64 << 10
+
 // decide answers POST decide for one hook event of the caller's window.
 func (a *api) decide(w http.ResponseWriter, r *http.Request) {
 	var req localapi.DecideRequest
-	if !a.read(w, r, textBodyMax, &req) || !a.named(w, r, req.Harness) {
+	c := callerOf(r)
+	if !a.read(w, r, textBodyMax, &req) || !a.named(w, r, req.Harness) ||
+		!a.fit(w, r, maxEventField, field{"tool", req.Event.Tool}, field{"app", req.Event.App}, field{"tool name", req.Event.ToolName},
+			field{"workspace", req.Event.Workspace}, field{"agent type", req.AgentType}, field{"agent id", req.AgentID}) {
+		a.noteRefused(c, "decide")
 		return
 	}
-	c := callerOf(r)
 	ctx, cancel := context.WithTimeout(r.Context(), decideBudget)
 	defer cancel()
 	sctx, scancel := context.WithTimeout(ctx, renewBudget)
@@ -243,8 +255,9 @@ func expiredReason(s Session, grace time.Duration) string {
 		return renewUnjudgedReason(age, s.Renewal.Detail)
 	}
 	return fmt.Sprintf("session token expired %s ago and the offline grace period (%s) is exhausted. "+
-		"Straza cannot verify current policy while the platform is unreachable; "+
-		"reconnect and run `straza doctor`.", age, grace)
+		"Straza cannot verify current policy while the platform is unreachable. "+
+		"This is a connection problem, not a policy decision. Try the call once more in a minute. "+
+		"If it is denied again, tell the user to check the network and run `straza doctor`.", age, grace)
 }
 
 // renewRefusedReason words the deny of a session whose renewal the server
@@ -257,15 +270,17 @@ func renewRefusedReason(detail string) string {
 // and whose renewal could not complete. detail says what failed.
 func renewFailedReason(age time.Duration, detail string) string {
 	return fmt.Sprintf("session token expired %s ago and automatic renewal failed (%s). "+
-		"Restart the session, or run `straza doctor`.", age, detail)
+		"Try the call once more in a minute. If it is denied again, tell the user to start a new session "+
+		"or run `straza doctor`.", age, detail)
 }
 
 // renewUnjudgedReason words the deny of a session whose token expired age
 // ago and whose renewal got an answer that judged nothing about it.
 func renewUnjudgedReason(age time.Duration, detail string) string {
 	return fmt.Sprintf("session token expired %s ago, and the renewal got an answer that does not say whether this session is still accepted: %s "+
-		"The next tool call tries the renewal again. If this keeps happening, check that the configured server URL reaches strazad "+
-		"with nothing in front of it that limits or blocks straza, and run `straza doctor`.", age, detail)
+		"Try the call once more in a minute, which tries the renewal again. If it is denied again, tell the user to check "+
+		"that the configured server URL reaches strazad with nothing in front of it that limits or blocks straza, "+
+		"and to run `straza doctor`.", age, detail)
 }
 
 // policyRefusedReason words the deny of a session whose newer policy could
@@ -285,39 +300,111 @@ func onlineDenyReason(err error, action, tail string) string {
 			"Straza: the server refused this session for %s (%s) and re-checkin could not restore it. Denied (fail-closed); restart the session or run `straza doctor`",
 			action, strings.TrimPrefix(refuse.Msg, "Straza: "))
 	}
-	return fmt.Sprintf("Straza: security layer unreachable for %s. %s", action, tail)
+	return fmt.Sprintf("Straza: security layer unreachable for %s. %s. "+
+		"This is a connection problem, not a policy decision. Try the call once more in a minute, "+
+		"and if it is denied again, tell the user.", action, tail)
 }
 
 // toolRecord is the straza.audit.tool record of one decision on s by the
-// snapshot the engine was built from. It carries the full event and that
+// snapshot the engine was built from. It carries the event and that
 // snapshot, because an audit line that cannot say what was attempted is not
-// evidence (spec/events section 2).
+// evidence (spec/events section 2). It keeps at most toolTextMax of the
+// command and of the paths, with the hash of what it cut.
 func toolRecord(s Session, snapshot string, req localapi.DecideRequest, d policy.Decision) map[string]any {
 	ev := req.Event
+	command, cut, hash := capText(ev.Command)
 	data := map[string]any{
 		"session":  s.ID,
 		"harness":  harnessLabel(req.Harness),
 		"event":    ev.Kind,
 		"tool":     ev.Tool,
 		"app":      ev.App,
-		"command":  ev.Command,
+		"command":  command,
 		"effect":   d.Effect,
 		"ruleId":   d.RuleID,
 		"setName":  d.SetName,
 		"reason":   d.Reason,
 		"snapshot": snapshot,
 	}
+	if cut {
+		data["commandTruncated"], data["commandHash"] = true, hash
+	}
 	if ev.ToolName != "" {
 		data["toolName"] = ev.ToolName
 	}
 	if len(ev.Paths) > 0 {
-		data["paths"] = ev.Paths
+		paths, cut, hash := capPaths(ev.Paths)
+		data["paths"] = paths
+		if cut {
+			data["pathsTruncated"], data["pathsHash"] = true, hash
+		}
 	}
 	if ev.Workspace != "" {
 		data["workspace"] = ev.Workspace
 	}
 	addAgentAttribution(data, req.AgentType, req.AgentID)
 	return data
+}
+
+// capText keeps at most toolTextMax bytes of s, cut on a character
+// boundary, and reports whether it cut and the hash of the whole of s.
+func capText(s string) (kept string, cut bool, hash string) {
+	if len(s) <= toolTextMax {
+		return s, false, ""
+	}
+	h := sha256.New()
+	writeString(h, s)
+	return cutUTF8(s, toolTextMax), true, "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// capPaths keeps paths in order while they fit in toolTextMax bytes,
+// counting one byte past each, cuts the path that crosses the bound on a
+// character boundary and drops the rest. When it cuts, hash covers the
+// whole list, each path after its length in bytes as an unsigned 64-bit
+// big-endian number, so two different lists never hash alike.
+func capPaths(paths []string) (kept []string, cut bool, hash string) {
+	budget := toolTextMax
+	for i, p := range paths {
+		if len(p)+1 <= budget {
+			budget -= len(p) + 1
+			continue
+		}
+		kept = paths[:i:i]
+		if budget > 1 {
+			if part := cutUTF8(p, budget-1); part != "" {
+				kept = append(kept, part)
+			}
+		}
+		h := sha256.New()
+		for _, q := range paths {
+			h.Write(binary.BigEndian.AppendUint64(nil, uint64(len(q))))
+			writeString(h, q)
+		}
+		return kept, true, "sha256:" + hex.EncodeToString(h.Sum(nil))
+	}
+	return paths, false, ""
+}
+
+// writeString writes s to h in pieces, so hashing a long string never
+// copies it whole.
+func writeString(h hash.Hash, s string) {
+	for len(s) > 0 {
+		n := min(len(s), 64<<10)
+		h.Write([]byte(s[:n]))
+		s = s[n:]
+	}
+}
+
+// cutUTF8 is the longest prefix of s of at most n bytes that ends on a
+// character boundary.
+func cutUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // recordText records one captured prompt or reply of s in mode.
@@ -366,16 +453,19 @@ func captureContent(content, mode string) (stored string, truncated bool, hash s
 // and records nothing otherwise, a snapshot that cannot be had included.
 func (a *api) capture(w http.ResponseWriter, r *http.Request) {
 	var req localapi.CaptureRequest
-	if !a.read(w, r, textBodyMax, &req) || !a.named(w, r, req.Harness) {
+	c := callerOf(r)
+	if !a.read(w, r, textBodyMax, &req) || !a.named(w, r, req.Harness) ||
+		!a.fit(w, r, maxEventField, field{"agent type", req.AgentType}, field{"agent id", req.AgentID}) {
+		a.noteRefused(c, "capture")
 		return
 	}
 	if req.Kind != localapi.CapturePrompt && req.Kind != localapi.CaptureReply {
+		a.noteRefused(c, "capture")
 		a.refuse(w, r, http.StatusBadRequest, fmt.Sprintf("The capture request names the kind %q, and the Straza "+
 			"background service records only prompt and reply. Update Straza so the client and the service are "+
 			"the same version.", req.Kind))
 		return
 	}
-	c := callerOf(r)
 	sctx, cancel := context.WithTimeout(r.Context(), renewBudget)
 	s, err := a.creds.Session(sctx, c, req.Harness, false)
 	cancel()

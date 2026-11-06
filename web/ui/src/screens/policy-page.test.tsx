@@ -10,6 +10,7 @@ import {
   eventSupport, getPolicy, listApps, listAudit, listPolicies, listRoles, listSessions, listUsers, simulate,
 } from "@/lib/api";
 import { checkDraft, createDraft, listDrafts, publishDraft } from "@/lib/drafts-api";
+import { take } from "@/lib/handoff";
 import { navigate, setLeaveGuard } from "@/lib/router";
 import { SAVE_PUBLISH } from "@/lib/save-words";
 import { downloadText } from "@/lib/utils";
@@ -606,11 +607,31 @@ describe("leaving the page with edits that are not published", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
-  it("goes straight through when nothing is unpublished", async () => {
+  it("goes straight through when nothing is unpublished, onto the search for this policy's decisions", async () => {
     mount("dev-guardrails", "decisions");
+    // The router with no guard leaves at once, and the hand-off rides the move.
+    vi.mocked(navigate).mockImplementationOnce((_key, _rest, _replace, before) => before?.());
     await userEvent.click(await screen.findByRole("button", { name: new RegExp(OPEN_IN_AUDIT) }));
-    expect(vi.mocked(navigate)).toHaveBeenCalledWith("audit");
+    expect(vi.mocked(navigate)).toHaveBeenCalledWith("audit", [], false, expect.any(Function));
+    expect(take("audit")).toEqual({ q: '"setName":"dev-guardrails"' });
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("hands Audit nothing when the person stays with unpublished edits, and the search when they leave", async () => {
+    const view = mount();
+    await editApplies();
+    view.rerender(<TooltipProvider><PolicyPage name="dev-guardrails" tab="decisions" /></TooltipProvider>);
+    // The router asks the page's guard and gives it the move, which carries the hand-off.
+    const viaGuard = () => vi.mocked(navigate).mockImplementationOnce((key, rest, _replace, before) =>
+      lastGuard()({ kind: "route", key: key as "audit", rest: rest || [] }, () => before?.()));
+    viaGuard();
+    await userEvent.click(await screen.findByRole("button", { name: new RegExp(OPEN_IN_AUDIT) }));
+    await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: STAY }));
+    expect(take("audit")).toBeNull();
+    viaGuard();
+    await userEvent.click(screen.getByRole("button", { name: new RegExp(OPEN_IN_AUDIT) }));
+    await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: LEAVE }));
+    expect(take("audit")).toEqual({ q: '"setName":"dev-guardrails"' });
   });
 });
 

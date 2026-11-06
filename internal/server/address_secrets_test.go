@@ -152,14 +152,14 @@ func TestNoSurfaceShowsAStoredSecret(t *testing.T) {
 		{"the export of a server with addresses in an argument and a description", exported(t, printer), "http://%5BREDACTED%5D@up.example/mcp?…"},
 		{"the recheck answer after the upstream closed", recheck, "degraded"},
 		{"the apps.recheck record", string(recorded), "apps.recheck"},
-		{"the AI agent's error on a closed upstream", string(closed), "upstream call failed"},
+		{"the AI agent's error on a closed upstream", string(closed), "the call to the MCP server slowsec failed"},
 		{"the servers list after the upstream closed", body(http.MethodGet, "/v1/admin/apps", root, nil), "degraded"},
 		{"the stored server-down note of a draft", note, "slowsec reads degraded now"},
 		{"the log of the remote server", body(http.MethodGet, "/v1/admin/apps/slowsec/logs", root, nil), "connected http://" + host + "/mcp/%5BREDACTED%5D/v1?…#…"},
 		{"the log of a server that prints its settings", body(http.MethodGet, "/v1/admin/apps/printer/logs", root, nil), "starting with API_TOKEN=[REDACTED]"},
 		{"the answer to a token paste", body(http.MethodPost, "/v1/connect/tokapp", joe, paste), "refused the token or did not answer"},
 		{"the install answer for an address that is not http", string(install), "must be http(s)"},
-		{"strazad's log", logs.String(), "upstream call failed"},
+		{"strazad's log", logs.String(), "the call to the MCP server slowsec failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

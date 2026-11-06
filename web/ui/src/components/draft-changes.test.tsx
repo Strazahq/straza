@@ -1,40 +1,61 @@
-import { describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { DraftChanges } from "./draft-changes";
 import { DraftGains } from "./draft-gains";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ApiError, type AppRow, listApps, listRoles } from "@/lib/api";
 import { roleToolsOf } from "@/lib/drafts-access";
-import { changeCounts, roleOf } from "@/lib/drafts-model";
+import { roleOf } from "@/lib/drafts-model";
 import {
+  FILE_MASKED,
   GOES_WITH,
-  LEAVES,
   NOTHING_STARTS,
   NO_GAINS,
+  NO_OTHER_FIELD,
   OFF_LINE,
   REMOVED_LINE,
   REMOVED_LINE_PAST,
   TOOLS_NOT_READ,
   GAINS_HIDDEN,
-  changesLede,
-  changesLedePublished,
   contactedLine,
+  fileFold,
+  notLive,
 } from "@/lib/drafts-words";
+import { notify } from "@/lib/notify";
+import { navigate } from "@/lib/router";
 import { openDoc, rulesOf } from "@/lib/policy-model";
 import { sentence } from "@/lib/policy-words";
-import { COVERAGE, COVERS_DETAIL, DETAIL, PUBLISHED_DETAIL, WRITERS_SET, detailWith, readersSet } from "@/test/drafts-fixture";
+import { COVERAGE, COVERS_DETAIL, DETAIL, PUBLISHED_DETAIL, WRITERS_SET, detailWith, readersSet, role } from "@/test/drafts-fixture";
 
-// What changes and Access after publishing: each
-// item in the landed shapes of the server, role and policy pages, the
-// reach of each role before and after, and every text as text.
+// What changes and Access after publishing: each item in the landed shapes
+// of the server, role and policy pages with its own file, the reach of each
+// role before and after as one row of chips, an edited rule over its old
+// sentence, and every text as text.
+
+vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), listApps: vi.fn(), listRoles: vi.fn() }));
+vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
+vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: vi.fn(), undo: vi.fn() } }));
 
 const card = (object: string) => document.querySelector('[data-item="' + object + '"]') as HTMLElement;
 const mount = (d = DETAIL) => render(<TooltipProvider><DraftChanges detail={d} /></TooltipProvider>);
 const names = (el: Element | null) => [...(el?.querySelectorAll("[data-name]") || [])].map((n) => n.textContent);
 
 describe("what changes", () => {
-  it("counts the items in one lede", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("gives each card with a document its own file, with the masked line, and none to a withheld or removed item", () => {
     mount();
-    expect(screen.getByText(changesLede(changeCounts(DETAIL.draft.items)))).toBeTruthy();
+    for (const [object, name] of [["App/github", "github"], ["Role/github-readers", "github-readers"], ["PolicySet/github-writers-access", "github-writers-access"]]) {
+      const fold = card(object).querySelector("[data-file]") as HTMLDetailsElement;
+      expect(fold.open).toBe(false);
+      expect(fold.querySelector("summary")?.textContent).toBe(fileFold(name, "open"));
+      expect(fold.textContent).toContain(FILE_MASKED);
+    }
+    expect(card("PolicySet/github-writers-access").querySelector("[data-file] pre")?.textContent).toBe(WRITERS_SET);
+    expect(card("Role/secret-role").querySelector("[data-file]")).toBeNull();
+    expect(card("App/old-tools").querySelector("[data-file]")).toBeNull();
+    expect(document.querySelector("[data-file] summary")?.textContent).not.toContain("would");
   });
 
   it("reads a new remote server in the server page's words, with its tools not read yet", () => {
@@ -53,19 +74,42 @@ describe("what changes", () => {
     expect(c.textContent).toContain(contactedLine("api.githubcopilot.com", "", 2).split(" at ")[0]);
   });
 
-  it("reads a changed server as the Now and After rows of the change sheets", () => {
+  it("reads a changed server as the Now and After rows of the change sheets, and says no other field changes", () => {
     mount();
     const row = card("App/demo-tools").querySelector('[data-row="Rate limit"]') as HTMLElement;
     expect([...row.querySelectorAll("td")].map((td) => td.textContent)).toEqual(["Rate limit", "10 calls per second, per session.", "20 calls per second, per session."]);
+    expect(card("App/demo-tools").querySelector("[data-no-other]")?.textContent).toBe(NO_OTHER_FIELD);
   });
 
-  it("reads a new role's tools as chips and a changed role's tools, each that leaves marked", () => {
+  it("names each kind in full on its card, with the server that owns a role", () => {
     mount();
-    expect(card("Role/github-readers").querySelector("[data-kind]")?.textContent).toBe("role · owned by github");
+    const kind = (object: string) => card(object).querySelector("[data-kind]")?.textContent;
+    expect([kind("App/github"), kind("Role/github-readers"), kind("PolicySet/github-writers-access"), kind("Role/secret-role")]).toEqual(["MCP server", "Application role · owned by github", "Policy set", "Role"]);
+  });
+
+  it("reads a new role's tools as chips, and a changed role's tools as one row with the one that leaves struck", () => {
+    mount();
     expect(names(card("Role/github-readers").querySelector('[data-fact="Tools"]'))).toEqual(["get_me", "list_issues"]);
-    const leaving = card("Role/demo-tools-readers").querySelector('[data-tool="get-env"]') as HTMLElement;
-    expect(leaving.textContent).toContain(LEAVES);
-    expect(card("Role/demo-tools-readers").querySelector('[data-tool="echo"]')?.textContent).not.toContain(LEAVES);
+    const tools = card("Role/demo-tools-readers").querySelector('[data-fact="Tools"]') as HTMLElement;
+    expect(names(tools)).toEqual(["get-env", "echo", "get-sum"]);
+    const leaving = tools.querySelector('[data-name="get-env"]') as HTMLElement;
+    expect([leaving.tagName, leaving.hasAttribute("data-removed"), leaving.className.includes("line-through")]).toEqual(["DEL", true, true]);
+    expect(tools.querySelector('[data-name="echo"]')?.hasAttribute("data-removed")).toBe(false);
+    expect([...card("Role/demo-tools-readers").querySelectorAll("[data-sum]")].map((c) => c.textContent)).toEqual(["-1 tool"]);
+    expect(card("Role/demo-tools-readers").querySelector("[data-holders]")?.textContent).toBe("1 person holds it");
+    expect(card("Role/demo-tools-readers").querySelector("table")).toBeNull();
+  });
+
+  it("folds the tools a role keeps once there are more than four, and opens them on click", async () => {
+    const kept = ["a1", "a2", "a3", "a4", "a5"];
+    mount(detailWith({ draft: { items: [{ kind: "Role", name: "wide", op: "put", doc: role("wide", "demo-tools", [...kept, "b1"]), existed: true }] }, live: { "Role/wide": { op: "put", doc: role("wide", "demo-tools", [...kept, "c1"]) } } }));
+    const tools = card("Role/wide").querySelector('[data-fact="Tools"]') as HTMLElement;
+    const shown = () => [...tools.querySelectorAll("[data-name]")].map((n) => n.getAttribute("data-name"));
+    expect(shown()).toEqual(["b1", "c1"]);
+    expect(tools.querySelector("[data-added]")?.textContent).toBe("+ b1");
+    await userEvent.click(within(tools).getByRole("button", { name: "5 unchanged" }));
+    expect(shown()).toEqual(["b1", "c1", ...kept]);
+    expect([...card("Role/wide").querySelectorAll("[data-sum]")].map((c) => c.textContent)).toEqual(["+1 tool", "-1 tool"]);
   });
 
   it("labels its tables in sentence case", () => {
@@ -73,7 +117,7 @@ describe("what changes", () => {
     for (const th of document.querySelectorAll("th")) expect(th.className).not.toContain("uppercase");
   });
 
-  it("reads an approval set's rules in the policy words, marked against live", () => {
+  it("reads a policy set's rules in the policy words, marked against live", () => {
     mount();
     const pr = card("PolicySet/github-writers-access").querySelector('[data-rule="github-pr-hold"]') as HTMLElement;
     expect(pr.textContent).toContain(sentence(rulesOf(openDoc(WRITERS_SET))[0]));
@@ -81,6 +125,29 @@ describe("what changes", () => {
     const set = card("PolicySet/demo-tools-readers-access");
     expect(set.querySelector('[data-rule="get-sum"] [data-rule-mark]')?.textContent).toBe("edited");
     expect(set.querySelector('[data-rule="get-env"] [data-rule-mark]')?.textContent).toBe("removed");
+  });
+
+  it("names the outcomes a policy set gives after publishing beside its name", () => {
+    mount();
+    expect(card("PolicySet/github-writers-access").querySelector("[data-outcomes]")?.textContent).toBe("needs approval");
+    expect(card("App/github").querySelector("[data-outcomes]")).toBeNull();
+  });
+
+  // get-sum was decided by the sponsor within 2 minutes and is now decided
+  // by sec-approvers within 5 minutes.
+  it("shows an edited rule's old sentence struck through above the new one, the words that differ marked", () => {
+    mount();
+    const row = card("PolicySet/demo-tools-readers-access").querySelector('[data-rule="get-sum"]') as HTMLElement;
+    const live = rulesOf(openDoc(readersSet(true))).find((r) => r.id === "get-sum");
+    const next = rulesOf(openDoc(readersSet(false))).find((r) => r.id === "get-sum");
+    const was = row.querySelector("[data-was]") as HTMLElement;
+    const now = row.querySelector("[data-now]") as HTMLElement;
+    expect([was.textContent, now.textContent]).toEqual([sentence(live!), sentence(next!)]);
+    expect(was.className).toContain("line-through");
+    expect(was.querySelectorAll("del").length).toBeGreaterThan(0);
+    expect(now.querySelectorAll("ins").length).toBeGreaterThan(0);
+    expect([...now.querySelectorAll("ins")].map((i) => i.textContent).join(" ")).toContain("sec-approvers");
+    expect(card("PolicySet/github-writers-access").querySelector("[data-was]")).toBeNull();
   });
 
   it.each([
@@ -110,6 +177,27 @@ describe("what changes", () => {
     expect(c.textContent).toContain("the role old-tools-readers");
   });
 
+  it("links a live object's card to its page, finding a server's or a role's id by name", async () => {
+    vi.mocked(listApps).mockResolvedValue([{ id: "app-7", name: "demo-tools" } as AppRow]);
+    mount();
+    expect(card("App/github").querySelector("[data-open-live]")).toBeNull();
+    await userEvent.click(within(card("PolicySet/demo-tools-readers-access")).getByRole("button", { name: "Open demo-tools-readers-access" }));
+    expect(navigate).toHaveBeenCalledWith("policies", ["demo-tools-readers-access"]);
+    await userEvent.click(within(card("App/demo-tools")).getByRole("button", { name: "Open demo-tools" }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("servers", ["app-7"]));
+  });
+
+  it("says why a live link cannot open its page", async () => {
+    vi.mocked(listRoles).mockResolvedValue([]);
+    vi.mocked(listApps).mockRejectedValue(new ApiError("strazad did not answer", 0, true));
+    mount();
+    await userEvent.click(within(card("Role/demo-tools-readers")).getByRole("button", { name: "Open demo-tools-readers" }));
+    await waitFor(() => expect(notify.failed).toHaveBeenCalledWith(notLive("demo-tools-readers")));
+    await userEvent.click(within(card("App/demo-tools")).getByRole("button", { name: "Open demo-tools" }));
+    await waitFor(() => expect(notify.failed).toHaveBeenCalledWith("The server list could not be read because strazad did not answer. Check that it is running, then reload."));
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("says why it leaves out a document the reader may not read", () => {
     mount();
     expect(card("Role/secret-role").textContent).toContain(DETAIL.draft.items[7].withheld as string);
@@ -130,13 +218,9 @@ describe("what changes", () => {
 describe("what a published draft changed", () => {
   // The change record, never live state: live moved on to 30 calls per
   // second after the publish, and the cards must still read 10 to 20.
-  it("reads each item from the change record, in the past tense", () => {
+  it("reads each item from the change record, its file as it was published", () => {
     mount(PUBLISHED_DETAIL);
-    expect(screen.getByText(changesLedePublished(changeCounts([
-      { kind: "App", op: "put", existed: true },
-      { kind: "Role", op: "remove", existed: true },
-      { kind: "PolicySet", op: "put", existed: true },
-    ])))).toBeTruthy();
+    expect(card("App/demo-tools").querySelector("[data-file] summary")?.textContent).toBe(fileFold("demo-tools", "published"));
     const row = card("App/demo-tools").querySelector('[data-row="Rate limit"]') as HTMLElement;
     expect([...row.querySelectorAll("td")].map((td) => td.textContent)).toEqual(["Rate limit", "10 calls per second, per session.", "20 calls per second, per session."]);
     expect(card("App/demo-tools").textContent).not.toContain("30 calls");
@@ -148,7 +232,7 @@ describe("what a published draft changed", () => {
     expect(c.querySelector("[data-mark]")?.textContent).toBe("removed");
     expect(c.textContent).toContain(REMOVED_LINE_PAST);
     expect(c.textContent).toContain(GOES_WITH);
-    expect(c.textContent).toContain("the approval set old-readers-access");
+    expect(c.textContent).toContain("the policy set old-readers-access");
   });
 
   it("keeps the edited and the removed rules of the set", () => {

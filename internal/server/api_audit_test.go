@@ -310,16 +310,6 @@ func (s *sessionReads) reads(id string) int {
 	return s.count[id]
 }
 
-func (s *sessionReads) total() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	n := 0
-	for _, c := range s.count {
-		n += c
-	}
-	return n
-}
-
 func (s *sessionReads) setFail(id string, on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -642,41 +632,6 @@ func TestAuditBatchSessionReadFault(t *testing.T) {
 	if d := waitChainData(t, r.app, "u5-fault-earlier"); d["session"] != kimA.ID {
 		t.Errorf("the retried record landed under session %v, want %s", d["session"], kimA.ID)
 	}
-}
-
-// TestAuditBatchCapsNamedSessions pins the cap on distinct sessions one batch
-// may name: past maxNamedSessions a record naming a new session is refused
-// without a read, all of them share one Warn line with their count, and a
-// record that names no session is still stored.
-func TestAuditBatchCapsNamedSessions(t *testing.T) {
-	t.Parallel()
-	r := newSpoolRig(t)
-	kim := seedIdentity(t, r.app)
-	kimB := r.session(t, kim.ID, "dev-kim")
-	recs := make([]spooled, 0, maxNamedSessions+3)
-	for i := range maxNamedSessions + 2 {
-		recs = append(recs, spooled{fmt.Sprintf("u5-cap-%d", i), fmt.Sprintf("u5-cap-%d", i), uuid.NewString()})
-	}
-	recs = append(recs, spooled{"u5-cap-own", "u5-cap-own", ""})
-
-	code, resp := r.upload(t, kimB, recs...)
-	if code != http.StatusOK || resp["accepted"] != float64(1) || resp["refused"] != float64(maxNamedSessions+2) {
-		t.Fatalf("batch = %d %v, want 200 with accepted 1 and refused %d", code, resp, maxNamedSessions+2)
-	}
-	if got := r.reads.total(); got != maxNamedSessions {
-		t.Errorf("session reads = %d, want %d", got, maxNamedSessions)
-	}
-	if n := warnLines(r.logs, whyUnknown); n != maxNamedSessions {
-		t.Errorf("WARN lines for unknown sessions = %d, want %d", n, maxNamedSessions)
-	}
-	capLine := fmt.Sprintf("names more than %d sessions other than the uploader's", maxNamedSessions)
-	if n := warnLines(r.logs, capLine, "count=2", fmt.Sprintf("record=u5-cap-%d ", maxNamedSessions)); n != 1 {
-		t.Errorf("WARN lines for the capped records = %d, want 1 with count=2:\n%s", n, lastLines(r.logs.String(), 3))
-	}
-	if got := counterValue(t, r.app, "straza_audit_refused_total"); got != float64(maxNamedSessions+2) {
-		t.Errorf("straza_audit_refused_total = %v, want %d", got, maxNamedSessions+2)
-	}
-	waitChainData(t, r.app, "u5-cap-own")
 }
 
 func lastLines(s string, n int) string {

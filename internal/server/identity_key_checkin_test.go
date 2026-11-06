@@ -142,7 +142,7 @@ func TestKeyCheckinRefusals(t *testing.T) {
 			return other
 		}, http.StatusForbidden, keyNotEnrolledMsg, keyNotEnrolledMsg, false},
 		{"a device an admin revoked", func(h *keyHolder) *keyHolder {
-			if err := app.revokeDevice(httptest.NewRequest(http.MethodDelete, "/", nil), h.device, "device revoked by admin"); err != nil {
+			if err := app.revokeDevice(httptest.NewRequest(http.MethodDelete, "/", nil), deviceRow(t, app, h.device), "device revoked by admin", "revoked-admin"); err != nil {
 				t.Fatal(err)
 			}
 			return h
@@ -156,7 +156,7 @@ func TestKeyCheckinRefusals(t *testing.T) {
 			return h
 		}, http.StatusForbidden,
 			"Your last sign-in on this machine was more than 7 days ago, and your Straza admin requires a new one. " +
-				"Run straza enroll and sign in with your work account.",
+				"Run `straza enroll --server " + app.cfg.Server.PublicURL + "` and sign in with your work account.",
 			signInPassedReason, true},
 		{"a disabled user", func(h *keyHolder) *keyHolder {
 			u := kim
@@ -165,7 +165,7 @@ func TestKeyCheckinRefusals(t *testing.T) {
 				t.Fatal(err)
 			}
 			return h
-		}, http.StatusForbidden, "user is disabled. Contact your administrator", "user is disabled", true},
+		}, http.StatusForbidden, disabledUserMsg, "user is disabled", true},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -205,6 +205,15 @@ func TestKeyReuseRevokesDevice(t *testing.T) {
 	kim := seedIdentity(t, app)
 	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
 	ctx := context.Background()
+	logins := func() int {
+		n := 0
+		for _, d := range outboxDataFor(t, app, "straza.audit.authn") {
+			if d["action"] == "login" {
+				n++
+			}
+		}
+		return n
+	}
 
 	for _, sent := range []int64{3, 1} {
 		name := map[int64]string{3: "the same counter", 1: "a lower counter"}[sent]
@@ -213,7 +222,7 @@ func TestKeyReuseRevokesDevice(t *testing.T) {
 			h.enroll(idToken, "sha256:"+strings.ReplaceAll(name, " ", "-"))
 			h.counter = 2
 			h.mustCheckin()
-			authnBefore := len(outboxDataFor(t, app, "straza.audit.authn"))
+			authnBefore := logins()
 
 			code, out := h.call("/v1/checkin", "", h.checkinBody(sent))
 			if code != http.StatusForbidden || out["error"] != keyReusedMsg {
@@ -245,8 +254,8 @@ func TestKeyReuseRevokesDevice(t *testing.T) {
 					t.Errorf("record %s = %v, want %v", k, recs[0][k], v)
 				}
 			}
-			if n := len(outboxDataFor(t, app, "straza.audit.authn")); n != authnBefore {
-				t.Errorf("authn records = %d, want %d: the reuse path writes no login record", n, authnBefore)
+			if n := logins(); n != authnBefore {
+				t.Errorf("login records = %d, want %d: the reuse path writes no login record", n, authnBefore)
 			}
 		})
 	}

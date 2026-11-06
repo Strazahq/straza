@@ -54,10 +54,11 @@ type Issuer struct {
 	// OnLoginFailed, when set, observes every refused password submit
 	// (spec/events rev 21 authn producer). username is the post-zeroing
 	// value: "" for an unknown, passwordless, or inactive account, so the
-	// observer can never fabricate an identity from attacker input. r is the
-	// submit request (the sourceIp/userAgent source). Unknown or expired
-	// device codes do NOT fire it: no credential was judged.
-	OnLoginFailed func(username string, r *http.Request)
+	// observer can never fabricate an identity from attacker input. reason
+	// is ReasonBadPassword or ReasonNonPersonPassword. r is the submit
+	// request (the sourceIp/userAgent source). Unknown or expired device
+	// codes do NOT fire it: no credential was judged.
+	OnLoginFailed func(username, reason string, r *http.Request)
 
 	// OnNHIGrant and OnNHIGrantFailed observe every judged
 	// client_credentials outcome (spec/events rev 22 authn producer). The
@@ -297,16 +298,30 @@ func (g *deviceGrant) pendingLocked(now time.Time) bool {
 	return g != nil && g.status == "pending" && !now.After(g.expiresAt)
 }
 
+// The reasons OnLoginFailed reports. ReasonNonPersonPassword is given only
+// after the password matched, so a wrong password reads the same for every
+// account.
+const (
+	ReasonBadPassword       = "invalid username or password"
+	ReasonNonPersonPassword = "an AI agent or a service account cannot sign in with a password" // #nosec G101 -- a refusal reason, not a credential
+)
+
+// nonPersonPasswordRefused is the sign-in pages' answer to the right
+// password of an AI agent or a service account, which signs in with its key
+// only.
+const nonPersonPasswordRefused = "This account is an AI agent or a service account, so it cannot sign in here: only a person signs in with a password. " +
+	"An agent signs in with its key, through straza enroll --headless on its machine."
+
 // judgePassword checks a password submit, the same way on the device page
-// and the authorize page. It returns the active user, or the sentence the
-// page shows instead. Each refusal fires OnLoginFailed once with the
-// post-zeroing username.
+// and the authorize page. It returns the active user who is a person, or
+// the sentence the page shows instead. Each refusal fires OnLoginFailed
+// once with the post-zeroing username and its reason.
 func (i *Issuer) judgePassword(r *http.Request, username, password string) (store.User, string) {
 	if i.LoginOnly != "" && username != i.LoginOnly {
 		// Refused before any lookup: on this mount no other row's hash is
 		// a credential, whatever set-password stored on it.
 		if i.OnLoginFailed != nil {
-			i.OnLoginFailed("", r)
+			i.OnLoginFailed("", ReasonBadPassword, r)
 		}
 		return store.User{}, "This page signs in the account " + i.LoginOnly + " only. Everyone else signs in at your identity provider."
 	}
@@ -321,9 +336,19 @@ func (i *Issuer) judgePassword(r *http.Request, username, password string) (stor
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil || username == "" {
 		if i.OnLoginFailed != nil {
-			i.OnLoginFailed(username, r)
+			i.OnLoginFailed(username, ReasonBadPassword, r)
 		}
 		return store.User{}, "Invalid username or password."
+	}
+	// A password an older version let an admin set on an AI agent or a
+	// service account opens nothing here, because such a user signs in with
+	// its key. The password is judged first, so only its holder learns that
+	// the account is not a person.
+	if u.IsNHI() {
+		if i.OnLoginFailed != nil {
+			i.OnLoginFailed(username, ReasonNonPersonPassword, r)
+		}
+		return store.User{}, nonPersonPasswordRefused
 	}
 	return u, ""
 }

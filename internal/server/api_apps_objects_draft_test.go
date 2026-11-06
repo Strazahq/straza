@@ -110,10 +110,9 @@ func TestAppObjectsDraft(t *testing.T) {
 			continue
 		}
 		d := out.Draft
-		plural := want.PluralWord()
-		if d.Door != "api" || d.Note != "Pins the "+plural+" that "+name+" declares in its tool marks." || len(d.Items) != 1 ||
+		if d.Door != "api" || d.Note != "" || len(d.Items) != 1 ||
 			d.Items[0].Kind != "App" || d.Items[0].Name != name || d.Items[0].Op != "put" {
-			t.Errorf("%s: draft = %+v, want one App put of the api door with the note", name, d)
+			t.Errorf("%s: draft = %+v, want one App put of the api door with no note", name, d)
 			continue
 		}
 		mf, err := manager.Parse([]byte(d.Items[0].Doc))

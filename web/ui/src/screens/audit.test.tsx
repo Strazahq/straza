@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { Audit } from "./audit";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { type AuditRow, listAudit, listUsers, overview, revokeSession } from "@/lib/api";
-import { chainBroken, chainVerified, loadedWords, recordMissing, revokeBody, searchLine } from "@/lib/audit-words";
+import { chainBroken, chainVerified, loadedWords, policyQuery, recordMissing, revokeBody, searchLine } from "@/lib/audit-words";
 import { notify } from "@/lib/notify";
 
 // The Audit screen over a chain whose hashes really verify: every fixture
@@ -154,7 +154,7 @@ describe("the Audit screen", () => {
     mount();
     await screen.findByRole("button", { name: "Open 4219" });
     expect(document.querySelector("table")?.className).toContain("table-fixed");
-    expect([...document.querySelectorAll("colgroup col")].map((c) => (c as HTMLElement).style.width)).toEqual(["68px", "84px", "236px", "88px", "96px", "28%", ""]);
+    expect([...document.querySelectorAll("colgroup col")].map((c) => (c as HTMLElement).style.width)).toEqual(["68px", "84px", "196px", "80px", "96px", "", ""]);
   });
 
   it.each([
@@ -342,6 +342,14 @@ describe("the Audit screen", () => {
     await waitFor(() => expect(rows()).toEqual(["4214"]));
     expect(vi.mocked(listAudit).mock.calls.some((c) => c[0] === "order=desc&limit=200&q=" + SESSION + "&user=" + JOE)).toBe(true);
     expect(screen.getByRole("button", { name: "Clear the user filter" })).toBeTruthy();
+  });
+
+  it("opens on the search for one policy's decisions that the policy page hands it", async () => {
+    vi.mocked(listAudit).mockImplementation((q: string) => Promise.resolve(serve(q, WINDOW.filter((r) => r.seq === 4214))));
+    render(<TooltipProvider><Audit preset={{ q: policyQuery("dev-guardrails") }} /></TooltipProvider>);
+    await waitFor(() => expect(rows()).toEqual(["4214"]));
+    expect(vi.mocked(listAudit).mock.calls.some((c) => c[0] === "order=desc&limit=200&q=" + encodeURIComponent('"setName":"dev-guardrails"'))).toBe(true);
+    expect((screen.getByRole("textbox", { name: "Search the chain" }) as HTMLInputElement).value).toBe('"setName":"dev-guardrails"');
   });
 
   it.each<[string, AuditRow, string]>([

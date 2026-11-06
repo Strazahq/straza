@@ -45,7 +45,7 @@ describe("the record sheet", () => {
     expect(screen.getByRole("heading", { name: "Record 4210 tool" })).toBeTruthy();
     expect(screen.getByText("joe-java-developer-agent, 2026-09-12 10:45:01 UTC, session", { exact: false }).textContent)
       .toBe("joe-java-developer-agent, 2026-09-12 10:45:01 UTC, session 0199cf12-4b1e…");
-    expect(blocks()).toEqual(["why", "Chain", "The record as stored"]);
+    expect(blocks()).toEqual(["why", "What ran", "Chain", "The record as stored"]);
     const why = document.querySelector("[data-why]") as HTMLElement;
     expect(why.textContent).toContain("Denied.");
     expect(why.textContent).toContain("Decided by rule no-destructive-delete in policy dev-guardrails: Straza: destructive delete is refused for role dev");
@@ -56,27 +56,33 @@ describe("the record sheet", () => {
   });
 
   it.each([
-    { name: "a refusal", data: DENY, type: "straza.audit.tool", tone: "danger", word: "Denied.", call: "shell.exec rm -rf ./build" },
-    { name: "a held call", data: MCP, type: "straza.audit.mcp", tone: "warn", word: "Needs approval.", call: "midpoint.assign_role" },
-    { name: "an allowance", data: { ...DENY, effect: "allow" }, type: "straza.audit.tool", tone: "ok", word: "Allowed.", call: "shell.exec rm -rf ./build" },
-  ])("sets the verdict of $name at title size in its tone, with the call it decided as a mono line", ({ data, type, tone, word, call }) => {
+    { name: "a refusal", data: DENY, type: "straza.audit.tool", tone: "danger", word: "Denied.", meta: "shell.exec" },
+    { name: "a held call", data: MCP, type: "straza.audit.mcp", tone: "warn", word: "Needs approval.", meta: "midpoint.assign_role" },
+    { name: "an allowance", data: { ...DENY, effect: "allow" }, type: "straza.audit.tool", tone: "ok", word: "Allowed.", meta: "shell.exec" },
+  ])("sets the verdict of $name on a neutral card, its word and dot in its tone, and the call under What ran", ({ data, type, tone, word, meta }) => {
     show(row(data, type));
     const why = document.querySelector("[data-why]") as HTMLElement;
-    expect(why.className).toContain("bg-" + tone + "-bg");
-    const verdict = why.firstElementChild as HTMLElement;
+    expect(why.className).toContain("bg-card");
+    expect(why.className).not.toContain("-bg");
+    expect(why.getAttribute("data-tone")).toBe(tone);
+    const verdict = why.querySelector("[data-outcome]") as HTMLElement;
     expect(verdict.textContent).toBe(word);
-    expect(verdict.className).toContain("text-xl");
     expect(verdict.className).toContain("text-" + tone);
-    const line = verdict.nextElementSibling as HTMLElement;
-    expect(line.hasAttribute("data-call")).toBe(true);
-    expect(line.textContent).toBe(call);
-    expect(line.className).toContain("font-mono");
+    expect(document.querySelector("[data-call]")).toBeNull();
+    const ran = document.querySelector("[data-section=\"What ran\"]") as HTMLElement;
+    expect((ran.querySelector("[data-what-ran-meta]") as HTMLElement).textContent).toBe(meta);
   });
 
-  it("leaves the call line out when the record names no call", () => {
+  it("lays the command out as its steps under What ran", () => {
+    show(row(DENY));
+    const ran = document.querySelector("[data-section=\"What ran\"]") as HTMLElement;
+    expect([...ran.querySelectorAll("[data-step-line]")].map((e) => e.textContent)).toEqual(["rm -rf ./build"]);
+  });
+
+  it("leaves What ran out when the record names no call", () => {
     show(row({ session: SESSION, user: USER_ID, effect: "allow", ruleId: "dev-reads", setName: "dev-guardrails" }));
     expect((document.querySelector("[data-why]") as HTMLElement).textContent).toContain("Allowed.");
-    expect(document.querySelector("[data-call]")).toBeNull();
+    expect(document.querySelector("[data-section=\"What ran\"]")).toBeNull();
   });
 
   it("says no policy matched when the record carries no rule", () => {
@@ -93,24 +99,32 @@ describe("the record sheet", () => {
       .toContain("Decided by rule no-destructive-delete. The policy name was not recorded on this record.");
   });
 
-  it("shows the record as it is stored, indented, and the hash it is signed by", () => {
+  it("folds the record as it is stored, and shows it indented once opened", async () => {
     show(row(DENY));
+    expect(document.querySelector("[data-section=\"The record as stored\"] pre")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "The record as stored" }));
     const stored = document.querySelector("[data-section=\"The record as stored\"] pre") as HTMLElement;
     expect(stored.textContent).toContain("\n  \"type\": \"straza.audit.tool\",");
     expect(stored.textContent).toContain("\n    \"effect\": \"deny\",");
-    expect(screen.getByText(HASH)).toBeTruthy();
-    expect(screen.getByText("Hash matches the loaded chain.")).toBeTruthy();
   });
 
-  it("tells a verified chain check by its fill, its check mark and its words", () => {
+  it("names the hash it is signed by on one line, and copies it whole", async () => {
+    show(row(DENY));
+    const hash = document.querySelector("[data-hash]") as HTMLElement;
+    expect(hash.textContent).toBe(HASH.slice(0, 16) + "…");
+    expect(hash.getAttribute("title")).toBe(HASH);
+    await userEvent.click(screen.getByRole("button", { name: "Copy hash" }));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(HASH);
+  });
+
+  it("tells a verified chain check by its mark and its words, with no fill", () => {
     show(row(DENY));
     const chain = document.querySelector("[data-section=\"Chain\"]") as HTMLElement;
-    expect(chain.className).toContain("bg-ok-bg");
+    expect(chain.className).not.toContain("-bg");
     const check = chain.querySelector("[data-chain-check]") as HTMLElement;
     expect(check.getAttribute("data-chain-check")).toBe("ok");
     expect(check.textContent).toBe("Hash matches the loaded chain.");
-    expect(check.className).toContain("text-ok");
-    expect(check.querySelector("svg")).toBeTruthy();
+    expect(check.querySelector("svg")?.getAttribute("class")).toContain("text-ok");
   });
 
   it("says a search result was not re-hashed, and never in the verified tone", () => {

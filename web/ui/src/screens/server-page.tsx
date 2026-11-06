@@ -12,15 +12,17 @@ import { ToneBadge } from "@/components/overview-parts";
 import { PageHead } from "@/components/page-head";
 import { ServerActivity } from "@/components/server-activity";
 import type { ChangeWhich } from "@/components/server-change-sheet";
+import { ObjectsReadContext, useObjectsRead } from "@/components/server-listing";
 import { ServerOverview } from "@/components/server-overview";
+import { SetupCard } from "@/components/server-setup";
 import { ServerRolesTab } from "@/components/server-roles-tab";
 import { NoRole, RoleChip, StatusBadge } from "@/components/status-badge";
 import { TestACall } from "@/components/test-a-call";
 import { SaveNoteLine, useDraftSave } from "@/components/use-draft-save";
-import { type ApiError, type AppRow, type BindingRow, type PreviewEntry, type RoleRow, type ToolRow, appLogs, appObjects, catalogPreview, disableApp, enableApp, getConfig, listApps, listAudit, listBindings, listRoles, listTools, recheckApp } from "@/lib/api";
+import { type ApiError, type AppRow, type BindingRow, type PreviewEntry, type RoleRow, type ToolRow, appLogs, catalogPreview, disableApp, enableApp, getConfig, listApps, listAudit, listBindings, listRoles, listTools, recheckApp } from "@/lib/api";
 import { manifestYAML } from "@/lib/manifest";
 import {
-  BANNER, FROM_SUMMARY, LAST_CALL_NOT_READABLE, NOT_CHECKED_YET, NO_DESCRIPTION, NO_ROLE_ACCESS, REACH_NOT_READABLE, ROLE_ACCESS_NOT_READABLE, SINCE_NOT_RECORDED,
+  BANNER, FROM_SUMMARY, LAST_CALL_NOT_READABLE, NOT_CHECKED_YET, NO_DESCRIPTION, NO_ROLE_ACCESS, POLICY_NOT_READABLE, REACH_NOT_READABLE, ROLE_ACCESS_NOT_READABLE, SINCE_NOT_RECORDED,
   fileParts, lockedServerTitle, sinceWhile, toolsWhile,
 } from "@/lib/server-words";
 import { navigate } from "@/lib/router";
@@ -48,7 +50,7 @@ const CODE = "rounded bg-muted px-1 font-mono text-[13px] text-foreground";
 
 
 type LastCall = { kind: "none" } | { kind: "unread" } | { kind: "closed" } | { kind: "call"; user: string; tool: string; t: string; verdict: string };
-type Data = { app: AppRow; tools: ToolRow[]; bindings: BindingRow[]; bindingsRead: boolean; roles: RoleRow[]; last: LastCall; reachReadable: boolean };
+type Data = { app: AppRow; tools: ToolRow[]; bindings: BindingRow[]; bindingsRead: boolean; roles: RoleRow[]; last: LastCall; toolsRead: boolean };
 type State = { kind: "loading" } | { kind: "missing" } | { kind: "locked"; message: string } | { kind: "error"; message: string } | { kind: "ready"; data: Data; problem: string | null; lastRead: Date };
 type Problem = { subject: string; unreachable: boolean; sentence: string };
 type Busy = "recheck" | "pause" | "enable" | null;
@@ -120,10 +122,10 @@ function Banner({ app, reach, last, reachReadable }: { app: AppRow; reach: strin
 // ToolsTab answers who can call each exposed tool. Which tools are exposed
 // is a manifest setting, so the tab carries the same door as the Settings
 // card, onChange, and none for a server the console cannot change.
-function ToolsTab({ app, tools, bindings, reachReadable, globalAdmin, onChange }: { app: AppRow; tools: ToolRow[]; bindings: BindingRow[]; reachReadable: boolean; globalAdmin: boolean; onChange: (() => void) | null }) {
-  // No previews are asked for when the reach is not readable: the policy
-  // area would refuse them the same way.
-  const reach = reachReadable ? bindings.filter((b) => b.app === app.name).map((b) => b.role).filter((r, i, xs) => xs.indexOf(r) === i).sort() : [];
+function ToolsTab({ app, tools, bindings, reachReadable, policyReadable, globalAdmin, onChange }: { app: AppRow; tools: ToolRow[]; bindings: BindingRow[]; reachReadable: boolean; policyReadable: boolean; globalAdmin: boolean; onChange: (() => void) | null }) {
+  // No previews are asked for when the Policy column is not readable: the
+  // preview is a read of the whole apps area, refused as the tool list was.
+  const reach = policyReadable ? bindings.filter((b) => b.app === app.name).map((b) => b.role).filter((r, i, xs) => xs.indexOf(r) === i).sort() : [];
   const reachKey = reach.join(",");
   const [previews, setPreviews] = React.useState<Record<string, Record<string, PreviewEntry> | null>>({});
   React.useEffect(() => {
@@ -150,7 +152,7 @@ function ToolsTab({ app, tools, bindings, reachReadable, globalAdmin, onChange }
   // outcome names the policy sets that decide it, then the roles it holds
   // for when the reaching roles do not share one outcome.
   const howItRuns = (tool: string): string | Run[] => {
-    if (!reachReadable) return "not readable with this account";
+    if (!policyReadable) return "not readable with this account";
     const rs = reachedBy(bindings, app.name, tool);
     if (!rs.length) return "does not exist for any session";
     const folded: { word: string; sets: string[]; roles: string[] }[] = [];
@@ -223,7 +225,7 @@ function ToolsTab({ app, tools, bindings, reachReadable, globalAdmin, onChange }
           </TableBody>
         </Table>
       </div>
-      <p className="mt-1.5 text-[13px] text-muted-foreground" data-reach-note>{reachReadable ? 'This table answers "who can call X". Nothing is reachable until a role has access to it. Policies add the gates.' : REACH_NOT_READABLE}</p>
+      <p className="mt-1.5 text-[13px] text-muted-foreground" data-reach-note>{!reachReadable ? REACH_NOT_READABLE : !policyReadable ? POLICY_NOT_READABLE : 'This table answers "who can call X". Nothing is reachable until a role has access to it. Policies add the gates.'}</p>
     </div>
   );
 }
@@ -235,14 +237,10 @@ function ToolsTab({ app, tools, bindings, reachReadable, globalAdmin, onChange }
 function ManifestTab({ app }: { app: AppRow }) {
   const yaml = app.manifest ? manifestYAML(app.manifest) : null;
   const file = app.file ? fileParts(app.file) : null;
-  const download = () => { if (yaml) downloadText(app.name + ".yaml", yaml, "application/yaml"); };
   return (
     <section>
       <div className="mb-1.5 flex items-center gap-2">
         <span className={CAPS}>the manifest as installed (app.yaml)</span>
-        <Button variant="outline" size="sm" className="ml-auto" onClick={download} aria-disabled={!yaml || undefined} title={yaml ? undefined : "There is no stored manifest to download."}>
-          <DownloadIcon /> Download app.yaml
-        </Button>
       </div>
       {yaml ? (
         <pre className="m-0 overflow-x-auto rounded-md border border-border bg-card px-4 py-3 font-mono text-[13px] leading-relaxed text-text-2">{yaml}</pre>
@@ -302,17 +300,18 @@ export function ServerPage({ id, tab }: Props) {
   const [sheet, setSheet] = React.useState<ChangeWhich | null>(null);
   const [upstreamTimeout, setUpstreamTimeout] = React.useState<number | null>(null);
   const [, tick] = React.useState(0);
-  const [objectCount, setObjectCount] = React.useState<number | null>(null);
   const current: Tab = (TABS as readonly string[]).includes(tab || "") ? (tab as Tab) : "overview";
 
   const load = React.useCallback(async () => {
     setState((s) => (s.kind === "ready" ? s : { kind: "loading" }));
     try {
       // The tools list is an apps-area read that a server admin holds no
-      // grant for, so a 403 on it or on the bindings list leaves the page
-      // standing on the row's own tool list and says the reach is not
-      // readable. The bindings list answers a server admin with the rows of
-      // their own servers, so the Roles tab still reads what each role covers.
+      // grant for, so a 403 on it leaves the page standing on the row's own
+      // tool list and says the Policy column is not readable. The bindings
+      // list answers a server admin with the rows of their own servers, so
+      // the Tools tab still says which roles reach each tool and the Roles
+      // tab still reads what each role covers. A 403 on it says the reach
+      // is not readable.
       // The roles list is read the same way: a server admin's answer holds
       // the roles their own servers own, and the Roles tab shows this
       // server's.
@@ -329,7 +328,7 @@ export function ServerPage({ id, tab }: Props) {
         // account when the audit area refused it.
         if ((e as ApiError).status === 403) last = { kind: "closed" };
       }
-      setState({ kind: "ready", data: { app, tools, bindings, bindingsRead, roles, last, reachReadable: toolsRead && bindingsRead }, problem: null, lastRead: new Date() });
+      setState({ kind: "ready", data: { app, tools, bindings, bindingsRead, roles, last, toolsRead }, problem: null, lastRead: new Date() });
     } catch (e) {
       const err = e as ApiError;
       if (err.status === 401) return;
@@ -357,16 +356,13 @@ export function ServerPage({ id, tab }: Props) {
     );
     return () => { alive = false; };
   }, []);
-  // The tab of a pinned type carries the size of the list the API holds,
-  // as the Tools tab carries its count. A failed read leaves the count off.
+  // The objects answer feeds the setup card and the listing credential row
+  // on Overview, and the tab of a pinned type carries the size of the list
+  // the API holds, as the Tools tab carries its count. A failed read leaves
+  // the count, the card and the row off.
   const pinnedType = state.kind === "ready" ? state.data.app.manifest?.straza?.objects?.type || "" : "";
-  React.useEffect(() => {
-    setObjectCount(null);
-    if (!pinnedType) return;
-    let alive = true;
-    appObjects(id, "limit=1").then((a) => { if (alive) setObjectCount(a.total); }, () => undefined);
-    return () => { alive = false; };
-  }, [id, pinnedType]);
+  const objects = useObjectsRead(id, state.kind === "ready" && !!state.data.app.manifest, pinnedType);
+  const objectCount = pinnedType && objects.answer ? objects.answer.total : null;
   React.useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 30000);
     return () => clearInterval(t);
@@ -462,7 +458,7 @@ export function ServerPage({ id, tab }: Props) {
   const stopped = status === "stopped" || status === "failed";
   // The row's own reached_by stands in when the bindings list was not
   // readable, so the banner never claims no role reaches a reached server.
-  const reach = state.data.reachReadable
+  const reach = state.data.bindingsRead
     ? bindings.filter((b) => b.app === app.name).map((b) => b.role).filter((r, i, xs) => xs.indexOf(r) === i).sort()
     : [...(app.reached_by || [])].sort();
   const toolNames = tools.filter((t) => t.app === app.name).map((t) => t.name);
@@ -482,6 +478,8 @@ export function ServerPage({ id, tab }: Props) {
   const ownedRoles = state.data.roles.filter((r) => r.server === app.name);
   const pinned = app.manifest?.straza?.objects;
   const shown = current === "objects" && !pinned ? "overview" : current;
+  const yaml = app.manifest ? manifestYAML(app.manifest) : null;
+  const download = () => { if (yaml) downloadText(app.name + ".yaml", yaml, "application/yaml"); };
   const recheckButton = (primary: boolean) => (
     <Button variant={primary ? "default" : "outline"} onClick={recheck} disabled={others("recheck")} aria-busy={busy === "recheck" || undefined}>
       <RefreshCwIcon className={busy === "recheck" ? "animate-spin" : ""} /> Recheck
@@ -500,6 +498,9 @@ export function ServerPage({ id, tab }: Props) {
         </Button>
       )}
       {canTest && <Button variant="outline" onClick={() => setTestOpen(true)} disabled={busy !== null}>Test a call</Button>}
+      <Button variant="outline" onClick={download} aria-disabled={!yaml || undefined} title={yaml ? undefined : "There is no stored manifest to download."}>
+        <DownloadIcon /> Download app.yaml
+      </Button>
       {stopped ? (
         <>
           {recheckButton(false)}
@@ -518,11 +519,12 @@ export function ServerPage({ id, tab }: Props) {
       </div>
       <div className="flex flex-col gap-4 px-6 py-5">
         {state.problem && <FetchError subject="MCP server" detail={state.problem} lastRead={state.lastRead} />}
-        <Banner app={app} reach={reach} last={last} reachReadable={state.data.reachReadable} />
+        <Banner app={app} reach={reach} last={last} reachReadable={state.data.bindingsRead} />
         {remover.note && <SaveNoteLine note={remover.note} />}
         {problem && (problem.unreachable
           ? <FetchError subject={problem.subject} detail={problem.sentence} />
           : <RefusedError subject={problem.subject} message={cap(problem.sentence.slice(problem.subject.length + " refused: ".length))} />)}
+        <ObjectsReadContext.Provider value={objects}>
         <Tabs value={shown} onValueChange={(v) => navigate("servers", [id, v], true)}>
           <div className="flex items-center border-b border-border">
             <TabsList variant="line">
@@ -534,13 +536,14 @@ export function ServerPage({ id, tab }: Props) {
               <TabsTrigger value="manifest">Manifest</TabsTrigger>
             </TabsList>
           </div>
-          <TabsContent value="overview"><ServerOverview app={app} upstreamTimeout={upstreamTimeout} onInspectAccess={() => navigate("servers", [id, "tools"], true)} onTest={canTest ? () => setTestOpen(true) : undefined} onChange={setSheet} onRefused={(err) => refuse("Secret", err)} /></TabsContent>
-          <TabsContent value="tools"><ToolsTab app={app} tools={tools} bindings={bindings} reachReadable={state.data.reachReadable} globalAdmin={globalAdmin} onChange={!app.manifest ? null : () => setSheet("settings")} /></TabsContent>
+          <TabsContent value="overview"><SetupCard app={app} read={objects} toolCount={names.length} onPublished={() => void load()} /><ServerOverview app={app} upstreamTimeout={upstreamTimeout} onInspectAccess={() => navigate("servers", [id, "tools"], true)} onTest={canTest ? () => setTestOpen(true) : undefined} onChange={setSheet} onRefused={(err) => refuse("Secret", err)} /></TabsContent>
+          <TabsContent value="tools"><ToolsTab app={app} tools={tools} bindings={bindings} reachReadable={state.data.bindingsRead} policyReadable={state.data.bindingsRead && state.data.toolsRead} globalAdmin={globalAdmin} onChange={!app.manifest ? null : () => setSheet("settings")} /></TabsContent>
           {pinned && <TabsContent value="objects"><React.Suspense fallback={null}><ServerObjects app={app} roles={state.data.roles} /></React.Suspense></TabsContent>}
           <TabsContent value="roles"><ServerRolesTab app={app} roles={ownedRoles} tools={tools} bindings={state.data.bindingsRead ? bindings : null} globalAdmin={globalAdmin} onChanged={() => void load()} /></TabsContent>
           <TabsContent value="activity"><ServerActivity app={app} /></TabsContent>
           <TabsContent value="manifest"><ManifestTab app={app} /></TabsContent>
         </Tabs>
+        </ObjectsReadContext.Provider>
       </div>
 
       <TestACall open={testOpen} onOpenChange={setTestOpen} app={{ id: app.id, name: app.name }} tools={names} />

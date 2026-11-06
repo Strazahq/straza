@@ -141,7 +141,7 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
 
   const matchers = grantMatchers(plan, names);
   const name = editing && role ? role.name : roleNameOf(app.name, suffix);
-  const preview = previewParts(name);
+  const preview = previewParts("application", name);
   const before = binding ? (isGlob(binding.tools) ? ["*"] : (binding.tools || []).slice().sort()) : null;
   const sameTools = !!before && JSON.stringify(before) === JSON.stringify(matchers);
   // sameRow says the access row stays as stored: its tools and its covers
@@ -235,7 +235,7 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
             )}
             {taken && <p className="m-0 max-w-[75ch] text-[13px] leading-snug text-danger" data-name-check="error">{nameTaken(name)}</p>}
             <p className={cn(HINT, "m-0")} data-name-preview>
-              {preview.lead}<span className={CODE}>{preview.stored}</span>{preview.mid}<span className={CODE}>{preview.ar}</span>{preview.end}
+              {preview.lead}<span className={CODE}>{preview.stored}</span>{preview.mid}<span className={CODE}>{preview.iga}</span>{preview.end}
               <br />
               {pinned ? (
                 <span className="block font-mono text-xs whitespace-pre-wrap" data-role-file>

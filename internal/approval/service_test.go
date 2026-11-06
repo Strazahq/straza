@@ -13,6 +13,7 @@ import (
 
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/policy"
+	"github.com/strazahq/straza/internal/server/ratelimit"
 	"github.com/strazahq/straza/internal/store"
 	"github.com/strazahq/straza/internal/store/storetest"
 )
@@ -89,7 +90,7 @@ func newHarness(t *testing.T) *harness {
 	svc := &Service{
 		st: st, bus: bus, resolver: res, cfg: config.Approval{}, log: slog.Default(),
 		tokenKey: key, now: time.Now,
-		waiters: map[string][]chan struct{}{},
+		waiters: map[string][]chan struct{}{}, rate: ratelimit.New(),
 	}
 	// Wire the resolution subscription exactly as Run would, deterministically.
 	unsub, err := bus.SubscribeCore(resolvedSubjectPrefix+"*", svc.handleResolved)

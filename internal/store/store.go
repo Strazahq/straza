@@ -54,38 +54,6 @@ type Store interface {
 	ObjectLists() ObjectListRepo
 }
 
-// UserRepo manages the users aggregate. Users are soft-deleted.
-type UserRepo interface {
-	Create(ctx context.Context, u User) (User, error)
-	GetByID(ctx context.Context, id string) (User, error)
-	// GetByIDs bulk-fetches by id; missing or deleted ids are simply absent
-	// from the result (batch seam for SCIM member display-name resolution).
-	GetByIDs(ctx context.Context, ids []string) ([]User, error)
-	GetByUsername(ctx context.Context, username string) (User, error)
-	// ListByEmail answers every undeleted user with a matching email, of any
-	// status or type, oldest first. Emails are not unique, so the Slack lane
-	// picks among these rows. An empty email matches nothing, never the many
-	// rows without an address.
-	ListByEmail(ctx context.Context, email string) ([]User, error)
-	GetByExternalID(ctx context.Context, externalID string) (User, error)
-	List(ctx context.Context) ([]User, error)
-	// Page returns limit users after the cursor in the order srt names (the
-	// zero Sort is newest first), skipping soft-deleted rows like List,
-	// narrowed server-side by f (see UserFilter for semantics).
-	Page(ctx context.Context, f UserFilter, srt Sort, c Cursor, limit int) ([]User, error)
-	// SponsoredCounts counts the agents each named user sponsors, in one query.
-	SponsoredCounts(ctx context.Context, usernames []string) (map[string]int, error)
-	Update(ctx context.Context, u User) (User, error)
-	// UpdateFields writes only the columns f names on the live user id and
-	// answers the row read back, so writes of different columns never undo
-	// each other. An f that names none writes nothing and answers the row.
-	UpdateFields(ctx context.Context, id string, f UserFields) (User, error)
-	// SoftDelete retires the user and ends every role grant it holds in one
-	// transaction, returning the removed assignment rows so the caller can
-	// audit each grant. ErrNotFound leaves every row untouched.
-	SoftDelete(ctx context.Context, id string) ([]RoleAssignment, error)
-}
-
 // RoleRepo manages roles, implication edges, and assignments.
 type RoleRepo interface {
 	Create(ctx context.Context, r Role) (Role, error)
@@ -140,10 +108,12 @@ type DeviceRepo interface {
 	GetByID(ctx context.Context, id string) (Device, error)
 	ListByUser(ctx context.Context, userID string) ([]Device, error)
 	Update(ctx context.Context, d Device) (Device, error)
-	// Revoke deletes the device and writes its revocation row with reason
-	// and the outbox event in one transaction. ErrNotFound when no such
-	// device exists. On any error nothing is written.
-	Revoke(ctx context.Context, id, reason string, event OutboxEvent) error
+	// Revoke deletes the device, marks its active sessions revoked and
+	// writes its revocation row with reason and the outbox event in one
+	// transaction. It answers the sessions it ended, ordered by id.
+	// ErrNotFound when no such device exists. On any error nothing is
+	// written.
+	Revoke(ctx context.Context, id, reason string, event OutboxEvent) ([]ClosedSession, error)
 	// AdvanceCounter raises the device's key counter to n only while the
 	// device still holds the key with thumbprint and its stored counter is
 	// below n, in one conditional write, and reports whether it moved.
@@ -193,9 +163,9 @@ type SessionRepo interface {
 	CloseStartedBefore(ctx context.Context, cutoff time.Time) ([]ClosedSession, error)
 }
 
-// ClosedSession is one CloseIdle or CloseStartedBefore casualty: just enough
-// identity for the janitor's per-session event, deliberately not a full
-// Session row.
+// ClosedSession is one session that CloseIdle, CloseStartedBefore or a
+// device revoke ended: just enough identity for its per-session event,
+// deliberately not a full Session row.
 type ClosedSession struct {
 	ID     string
 	UserID string
@@ -422,6 +392,11 @@ type ApprovalRepo interface {
 	// the terminal deny-final lookup: a still-in-window denial blocks a fresh
 	// call rather than opening a new ticket.
 	FindLatestTicketByKey(ctx context.Context, userID, ruleID, argvHash string) (Approval, error)
+	// FindLatestHoldByKey returns the newest hold-class row of (userID,
+	// sessionID, ruleID, argvHash) in any state, ErrNotFound when none. It is
+	// the hold's deny-final lookup: a person's denial still inside its decision
+	// window refuses a retry of the same call rather than ask again.
+	FindLatestHoldByKey(ctx context.Context, userID, sessionID, ruleID, argvHash string) (Approval, error)
 	// ListExpirable returns pending records already past ExpiresAt (sweep input).
 	ListExpirable(ctx context.Context, now time.Time, limit int) ([]Approval, error)
 	// ClaimExpired atomically flips one still-pending, past-expiry row to

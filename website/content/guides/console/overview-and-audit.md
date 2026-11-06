@@ -77,7 +77,7 @@ Above the table, the status line reads `Chain verified`, with the count of recor
 
 {{< shot name="audit-list" caption="The newest records on Audit. Each denied `rm -rf` has a red edge and a tinted row." >}}
 
-Each row shows **Seq**, **Time**, **Who**, **Type**, **Effect**, **What** and **Reason**. A denied call has a red edge and a tinted row. On a server that pins its objects, the **What** cell names the object after the tool, as in `ghapp.pr_create on Strazahq/pay-api` followed by the arguments, and no column of its own holds it. A run of identical records folds into its newest row with `×2 identical · show all`, and the export and the chain check still read every record of the run. **Load older** reads the 200 records before the oldest one loaded and checks that they join it.
+Each row shows **Seq**, **Time**, **Who**, **Type**, **Effect**, **Action** and **Reason**. A denied call has a red edge and a tinted row. A shell command fits on one line in the **Action** cell: its commands joined by their operators, a here-document as its opener, such as `python - <<'EOF'`, and `+7 lines` beside it when the command has more lines. On a server that pins its objects, the **Action** cell names the object after the tool, as in `ghapp.pr_create on Strazahq/pay-api` followed by the arguments, and no column of its own holds it. A run of identical records folds into its newest row with `×2 identical · show all`, and the export and the chain check still read every record of the run. **Load older** reads the 200 records before the oldest one loaded and checks that they join it.
 
 {{< see >}}`Chain verified` and a count of loaded records.{{< /see >}}
 
@@ -103,14 +103,19 @@ The effect buttons, the search box and the **User** picker search the whole chai
 ## Read one record
 
 
-Select a row. The sheet is titled with the record's number and type, such as `Record 24 tool`, and names who, when and the session. For a decision it opens on the outcome, `Denied.`, then the call itself, then the sentence `Decided by rule block-recursive-delete in policy standalone-starter:` followed by the reason the agent read. `Recorded at decision time.` reminds you that the record holds what the engine knew then, whatever changed since.
+Select a row. The sheet is titled with the record's number and type, such as `Record 24 tool`, and names who, when and the session. For a decision it opens on the outcome, `Denied.`, in its color, then the sentence `Decided by rule block-recursive-delete in policy standalone-starter:` followed by the reason the agent read. `Recorded at decision time.` reminds you that the record holds what the engine knew then, whatever changed since.
 
-{{< shot name="audit-deny" caption="The record of alice's denied `rm -rf`: the outcome, the rule and policy that decided it, and the chain check." >}}
+
+**What ran** follows, with two views. **Readable** opens first and lays the call out. A shell command reads as its commands, numbered, with the words for how each leads to the next between them, such as `then, only if it succeeded` for `&&` or `its output goes into` for `|`. Each redirection gets its words beside it, such as `errors into output` for `2>&1`. A here-document, such as a python script an agent feeds on its input, shows as its own numbered code block. **Paths named in the command** lists the files and folders the text names, which is what the command names, not proof of what it touched. Every character of the command stays on screen. **Raw** shows the command exactly as the record holds it, line by line, with **Wrap lines** and **Copy command**, and the browser remembers the view you picked last.
+
+Readable never guesses. When it cannot split a command, such as one with a quote that never closes, it reads `Straza cannot split this command into steps:` and why, and shows the command as it ran. Characters that do not show on screen, such as a zero-width space or a right-to-left override, get a warning that names each one and its line, and both views mark them. A command the record cut says how much Straza kept and gives the SHA-256 of the whole command. For a gateway call the view is a table of its arguments, one row each, and a file tool shows its paths from the workspace, with `The record holds the path. It does not hold what changed in the file.`
+
+{{< shot name="audit-deny" caption="The record of alice's denied `rm -rf`: the outcome, the rule and policy that decided it, and what ran." >}}
 
 
 A call that names a repository adds a row named by the server's type, such as **Repo**, with the value the call named and its id in the list, as in `id 812345678`, or `not in the repo list` when the list did not hold it. When the object check refused the call, no policy ran, so the sheet reads `No policy rule was recorded for this call.` and then the sentence the agent read, which starts with `Straza:` and names the tool, and the repository when the call named one. Under **The record as stored**, `rolesChecked` names the held roles that bind the tool.
 
-The **Chain** box holds the record's hash and the verdict of your browser, `Hash matches the loaded chain.` A record opened from a search reads `Not verified in this browser. See the audit chain status for details.` instead, because a search result is not part of the checked tail. **The record as stored** shows the whole record, and **Copy as JSON** copies it.
+The **Chain** line holds the start of the record's hash, **Copy hash** copies it whole, and the verdict of your browser follows, `Hash matches the loaded chain.` A record opened from a search reads `Not verified in this browser. See the audit chain status for details.` instead, because a search result is not part of the checked tail. **The record as stored** is folded, and opens on the whole record. **Copy as JSON** copies it.
 
 ## Test the call again
 

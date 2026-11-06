@@ -166,7 +166,7 @@ An override for a business role is refused with a sentence that ends in `Set the
 
 {{< shot name="server-overview" caption="The **Server authentication** card, with the type, how the secret is sent and its fingerprint under **Stored here**." >}}
 
-The Server authentication card shows the type and how the secret is sent. Its row Stored here gives the time the secret was set, its fingerprint and `Never shown again.`, and its row Per-role secrets gives one line per role with the fingerprint. No row shows a value.
+The Server authentication card shows the type and how the secret is sent. Its row Stored here gives the time the secret was set, its fingerprint and `Never shown again.`, and its row Per-role secrets gives one line per role with the fingerprint. On a server that pins its objects, the row Listing credential reads `Stored, sealed` once one is stored. No row shows a value.
 {{< /console >}}
 
 
@@ -215,7 +215,7 @@ A `sleep` holds the pipe open while the replies come back, because the proxy sto
 ## When a session has no secret {.nostep}
 
 
-Resolution runs role first, then server. The override of the role whose access row allowed the call is used first. On a server that pins its objects, that is the first role by name whose covers line covers the call. When that role has no override, the override of the role whose name sorts first among the session's other roles is used, even though that role did not allow the call. Only when none of the session's roles holds an override for the server is the server's own secret used. When neither exists the call fails closed, the upstream is never contacted, and the agent reads "upstream call failed: app scout-tools requires a credential and none is stored for the server or bound to your roles. An administrator sets one with strazactl apps secret set scout-tools, which asks for the value at a hidden prompt". The health probe resolves the same way, so a server with only per-role rows is probed under the row of the role whose name sorts first.
+Resolution runs role first, then server. The override of the role whose access row allowed the call is used first. On a server that pins its objects, that is the first role by name whose covers line covers the call. When that role has no override, the override of the role whose name sorts first among the session's other roles is used, even though that role did not allow the call. Only when none of the session's roles holds an override for the server is the server's own secret used. When neither exists the call fails closed, the upstream is never contacted, and the agent reads "Straza: the call was not sent to the MCP server scout-tools: app scout-tools requires a credential and none is stored for the server or bound to your roles. An administrator sets one with strazactl apps secret set scout-tools, which asks for the value at a hidden prompt." The health probe resolves the same way, so a server with only per-role rows is probed under the row of the role whose name sorts first.
 
 
 On a server that pins its objects, a tool whose pinned reach is `credential` names no object in its calls and leaves the limit to the secret the call carries. Straza does not yet check what a role's own secret reaches, so such a tool goes only in a role on every object. The draft refuses it in a role on some, with a sentence that ends `Straza does not check a role's own login yet. Make a role on every repo for it.`, where your server's own type stands in place of repo. A call to such a tool is therefore granted by a role on every object, and its secret follows the order above. ghapp marks no tool this way, because every ghapp tool but `repo_list` names its repository, and `repo_list` is marked `all`.
@@ -223,9 +223,24 @@ On a server that pins its objects, a tool whose pinned reach is `credential` nam
 ## The listing credential {#listing-credential .nostep}
 
 
-A server that pins its objects, as [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md#objects" >}}) pins ghapp's repositories, holds a third kind of stored secret beside its own and the role overrides: the listing credential. Straza's own listing of the server's objects carries it and nothing else. No tool call and no health probe carries it, so the order above never reaches it, and the listing never falls back to the server's own secret or a role's. A server that takes no credential, or runs on the `command` or `oci` runtime, is listed without one and refuses one. ghapp, set up without client credentials, takes both as bearer tokens: its `GHAPP_MCP_GATEWAY_SECRET` is the server's own secret, its `GHAPP_MCP_LISTING_TOKEN` is the listing credential, and it refuses to start while the two are the same.
+A server that pins its objects, as [Limit a role to some objects]({{< relref "guides/serve-mcp-apps/limit-a-role-to-some-objects.md" >}}) pins ghapp's repositories, holds a third kind of stored secret beside its own and the role overrides: the listing credential. Straza calls the server's listing tool itself, in the background, to keep the list of objects a role can pick from, and the listing credential is the token on that call. It is a second token for the server's MCP endpoint, which the server accepts for its listing tool only. It is neither a GitHub token nor a database password: ghapp keeps its GitHub App's key, and adaptive-pg-mcp keeps its own database logins. You make the value, put it in the server's config, and give Straza the same value. ghapp, set up without client credentials, reads it as `GHAPP_MCP_LISTING_TOKEN` beside its own secret `GHAPP_MCP_GATEWAY_SECRET`, and refuses to start while the two are the same.
 
-Store it once the pin is published, with the same command and `--listing`, which asks for the value at a hidden prompt too: `strazactl apps secret set ghapp --listing`. A server that pins nothing refuses it with `ghapp pins no object type, so a listing credential has no use. Pin its objects first with strazactl apps objects draft ghapp, then publish the draft.` The answer names the fingerprint and never the value, as for the other secrets, and `strazactl apps secret remove ghapp --listing` removes it. Each writes its `apps.secret.set` or `apps.secret.remove` record with the scope `listing`. The console sets no listing credential. The Server authentication card and the SECRETS table of `strazactl apps show` list the server's own secret and the role overrides only, and a missing listing credential shows on the server's Repos tab and in `strazactl apps objects ghapp` instead.
+Straza sends the listing credential on its listing call and on nothing else. No agent's call and no health probe carries it, so the order above never reaches it, and the listing never falls back to the server's own secret or a role's. It is kept apart from the server's own secret because that secret travels on agents' calls, so a leaked listing credential can only list names. A server that takes no credential needs none, and neither does a server on the `command` or `oci` runtime: Straza lists such a server without one and refuses to store one for it.
+
+{{< console >}}
+
+{{< clicks "MCP servers" "ghapp" "Overview" "Set one" >}}
+
+The Server authentication card has the row **Listing credential** under **Stored here**. Before the pin it reads `Pin repos first. ghapp has nothing to list for Straza until then.`, with your own server's name and plural, and after it `Not set.` with **Set one**. A value the server already runs with goes in the box after `or paste`, and **Store** sends it. **Generate** fills the box with a random value made in the browser, shown in clear with **Copy** and `Put this value in ghapp's config and restart ghapp, then press Store.` Store it only once the server runs with it, because storing starts a listing that fails until then. Once one is stored, the row reads `Stored, sealed` with **Set it again** and **Remove**, and with the fingerprint until you leave the page.
+{{< /console >}}
+
+{{< cli >}}
+
+Store it once the pin is published, with the same command and `--listing`, which asks for the value at a hidden prompt too: `strazactl apps secret set ghapp --listing`. `strazactl apps secret remove ghapp --listing` removes it.
+{{< /cli >}}
+
+
+A server that pins nothing refuses it with `ghapp pins no object type, so a listing credential has no use. Pin its objects first with strazactl apps objects draft ghapp, then publish the draft.` The answer names the fingerprint and never the value, as for the other secrets. Each set and each removal writes its `apps.secret.set` or `apps.secret.remove` record with the scope `listing`. The SECRETS table of `strazactl apps show` lists the server's own secret and the role overrides only, and a missing listing credential shows on the server's Repos tab and in `strazactl apps objects ghapp` instead.
 
 ## Remove a secret {.nostep}
 

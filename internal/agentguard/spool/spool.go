@@ -1,9 +1,10 @@
 // Package spool is the client kit's audit buffer: governed decisions and
 // captured conversation turns are appended as JSONL CloudEvents and drained
 // to the server in bounded chunks with zero loss (rotate aside, upload,
-// remove only on success), a bounded parked backlog, and a loss ledger the
-// doctor reads. It knows nothing about harness events or the HTTP client:
-// agentguard shapes the records (spoolwrite.go) and supplies the Uploader.
+// remove only on success), a bounded parked backlog, and a loss ledger that
+// each drain reports to the server. It knows nothing about harness events
+// or the HTTP client: agentguard shapes the records (spoolwrite.go) and
+// supplies the Uploader.
 package spool
 
 import (
@@ -16,8 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -52,15 +51,7 @@ const LastDrainMarkerName = "audit-last-drain"
 // fsync'd. The record shapes themselves live with their producers in
 // agentguard (spoolwrite.go); this is the only writer of the file.
 func (s *Spool) AppendCE(ceType string, data map[string]any) error {
-	ce := map[string]any{
-		"specversion": "1.0",
-		"id":          uuid.NewString(),
-		"type":        ceType,
-		"source":      "straza",
-		"time":        time.Now().UTC().Format(time.RFC3339Nano),
-		"data":        data,
-	}
-	line, err := json.Marshal(ce)
+	line, err := encodeCE(uuid.NewString(), ceType, data)
 	if err != nil {
 		return err
 	}
@@ -78,6 +69,19 @@ func (s *Spool) AppendCE(ceType string, data map[string]any) error {
 		return err
 	}
 	return f.Sync()
+}
+
+// encodeCE is the CloudEvent of ceType carrying data under id, as the
+// client writes every record it sends.
+func encodeCE(id, ceType string, data map[string]any) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"specversion": "1.0",
+		"id":          id,
+		"type":        ceType,
+		"source":      "straza",
+		"time":        time.Now().UTC().Format(time.RFC3339Nano),
+		"data":        data,
+	})
 }
 
 // Upload and backlog bounds. The server rejects any /v1/audit/batch body
@@ -104,31 +108,29 @@ var (
 // refusing the delete, or a concurrent drainer winning the remove race.
 var removeSpoolFile = os.Remove
 
-// spoolReadCap is the largest single record ScanRecords will buffer, DERIVED
+// spoolReadCap is the largest single record eachRecord will buffer, DERIVED
 // from drainChunkBytes so the two bounds can never drift apart.
 //
 // Size invariant: read cap >= the largest chunk-carryable record, which is
-// drainChunkBytes-1 (dropOversize keeps a record iff len+1 <= drainChunkBytes,
-// so uploadChunked always has a chunk for it). Three outcomes, none an error:
+// drainChunkBytes-1 (uploadFile keeps a record iff len+1 <= drainChunkBytes,
+// so it always has a chunk for it). Three outcomes, none an error:
 //
 //	len < drainChunkBytes         -> buffered and uploaded
-//	drainChunkBytes <= len <= cap -> buffered, counted by dropOversize
+//	drainChunkBytes <= len <= cap -> buffered, counted by uploadFile
 //	len > cap                     -> skip-streamed, counted the same way
 //
 // An independent scanner cap under the chunk size breaks that first relation:
-// a carryable but unreadable record makes ReadRecords return bufio.ErrTooLong
-// and Drain abort at that file every pass, halting audit delivery. Pinned by
+// a carryable but unreadable record would make the read fail and Drain abort
+// at that file every pass, halting audit delivery. Pinned by
 // TestSpoolReadCapDominatesCarryableMax and TestSpoolRecordSizeInvariant.
 func spoolReadCap() int { return drainChunkBytes }
 
 // DroppedMarkerName records audit loss: one `<RFC3339> dropped <what>` line
 // per event the spool cap or the oversize-record guard discarded records on.
-// It is the ONLY trace those records ever existed, and `straza doctor` is its
-// reader (droppedAuditCheck: a populated marker is a loud FAIL; deleting the
-// file is the acknowledgement). Doctor is deliberately the only surface:
-// drops happen inside Drain, which runs from hook-invoked flows where stderr
-// is harness-interpreted (claude-code/codex show it as the block reason on
-// exit 2), so hooks must not write to stderr mid-session.
+// It is the only trace those records ever existed. The next drain sends it
+// to the server as one loss record (reportLoss) and removes it once the
+// server took that record. Until then the service's status, and so
+// `straza doctor`, count it.
 const DroppedMarkerName = "audit-dropped"
 
 // markerCompactBytes bounds the marker itself: a box parked over the spool
@@ -141,9 +143,19 @@ var markerCompactBytes int64 = 64 << 10
 // oversized marker renamed aside while its summary is appended to the live
 // name. Unique per claim so no rename can ever land ON an existing claim and
 // erase it (os.Rename replaces on Unix). Anything matching marker+suffix+*
-// is unfolded loss evidence: noteDropped folds claims back in before
-// appending, and doctor reads them.
+// is unfolded loss evidence: noteDropped and reportLoss fold claims back in
+// first, and Dropped counts them.
 const DroppedCompactingSuffix = ".compacting-"
+
+// DroppedReportingSuffix plus a random id names a report claim: the ledger
+// renamed aside while its loss record goes to the server. A drop noted
+// meanwhile starts a new live ledger, and compaction never folds a report
+// claim, so an accepted report removes only what it sent.
+const DroppedReportingSuffix = ".reporting-"
+
+// LossEvent is the event of the loss record, the straza.audit.tool record
+// that tells the server how much audit this spool discarded.
+const LossEvent = "audit.dropped"
 
 // Uploader is the one server call Drain needs: the audit batch upload.
 // *agentguard.Client satisfies it; tests supply fakes.
@@ -180,21 +192,12 @@ func (s *Spool) Drain(ctx context.Context, client Uploader, sessionToken string)
 		return 0, err
 	}
 	sort.Strings(pending)
-	pending = enforceSpoolCap(dir, pending)
-
-	total := 0
-	for _, p := range pending {
-		recs, skipped, err := ScanRecords(p)
-		if err != nil {
-			return total, err
-		}
-		recs, oversize := dropOversize(recs)
-		n, err := uploadChunked(ctx, client, sessionToken, recs)
-		total += n
-		if err != nil {
-			return total, fmt.Errorf("audit drain failed (uploaded %d, kept the rest): %w", total, err)
-		}
-		removeDrained(dir, p, skipped+oversize)
+	total, err := upload(ctx, client, sessionToken, dir, pending)
+	if err != nil {
+		// What a drain could not deliver is the backlog the cap bounds, so it
+		// applies now, and never to a file the server would have taken.
+		enforceSpoolCap(dir, pending)
+		return total, err
 	}
 	s.mu.Lock()
 	s.markDrainedIfFlushed()
@@ -202,9 +205,68 @@ func (s *Spool) Drain(ctx context.Context, client Uploader, sessionToken string)
 	return total, nil
 }
 
+// upload sends the loss ledger first, so loss reaches the server ahead of
+// whatever followed it, then the pending files in order, and removes each
+// file once all of its records landed. It stops at the first failure and
+// returns how many spooled records landed.
+func upload(ctx context.Context, client Uploader, sessionToken, dir string, pending []string) (int, error) {
+	if err := reportLoss(ctx, client, sessionToken, dir); err != nil {
+		return 0, fmt.Errorf("audit drain failed (the record of discarded audit was not accepted, kept it and the spooled records up to the spool cap): %w", err)
+	}
+	total := 0
+	for _, p := range pending {
+		n, oversize, err := uploadFile(ctx, client, sessionToken, p)
+		total += n
+		if err != nil {
+			return total, fmt.Errorf("audit drain failed (uploaded %d, kept the rest up to the spool cap): %w", total, err)
+		}
+		removeDrained(dir, p, oversize)
+	}
+	return total, nil
+}
+
+// uploadFile uploads the records of the spool file at path in chunks of at
+// most drainChunkRecords records and drainChunkBytes bytes, and reads the
+// records after a chunk only once it landed, so a file of any size costs
+// one chunk of memory. It returns how many records landed and how many no
+// chunk can carry, which it skips.
+func uploadFile(ctx context.Context, client Uploader, sessionToken, path string) (sent, oversize int, err error) {
+	var chunk []json.RawMessage
+	size := 0
+	flush := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		if _, err := client.AuditBatch(ctx, sessionToken, chunk); err != nil {
+			return err
+		}
+		sent += len(chunk)
+		chunk, size = nil, 0
+		return nil
+	}
+	skipped, err := eachRecord(path, func(rec []byte) error {
+		if len(rec)+1 > drainChunkBytes {
+			oversize++
+			return nil
+		}
+		if len(chunk) == drainChunkRecords || size+len(rec)+1 > drainChunkBytes {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		chunk = append(chunk, append(json.RawMessage(nil), rec...))
+		size += len(rec) + 1
+		return nil
+	})
+	if err == nil {
+		err = flush()
+	}
+	return sent, oversize + skipped, err
+}
+
 // removeDrained removes a fully-uploaded pending file and, only when THIS
 // process's removal is what discarded it, writes the marker line for the
-// oversize records that went with it (scan-skipped + dropOversize-filtered).
+// oversize records that went with it, as uploadFile counted them.
 // Counting is tied to the discard, never the read: a refused removal (a
 // Windows handle) keeps the file WHOLE (nothing is lost yet, the next drain
 // re-reads it and re-uploads dedupe by CE id), and IsNotExist means a
@@ -223,52 +285,12 @@ func removeDrained(dir, path string, oversize int) {
 	}
 }
 
-// uploadChunked sends recs in server-safe chunks, returning how many landed.
-func uploadChunked(ctx context.Context, client Uploader, sessionToken string, recs []json.RawMessage) (int, error) {
-	sent := 0
-	for len(recs) > 0 {
-		size, n := 0, 0
-		for n < len(recs) && n < drainChunkRecords {
-			if rl := len(recs[n]) + 1; size+rl > drainChunkBytes && n > 0 {
-				break
-			} else {
-				size += rl
-			}
-			n++
-		}
-		if _, err := client.AuditBatch(ctx, sessionToken, recs[:n]); err != nil {
-			return sent, err
-		}
-		sent += n
-		recs = recs[n:]
-	}
-	return sent, nil
-}
-
-// dropOversize filters out records no chunk can ever carry (len+1 over
-// drainChunkBytes): unuploadable, they would wedge their file forever. It
-// only COUNTS; the marker line is removeDrained's, written when the file
-// (and so the record) is actually discarded; noting at read time would
-// re-count the same record on every failed-upload retry.
-func dropOversize(recs []json.RawMessage) ([]json.RawMessage, int) {
-	kept := recs[:0]
-	dropped := 0
-	for _, rec := range recs {
-		if len(rec)+1 > drainChunkBytes {
-			dropped++
-			continue
-		}
-		kept = append(kept, rec)
-	}
-	return kept, dropped
-}
-
 // enforceSpoolCap drops the OLDEST parked files (by mtime) until the parked
-// backlog fits maxSpoolBytes, returning the surviving list in the original
-// upload order. A file counts as dropped ONLY when this process's os.Remove
+// backlog fits maxSpoolBytes, and notes the files and the records in them.
+// A file counts as dropped ONLY when this process's os.Remove
 // actually discarded it: a refused removal (a Windows handle holding
-// the file open) means the file SURVIVED (it stays in the drain list and
-// uploads normally), and IsNotExist means a concurrent drainer already
+// the file open) means the file SURVIVED (it stays parked for the next
+// drain), and IsNotExist means a concurrent drainer already
 // discarded and counted it. The fail-closed "unknown loss is loss" stance
 // (ParseDroppedMarker) is about evidence we cannot READ, never about files
 // we know survived: counting survivors would make the doctor audit-dropped
@@ -276,7 +298,7 @@ func dropOversize(recs []json.RawMessage) ([]json.RawMessage, int) {
 // leave the eviction budget, so one stuck file cannot cascade the eviction
 // onto newer files: the byte bound is best-effort until the lock clears,
 // and the next drain retries.
-func enforceSpoolCap(dir string, pending []string) []string {
+func enforceSpoolCap(dir string, pending []string) {
 	type pf struct {
 		path string
 		size int64
@@ -293,166 +315,35 @@ func enforceSpoolCap(dir string, pending []string) []string {
 		total += fi.Size()
 	}
 	if total <= maxSpoolBytes {
-		return pending
+		return
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mod.Before(files[j].mod) })
-	droppedFiles := 0
-	gone := map[string]bool{}
+	droppedFiles, droppedRecords := 0, 0
 	for _, f := range files {
 		if total <= maxSpoolBytes {
 			break
 		}
+		recs := countRecords(f.path)
 		err := removeSpoolFile(f.path)
 		total -= f.size
-		switch {
-		case err == nil:
-			gone[f.path] = true
+		if err == nil {
 			droppedFiles++
-		case os.IsNotExist(err):
-			gone[f.path] = true // the concurrent drainer's disposal, not ours
+			droppedRecords += recs
 		}
 	}
 	if droppedFiles > 0 {
-		noteDropped(dir, fmt.Sprintf("%d parked file(s) over the %d-byte spool cap", droppedFiles, maxSpoolBytes))
-	}
-	kept := pending[:0]
-	for _, p := range pending {
-		if !gone[p] {
-			kept = append(kept, p)
-		}
-	}
-	return kept
-}
-
-// noteDropped appends one line to the audit-dropped marker, best-effort
-// (compacting it first when it outgrew markerCompactBytes).
-func noteDropped(dir, what string) {
-	path := filepath.Join(dir, DroppedMarkerName)
-	compactDroppedMarker(path)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- our own marker
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "%s dropped %s\n", time.Now().UTC().Format(time.RFC3339), what)
-}
-
-// compactDroppedMarker folds a marker past markerCompactBytes into one
-// summary line WITHOUT ever truncating a file another process may be
-// appending to: Spool.mu is per-process while concurrent drainers across
-// processes are a supported state (see Drain), so a read-then-rewrite here
-// would erase any line that landed between the read and the write. Instead
-// the oversized marker is CLAIMED by an atomic rename to a unique name: an
-// appender either beat the rename (its line is inside the claim, counted by
-// the summary) or O_CREATEs a fresh live marker whose lines survive beside
-// the appended summary; no interleaving loses a line. A rename refused by
-// an appender's open handle (Windows) just skips this round. A crash between
-// rename and append parks the ledger in the claim file: the next drop folds
-// it back in first, and doctor reads claims meanwhile. The one benign race
-// left: two processes folding the same claim can append its summary twice;
-// totals then OVERcount, never undercount; the contract is that nothing may
-// shrink the evidence of loss.
-func compactDroppedMarker(path string) {
-	foldClaims(path)
-	fi, err := os.Stat(path)
-	if err != nil || fi.Size() <= markerCompactBytes {
-		return
-	}
-	claim := path + DroppedCompactingSuffix + uuid.NewString()
-	if os.Rename(path, claim) != nil {
-		return
-	}
-	foldOneClaim(path, claim)
-}
-
-// foldClaims folds every parked compaction claim back into the live marker.
-func foldClaims(path string) {
-	claims, _ := filepath.Glob(path + DroppedCompactingSuffix + "*")
-	for _, claim := range claims {
-		foldOneClaim(path, claim)
+		noteDropped(dir, fmt.Sprintf("%d parked file(s) holding %d record(s) over the %d-byte spool cap",
+			droppedFiles, droppedRecords, maxSpoolBytes))
 	}
 }
 
-// foldOneClaim appends a claim's one-line summary to the live marker name,
-// then removes the claim. The summary reuses the marker grammar so
-// ParseDroppedMarker round-trips it: totals and last-drop time survive any
-// number of compactions. Best-effort with a fail-safe order: the claim is
-// removed only after its summary landed, so any failure keeps the evidence
-// (in a file doctor also reads) rather than the directory clean.
-func foldOneClaim(path, claim string) {
-	raw, err := os.ReadFile(claim) // #nosec G304 -- our own marker
-	if err != nil {
-		return
-	}
-	st := ParseDroppedMarker(raw)
-	if st.Events == 0 {
-		return // nothing parseable to fold; leave it for doctor to warn about
-	}
-	last := st.Last
-	if last.IsZero() {
-		last = time.Now().UTC()
-	}
-	line := fmt.Sprintf("%s dropped %d oversize record(s) and %d parked file(s) spanning %d drop event(s) [compacted]\n",
-		last.UTC().Format(time.RFC3339), st.Records, st.Files, st.Events)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- our own marker
-	if err != nil {
-		return
-	}
-	_, werr := f.WriteString(line)
-	_ = f.Close()
-	if werr != nil {
-		return
-	}
-	_ = os.Remove(claim)
-}
-
-// DroppedStats is the audit-dropped marker, summed: how much audit this
-// machine discarded, over how many drop events, and when the last one was.
-type DroppedStats struct {
-	Events   int       // drop events recorded (compacted lines carry their span)
-	Records  int       // oversize records dropped by dropOversize
-	Files    int       // parked files dropped by enforceSpoolCap
-	Last     time.Time // newest drop time seen on any line, zero when none carried one
-	LastLine string    // final line, verbatim
-}
-
-// ParseDroppedMarker sums the marker's lines. Grammar per line:
-// `<RFC3339> dropped N oversize record(s)` / `... N parked file(s) over the
-// C-byte spool cap` / the compacted summary carrying `spanning N drop
-// event(s)`. A line it cannot read still counts as one drop event: the
-// marker exists to make loss visible, so unknown loss is loss, not nothing.
-func ParseDroppedMarker(raw []byte) DroppedStats {
-	var st DroppedStats
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		st.LastLine = line
-		fields := strings.Fields(line)
-		// Newest time wins, not last-line-wins: doctor concatenates the live
-		// marker with parked claims, and those sources are not ordered.
-		if ts, err := time.Parse(time.RFC3339, fields[0]); err == nil && ts.After(st.Last) {
-			st.Last = ts
-		}
-		lineEvents := 1
-		for i, f := range fields[:len(fields)-1] {
-			n, err := strconv.Atoi(f)
-			if err != nil {
-				continue
-			}
-			switch {
-			case strings.HasPrefix(fields[i+1], "oversize"):
-				st.Records += n
-			case strings.HasPrefix(fields[i+1], "parked"):
-				st.Files += n
-			case strings.HasPrefix(fields[i+1], "drop"):
-				lineEvents = n
-			}
-		}
-		st.Events += lineEvents
-	}
-	return st
+// countRecords counts the records of the spool file at path without holding
+// them, before an eviction discards them. A file it cannot read whole
+// counts at least one record, because unknown loss is loss.
+func countRecords(path string) int {
+	n := 0
+	skipped, _ := eachRecord(path, func([]byte) error { n++; return nil })
+	return max(n+skipped, 1)
 }
 
 // markDrainedIfFlushed stamps the last-drain marker, but only when this
@@ -468,7 +359,9 @@ func (s *Spool) markDrainedIfFlushed() {
 		[]byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
 }
 
-// Pending returns the number of spooled records, live + parked (diagnostics).
+// Pending returns the number of spooled records, live + parked
+// (diagnostics). It counts without holding them, so a large spool costs no
+// memory here either.
 func (s *Spool) Pending() (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -477,37 +370,29 @@ func (s *Spool) Pending() (int, error) {
 	files = append(files, parked...)
 	n := 0
 	for _, p := range files {
-		recs, err := ReadRecords(p)
-		if err != nil {
+		if _, err := eachRecord(p, func([]byte) error { n++; return nil }); err != nil {
 			return 0, err
 		}
-		n += len(recs)
 	}
 	return n, nil
 }
 
-// ReadRecords is the uploadable view of a spool file (diagnostics callers:
-// doctor's backlog count, Pending, tests). Lines past the read cap are
-// invisible here; Drain's ScanRecords counts them as oversize drops.
-func ReadRecords(path string) ([]json.RawMessage, error) {
-	recs, _, err := ScanRecords(path)
-	return recs, err
-}
-
-// ScanRecords reads one spool file line by line, never buffering more than
-// spoolReadCap() plus one reader page per line. A line past the cap is, by
-// the size invariant on spoolReadCap, unuploadable anyway: it is skipped in
-// a stream and returned in skipped so Drain records it as an oversize drop
-// when the file is discarded. Record SIZE must never be a read error (a
-// read error aborts Drain at this file on every pass), so
-// the error return carries real I/O faults only.
-func ScanRecords(path string) (recs []json.RawMessage, skipped int, err error) {
+// eachRecord calls fn with each record of the spool file at path, in order,
+// never holding more than spoolReadCap() plus one reader page of it, and
+// returns how many lines it skipped. rec is valid only until fn returns. A
+// line past the cap is, by the size invariant on spoolReadCap, unuploadable
+// anyway: it is skipped in a stream and counted so Drain records it as an
+// oversize drop when the file is discarded. Record SIZE must never be a read
+// error (a read error aborts Drain at this file on every pass), so the
+// error carries real I/O faults and fn's own error only. A missing file has
+// no records.
+func eachRecord(path string, fn func(rec []byte) error) (skipped int, err error) {
 	f, err := os.Open(path) // #nosec G304 -- our own spool files
 	if os.IsNotExist(err) {
-		return nil, 0, nil
+		return 0, nil
 	}
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
 	defer func() { _ = f.Close() }()
 
@@ -527,7 +412,7 @@ func ScanRecords(path string) (recs []json.RawMessage, skipped int, err error) {
 			continue
 		}
 		if rerr != nil && rerr != io.EOF {
-			return recs, skipped, rerr
+			return skipped, rerr
 		}
 		rec := bytes.TrimSuffix(line, []byte{'\n'})
 		rec = bytes.TrimSuffix(rec, []byte{'\r'})
@@ -535,11 +420,13 @@ func ScanRecords(path string) (recs []json.RawMessage, skipped int, err error) {
 		case tooLong || len(rec) > readCap:
 			skipped++
 		case len(rec) > 0:
-			recs = append(recs, append(json.RawMessage(nil), rec...))
+			if err := fn(rec); err != nil {
+				return skipped, err
+			}
 		}
 		tooLong, line = false, line[:0]
 		if rerr == io.EOF {
-			return recs, skipped, nil
+			return skipped, nil
 		}
 	}
 }

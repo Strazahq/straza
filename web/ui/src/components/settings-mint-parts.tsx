@@ -103,7 +103,7 @@ function Levels({ area, level, onPick }: { area: string; level: string; onPick: 
           key={key}
           value={key}
           className={cn(
-            "cursor-pointer border-r border-border px-3 py-1.5 text-[13px] outline-none last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring/50",
+            "cursor-pointer border-r border-border px-2.5 py-1.5 text-[13px] outline-none last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring/50",
             level === key ? "bg-accent-bg font-semibold text-foreground" : "text-text-2",
           )}
         >
@@ -114,35 +114,36 @@ function Levels({ area, level, onPick }: { area: string; level: string; onPick: 
   );
 }
 
-// AreaTable is the Custom path: one row per area, the level as a
-// segmented control, and the meaning of the picked level printed under it
-// rather than hidden in a hover.
+// AreaTable is the Custom path: one row per area with what it covers
+// under its name, the level as a segmented control, and the meaning of the
+// picked level printed under it rather than hidden in a hover.
 export function AreaTable({ grants, onChange }: { grants: string[]; onChange: (next: string[]) => void }) {
   return (
     <div className="overflow-hidden rounded-md border border-border" data-area-table>
       <Table className="table-fixed">
         <colgroup>
-          <col style={{ width: "120px" }} />
           <col />
-          <col style={{ width: "300px" }} />
+          <col style={{ width: "250px" }} />
         </colgroup>
         <TableHeader>
           <TableRow>
             <TableHead className={HEAD}>{AREA_COLUMN.area}</TableHead>
-            <TableHead className={HEAD}>{AREA_COLUMN.covers}</TableHead>
             <TableHead className={HEAD}>{AREA_COLUMN.access}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {AREAS.map(([area, hint]) => {
             const level = levelOf(grants, area);
+            // The kit's cell never wraps, and a fixed layout never widens a
+            // column to fit, so text that cannot wrap runs into the next
+            // cell. Both cells here wrap.
             return (
               <TableRow key={area} data-area={area}>
-                <TableCell className="align-top">
-                  <b className={cn("font-mono text-[13px] font-semibold", area === "tokens" ? "text-warn" : "text-foreground")}>{area}</b>
+                <TableCell className="align-top whitespace-normal">
+                  <b className={cn("block font-mono text-[13px] font-semibold", area === "tokens" ? "text-warn" : "text-foreground")}>{area}</b>
+                  <span className="block text-[13px] leading-snug text-text-2">{hint}</span>
                 </TableCell>
-                <TableCell className="align-top text-[13px] leading-snug text-text-2">{hint}</TableCell>
-                <TableCell className="align-top">
+                <TableCell className="align-top whitespace-normal">
                   <Levels area={area} level={level} onPick={(next) => onChange(grantsAtLevel(grants, area, next))} />
                   {level !== "none" && (
                     <span className="mt-1 block text-[13px] leading-snug text-muted-foreground" data-level-hint={area}>{levelHint(area, level)}</span>

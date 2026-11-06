@@ -53,11 +53,20 @@ type Deps struct {
 	// token whose scope covers the scim area for the request method. On success the returned context carries the caller's audit
 	// identity, and every write the request drives runs on it. On refusal it
 	// returns the HTTP status (401 unknown, 403 known but lacking the grant)
-	// and the detail sentence for the SCIM error body.
+	// and the detail sentence for the SCIM error body. It returns 503 when
+	// the token could not be read from the store, which says nothing about
+	// whether the token exists.
 	Authenticate func(r *http.Request, bearer string) (context.Context, int, string)
-	// Deactivate runs the kill-switch cascade for a user: disable sessions,
-	// feed denylists, emit straza.revocation.user.
-	Deactivate func(ctx context.Context, userID, reason string)
+	// Deactivate writes the disabled status of the user userID together with
+	// its revocation and straza.revocation.user, all or none, then runs the
+	// rest of the kill-switch cascade and answers the row as stored. On an
+	// error the status still reads active, unless the write ended without an
+	// answer, so the identity manager's next reconciliation sends it again.
+	Deactivate func(ctx context.Context, userID, reason string) (store.User, error)
+	// DeactivationFailed records a deactivation of the request r that
+	// Deactivate refused with err, as one Error record and one error count,
+	// and answers the status and the detail of the SCIM error.
+	DeactivationFailed func(r *http.Request, err error) (int, string)
 	// Reactivate is the SCIM-lane lift: origin-selective (spec/scim-profile
 	// §3): it removes scim-origin revocations only, so an
 	// admin/external lock survives IdM enables. Sessions already revoked stay

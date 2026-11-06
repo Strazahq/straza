@@ -308,7 +308,7 @@ or to [security@straza.ai](mailto:security@straza.ai), never in a public issue.
 
 ## Status
 
-v2.0.1 is the latest release, a patch to the major release 2.0.0, and v1.1.0 was the first public release. Upgrading
+v2.1.0 is the latest release, a minor release after the major release 2.0.0, and v1.1.0 was the first public release. Upgrading
 from 1.1.2 changes every governed machine, as
 [Upgrade from 1.1.2 to 2.0.0](https://docs.straza.ai/guides/operate/backup-and-upgrade/#upgrade-from-112-to-200)
 shows. The project is under heavy development, so expect frequent changes between releases. A

@@ -1,0 +1,28 @@
+{
+  "specversion": "1.0",
+  "id": "019a54d2-7e31-7c40-8d11-2a3b4c5d6f02",
+  "type": "straza.audit.mcp",
+  "source": "strazad",
+  "time": "2026-11-05T08:40:12.731Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.post",
+    "tool": "mcp.call",
+    "app": "billing-api",
+    "toolName": "get_invoice",
+    "arguments": "{\"invoice\":\"INV-20431\"}",
+    "effect": "deny",
+    "ruleId": "allow-billing-reads",
+    "setName": "finance",
+    "reason": "Straza: the reply of the tool get_invoice on the MCP server billing-api was withheld, because it held the credential Straza injects for that server. The same call will be withheld again. Tell the user.",
+    "snapshot": "sha256:44f0be1c",
+    "granted": true,
+    "default": false,
+    "bindingId": "0197fa3d-6666-7abc-9def-000000000006",
+    "role": "finance-analyst",
+    "credentialId": "0197fa3e-7777-7abc-9def-000000000007",
+    "credentialSource": "shared"
+  }
+}

@@ -134,8 +134,8 @@ type cancelUsers struct {
 	s *cancelOnSoftDelete
 }
 
-func (u cancelUsers) SoftDelete(ctx context.Context, id string) ([]store.RoleAssignment, error) {
-	removed, err := u.UserRepo.SoftDelete(ctx, id)
+func (u cancelUsers) SoftDelete(ctx context.Context, id string, revoke *store.UserRevocation) ([]store.RoleAssignment, error) {
+	removed, err := u.UserRepo.SoftDelete(ctx, id, revoke)
 	if err == nil && u.s.cancel != nil {
 		u.s.cancel()
 		u.s.fired++

@@ -145,6 +145,10 @@ type CheckinResponse struct {
 	// machine's git host file. An older server, or one with no git app,
 	// omits it.
 	GitUpstreams []string `json:"git_upstreams,omitempty"`
+	// StartText is the governance paragraph the agent reads at session
+	// start. An older server omits it, so it stays nil and the client's own
+	// StartText stands. An empty text turns the paragraph off.
+	StartText *string `json:"start_text,omitempty"`
 }
 
 // PackPayload is a delivered knowledge pack.

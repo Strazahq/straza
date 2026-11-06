@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,23 +15,24 @@ import (
 	"github.com/strazahq/straza/internal/store"
 )
 
-// The sign-in refusals of a person's key enrollment, pinned verbatim.
+// The sign-in refusals of a person's key enrollment, pinned verbatim. Each
+// {server} stands for the address the answering server serves on.
 const (
 	wantOtherKeyMsg = "Straza refused this sign-in because it was made for a different enrollment. " +
-		"Run `straza enroll` again and finish the sign-in in the browser it opens."
+		"Run `straza enroll --server {server}` again and finish the sign-in in the browser it opens."
 	wantNoAuthTimeMsg = "Straza refused this sign-in because the identity provider sent no auth_time claim, " +
 		"so Straza cannot tell that you signed in just now. Ask IT to add the auth_time claim to the ID token " +
-		"of the Straza app, then run `straza enroll` again."
+		"of the Straza app, then run `straza enroll --server {server}` again."
 	wantCodeLaneMsg = "Straza refused this sign-in because your Straza admin requires a browser sign-in, and a " +
-		"sign-in code cannot show which machine it was approved for. Run `straza enroll` in a desktop session on " +
+		"sign-in code cannot show which machine it was approved for. Run `straza enroll --server {server}` in a desktop session on " +
 		"this machine, and update Straza first if it does not open a browser."
 	wantCodeMachineMsg = "Straza refused this machine because it was enrolled with a sign-in code, and your " +
-		"Straza admin now requires a browser sign-in. Run `straza enroll` in a desktop session on this machine, " +
+		"Straza admin now requires a browser sign-in. Run `straza enroll --server {server}` in a desktop session on this machine, " +
 		"and update Straza first if it does not open a browser."
 	wantDoorMsg = "Straza refused this session because a sign-in token alone no longer starts a session on this " +
-		"server. Install Straza on this machine and run `straza enroll`."
+		"server. Install Straza on this machine and run `straza enroll --server {server}`."
 	wantOtherProgramMsg = "Straza refused this sign-in because it was made for another Straza program. " +
-		"Run `straza enroll` on this machine and finish the sign-in it starts."
+		"Run `straza enroll --server {server}` on this machine and finish the sign-in it starts."
 )
 
 // wantPastDeadlineMsg is the refusal of a sign-in made at at, already older
@@ -38,7 +40,7 @@ const (
 func wantPastDeadlineMsg(at time.Time) string {
 	return "Straza refused this sign-in because your identity provider says you last signed in at " +
 		at.UTC().Format("2006-01-02 15:04:05 UTC") + ", longer ago than your Straza admin allows. " +
-		"Sign out at your identity provider, then run `straza enroll` again and sign in."
+		"Sign out at your identity provider, then run `straza enroll --server {server}` again and sign in."
 }
 
 // wantStaleMsg is the refusal of a sign-in made at at, more than 10 minutes
@@ -46,7 +48,7 @@ func wantPastDeadlineMsg(at time.Time) string {
 func wantStaleMsg(at time.Time) string {
 	return "Straza refused this sign-in because your identity provider says you last signed in at " +
 		at.UTC().Format("2006-01-02 15:04:05 UTC") + ", more than 10 minutes ago. " +
-		"Run `straza enroll` again and sign in when the browser asks."
+		"Run `straza enroll --server {server}` again and sign in when the browser asks."
 }
 
 // wantAheadMsg is the refusal of a sign-in time ahead of the server clock.
@@ -54,7 +56,7 @@ func wantAheadMsg(at time.Time) string {
 	return "Straza refused this sign-in because your identity provider says you signed in at " +
 		at.UTC().Format("2006-01-02 15:04:05 UTC") + ", which is ahead of the Straza server's clock. " +
 		"Ask your Straza admin to check the clocks of the Straza server and the identity provider, " +
-		"then run `straza enroll` again."
+		"then run `straza enroll --server {server}` again."
 }
 
 // wantAgentProofMsg is the refusal of an agent's id-token check-in without
@@ -62,7 +64,13 @@ func wantAheadMsg(at time.Time) string {
 func wantAgentProofMsg(username, kind string) string {
 	return "Straza refused this session because the user " + username + " is " + kind +
 		", and this server accepts its check-in only with a key proof. Install a current Straza on the " +
-		"machine it runs on, with `straza service` running, and enroll it there with `straza enroll --headless`."
+		"machine it runs on, with `straza service` running, and enroll it there with `straza enroll --server {server} --headless`."
+}
+
+// atServer is want with each {server} replaced by the address app serves
+// on, which the refusals name in their enroll command.
+func atServer(want string, app *App) string {
+	return strings.ReplaceAll(want, "{server}", strings.TrimRight(app.cfg.Server.PublicURL, "/"))
 }
 
 // keyNonce is a browser sign-in's nonce for the key whose thumbprint is
@@ -259,8 +267,8 @@ func TestKeyEnrollSignIn(t *testing.T) {
 			fails := signInFailures(t, r.app, r.kim.ID, "device-key")
 			recs := enrolledRecords(t, r.app, r.kim.ID)
 			if tc.lane == "" {
-				if code != http.StatusForbidden || out["error"] != tc.msg {
-					t.Fatalf("enroll = %d %v, want 403 %q", code, out, tc.msg)
+				if code != http.StatusForbidden || out["error"] != atServer(tc.msg, r.app) {
+					t.Fatalf("enroll = %d %v, want 403 %q", code, out, atServer(tc.msg, r.app))
 				}
 				if len(devs) != len(devsBefore) || len(recs) != recsBefore {
 					t.Errorf("a refused enrollment registered devices %d to %d and records %d to %d", len(devsBefore), len(devs), recsBefore, len(recs))
@@ -340,8 +348,8 @@ func TestKeyEnrollSignInExternal(t *testing.T) {
 	h, other := newKeyHolder(t, base), newKeyHolder(t, base)
 	at := time.Now().Add(-time.Minute).Truncate(time.Second)
 	foreign := signInTokenFor(t, idpApp, idpKim, "shared-client", authn.LoginFacts{Nonce: keyNonce(t, other.thumbprint(), 16), AuthTime: at})
-	if code, out := h.call("/v1/enroll", "", keyEnrollBody(foreign, "sha256:external-other")); code != http.StatusForbidden || out["error"] != wantOtherKeyMsg {
-		t.Fatalf("enroll with a nonce for another key = %d %v, want 403 %q", code, out, wantOtherKeyMsg)
+	if code, out := h.call("/v1/enroll", "", keyEnrollBody(foreign, "sha256:external-other")); code != http.StatusForbidden || out["error"] != atServer(wantOtherKeyMsg, platform) {
+		t.Fatalf("enroll with a nonce for another key = %d %v, want 403 %q", code, out, atServer(wantOtherKeyMsg, platform))
 	}
 	own := signInTokenFor(t, idpApp, idpKim, "shared-client", authn.LoginFacts{Nonce: keyNonce(t, h.thumbprint(), 16), AuthTime: at})
 	code, out := h.call("/v1/enroll", "", keyEnrollBody(own, "sha256:external-own"))
@@ -376,7 +384,7 @@ func TestKeyEnrollClientCannotClaimLane(t *testing.T) {
 			body["custody"] = map[string]string{"kind": "account", "platform": "linux/amd64", "version": "0.3.0", "sign_in": "browser"}
 			code, out := newKeyHolder(t, base).call("/v1/enroll", "", body)
 			if minimum == config.SignInBrowser {
-				if code != http.StatusForbidden || out["error"] != wantCodeLaneMsg {
+				if code != http.StatusForbidden || out["error"] != atServer(wantCodeLaneMsg, app) {
 					t.Fatalf("enroll = %d %v, want the code-lane 403", code, out)
 				}
 				return
@@ -423,8 +431,8 @@ func TestKeyEnrollBuiltinAudience(t *testing.T) {
 			before := len(signInFailures(t, app, kim.ID, "device-key"))
 			body := keyEnrollBody(signInTokenFor(t, app, kim, tc.aud, f), "sha256:audience-"+string(rune('a'+i)))
 			code, out := h.call("/v1/enroll", "", body)
-			if code != http.StatusForbidden || out["error"] != wantOtherProgramMsg {
-				t.Fatalf("enroll = %d %v, want 403 %q", code, out, wantOtherProgramMsg)
+			if code != http.StatusForbidden || out["error"] != atServer(wantOtherProgramMsg, app) {
+				t.Fatalf("enroll = %d %v, want 403 %q", code, out, atServer(wantOtherProgramMsg, app))
 			}
 			fails := signInFailures(t, app, kim.ID, "device-key")
 			if len(fails) != before+1 || fails[len(fails)-1]["reason"] != reason {
@@ -500,8 +508,8 @@ func TestMinSignInEndsSessions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			before := len(signInFailures(t, app, kim.ID, tc.via))
 			status, out := tc.send()
-			if status != http.StatusForbidden || out["error"] != wantCodeMachineMsg {
-				t.Fatalf("answer = %d %v, want 403 %q", status, out, wantCodeMachineMsg)
+			if status != http.StatusForbidden || out["error"] != atServer(wantCodeMachineMsg, app) {
+				t.Fatalf("answer = %d %v, want 403 %q", status, out, atServer(wantCodeMachineMsg, app))
 			}
 			fails := signInFailures(t, app, kim.ID, tc.via)
 			if len(fails) != before+1 {
@@ -591,8 +599,8 @@ func TestIDTokenDoor(t *testing.T) {
 						}
 						return
 					}
-					if status != http.StatusForbidden || out["error"] != tc.msg {
-						t.Fatalf("check-in = %d %v, want 403 %q", status, out, tc.msg)
+					if status != http.StatusForbidden || out["error"] != atServer(tc.msg, app) {
+						t.Fatalf("check-in = %d %v, want 403 %q", status, out, atServer(tc.msg, app))
 					}
 					if len(fails) != before+1 {
 						t.Fatalf("login failures = %d, want exactly one more than %d", len(fails), before)

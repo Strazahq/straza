@@ -216,7 +216,8 @@ func (a *App) resolveClassify(ctx context.Context, lane string, ev policy.Event,
 // could not enter the queue under block, on the hook and the gateway lane.
 const auditQueueFullMsg = "Straza: this action did not run, because its audit record could not be written while Straza cannot reach its database. " +
 	"The audit setting is block, so nothing runs without its record. " +
-	"Try again once the database is back. An administrator sees audit queue waiting for the database in the strazad log."
+	"Try the call once more in a minute. If it is denied again, tell the user. " +
+	"An administrator sees audit queue waiting for the database in the strazad log."
 
 // auditDecision spools a straza.audit.tool CloudEvent and reports whether
 // it entered the queue. Under block a full queue holds it for at most the
@@ -265,7 +266,9 @@ func (a *App) auditDecision(ctx context.Context, claims authn.Claims, req Decide
 	if err != nil {
 		return true
 	}
-	if err := a.audit.submit(ctx, store.OutboxEvent{Subject: "straza.audit.tool", CE: string(ce)}); err != nil {
+	// The record is bounded here, in the request that made it, so a long
+	// one never costs the audit writer that every decision shares.
+	if err := a.audit.submit(ctx, store.OutboxEvent{Subject: "straza.audit.tool", CE: store.BoundCE(string(ce))}); err != nil {
 		a.failClosed(ctx, "hook", d.RuleID, err)
 		return false
 	}

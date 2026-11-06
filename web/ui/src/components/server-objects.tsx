@@ -8,15 +8,16 @@ import { FetchError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { ToneBadge } from "@/components/overview-parts";
 import { NoRole, RoleChip } from "@/components/status-badge";
-import { type ApiError, type AppRow, type ObjectDraft, type ObjectListing, type ObjectRow, type ObjectsAnswer, type RoleRow, appObjects, query } from "@/lib/api";
+import { type ApiError, type AppRow, type ObjectDraft, type ObjectListing, type ObjectRow, type ObjectsAnswer, type RoleRow, appObjects, query, refreshAppObjects } from "@/lib/api";
 import { toYAML } from "@/lib/manifest";
+import { notify } from "@/lib/notify";
 import {
-  COLUMN, LISTING, NEW, NOT_SET, NO_AGENT, NO_ROLE, type Nouns,
-  cap, coveredHelp, declaresTitle, draftLink, draftsHelp, drift, emptyList, filterLabel, idHelp, idLabel, listingHelp, noMarks, noMatch, nounsOf, reading, setByHelp, stripOf,
+  COLUMN, LISTING, LIST_AGAIN, NEW, NOT_SET, NO_AGENT, NO_ROLE, type Nouns,
+  cap, coveredHelp, declaresTitle, draftLink, draftsHelp, drift, emptyList, filterLabel, idHelp, idLabel, listingAgain, listingHelp, noMarks, noMatch, nounsOf, reading, setByHelp, stripOf,
 } from "@/lib/object-words";
 import { LOAD_MORE, shownWords } from "@/lib/role-words";
 import { isPlainClick, navigate, pathFor } from "@/lib/router";
-import { readFailed } from "@/lib/say";
+import { readFailed, refused } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 // The tab of an MCP server's page named by the plural of the type its
@@ -58,6 +59,8 @@ export function ServerObjects({ app, roles }: ServerObjectsProps) {
   const [q, setQ] = React.useState("");
   const [state, setState] = React.useState<State>({ kind: "loading" });
   const [busy, setBusy] = React.useState(false);
+  const [asking, setAsking] = React.useState(false);
+  const [nonce, setNonce] = React.useState(0);
   const seq = React.useRef(0);
   const pinned = app.manifest?.straza?.objects;
   const fallback = nounsOf(pinned || { type: "" });
@@ -77,7 +80,7 @@ export function ServerObjects({ app, roles }: ServerObjectsProps) {
         setState((s) => (s.kind === "ready" ? { ...s, problem: message } : { kind: "error", message }));
       },
     );
-  }, [app.id, q]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [app.id, q, nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const more = async () => {
     if (state.kind !== "ready" || !state.answer.next) return;
@@ -93,6 +96,23 @@ export function ServerObjects({ app, roles }: ServerObjectsProps) {
     }
   };
 
+  // listAgain asks strazad for a listing now and reads the tab again. A
+  // server listed within the last minute answers 429 with the wait.
+  const listAgain = async (w: Nouns) => {
+    setAsking(true);
+    try {
+      await refreshAppObjects(app.id);
+      notify.ok(listingAgain(app.name, w));
+      setNonce((n) => n + 1);
+    } catch (e) {
+      const err = e as ApiError;
+      if (err.status === 429) notify.warn(err.message);
+      else if (err.status !== 401) notify.failed(refused(err));
+    } finally {
+      setAsking(false);
+    }
+  };
+
   if (state.kind === "loading") return <p className="text-[13px] text-muted-foreground">{reading(fallback)}</p>;
   if (state.kind === "error") return <FetchError subject={cap(fallback.plural)} detail={state.message} />;
 
@@ -104,7 +124,7 @@ export function ServerObjects({ app, roles }: ServerObjectsProps) {
   return (
     <div className="flex flex-col gap-3" data-objects-tab={app.name}>
       {state.problem && <FetchError subject={cap(w.plural)} detail={state.problem} />}
-      <Strip app={app.name} w={w} listing={listing} />
+      <Strip app={app.name} w={w} listing={listing} again={listing.outcome === "failed" && listing.credential !== "missing" ? { busy: asking, onClick: () => void listAgain(w) } : null} />
       <div className="flex flex-wrap items-center gap-3">
         <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={filterLabel(w)} aria-label={filterLabel(w)} className="h-9 w-full max-w-xs" />
         <span className="ml-auto text-[13px] text-muted-foreground">{shownWords(rows.length, answer.total)}</span>
@@ -164,12 +184,14 @@ export function ServerObjects({ app, roles }: ServerObjectsProps) {
 }
 
 // Strip is the status of the listing in words, the reason of a failed one
-// verbatim, with how the listing runs behind its help icon.
-function Strip({ app, w, listing }: { app: string; w: Nouns; listing: ObjectListing }) {
+// verbatim, with how the listing runs behind its help icon. A failed
+// listing with its credential set carries List again.
+function Strip({ app, w, listing, again }: { app: string; w: Nouns; listing: ObjectListing; again: { busy: boolean; onClick: () => void } | null }) {
   const s = stripOf(app, w, listing);
   return (
     <div className={cn("flex items-start gap-2 rounded-md border px-3 py-2 text-sm leading-relaxed text-text-2", STRIP[s.tone])} data-listing-strip data-tone={s.tone}>
       <div className="min-w-0 flex-1">{s.lines.map((l, i) => <p key={i} data-line>{l}</p>)}</div>
+      {again && <Button variant="outline" size="sm" disabled={again.busy} aria-busy={again.busy || undefined} onClick={again.onClick}>{again.busy && <Loader2Icon className="animate-spin" />}{LIST_AGAIN}</Button>}
       <HelpTip label={LISTING} text={listingHelp(app, listing.tool, listing.credential)} className="mt-1" />
     </div>
   );

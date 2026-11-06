@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -229,7 +230,7 @@ spec:
 	_, aliceList, rawList := mcpCall(t, base, aliceTok, "tools/list", nil)
 	clientBytes.Write(rawList)
 	aliceTools := toolNamesOf(t, aliceList)
-	want := []string{"github__create_issue", "github__get_issue", "github__list_issues"}
+	want := []string{"github__create_issue", "github__get_issue", "github__list_issues", "straza__whoami"}
 	if strings.Join(aliceTools, ",") != strings.Join(want, ",") {
 		t.Errorf("alice sees %v, want %v (delete_repository must NOT be visible)", aliceTools, want)
 	}
@@ -253,12 +254,12 @@ spec:
 		t.Errorf("delete_repository call = %v", delRes)
 	}
 
-	// -- Bob (no role): sees nothing at all. --
+	// -- Bob (no role): sees only whoami, which every session holds. --
 	bobTok := sessionToken(t, base, "bob")
 	_, bobList, rawBob := mcpCall(t, base, bobTok, "tools/list", nil)
 	clientBytes.Write(rawBob)
-	if n := len(toolNamesOf(t, bobList)); n != 0 {
-		t.Errorf("bob sees %d tools, want 0", n)
+	if names := toolNamesOf(t, bobList); !slices.Equal(names, []string{"straza__whoami"}) {
+		t.Errorf("bob sees %v, want whoami alone", names)
 	}
 
 	// -- The token never appears client-side. --
@@ -291,11 +292,11 @@ spec:
 	for {
 		_, afterList, _ := mcpCall(t, base, aliceTok, "tools/list", nil)
 		n := len(toolNamesOf(t, afterList))
-		if n == 0 {
+		if n == 1 {
 			break
 		}
 		if time.Now().After(catalogDeadline) {
-			t.Errorf("catalog after removal has %d tools, want 0", n)
+			t.Errorf("catalog after removal has %d tools, want whoami alone", n)
 			break
 		}
 		time.Sleep(20 * time.Millisecond)

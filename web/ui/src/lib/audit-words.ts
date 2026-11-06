@@ -2,6 +2,7 @@
 // Every reader is a pure function over the wire row, so the screen and its
 // tests share one reading of a record.
 import type { AuditRow } from "./api";
+import { cutOf } from "./shell-read";
 
 export const SENTINEL_TYPE = "straza.audit.sentinel";
 
@@ -125,6 +126,11 @@ export type Row = {
   time: string;
   effect: string;
   tool: string;
+  // command is a shell record's command as stored, so the list can lay it
+  // out on one line; "" for any other record.
+  command: string;
+  // commandCut says the record keeps only part of the command.
+  commandCut: boolean;
   what: string;
   reason: string;
   session: string;
@@ -155,6 +161,8 @@ export function ceRow(r: AuditRow): Row {
     time: (ce && ce.time) || "",
     effect: String(approval ? d.state || "" : d.effect || ""),
     tool: String(d.tool || ""),
+    command: !approval && typeof d.command === "string" ? d.command : "",
+    commandCut: d.commandTruncated === true || (typeof d.command === "string" && cutOf(d.command) !== null),
     what: approval ? approvalWhat(d, r) : ceWhat(ce),
     reason: String(approval ? d.decidedReason || "" : d.reason || (d.effect && d.ruleId ? "rule " + String(d.ruleId) : "")),
     session: String(d.session || ""),
@@ -251,6 +259,11 @@ export const searchLine = (q: string, effect: string, user: string, capped: bool
   const parts = [q ? "for “" + q + "”" : "", effect ? "effect " + effect : "", user ? "by " + user : ""].filter(Boolean);
   return (parts.length ? parts.join(", ") : "every record") + (capped ? ", newest " + TAIL_WINDOW + " shown" : "");
 };
+// policyQuery is the whole-chain search for the decisions one policy made.
+// A decision record names its policy as setName and the server matches the
+// raw record text, so the key and both quotes keep out a policy whose name
+// only contains this one.
+export const policyQuery = (name: string) => '"setName":"' + name + '"';
 export const loadedWords = (n: number, total: number) => n.toLocaleString("en-US") + " of " + total.toLocaleString("en-US") + " records loaded";
 // shownWords and matchWords count the rows the filter row has on screen,
 // which the lens and the fold both move. loadedWords counts the window.
@@ -326,6 +339,7 @@ const ACTION_LABEL: Record<string, string> = {
   "approver.revoke": "Revoked an approver phone or browser with its user",
   "revocation.session": "Revoked a session", "revocation.sessions": "Revoked sessions", "revocation.user": "Revoked a user's access",
   "revocation.device": "Revoked a machine", "revocation.lift": "Lifted a user's revocation",
+  "device.revoke": "Revoked a user's machine",
 };
 
 // ACTION_NOUN names the object of each action namespace, for an action

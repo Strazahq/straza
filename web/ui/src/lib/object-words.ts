@@ -17,11 +17,10 @@ export const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 // counted is a number with the noun it counts.
 export const counted = (n: number, w: Nouns) => n.toLocaleString("en-US") + " " + (n === 1 ? w.type : w.plural);
 
-// missingCredential is the sentence the listing stores when a server that
-// takes a credential has no listing credential, said before a listing
-// fails on it.
+// missingCredential says a server that takes a credential has no listing
+// credential, naming the card on Overview before the strazactl command.
 export const missingCredential = (app: string, w: Nouns) =>
-  app + " has no listing credential, so Straza cannot list its " + w.plural + ". Add one with strazactl apps secret set " + app + " --listing, then refresh with strazactl apps objects refresh " + app + ".";
+  app + " has no listing credential, so Straza cannot list its " + w.plural + ". Set one under Server authentication on Overview, or with strazactl apps secret set " + app + " --listing.";
 
 export type Strip = { tone: "plain" | "ok" | "danger"; lines: string[] };
 
@@ -49,11 +48,18 @@ export function stripOf(app: string, w: Nouns, l: ObjectListing): Strip {
   }
   const lines = [lead];
   if (missing) lines.push(missing);
-  if (failed && l.reason && l.reason !== missing) lines.push(l.reason);
+  // A listing without its credential fails on that alone, so the reason
+  // it stored says what the missing line says.
+  if (failed && l.reason && !missing) lines.push(l.reason);
   if (l.listedAt) lines.push("The list below is from the last good listing, " + relTimeText(l.listedAt) + ".");
   else if (failed) lines.push("No listing has worked yet, so there are no " + w.plural + " to show.");
   return { tone: "danger", lines };
 }
+
+// LIST_AGAIN asks for a listing now, on a strip whose listing failed with
+// a credential set. listingAgain is the toast once strazad takes it.
+export const LIST_AGAIN = "List again";
+export const listingAgain = (app: string, w: Nouns) => "Straza is listing " + app + "'s " + w.plural + " again. Reload the page in a minute to see the list.";
 
 // listingHelp is the help icon beside the strip. A server that needs no
 // listing credential is listed with none, so the sentence names none.

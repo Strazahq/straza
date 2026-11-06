@@ -246,6 +246,14 @@ type instance struct {
 	deployed bool // apps.deployed emitted
 	dead     bool // replaced/removed: late runtime callbacks must not write
 
+	// spawnEcho is what a reply of a command or oci process must not hold:
+	// the credential the process was started with, as echoValues answers
+	// it. It is set before the instance is registered and never written
+	// after. echoTools names the tools the last probe dropped for holding
+	// the credential, under mu, so each change of them logs once.
+	spawnEcho []string
+	echoTools string
+
 	// registered is when register made this the instance of its name.
 	registered time.Time
 
@@ -487,8 +495,9 @@ func (m *Manager) startInstance(ctx context.Context, row store.App, mf Manifest,
 			return nil
 		}
 		spec := *mf.Straza.Runtime.Command
-		if extra, ok := m.commandEnvSecret(inst); ok {
+		if extra, echo, ok := m.commandEnvSecret(inst); ok {
 			spec.Env = append(append([]EnvVar{}, spec.Env...), extra)
+			inst.spawnEcho = echo
 		} else if mf.CredentialKind() != CredentialNone {
 			// Fail closed: never spawn a credentialed app uncredentialed.
 			m.register(inst)
@@ -520,8 +529,9 @@ func (m *Manager) startInstance(ctx context.Context, row store.App, mf Manifest,
 			return nil
 		}
 		var injectEnv *EnvVar
-		if e, ok := m.commandEnvSecret(inst); ok {
+		if e, echo, ok := m.commandEnvSecret(inst); ok {
 			injectEnv = &e
+			inst.spawnEcho = echo
 		} else if mf.CredentialKind() != CredentialNone {
 			m.register(inst)
 			m.setStatus(ctx, inst, StatusPending, "waiting for a credential (strazactl apps secret set)")
@@ -729,7 +739,9 @@ func (m *Manager) probe(ctx context.Context, inst *instance) {
 		m.failed(ctx, inst, start, "manager: the tool inventory probe failed", err)
 		return
 	}
-	m.acceptInventory(ctx, inst, tools, m.refreshViews(ctx, inst, tools, secret))
+	echo := inst.echoValues(secret)
+	tools = m.withoutEchoes(inst, tools, echo)
+	m.acceptInventory(ctx, inst, tools, m.refreshViews(ctx, inst, tools, secret), echo)
 }
 
 // askedKey marks the context of a check that a request asked for.
@@ -775,7 +787,10 @@ func (m *Manager) failed(ctx context.Context, inst *instance, start time.Time, l
 // straza.apps.drift; the catalog rebuilds from the new list so vanished
 // tools fail closed immediately). views are the served views, which the
 // drift hash covers with the tools' links while the views switch is on.
-func (m *Manager) acceptInventory(ctx context.Context, inst *instance, tools []*mcp.Tool, views []View) {
+// A removed tool whose name holds one of echo, the credential the listing
+// was made with, is named by echoNameStandIn, so its name reaches neither
+// the log, the status detail nor the event.
+func (m *Manager) acceptInventory(ctx context.Context, inst *instance, tools []*mcp.Tool, views []View, echo []string) {
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	hash := inventoryHash(tools, views, inst.manifest.viewsOn())
 
@@ -801,6 +816,11 @@ func (m *Manager) acceptInventory(ctx context.Context, inst *instance, tools []*
 	}
 
 	added, removed := diffTools(prev, tools)
+	for i, name := range removed {
+		if echoes(echo, name, nil) {
+			removed[i] = echoNameStandIn
+		}
+	}
 	changed := changedViews(prevViews, views)
 	links := inst.manifest.viewsOn() && linksChanged(prev, tools)
 	m.opts.Log.Warn("manager: tool inventory drift", "app", inst.app.Name, "added", added, "removed", removed, "views", changed)
@@ -1173,7 +1193,12 @@ func (m *Manager) unusableOwnRow(inst *instance, sponsor string, row UserCredent
 // (nil for a kind none app) and the _meta Straza sets on the call (nil for
 // none). It fails closed: a credentialed app is never called with a nil
 // secret. The runtime's error comes back as shown writes it, because the
-// gateway answers it to the AI agent.
+// gateway answers it to the AI agent. A reply or an error that holds the
+// credential Straza injected for the call, as echoes judges it, answers no
+// result and ErrCredentialEcho instead. A call that may have run logs the
+// runtime's own error at Warn, which its answer leaves out. Every runtime's reply passes here,
+// so the check covers a remote server's header and the environment of a
+// command or oci process alike.
 func (m *Manager) Call(ctx context.Context, appName, tool string, args json.RawMessage, secret *Secret, meta map[string]any) (*mcp.CallToolResult, error) {
 	m.mu.RLock()
 	inst, ok := m.byName[appName]
@@ -1185,7 +1210,72 @@ func (m *Manager) Call(ctx context.Context, appName, tool string, args json.RawM
 		return nil, m.missingCredential(inst, kind)
 	}
 	res, err := inst.runtime.Call(ctx, CallInput{Tool: tool, Args: args, Secret: secret, Meta: meta})
-	return res, shownErr(err)
+	err = shownErr(err)
+	values := inst.echoValues(secret)
+	if echoes(values, res, err) {
+		return nil, ErrCredentialEcho
+	}
+	if mhr := (*mayHaveRun)(nil); errors.As(err, &mhr) {
+		cause := shown(mhr.cause.Error())
+		if echoes(values, nil, mhr.cause) {
+			cause = "(not logged, because it holds the credential Straza injects for the server)"
+		}
+		m.opts.Log.Warn("manager: a call may have run, and no answer Straza could read came back", "app", appName, "tool", tool, "err", cause)
+	}
+	return res, err
+}
+
+// echoValues answers what an answer of inst on secret must not hold: for a
+// remote server the credential its header carried, and for a command or oci
+// process the credential it was started with.
+func (inst *instance) echoValues(secret *Secret) []string {
+	if rrt, ok := inst.runtime.(*RemoteRuntime); ok {
+		return rrt.echoValues(secret)
+	}
+	return inst.spawnEcho
+}
+
+// toolEchoes is the Warn line of a tool dropped from a server's inventory
+// because its listing holds the credential Straza injects for the server.
+const toolEchoes = "manager: a tool of an MCP server is not listed, because its name, description, schema or _meta holds the credential Straza injects for the server. " +
+	"An administrator fixes the server, then runs strazactl apps recheck for it"
+
+// echoNameStandIn names a tool in a log line, a status detail or an event
+// when its own name holds the credential Straza injects for its server.
+const echoNameStandIn = "(a tool whose name holds the credential)"
+
+// withoutEchoes answers tools without each tool whose listing holds one of
+// values, the credential the listing was made with, as echoes judges it, so
+// no catalog lists it. A change of the dropped set logs toolEchoes once,
+// with the server and each tool's name, or echoNameStandIn for a name that
+// holds the credential itself. A dropped tool that was listed before reads
+// as inventory drift.
+func (m *Manager) withoutEchoes(inst *instance, tools []*mcp.Tool, values []string) []*mcp.Tool {
+	if len(values) == 0 {
+		return tools
+	}
+	out := make([]*mcp.Tool, 0, len(tools))
+	var dropped []string
+	for _, t := range tools {
+		if !echoes(values, t, nil) {
+			out = append(out, t)
+			continue
+		}
+		name := t.Name
+		if echoes(values, name, nil) {
+			name = echoNameStandIn
+		}
+		dropped = append(dropped, name)
+	}
+	key := strings.Join(dropped, "\n")
+	inst.mu.Lock()
+	changed := key != inst.echoTools
+	inst.echoTools = key
+	inst.mu.Unlock()
+	if changed && key != "" {
+		m.opts.Log.Warn(toolEchoes, "app", inst.app.Name, "tool", strings.Join(dropped, ", "))
+	}
+	return out
 }
 
 // missingCredential is the actionable error for a credentialed app whose
@@ -1259,18 +1349,19 @@ func (m *Manager) appSecret(inst *instance) *Secret {
 	return m.opts.Secrets.AppSecret(inst.app.ID)
 }
 
-// commandEnvSecret renders the spawn-time env injection for command apps.
-func (m *Manager) commandEnvSecret(inst *instance) (EnvVar, bool) {
+// commandEnvSecret renders the spawn-time env injection for command apps,
+// and answers what a reply of the process must not hold (echoValues).
+func (m *Manager) commandEnvSecret(inst *instance) (EnvVar, []string, bool) {
 	mf := inst.manifest
 	if mf.CredentialKind() == CredentialNone || mf.Straza.Credential.Inject == nil {
-		return EnvVar{}, false
+		return EnvVar{}, nil, false
 	}
 	secret := m.appSecret(inst)
 	if secret == nil {
-		return EnvVar{}, false
+		return EnvVar{}, nil, false
 	}
 	in := mf.Straza.Credential.Inject
-	return EnvVar{Name: in.Name, Value: strings.ReplaceAll(in.Template, SecretPlaceholder, secret.Value)}, true
+	return EnvVar{Name: in.Name, Value: strings.ReplaceAll(in.Template, SecretPlaceholder, secret.Value)}, echoValues(in.Template, secret.Value), true
 }
 
 // setStatus records an FSM transition (memory + the row's status column)

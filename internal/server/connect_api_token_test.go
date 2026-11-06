@@ -54,10 +54,10 @@ func connectRecords(t *testing.T, app *App) []map[string]any {
 // of caller: an administrator's machine session, the same administrator's
 // own sign-in, and admin API tokens with apps:write, with apps:read only and
 // with full. A token passes on its scope as on the admin plane, must name
-// the user it acts for, meets no machine-session rule, starts no provider
-// sign-in, and each write it lands leaves exactly one record with setBy the
-// token's id and actorVia api-token, while a person's record carries no
-// actorVia. The stored row names the token as its setter, and the list reads
+// the user it acts for, meets no machine-session rule, and starts no
+// provider sign-in. Each write it lands, and each sign-in it is refused,
+// leaves exactly one record with setBy the token's id and actorVia
+// api-token, while a person's record carries no actorVia. The stored row names the token as its setter, and the list reads
 // that setter as the token's name.
 func TestConnectTakesAnAdminAPIToken(t *testing.T) {
 	t.Parallel()
@@ -111,9 +111,10 @@ func TestConnectTakesAnAdminAPIToken(t *testing.T) {
 			map[string]any{"token": "tok-x", "user": "nobody"}, http.StatusNotFound, `unknown user "nobody"`, "", "", "", false, ""},
 		{"a write token cannot start a sign-in for a person", writeTok, http.MethodPost, "/v1/connect/github",
 			map[string]any{"user": "alice"}, http.StatusForbidden, wantTokenSignInAlice + strings.TrimRight(app.cfg.Server.PublicURL, "/") + testConnectPage,
-			"", "", "", false, ""},
+			"connection.refused", alice.ID, writeID, true, ""},
 		{"a write token cannot start a sign-in for an agent", writeTok, http.MethodPost, "/v1/connect/github",
-			map[string]any{"user": "joe"}, http.StatusForbidden, agentSignInRefusal(joe, "github", "github"), "", "", "", false, ""},
+			map[string]any{"user": "joe"}, http.StatusForbidden, agentSignInRefusal(joe, "github", "github"),
+			"connection.refused", joe.ID, writeID, true, ""},
 		{"a write token cannot list", writeTok, http.MethodGet, "/v1/connect?user=joe",
 			nil, http.StatusForbidden, wantTokenNoAppsRead, "", "", "", false, ""},
 		{"a read token that names no user", readTok, http.MethodGet, "/v1/connect",

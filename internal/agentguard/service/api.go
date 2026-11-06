@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/strazahq/straza/internal/agentguard"
 	"github.com/strazahq/straza/internal/agentguard/localapi"
@@ -52,8 +54,13 @@ var busyStarting = fmt.Sprintf("The Straza background service was busy checking 
 // save of the session table.
 const maxHarnessField = 256
 
-// harnessFieldTooLong is the refusal of a harness field over
-// maxHarnessField: the field, its length and the bound.
+// maxEventField bounds the other strings a decide or capture record copies
+// from its request: the tool, app, tool name and workspace and the
+// delegate's type and id. No harness sends one near it.
+const maxEventField = 4 << 10
+
+// harnessFieldTooLong is the refusal of a harness or event field over its
+// bound: the field, its length and the bound.
 const harnessFieldTooLong = "The request names a %s of %d bytes, and the Straza background service takes at most %d, " +
 	"so it refused the request. Update Straza so the client and the service are the same version, and tell your Straza admin " +
 	"if this keeps happening."
@@ -127,6 +134,7 @@ type api struct {
 	self       string
 	classifier policy.Classifier
 	starts     *limiter
+	text       *inFlight
 }
 
 // newAPI returns the API half over creds. The service's own uid decides
@@ -143,6 +151,7 @@ func newAPI(creds credentials, opts Options) *api {
 		self:       ownUID(),
 		classifier: classifier.NewHeuristic(),
 		starts:     newLimiter(startBurst, startRate),
+		text:       &inFlight{open: map[string]load{}},
 	}
 }
 
@@ -154,8 +163,8 @@ func (a *api) routes() http.Handler {
 	mux.HandleFunc(localapi.RouteEnroll, a.only(http.MethodPost, a.enroll))
 	mux.HandleFunc(localapi.RouteKeygen, a.only(http.MethodPost, a.keygen))
 	mux.HandleFunc(localapi.RouteSessions, a.only(http.MethodPost, a.sessions))
-	mux.HandleFunc(localapi.RouteDecide, a.only(http.MethodPost, a.decide))
-	mux.HandleFunc(localapi.RouteCapture, a.only(http.MethodPost, a.capture))
+	mux.HandleFunc(localapi.RouteDecide, a.only(http.MethodPost, a.bounded("decide", tooManyDecides, a.decide)))
+	mux.HandleFunc(localapi.RouteCapture, a.only(http.MethodPost, a.bounded("capture", tooManyCaptures, a.capture)))
 	mux.HandleFunc(localapi.RouteMCP, a.proxyMCP)
 	mux.HandleFunc(localapi.RouteMCP+"/{server}", a.proxyMCP)
 	mux.HandleFunc(strings.TrimSuffix(localapi.RouteConnect, "/"), a.proxyConnect)
@@ -275,11 +284,21 @@ func (a *api) fail(w http.ResponseWriter, r *http.Request, status int, err error
 	a.refuse(w, r, status, err.Error())
 }
 
-// read decodes r's JSON body into v, reading at most limit bytes. It
-// answers the refusal itself and reports false when the body is too large
-// or not the route's JSON.
+// read decodes r's JSON body into v, reading at most limit bytes into one
+// buffer sized by the request's length. It answers the refusal itself and
+// reports false when the body is too large, not UTF-8 or not the route's
+// JSON. The decoder would turn each stray byte into a three-byte
+// replacement character, so a body that is not UTF-8 never reaches it.
 func (a *api) read(w http.ResponseWriter, r *http.Request, limit int64, v any) bool {
-	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(v)
+	body := bytes.NewBuffer(make([]byte, 0, min(max(r.ContentLength, 0), limit)+bytes.MinRead))
+	_, err := body.ReadFrom(http.MaxBytesReader(w, r.Body, limit))
+	switch {
+	case err != nil:
+	case !utf8.Valid(body.Bytes()):
+		err = errors.New("the body is not UTF-8")
+	default:
+		err = json.Unmarshal(body.Bytes(), v)
+	}
 	var tooBig *http.MaxBytesError
 	switch {
 	case err == nil:
@@ -302,11 +321,19 @@ func (a *api) named(w http.ResponseWriter, r *http.Request, h localapi.Harness) 
 			"which session it belongs to. Update Straza so the client and the service are the same version.")
 		return false
 	}
-	for _, f := range []struct{ field, value string }{
-		{"harness name", h.Name}, {"harness version", h.Version}, {"harness session id", h.Session},
-	} {
-		if len(f.value) > maxHarnessField {
-			a.refuse(w, r, http.StatusBadRequest, fmt.Sprintf(harnessFieldTooLong, f.field, len(f.value), maxHarnessField))
+	return a.fit(w, r, maxHarnessField, field{"harness name", h.Name}, field{"harness version", h.Version},
+		field{"harness session id", h.Session})
+}
+
+// field is one named string of a request that fit bounds.
+type field struct{ name, value string }
+
+// fit refuses a request with one of fields longer than limit bytes, with
+// the sentence that names the field.
+func (a *api) fit(w http.ResponseWriter, r *http.Request, limit int, fields ...field) bool {
+	for _, f := range fields {
+		if len(f.value) > limit {
+			a.refuse(w, r, http.StatusBadRequest, fmt.Sprintf(harnessFieldTooLong, f.name, len(f.value), limit))
 			return false
 		}
 	}
@@ -453,7 +480,7 @@ func (a *api) sessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, localapi.SessionAnswer{
 		SessionID: s.ID, User: s.User, Roles: s.Roles, Attestation: s.Attestation,
 		SnapshotID: snapshot, ServerURL: s.ServerURL, Capture: eng.Capture(s.Subject()),
-		Packs: s.Packs, Reused: s.Reused,
+		Packs: s.Packs, Reused: s.Reused, StartText: s.StartText,
 	})
 }
 

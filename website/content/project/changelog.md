@@ -13,11 +13,13 @@ Straza keeps its changelog in [CHANGELOG.md](https://github.com/strazahq/straza/
 ## Latest release
 
 
-The latest release is [Straza 2.0.1](https://github.com/strazahq/straza/releases/tag/v2.0.1), a security and bug-fix release. Interpreter rules now apply to `straza exec`, the standalone database is readable by its owner only, and calls that a classify rule allows run again.
+The latest release is [Straza 2.1.0](https://github.com/strazahq/straza/releases/tag/v2.1.0), a minor release. It adds the `straza__whoami` tool and pinning a server's objects in the console, withholds an MCP server's reply that holds the credential Straza injected, and bounds slow and oversized requests. Its wire changes are additive, so 2.0.x clients keep working against it.
 
-Before it came [Straza 2.0.0](https://github.com/strazahq/straza/releases/tag/v2.0.0), a major release. strazad 2.0.0 refuses the machines that a 1.x `straza` client enrolled and the sign-in of a 1.x `strazactl`, so every governed machine gets a new client and every person enrolls again. [Upgrade from 1.1.2 to 2.0.0]({{< relref "guides/operate/backup-and-upgrade.md#upgrade-from-112-to-200" >}}) lists the steps in their order. Its notes list the changes, name each break of a wire format, and link the steps that verify your download.
+Before it came [Straza 2.0.1](https://github.com/strazahq/straza/releases/tag/v2.0.1), a security and bug-fix release. Interpreter rules now apply to `straza exec`, the standalone database is readable by its owner only, and calls that a classify rule allows run again.
 
-Before that came [1.1.2](https://github.com/strazahq/straza/releases/tag/v1.1.2), a bug-fix release, [1.1.1](https://github.com/strazahq/straza/releases/tag/v1.1.1), a security update, and [1.1.0](https://github.com/strazahq/straza/releases/tag/v1.1.0), the first public release.
+2.0.1 followed [Straza 2.0.0](https://github.com/strazahq/straza/releases/tag/v2.0.0), a major release. strazad 2.0.0 refuses the machines that a 1.x `straza` client enrolled and the sign-in of a 1.x `strazactl`, so every governed machine gets a new client and every person enrolls again. [Upgrade from 1.1.2 to 2.0.0]({{< relref "guides/operate/backup-and-upgrade.md#upgrade-from-112-to-200" >}}) lists the steps in their order. Its notes list the changes, name each break of a wire format, and link the steps that verify your download.
+
+Before 2.0.0 came [1.1.2](https://github.com/strazahq/straza/releases/tag/v1.1.2), a bug-fix release, [1.1.1](https://github.com/strazahq/straza/releases/tag/v1.1.1), a security update, and [1.1.0](https://github.com/strazahq/straza/releases/tag/v1.1.0), the first public release.
 
 ## How versions are numbered
 
@@ -35,7 +37,7 @@ Use the binary version when reporting a problem. Check the format revision when 
 
 Within one major version, a change to a wire format under `spec/` is additive. A field is never removed or renamed, an optional request field never becomes required, and a change lands as the schema, its example and conformance fixtures and the version bump in one commit, the release notes name it, and the previous revision's fixtures still pass against the new decoder. The cost sits with rollout order, since parsers are strict: a document that uses a block from a newer revision is rejected by an older client, so clients roll before such a document is written.
 
-A change that refuses what an earlier release accepted is a break, and the release that carries it is a new major version. Straza 2.0.0 is such a release. Its five breaks are all in the check-in and enrollment of the attestation specification, whose changelog records each one. Its release notes name each one, and [The spec]({{< relref "reference/spec.md#how-a-specification-changes" >}}) lists them.
+A change that refuses what an earlier release accepted is a break, and the release that carries it is a new major version. Straza 2.0.0 is such a release. Its five breaks are all in the check-in and enrollment of the attestation specification, whose changelog records each one. Its release notes name each one, and [The spec]({{< relref "reference/spec.md#how-a-specification-changes" >}}) lists them. The refusals of a NUL character added on 2026-11-04 ship as fixes, and the same page says why.
 
 ## How to read a release note
 

@@ -113,7 +113,7 @@ func TestDirectRoutesRefuseAnAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	grantAdmin(t, f.app, u.ID)
-	bot := loginDeviceFlow(t, f.base, "bot", "hunter2!")
+	bot := agentIDToken(t, f.app, "bot")
 	code, out := f.send(t, bot, jsonReq(t, http.MethodPatch, "/v1/admin/roles/"+ro.ID, map[string]any{"description": "New words."}))
 	var answer struct {
 		Error string `json:"error"`

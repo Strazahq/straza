@@ -93,6 +93,20 @@ disabled mara. Sessions revoked, lift with `strazactl users enable mara`
 {{< /cli >}}
 
 
+A disable from the console, strazactl or the admin API writes the status, the revocation record and the event that tells the other servers in one transaction. When the database refuses any of them, nothing changes, and the answer says so. When the write ends without a clear answer, Straza asks the database whether the disable was saved, and a saved disable answers and finishes as any disable does.
+
+{{< fails >}}
+`user USERNAME was not disabled: Straza could not write the change to its database, so nothing changed and the user stays active. This server already refuses the user, but the other servers do not. Run the disable again. Without a saved disable, this server's refusal lasts until it restarts, or until strazactl users unlock USERNAME lifts it. The strazad log names the cause under request id REQUEST-ID.`
+: The server that answered refuses the user at once, and the other servers keep admitting the user. Run the same disable again once the database answers, and look up REQUEST-ID in the strazad log for the cause. An enable does not lift that refusal, because the user still reads active. USERNAME and REQUEST-ID stand for the values in your answer.
+
+`Straza could not tell whether its database saved the disable of user USERNAME, because the write ended without a clear answer. This server already refuses the user. Read the user back, and if it is unchanged, run the disable again. Without a saved disable, this server's refusal lasts until it restarts, or until strazactl users unlock USERNAME lifts it. The strazad log names the cause under request id REQUEST-ID.`
+: The database stopped answering while it took the write, and again when Straza asked whether the write was saved. When the STATUS column of `strazactl users list` reads `disabled`, the disable is saved and every server refuses the user, but the audit chain holds no record of it, and the user's sessions still show as active although every server refuses them. Revoke them on the console's Sessions page, or one by one with `strazactl sessions revoke`. When it reads `active`, run the disable again.
+
+`user USERNAME was not changed: the database refused a value in the request, so nothing in it was saved and the user's status did not change. Send the request again without that value, such as text that holds a NUL character.`
+: The answer is 400, and no server refuses the user. Sending the same request fails the same way, so drop or fix the refused value first.
+{{< /fails >}}
+
+
 On mara's machine, `straza service` receives the revocation on the push stream of each session, marks the session revoked and logs it, and the next hook call denies. The service keeps running for every other user of the machine. A hook payload sent by hand on that machine shows the answer the harness gets:
 
 {{< command terminal="Terminal" purpose="on mara's machine" >}}
@@ -139,7 +153,7 @@ The audit chain holds one identity event per kill, with the reason, the origin t
 {{< console >}}
 {{< clicks "Users" "mara" "Audit trail: open" >}}
 
-Audit opens on mara's records, and the newest is the `identity` record `user.killed`. Open it, and **The record as stored** shows the whole event, with the reason and the count of revoked sessions.
+Audit opens on mara's records, and the newest is the `identity` record `user.killed`. Open it, and open **The record as stored** to see the whole event, with the reason and the count of revoked sessions.
 
 {{< shot name="user-audit-trail" caption="mara's records, opened from her sheet. Each disable writes `user.killed`, and each enable `user.reactivated`." >}}
 
@@ -253,7 +267,7 @@ revoked device 01a11329-4ee8-7217-88b2-4dca17bf54d2 of mara. Its key starts no m
 ```
 {{< /cli >}}
 
-The machine's key can no longer start a session, sessions bound to that device stop refreshing, and `straza service` on that machine marks each live session revoked when the push arrives. The person brings the machine back with a new `straza enroll` and a fresh sign-in.
+The machine's key can no longer start a session, and the device's active sessions end with the revoke, so the sessions list shows them revoked at once. Each one leaves a `session.end` record on the audit chain, and `straza service` on that machine marks each live session revoked when the push arrives. The person brings the machine back with a new `straza enroll` and a fresh sign-in.
 
 
 {{< fails >}}
@@ -324,6 +338,20 @@ locked mara. Sessions revoked; the identity manager sees it read-only, lift with
 
 `--origin external` marks a lock that a SOAR or SIEM automation applied. Only the CLI sets it, and the console's lock records the admin origin.
 {{< /cli >}}
+
+
+A lock writes its revocation record and the event that tells the other servers as two writes. The server that answered refuses the user at once, whichever write the database refuses, and the answer says how far the lock reached.
+
+{{< fails >}}
+`user USERNAME is locked and the lock is saved, but only this server refuses the user now. Straza could not write the event that tells the other servers, so they admit the user until they restart. Run strazactl users lock USERNAME again with the same reason, which writes the event again. The strazad log names the cause under request id REQUEST-ID.`
+: The console shows this lock, so it offers **Unlock user** and not **Lock user**. Run the lock again from strazactl once the database answers, and look up REQUEST-ID in the strazad log for the cause.
+
+`user USERNAME is locked on this server only, until it restarts. Straza could not write the lock to its database or the event that tells the other servers, so they still admit the user. Run the lock again, and check the server's database connection if it fails again. The strazad log names the cause under request id REQUEST-ID.`
+: The database holds nothing of this lock, so a restart of the server that answered lifts it there too. Run the lock again once the database answers.
+
+`user USERNAME is locked on every server, but Straza could not write the lock to its database, so the console and your identity manager show no lock, and an identity manager that disables and enables the user lifts it. Run the lock again, which saves it. The strazad log names the cause under request id REQUEST-ID.`
+: The event reached every server, so they all refuse the user, but the lock that only an administrator lifts is missing. The console still offers **Lock user**, and a second lock saves the record. USERNAME and REQUEST-ID stand for the values in your answer.
+{{< /fails >}}
 
 A fresh sign-in at the identity provider does not get a locked person back in. Enroll, session start, the approval routes and the admin plane all answer 403, and each refusal is a login failure on the chain with the reason `user is locked`. That holds for a locked administrator too, who cannot lift their own lock. A lock or a disable does not reach the admin API tokens the person minted, because a token belongs to no person, so revoke those under **Settings**, **API tokens**, where the list names who minted each one.
 

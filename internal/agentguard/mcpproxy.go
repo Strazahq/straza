@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -73,7 +75,7 @@ func runMCPProxy(ctx context.Context, harnessOverride, server string, transport 
 	p.debugSession(ses)
 	// Boot and revival dial through the same factory so a revived session is
 	// wired exactly like this first one (mcpproxy_redial.go).
-	p.dial = newGatewayDialer(p, serviceHTTPClient(svc, harness), gatewayEndpoint(server))
+	p.dial = newGatewayDialer(p, bridgeHTTPClient(svc, harness), gatewayEndpoint(server))
 	p.logf = func(event, msg string) {
 		store.logClientError(ClientError{Kind: "mcp", Harness: harness, Event: event, Err: msg})
 	}
@@ -204,10 +206,11 @@ type mcpProxy struct {
 	timers sync.WaitGroup
 }
 
-// newMCPProxy wires a proxy with production tunables. Tests that need faster
-// timers construct the proxy directly (buildProxy) and override the fields.
+// newMCPProxy wires a proxy with production tunables onto srv, including
+// the middleware that sends a call outside the mirror to the gateway. Tests
+// that need faster timers override the fields of the proxy it returns.
 func newMCPProxy(srv *mcp.Server) *mcpProxy {
-	return &mcpProxy{
+	p := &mcpProxy{
 		srv:            srv,
 		retryPause:     defaultResyncRetryPause,
 		jitterMax:      defaultResyncJitterMax,
@@ -217,6 +220,35 @@ func newMCPProxy(srv *mcp.Server) *mcpProxy {
 		redialCap:      defaultRedialCap,
 		redialTimeout:  defaultRedialTimeout,
 	}
+	srv.AddReceivingMiddleware(p.forwardUnmirrored)
+	return p
+}
+
+// forwardUnmirrored is the stdio server's receiving middleware. It sends a
+// tools/call whose name the mirror does not carry to the gateway like any
+// other call, so strazad records the attempt and words the answer. Without
+// it the go-sdk server answers such a call itself, quoting the whole name,
+// and nothing reaches strazad. Every other request goes on to next.
+func (p *mcpProxy) forwardUnmirrored(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		call, ok := req.(*mcp.CallToolRequest)
+		if !ok || call.Params == nil || p.mirrored(call.Params.Name) {
+			return next(ctx, method, req)
+		}
+		out, err := p.callGateway(ctx, call.Params.Name, call.Params.Arguments)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+}
+
+// mirrored reports whether the stdio server carries a tool named name.
+func (p *mcpProxy) mirrored(name string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.registered[name]
+	return ok
 }
 
 // digestUnhashable marks a tool whose mirrored *mcp.Tool failed to marshal.
@@ -321,6 +353,61 @@ func (p *mcpProxy) listAllTools(ctx context.Context) ([]*mcp.Tool, bool) {
 	return nil, false
 }
 
+// The sentences the agent reads after the gateway session died under a call,
+// or after the answer to a call was lost, when the call may have reached
+// the gateway. The bridge never sends such a call again.
+const (
+	inFlightLost   = "The gateway session was lost while this call was in flight."
+	answerLost     = "The gateway's answer to this call did not arrive."
+	unknownOutcome = "The call may or may not have run. " +
+		"Check whether its effect happened, or ask the user, before you send the call again"
+)
+
+// retryOnce is the next step of a call turned away before it ran.
+const retryOnce = "Try the call once more in a minute. If it fails again, tell the user to run `straza doctor`."
+
+// nextStep is what the agent does after a call that failed with err and no
+// answer from the gateway. status is the HTTP status the answer carried,
+// and notSent reports the service's mark that it refused the call before
+// sending it. Only a 429, a marked refusal and a service the bridge could
+// not reach prove the call did not run. A 503 without the mark, a 502, a
+// 504 or no answer at all can follow a call strazad already ran, behind an
+// ingress or the service's proxy, so the outcome is unknown then.
+func nextStep(err error, status int, notSent bool) string {
+	if status == http.StatusTooManyRequests || notSent || errors.Is(err, localapi.ErrUnreachable) {
+		return retryOnce
+	}
+	return answerLost + " " + unknownOutcome
+}
+
+// bridgeHTTPClient is the bridge's client of the service's MCP routes for
+// harness: the service client, which also notes the service's not-sent
+// mark on the call in flight (notSentTransport).
+func bridgeHTTPClient(svc *localapi.Client, harness string) *http.Client {
+	c := serviceHTTPClient(svc, harness)
+	c.Transport = notSentTransport{base: c.Transport}
+	return c
+}
+
+// notSentKey carries the *atomic.Bool of the call in flight that
+// notSentTransport sets.
+type notSentKey struct{}
+
+// notSentTransport sets the call's notSentKey flag when the service's
+// answer carries localapi.HeaderNotSent, its own refusal made before it
+// sent the call to strazad.
+type notSentTransport struct{ base http.RoundTripper }
+
+func (t notSentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err == nil && resp.Header.Get(localapi.HeaderNotSent) != "" {
+		if mark, ok := req.Context().Value(notSentKey{}).(*atomic.Bool); ok {
+			mark.Store(true)
+		}
+	}
+	return resp, err
+}
+
 // reconcile brings the stdio server's tool set in line with the freshly listed
 // catalog (add new, drop vanished, re-add on schema drift).
 func (p *mcpProxy) reconcile(tools []*mcp.Tool) {
@@ -348,44 +435,7 @@ func (p *mcpProxy) reconcile(tools []*mcp.Tool) {
 			continue
 		}
 		p.srv.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// The journal's view of this call: the gateway's answer (status +
-			// X-Request-Id) is observed by harnessTransport through this
-			// Call, which the SDK threads into the HTTP request via ctx.
-			start := time.Now()
-			call := &trace.Call{}
-			ctx = trace.WithCall(ctx, call)
-			revived := false
-			cs := p.session()
-			params := &mcp.CallToolParams{Name: name, Arguments: req.Params.Arguments}
-			out, err := cs.CallTool(ctx, params)
-			if err != nil && sessionDeadErr(err) {
-				// The session is a corpse (idle eviction, pod restart, SSE
-				// exhaustion). Revive so no failure is ever permanent, then
-				// split on proof: only a request that provably never left
-				// the process may be replayed by plumbing.
-				fresh, rerr := p.revive(ctx, cs)
-				switch {
-				case rerr != nil:
-					err = fmt.Errorf("%v; gateway reconnect also failed: %v", err, rerr)
-				case neverSentErr(err):
-					revived = true
-					out, err = fresh.CallTool(ctx, params)
-				default:
-					// Indeterminate original failure: the lane is healed but
-					// the call may have executed and is NOT replayed. The
-					// agent decides about a re-call with full context.
-					revived = true
-					err = fmt.Errorf("%v; the gateway session has been reconnected, retry the call", err)
-				}
-			}
-			p.journalCall(name, out, err, call, start, revived)
-			if err != nil {
-				// A DENY arrives as an isError result from the gateway and
-				// passes through above; this branch is infrastructure:
-				// fail closed with an actionable reason.
-				return nil, fmt.Errorf("Straza: gateway call failed: %w", err) //nolint:staticcheck // ST1005: deliberate brand prefix; this text reaches the agent as the tool-failure reason
-			}
-			return out, nil
+			return p.callGateway(ctx, name, req.Params.Arguments)
 		})
 		added++
 		if ok {
@@ -407,4 +457,76 @@ func (p *mcpProxy) reconcile(tools []*mcp.Tool) {
 	if p.tr.DebugOn() {
 		p.tr.Debug("mcp.reconcile", slog.Int("added", added), slog.Int("removed", len(gone)))
 	}
+}
+
+// callGateway sends one tools/call for name with args to the gateway and
+// answers the agent with what came back: the gateway's result, the
+// gateway's own JSON-RPC answer as it wrote it, or the bridge's sentence
+// for a failure the gateway did not answer.
+func (p *mcpProxy) callGateway(ctx context.Context, name string, args json.RawMessage) (*mcp.CallToolResult, error) {
+	// The journal's view of this call: the gateway's answer (status +
+	// X-Request-Id) is observed by harnessTransport through this
+	// Call, which the SDK threads into the HTTP request via ctx.
+	start := time.Now()
+	call := &trace.Call{}
+	ctx = trace.WithCall(ctx, call)
+	notSent := new(atomic.Bool)
+	ctx = context.WithValue(ctx, notSentKey{}, notSent)
+	revived := false
+	cs := p.session()
+	params := &mcp.CallToolParams{Name: name, Arguments: args}
+	out, err := cs.CallTool(ctx, params)
+	// worded marks an error whose outcome the revival below already words.
+	worded := false
+	if err != nil && sessionDeadErr(err) {
+		// The session is a corpse (idle eviction, pod restart, SSE
+		// exhaustion). Revive so no failure is ever permanent, then
+		// split on proof: only a request that provably never left
+		// the process may be replayed by plumbing.
+		fresh, rerr := p.revive(ctx, cs)
+		switch {
+		case rerr != nil && neverSentErr(err) && ctx.Err() == nil:
+			// A cancelled call can carry the never-sent text from its
+			// failed cancel notice after it was written, so a call
+			// whose context ended gets the unknown outcome below.
+			err = fmt.Errorf("%v; gateway reconnect also failed: %v. "+
+				"The call did not run, because the gateway could not be reached. "+
+				"Send it again once the gateway answers, and run `straza doctor` if it stays out of reach", err, rerr)
+			worded = true
+		case rerr != nil:
+			// The call may have reached the gateway before the
+			// session died, so its outcome is as unknown as below.
+			err = fmt.Errorf("%v; gateway reconnect also failed: %v. %s %s", err, rerr, inFlightLost, unknownOutcome)
+			worded = true
+		case neverSentErr(err):
+			revived = true
+			out, err = fresh.CallTool(ctx, params)
+		default:
+			// Indeterminate original failure: the lane is healed but
+			// the call may have executed and is NOT replayed. The
+			// agent decides about a re-call with full context.
+			revived, worded = true, true
+			err = fmt.Errorf("%v. %s Straza reconnected the session but did not send the call again. %s",
+				err, inFlightLost, unknownOutcome)
+		}
+	}
+	p.journalCall(name, out, err, call, start, revived)
+	if err != nil {
+		// A DENY arrives as an isError result from the gateway and
+		// passes through above. A JSON-RPC error the gateway answered
+		// is its own sentence, which reaches the agent as written.
+		if said := gatewayAnswered(err); said != nil {
+			return nil, said
+		}
+		// What is left is infrastructure: fail closed with an
+		// actionable reason. A replay's failure gets the same rule as
+		// a first send's, by the replay's answer, because a send that
+		// never left the bridge reaches neither the service nor the mark.
+		if !worded {
+			status, _ := call.Get()
+			err = fmt.Errorf("%w. %s", err, nextStep(err, status, notSent.Load()))
+		}
+		return nil, fmt.Errorf("Straza: gateway call failed: %w", err) //nolint:staticcheck // ST1005: deliberate brand prefix; this text reaches the agent as the tool-failure reason
+	}
+	return out, nil
 }

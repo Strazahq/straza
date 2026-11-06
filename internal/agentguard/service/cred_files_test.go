@@ -76,17 +76,18 @@ func TestCredFileModes(t *testing.T) {
 
 // TestCredMachineBinding pins the machine binding: the same machine keeps
 // using the key across a restart, another machine identity refuses every
-// use with the machine-changed sentence, and a system without
-// /etc/machine-id keeps one random identity in the state directory.
+// use with the machine-changed sentence, which names the enrolled server,
+// and a system without /etc/machine-id keeps one random identity in the
+// state directory.
 func TestCredMachineBinding(t *testing.T) {
 	cases := []struct {
 		name    string
 		machine string // "" removes the machine id file
-		want    string // "" means the session starts
+		changed bool   // false means the session starts
 	}{
-		{"same machine", "machine-one\n", ""},
-		{"cloned machine", "machine-two\n", machineChangedSentence},
-		{"machine id gone", "", machineChangedSentence},
+		{"same machine", "machine-one\n", false},
+		{"cloned machine", "machine-two\n", true},
+		{"machine id gone", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,15 +103,16 @@ func TestCredMachineBinding(t *testing.T) {
 			r.restart()
 			_, err := r.start(alice, "w1")
 			var refused *Refused
+			want := personChangedFor(r.srv.serverURL())
 			switch {
-			case tc.want == "" && err != nil:
+			case !tc.changed && err != nil:
 				t.Fatalf("start on the same machine: %v", err)
-			case tc.want != "" && (!errors.As(err, &refused) || refused.Sentence != tc.want || refused.Status != http.StatusForbidden):
-				t.Fatalf("start after the machine changed: got %v, want 403 %q", err, tc.want)
+			case tc.changed && (!errors.As(err, &refused) || refused.Sentence != want || refused.Status != http.StatusForbidden):
+				t.Fatalf("start after the machine changed: got %v, want 403 %q", err, want)
 			}
 			st := r.s.Status(alice)
-			if st.Enrollment == nil || st.Enrollment.MachineChanged != (tc.want != "") {
-				t.Fatalf("status enrollment %+v, want machine_changed %v", st.Enrollment, tc.want != "")
+			if st.Enrollment == nil || st.Enrollment.MachineChanged != tc.changed {
+				t.Fatalf("status enrollment %+v, want machine_changed %v", st.Enrollment, tc.changed)
 			}
 		})
 	}

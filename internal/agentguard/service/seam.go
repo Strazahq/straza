@@ -87,6 +87,9 @@ type Session struct {
 	Renewal        Renewal
 	Packs          []localapi.Pack
 	Reused         bool
+	// StartText is the governance paragraph the server wrote at check-in,
+	// nil when the server sent none.
+	StartText *string
 }
 
 // Subject builds the policy subject of the session, the same way strazad

@@ -6,11 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // shrinkChunks makes the upload bounds small enough to exercise with
@@ -149,64 +147,6 @@ func TestSpoolDrainPartialFailureKeepsRemainder(t *testing.T) {
 	}
 }
 
-// TestSpoolCapDropsOldestParkedFiles pins the backlog bound: over the cap,
-// the OLDEST parked files are dropped (counted in the audit-dropped marker)
-// and the newest survive and upload.
-func TestSpoolCapDropsOldestParkedFiles(t *testing.T) {
-	shrinkChunks(t, 3<<20, 1000, 30<<10) // 30 KiB spool cap
-	dir := t.TempDir()
-	spool := NewSpool(filepath.Join(dir, "spool.jsonl"))
-
-	// Three parked files of ~20 KiB each, oldest first by mtime.
-	now := time.Now()
-	var newestIDs []string
-	for i, name := range []string{"audit-pending-aaa.jsonl", "audit-pending-bbb.jsonl", "audit-pending-ccc.jsonl"} {
-		var lines []string
-		for j := 0; j < 10; j++ {
-			id := name + "-" + strconv.Itoa(j)
-			lines = append(lines, `{"id":"`+id+`","data":{"content":"`+strings.Repeat("x", 2<<10)+`"}}`)
-			if i == 2 {
-				newestIDs = append(newestIDs, id)
-			}
-		}
-		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		mt := now.Add(time.Duration(i-3) * time.Hour)
-		if err := os.Chtimes(p, mt, mt); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	srv := &captureBatchServer{ids: map[string]bool{}}
-
-	n, err := spool.Drain(context.Background(), srv, "tok")
-	if err != nil {
-		t.Fatalf("Drain: %v", err)
-	}
-	if n != 10 {
-		t.Fatalf("drained %d, want 10 (only the newest file survives the cap)", n)
-	}
-	for _, id := range newestIDs {
-		if !srv.ids[id] {
-			t.Fatalf("newest file's record %s was not uploaded", id)
-		}
-	}
-	marker, err := os.ReadFile(filepath.Join(dir, DroppedMarkerName))
-	if err != nil {
-		t.Fatalf("dropped marker missing: %v", err)
-	}
-	if !strings.Contains(string(marker), "parked file(s)") {
-		t.Fatalf("dropped marker content = %q", marker)
-	}
-	// The marker a real cap-drop writes must parse back into the totals the
-	// doctor check reports (two of the three files fit under no cap here).
-	if st := ParseDroppedMarker(marker); st.Files != 2 || st.Events != 1 || st.Last.IsZero() {
-		t.Fatalf("parsed marker = %+v, want 2 files / 1 event with a drop time", st)
-	}
-}
-
 // spoolLineOfLen returns a valid one-line JSON record of exactly n bytes,
 // carrying id so the capture server can account for it.
 func spoolLineOfLen(t *testing.T, id string, n int) string {
@@ -220,7 +160,7 @@ func spoolLineOfLen(t *testing.T, id string, n int) string {
 
 // TestSpoolDrainMidsizeRecordNeverWedges pins the wedge case at production
 // sizes: a record over a 1 MiB scanner cap but under the 3 MiB chunk cap
-// would make ReadRecords fail with bufio.ErrTooLong, so EVERY drain would
+// would make the read fail with bufio.ErrTooLong, so EVERY drain would
 // abort at that file forever: no upload, no drop, no marker line, and audit
 // delivery for the machine silently halted while doctor blamed the server
 // check. Under the size invariant (read cap >= the largest chunk-carryable
@@ -250,7 +190,7 @@ func TestSpoolDrainMidsizeRecordNeverWedges(t *testing.T) {
 
 // TestSpoolRecordSizeInvariant pins the ordering that keeps Drain wedge-free
 // for EVERY record size: read cap >= largest chunk-carryable record
-// (drainChunkBytes-1, dropOversize's keep bound). Every record lands in
+// (drainChunkBytes-1, uploadFile's keep bound). Every record lands in
 // exactly one of two outcomes (upload, or COUNTED drop), and no size is ever
 // a read error; records around an oversize line still upload.
 func TestSpoolRecordSizeInvariant(t *testing.T) {

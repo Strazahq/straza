@@ -24,8 +24,10 @@ import {
   roleOf,
   roleToolRows,
   ruleMarks,
+  setOutcomes,
   sidesOf,
   stateOf,
+  toolsMoves,
   typedMatches,
   typedWrongly,
 } from "./drafts-model";
@@ -299,12 +301,29 @@ describe("the documents of the items", () => {
       { server: "demo-tools", tool: "get-tiny", before: false, after: true },
     ]);
     expect(roleToolRows(null, after).every((r) => !r.before && r.after)).toBe(true);
+    expect(toolsMoves(before, after)).toEqual([{ server: "demo-tools", added: ["get-tiny"], removed: ["get-env"], same: ["echo", "get-sum"] }]);
   });
 
-  it("marks each rule of an approval set against the live text", () => {
-    expect(ruleMarks(readersSet(true), readersSet(false)).map((r) => [r.rule.id, r.mark])).toEqual([["get-sum", "edited"], ["get-env", "removed"]]);
+  it("marks each rule of a policy set against the live text, an edited one with its live reading", () => {
+    const marks = ruleMarks(readersSet(true), readersSet(false));
+    expect(marks.map((r) => [r.rule.id, r.mark])).toEqual([["get-sum", "edited"], ["get-env", "removed"]]);
+    expect(marks[0].was?.id).toBe("get-sum");
+    expect(marks[0].was?.timeoutSeconds).toBe(120);
+    expect(marks[1].was).toBeUndefined();
     expect(ruleMarks(null, WRITERS_SET).map((r) => [r.rule.id, r.mark])).toEqual([["github-pr-hold", "new"]]);
     expect(ruleMarks(WRITERS_SET, WRITERS_SET).map((r) => r.mark)).toEqual(["same"]);
+  });
+
+  // Each case is a set's text and the outcomes its rules give, in the order
+  // needs approval, denied, allowed.
+  const deny = (id: string) => "    - id: " + id + "\n      tools: [mcp.call]\n      apps: [demo-tools]\n      effect: deny\n";
+  const outcomes: [string, string | undefined, string[]][] = [
+    ["a set that asks for approval", WRITERS_SET, ["hum"]],
+    ["a set that asks and denies", WRITERS_SET + deny("no-env"), ["hum", "deny"]],
+    ["no text", undefined, []],
+  ];
+  it.each(outcomes)("names the outcomes of %s", (_name, text, want) => {
+    expect(setOutcomes(text)).toEqual(want);
   });
 
   it("names the live objects a removal takes along", () => {

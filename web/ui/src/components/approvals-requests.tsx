@@ -45,10 +45,10 @@ import {
   deciderWhy,
   deciderWords,
   decidesWord,
-  laneWord,
   loadedLine,
   phaseTone,
   requestsCount,
+  runsWhereAlone,
   stateLine,
   waitingCount,
 } from "@/lib/approval-words";
@@ -136,9 +136,9 @@ export type RequestsProps = {
 
 // WhereChip names where the call goes: a server in the link hue so it
 // reads as a server, and the hook's shell, files or network in the plain
-// role chip. The lane sentence sits on the tooltip, since the chip is the
-// only place a row says where the call runs.
-function WhereChip({ where, kind, lane }: { where: string; kind: Call["whereKind"]; lane: string }) {
+// role chip. Where the call runs sits on the tooltip, since the chip is the
+// only place a row says it.
+function WhereChip({ where, kind, runs }: { where: string; kind: Call["whereKind"]; runs: string }) {
   if (!where) return null;
   return (
     <Tooltip>
@@ -149,7 +149,7 @@ function WhereChip({ where, kind, lane }: { where: string; kind: Call["whereKind
             : <RoleChip name={where} />}
         </span>
       </TooltipTrigger>
-      <TooltipContent>{laneWord(lane)}</TooltipContent>
+      <TooltipContent>{runs}</TooltipContent>
     </Tooltip>
   );
 }
@@ -296,7 +296,7 @@ export function RequestsTab({ seat, source = adminSource, isMine, needsDevice, o
         const c = callOf(row.original.summary);
         return (
           <span className="flex flex-wrap items-center gap-1 whitespace-normal [overflow-wrap:anywhere]">
-            <WhereChip where={c.where} kind={c.whereKind} lane={row.original.lane} />
+            <WhereChip where={c.where} kind={c.whereKind} runs={runsWhereAlone(row.original)} />
             <span className="font-mono">{c.call}</span>
           </span>
         );

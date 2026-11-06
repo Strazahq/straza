@@ -179,8 +179,8 @@ func TestRequireDrafts(t *testing.T) {
 			}
 		}},
 		{"a person with no standing", login("nell"), http.MethodGet, http.StatusForbidden, draftsAccessRefusal, nil},
-		{"an agent holding the global MCP admin", login("bot"), http.MethodGet, http.StatusForbidden, fmt.Sprintf(nonPersonAdminRefusal, "bot", "an agent"), nil},
-		{"an agent holding root", login("rootbot"), http.MethodPost, http.StatusForbidden, fmt.Sprintf(nonPersonAdminRefusal, "rootbot", "an agent"), nil},
+		{"an agent holding the global MCP admin", agentIDToken(t, app, "bot"), http.MethodGet, http.StatusForbidden, fmt.Sprintf(nonPersonAdminRefusal, "bot", "an agent"), nil},
+		{"an agent holding root", agentIDToken(t, app, "rootbot"), http.MethodPost, http.StatusForbidden, fmt.Sprintf(nonPersonAdminRefusal, "rootbot", "an agent"), nil},
 		{"an admin API token with apps:write", mint("apps-writer", "apps:write"), http.MethodPost, http.StatusForbidden,
 			"This token holds no drafts scope, and writing or checking a draft needs drafts:write. Mint a token with the scopes drafts:read and drafts:write with strazactl api-token create.", nil},
 		{"an admin API token with drafts:write, reading", mint("drafts-writer", "drafts:write"), http.MethodGet, http.StatusForbidden,
@@ -433,7 +433,7 @@ func TestDraftsRefuseADisabledOrLockedSession(t *testing.T) {
 	}
 	app.denylist.RevokeUser(lars.ID)
 	cases := []struct{ name, bearer, says string }{
-		{"a person whose user was disabled", doraSession, "user is disabled. Contact your administrator"},
+		{"a person whose user was disabled", doraSession, disabledUserMsg},
 		{"a person whose user was locked", larsSession, revokedIdentityMsg},
 		{"an active person", kimSession, ""},
 	}

@@ -268,7 +268,7 @@ straza: the identity provider refused the agent's sign-in (invalid_client): clie
 ```
 
 
-Retiring the identity is the identity manager's act. A SCIM deactivation or delete disables the account, revokes its sessions and removes its per-user grants. An administrator can also soft-delete it with `DELETE /v1/admin/users/{id}`, which answers `{"status":"deleted"}` and removes the row from `strazactl users list`. Neither the console nor `strazactl` has a delete.
+Retiring the identity is the identity manager's act. A SCIM deactivation or delete disables the account, revokes its sessions and removes its per-user grants. An administrator can also soft-delete it with `DELETE /v1/admin/users/{id}`, which answers `{"status":"deleted"}` and removes the row from `strazactl users list`. A delete the database refuses answers 500 and changes nothing. Neither the console nor `strazactl` has a delete.
 
 ## Caveats {.nostep}
 

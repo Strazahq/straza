@@ -10,9 +10,9 @@ import (
 
 // TestDisabledUserIDTokenRefused pins that a disabled user's ID token is
 // refused alike on every lane that takes one: the admin plane, the person
-// routes, enroll and the session exchange each answer 403 with the words
-// of the session lane and write exactly one login failure record that
-// names the user, with via id-token and the reason. An active user's ID
+// routes, enroll and the session exchange each answer 403 with
+// disabledUserMsg and write exactly one login failure record that names the
+// user, with via id-token and the reason. An active user's ID
 // token still opens the admin plane, and a locked user keeps its sentence.
 func TestDisabledUserIDTokenRefused(t *testing.T) {
 	t.Parallel()
@@ -39,7 +39,7 @@ func TestDisabledUserIDTokenRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const disabled = "user is disabled. Contact your administrator"
+	const disabled = disabledUserMsg
 	device := map[string]any{"name": "dee-laptop", "platform": "linux", "fingerprint": "fp-dee"}
 	lanes := []struct {
 		name, method, path, harness string

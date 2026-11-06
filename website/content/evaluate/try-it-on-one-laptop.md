@@ -14,7 +14,7 @@ steps: true
 applies_to: standalone
 tested:
   version: v1.0.0-1700-g89d0cf1d
-  platform: in a fresh Alpine 3.20 container on Linux amd64, with the browser steps in headless Chromium
+  platform: in a fresh Alpine 3.20 container on Linux amd64, with the browser steps in headless Chromium. The approve dialog's sentence and its toast were reworded from the code on 2026-11-03 and not walked
   date: 2026-11-02
   except: Claude Code itself, whose calls went to straza hook by hand, and the enroll browser sign-in, done by device code
 keywords: try laptop standalone enroll install first deny confirm approve self-service this browser requests retry claude code
@@ -172,7 +172,7 @@ printf '%s' '{"hook_event_name":"PreToolUse","session_id":"laptop-1","cwd":"/tmp
 ```
 
 ```text
-{"hookSpecificOutput":{"additionalContext":"Straza governance is active for this session. You are operating as \"alice\" (roles: straza-enroll-browser) against http://127.0.0.1:18420; policy snapshot c485b47b783a, attestation advisory. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial.","hookEventName":"SessionStart"},"systemMessage":"🛡 Straza governance active: alice (straza-enroll-browser) @ http://127.0.0.1:18420 · policy c485b47b783a · attestation advisory"}
+{"hookSpecificOutput":{"additionalContext":"Straza governs this session as \"alice\". Every tool call is checked against policy and recorded in the audit log. When a call is denied, tell the user what the reason says, then do what it says next: wait for a person's approval, change the call, or try once more later. A denial that says none of these is a policy decision, and the same call will be denied again. Do not try to reach the denied result another way.","hookEventName":"SessionStart"},"systemMessage":"🛡 Straza governance active: alice (straza-enroll-browser) @ http://127.0.0.1:18420 · policy c485b47b783a · attestation advisory"}
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet."}}
 Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.
 exit 2
@@ -232,11 +232,11 @@ Open **This browser**, press **Enable this browser**, keep or change the name, a
 
 Ask Claude Code to run `git push`. The hook denies it at once. Claude Code shows a reason that starts `Straza: this call needs the requester's confirmation` and ends with a reference.
 
-On the self-service page, open **Requests**. Within a few seconds a row shows `git push` for alice, with `only the requester confirms`. Press **Approve**, then **Approve request**. The dialog says the call runs now, but with Claude Code it runs when the agent sends it again.
+On the self-service page, open **Requests**. Within a few seconds a row shows `git push` for alice, with `only the requester confirms`. Press **Approve**, then **Approve request**. The dialog says `The call runs once, when the agent retries it soon after your yes.`
 
 Within 60 seconds of your approval, ask Claude Code to run `git push` again in the same session.
 
-{{< see >}}`Approved. git push runs now for alice.` in the browser, and Claude Code runs the command on its next try. A try after that needs a new approval.{{< /see >}}
+{{< see >}}`Approved. git push runs for alice if the agent retries it soon.` in the browser, and Claude Code runs the command on its next try. A try after that needs a new approval.{{< /see >}}
 
 {{< details summary="The same calls without Claude Code" >}}
 Send this in Terminal 4 for the deny and its reference. After you approve in the browser, send it again for the allow.

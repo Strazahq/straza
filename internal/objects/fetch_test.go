@@ -202,9 +202,10 @@ func TestFetchDropsExactRepeats(t *testing.T) {
 // TestFetchServerRules pins what stops a listing before or between pages:
 // no listing credential (no call at all, and no fallback), a server that
 // is not running or whose tool list was not read yet, a listing tool it
-// does not have or that is not read-only, a call that fails, and the page
-// and listing time limits. soon marks the failures a server that is still
-// starting answers, which the loop tries again after a minute.
+// does not have or that is not read-only, a call that fails, a call the
+// server refuses with an HTTP status, and the page and listing time limits.
+// soon marks the failures a server that is still starting answers, which
+// the loop tries again after a minute.
 func TestFetchServerRules(t *testing.T) {
 	ok := map[string]*mcp.CallToolResult{"": page("", item("a", nil, nil))}
 	cases := []struct {
@@ -216,7 +217,7 @@ func TestFetchServerRules(t *testing.T) {
 		noCalls bool
 	}{
 		{name: "no listing credential", secret: true, noCalls: true,
-			want: "objects-demo has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set objects-demo --listing, then refresh with strazactl apps objects refresh objects-demo."},
+			want: "objects-demo has no listing credential, so Straza cannot list its repos. Set one on its server page under Server authentication, or with strazactl apps secret set objects-demo --listing. Then press List again on its repos tab, or run strazactl apps objects refresh objects-demo."},
 		{name: "not running", noCalls: true, soon: true, setup: func(f *fakeCaller, _ *Lists) { delete(f.tools, "objects-demo") },
 			want: "objects-demo is not running, so Straza could not call repo_list. Start it, then refresh."},
 		{name: "tool list not read yet", noCalls: true, soon: true,
@@ -232,6 +233,16 @@ func TestFetchServerRules(t *testing.T) {
 			want: "objects-demo is not running, so Straza could not call repo_list. Start it, then refresh."},
 		{name: "a call that fails", setup: func(f *fakeCaller, _ *Lists) { f.errs["objects-demo"] = errors.New("dial tcp: refused") },
 			want: "Straza could not reach objects-demo to call repo_list. Check objects-demo's logs on its Activity tab, then refresh."},
+		{name: "a listing credential the server refuses", secret: true,
+			setup: func(f *fakeCaller, l *Lists) {
+				l.opts.Secrets = fakeSecrets{"app-1": {ID: "listing-1", Value: "v"}}
+				f.errs["objects-demo"] = fmt.Errorf("shown: %w", &manager.RefusedError{Server: "objects-demo", Status: 401})
+			},
+			want: "objects-demo refused the listing credential with HTTP 401 Unauthorized, so Straza could not list its repos. objects-demo's own config must hold the value Straza stores: put it there and restart objects-demo, or store a new value under Server authentication on its server page and give objects-demo that one. Then press List again on its repos tab, or run strazactl apps objects refresh objects-demo."},
+		{name: "a listing call the server refuses", setup: func(f *fakeCaller, _ *Lists) {
+			f.errs["objects-demo"] = &manager.RefusedError{Server: "objects-demo", Status: 403}
+		},
+			want: "objects-demo answered the call to repo_list with HTTP 403 Forbidden, so Straza could not list its repos. Check objects-demo's logs on its Activity tab, then refresh."},
 		{name: "a page over its time", setup: func(f *fakeCaller, l *Lists) { f.block, l.pageTimeout = true, 20*time.Millisecond },
 			want: "repo_list did not answer within 30 seconds on page 1."},
 		{name: "a listing over its time", setup: func(f *fakeCaller, l *Lists) { f.block, l.listTimeout = true, 20*time.Millisecond },

@@ -119,12 +119,18 @@ type faultDevices struct {
 }
 
 // Revoke fails while "devices.revoke" is armed, before the store's
-// transaction starts.
-func (d faultDevices) Revoke(ctx context.Context, id, reason string, event store.OutboxEvent) error {
+// transaction starts. While "devices.revoke.lost" is armed, the revoke
+// commits and then answers the armed error, as a commit whose answer the
+// connection lost does.
+func (d faultDevices) Revoke(ctx context.Context, id, reason string, event store.OutboxEvent) ([]store.ClosedSession, error) {
 	if err := d.f.fault("devices.revoke"); err != nil {
-		return err
+		return nil, err
 	}
-	return d.DeviceRepo.Revoke(ctx, id, reason, event)
+	ended, err := d.DeviceRepo.Revoke(ctx, id, reason, event)
+	if lost := d.f.fault("devices.revoke.lost"); err == nil && lost != nil {
+		return nil, lost
+	}
+	return ended, err
 }
 
 func (d faultDevices) GetByID(ctx context.Context, id string) (store.Device, error) {

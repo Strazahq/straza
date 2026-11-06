@@ -126,16 +126,16 @@ func TestCredEnrollLanes(t *testing.T) {
 		{
 			name: "the code lane under min_sign_in browser", min: "browser",
 			wantErr: "Straza refused this sign-in because your Straza admin requires a browser sign-in, and a sign-in code cannot show which machine it was approved for. " +
-				"Run `straza enroll` in a desktop session on this machine.",
+				"Run `straza enroll --server %[1]s` in a desktop session on this machine.",
 		},
 		{
 			name: "an older server", lane: localapi.LaneBrowser,
-			wantErr: "The Straza server at %s does not offer a browser sign-in yet. Run `straza enroll --use-device-code`, or ask your Straza admin to upgrade the server.",
+			wantErr: "The Straza server at %[1]s does not offer a browser sign-in yet. Run `straza enroll --server %[1]s --use-device-code`, or ask your Straza admin to upgrade the server.",
 		},
 		{
 			name: "a lane the service does not know", lane: "phone",
 			wantErr: "Straza cannot sign you in on the lane \"phone\", because it knows browser and device-code only. " +
-				"Run `straza enroll`, or `straza enroll --use-device-code` to sign in with a code.",
+				"Run `straza enroll --server %[1]s`, or `straza enroll --server %[1]s --use-device-code` to sign in with a code.",
 		},
 	}
 	for _, tc := range cases {
@@ -151,7 +151,7 @@ func TestCredEnrollLanes(t *testing.T) {
 			ev.wg.Wait()
 			if tc.wantErr != "" {
 				want := tc.wantErr
-				if strings.Contains(want, "%s") {
+				if strings.Contains(want, "%[1]s") {
 					want = fmt.Sprintf(want, r.srv.serverURL())
 				}
 				if err == nil || err.Error() != want {

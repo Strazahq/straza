@@ -55,7 +55,7 @@ func TestConnectRoutesJudgeTheSession(t *testing.T) {
 			return checkin, code, ""
 		}},
 	}
-	const disabled = "user is disabled. Contact your administrator"
+	const disabled = disabledUserMsg
 	cases := []struct {
 		name         string
 		arm          func(u store.User, device, session string)
@@ -70,7 +70,7 @@ func TestConnectRoutesJudgeTheSession(t *testing.T) {
 			}
 		}, http.StatusForbidden, disabled, "user is disabled"},
 		{"deleted with the session row still active", func(u store.User, _, _ string) {
-			if _, err := app.store.Users().SoftDelete(ctx, u.ID); err != nil {
+			if _, err := app.store.Users().SoftDelete(ctx, u.ID, nil); err != nil {
 				t.Fatal(err)
 			}
 		}, http.StatusForbidden, disabled, "user is disabled"},

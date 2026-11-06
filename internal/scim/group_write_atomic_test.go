@@ -41,7 +41,7 @@ func newAtomicGroupServer(t *testing.T, wrap func(store.Store) store.Store) *ato
 	s := New(Deps{
 		Store:        deps,
 		Authenticate: func(r *http.Request, _ string) (context.Context, int, string) { return r.Context(), 0, "" },
-		Deactivate:   func(context.Context, string, string) {},
+		Deactivate:   deactivateIn(deps),
 		Reactivate:   func(context.Context, string) {},
 		IdentityChanged: func(_ context.Context, _ string, id string) {
 			g.mu.Lock()

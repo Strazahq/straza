@@ -108,7 +108,7 @@ func (a *App) decideCall(ctx context.Context, c gatewayCall) gatewayVerdict {
 	}
 	// The tier-one hit above is the binding check, or for a drafting tool
 	// the role check, so the call carries the granted fact grantedOf answers
-	// (spec/policyset revisions 17 and 20).
+	// (spec/policyset revisions 17, 20 and 27).
 	ev := policy.Event{
 		Kind: policy.EventToolPre, Tool: policy.ToolMCPCall, App: target.app, ToolName: target.tool,
 		Granted: grantedOf(target),
@@ -144,7 +144,7 @@ func (a *App) decideCall(ctx context.Context, c gatewayCall) gatewayVerdict {
 	}
 	msg := ""
 	if !a.gateway.limiter.Allow(key, rps) {
-		msg = fmt.Sprintf("Straza: rate limit exceeded for the MCP server %q (%.0f rps). Retry shortly", target.app, rps)
+		msg = fmt.Sprintf("Straza: rate limit exceeded for the MCP server %q (%.0f rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.", target.app, rps)
 	} else if c.describe == nil && target.app == nativeAppName && target.tool == nativeToolDraftSubmit {
 		msg = a.submitRateRefusal(c.claims.Subject)
 	}
@@ -255,7 +255,9 @@ func (a *App) decideCall(ctx context.Context, c gatewayCall) gatewayVerdict {
 // resolveTarget is the visibility step of c: the catalog it resolves in, the
 // tool's catalog name, the target and whether the caller sees it, and the
 // event the record of an unseen name carries, with that name cut by
-// cutUnresolved. A server endpoint takes the server's own tool name, so
+// cutUnresolved. On /mcp an unseen name that holds "__" is recorded as the
+// server before it and the tool after it, each cut on its own. A server
+// endpoint takes the server's own tool name, so
 // both name the server. The grant route and a described call reach the
 // named tool as /mcp does, and the record names the server and the tool as
 // every grant record does. The tool's target must name both, so a server or
@@ -277,6 +279,12 @@ func (a *App) resolveTarget(c gatewayCall) (*sessionCatalog, string, gwTarget, b
 	}
 	tier1 := a.catalogFor(c.sub.Roles)
 	t, ok := tier1.targets[c.name]
+	if app, tool, split := strings.Cut(c.name, "__"); !ok && split {
+		// A catalog name is the server's name, which never holds "__", then
+		// "__" and the tool's name, so the record of an unseen name names
+		// the server and the tool apart, as the record of a call does.
+		probe.App, probe.ToolName = cutUnresolved(app), cutUnresolved(tool)
+	}
 	return tier1, c.name, t, ok, probe
 }
 

@@ -6,13 +6,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
+	"github.com/strazahq/straza/internal/policy"
 )
 
 // bodyLimit is the server.mcpMaxBodyBytes the body limit tests run under,
@@ -183,5 +188,81 @@ func TestBufferedRequestID(t *testing.T) {
 		if got := string(bufferedRequestID(strings.NewReader(row.prefix))); got != row.want {
 			t.Errorf("%s: id = %q, want %q", row.name, got, row.want)
 		}
+	}
+}
+
+// stalledBody is a request body that yields prefix and then fails with err,
+// as net/http's body fails when its read deadline passes mid-body.
+type stalledBody struct {
+	prefix *strings.Reader
+	err    error
+}
+
+func (b *stalledBody) Read(p []byte) (int, error) {
+	if b.prefix.Len() > 0 {
+		return b.prefix.Read(p)
+	}
+	return 0, b.err
+}
+
+func (b *stalledBody) Close() error { return nil }
+
+// timeoutError is a net.Error that reports a timeout without wrapping
+// os.ErrDeadlineExceeded.
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "stream read deadline" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+// TestGatewaySlowBodyAnswers pins the answer to an MCP request whose body
+// stopped arriving until its read deadline passed: a JSON-RPC error -32600
+// that says the body arrived too slowly and was cut, and what to do next,
+// with the request's id and HTTP 200 when the part that arrived names one,
+// and id null and HTTP 408 when it does not, and one Warn line with the
+// session. A body that is not JSON keeps the parse error and no line.
+func TestGatewaySlowBodyAnswers(t *testing.T) {
+	t.Parallel()
+	const slow = "Straza: this MCP request was not read, because its body arrived too slowly and Straza cut it off. " +
+		"Check the network between this machine and Straza, or send less in one call, then try the call once more. If it fails again, tell the user."
+	deadline := &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}
+	rows := []struct {
+		name, prefix string
+		err          error
+		status       int
+		id           any
+		code         float64
+		msg          string
+		logged       bool
+	}{
+		{"stalled after the id", `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"x","arguments":{"text":"`, deadline,
+			http.StatusOK, float64(7), -32600, slow, true},
+		{"stalled before an id", `{"jsonrpc":"2.0",`, deadline, http.StatusRequestTimeout, nil, -32600, slow, true},
+		{"a net.Error that times out", `{"jsonrpc":"2.0","id":"a",`, timeoutError{}, http.StatusOK, "a", -32600, slow, true},
+		{"a body that is not JSON", `not json`, io.EOF, http.StatusOK, nil, -32700,
+			"parse error: single JSON-RPC message expected (batching is not supported)", false},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			log, logs := captureLogger()
+			app, _ := testAppPreRun(t, []func(*App){func(a *App) { a.log = log }})
+			r := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			r.Body = &stalledBody{prefix: strings.NewReader(row.prefix), err: row.err}
+			w := httptest.NewRecorder()
+			app.handleMCPPost(w, r, authn.Claims{Session: "sess-slow"}, policy.Subject{})
+			var answer map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &answer); err != nil {
+				t.Fatalf("answer %q: %v", w.Body.String(), err)
+			}
+			errObj, _ := answer["error"].(map[string]any)
+			if w.Code != row.status || answer["id"] != row.id || errObj["code"] != row.code || errObj["message"] != row.msg {
+				t.Errorf("answer = %d %s, want %d id %v code %v %q", w.Code, w.Body.String(), row.status, row.id, row.code, row.msg)
+			}
+			n := strings.Count(logs.String(), "strazad cut an MCP request whose body arrived too slowly")
+			if want := map[bool]int{true: 1, false: 0}[row.logged]; n != want || (row.logged && !strings.Contains(logs.String(), "sess-slow")) {
+				t.Errorf("%d Warn lines for the slow body, want %d with the session:\n%s", n, want, logs.String())
+			}
+		})
 	}
 }

@@ -18,7 +18,6 @@ const (
 	objectsNotRunningRefusal = "%s is not running, so Straza cannot read its tool marks. Start it, then draft again."
 	objectsFaultFix          = "Fix the marks on the server, or write straza.objects in its manifest by hand."
 	objectsUnchanged         = "%s's pinned %s already match its marks. Nothing to draft."
-	objectsDraftNote         = "Pins the %s that %s declares in its tool marks."
 )
 
 // handleAppObjectsDraft is POST /v1/admin/apps/{id}/objects/draft. It reads
@@ -66,15 +65,14 @@ func (a *App) handleAppObjectsDraft(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, http.StatusInternalServerError, "Straza could not write the manifest of "+row.Name+" as a draft. Try again, and read the strazad log if it keeps failing.", err)
 		return
 	}
-	a.openObjectsDraft(w, r, drafts.Item{Kind: drafts.KindApp, Name: row.Name, Op: drafts.OpPut, Doc: string(doc)},
-		fmt.Sprintf(objectsDraftNote, merged.PluralWord(), row.Name))
+	a.openObjectsDraft(w, r, drafts.Item{Kind: drafts.KindApp, Name: row.Name, Op: drafts.OpPut, Doc: string(doc)})
 }
 
-// openObjectsDraft stores item as a new draft of the api door by the caller
-// with note, as handleDraftCreate stores a draft: intake first, the open
-// limit, then the check and the records, answering 201 with the draft and
-// its verdict.
-func (a *App) openObjectsDraft(w http.ResponseWriter, r *http.Request, item drafts.Item, note string) {
+// openObjectsDraft stores item as a new draft of the api door by the caller,
+// as handleDraftCreate stores a draft: intake first, the open limit, then
+// the check and the records, answering 201 with the draft and its verdict.
+// The draft carries no note, because a note reads as the caller's own words.
+func (a *App) openObjectsDraft(w http.ResponseWriter, r *http.Request, item drafts.Item) {
 	ctx := r.Context()
 	author, err := a.directAuthor(ctx)
 	var c draftCaller
@@ -86,7 +84,7 @@ func (a *App) openObjectsDraft(w http.ResponseWriter, r *http.Request, item draf
 		return
 	}
 	c.door = drafts.DoorAPI
-	d := drafts.Draft{Revision: 1, State: drafts.StateOpen, Door: drafts.DoorAPI, Note: note, Authors: []drafts.Principal{author}, Items: []drafts.Item{item}}
+	d := drafts.Draft{Revision: 1, State: drafts.StateOpen, Door: drafts.DoorAPI, Authors: []drafts.Principal{author}, Items: []drafts.Item{item}}
 	fs := bodyIntake(d, author, nil)
 	if refuseCertain(w, fs) {
 		return

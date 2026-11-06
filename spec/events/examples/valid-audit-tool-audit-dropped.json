@@ -1,0 +1,21 @@
+{
+  "specversion": "1.0",
+  "id": "5d1c0f6e-2b7a-5c3e-9f41-8a2d7e6b4c10",
+  "type": "straza.audit.tool",
+  "source": "straza",
+  "time": "2026-11-05T10:06:12.408Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "event": "audit.dropped",
+    "droppedRecords": 15,
+    "oversizeRecords": 1,
+    "evictedFiles": 2,
+    "evictedRecords": 11,
+    "refusedCalls": 3,
+    "dropEvents": 6,
+    "firstDrop": "2026-11-05T10:00:00Z",
+    "lastDrop": "2026-11-05T10:05:00Z",
+    "reason": "The Straza background service on this machine lost 15 audit records of this user before they reached strazad, between 2026-11-05T10:00:00Z and 2026-11-05T10:05:00Z. 1 was larger than one upload can carry. It discarded 2 unsent spool files holding 11 records because uploads failed while the unsent backlog passed the spool cap. It refused 3 decide or capture calls because this user already had as many decide and capture calls running as it takes at once, or because the call was malformed or too large to read. A refused tool call was denied with no record, and a refused captured turn was never recorded. That audit is lost. Look for the gap in this user's other records, and check the Straza service log on that machine for failed uploads."
+  }
+}

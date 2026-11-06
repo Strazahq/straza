@@ -110,7 +110,7 @@ func TestDecideOfflineGate(t *testing.T) {
 // keep the grace. Only a transport failure, or no renewal, may claim the
 // server is unreachable.
 func TestDecideRenewalWording(t *testing.T) {
-	const disabled = "user is disabled. Contact your administrator"
+	const disabled = "this user is disabled, so Straza refuses this request. Ask your IGA owner or a Straza administrator to enable the user."
 	const bare403 = "the server answered HTTP 403 and gave no reason. Ask your administrator whether this user or device is still enabled, " +
 		"and check whether a proxy in front of strazad replaces its answers."
 	rows := []struct {
@@ -123,7 +123,7 @@ func TestDecideRenewalWording(t *testing.T) {
 	}{
 		{"401 refresh and no identity to re-acquire", 900, -10 * time.Hour,
 			Renewal{RenewRejected, "no enrolled identity: open u/1000/key.pem: no such file or directory"},
-			[]string{"expired", "renewal failed", "Restart the session"}, []string{"unreachable"}},
+			[]string{"expired", "renewal failed", "start a new session"}, []string{"unreachable"}},
 		{"the re-acquire is refused because the device was revoked", 900, -10 * time.Hour,
 			Renewal{RenewTerminal, "this device or user has been revoked. Contact your administrator"},
 			[]string{"refused", "revoked", "administrator"}, []string{"unreachable", "restart the session"}},
@@ -150,7 +150,7 @@ func TestDecideRenewalWording(t *testing.T) {
 			Renewal{RenewTerminal, bare403}, []string{"Straza: session renewal was refused: the server answered HTTP 403 and gave no reason."}, nil},
 		{"enterprise, a proxy answers with a 429 and no reason", 0, -time.Minute,
 			Renewal{RenewUnjudged, "the server answered HTTP 429 and gave no reason."},
-			[]string{"the server answered HTTP 429 and gave no reason. The next tool call tries the renewal again."}, nil},
+			[]string{"the server answered HTTP 429 and gave no reason. Try the call once more in a minute, which tries the renewal again."}, nil},
 		{"enterprise, the renewal is refused", 0, -time.Minute,
 			Renewal{RenewTerminal, disabled}, []string{"Straza: session renewal was refused: " + disabled}, nil},
 		{"enterprise, strazad cannot be reached", 0, -time.Minute,
@@ -189,7 +189,7 @@ func TestDecideRenewalWording(t *testing.T) {
 // and otherwise the credential half's sentence stands. None of it records.
 func TestDecidePolicyFailureAfterRenewal(t *testing.T) {
 	const missing = "this session is live, but the policy snapshot is missing on this machine, so tool calls are denied until straza has it."
-	failed := "). Restart the session, or run `straza doctor`."
+	failed := "). Try the call once more in a minute. If it is denied again, tell the user to start a new session or run `straza doctor`."
 	rows := []struct {
 		name    string
 		expires time.Duration
@@ -198,8 +198,8 @@ func TestDecidePolicyFailureAfterRenewal(t *testing.T) {
 		parts   []string
 	}{
 		{"the server refuses the renewal because the user is disabled", -10 * time.Minute,
-			Renewal{RenewTerminal, "user is disabled. Contact your administrator"},
-			"Straza: session renewal was refused: user is disabled. Contact your administrator", nil},
+			Renewal{RenewTerminal, "this user is disabled, so Straza refuses this request. Ask your IGA owner or a Straza administrator to enable the user."},
+			"Straza: session renewal was refused: this user is disabled, so Straza refuses this request. Ask your IGA owner or a Straza administrator to enable the user.", nil},
 		{"the token is refused and no identity can check in", -10 * time.Minute,
 			Renewal{RenewRejected, "no enrolled identity: open key.pem: no such file or directory"}, "",
 			[]string{"session token expired ", " ago and automatic renewal failed (no enrolled identity: ", failed}},
@@ -209,7 +209,7 @@ func TestDecidePolicyFailureAfterRenewal(t *testing.T) {
 		{"a proxy answers the renewal with a 429 and no reason", -10 * time.Minute,
 			Renewal{RenewUnjudged, "the server answered HTTP 429 and gave no reason."}, "",
 			[]string{"session token expired ", " ago, and the renewal got an answer that does not say whether this session is still accepted: " +
-				"the server answered HTTP 429 and gave no reason. The next tool call tries the renewal again."}},
+				"the server answered HTTP 429 and gave no reason. Try the call once more in a minute, which tries the renewal again."}},
 		{"a renewal that landed on a time that has passed", -10 * time.Minute, Renewal{}, "Straza: " + missing, nil},
 		{"a live session", time.Hour, Renewal{}, "Straza: " + missing, nil},
 	}
@@ -430,5 +430,30 @@ spec:
 	}
 	if ans.Decision.Effect != policy.EffectDeny || !ans.Journal.FailClosed || ans.Journal.Escalation != "server" || slow.calls.Load() != 1 {
 		t.Errorf("answer = %+v, want the server lane's fail-closed deny after one classify", ans)
+	}
+}
+
+// TestOutageReasonsBoundTheRetry pins the service's refusals for a server it
+// could not reach: each says the fault is a connection problem where it is
+// one and asks for one more try, never an open retry.
+func TestOutageReasonsBoundTheRetry(t *testing.T) {
+	expired := Session{ExpiresAt: time.Now().Add(-time.Hour)}
+	for name, reason := range map[string]string{
+		"no answer at the grace end":    expiredReason(expired, 0),
+		"a renewal that failed":         renewFailedReason(time.Hour, "store unavailable"),
+		"an answer that judged nothing": renewUnjudgedReason(time.Hour, "the server answered HTTP 429 and gave no reason."),
+		"approval lane unreachable":     onlineDenyReason(errors.New("dial tcp: i/o timeout"), "an approval-gated action", "Denied (fail-closed)"),
+		"server check unreachable":      onlineDenyReason(errors.New("dial tcp: i/o timeout"), "a server-checked action", "Denied (run `straza doctor`)"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(reason, "Try the call once more in a minute") || !strings.Contains(reason, "denied again, tell the user") {
+				t.Errorf("%q does not bound the retry to one more try", reason)
+			}
+			for _, open := range []string{"Restart the session", "The next tool call", "reconnect", "keeps happening"} {
+				if strings.Contains(reason, open) {
+					t.Errorf("%q still says %q", reason, open)
+				}
+			}
+		})
 	}
 }

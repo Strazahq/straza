@@ -247,7 +247,7 @@ The enrollment a 1.1.x client made works nowhere, so each person runs `straza en
 A machine with no display enrolls with `straza enroll --use-device-code`. Under the enterprise profile `governance.minSignIn` defaults to `browser`, which refuses a sign-in code, because a code cannot show which machine it was approved for. A deployment whose people must enroll such machines sets `STRAZA_MIN_SIGN_IN=code`, which accepts a sign-in code on every machine.
 
 {{< fails >}}
-``Straza refused this sign-in because your Straza admin requires a browser sign-in, and a sign-in code cannot show which machine it was approved for. Run `straza enroll` in a desktop session on this machine.``
+``Straza refused this sign-in because your Straza admin requires a browser sign-in, and a sign-in code cannot show which machine it was approved for. Run `straza enroll --server https://straza.example.com` in a desktop session on this machine.``
 : The person enrolled with `--use-device-code` on a server that requires the browser sign-in. Run `straza enroll` in a desktop session on that machine.
 {{< /fails >}}
 
@@ -558,6 +558,8 @@ To retire a machine, take three steps in order:
 3. Revoke each person's device of that machine, on the person's sheet in the console or with `strazactl devices list alice` and `strazactl devices revoke alice DEVICE-ID`, as [Cut one machine]({{< relref "guides/operate/kill-switch-runbook.md#cut-one-machine" >}}) shows. For an AI agent that ran there, run `strazactl users nhi-key unset build-bot`.
 
 Revoking closes the time in which a copy of the machine's keys, such as one in a disk image, could still start a session.
+
+If the package goes before step 1, the wiring stays and names a binary that is gone. Where the Claude Code wiring carries `onFailure`, which `grep onFailure` on its managed file shows, Claude Code 2.1.295 and later then blocks every tool call. Older Claude Code wiring, Codex CLI and Gemini CLI run their calls unchecked. Install the package again and take step 1, or delete Straza's entries from each harness's managed file by hand.
 
 
 On a Windows machine, an administrator removes the Straza MSI in an elevated PowerShell, with the install command of [its step]({{< relref "guides/operate/install.md#install-the-service-on-windows" >}}) and `/x` in place of `/i`. The `PURGE` property decides what happens to the keys in `C:\ProgramData\straza-service`.

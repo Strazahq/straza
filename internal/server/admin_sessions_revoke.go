@@ -24,36 +24,79 @@ const (
 		"and its database did not answer the lookup that tells which. Run strazactl sessions revoke %s again. The strazad log names the cause under request id %s."
 )
 
-// revokeDevice deletes the device row with its revocation row of reason and
-// its straza.revocation.device event in one transaction, then runs the rest
-// of the kill-switch cascade handleDeviceRevoke describes. It is shared by
-// the admin route and the key-reuse refusal of a key check-in. It answers
-// store.ErrNotFound, and does nothing else, when the row is already gone.
-// On any other error nothing durable changed and no push goes out, but this
-// server's denylist refuses the device at once. The write runs on a context
-// the client's leaving does not cancel, bounded by adminWriteBound, because
-// the check-in route that refuses a reused key is not bounded like an admin
-// write, and a copy's holder who hangs up must not cancel the revoke its
-// own check-in set off.
-func (a *App) revokeDevice(r *http.Request, deviceID, reason string) error {
+// revokeDevice deletes the device row of d with its revocation row of
+// reason and its straza.revocation.device event in one transaction, which
+// also ends the device's active sessions, then runs the rest of the
+// kill-switch cascade handleDeviceRevoke describes. Each ended session is
+// refused locally, as a revoked session is, and gets one session.end record
+// with outcome and reason. It is shared by the admin route and the
+// key-reuse refusal of a key check-in. It answers store.ErrNotFound, and
+// does nothing else, when the row is already gone. On any other error
+// nothing durable changed and no push goes out, but this server's denylist
+// refuses the device at once. The write runs on a context the client's
+// leaving does not cancel, bounded by adminWriteBound, so a copy's holder
+// who hangs up cannot cancel the revoke its own check-in set off.
+func (a *App) revokeDevice(r *http.Request, d store.Device, reason, outcome string) error {
 	// Payload carries ONLY the device id: the spine consumer keys the denylist
 	// scope off which field is set, so a user id riding along would lock the
 	// whole user (spine/revocation.go apply).
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), adminWriteBound)
 	defer cancel()
-	ev, err := a.cloudEvent(ctx, "straza.revocation.device", map[string]any{"device": deviceID})
+	ev, err := a.cloudEvent(ctx, "straza.revocation.device", map[string]any{"device": d.ID})
+	var ended []store.ClosedSession
 	if err == nil {
-		err = a.store.Devices().Revoke(ctx, deviceID, reason, ev)
+		ended, err = a.revokeDeviceRow(ctx, d, reason, ev)
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		return err
 	}
-	a.denylist.RevokeDevice(deviceID)
+	a.denylist.RevokeDevice(d.ID)
 	if err != nil {
 		return err
 	}
-	a.pushRevocation("device", deviceID)
+	a.pushRevocation("device", d.ID)
+	for _, c := range ended {
+		a.refuseLocally([]string{c.ID})
+		a.emitAuthnSessionEnd(ctx, r, outcome, authnFields{UserID: c.UserID, Session: c.ID, Reason: reason})
+	}
 	return nil
+}
+
+// revokeDeviceRow is Devices().Revoke with a write that ended without a
+// clear answer settled the way writeLanded settles a user write: when the
+// device row is gone, the revoke committed and the rest of it runs as after
+// any commit. The rows the revoke ends are revoked once it commits, so the
+// device's sessions are read first, and the ones active then are the ones
+// it ended. A session that started between the read and the commit gets no
+// record. The revoke is sent even when that read fails, because it is a
+// kill switch, and when such a revoke's answer is lost the missing
+// session.end records leave one Error line and one count of
+// straza_outbox_records_lost_total.
+func (a *App) revokeDeviceRow(ctx context.Context, d store.Device, reason string, ev store.OutboxEvent) ([]store.ClosedSession, error) {
+	held, heldErr := a.store.Sessions().ListByUser(ctx, d.UserID)
+	ended, err := a.store.Devices().Revoke(ctx, d.ID, reason, ev)
+	if errors.Is(err, store.ErrNotFound) || !store.MaybeWritten(err) {
+		return ended, err
+	}
+	cctx, cancel := afterCommit(ctx)
+	defer cancel()
+	if _, readErr := a.store.Devices().GetByID(cctx, d.ID); !errors.Is(readErr, store.ErrNotFound) {
+		return nil, err
+	}
+	a.reqlog(ctx).Warn("device revoke: the database committed the revoke but its answer was lost, so the rest of the revoke runs as after any commit",
+		"device", d.ID, "err", err)
+	if heldErr != nil {
+		a.recordLost()
+		a.reqlog(ctx).Error("device revoke: the revoke committed but the device's sessions could not be listed, so the sessions it ended have no session.end record",
+			"device", d.ID, "user", d.UserID, "err", heldErr)
+	}
+	ended = nil
+	for _, s := range held {
+		if s.DeviceID == d.ID && s.Status == store.SessionActive {
+			ended = append(ended, store.ClosedSession{ID: s.ID, UserID: s.UserID})
+		}
+	}
+	return ended, nil
 }
 
 // revokeSession ends session id with reason in the store's revoke

@@ -189,7 +189,7 @@ docker exec straza-sam straza exec -- ls
 {{< /command >}}
 
 ```text
-Straza: user is disabled. Contact your administrator Refusing to run.
+Straza: this user is disabled, so Straza refuses this request. Ask your IGA owner or a Straza administrator to enable the user. Refusing to run.
 ```
 
 midPoint answers with no body and sends the change to Straza over SCIM, where Straza revokes every session sam holds and refuses to open a new one until midPoint enables sam again. So the `ls` that ran a minute ago is refused. In the walk, Straza listed sam as disabled as soon as midPoint answered, under two seconds after the request.
@@ -261,7 +261,7 @@ When you are done, find the token's id with `strazactl api-token list` and revok
 The stack is set up for more than this walk. Each item below runs on it as the seeder leaves it, unless the item names an overlay or a profile.
 
 
-midPoint and Straza stay in step in both directions. midPoint sends people, agents, sponsors and role membership to strazad over SCIM. Three live sync tasks in midPoint read Straza's users, MCP servers and roles back every 10 seconds, after a first reconciliation of each, so a change made in Straza shows up in midPoint. When strazad restarts, midPoint suspends those tasks, and they stay suspended until someone resumes them in midPoint.
+midPoint and Straza stay in step in both directions. midPoint sends people, agents, sponsors and role membership to strazad over SCIM. Three live sync tasks in midPoint read Straza's users, MCP servers and roles back every 10 seconds, after a first reconciliation of each, so a change made in Straza shows up in midPoint. When a run fails, for example while strazad restarts, midPoint suspends that task. A watchdog task in midPoint resumes it within 5 minutes, unless a person suspended or edited the task since the failed run.
 
 
 {{< details summary="What the seeder configures in midPoint and Keycloak" >}}

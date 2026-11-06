@@ -101,7 +101,7 @@ The Deployment is where the runtime footprint is decided. Trimmed to the lines t
         runAsUser: 65532
       containers:
         - name: strazad
-          image: ghcr.io/strazahq/straza:2.0.1
+          image: ghcr.io/strazahq/straza:2.1.0
           args: ["serve", "--profile", "enterprise", "--listen", "0.0.0.0:8420"]
           env:
             - name: STRAZA_PUBLIC_URL

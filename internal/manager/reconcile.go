@@ -287,7 +287,7 @@ func (m *Manager) credentialArrived(inst *instance) bool {
 	if !parked || (kind != RuntimeCommand && kind != RuntimeOCI) {
 		return false
 	}
-	_, ok := m.commandEnvSecret(inst)
+	_, _, ok := m.commandEnvSecret(inst)
 	return ok
 }
 

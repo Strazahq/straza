@@ -141,7 +141,7 @@ func TestSelfServers(t *testing.T) {
 			want: map[string]any{"reached": true, "connected": false, "allow_agents": false, "fingerprint": nil}},
 		{name: "sponsored agent does not inherit the sponsor's reach", tok: aliceTok, user: "joe", app: "tokapp", absent: true},
 		{name: "stranger refused in words", tok: malloryTok, user: "alice", wantCode: http.StatusForbidden,
-			wantErr: "only alice's sponsor or an administrator can manage alice's connections"},
+			wantErr: "mallory cannot read or change alice's connections, because mallory neither sponsors alice nor is an administrator. Ask alice or an administrator to do this."},
 		{name: "unknown user", tok: aliceTok, user: "nobody", wantCode: http.StatusNotFound, wantErr: "unknown user"},
 	}
 	for _, tc := range cases {

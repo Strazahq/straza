@@ -140,10 +140,15 @@ func TestGatewayServerEndpoint(t *testing.T) {
 	// /mcp: the upstream's _meta never reaches the combined list, which
 	// keeps exactly the fields it served before.
 	_, list, raw := mcpCall(t, base, tok, "tools/list", nil)
-	if got := toolNamesOf(t, list); !reflect.DeepEqual(got, []string{"viewapp__old", "viewapp__plain", "viewapp__show"}) {
+	if got := toolNamesOf(t, list); !reflect.DeepEqual(got, []string{"straza__whoami", "viewapp__old", "viewapp__plain", "viewapp__show"}) {
 		t.Fatalf("combined names = %v", got)
 	}
 	for _, tl := range resultOf(t, list, raw)["tools"].([]any) {
+		if tl.(map[string]any)["name"] == "straza__whoami" {
+			// The built-in tool has a title and no annotations, and no
+			// upstream serves it, so it carries no _meta to strip.
+			continue
+		}
 		var keys []string
 		for k := range tl.(map[string]any) {
 			keys = append(keys, k)

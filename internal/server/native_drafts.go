@@ -37,7 +37,8 @@ var draftingTools = map[string]bool{nativeToolDraftSubmit: true, nativeToolDraft
 
 // The rates of the drafting tools: two calls a second between the
 // two tools for each session, and one submit every 10 seconds for each
-// user, both on the gateway's limiter. The approval tools keep no rate.
+// user, both on the gateway's limiter. The approval tools keep no rate of
+// their own, and a new approval spends from the approval service's rate.
 const (
 	draftingSessionRPS = 2
 	draftSubmitUserRPS = 0.1
@@ -53,8 +54,9 @@ const (
 	draftNoOpenRefusal     = "Straza: no open draft %s of yours. Submit without draft to start a new one."
 	draftNoSuchRefusal     = "Straza: no such draft %s"
 	draftMovedRefusal      = "Straza: draft %s changed while this revision was saved, so nothing was saved. Read it with straza__draft_status, then submit again with draft %s."
-	submitStoreRefusal     = "Straza: the draft was not saved, because Straza could not reach its database. Try again in a minute, and if it keeps failing ask an administrator to read the strazad log."
-	statusReadRefusal      = "Straza: the draft could not be read, because Straza could not reach its database. Try again in a minute, and if it keeps failing ask an administrator to read the strazad log."
+	submitStoreRefusal     = "Straza: the draft was not saved, because Straza could not reach its database. Try once more in a minute. If it fails again, tell the user to ask an administrator to read the strazad log."
+	draftNotIDRecord       = "Straza: no open draft of yours has that id, which is not a number. Submit without draft to start a new one."
+	statusReadRefusal      = "Straza: the draft could not be read, because Straza could not reach its database. Try once more in a minute. If it fails again, tell the user to ask an administrator to read the strazad log."
 )
 
 // The next steps a drafting tool names in DraftAgentStatus. A draft
@@ -72,19 +74,20 @@ const (
 )
 
 // nativeListed reports whether tier one lists the built-in tool for a
-// session holding roles: an approval tool for every session, and a
-// drafting tool only for a holder of straza-draft-config.
+// session holding roles: an approval tool and whoami for every session,
+// and a drafting tool only for a holder of straza-draft-config.
 func nativeListed(tool string, roles []string) bool {
 	return !draftingTools[tool] || slices.Contains(roles, DraftConfigRole)
 }
 
 // grantedOf answers the granted fact of a tier-one target (spec/policyset
-// revisions 17 and 20): true for a proxied tool, whose access row tier one
-// matched, and for a drafting tool, which tier one lists only to holders,
-// and false for an approval tool, which policy alone gates. The gateway
-// call, the overlay probe and simulate's access check all answer it.
+// revisions 17, 20 and 27): true for a proxied tool, whose access row tier
+// one matched, for a drafting tool, which tier one lists only to holders,
+// and for whoami, which every session holds, and false for an approval
+// tool, which policy alone gates. The gateway call, the overlay probe and
+// simulate's access check all answer it.
 func grantedOf(t gwTarget) bool {
-	return t.app != nativeAppName || draftingTools[t.tool]
+	return t.app != nativeAppName || draftingTools[t.tool] || t.tool == nativeToolWhoami
 }
 
 // draftingTool reports whether t is one of the two drafting tools.
@@ -111,8 +114,8 @@ func (a *App) submitRateRefusal(userID string) string {
 // draftingSubject answers the session's cache entry for the drafting tool
 // tool, or the role refusal when the entry is gone or its roles lack
 // straza-draft-config. It answers no entry and no refusal for any other
-// tool. The gateway asks before it writes the call's record and each
-// handler asks again, so a wrong role check refuses instead of allowing.
+// tool. Each drafting handler asks before the gateway writes the call's
+// record, so a wrong role check refuses, and the record is its deny.
 func (a *App) draftingSubject(session, tool string) (cachedSubject, string) {
 	if !draftingTools[tool] {
 		return cachedSubject{}, ""
@@ -194,28 +197,38 @@ type draftSubmitArgs struct {
 	Draft     string   `json:"draft"`
 }
 
-// nativeDraftSubmit stores a draft of the straza-app door, or the next
-// revision of the caller's own open draft, with no check, and answers
-// DraftAgentStatus at once. The gateway already took the rates.
-// Intake runs first, and a refusal stores nothing, unless live state may
-// waive every finding (drafts.Waive). A finding about a value, a plain
-// word at a secret-named place or a mask sent back, is then judged before
-// the insert in the author's read view (submitWaived), and what the waiver
-// does not lift refuses the submit with nothing stored, in the same words
-// for a value the stored manifest holds and for any other, so no submit
-// confirms a guess. A draft whose findings are about names alone is stored
-// with live state unread, as a clean one is, and the check decides. The
-// new revision expires 14 days after it is written, writes its
-// draft.create or draft.update with the caller as actor, and wakes the
-// checker.
+// nativeDraftSubmit runs both steps of judgeDraftSubmit with no record
+// between them and answers the tool result.
 func (a *App) nativeDraftSubmit(ctx context.Context, args json.RawMessage, claims authn.Claims) *mcp.CallToolResult {
+	save, no := a.judgeDraftSubmit(ctx, args, claims)
+	if save == nil {
+		return nativeToolError(no.text)
+	}
+	return save()
+}
+
+// judgeDraftSubmit runs each step of straza__draft_submit that can refuse
+// it and answers the step that stores the draft, or nil and the refusal.
+// The gateway took the rates and writes the call's record between the
+// two, so a refusal's record is its deny. Intake runs first, and a refusal
+// stores nothing, unless live state may waive every finding (drafts.Waive).
+// A value finding, a plain word at a secret-named place or a mask sent
+// back, is judged in the author's read view (submitWaived), and what the
+// waiver leaves refuses in the same words whether the stored manifest
+// holds the value or not, so no submit confirms a guess. A draft whose
+// findings are about names alone goes on with live state unread, and the
+// check decides. The step stores a new draft of the straza-app door or the
+// next revision of the caller's own open one, unchecked and expiring in 14
+// days, writes its draft.create or draft.update with the caller as actor,
+// wakes the checker and answers DraftAgentStatus.
+func (a *App) judgeDraftSubmit(ctx context.Context, args json.RawMessage, claims authn.Claims) (func() *mcp.CallToolResult, nativeRefusal) {
 	e, msg := a.draftingSubject(claims.Session, nativeToolDraftSubmit)
 	if msg != "" {
-		return nativeToolError(msg)
+		return nil, plainRefusal(msg)
 	}
 	var in draftSubmitArgs
 	if err := json.Unmarshal(args, &in); err != nil {
-		return nativeToolError(draftSubmitShape)
+		return nil, plainRefusal(draftSubmitShape)
 	}
 	author := doorAuthor(claims, e)
 	items, bundle := drafts.ParseBundle(in.Documents)
@@ -227,56 +240,61 @@ func (a *App) nativeDraftSubmit(ctx context.Context, args json.RawMessage, claim
 		var err error
 		if own, held, msg, err = a.ownDraft(ctx, in.Draft, author); err != nil {
 			a.log.Warn("draft submit: the draft to revise could not be read", "draft", in.Draft, "err", err)
-			return nativeToolError(submitStoreRefusal)
+			return nil, plainRefusal(submitStoreRefusal)
 		} else if msg != "" {
-			return nativeToolError(msg)
+			return nil, noOpenDraft(msg, in.Draft)
 		}
 		d.Note = noteOf(in.Note, own.Note)
 	}
 	fs := bodyIntake(d, author, bundle)
 	if !drafts.Waivable(fs) {
-		return nativeToolError(notSavedRefusal(certainFirst(fs)))
+		return nil, notSaved(certainFirst(fs))
 	}
 	if slices.ContainsFunc(fs, func(f drafts.Finding) bool { return f.Code == "secret.value" || f.Code == "bundle.masked" }) {
 		refused, err := a.submitWaived(ctx, author, d, fs)
 		if err != nil {
 			a.log.Warn("draft submit: live state could not be read to judge a value", "user", author.UserID, "err", err)
-			return nativeToolError(submitStoreRefusal)
+			return nil, plainRefusal(submitStoreRefusal)
 		}
 		if len(refused) > 0 {
-			return nativeToolError(notSavedRefusal(refused))
+			return nil, notSaved(refused)
 		}
 	}
 	if own.ID == 0 {
 		n, err := a.store.Drafts().CountOpen(ctx, author.UserID)
 		if err != nil {
 			a.log.Warn("draft submit: the open drafts could not be counted", "user", author.UserID, "err", err)
-			return nativeToolError(submitStoreRefusal)
+			return nil, plainRefusal(submitStoreRefusal)
 		}
 		if fs := drafts.OpenLimit(author.Username, n); len(fs) > 0 {
-			return nativeToolError(notSavedRefusal(fs))
+			return nil, notSaved(fs)
 		}
 	}
-	rows := keepHeld(held, items)
-	canonicalRoles(rows, nil)
-	stored, err := a.storeDoorDraft(ctx, own, rows, d.Note, in.Note, author)
-	var moved *draftMoved
-	switch {
-	case errors.As(err, &moved):
-		return nativeToolError(moved.refusal)
-	case err != nil:
-		a.log.Warn("draft submit: the draft could not be stored", "user", author.UserID, "err", err)
-		return nativeToolError(submitStoreRefusal)
-	}
-	id := strconv.FormatInt(stored.ID, 10)
-	action := "draft.create"
-	if stored.Revision > 1 {
-		action = "draft.update"
-	}
-	a.recordDoorRevision(ctx, action, id, stored.Revision, itemsOf(rows), author)
-	a.wakeDraftsChecker()
-	return nativeToolOK(map[string]any{"draft": id, "revision": stored.Revision, "state": stored.State, "checked": false,
-		"publishable": false, "next": fmt.Sprintf(nextSubmitted, id)})
+	return func() *mcp.CallToolResult {
+		rows := keepHeld(held, items)
+		canonicalRoles(rows, nil)
+		stored, err := a.storeDoorDraft(ctx, own, rows, d.Note, in.Note, author)
+		var moved *draftMoved
+		// Through the gateway the call's record already says allow here. A
+		// draft that moved and a write the store refuses show only when the
+		// write runs, and the write never runs before its record.
+		switch {
+		case errors.As(err, &moved):
+			return nativeToolError(moved.refusal)
+		case err != nil:
+			a.log.Warn("draft submit: the draft could not be stored", "user", author.UserID, "err", err)
+			return nativeToolError(submitStoreRefusal)
+		}
+		id := strconv.FormatInt(stored.ID, 10)
+		action := "draft.create"
+		if stored.Revision > 1 {
+			action = "draft.update"
+		}
+		a.recordDoorRevision(ctx, action, id, stored.Revision, itemsOf(rows), author)
+		a.wakeDraftsChecker()
+		return nativeToolOK(map[string]any{"draft": id, "revision": stored.Revision, "state": stored.State, "checked": false,
+			"publishable": false, "next": fmt.Sprintf(nextSubmitted, id)})
+	}, nativeRefusal{}
 }
 
 // submitWaived answers the intake findings fs of d that the waiver leaves
@@ -375,6 +393,33 @@ func notSavedRefusal(fs []drafts.Finding) string {
 		clauses[i] = clause
 	}
 	return draftNotSaved + strings.Join(clauses, " ")
+}
+
+// notSaved is the refusal of the intake findings fs. The agent reads each
+// finding's sentence and fix, which may quote a document, scanned for a
+// secret or not. The record keeps draftNotSaved and each finding's code,
+// with its document's number when it has one, so no word of a document
+// reaches the chain.
+func notSaved(fs []drafts.Finding) nativeRefusal {
+	codes := make([]string, len(fs))
+	for i, f := range fs {
+		codes[i] = f.Code
+		if f.Document > 0 {
+			codes[i] += " in document " + strconv.Itoa(f.Document)
+		}
+	}
+	return nativeRefusal{text: notSavedRefusal(fs), reason: draftNotSaved + "Refused: " + strings.Join(codes, ", ") + "."}
+}
+
+// noOpenDraft is the refusal msg of the draft id that names no open draft
+// of the caller's. The record keeps msg when id is a plain number, the one
+// form a draft id takes, and draftNotIDRecord otherwise, because any other
+// id may hold any text the agent sent.
+func noOpenDraft(msg, id string) nativeRefusal {
+	if n, err := strconv.ParseInt(id, 10, 64); err == nil && strconv.FormatInt(n, 10) == id {
+		return plainRefusal(msg)
+	}
+	return nativeRefusal{text: msg, reason: draftNotIDRecord}
 }
 
 // recordDoorRevision writes the draft.create or draft.update of a revision

@@ -1,9 +1,12 @@
 import * as React from "react";
 import { FileXIcon, Loader2Icon, Undo2Icon } from "lucide-react";
+import { DraftBand } from "@/components/draft-band";
 import { DraftChanges } from "@/components/draft-changes";
-import { DraftChecks, DraftChip, type ChipTone, VerdictStrip } from "@/components/draft-checks";
+import { DraftChecks, DraftChip, type ChipTone } from "@/components/draft-checks";
 import { DiscardDialog, PicksDialog, unlinked } from "@/components/draft-dialogs";
 import { DraftGains } from "@/components/draft-gains";
+import { DraftItems } from "@/components/draft-items";
+import { DraftFacts, DraftMeta } from "@/components/draft-meta";
 import { DraftPublish } from "@/components/draft-publish";
 import { EmptyState } from "@/components/empty-state";
 import { FetchError, RefusedError } from "@/components/error-state";
@@ -12,9 +15,10 @@ import { PageHead } from "@/components/page-head";
 import { Button } from "@/components/ui/button";
 import type { ApiError, DraftConflict, DraftDetail, DraftPublished } from "@/lib/api";
 import { UNVERIFIED } from "@/lib/approval-words";
-import { coverageNouns, isNewRole, leadOf, loosenings, mergedNotes, roleToolsOf } from "@/lib/drafts-access";
+import { chipNotes, isNewRole, loosenings, roleToolsOf } from "@/lib/drafts-access";
 import { conflictsOf, contactDraftServer, getDraft, rebaseDraft, revertDraft } from "@/lib/drafts-api";
-import { STALE_CODE, type Shown, confirmBlocks, gainsHidden, objectOf, stateOf } from "@/lib/drafts-model";
+import { itemFacts } from "@/lib/drafts-items";
+import { STALE_CODE, type Shown, confirmBlocks, gainStory, gainsHidden, stateOf } from "@/lib/drafts-model";
 import {
   CHANGES_TITLE,
   CHECKS_TITLE,
@@ -22,20 +26,14 @@ import {
   CHECK_AGAIN_SUBJECT,
   DISCARD,
   DISCARD_KEEP_LIVE,
-  DOCS_MASKED,
-  DOCS_TITLE,
-  FACT,
   FILE_REFUSED,
   GAINS_HELP,
   GAINS_TITLE,
   LOOSEN_TAIL,
-  MAY_PUBLISH_ALL,
   MISSING_TITLE,
   NEXT_TITLE,
   NO_NEEDS,
   OPEN_DRAFTS,
-  PUBLISH_NOT_YET,
-  PUBLISH_OPEN,
   REFUSED_BAR,
   SAYS_AGENT_HELP,
   STALE_BAR,
@@ -49,34 +47,28 @@ import {
   ackBar,
   agentWrote,
   answered,
-  cameInLine,
   checkedAgain,
   checkCounts,
-  checkedLine,
   checksLede,
+  crumbLabel,
   discardKeep,
   discardedLine,
-  docsFold,
   draftTitle,
   expiredLine,
-  expiresLine,
-  leadLines,
+  holdersLose,
+  idChip,
   needLine,
   notCheckedAgain,
-  proposerWords,
   publishedLine,
   publishedUnread,
   readingDraft,
   reasonLine,
-  removalDoc,
-  revisionLine,
   saysPersonHelp,
   saysTitle,
   serverLine,
   storedCheckLine,
   storedNoCheck,
   subjectDraft,
-  undoesLine,
   undoneToast,
 } from "@/lib/drafts-words";
 import { notify } from "@/lib/notify";
@@ -88,19 +80,18 @@ import { snapshot } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { absTime } from "@/lib/words";
 
-// The review page of one draft: a red warning when an agent's draft loosens
-// the rules that bind that agent, a lead that says what publishing does to
-// the objects each role covers and who holds the roles, who drafted it and
-// where it came from, the proposer's note marked unverified, the verdict
-// strip, what changes, access after publishing, the checks and the files,
-// with a sticky bar that publishes and discards. Every line but the note is
-// the server's, and the lead and the warning are built from them. Publish
-// is a person's act: the dialog renders only for a reader the server says
-// may publish, and the server checks again when it runs.
+// The review page of one draft: the server's title with one line of who
+// drafted it and when, a red warning when an agent's draft loosens the
+// rules that bind that agent, the Before you publish band that stays in
+// view and publishes or discards, the proposer's note marked unverified,
+// In this draft with one row per item, what changes card by card, access
+// after publishing and the checks. Every line but the note is the server's,
+// and the rows and the warnings are built from them. Publish is a person's
+// act: the dialog renders only for a reader the server says may publish,
+// and the server checks again when it runs.
 
 const route = routeByKey("drafts");
 const STATE_TONE: Record<Shown, ChipTone> = { ready: "accent", refused: "danger", stale: "warn", published: "ok", discarded: "plain", expired: "plain" };
-const DANGER_OUTLINE = "border-danger text-danger hover:bg-danger-bg hover:text-danger";
 const BANNER = "flex flex-col gap-1 border border-l-[3px] border-border bg-card px-3.5 py-2.5 text-sm leading-relaxed text-text-2";
 // PROOF is the strip of a published draft. Being live is a trust state, so
 // the ok tone fills the whole strip and no edge carries it.
@@ -114,15 +105,6 @@ type State =
   | { kind: "missing"; sentence: string }
   | { kind: "error"; message: string };
 
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <tr className="border-b border-border last:border-b-0" data-fact={label}>
-      <th scope="row" className="w-[170px] py-2 pr-3 text-left align-top font-semibold whitespace-nowrap text-foreground">{label}</th>
-      <td className="py-2 align-top text-text-2">{children}</td>
-    </tr>
-  );
-}
-
 export function DraftPage({ id }: { id: string }) {
   const [state, setState] = React.useState<State>({ kind: "loading" });
   const [answer, setAnswer] = React.useState<DraftPublished | null>(null);
@@ -134,6 +116,7 @@ export function DraftPage({ id }: { id: string }) {
   const [pickProblem, setPickProblem] = React.useState<string | null>(null);
   const [undoing, setUndoing] = React.useState(false);
   const [undoProblem, setUndoProblem] = React.useState<string | null>(null);
+  const [details, setDetails] = React.useState(false);
   const checksRef = React.useRef<HTMLElement>(null);
 
   // load reads the draft, whose verdict the server computes on the read
@@ -153,11 +136,12 @@ export function DraftPage({ id }: { id: string }) {
   }, [id]);
   React.useEffect(() => { void load(); }, [load]);
 
-  if (state.kind === "loading") return <PageHead label={route.label} title={draftTitle(id)} description={readingDraft(id)} />;
+  const crumb = crumbLabel(route.label, id);
+  if (state.kind === "loading") return <PageHead label={crumb} title={draftTitle(id)} description={readingDraft(id)} />;
   if (state.kind === "error") {
     return (
       <>
-        <PageHead label={route.label} title={draftTitle(id)} description={readingDraft(id)} />
+        <PageHead label={crumb} title={draftTitle(id)} description={readingDraft(id)} />
         <div className="px-6 py-5"><FetchError subject={subjectDraft(id)} detail={state.message} /></div>
       </>
     );
@@ -165,7 +149,7 @@ export function DraftPage({ id }: { id: string }) {
   if (state.kind === "missing") {
     return (
       <>
-        <PageHead label={route.label} title={draftTitle(id)} description={route.description} />
+        <PageHead label={crumb} title={draftTitle(id)} description={route.description} />
         <EmptyState icon={FileXIcon} title={MISSING_TITLE} action={<Button variant="outline" onClick={() => navigate("drafts")}>{OPEN_DRAFTS}</Button>}>{state.sentence}</EmptyState>
       </>
     );
@@ -177,9 +161,7 @@ export function DraftPage({ id }: { id: string }) {
   const shown = stateOf(detail);
   const open = d.state === "open";
   const proposer = d.authors[0];
-  const who = proposer ? proposerWords(proposer, snapshot()?.user || "", d.source) : null;
   const stale = (v.refused || []).filter((f) => f.code === STALE_CODE);
-  const blocked = shown === "stale" || shown === "refused";
   const shownAnswer = answer && answer.draft.id === d.id ? answer : null;
   const server = unlinked(d);
 
@@ -237,18 +219,31 @@ export function DraftPage({ id }: { id: string }) {
   // so, or says that read failed, rather than claim no check was stored.
   const unread = state.fromPublish ? (state.problem ? publishedUnread(d.id) : readingDraft(d.id)) : null;
   const risks = v.risks || [];
-  const barLine = shown === "stale" ? STALE_BAR : shown === "refused" ? REFUSED_BAR : !detail.may_publish ? (detail.publish_refusal ? detail.publish_refusal + " " : "") + WAITS_WHOLE : ackBar(confirmBlocks(risks).length, risks.length, (v.warnings || []).length);
+  // The band's line says what to do before Publish. The verdict chip beside
+  // it already says when there is nothing to confirm, and the band names a
+  // refusal to publish beside its own help.
+  const blocks = confirmBlocks(risks).length;
+  const warnings = (v.warnings || []).length;
+  const bandLine = shown === "stale" ? STALE_BAR : shown === "refused" ? REFUSED_BAR : !detail.may_publish ? WAITS_WHOLE : blocks || warnings ? ackBar(blocks, risks.length, warnings) : "";
   const hidden = gainsHidden(v);
-  const lead = leadOf(detail, !!hidden);
-  const leading = open ? leadLines(lead, coverageNouns, !!hidden) : [];
   const loosened = open ? loosenings(v) : [];
+  const loses = open ? gainStory(v.gains || []).lose : [];
   const needs = (v.needs || []).map((n) => needLine(n.object, n.standing)).join(" ") || NO_NEEDS;
+  const facts = d.items.map((it) => itemFacts(detail, it));
+  const jumpToChecks = () => checksRef.current?.scrollIntoView({ block: "start" });
 
   return (
     <>
-      <PageHead label={route.label} title={draftTitle(d.id)} titleExtra={<DraftChip word={STATE_WORD[shown]} tone={STATE_TONE[shown]} attr="data-state-badge" />} description={d.title} />
+      <PageHead
+        label={crumb}
+        title={d.title || draftTitle(d.id)}
+        titleExtra={<><DraftChip word={STATE_WORD[shown]} tone={STATE_TONE[shown]} attr="data-state-badge" /><span className="font-mono"><DraftChip word={idChip(d.id)} tone="plain" attr="data-draft-id" /></span></>}
+        description=""
+        descriptionExtra={<DraftMeta detail={detail} me={snapshot()?.user || ""} details={details} onDetails={() => setDetails((o) => !o)} />}
+      />
       <div className="flex flex-col gap-5 px-6 py-5">
         {state.problem && <FetchError subject={subjectDraft(d.id)} detail={state.problem} lastRead={state.lastRead} />}
+        {details && <DraftFacts detail={detail} checked={unread || ""} needs={needs} />}
         {loosened.length > 0 && (
           // The agent is named from the draft's proposer, because a line's
           // own sentence never names a person.
@@ -293,32 +288,21 @@ export function DraftPage({ id }: { id: string }) {
             {checkProblem && <RefusedError subject={CHECK_AGAIN_SUBJECT} message={checkProblem} />}
           </div>
         )}
-        {leading.length > 0 && (
-          <p className="m-0 max-w-[75ch] text-[15px] leading-relaxed text-foreground" data-lead>
-            {leading.map((l, i) => <span key={i} className={l.loses ? "text-warn" : undefined}>{(i ? " " : "") + l.text}</span>)}
-          </p>
+        {open && (
+          <DraftBand
+            verdict={v}
+            mayPublish={detail.may_publish}
+            refusal={detail.publish_refusal}
+            needs={needs}
+            line={bandLine}
+            blocked={shown === "stale" || shown === "refused" ? shown : false}
+            discard={server ? discardKeep(server) : d.door === "apps-directory" ? DISCARD_KEEP_LIVE : DISCARD}
+            onJump={jumpToChecks}
+            onDiscard={() => setDiscarding(true)}
+            onPublish={() => setPublishing(true)}
+          />
         )}
-
-        <table className="w-full max-w-[960px] border-collapse text-sm" data-facts>
-          <tbody>
-            {who && <Fact label={FACT.by}><b className="font-semibold text-foreground">{who.name}</b>{who.line && <span className="text-muted-foreground">{" · " + who.line}</span>}</Fact>}
-            <Fact label={FACT.door}>{cameInLine(d.door, d.source, proposer?.client)}</Fact>
-            <Fact label={FACT.revisions}>
-              <ul className="m-0 flex list-none flex-col gap-0.5 p-0">{(detail.revisions || []).map((r) => <li key={r.revision}>{revisionLine(r.revision, r.author.username, r.door, absTime(r.created_at), !!r.mechanical)}</li>)}</ul>
-            </Fact>
-            <Fact label={FACT.checked}>{unread || (open || stored ? checkedLine(absTime(v.checked_at), (v.snapshot || "").slice(0, 8)) : storedNoCheck(d.revision))}</Fact>
-            {open && d.expires_at && <Fact label={FACT.expires}>{expiresLine(absTime(d.expires_at))}</Fact>}
-            {d.reverts && <Fact label={FACT.undoes}><Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={() => navigate("drafts", [d.reverts as string])}>{undoesLine(d.reverts)}</Button></Fact>}
-            {open && (
-              <Fact label={FACT.needs}>
-                <span className="inline-flex items-center gap-1.5">
-                  {detail.may_publish ? MAY_PUBLISH_ALL : detail.publish_refusal}
-                  <HelpTip label={FACT.needs} text={needs} />
-                </span>
-              </Fact>
-            )}
-          </tbody>
-        </table>
+        {loses.length > 0 && <p className="m-0 max-w-[75ch] text-[15px] leading-relaxed text-warn" data-loses>{holdersLose(loses)}</p>}
 
         {d.note && proposer && (
           <div className="flex max-w-[960px] flex-col gap-1 rounded-md border border-dashed border-border bg-card px-3.5 py-2.5" data-says>
@@ -331,7 +315,7 @@ export function DraftPage({ id }: { id: string }) {
           </div>
         )}
 
-        {open && <VerdictStrip verdict={v} onJump={() => checksRef.current?.scrollIntoView({ block: "start" })} />}
+        <DraftItems facts={facts} />
 
         <section className="flex flex-col gap-3" aria-label={CHANGES_TITLE}>
           <h2 className="m-0 text-base font-semibold text-foreground">{CHANGES_TITLE}</h2>
@@ -348,46 +332,9 @@ export function DraftPage({ id }: { id: string }) {
         <section ref={checksRef} className="flex scroll-mt-40 flex-col gap-3" aria-label={CHECKS_TITLE} id="draft-checks">
           <h2 className="m-0 text-base font-semibold text-foreground">{CHECKS_TITLE}</h2>
           <p className="m-0 max-w-[75ch] text-[15px] text-text-2" data-checks-lede>{unread || (open ? checksLede(absTime(v.checked_at)) : closedChecks)}</p>
-          {open && <DraftChecks detail={detail} onContact={contact} omit={mergedNotes(v, lead)} />}
-        </section>
-
-        <section className="flex flex-col gap-2" aria-label={DOCS_TITLE}>
-          <h2 className="m-0 text-base font-semibold text-foreground">{DOCS_TITLE}</h2>
-          <details>
-            <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">{docsFold(d.items.length, d.state)}</summary>
-            <div className="mt-2 flex flex-col gap-2">
-              {d.items.map((it) => (
-                <div key={objectOf(it)} className="flex flex-col gap-1">
-                  <span className="font-mono text-[13px] text-foreground">{objectOf(it)}</span>
-                  {it.withheld ? <span className="text-sm text-text-2">{it.withheld}</span>
-                    : it.op === "remove" ? <span className="text-sm text-text-2">{removalDoc(objectOf(it))}</span>
-                    : <pre className="m-0 overflow-x-auto rounded-md border border-border bg-secondary/40 px-3 py-2 font-mono text-[12.5px] leading-relaxed text-foreground">{it.doc}</pre>}
-                </div>
-              ))}
-            </div>
-          </details>
-          <p className="m-0 text-[13px] text-muted-foreground">{DOCS_MASKED}</p>
+          {open && <DraftChecks detail={detail} onContact={contact} omit={chipNotes(detail)} />}
         </section>
       </div>
-
-      {open && (
-        <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2.5 border-t border-border bg-background px-6 py-2.5" data-publish-bar>
-          <span className="min-w-0 flex-1 text-sm text-text-2">{barLine}</span>
-          <Button variant="outline" className={DANGER_OUTLINE} onClick={() => setDiscarding(true)}>
-            {server ? discardKeep(server) : d.door === "apps-directory" ? DISCARD_KEEP_LIVE : DISCARD}
-          </Button>
-          {detail.may_publish && (
-            <Button
-              variant={blocked ? "outline" : "default"}
-              aria-disabled={blocked || undefined}
-              title={blocked ? (shown === "stale" ? STALE_BAR : PUBLISH_NOT_YET) : undefined}
-              onClick={() => { if (!blocked) setPublishing(true); }}
-            >
-              {PUBLISH_OPEN}
-            </Button>
-          )}
-        </div>
-      )}
 
       {open && detail.may_publish && (
         <DraftPublish

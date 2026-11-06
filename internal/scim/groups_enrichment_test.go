@@ -22,7 +22,7 @@ func enrichmentServer(t *testing.T, projection func(ctx context.Context, roleID 
 	s := New(Deps{
 		Store:           st,
 		Authenticate:    func(r *http.Request, _ string) (context.Context, int, string) { return r.Context(), 0, "" },
-		Deactivate:      func(context.Context, string, string) {},
+		Deactivate:      deactivateIn(st),
 		Reactivate:      func(context.Context, string) {},
 		IdentityChanged: func(context.Context, string, string) {},
 		RoleProjection:  projection,

@@ -48,6 +48,7 @@ import {
   SCOPE_TITLE,
   SHOWN_ONCE,
   USE_TITLE,
+  WRITE_LINE,
   canonicalScope,
   curlLine,
   expiresLine,
@@ -206,6 +207,7 @@ export function MintSheet({ open, onOpenChange, rows, onMinted }: Props) {
               {picked && picked.custom && (
                 <Section title={AREAS_TITLE}>
                   <AreaTable grants={grants} onChange={setGrants} />
+                  <span className={HINT}>{WRITE_LINE}</span>
                 </Section>
               )}
 

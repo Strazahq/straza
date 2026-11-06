@@ -93,7 +93,7 @@ func usersCmd(client func() *ctl.Client) *cobra.Command {
 	var newPassword string
 	setPassword := &cobra.Command{
 		Use:   "set-password <username>",
-		Short: "Set a user's built-in-issuer password (rotation, or a credential for SCIM-born users)",
+		Short: "Set a person's built-in-issuer password (rotation, or a credential for SCIM-born people)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if newPassword == "" {

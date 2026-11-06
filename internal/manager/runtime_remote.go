@@ -192,6 +192,13 @@ func (r *RemoteRuntime) onSession(ctx context.Context, secret *Secret, what stri
 }
 
 // Call invokes one upstream tool with the caller's resolved credential.
+// When the upstream's session is gone and the call cannot have run, because
+// its POST was never written or the upstream refused it for its session, it
+// is sent once more on a new session. A 4xx answer in place of running the
+// call, or to the connect handshake of its session, is a RefusedError. When
+// the call may have run, because its POST was written and no answer of the
+// server came back, the error matches ErrMayHaveRun and the call is never
+// sent again.
 func (r *RemoteRuntime) Call(ctx context.Context, in CallInput) (*mcp.CallToolResult, error) {
 	if r.inject != nil && in.Secret == nil {
 		// Unlike inventory/health, a tool call may NEVER go upstream
@@ -199,20 +206,63 @@ func (r *RemoteRuntime) Call(ctx context.Context, in CallInput) (*mcp.CallToolRe
 		// resolves the caller's grant before reaching this runtime.
 		return nil, errNoCredential
 	}
-	s, key, err := r.session(ctx, in.Secret)
-	if err != nil {
-		return nil, err
+	for resent := false; ; resent = true {
+		// A server that checks its bearer token on every request refuses a
+		// new or rotated credential at the connect handshake, before any
+		// tool call, so that 4xx is a refusal of the call as well.
+		var dial callTrace
+		s, key, err := r.session(context.WithValue(ctx, traceKey{}, &dial), in.Secret)
+		if status := dial.refusedWith(); err != nil && status != 0 {
+			return nil, &RefusedError{Server: r.name, Status: status}
+		}
+		if err != nil {
+			return nil, err
+		}
+		var tr callTrace
+		res, err := callTool(context.WithValue(ctx, traceKey{}, &tr), s, in)
+		if err == nil {
+			return res, nil
+		}
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			// Every caller of this credential shares s. A caller that left says
+			// nothing about s, and closing s would end its upstream session for
+			// every other caller. A call that reached its own deadline still
+			// evicts s, so a session that stops answering is replaced on the
+			// next call.
+			r.evict(key, s)
+		}
+		// The trace counts only while ctx lasts, since the notice that
+		// cancels a call that ran out of time is another POST under it.
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		gone := errors.Is(err, mcp.ErrSessionMissing) || errors.Is(err, mcp.ErrConnectionClosed)
+		switch {
+		case !gone && tr.refusedWith() != 0:
+			return nil, &RefusedError{Server: r.name, Status: tr.refusedWith()}
+		case !gone && tr.ran() && !serverAnswered(err):
+			// The POST was written and no answer of the server came back
+			// that Straza could read, such as a proxy's 504 or an answer
+			// that broke off, so the server may have run the call. The
+			// transport's words, which can quote the session id, stay out of
+			// the agent's text, and Manager.Call logs them.
+			return nil, mayHaveRunErr(fmt.Sprintf("the MCP server %s took the call, but no answer Straza could read came back", r.name), err)
+		case !gone:
+			return nil, err
+		case !tr.ran() && !resent:
+			// The session is gone, as after a restart of the upstream, and the
+			// call cannot have run: its POST was never written, because another
+			// call's answer had already ended the session, or the upstream
+			// answered it with HTTP 404, which the MCP streamable HTTP transport
+			// gives for a session the server does not know before it reads the
+			// message, and on which a client opens a new session. Sending it
+			// once more on a new session cannot run it twice.
+			continue
+		case !tr.ran():
+			return nil, fmt.Errorf("the MCP server %s did not take the call on a new session either, so the call did not run", r.name)
+		}
+		return nil, mayHaveRunErr(fmt.Sprintf("the MCP server %s ended its session while the call ran", r.name), err)
 	}
-	res, err := callTool(ctx, s, in)
-	if err != nil && !errors.Is(ctx.Err(), context.Canceled) {
-		// Every caller of this credential shares s. A caller that left says
-		// nothing about s, and closing s would end its upstream session for
-		// every other caller. A call that reached its own deadline still
-		// evicts s, so a session that stops answering is replaced on the
-		// next call.
-		r.evict(key, s)
-	}
-	return res, err
 }
 
 // Ping checks upstream liveness with the app-level credential and answers
@@ -246,7 +296,20 @@ func (r *RemoteRuntime) Ping(ctx context.Context, secret *Secret) error {
 	if err != nil {
 		return err
 	}
-	return r.ping(ctx, key, s)
+	err = r.ping(ctx, key, s)
+	if errors.Is(err, mcp.ErrSessionMissing) || errors.Is(err, mcp.ErrConnectionClosed) {
+		// The upstream no longer knows the session, as after a restart, or a
+		// call already found that out and closed it. The MCP streamable HTTP
+		// transport asks a client to open a new session on that answer, and
+		// ping evicted the old one, so the app-level session is dialed and
+		// pinged once more. A ping changes nothing upstream, so a second one
+		// is harmless.
+		if s, key, err = r.session(pass, secret); err != nil {
+			return err
+		}
+		err = r.ping(ctx, key, s)
+	}
+	return err
 }
 
 // ping pings one pooled session under a deadline of ConnectTimeout and
@@ -406,19 +469,20 @@ func (r *RemoteRuntime) evict(key string, s *mcp.ClientSession) {
 }
 
 // httpClient wraps the pooled transport with header injection when the
-// manifest declares one, and bounds the DELETE that ends the session. Both
+// manifest declares one, bounds the DELETE that ends the session and traces
+// the POST of each tool call (markTrace). Both
 // clients follow a redirect only on the manifest's host, since a hop also
 // carries the call's arguments.
 func (r *RemoteRuntime) httpClient(secret *Secret) *http.Client {
 	if r.inject == nil || secret == nil {
-		return &http.Client{Transport: &deleteDeadline{base: r.transport, timeout: r.ConnectTimeout}, CheckRedirect: followRedirect}
+		return &http.Client{Transport: markTrace{&deleteDeadline{base: r.transport, timeout: r.ConnectTimeout}}, CheckRedirect: followRedirect}
 	}
 	value := strings.ReplaceAll(r.inject.Template, SecretPlaceholder, secret.Value)
-	return &http.Client{CheckRedirect: followRedirect, Transport: &deleteDeadline{timeout: r.ConnectTimeout, base: &headerInjector{
+	return &http.Client{CheckRedirect: followRedirect, Transport: markTrace{&deleteDeadline{timeout: r.ConnectTimeout, base: &headerInjector{
 		base:  r.transport,
 		name:  r.inject.Name,
 		value: value,
-	}}}
+	}}}}
 }
 
 // deleteDeadline gives the DELETE that ends an upstream session a deadline.
@@ -469,6 +533,16 @@ func followRedirect(req *http.Request, via []*http.Request) error {
 		return fmt.Errorf("the MCP server redirected %d times, and Straza stops there. An administrator puts the address the server answers at in the manifest", maxRedirects)
 	}
 	return nil
+}
+
+// echoValues answers what a reply of a call on secret must not hold: the
+// credential as the header carried it, as echoValues answers it, and
+// nothing when the runtime injects no header.
+func (r *RemoteRuntime) echoValues(secret *Secret) []string {
+	if r.inject == nil || secret == nil {
+		return nil
+	}
+	return echoValues(r.inject.Template, secret.Value)
 }
 
 // headerInjector adds the rendered credential header to every upstream

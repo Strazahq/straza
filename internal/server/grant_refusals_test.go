@@ -43,7 +43,7 @@ func TestGrantRefusalsMatchTheGateway(t *testing.T) {
 		{class: "overlay", user: "den", op: "fetch", filter: true, tool: "ghapp__git_fetch", args: `{"repo":"Strazahq/pay-api"}`,
 			rule: "deny-git-fetch", reason: "Straza: git fetch is off for this role"},
 		{class: "rate limit", user: "eve", op: "fetch", filter: true, tool: "ghapp__git_fetch", args: `{"repo":"Strazahq/pay-api"}`,
-			prep: drain, reason: `Straza: rate limit exceeded for the MCP server "ghapp" (0 rps). Retry shortly`},
+			prep: drain, reason: `Straza: rate limit exceeded for the MCP server "ghapp" (0 rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.`},
 		{class: "object gate", user: "pam", op: "fetch", tool: "ghapp__git_fetch", args: `{"repo":"Strazahq/site"}`,
 			reason: "git_fetch on Strazahq/site was refused: none of your roles on ghapp covers that repo."},
 		{class: "engine", user: "den", op: "fetch", tool: "ghapp__git_fetch", args: `{"repo":"Strazahq/pay-api"}`,

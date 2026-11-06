@@ -212,8 +212,8 @@ func TestPublishRefusesAnyoneButAPerson(t *testing.T) {
 		{"an admin API token with drafts:write", f.token, publishRefusalAdminAPI},
 		{"an admin API token without a drafts grant", bare, publishRefusalAdminAPI},
 		{"an agent with a drafts grant", f.bot, fmt.Sprintf(nonPersonAdminRefusal, "bot", "an agent")},
-		{"an agent without a drafts grant", f.login(t, "bot2"), fmt.Sprintf(nonPersonAdminRefusal, "bot2", "an agent")},
-		{"a disabled person", doraSession, "user is disabled. Contact your administrator"},
+		{"an agent without a drafts grant", agentIDToken(t, f.app, "bot2"), fmt.Sprintf(nonPersonAdminRefusal, "bot2", "an agent")},
+		{"a disabled person", doraSession, disabledUserMsg},
 		{"a locked person", larsSession, revokedIdentityMsg},
 		{"a coding harness's session", harness, fmt.Sprintf(codingHarnessRefusal, "claude-code")},
 	} {

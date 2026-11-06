@@ -122,7 +122,7 @@ Bound packs reach a session holding the role at check-in, before its first promp
 
 {{< shot name="new-role-1" caption="The first step for an application role on demo-tools, with the stored name and the name midPoint sees." >}}
 
-The wizard asks one thing per step. For an application role the steps are **Kind, server and name**, **Access**, **Knowledge packs** when a pack exists, **Review** and **Done**. Pick **Application role**, **Business role** or **Approver role**, and for an application role pick its server. The name of a server's role starts with the server's name, which the field fixes, and a line under it shows the stored name and the name your identity manager sees, such as `Stored as demo-tools-, in midPoint as AR:demo-tools-.` **Review** ends with **Save draft** and **Save and publish**.
+The wizard asks one thing per step. For an application role the steps are **Kind, server and name**, **Access**, **Knowledge packs** when a pack exists, **Review** and **Done**. Pick **Application role**, **Business role** or **Approver role**, and for an application role pick its server. The name of a server's role starts with the server's name, which the field fixes, and a line under it shows the kind, the stored name and the IGA's name, such as `Application role, stored as demo-tools-. An IGA imports it as AR:demo-tools-.` **Review** ends with **Save draft** and **Save and publish**.
 
 {{< fails >}}
 `No MCP server is running with tools. Install and start one first: an access row can only name tools the server serves.`

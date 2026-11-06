@@ -19,7 +19,7 @@ func TestAuditBatchLogsOncePerSession(t *testing.T) {
 	joe := r.user(t, "joe", store.UserTypeHuman)
 	kimB := r.session(t, kim.ID, "dev-kim")
 	joeA := r.session(t, joe.ID, "dev-joe")
-	const n = 5000
+	const n = 499
 	recs := make([]spooled, 0, 2*n+1)
 	for i := range n {
 		recs = append(recs, spooled{fmt.Sprintf("u5-one-%d", i), fmt.Sprintf("u5-one-%d", i), joeA.ID},

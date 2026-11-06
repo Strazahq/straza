@@ -543,7 +543,7 @@ describe("the New role wizard", () => {
     expect(rail("scout-tools").getAttribute("aria-checked")).toBe("false");
     expect(textOf("[data-name-prefix]")).toBe("demo-tools-");
     await userEvent.type(suffixBox(), "sum");
-    expect(textOf("[data-name-preview]")).toBe("Stored as demo-tools-sum, in midPoint as AR:demo-tools-sum.");
+    expect(textOf("[data-name-preview]")).toBe("Application role, stored as demo-tools-sum. An IGA imports it as AR:demo-tools-sum.");
     await click("Next");
     await heading("Access");
     expect(textOf("[data-access-server]")).toBe("demo-tools-sum reaches demo-tools. To pick another server, go back to the first step.");

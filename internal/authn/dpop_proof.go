@@ -66,7 +66,7 @@ type ProofCheck struct {
 	// CallerSpends leaves a passing proof's jti unspent, for the key lanes
 	// that spend it in the store once they know who is calling. The caller
 	// MUST spend Proof.JTI until now plus SpentProofLifetime before it acts
-	// on the request.
+	// on the request. Such a proof's jti never holds a NUL character.
 	CallerSpends bool
 }
 
@@ -178,6 +178,12 @@ func (v *ProofVerifier) Verify(raw string, c ProofCheck, now time.Time) (Proof, 
 	}
 	if len(jti) > maxJTILength {
 		return Proof{}, refuse("jti is longer than 128 bytes")
+	}
+	// A caller that spends the jti in the store needs one the store can
+	// hold, and a Postgres text column cannot hold a NUL character. A jti
+	// spent in memory has no such limit, so it keeps passing.
+	if c.CallerSpends && strings.Contains(jti, "\x00") {
+		return Proof{}, refuse("jti holds a NUL character (a zero byte), which strazad does not accept in a proof id it stores")
 	}
 	ath, hasATH := claims.str("ath")
 	switch {

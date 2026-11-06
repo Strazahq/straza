@@ -39,6 +39,7 @@ export type ApproverRow = {
   args_bytes?: number;
   argv_hash_prefix?: string;
   binding_scope?: string;
+  lane?: string;
 };
 
 // SelfRow is the console's record plus the challenge the approver lane
@@ -55,7 +56,8 @@ export function summaryString(r: Pick<ApproverRow, "summary" | "args_preview">):
   return line && s.tool ? s.tool + ": " + line : machineText(s);
 }
 
-// toSelfRow maps one approver row onto the console's shape. The lane is
+// toSelfRow maps one approver row onto the console's shape. The lane is the
+// one the server names. An older server names none, and the lane is then
 // read from the call: an MCP call came through the gateway, anything else
 // from the hook.
 export function toSelfRow(r: ApproverRow): SelfRow {
@@ -72,7 +74,7 @@ export function toSelfRow(r: ApproverRow): SelfRow {
     session: r.session_id || "",
     rule: r.rule_id,
     set: r.set_name,
-    lane: r.summary && r.summary.tool === "mcp.call" ? "gateway" : "hook",
+    lane: r.lane || (r.summary && r.summary.tool === "mcp.call" ? "gateway" : "hook"),
     summary: summaryString(r),
     justification: r.justification || "",
     approverRoles: r.approver_roles || [],

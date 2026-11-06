@@ -106,7 +106,7 @@ An explicit rename of a group answers `400` with `scimType` `mutability`, becaus
 
 ## Undo
 
-Revoking the token stops provisioning at once. `strazactl api-token revoke <token id>` prints `revoked <token id>`, and the next request with the old token answers `401`.
+Revoking the token stops provisioning at once. `strazactl api-token revoke <token id>` prints `revoked the admin API token <token id>, matched by its id.`, and the next request with the old token answers `401`.
 
 ## What a certifier sees
 

@@ -37,6 +37,11 @@ const (
 	HeaderHarnessSession = "Straza-Harness-Session"
 )
 
+// HeaderNotSent marks an answer on a proxied route that is the service's own
+// refusal, made before it sent the request to strazad. Only the service
+// sets it, and it removes the header from every answer strazad sends.
+const HeaderNotSent = "Straza-Not-Sent"
+
 // ServiceSID is the SID Windows gives NT SERVICE\straza-service, the
 // account of the Windows service straza-service: S-1-5-80 and the SHA-1 of
 // the upper-case service name. The thin clients refuse a pipe it does not
@@ -93,6 +98,9 @@ type SessionAnswer struct {
 	Capture     policy.CaptureDirective `json:"capture"`
 	Packs       []Pack                  `json:"packs,omitempty"`
 	Reused      bool                    `json:"reused,omitempty"`
+	// StartText is the governance paragraph strazad wrote at check-in, nil
+	// when the server or the service is older and sent none.
+	StartText *string `json:"start_text,omitempty"`
 }
 
 // DecideRequest is one normalized hook event. It carries no conversation
@@ -263,7 +271,9 @@ const (
 
 // SessionStatus is one live server session of the caller. PolicyRefused is
 // the server's sentence while it refuses to send a newer policy than the one
-// SnapshotID pins.
+// SnapshotID pins. Attestation is the level strazad gave the session at
+// the check-in that started it, and AttestedAt is when. Both are empty from
+// a service that does not report them.
 type SessionStatus struct {
 	Harness       Harness   `json:"harness"`
 	SessionID     string    `json:"session_id"`
@@ -273,6 +283,8 @@ type SessionStatus struct {
 	Push          string    `json:"push"`
 	Revoked       string    `json:"revoked,omitempty"`
 	PolicyRefused string    `json:"policy_refused,omitempty"`
+	Attestation   string    `json:"attestation,omitempty"`
+	AttestedAt    time.Time `json:"attested_at,omitzero"`
 }
 
 // SpoolStatus is the caller's audit spool.

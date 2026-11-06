@@ -159,7 +159,12 @@ spec:
       events: [tool.pre]
       tools: [shell.exec]
       command:
-        denyPatterns: ["rm -rf *", "git push --force*", "curl * | *sh*"]
+        denyPatterns:
+          - "rm -rf *"
+          - "git push --force*"
+          # curl piped into a shell: sh, bash, zsh, dash, ksh or fish, also behind
+          # sudo, env or a path. A pipe into grep, jq or shasum passes.
+          - 're:(.*[;&|\n]\s*)?(sudo\s+)?curl\s.*\|\s*(sudo\s+(-\S+\s+(\w+\s+)?)*)?(env\s+(\S+=\S*\s+)*)?(\S*/)?(ba|z|da|k|fi)?sh([\s;&|)].*)?'
       effect: deny
       reason: "Straza: the agent guardrails deny recursive deletes, force pushes and a download piped into a shell. Run a narrower command, or ask an admin to change the agent-guardrails PolicySet."
     - id: protect-secrets
@@ -171,7 +176,7 @@ spec:
       reason: "Straza: the agent guardrails deny writing secret files such as .env files, SSH keys and credentials.json. Ask a person to change the file, or ask an admin to change the agent-guardrails PolicySet."
 ```
 
-The first rule lets an agent request, check and wait for its own approvals through the built-in `straza` app. No access row reaches that app, so only a rule does, and deciding is never one of its tools, so the rule gives no approver power. The second rule gives back the local tools: shell commands, reading, writing and editing files, fetching URLs and starting subagents. Keep `file.read`, because it also covers the harness's search tools, such as Glob and Grep in Claude Code. The two deny rules hold whatever else allows, because a deny wins over every allow. The [PolicySet grammar]({{< relref "reference/policyset-grammar.md" >}}) lists every key, and a harness tool that Straza does not classify stays denied until you allow it by name, as [Harness tools by name]({{< relref "reference/policyset-grammar.md#harness-tools-by-name" >}}) shows.
+The first rule lets an agent request, check and wait for its own approvals through the built-in `straza` app. No access row reaches that app, so only a rule opens its approval tools, and deciding is never one of its tools, so the rule gives no approver power. Its `whoami` tool needs no rule, because every session may call it until a rule denies it. The second rule gives back the local tools: shell commands, reading, writing and editing files, fetching URLs and starting subagents. Keep `file.read`, because it also covers the harness's search tools, such as Glob and Grep in Claude Code. The two deny rules hold whatever else allows, because a deny wins over every allow. The [PolicySet grammar]({{< relref "reference/policyset-grammar.md" >}}) lists every key, and a harness tool that Straza does not classify stays denied until you allow it by name, as [Harness tools by name]({{< relref "reference/policyset-grammar.md#harness-tools-by-name" >}}) shows.
 
 Check the file, store it and make it live:
 

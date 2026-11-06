@@ -40,7 +40,7 @@ Release builds exist for Linux, Windows and macOS, each on amd64 and arm64. Choo
 ## Download a release and verify it
 
 
-Each release carries one archive per platform, named after the project, the version, the operating system and the architecture, for example `straza_2.0.1_linux_amd64.tar.gz`. Windows gets a zip, such as `straza_2.0.0_windows_amd64.zip`. Inside are the three binaries, both license files, `NOTICE`, `TRADEMARKS.md`, the third-party notices in `THIRD_PARTY_NOTICES.txt`, the README and the standalone quickstart. Linux also gets the `straza` client as a deb and an rpm package for each architecture. Their names end in `.deb` or `.rpm` in place of `.tar.gz`. Windows on amd64 also gets the client as an MSI, whose name ends in `_windows_amd64.msi`. A Mac gets the client as one pkg for Apple silicon and Intel Macs, whose name ends in `_darwin_universal.pkg`. The packages, the MSI and the pkg exist from 2.0.0, and releases from 1.1.2 and earlier carry the archives only. A prerelease such as `2.1.0-rc.1` gets neither the pkg nor the MSI.
+Each release carries one archive per platform, named after the project, the version, the operating system and the architecture, for example `straza_2.1.0_linux_amd64.tar.gz`. Windows gets a zip, such as `straza_2.0.0_windows_amd64.zip`. Inside are the three binaries, both license files, `NOTICE`, `TRADEMARKS.md`, the third-party notices in `THIRD_PARTY_NOTICES.txt`, the README and the standalone quickstart. Linux also gets the `straza` client as a deb and an rpm package for each architecture. Their names end in `.deb` or `.rpm` in place of `.tar.gz`. Windows on amd64 also gets the client as an MSI, whose name ends in `_windows_amd64.msi`. A Mac gets the client as one pkg for Apple silicon and Intel Macs, whose name ends in `_darwin_universal.pkg`. The packages, the MSI and the pkg exist from 2.0.0, and releases from 1.1.2 and earlier carry the archives only. A prerelease such as `2.1.0-rc.1` gets neither the pkg nor the MSI.
 
 Beside the archives sit `checksums.txt`, its signature `checksums.txt.sig`, the signing certificate `checksums.txt.pem` and a software bill of materials for every archive. A package holds the same `straza` binary as the Linux archive of its architecture, and the MSI holds the same `straza.exe` as the Windows amd64 zip. The bill of materials of that archive lists the binary's modules. In the pkg, the `straza` binaries of the two darwin archives are joined into one file and signed with a Developer ID, so the bills of materials of those archives cover it. The checksums file is signed with keyless cosign by the GitHub Actions job that built the release, so the certificate names that job's identity.
 
@@ -82,7 +82,7 @@ The same check runs in PowerShell, with `cosign` for Windows on your PATH. Power
 cosign verify-blob --signature checksums.txt.sig --certificate checksums.txt.pem `
   --certificate-identity-regexp '^https://github\.com/Strazahq/straza/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' `
   --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
-$zip = "straza_2.0.1_windows_amd64.zip"
+$zip = "straza_2.1.0_windows_amd64.zip"
 $line = Select-String -Path checksums.txt -Pattern ('  ' + [regex]::Escape($zip) + '$')
 (Get-FileHash -Algorithm SHA256 $zip).Hash -eq ($line.Line -split '\s+')[0]
 ```

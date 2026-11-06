@@ -95,9 +95,11 @@ func (s *Sentinel) handle(ctx context.Context, raw []byte) {
 	}
 }
 
-// emit publishes one verdict as a CloudEvent on the audit stream (same
-// envelope style as the PDP's audit producer).
-func (s *Sentinel) emit(ctx context.Context, v Verdict) error {
+// VerdictCE encodes v as a straza.audit.sentinel CloudEvent from source,
+// under a fresh id: strazad-sentinel for the sentinel's own verdicts, and
+// strazad for the verdict the gateway raises itself. Evidence is an empty
+// list when v has none, and window is written only when v has one.
+func VerdictCE(v Verdict, source string) ([]byte, error) {
 	if v.Evidence == nil {
 		v.Evidence = []string{}
 	}
@@ -112,14 +114,20 @@ func (s *Sentinel) emit(ctx context.Context, v Verdict) error {
 	if v.Window != "" {
 		data["window"] = v.Window
 	}
-	ce, err := json.Marshal(map[string]any{
+	return json.Marshal(map[string]any{
 		"specversion": "1.0",
 		"id":          uuid.NewString(),
 		"type":        SubjectVerdict,
-		"source":      "strazad-sentinel",
+		"source":      source,
 		"time":        time.Now().UTC().Format(time.RFC3339Nano),
 		"data":        data,
 	})
+}
+
+// emit publishes one verdict as a CloudEvent on the audit stream (same
+// envelope style as the PDP's audit producer).
+func (s *Sentinel) emit(ctx context.Context, v Verdict) error {
+	ce, err := VerdictCE(v, "strazad-sentinel")
 	if err != nil {
 		return err
 	}

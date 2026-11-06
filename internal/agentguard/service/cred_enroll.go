@@ -57,13 +57,33 @@ type enrollAnswer struct {
 }
 
 // errDeviceCodeExpired is a device flow nobody approved in time.
-var errDeviceCodeExpired = errors.New("the sign-in code expired before it was approved. " +
-	"Run `straza enroll` again and approve the new code it shows")
+var errDeviceCodeExpired = errors.New("the sign-in code expired before it was approved")
 
-// codeLaneRefused is the answer to a device-code enrollment at a server
+// deviceCodeExpired is errDeviceCodeExpired at server, with the enroll
+// command that works on this machine.
+func deviceCodeExpired(server string) error {
+	return fmt.Errorf("%w. Run `%s` again and approve the new code it shows", errDeviceCodeExpired, enrollCommand(server))
+}
+
+// codeLaneRefused is the answer to a device-code enrollment at server
 // whose idp.json says it accepts the browser lane only.
-const codeLaneRefused = "Straza refused this sign-in because your Straza admin requires a browser sign-in, " +
-	"and a sign-in code cannot show which machine it was approved for. Run `straza enroll` in a desktop session on this machine."
+func codeLaneRefused(server string) string {
+	return "Straza refused this sign-in because your Straza admin requires a browser sign-in, " +
+		"and a sign-in code cannot show which machine it was approved for. Run `" + enrollCommand(server) +
+		"` in a desktop session on this machine."
+}
+
+// enrollCommand is the straza enroll command that enrolls this machine at
+// server: the bare command when the managed configuration names a server,
+// because the service enrolls there then, and the command with --server
+// otherwise, because the service refuses an enrollment that names no
+// server.
+func enrollCommand(server string) string {
+	if c, managed, err := managedConfig(); err == nil && managed && c.ServerURL != "" {
+		return "straza enroll"
+	}
+	return "straza enroll --server " + server
+}
 
 // Enroll enrolls c, a person on the sign-in lane req.Lane names or an agent
 // headless, and hands each progress note, the code or the browser link to
@@ -116,7 +136,7 @@ func enrollServer(named string, emit func(localapi.EnrollEvent)) (string, map[st
 func (s *credStore) enrollPerson(ctx context.Context, c Caller, server string, keys map[string]string, lane string, emit func(localapi.EnrollEvent)) (localapi.EnrollResult, error) {
 	if lane != "" && lane != localapi.LaneBrowser && lane != localapi.LaneDeviceCode {
 		return localapi.EnrollResult{}, &Refused{Status: http.StatusBadRequest, Sentence: fmt.Sprintf("Straza cannot sign you in on the lane %q, "+
-			"because it knows browser and device-code only. Run `straza enroll`, or `straza enroll --use-device-code` to sign in with a code.", lane)}
+			"because it knows browser and device-code only. Run `%[2]s`, or `%[2]s --use-device-code` to sign in with a code.", lane, enrollCommand(server))}
 	}
 	plain := agentguard.NewClient(server)
 	flow, err := plain.DiscoverLogin(ctx)
@@ -173,10 +193,10 @@ func (s *credStore) enrollPerson(ctx context.Context, c Caller, server string, k
 	case got.KeyThumbprint == "":
 		return localapi.EnrollResult{}, &Refused{Status: http.StatusBadGateway, Sentence: "The server enrolled this machine without binding its key, " +
 			"so it is older than this Straza client and made a device that works without one. Ask your Straza admin to update the server " +
-			"and revoke that device, then run `straza enroll` again."}
+			"and revoke that device, then run `" + enrollCommand(server) + "` again."}
 	case got.KeyThumbprint != thumb:
 		return localapi.EnrollResult{}, &Refused{Status: http.StatusBadGateway, Sentence: "The server bound a key other than the one this machine made, " +
-			"so Straza did not keep the enrollment. Run `straza enroll` again, and tell your Straza admin if it happens again."}
+			"so Straza did not keep the enrollment. Run `" + enrollCommand(server) + "` again, and tell your Straza admin if it happens again."}
 	}
 	rec := enrollment{
 		ServerURL: server, Kind: localapi.KindPerson, Username: got.Username, UserID: got.UserID, DeviceID: got.DeviceID,
@@ -185,7 +205,7 @@ func (s *credStore) enrollPerson(ctx context.Context, c Caller, server string, k
 	}
 	if err := s.replace(a, rec, key); err != nil {
 		return localapi.EnrollResult{}, fmt.Errorf("the server enrolled device %s, and this machine could not keep its key, "+
-			"so revoke that device and run `straza enroll` again: %w", got.DeviceID, err)
+			"so revoke that device and run `%s` again: %w", got.DeviceID, enrollCommand(server), err)
 	}
 	s.log.Info("enrolled a person", "uid", c.UID, "user", got.Username, "device", got.DeviceID, "custody", custody)
 	return localapi.EnrollResult{
@@ -201,12 +221,12 @@ func (s *credStore) enrollPerson(ctx context.Context, c Caller, server string, k
 // code.
 func personSignIn(ctx context.Context, plain *agentguard.Client, flow oidcflow.Flow, lane, thumb string, emit func(localapi.EnrollEvent)) (string, error) {
 	if lane == localapi.LaneBrowser {
-		return oidcflow.SignIn(ctx, plain.HTTP, flow, oidcflow.Nonce(thumb), "straza enroll", func(link string) {
+		return oidcflow.SignIn(ctx, plain.HTTP, flow, oidcflow.Nonce(thumb), enrollCommand(plain.Base), func(link string) {
 			emit(localapi.EnrollEvent{Event: localapi.EnrollBrowser, VerificationURI: link})
 		})
 	}
 	if flow.MinSignIn == "browser" {
-		return "", &Refused{Status: http.StatusForbidden, Sentence: codeLaneRefused}
+		return "", &Refused{Status: http.StatusForbidden, Sentence: codeLaneRefused(plain.Base)}
 	}
 	if err := flow.CheckDevice(); err != nil {
 		return "", err
@@ -240,7 +260,7 @@ func pollDeviceFlow(ctx context.Context, c *agentguard.Client, flow oidcflow.Flo
 			return "", err
 		case wait == "" && tok == "":
 			return "", errors.New("the identity provider approved the sign-in but sent no ID token. " +
-				"Ask IT to allow the openid scope for the Straza client, then run `straza enroll` again")
+				"Ask IT to allow the openid scope for the Straza client, then run `" + enrollCommand(c.Base) + "` again")
 		case wait == "":
 			return tok, nil
 		case wait == "slow_down":
@@ -257,7 +277,7 @@ func pollDeviceFlow(ctx context.Context, c *agentguard.Client, flow oidcflow.Flo
 		case <-time.After(interval):
 		}
 	}
-	return "", errDeviceCodeExpired
+	return "", deviceCodeExpired(c.Base)
 }
 
 // enrollRefusal turns a refused enrollment into the sentence the person
@@ -273,7 +293,7 @@ func enrollRefusal(server string, ans answer) error {
 			"Check that %s reaches strazad with nothing in front of it that blocks Straza, and run `straza doctor`.", refuse.Status, server)}
 	case refuse.Status >= http.StatusInternalServerError:
 		return &Refused{Status: http.StatusBadGateway, Sentence: fmt.Sprintf("The server could not enroll this machine and answered HTTP %d: %s "+
-			"Run `straza enroll` again in a minute, and run `straza doctor` if it keeps failing.", refuse.Status, endSentence(refuse.Msg))}
+			"Run `%s` again in a minute, and run `straza doctor` if it keeps failing.", refuse.Status, endSentence(refuse.Msg), enrollCommand(server))}
 	}
 	return &Refused{Status: refuse.Status, Sentence: refuse.Msg}
 }

@@ -130,3 +130,13 @@ CHANGELOG + version bump in the same PR.
   publishing adds a registry row beside the old one.
   `valid-gemini-darwin.json` is regenerated, because it is built from the
   darwin gemini render.
+- **v1alpha1 content** (2026-11-04): the `PreToolUse` hook of every
+  `hooks.claude-code` artifact, on linux, darwin and windows, gains
+  `"onFailure": "block"`, so Claude Code 2.1.295 and later blocks a tool
+  call when the straza hook cannot start, is killed, times out or prints
+  output Claude Code cannot read, instead of running it unchecked. Earlier
+  Claude Code releases ignore the key. No other hook and no codex or gemini
+  artifact changes. As before, the envelope, the signing input and the
+  verification do not change, each claude-code `content_hash` changes once
+  and publishing adds a registry row beside the old one. The four examples
+  built from the linux claude-code render are regenerated.

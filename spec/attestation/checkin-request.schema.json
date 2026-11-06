@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://straza.dev/attestation/v1beta1/checkin-request.schema.json",
   "title": "Straza check-in request (v1beta1)",
-  "description": "POST /v1/checkin body. Exactly one credential lane: id_token (fresh login), device_token (a device credential, which the server refuses since 2026-11-01), session_token (refresh), or the key lane, device_id plus counter with no token in the body, which the request's DPoP header proves (RFC 9449). v1beta1 (2026-11-01): strazactl no longer signs in, so a check-in under the harness name strazactl and a device_token on a human row are refused, and with the kit lane retired before, every device_token is refused. The shape is unchanged. v1beta1 (2026-10-31): harness.name, harness.version and client.version hold at most 256 bytes, and a longer one answers 400 before the server writes anything. v1beta1 (2026-10-21): the straza client's device_token lane is retired, so device_token is for the human clients' devices only, and an AI agent's id_token check-in may carry a DPoP proof. The shape is unchanged. v1beta1 (2026-10-20): counter and the key lane added. v1beta1 (2026-09-09): client added, the calling build's version and commit, recorded on the session. v1beta1: id stabilized, no wire changes from v1alpha3. v1alpha3: device_token added, the long-lived enroll credential; its device binding is authoritative, so device_id is ignored alongside it. v1alpha2: attestation.platform added; managed level verified against the expected-hash registry (SPEC.md).",
+  "description": "POST /v1/checkin body. Exactly one credential lane: id_token (fresh login), device_token (a device credential, which the server refuses since 2026-11-01), session_token (refresh), or the key lane, device_id plus counter with no token in the body, which the request's DPoP header proves (RFC 9449). v1beta1 (2026-11-04): a NUL character in harness.name, harness.version, client.version, client.commit, or an artifact name or hash of attestation.hashes, answers 400 before the server writes anything, on every lane, because the server stores these fields when a check-in starts a session and a Postgres store cannot hold that character. The shape is unchanged. v1beta1 (2026-11-01): strazactl no longer signs in, so a check-in under the harness name strazactl and a device_token on a human row are refused, and with the kit lane retired before, every device_token is refused. The shape is unchanged. v1beta1 (2026-10-31): harness.name, harness.version and client.version hold at most 256 bytes, and a longer one answers 400 before the server writes anything. v1beta1 (2026-10-21): the straza client's device_token lane is retired, so device_token is for the human clients' devices only, and an AI agent's id_token check-in may carry a DPoP proof. The shape is unchanged. v1beta1 (2026-10-20): counter and the key lane added. v1beta1 (2026-09-09): client added, the calling build's version and commit, recorded on the session. v1beta1: id stabilized, no wire changes from v1alpha3. v1alpha3: device_token added, the long-lived enroll credential; its device binding is authoritative, so device_id is ignored alongside it. v1alpha2: attestation.platform added; managed level verified against the expected-hash registry (SPEC.md).",
   "type": "object",
   "properties": {
     "id_token": { "type": "string", "minLength": 1 },
@@ -21,12 +21,14 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
-          "description": "v1beta1 (2026-10-31): at most 256 bytes, or the check-in answers 400. The server counts bytes, and maxLength counts characters, so a name of multi-byte characters is refused sooner than the schema shows."
+          "pattern": "^[^\\x00]*$",
+          "description": "v1beta1 (2026-10-31): at most 256 bytes, or the check-in answers 400. The server counts bytes, and maxLength counts characters, so a name of multi-byte characters is refused sooner than the schema shows. v1beta1 (2026-11-04): a name that holds a NUL character answers 400 as well."
         },
         "version": {
           "type": "string",
           "maxLength": 256,
-          "description": "v1beta1 (2026-10-31): at most 256 bytes, or the check-in answers 400, counted in bytes as harness.name is."
+          "pattern": "^[^\\x00]*$",
+          "description": "v1beta1 (2026-10-31): at most 256 bytes, or the check-in answers 400, counted in bytes as harness.name is. v1beta1 (2026-11-04): a NUL character answers 400 as in harness.name."
         }
       },
       "required": ["name"]
@@ -42,6 +44,8 @@
         },
         "hashes": {
           "type": "object",
+          "description": "v1beta1 (2026-11-04): an artifact name or a hash that holds a NUL character answers 400.",
+          "propertyNames": { "pattern": "^[^\\x00]*$" },
           "additionalProperties": { "type": "string", "pattern": "^sha256:[0-9a-f]{6,64}$" }
         }
       },
@@ -54,9 +58,14 @@
         "version": {
           "type": "string",
           "maxLength": 256,
-          "description": "v1beta1 (2026-10-31): at most 256 bytes, or the check-in answers 400, counted in bytes as harness.name is."
+          "pattern": "^[^\\x00]*$",
+          "description": "v1beta1 (2026-10-31): at most 256 bytes, or the check-in answers 400, counted in bytes as harness.name is. v1beta1 (2026-11-04): a NUL character answers 400 as in harness.name."
         },
-        "commit": { "type": "string" }
+        "commit": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "description": "v1beta1 (2026-11-04): a NUL character answers 400 as in harness.name."
+        }
       }
     }
   },

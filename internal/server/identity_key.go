@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/strazahq/straza/internal/authn"
@@ -139,8 +140,18 @@ func (a *App) answerStoreOutage(w http.ResponseWriter, r *http.Request, err erro
 	a.fail(w, r, http.StatusServiceUnavailable, loginOutageBody, fmt.Errorf("key lane: %w", err))
 }
 
+// enrollNULMsg is the refusal of a key enrollment whose text holds a NUL
+// character, with the name of the field that holds it.
+const enrollNULMsg = "The %s field of this enrollment holds a NUL character (a zero byte), and strazad does not accept one. " +
+	"strazad stores this field when an enrollment creates a device, and a Postgres store cannot hold that character, " +
+	"so strazad refuses it in every enrollment. " +
+	"A straza client never puts one there, so a program other than a straza client likely made this enrollment. " +
+	"Find out what made it, or reinstall straza."
+
 // keyEnrollFieldsError checks the fields a key enrollment adds to the body
-// and answers the 400 sentence, or "" when they hold.
+// and the text fields a new device row stores as sent, and answers the 400
+// sentence, or "" when they hold. The custody fields are kept as JSON text,
+// which escapes a NUL character, so only the four raw fields refuse one.
 func keyEnrollFieldsError(req enrollRequest, kind string) string {
 	switch {
 	case kind != store.DeviceClientKit:
@@ -153,6 +164,14 @@ func keyEnrollFieldsError(req enrollRequest, kind string) string {
 		return "machine_binding is required and must be at most 128 bytes"
 	case req.Counter != 0:
 		return "counter must be 0 on a key enrollment, because a new key has not checked in yet"
+	}
+	for _, f := range []struct{ name, value string }{
+		{"device.name", req.Device.Name}, {"device.platform", req.Device.Platform},
+		{"device.fingerprint", req.Device.Fingerprint}, {"machine_binding", req.MachineBinding},
+	} {
+		if strings.Contains(f.value, "\x00") {
+			return fmt.Sprintf(enrollNULMsg, f.name)
+		}
 	}
 	return ""
 }
@@ -383,7 +402,7 @@ func (a *App) checkinKey(w http.ResponseWriter, r *http.Request, req checkinRequ
 		return none()
 	}
 	if err != nil || u.Status != store.UserActive {
-		return refuse(http.StatusForbidden, "user is disabled. Contact your administrator",
+		return refuse(http.StatusForbidden, disabledUserMsg,
 			authnFields{User: u.Username, UserID: d.UserID, Reason: "user is disabled"})
 	}
 	if msg, passed := a.signInPassed(d, now); passed {
@@ -431,7 +450,7 @@ func (a *App) checkinKey(w http.ResponseWriter, r *http.Request, req checkinRequ
 // revoke deleted the row first. A delete the store fails is logged at Error
 // and the record is still written, because the reuse happened.
 func (a *App) revokeReusedKey(r *http.Request, d store.Device, sent int64) bool {
-	err := a.revokeDevice(r, d.ID, "device key reused")
+	err := a.revokeDevice(r, d, "device key reused", "revoked-key-reuse")
 	if errors.Is(err, store.ErrNotFound) {
 		return false
 	}
@@ -467,7 +486,7 @@ func (a *App) keyDeviceRefusal(d store.Device, via, cnf string, now time.Time) (
 	case a.custodyRefused(custodyKind(d.Custody)):
 		return http.StatusForbidden, custodyRefusedMsg, custodyBelowReason
 	case a.signInRefused(storedSignIn(d.Custody)):
-		return http.StatusForbidden, codeMachineMsg, signInBelowReason
+		return http.StatusForbidden, fmt.Sprintf(codeMachineMsg, a.enrollCommand("")), signInBelowReason
 	}
 	if msg, passed := a.signInPassed(d, now); passed {
 		return http.StatusForbidden, msg, signInPassedReason
@@ -481,7 +500,7 @@ func (a *App) keyDeviceRefusal(d store.Device, via, cnf string, now time.Time) (
 func (a *App) signInPassed(d store.Device, now time.Time) (string, bool) {
 	maxAge := a.cfg.EffectiveSignInMaxAge()
 	msg := "Your last sign-in on this machine was more than " + periodWords(maxAge) +
-		" ago, and your Straza admin requires a new one. Run straza enroll and sign in with your work account."
+		" ago, and your Straza admin requires a new one. Run " + a.enrollCommand("") + " and sign in with your work account."
 	return msg, d.SignedInAt.IsZero() || now.Sub(d.SignedInAt) > maxAge
 }
 

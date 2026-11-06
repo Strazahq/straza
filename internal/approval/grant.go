@@ -68,6 +68,28 @@ func (s *Service) DeniedTicketWithinWindow(ctx context.Context, userID, ruleID, 
 	return Record{}, false, nil
 }
 
+// DeniedHoldWithinWindow is DeniedTicketWithinWindow for a hold, scoped the
+// way a hold is used: it reports whether the latest hold of (userID,
+// sessionID, ruleID, argvHash) is a denial still inside its decision window
+// (ExpiresAt > now). On a hit it returns (record, true, nil) and the hook
+// lane refuses the retry without asking the person again. Any other latest
+// hold, or none, returns (_, false, nil). A store error returns
+// (_, false, err) so the PEP fails closed. The hook lane checks it after
+// ConsumeHold, so an unused approval inside its use window wins.
+func (s *Service) DeniedHoldWithinWindow(ctx context.Context, userID, sessionID, ruleID, argvHash string) (Record, bool, error) {
+	latest, err := s.st.Approvals().FindLatestHoldByKey(ctx, userID, sessionID, ruleID, argvHash)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return Record{}, false, nil
+		}
+		return Record{}, false, fmt.Errorf("approval denied-hold-find: %w", err)
+	}
+	if latest.State == string(StateDenied) && s.now().Before(latest.ExpiresAt) {
+		return recordFromStore(latest), true, nil
+	}
+	return Record{}, false, nil
+}
+
 // ConsumeHold uses the approval of a hold for a retry of the same call: the
 // approved, unused hold of (userID, sessionID, ruleID, argvHash) whose use
 // deadline, decidedAt plus retryTTLSeconds, is still ahead. A win returns

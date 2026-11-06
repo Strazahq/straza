@@ -1,13 +1,16 @@
 package authn
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jws"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 
 	"github.com/strazahq/straza/internal/clientassertion"
@@ -42,6 +45,21 @@ const (
 	// the enforcement kit's client id, already accepted at /v1/checkin.
 	nhiTokenAudience = "straza"
 )
+
+// errAssertionKey reports an EdDSA client assertion whose signature does not
+// verify with the key registered for its client.
+var errAssertionKey = errors.New("authn: assertion signature does not verify with the registered key")
+
+// assertionKeyRefused is the error_description for errAssertionKey. It names
+// the client the caller sent, how to register the key it signs with, and
+// the enroll command for server. The server is this issuer's URL, which
+// idp.json names as nhi_issuer, so the agent's key lane already reached it.
+func assertionKeyRefused(username, server string) string {
+	return "the key that signed the request is not the key registered for " + username + ". " +
+		"On the agent's machine, run `straza keygen --force --user " + username + "` to make a new key. " +
+		"Have an admin register the public key it prints, with `strazactl users nhi-key set` or in the console. " +
+		"Then run `straza enroll --server " + server + " --headless`"
+}
 
 // nhiGrantOutcome fires the matching observer hook once per judged grant.
 func (i *Issuer) nhiGrantOutcome(userID, username, reason string, r *http.Request) {
@@ -81,7 +99,11 @@ func (i *Issuer) handleClientCredentials(w http.ResponseWriter, r *http.Request)
 	jti, exp, err := verifyClientAssertion(assertion, pub, clientID, i.baseURL)
 	if err != nil {
 		i.nhiGrantOutcome(u.ID, u.Username, "client assertion rejected", r)
-		oauthError(w, "invalid_client", "client assertion rejected: mint a fresh EdDSA assertion (iss=sub=client_id, aud=issuer, exp ≤ 5 min, unique jti)")
+		desc := "client assertion rejected: mint a fresh EdDSA assertion (iss=sub=client_id, aud=issuer, exp ≤ 5 min, unique jti)"
+		if errors.Is(err, errAssertionKey) {
+			desc = assertionKeyRefused(u.Username, i.baseURL)
+		}
+		oauthError(w, "invalid_client", desc)
 		return
 	}
 
@@ -117,12 +139,17 @@ func (i *Issuer) handleClientCredentials(w http.ResponseWriter, r *http.Request)
 // exp/iat (30 s skew, same as every Straza token), iss==sub==client_id,
 // audience (the issuer URL or its token endpoint), the lifetime bound, and
 // that a jti is present. Returns the jti and expiry for the replay cache.
+// A refused assertion whose EdDSA signature does not verify with pub fails
+// with errAssertionKey.
 func verifyClientAssertion(raw string, pub ed25519.PublicKey, clientID, issuerURL string) (jti string, exp time.Time, err error) {
 	tok, err := jwt.Parse([]byte(raw),
 		jwt.WithKey(jwa.EdDSA(), pub),
 		jwt.WithAcceptableSkew(30*time.Second),
 	)
 	if err != nil {
+		if signedByAnotherKey(raw, pub) {
+			return "", time.Time{}, fmt.Errorf("%w: %w", errAssertionKey, err)
+		}
 		return "", time.Time{}, fmt.Errorf("authn: assertion rejected: %w", err)
 	}
 	iss, _ := tok.Issuer()
@@ -150,6 +177,24 @@ func verifyClientAssertion(raw string, pub ed25519.PublicKey, clientID, issuerUR
 		return "", time.Time{}, fmt.Errorf("authn: assertion has no jti")
 	}
 	return jti, expT, nil
+}
+
+// signedByAnotherKey reports whether raw is a compact JWS with alg EdDSA
+// whose signature does not verify with pub. It only names the reason for a
+// refusal that jwt.Parse already made. It verifies the bytes as received
+// with the call jwt.Parse makes for one key, so an assertion signed by pub
+// and refused for its claims, its encoding or a crit header reports false.
+func signedByAnotherKey(raw string, pub ed25519.PublicKey) bool {
+	b := bytes.TrimSpace([]byte(raw))
+	msg, err := jws.Parse(b, jws.WithCompact())
+	if err != nil || len(msg.Signatures()) != 1 {
+		return false
+	}
+	if alg, ok := msg.Signatures()[0].ProtectedHeaders().Algorithm(); !ok || alg != jwa.EdDSA() {
+		return false
+	}
+	_, err = jws.VerifyCompactFast(pub, b, jwa.EdDSA())
+	return errors.Is(err, jws.VerificationError())
 }
 
 // gcJTILocked drops replay-cache entries whose assertions have expired (they

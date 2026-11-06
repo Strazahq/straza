@@ -131,7 +131,7 @@ printf %s '{"hook_event_name":"SessionStart"}' | straza hook --harness claude-co
 The context the agent receives, decoded from the hook's JSON answer, reads:
 
 ```text
-Straza governance is active for this session. You are operating as "alice" (roles: dev) against http://127.0.0.1:8420; policy snapshot 72ef15aad404, attestation advisory. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial.
+Straza governs this session as "alice". Every tool call is checked against policy and recorded in the audit log. When a call is denied, tell the user what the reason says, then do what it says next: wait for a person's approval, change the call, or try once more later. A denial that says none of these is a policy decision, and the same call will be denied again. Do not try to reach the denied result another way.
 
 # Straza knowledge packs (delivered by role)
 

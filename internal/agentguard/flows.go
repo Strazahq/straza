@@ -206,6 +206,9 @@ type SessionInfo struct {
 	// Capture: whether this session's conversations are recorded (spec/
 	// policyset §6: the principal is TOLD, never silently surveilled).
 	Capture policy.CaptureDirective
+	// StartText is the governance paragraph the server wrote at check-in.
+	// Nil means the server sent none, and an empty text turns it off.
+	StartText *string
 }
 
 // PackContext renders knowledge packs as a single additional-context string

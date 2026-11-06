@@ -79,7 +79,7 @@ describe("a server admin on their server's Roles tab", () => {
     const reach = within(row).getAllByRole("cell")[1];
     expect(reach.textContent).toBe("2 of 3toolsechoadd");
     expect(Array.from(reach.querySelectorAll("[data-tool-names] > *"), (c) => c.textContent)).toEqual(["echo", "add"]);
-    expect(screen.getByText("Nobody holds it yet. Your identity manager assigns it: in midPoint it is AR:demo-tools-readers within a sync cycle.")).toBeTruthy();
+    expect(screen.getByText("Nobody holds it yet. Your IGA assigns it as AR:demo-tools-readers, within a sync cycle.")).toBeTruthy();
 
     expect(document.querySelector("[data-refused-error]")).toBeNull();
     expect(screen.queryByText(/HTTP \d/)).toBeNull();

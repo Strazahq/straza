@@ -46,6 +46,19 @@ registered for the agent, and refuses a check-in proof from another key
 and an agent's minted before this revision, are unchanged, and session
 tokens and the proof examples are unchanged.
 
+Revision (2026-11-04): a proof on key enrollment, key check-in or an AI
+agent's ID-token check-in, the lanes whose `jti` the server spends in its
+database, is refused at step 7 of the proof checks when its `jti` holds a
+NUL character (U+0000). The answer is that lane's proof failure, 401 with
+`invalid_dpop_proof` (spec/attestation). A Postgres store cannot hold the
+character in text, so on Postgres such a proof passed the checks, its
+spend failed, and a key check-in answered 503 as for a store outage. Only
+a SQLite store accepted it before. A proof on a request with a key-bound session
+token, whose `jti` a replica spends in memory, is unchanged. A straza
+client's `jti` is 32 hex characters. This refusal ships as a fix without
+a major release. The proof schema and the examples are
+unchanged, because the schema describes one proof without its lane.
+
 Straza session tokens are EdDSA (ed25519) JWTs, TTL **300 s**, verified
 locally against the JWKS at `/.well-known/straza/jwks.json` (invariant:
 self-validating tokens + push revocation; verifiers never call home per
@@ -161,7 +174,10 @@ the proof in this order:
 4. `htm`, which MUST equal the request method.
 5. `htu`, as below.
 6. `iat`, which MUST be present.
-7. `jti`, which MUST be present and at most 128 bytes.
+7. `jti`, which MUST be present and at most 128 bytes. On key enrollment,
+   key check-in and an AI agent's ID-token check-in, whose `jti` the
+   server spends in its database, it MUST NOT hold a NUL character
+   (U+0000), because a Postgres database cannot store that character.
 8. `ath`, as above.
 9. `ctr`, as above.
 10. The key's thumbprint, which MUST equal `cnf.jkt` when the request

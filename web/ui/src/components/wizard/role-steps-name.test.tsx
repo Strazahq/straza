@@ -79,13 +79,13 @@ describe("the first step of an application role", () => {
   it("fixes the picked server's prefix, keeps the typed word on a switch and previews the stored name", async () => {
     render(<Mounted server="demo-tools" />);
     expect(prefix()).toBe("demo-tools-");
-    expect(preview()).toBe("Stored as demo-tools-, in midPoint as AR:demo-tools-.");
+    expect(preview()).toBe("Application role, stored as demo-tools-. An IGA imports it as AR:demo-tools-.");
     await userEvent.type(suffix(), "Read Only");
-    expect(preview()).toBe("Stored as demo-tools-read-only, in midPoint as AR:demo-tools-read-only.");
+    expect(preview()).toBe("Application role, stored as demo-tools-read-only. An IGA imports it as AR:demo-tools-read-only.");
     await userEvent.click(rail("midpoint"));
     expect(prefix()).toBe("midpoint-");
     expect((suffix() as HTMLInputElement).value).toBe("Read Only");
-    expect(preview()).toBe("Stored as midpoint-read-only, in midPoint as AR:midpoint-read-only.");
+    expect(preview()).toBe("Application role, stored as midpoint-read-only. An IGA imports it as AR:midpoint-read-only.");
   });
 
   // Each case is the server, the typed word, and the check line the stored
@@ -132,6 +132,26 @@ describe("the name check against a server's prefix", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "demo-team");
     expect(check().getAttribute("data-name-check")).toBe("warn");
     expect(check().textContent).toBe("Close to existing: demo-tools-readers and demo-tools-sandbox.");
+  });
+
+  // Each case is the picked kind, the typed name, and the name line under
+  // the field: the kind and the name an IGA imports, BR: for a business
+  // role and AR: for an approver role.
+  const lines: [Draft["kind"], string, string][] = [
+    ["business", "analysts", "Business role, stored as analysts. An IGA imports it as BR:analysts."],
+    ["approver", "pay-approvers", "Approver role, stored as pay-approvers. An IGA imports it as AR:pay-approvers."],
+  ];
+  it.each(lines)("names the kind of a %s role in the name line", async (kind, name, want) => {
+    render(<Mounted kind={kind} />);
+    expect(document.querySelector("[data-name-preview]")).toBeNull();
+    await userEvent.type(screen.getByRole("textbox", { name: "Name" }), name);
+    expect(preview()).toBe(want);
+  });
+
+  it("shows no name line for a business role's name inside a server's prefix", async () => {
+    render(<Mounted kind="business" />);
+    await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "demo-tools-x");
+    expect(document.querySelector("[data-name-preview]")).toBeNull();
   });
 
   it("leaves a name outside every server's prefix free", async () => {

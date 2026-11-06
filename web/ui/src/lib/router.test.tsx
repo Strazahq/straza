@@ -25,6 +25,23 @@ describe("the leave guard", () => {
     expect(window.location.pathname).toBe("/audit");
   });
 
+  it("hands over only on a departure that happens: never when the person stays, at the move when the guard lets it go, at once with no guard", () => {
+    at("/policies/dev-guardrails/rules");
+    renderHook(() => useRouter());
+    const seen: string[] = [];
+    let release: (() => void) | null = null;
+    setLeaveGuard((_next, go) => { release = go; });
+    navigate("audit", [], false, () => seen.push("handed over at " + window.location.pathname));
+    expect(seen).toEqual([]);
+    (release as unknown as () => void)();
+    expect(seen).toEqual(["handed over at /policies/dev-guardrails/rules"]);
+    expect(window.location.pathname).toBe("/audit");
+    setLeaveGuard(null);
+    navigate("users", [], false, () => seen.push("handed over at " + window.location.pathname));
+    expect(seen[1]).toBe("handed over at /audit");
+    expect(window.location.pathname).toBe("/users");
+  });
+
   it("is not asked for the location the console is already at, and goes at once with no guard", () => {
     at("/policies/dev-guardrails/rules");
     renderHook(() => useRouter());

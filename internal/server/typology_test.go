@@ -30,7 +30,7 @@ func TestCheckinCarriesTypology(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	idt := loginDeviceFlow(t, base, "atlas", "hunter2!")
+	idt := agentIDToken(t, app, "atlas")
 	var resp struct {
 		SessionID  string `json:"session_id"`
 		UserType   string `json:"user_type"`

@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "019a4f31-5c20-7d42-8e33-4b5c6d7e8f19",
+  "type": "straza.audit.admin",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-11-03T14:05:12.481Z",
+  "data": {
+    "action": "device.revoke",
+    "actor": "alice",
+    "actorId": "0197fa3d-1111-7abc-9def-000000000001",
+    "actorVia": "session",
+    "target": "01a11329-4ee8-7217-88b2-4dca17bf54d2",
+    "device": "01a11329-4ee8-7217-88b2-4dca17bf54d2",
+    "user": "0197fa3d-2222-7abc-9def-000000000002",
+    "reason": "device revoked by admin"
+  }
+}

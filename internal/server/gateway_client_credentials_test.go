@@ -150,8 +150,8 @@ func TestGatewayClientCredentialsLane(t *testing.T) {
 	catRecompile(t, app)
 
 	aliceTok := sessionToken(t, base, "alice")
-	joeTok, joeSID := gatewaySession(t, base, "joe")
-	samTok := sessionToken(t, base, "sam")
+	joeTok, joeSID := agentCheckin(t, app, base, "joe")
+	samTok := agentSessionToken(t, app, base, "sam")
 	var answers []string
 	call := func(tok string) string {
 		raw := echoCall(t, base, tok, "ccapp")
@@ -239,7 +239,7 @@ func TestGatewayClientCredentialsLane(t *testing.T) {
 	// A revoked session costs joe his cached token, so his next session asks
 	// again, and a locked user loses theirs the same way.
 	app.denylist.RevokeSession(joeSID)
-	if raw := call(sessionToken(t, base, "joe")); !strings.Contains(raw, "echo: hi") {
+	if raw := call(agentSessionToken(t, app, base, "joe")); !strings.Contains(raw, "echo: hi") {
 		t.Fatalf("joe on a new session = %s", raw)
 	}
 	if got := idp.asked(); got != "joe,sam,joe" {
@@ -262,7 +262,7 @@ func TestGatewayClientCredentialsLane(t *testing.T) {
 	app.denylist.RevokeSession("no-such-session")
 	app.clientTokens.DropUser(joe.ID)
 	downReason := open + "keycloak answered the token request at " + idp.URL + "/token with HTTP 503 and no OAuth error. Check oauth.providers.keycloak.tokenUrl in strazad's config and that the provider is healthy, then call again."
-	if raw := call(sessionToken(t, base, "joe")); !strings.Contains(raw, downReason) {
+	if raw := call(agentSessionToken(t, app, base, "joe")); !strings.Contains(raw, downReason) {
 		t.Fatalf("joe while the provider is down = %s", raw)
 	}
 	denied(joe, downReason)

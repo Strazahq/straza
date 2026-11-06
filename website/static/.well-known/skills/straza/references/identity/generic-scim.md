@@ -99,7 +99,7 @@ Creating a group answers `501` with `"roles are born in Straza, so the IdM canno
 
 ## Undo
 
-Revoke the token when the client is retired. `strazactl api-token revoke <token id>` prints `revoked <token id>`, and the next request with that token answers `401` with the detail `admin API token rejected: unknown, expired or revoked (strazactl api-token list)`.
+Revoke the token when the client is retired. `strazactl api-token revoke <token id>` prints `revoked the admin API token <token id>, matched by its id.`, and the next request with that token answers `401` with the detail `admin API token rejected: this token is unknown, expired or revoked. Mint a new token in the console under Settings, API tokens, or ask a Straza administrator to mint one. Then set STRAZA_API_TOKEN, or the token setting of the connector that sent this request, to the new token.`.
 
 ## What a certifier sees
 

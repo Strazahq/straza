@@ -11,13 +11,26 @@ import (
 
 // MaybeWritten reports whether a write that returned err may still have been
 // stored: the statement may have reached the database and no answer came
-// back, as when a timeout or a lost connection ends the wait. It is false
+// back, as when a timeout or a lost connection ends the wait, including a
+// connection pgx closed while the statement waited for its answer. It is false
 // when err proves that nothing was stored: nil, a duplicate key or invalid
 // data, a failure before anything was sent, or an error the database
 // answered with, except a connection error or a termination. An
 // unrecognised error answers true, the cautious reading.
 func MaybeWritten(err error) bool {
-	if err == nil || errors.Is(err, ErrConflict) || errors.Is(err, ErrInvalidData) ||
+	if err == nil {
+		return false
+	}
+	// pgx answers a statement whose connection closed while it waited for
+	// the reply with its closed-connection error, which says it is safe to
+	// retry because pgx also gives it before a send. A COMMIT the server
+	// took before a termination comes back this way, so it is unsure.
+	// database/sql refuses a pooled connection that is already closed with
+	// ErrBadConn before any use, so that case still reads as nothing sent.
+	if errors.Is(err, pgconn.ErrConnClosed) {
+		return true
+	}
+	if errors.Is(err, ErrConflict) || errors.Is(err, ErrInvalidData) ||
 		errors.Is(err, driver.ErrBadConn) || pgconn.SafeToRetry(err) {
 		return false
 	}

@@ -63,6 +63,12 @@ type harnessInstall struct {
 	// which the harness merges above (and un-overridably against) user
 	// settings. Missing GOOS falls back to "linux".
 	managedPath map[string]string
+	// blockOnFailure marks the pre-tool entry so that the harness blocks the
+	// call when the straza hook cannot start, is killed, times out or prints
+	// invalid output, where the harness default lets the call run unchecked.
+	// Only claude-code offers such a setting (onFailure, v2.1.295 and later;
+	// earlier releases ignore the key). Codex and gemini document none.
+	blockOnFailure bool
 }
 
 var installs = map[string]harnessInstall{
@@ -76,7 +82,7 @@ var installs = map[string]harnessInstall{
 			"linux":   "/etc/claude-code/managed-settings.json",
 			"darwin":  "/Library/Application Support/ClaudeCode/managed-settings.json",
 			"windows": `C:\Program Files\ClaudeCode\managed-settings.json`,
-		}},
+		}, true},
 	// Codex cloned the hook contract of the row above nearly verbatim
 	// (adapters/codex.yaml), but the PLUMBING differs and must not be copied:
 	//   - user scope is hooks.json, the dedicated file codex reads. It is NOT
@@ -95,7 +101,7 @@ var installs = map[string]harnessInstall{
 			"linux":   "/etc/codex/requirements.toml",
 			"darwin":  "/etc/codex/requirements.toml",
 			"windows": `C:\ProgramData\OpenAI\Codex\requirements.toml`,
-		}},
+		}, false},
 	// Gemini CLI / Antigravity: renamed events, system settings.json
 	// (adapters/gemini.yaml). AfterAgent is the turn-end capture point and
 	// carries the reply IN the payload (prompt_response, vendor-verified).
@@ -110,7 +116,7 @@ var installs = map[string]harnessInstall{
 			"linux":   "/etc/gemini-cli/settings.json",
 			"darwin":  "/Library/Application Support/GeminiCli/settings.json",
 			"windows": `C:\ProgramData\gemini-cli\settings.json`,
-		}},
+		}, false},
 }
 
 // allEvents returns every native event this harness's installer registers,
@@ -378,6 +384,13 @@ func applyStrazaHooks(h harnessInstall, hooks map[string]any, cmd string) {
 	hooks[h.sessionEvent] = mergeHook(hooks[h.sessionEvent], entry(), cmd)
 	pre := entry()
 	pre["matcher"] = "*"
+	if h.blockOnFailure {
+		// Only the pre-tool entry carries it: the vendor ignores the key on
+		// Stop and SubagentStop, SessionStart and SessionEnd cannot block, and
+		// straza hook itself lets a prompt through when it fails, so blocking
+		// prompts would only add refusals on top of the blocked tools.
+		pre["hooks"].([]any)[0].(map[string]any)["onFailure"] = "block"
+	}
 	hooks[h.preEvent] = mergeHook(hooks[h.preEvent], pre, cmd)
 	hooks[h.promptEvent] = mergeHook(hooks[h.promptEvent], entry(), cmd)
 	for _, ev := range append(append([]string{}, h.endEvents...), h.subagentEvents...) {
@@ -484,36 +497,48 @@ func allEventsIn(hooks map[string]any) []string {
 
 // mergeHook appends the Straza entry to an existing hook array for the event,
 // idempotently (does not duplicate if the same command is already wired).
+// When the command is already wired, the entry's hook settings are copied
+// onto that hook, so a re-install upgrades an entry an older install wrote,
+// while an operator's own hook in the same group stays as it is.
 func mergeHook(existing any, entry map[string]any, cmd string) []any {
 	var arr []any
 	if e, ok := existing.([]any); ok {
 		arr = e
 	}
 	for _, item := range arr {
-		if hookHasCommand(item, cmd) {
-			return arr // already installed
+		if hm := strazaHookIn(item, cmd); hm != nil {
+			for k, v := range entry["hooks"].([]any)[0].(map[string]any) {
+				hm[k] = v
+			}
+			return arr
 		}
 	}
 	return append(arr, entry)
 }
 
 func hookHasCommand(item any, cmd string) bool {
+	return strazaHookIn(item, cmd) != nil
+}
+
+// strazaHookIn returns the hook object in one hook group whose command is
+// cmd, or nil when the group holds none.
+func strazaHookIn(item any, cmd string) map[string]any {
 	m, ok := item.(map[string]any)
 	if !ok {
-		return false
+		return nil
 	}
 	hooks, ok := m["hooks"].([]any)
 	if !ok {
-		return false
+		return nil
 	}
 	for _, h := range hooks {
 		if hm, ok := h.(map[string]any); ok {
 			if c, _ := hm["command"].(string); c == cmd {
-				return true
+				return hm
 			}
 		}
 	}
-	return false
+	return nil
 }
 
 func quoteCommandFor(goos, path string) string {

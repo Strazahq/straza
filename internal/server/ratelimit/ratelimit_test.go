@@ -101,3 +101,61 @@ func TestRateLimitUnlimitedAndPerKey(t *testing.T) {
 		t.Error("second call on key b should throttle")
 	}
 }
+
+// TestAllowBurst pins a bucket whose burst is given apart from its rate:
+// five calls at once and then one every 12 seconds, refilled to the burst
+// and never past it. Each step runs calls at the given offset from the
+// start, in order, on one key.
+func TestAllowBurst(t *testing.T) {
+	l := New()
+	base := time.Unix(1_700_000_000, 0)
+	steps := []struct {
+		name  string
+		at    time.Duration
+		calls int
+		want  int // calls allowed
+	}{
+		{"the burst passes at once and the next call is refused", 0, 6, 5},
+		{"less than one refill later nothing passes", 11 * time.Second, 1, 0},
+		{"one refill later one call passes", 12 * time.Second, 2, 1},
+		{"a long idle refills to the burst and no further", 10 * time.Minute, 7, 5},
+	}
+	for _, st := range steps {
+		l.now = func() time.Time { return base.Add(st.at) }
+		got := 0
+		for i := 0; i < st.calls; i++ {
+			if l.AllowBurst("k", 5.0/60, 5) {
+				got++
+			}
+		}
+		if got != st.want {
+			t.Errorf("%s: allowed %d of %d, want %d", st.name, got, st.calls, st.want)
+		}
+	}
+}
+
+// TestReady pins the look that spends nothing: it answers what AllowBurst
+// would answer now, on a cold key, a spent key and a refilled key, and
+// any number of looks leave the bucket as it was.
+func TestReady(t *testing.T) {
+	l := New()
+	base := time.Unix(1_700_000_000, 0)
+	l.now = func() time.Time { return base }
+	for i := 0; i < 10; i++ {
+		if !l.Ready("k", 5.0/60, 5) {
+			t.Fatal("a cold key is not ready")
+		}
+	}
+	for i := 0; i < 5; i++ {
+		if !l.AllowBurst("k", 5.0/60, 5) {
+			t.Fatalf("call %d refused after the looks, which must spend nothing", i+1)
+		}
+	}
+	if l.Ready("k", 5.0/60, 5) {
+		t.Error("a spent key is ready")
+	}
+	l.now = func() time.Time { return base.Add(12 * time.Second) }
+	if !l.Ready("k", 5.0/60, 5) || !l.AllowBurst("k", 5.0/60, 5) || l.Ready("k", 5.0/60, 5) {
+		t.Error("one refill must make the key ready for exactly one call")
+	}
+}

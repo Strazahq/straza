@@ -83,11 +83,11 @@ func TestAPITokenIsTheCredential(t *testing.T) {
 				calls.Add(1)
 				rw.Header().Set("Content-Type", "application/json")
 				rw.WriteHeader(http.StatusUnauthorized)
-				_, _ = rw.Write([]byte(`{"error":"admin API token rejected: unknown, expired or revoked (strazactl api-token list)"}`))
+				_, _ = rw.Write([]byte(`{"error":"admin API token rejected: this token is unknown, expired or revoked. Mint a new token in the console under Settings, API tokens, or ask a Straza administrator to mint one. Then set STRAZA_API_TOKEN, or the token setting of the connector that sent this request, to the new token."}`))
 			}))
 			t.Cleanup(srv.Close)
 			err := w.call(tokenClient(t, srv.URL), http.MethodGet, "/v1/admin/roles")
-			if err == nil || err.Error() != "admin API token rejected: unknown, expired or revoked (strazactl api-token list)" {
+			if err == nil || err.Error() != "admin API token rejected: this token is unknown, expired or revoked. Mint a new token in the console under Settings, API tokens, or ask a Straza administrator to mint one. Then set STRAZA_API_TOKEN, or the token setting of the connector that sent this request, to the new token." {
 				t.Fatalf("err = %v, want the server's sentence", err)
 			}
 			if n := calls.Load(); n != 1 {

@@ -16,64 +16,102 @@ import (
 // noteDropped ever wrote (plain and compacted) parses back into totals, and a
 // foreign line degrades to "one drop event, unknown size" instead of being
 // silently ignored: the marker exists to make loss visible, so an
-// unparseable line must still count as loss.
+// unparseable line must still count as loss. A parked-file line that does
+// not count its records counts each file as one record.
 func TestParseDroppedMarker(t *testing.T) {
 	ts1 := "2026-07-29T10:00:00Z"
 	ts2 := "2026-07-30T04:05:06Z"
 	cases := []struct {
-		name     string
-		raw      string
-		events   int
-		records  int
-		files    int
-		last     string // RFC3339, "" = zero time
-		lastLine string
+		name        string
+		raw         string
+		events      int
+		records     int
+		files       int
+		fileRecords int
+		first, last string // RFC3339, "" = zero time
+		lastLine    string
 	}{
-		{"empty", "", 0, 0, 0, "", ""},
-		{"blank lines only", "\n\n", 0, 0, 0, "", ""},
+		{"empty", "", 0, 0, 0, 0, "", "", ""},
+		{"blank lines only", "\n\n", 0, 0, 0, 0, "", "", ""},
 		{"oversize records",
 			ts1 + " dropped 5 oversize record(s)\n",
-			1, 5, 0, ts1, ts1 + " dropped 5 oversize record(s)"},
+			1, 5, 0, 0, ts1, ts1, ts1 + " dropped 5 oversize record(s)"},
 		{"parked files with cap bytes not miscounted",
 			ts1 + " dropped 2 parked file(s) over the 30720-byte spool cap\n",
-			1, 0, 2, ts1, ts1 + " dropped 2 parked file(s) over the 30720-byte spool cap"},
+			1, 0, 2, 2, ts1, ts1, ts1 + " dropped 2 parked file(s) over the 30720-byte spool cap"},
+		{"parked files that count their records",
+			ts1 + " dropped 2 parked file(s) holding 17 record(s) over the 30720-byte spool cap\n",
+			1, 0, 2, 17, ts1, ts1, ts1 + " dropped 2 parked file(s) holding 17 record(s) over the 30720-byte spool cap"},
 		{"mixed lines sum and the last line wins",
 			ts1 + " dropped 2 parked file(s) over the 30720-byte spool cap\n" +
 				ts2 + " dropped 1 oversize record(s)\n",
-			2, 1, 2, ts2, ts2 + " dropped 1 oversize record(s)"},
+			2, 1, 2, 2, ts1, ts2, ts2 + " dropped 1 oversize record(s)"},
 		{"compacted summary line carries its event span",
 			ts2 + " dropped 7 oversize record(s) and 3 parked file(s) spanning 9 drop event(s) [compacted]\n",
-			9, 7, 3, ts2, ts2 + " dropped 7 oversize record(s) and 3 parked file(s) spanning 9 drop event(s) [compacted]"},
+			9, 7, 3, 3, ts2, ts2, ts2 + " dropped 7 oversize record(s) and 3 parked file(s) spanning 9 drop event(s) [compacted]"},
+		{"compacted summary with records and its first drop",
+			ts2 + " dropped 7 oversize record(s) and 3 parked file(s) holding 40 record(s) spanning 9 drop event(s) since " + ts1 + " [compacted]\n",
+			9, 7, 3, 40, ts1, ts2, ts2 + " dropped 7 oversize record(s) and 3 parked file(s) holding 40 record(s) spanning 9 drop event(s) since " + ts1 + " [compacted]"},
 		{"compacted summary plus later plain lines",
 			ts1 + " dropped 7 oversize record(s) and 3 parked file(s) spanning 9 drop event(s) [compacted]\n" +
 				ts2 + " dropped 4 parked file(s) over the 33554432-byte spool cap\n",
-			10, 7, 7, ts2, ts2 + " dropped 4 parked file(s) over the 33554432-byte spool cap"},
+			10, 7, 7, 7, ts1, ts2, ts2 + " dropped 4 parked file(s) over the 33554432-byte spool cap"},
 		{"foreign line still counts as one drop event",
 			"something ate the spool\n",
-			1, 0, 0, "", "something ate the spool"},
-		{"out-of-order times keep the newest",
+			1, 0, 0, 0, "", "", "something ate the spool"},
+		{"out-of-order times keep the newest and the oldest",
 			ts2 + " dropped 1 oversize record(s)\n" +
 				ts1 + " dropped 1 oversize record(s)\n",
-			2, 2, 0, ts2, ts1 + " dropped 1 oversize record(s)"},
+			2, 2, 0, 0, ts1, ts2, ts1 + " dropped 1 oversize record(s)"},
+	}
+	at := func(s string) time.Time {
+		if s == "" {
+			return time.Time{}
+		}
+		ts, _ := time.Parse(time.RFC3339, s)
+		return ts
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			st := ParseDroppedMarker([]byte(tc.raw))
-			if st.Events != tc.events || st.Records != tc.records || st.Files != tc.files {
-				t.Fatalf("events/records/files = %d/%d/%d, want %d/%d/%d",
-					st.Events, st.Records, st.Files, tc.events, tc.records, tc.files)
+			if st.Events != tc.events || st.Records != tc.records || st.Files != tc.files || st.FileRecords != tc.fileRecords {
+				t.Fatalf("events/records/files/fileRecords = %d/%d/%d/%d, want %d/%d/%d/%d",
+					st.Events, st.Records, st.Files, st.FileRecords, tc.events, tc.records, tc.files, tc.fileRecords)
 			}
-			wantLast := time.Time{}
-			if tc.last != "" {
-				wantLast, _ = time.Parse(time.RFC3339, tc.last)
-			}
-			if !st.Last.Equal(wantLast) {
-				t.Fatalf("last = %v, want %v", st.Last, wantLast)
+			if !st.First.Equal(at(tc.first)) || !st.Last.Equal(at(tc.last)) {
+				t.Fatalf("first/last = %v/%v, want %s/%s", st.First, st.Last, tc.first, tc.last)
 			}
 			if st.LastLine != tc.lastLine {
 				t.Fatalf("lastLine = %q, want %q", st.LastLine, tc.lastLine)
 			}
 		})
+	}
+}
+
+// TestCompactionKeepsRecordsAndFirstDrop pins what a compacted summary
+// carries beyond the counts: the records in evicted files and the time of
+// the first drop, so a loss record sent after a compaction still names the
+// whole loss and its whole time range.
+func TestCompactionKeepsRecordsAndFirstDrop(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DroppedMarkerName)
+	claim := path + DroppedCompactingSuffix + "test"
+	if err := os.WriteFile(claim,
+		[]byte("2026-07-29T10:00:00Z dropped 2 oversize record(s)\n"+
+			"2026-07-29T11:00:00Z dropped 3 parked file(s) holding 30 record(s) over the 512-byte spool cap\n"+
+			"2026-07-29T12:00:00Z dropped 1 parked file(s) over the 512-byte spool cap\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	foldOneClaim(path, claim)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := ParseDroppedMarker(raw)
+	first, _ := time.Parse(time.RFC3339, "2026-07-29T10:00:00Z")
+	last, _ := time.Parse(time.RFC3339, "2026-07-29T12:00:00Z")
+	if st.Records != 2 || st.Files != 4 || st.FileRecords != 31 || st.Events != 3 || !st.First.Equal(first) || !st.Last.Equal(last) {
+		t.Fatalf("folded ledger %q parsed to %+v, want 2 oversize, 4 files holding 31 records, 3 events, 10:00 to 12:00", raw, st)
 	}
 }
 
@@ -185,8 +223,8 @@ func writeParkedFiles(t *testing.T, dir string, names []string, size int) []stri
 // TestEnforceSpoolCapCountsOnlyRealRemovals pins the accounting rule: a
 // "dropped" parked file is one THIS process's os.Remove actually discarded.
 // A refused removal (a Windows handle holding the file) means the file
-// SURVIVED: it stays in the drain list, uploads normally, and is never
-// counted; IsNotExist means a concurrent drainer already discarded (and
+// SURVIVED: it stays parked for the next drain and is never counted;
+// IsNotExist means a concurrent drainer already discarded (and
 // counted) it: gone, but not this process's drop. The marker exists to make
 // real loss visible, and counting survivors would turn the doctor
 // audit-dropped check into false FAILs.
@@ -199,7 +237,7 @@ func TestEnforceSpoolCapCountsOnlyRealRemovals(t *testing.T) {
 		name      string
 		remove    func(oldest string) func(string) error // nil = real os.Remove
 		wantFiles int                                    // marker total: files actually dropped
-		wantKept  []string                               // surviving drain list, in order
+		wantKept  []string                               // parked files left on disk, in name order
 	}{
 		{"every removal real: both evictions counted", nil, 2,
 			[]string{"audit-pending-ccc.jsonl"}},
@@ -243,11 +281,13 @@ func TestEnforceSpoolCapCountsOnlyRealRemovals(t *testing.T) {
 				t.Cleanup(func() { removeSpoolFile = oldRm })
 			}
 
-			kept := enforceSpoolCap(dir, paths)
+			enforceSpoolCap(dir, paths)
 
 			var keptNames []string
-			for _, p := range kept {
-				keptNames = append(keptNames, filepath.Base(p))
+			for _, p := range paths {
+				if _, err := os.Stat(p); err == nil {
+					keptNames = append(keptNames, filepath.Base(p))
+				}
 			}
 			if strings.Join(keptNames, " ") != strings.Join(tc.wantKept, " ") {
 				t.Fatalf("kept = %v, want %v", keptNames, tc.wantKept)
@@ -280,7 +320,7 @@ func TestSpoolLockedFileNotCountedAndDrainsNextPass(t *testing.T) {
 	dir := t.TempDir()
 	spool := NewSpool(filepath.Join(dir, "spool.jsonl"))
 
-	// Two 20 KiB parked files over the 30 KiB cap; eviction wants the oldest.
+	// Two 20 KiB parked files over the 30 KiB cap, which a drain whose uploads land never applies.
 	names := []string{"audit-pending-old.jsonl", "audit-pending-new.jsonl"}
 	now := time.Now()
 	for i, name := range names {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -163,8 +164,8 @@ func TestCatalogPolicyFilterOn(t *testing.T) {
 	_ = app
 
 	names := toolNamesOf(t, second(mcpCall(t, base, tok, "tools/list", nil)))
-	if len(names) != 1 || names[0] != "echoapp__echo" {
-		t.Fatalf("filtered catalog = %v, want [echoapp__echo] only (env hidden by policy)", names)
+	if !slices.Equal(names, []string{"echoapp__echo", "straza__whoami"}) {
+		t.Fatalf("filtered catalog = %v, want [echoapp__echo straza__whoami] only (env hidden by policy)", names)
 	}
 	_, call, _ := mcpCall(t, base, tok, "tools/call", map[string]any{"name": "echoapp__env"})
 	errObj, _ := call["error"].(map[string]any)
@@ -188,8 +189,8 @@ func TestCatalogPolicyFilterOff(t *testing.T) {
 	_ = app
 
 	names := toolNamesOf(t, second(mcpCall(t, base, tok, "tools/list", nil)))
-	if len(names) != 2 {
-		t.Fatalf("unfiltered catalog = %v, want both echo and env listed", names)
+	if !slices.Equal(names, []string{"echoapp__echo", "echoapp__env", "straza__whoami"}) {
+		t.Fatalf("unfiltered catalog = %v, want echo and env listed beside whoami", names)
 	}
 	_, _, raw := mcpCall(t, base, tok, "tools/call", map[string]any{"name": "echoapp__env"})
 	if !strings.Contains(string(raw), "env reads are blocked for role dev") {
@@ -316,7 +317,7 @@ spec:
 func TestCatalogOversizeWarning(t *testing.T) {
 	t.Parallel()
 	app, base, _ := testAppCounting(t)
-	app.cfg.Apps.Catalog.WarnSize = 1 // echoapp exposes 2 tools → over the limit
+	app.cfg.Apps.Catalog.WarnSize = 1 // echoapp's 2 tools and whoami → over the limit
 	up := startGatewayUpstream(t)
 	seedGatewayUser(t, app, "kim", "dev")
 	catInstallEcho(t, app, up, "echoapp", []string{"*"})
@@ -324,8 +325,8 @@ func TestCatalogOversizeWarning(t *testing.T) {
 
 	const metric = "straza_gateway_catalog_oversize_total"
 	before := catMetric(t, base, metric)
-	if n := len(toolNamesOf(t, second(mcpCall(t, base, tok, "tools/list", nil)))); n != 2 {
-		t.Fatalf("catalog = %d tools, want 2", n)
+	if n := len(toolNamesOf(t, second(mcpCall(t, base, tok, "tools/list", nil)))); n != 3 {
+		t.Fatalf("catalog = %d tools, want 3", n)
 	}
 	// A second identical list hits the tier-1 cache: no rebuild, no re-warn.
 	mcpCall(t, base, tok, "tools/list", nil)

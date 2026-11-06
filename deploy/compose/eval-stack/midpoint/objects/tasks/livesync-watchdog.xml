@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Straza eval stack: the LiveSync watchdog for midPoint 4.10.
+
+  midPoint 4.10 treats every error while a LiveSync fetches changes as a
+  permanent error, and it suspends a recurring task after a permanent
+  error until someone resumes it. A Straza LiveSync therefore stops for
+  good when one of its runs fails, for example while strazad restarts.
+
+  Every 5 minutes this task looks at each Straza LiveSync, a task with the
+  Live synchronization task archetype whose objectRef is the Straza
+  resource, that is suspended with the result fatal_error. It resumes such
+  a task only when all of these hold:
+  - Since the failed run started, midPoint's audit holds no record that
+    names the task as its target, other than a read, a resume or a run
+    now. A person's suspend, edit or re-import of a task always leaves one.
+    midPoint's own suspend after a failed run leaves none.
+  - The failed run finished in the last 7 days. An older failure is left
+    for a person.
+  - A fresh read right before the resume still shows the task suspended
+    with fatal_error.
+  In every other case, and when the check itself fails, the task stays
+  suspended and this task's result shows why.
+
+  A task that a person suspends while it is healthy keeps its last good
+  result, so the search never finds it. To keep a failed LiveSync down on
+  purpose, suspend this watchdog as well.
+
+  The seeder (seed/seed.sh) imports this file runnable under the same OID,
+  and options=overwrite keeps a re-seed idempotent. The script uses the
+  administrator's rights through ownerRef.
+-->
+<task xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
+      xmlns:s="http://midpoint.evolveum.com/xml/ns/public/model/scripting-3"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      oid="b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c1c">
+    <name>Straza LiveSync watchdog</name>
+    <description>Resumes a Straza LiveSync that midPoint suspended after a failed run. It never resumes one a person suspended.</description>
+    <assignment>
+        <targetRef oid="00000000-0000-0000-0000-000000000509" type="ArchetypeType"/>
+    </assignment>
+    <ownerRef oid="00000000-0000-0000-0000-000000000002" type="UserType"/>
+    <executionState>runnable</executionState>
+    <schedule>
+        <recurrence>recurring</recurrence>
+        <interval>300</interval>
+    </schedule>
+    <activity>
+        <work>
+            <iterativeScripting>
+                <objects>
+                    <type>TaskType</type>
+                    <query>
+                        <q:filter>
+                            <q:text>archetypeRef matches (oid = "00000000-0000-0000-0000-000000000504") and objectRef matches (oid = "b6f9f2c8-0d5a-4e77-9a1e-9d3c0e5a1c01") and executionState = "suspended" and resultStatus = "fatal_error"</q:text>
+                        </q:filter>
+                    </query>
+                </objects>
+                <scriptExecutionRequest>
+                    <s:action>
+                        <s:type>execute-script</s:type>
+                        <s:parameter>
+                            <s:name>script</s:name>
+                            <c:value xsi:type="c:ScriptExpressionEvaluatorType">
+                                <c:code><![CDATA[
+import com.evolveum.midpoint.model.api.ModelAuditService
+import com.evolveum.midpoint.model.api.TaskService
+import com.evolveum.midpoint.model.impl.expr.SpringApplicationContextHolder
+import com.evolveum.midpoint.xml.ns._public.common.audit_3.AuditEventRecordType
+import com.evolveum.midpoint.xml.ns._public.common.audit_3.AuditEventTypeType
+import com.evolveum.midpoint.xml.ns._public.common.common_3.OperationResultStatusType
+import com.evolveum.midpoint.xml.ns._public.common.common_3.TaskExecutionStateType
+import com.evolveum.midpoint.xml.ns._public.common.common_3.TaskType
+
+def maxAgeMs = 7L * 24 * 3600 * 1000
+def result = midpoint.currentResult
+def oid = input.oid
+try {
+    // Fresh read: the search that found this task may be minutes old.
+    def t = midpoint.repositoryService.getObject(TaskType.class, oid, null, result).asObjectable()
+    if (t.executionState != TaskExecutionStateType.SUSPENDED
+            || t.resultStatus != OperationResultStatusType.FATAL_ERROR) {
+        log.info('LiveSync watchdog: leaving {}: it is no longer suspended after a failed run', t.name)
+        return
+    }
+    def started = t.lastRunStartTimestamp
+    def finished = t.lastRunFinishTimestamp
+    if (started == null || finished == null) {
+        log.info('LiveSync watchdog: leaving {}: no finished run on record', t.name)
+        return
+    }
+    if (finished.toGregorianCalendar().timeInMillis < System.currentTimeMillis() - maxAgeMs) {
+        log.info('LiveSync watchdog: leaving {}: its failed run finished at {}, more than 7 days ago', t.name, finished)
+        return
+    }
+    // midPoint audits anything a person does to a task with the task as
+    // target, and its own suspend after a failed run without one. Reads,
+    // resumes and run-now ask for a running task, and this watchdog's own
+    // resume is one of them, so they are ignored. Any other record means a
+    // person acted on the task, and the watchdog leaves it alone.
+    def query = prismContext.queryFor(AuditEventRecordType.class)
+            .item(AuditEventRecordType.F_TARGET_REF).ref(oid)
+            .and().item(AuditEventRecordType.F_TIMESTAMP).ge(started)
+            .and().not().item(AuditEventRecordType.F_EVENT_TYPE).eq(AuditEventTypeType.GET_OBJECT)
+            .and().not().item(AuditEventRecordType.F_EVENT_TYPE).eq(AuditEventTypeType.RESUME_TASK)
+            .and().not().item(AuditEventRecordType.F_EVENT_TYPE).eq(AuditEventTypeType.RUN_TASK_IMMEDIATELY)
+            .build()
+    // The beans are looked up by type, because getBean(Class) on this
+    // holder looks for a bean named after the class, and no bean has that name.
+    def spring = SpringApplicationContextHolder.getApplicationContext()
+    def touched = spring.getBean(ModelAuditService.class)
+            .countObjects(query, null, midpoint.currentTask, result)
+    if (touched != 0) {
+        log.info('LiveSync watchdog: leaving {}: {} audit record(s) since its last run started at {} show a person acted on it',
+                t.name, touched, started)
+        return
+    }
+    log.info('LiveSync watchdog: resuming {}: midPoint suspended it after the run that started at {} failed, and nobody has acted on it since',
+            t.name, started)
+    spring.getBean(TaskService.class).resumeTask(oid, midpoint.currentTask, result)
+} catch (Throwable e) {
+    log.error('LiveSync watchdog: leaving {} suspended, the check failed: {}', oid, e.message, e)
+    throw e
+}
+]]></c:code>
+                            </c:value>
+                        </s:parameter>
+                    </s:action>
+                </scriptExecutionRequest>
+            </iterativeScripting>
+        </work>
+    </activity>
+</task>

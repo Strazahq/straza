@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -249,6 +250,186 @@ func TestMCPProxyMidflightErrorNeverReplays(t *testing.T) {
 	}
 	if n := dials.Load(); n != 0 {
 		t.Errorf("healthy session was revived anyway (dials = %d)", n)
+	}
+}
+
+// newAnsweringGateway is a real sdk-served gateway that counts every
+// tools/call for "everything__write" it receives. When code is not 0, it
+// answers that call with the JSON-RPC error code and message instead of
+// running it. The call has then reached the gateway, so it may have run.
+func newAnsweringGateway(t *testing.T, code int, message string) (*fakeGateway, *atomic.Int64) {
+	t.Helper()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "gateway", Version: "1.0.0"}, nil)
+	type writeArgs struct {
+		Text string `json:"text"`
+	}
+	mcp.AddTool(srv, &mcp.Tool{Name: "everything__write", Description: "a write that is not idempotent"},
+		func(_ context.Context, _ *mcp.CallToolRequest, a writeArgs) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "wrote " + a.Text}}}, nil, nil
+		})
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+
+	var received atomic.Int64
+	g := &fakeGateway{token: "ses-token-1", mcpSrv: srv}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/checkin", g.handleCheckin)
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		want := "Bearer " + g.token
+		g.mu.Unlock()
+		if r.Header.Get("Authorization") != want {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.Method == http.MethodPost {
+			body, _ := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			var req struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+				Params struct {
+					Name string `json:"name"`
+				} `json:"params"`
+			}
+			if json.Unmarshal(body, &req) == nil && req.Method == "tools/call" &&
+				req.Params.Name == "everything__write" {
+				received.Add(1)
+				if code != 0 {
+					writeRPC(w, req.ID, map[string]any{"error": map[string]any{"code": code, "message": message}})
+					return
+				}
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		handler.ServeHTTP(w, r)
+	})
+	g.Server = httptest.NewServer(mux)
+	t.Cleanup(g.Close)
+	return g, &received
+}
+
+// TestMCPProxyReconnectAnswer pins what the agent reads when the gateway
+// session dies under a call, and that no call that may have run is sent
+// twice. A call that may have reached the gateway is never sent again, and
+// the agent reads that its outcome is unknown. Only a call that provably
+// never left the bridge is sent once more. An error the gateway answered
+// passes through without a reconnect, whatever its text says.
+func TestMCPProxyReconnectAnswer(t *testing.T) {
+	const (
+		lost    = "The gateway session was lost while this call was in flight. "
+		unknown = "The call may or may not have run. " +
+			"Check whether its effect happened, or ask the user, before you send the call again"
+		notRun = "The call did not run, because the gateway could not be reached. " +
+			"Send it again once the gateway answers, and run `straza doctor` if it stays out of reach"
+		// closing is the answer the sdk's server gives a call that arrives
+		// while it shuts down. The bridge's client reads it as a dead session.
+		closing = "server is closing"
+		// relayed is strazad's answer when its own client to the upstream
+		// server is latched closed. It passes the upstream failure through
+		// word for word, so the text names the sdk's latched spelling.
+		relayed = `upstream call failed: connection closed: calling "tools/call": client is closing`
+	)
+	cases := []struct {
+		name string
+		// code and message make the gateway answer the call with that
+		// JSON-RPC error. A zero code runs the call.
+		code    int
+		message string
+		// latch closes the live session first, so the call never leaves.
+		latch bool
+		// dialFails refuses the reconnect dial, and backoff arms the gate
+		// that refuses a reconnect after a failed one without dialing.
+		dialFails, backoff bool
+		// wantEnd is how the agent's error text ends, empty when the call
+		// succeeds, and wantCode is the error's JSON-RPC code.
+		wantEnd  string
+		wantCode int64
+		// wantReceived is how often the gateway received the call, and
+		// wantDials how often the bridge dialed a new session.
+		wantReceived, wantDials int64
+	}{
+		{name: "call in flight when the session dies is not sent again",
+			code: -32004, message: closing,
+			wantEnd:      ". " + lost + "Straza reconnected the session but did not send the call again. " + unknown,
+			wantReceived: 1, wantDials: 1},
+		{name: "call that never left the bridge is sent once on the new session",
+			latch: true, wantReceived: 1, wantDials: 1},
+		{name: "call in flight with a failed reconnect has an unknown outcome",
+			code: -32004, message: closing, dialFails: true,
+			wantEnd:      "; gateway reconnect also failed: dial refused (test). " + lost + unknown,
+			wantReceived: 1, wantDials: 1},
+		{name: "call in flight while the reconnect backs off has an unknown outcome",
+			code: -32004, message: closing, backoff: true,
+			wantEnd:      "; gateway reconnect also failed: gateway reconnect backing off after 1 failed attempts. " + lost + unknown,
+			wantReceived: 1, wantDials: 0},
+		{name: "call that never left the bridge with a failed reconnect did not run",
+			latch: true, dialFails: true,
+			wantEnd:      "; gateway reconnect also failed: dial refused (test). " + notRun,
+			wantReceived: 0, wantDials: 1},
+		{name: "gateway answer that names a closing client passes through",
+			code: -32000, message: relayed,
+			wantEnd: relayed, wantCode: -32000, wantReceived: 1, wantDials: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g, received := newAnsweringGateway(t, tc.code, tc.message)
+			store := proxyTestStore(t, g)
+			ctx, p, harness := buildProxy(t, g, store)
+			p.jitterMax = 0 // a revive arms a resync, and this fires it at once
+			if tc.dialFails {
+				p.dial = func(context.Context) (*mcp.ClientSession, error) {
+					return nil, errors.New("dial refused (test)")
+				}
+			}
+			if tc.backoff {
+				p.csMu.Lock()
+				p.redialFails, p.redialNext = 1, time.Now().Add(time.Hour)
+				p.csMu.Unlock()
+			}
+			dials := countDials(p)
+			if tc.latch {
+				_ = p.session().Close()
+			}
+
+			out, err := harness.CallTool(ctx, &mcp.CallToolParams{
+				Name: "everything__write", Arguments: map[string]any{"text": "row"}})
+			if n := received.Load(); n != tc.wantReceived {
+				t.Errorf("gateway received the call %d times, want %d", n, tc.wantReceived)
+			}
+			if n := dials.Load(); n != tc.wantDials {
+				t.Errorf("reconnect dials = %d, want %d", n, tc.wantDials)
+			}
+			if tc.wantEnd == "" {
+				if err != nil {
+					t.Fatalf("call must succeed, got: %v", err)
+				}
+				if txt := out.Content[0].(*mcp.TextContent).Text; txt != "wrote row" {
+					t.Errorf("result = %q, want the gateway's answer", txt)
+				}
+				return
+			}
+			// The bridge answers with a JSON-RPC error. Its own text starts
+			// "Straza: gateway call failed:" and its code is 0. The
+			// gateway's own answer passes as the gateway wrote it, code
+			// and all.
+			var rpcErr *jsonrpc.Error
+			if !errors.As(err, &rpcErr) {
+				t.Fatalf("the bridge must answer with a JSON-RPC error, got: %v", err)
+			}
+			msg := rpcErr.Message
+			relayed := tc.wantCode != 0 && msg == tc.wantEnd
+			bridged := tc.wantCode == 0 && strings.HasPrefix(msg, "Straza: gateway call failed: ") && strings.HasSuffix(msg, tc.wantEnd)
+			if rpcErr.Code != tc.wantCode || !relayed && !bridged {
+				t.Errorf("error code %d, text:\n%s\nwant code %d and the text, or the Straza prefix and the ending:\n%s",
+					rpcErr.Code, msg, tc.wantCode, tc.wantEnd)
+			}
+			if strings.Contains(msg, "retry the call") {
+				t.Errorf("the agent must not be told to retry a call that may have run: %s", msg)
+			}
+			if (tc.dialFails || tc.backoff) && strings.Contains(msg, "reconnected") {
+				t.Errorf("a failed reconnect must not be called a reconnect: %s", msg)
+			}
+		})
 	}
 }
 

@@ -3,10 +3,12 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ServerObjects } from "./server-objects";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { type ObjectListing, type ObjectRow, type ObjectsAnswer, type ObjectsBlock, appObjects } from "@/lib/api";
+import { type ObjectListing, type ObjectRow, type ObjectsAnswer, type ObjectsBlock, appObjects, refreshAppObjects } from "@/lib/api";
 import { navigate, pathFor } from "@/lib/router";
+import { notify } from "@/lib/notify";
 
-vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), appObjects: vi.fn() }));
+vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), appObjects: vi.fn(), refreshAppObjects: vi.fn() }));
+vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: vi.fn() } }));
 vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 
 const NOW = Date.now();
@@ -64,7 +66,10 @@ describe("the objects tab of an MCP server", () => {
   });
 
   const LEAD = "ghapp lists its repos with repo_list.";
+  // R1 is the reason a listing stores when the credential is missing, and
+  // MISSING the strip's own line, which names the field on Overview first.
   const R1 = "ghapp has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set ghapp --listing, then refresh with strazactl apps objects refresh ghapp.";
+  const MISSING = "ghapp has no listing credential, so Straza cannot list its repos. Set one under Server authentication on Overview, or with strazactl apps secret set ghapp --listing.";
   const R3 = "repo_list answered an error: bad credentials. Check ghapp's logs on its Activity tab.";
   // Each case is the listing state the API answers and the strip it shows:
   // its tone and each of its lines, the reason sentences verbatim.
@@ -75,8 +80,8 @@ describe("the objects tab of an MCP server", () => {
     ["a listing where repos joined and left", { version: 4, count: 1, joined: 2, left: 1 }, "ok", [LEAD, "Last listing 3 m ago: 1 repo, 2 new, 1 left the list."]],
     ["a failed listing after a good one", { outcome: "failed", reason: R3, attemptedAt: iso(20) }, "danger", [LEAD, R3, "The list below is from the last good listing, 3 m ago."]],
     ["a listing that never worked", { outcome: "failed", reason: R3, version: 0, count: 0, listedAt: undefined }, "danger", [LEAD, R3, "No listing has worked yet, so there are no repos to show."]],
-    ["a missing listing credential", { credential: "missing", outcome: "never", version: 0, count: 0, listedAt: undefined, attemptedAt: undefined }, "danger", [LEAD, R1]],
-    ["a missing credential the failed listing already names", { credential: "missing", outcome: "failed", reason: R1 }, "danger", [LEAD, R1, "The list below is from the last good listing, 3 m ago."]],
+    ["a missing listing credential", { credential: "missing", outcome: "never", version: 0, count: 0, listedAt: undefined, attemptedAt: undefined }, "danger", [LEAD, MISSING]],
+    ["a missing credential the failed listing names in its own words", { credential: "missing", outcome: "failed", reason: R1 }, "danger", [LEAD, MISSING, "The list below is from the last good listing, 3 m ago."]],
     ["a server not listed yet", { outcome: "never", version: 0, count: 0, listedAt: undefined, attemptedAt: undefined }, "plain", [LEAD, "No listing yet. Straza runs the first one within 30 seconds. Reload the page to see it."]],
   ];
   it.each(strips)("words the strip for %s", async (_case, listing, tone, lines) => {
@@ -85,6 +90,41 @@ describe("the objects tab of an MCP server", () => {
     const el = await strip();
     expect(el.getAttribute("data-tone")).toBe(tone);
     expect([...el.querySelectorAll("[data-line]")].map((l) => l.textContent)).toEqual(lines);
+  });
+
+  // Each case is a listing state and whether its strip offers List again:
+  // a failed listing with its credential set does, and nothing else.
+  const agains: [string, Partial<ObjectListing>, boolean][] = [
+    ["a failed listing with its credential set", { outcome: "failed", reason: R3 }, true],
+    ["a failed listing of a server that needs no credential", { outcome: "failed", reason: R3, credential: "not-needed" }, true],
+    ["a failed listing while the credential is missing", { outcome: "failed", reason: R1, credential: "missing" }, false],
+    ["a listing that worked", {}, false],
+    ["a server not listed yet", { outcome: "never", version: 0, count: 0, listedAt: undefined }, false],
+  ];
+  it.each(agains)("offers List again for %s only where a listing can work", async (_case, listing, offered) => {
+    vi.mocked(appObjects).mockResolvedValue(answerOf({}, listing));
+    mount();
+    const el = await strip();
+    expect(within(el).queryByRole("button", { name: "List again" }) !== null).toBe(offered);
+  });
+
+  it("asks for a listing on List again and reads the tab again", async () => {
+    vi.mocked(appObjects).mockResolvedValue(answerOf({}, { outcome: "failed", reason: R3 }));
+    vi.mocked(refreshAppObjects).mockResolvedValue({ app: "ghapp", dueAt: iso(0) });
+    mount();
+    await userEvent.click(within(await strip()).getByRole("button", { name: "List again" }));
+    await waitFor(() => expect(refreshAppObjects).toHaveBeenCalledWith("app-13"));
+    expect(notify.ok).toHaveBeenCalledWith("Straza is listing ghapp's repos again. Reload the page in a minute to see the list.");
+    await waitFor(() => expect(appObjects).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows the server's wait when the server was listed within the last minute", async () => {
+    vi.mocked(appObjects).mockResolvedValue(answerOf({}, { outcome: "failed", reason: R3 }));
+    vi.mocked(refreshAppObjects).mockRejectedValue(apiError(429, "ghapp was listed 20 seconds ago. Refresh again in 40 seconds."));
+    mount();
+    await userEvent.click(within(await strip()).getByRole("button", { name: "List again" }));
+    await waitFor(() => expect(notify.warn).toHaveBeenCalledWith("ghapp was listed 20 seconds ago. Refresh again in 40 seconds."));
+    expect(appObjects).toHaveBeenCalledTimes(1);
   });
 
   it.each([

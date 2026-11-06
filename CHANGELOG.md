@@ -10,46 +10,95 @@ Straza numbers its binaries, its API and its wire formats.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-06
+
+Straza 2.1.0 adds a tool that tells an agent what it may do, lets you pin a server's objects in the
+console, and closes several security gaps. It changes no database schema, and 2.0.x clients keep
+working with a 2.1.0 server.
+
+### Upgrade notes
+
+1. Upgrade strazad first, then the straza package on each machine. If you run `straza service` from
+   the archive, restart it.
+2. On managed machines with Claude Code, run `straza install --managed` again after the package
+   upgrade. The new setup blocks a tool call when the Straza hook cannot run, which needs Claude Code
+   2.1.295 or later. A custom layout needs its new hash registered.
+3. AI agents and service accounts can no longer sign in with a password. Move each one to a key with
+   `straza keygen`, `strazactl users nhi-key set` and `straza enroll --headless`.
+4. Automation that used an AI agent's session to change other users' connections now gets 403. Use
+   an admin API token instead.
+5. A custom client must send each request within 30 seconds, and an audit upload may carry at most
+   1000 records.
+6. A client now reports the audit records it had to drop in a `straza.audit.tool` record with the
+   event `audit.dropped`. Leave it out when you count tool calls in your SIEM. Two new metrics are
+   worth an alert: `straza_gateway_replies_withheld_total` and `straza_outbox_records_lost_total`.
+
+### Added
+
+- An agent can call the built-in tool `straza__whoami` to see what its own session may do: its
+  roles, the tools it can call, which calls need a person's approval, and which objects it may
+  touch. It never shows other users' access or any credential.
+- You can pin a server's objects and store its listing credential in the console. Before, both
+  needed strazactl.
+- The audit record view lays a shell command out step by step, with its scripts and the files it
+  names, next to the raw text.
+- The demo stack resumes midPoint's sync tasks by itself after a failed run, unless a person
+  stopped them.
+
 ### Changed
 
-- The docs are reorganized around a model of Straza, with reading paths for evaluators,
-  operators and newcomers. A new Evaluate section replaces Start: What Straza is, How it works
-  with a diagram of the core parts, the security model, Identity and your IGA, and two tutorials.
-  Short concept pages explain each part and open with the same diagram, with that part
-  highlighted. Journey pages list in order the pages for deciding whether Straza fits, setting it
-  up for a team, and a first approval on a laptop. Tutorials, how-tos and concept pages open
-  with In short, walk records fold to one line, and the glossary links the concept pages. Moved
-  pages keep their old addresses as redirects. In a reader test before the change, an architect,
-  an operator and a newcomer each needed 22 to 27 pages to answer five core questions.
-- Every docs page has a Markdown copy for agents at its address plus `index.md`, and `llms.txt`
-  lists every copy. A Markdown link at the top of each page opens the copy, because most agents
-  fetch the page itself and never read the alternate link in the page head.
-- The diagram of Straza on the landing page, How it works and the concept pages is redrawn. It
-  shows that Straza decides on the agent's machine as well as in front of MCP servers, that an
-  agent can propose a draft for a person to publish, and that Straza adds a server's credential
-  at the gateway. Each part links to its page, How it works steps through a tool call on it, each
-  concept page highlights its own parts, and on a phone it stacks top to bottom.
-- The Evaluate and concept pages, the FAQ and the landing page are reworded in plain technical
-  prose. They state that no AI model takes part in a decision as how Straza works today.
-- Try it on the demo stack opens with a diagram of the whole stack and ends with what else the
-  stack shows: live sync from Straza back to midPoint, the access packages and approvals seeded
-  in midPoint, and the MCP servers and overlays.
-- Try it on one laptop ends with how to remove Straza. The hooks come off while the service still
-  runs, because with the service stopped the hook denies every call. The page also says how long
-  the enrollment lasts and how to keep the phone approver's port 8443 closed on a shared network.
-- The README and the midPoint guide link the source of universal-rest-connector, the connector
-  midPoint uses to reach Straza.
-- The agent skill plugin moves to 0.6.37. Its links point at the Markdown copies of the docs
-  pages, which an agent that fetches with curl reads in two to three times fewer tokens than the
-  HTML page. The skill tells the agent to give a person the normal page address.
+- When a call is denied, the agent is told what to do next: wait for a person's approval, change
+  the call, or try once more later. Before, agents were told never to retry, so a call a person
+  approved never ran.
+- The drafts page shows what a draft changes and what publishing does, with Publish and Discard
+  always in view. "Approval set" is now called "policy set" everywhere.
+- The docs are reorganized around a model of Straza, with reading paths for evaluators, operators
+  and newcomers, redrawn diagrams, and a Markdown copy of every page for agents.
+- The agent skill plugin is 0.6.39 and links to the Markdown copies of the docs.
 
 ### Fixed
 
-- Several docs pages described older behavior and now match the code. Deleting or replacing an
-  agent's key ends its running sessions at once. A SCIM deactivation leaves the person's machines
-  enrolled, so a reactivation needs no new enrollment. A tool that policy hides at the gateway
-  answers as an unknown tool, and only the audit record keeps the rule's reason. `straza exec`
-  decides only the command it is given and not the processes that command starts.
+- Claude Code no longer runs a tool call unchecked when the Straza hook cannot run, for example
+  after Straza was removed from the machine.
+- Running `straza install --managed` again over an older install now installs the server's setup,
+  and `straza doctor` no longer reports an older setup that the server still accepts as broken.
+- After a remote MCP server restarts, Straza reconnects by itself. A call that may already have run
+  is never sent twice, and the agent is told to check its effect before it tries again.
+- When a person denies a call, the agent cannot ask again for the same call until the approval
+  window ends.
+- Audit records that were missing are now written: refused requests, device revokes, user deletes,
+  refusals by Straza's own tools, and approval requests whose client disconnected. A record that
+  cannot be written is retried once and counted.
+- Revoking a device marks its sessions as ended right away.
+- Disabling, deleting or deactivating a user now commits together with the revocation, so no
+  server misses the block, also when the database connection drops during the commit.
+- A database outage no longer looks like a rejected admin API token or an approval nobody can
+  decide. Straza says the database did not answer.
+- A request with a NUL character in a text field is refused with a clear message instead of a
+  server error.
+- Messages for agents and operators say what to do next, for example how an agent with the wrong
+  key fixes it, how to mint a new admin API token, and how to enroll again.
+- The demo stack no longer blocks harmless commands such as `curl ... | grep push`.
+- The Markdown copies of the docs pages keep their line breaks again.
+
+### Security
+
+- The MCP gateway withholds a server's reply when it contains the credential Straza added to that
+  call, and raises a critical alert.
+- AI agents can no longer act on other users' connections, even with an admin role or as an
+  agent the user sponsors.
+- AI agents and service accounts can no longer have a password.
+- strazad stops reading a request that takes longer than 30 seconds to arrive, so slow clients
+  cannot hold connections open.
+- Rate limits count an IPv6 client by its /64 network, so one host cannot get a fresh limit for
+  each of its addresses.
+- An audit upload may carry at most 1000 records, so one upload cannot tie up the server's CPU.
+- Straza limits how many new approval requests a session and a user can open per minute, so a
+  looping agent cannot flood the approvers.
+- `straza service` limits how much work one OS account can give it, so one agent cannot exhaust
+  it for everyone else on the machine.
+- A client reports the audit records it had to drop to strazad, so a flood of local records
+  cannot hide an agent's calls.
 
 ## [2.0.1] - 2026-11-02
 

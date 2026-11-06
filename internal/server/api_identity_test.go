@@ -10,10 +10,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/strazahq/straza/internal/agentguard"
 	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/logging"
@@ -215,6 +217,13 @@ func TestEnrollAndCheckinFlow(t *testing.T) {
 	if len(packs) != 1 || packs[0].(map[string]any)["name"] != "golang-style" {
 		t.Errorf("packs = %v", packs)
 	}
+	if got := checkin["start_text"]; got != agentguard.StartText("kim", true) {
+		t.Errorf("start_text = %v, want the governance paragraph for kim with the whoami sentence", got)
+	}
+	if e, ok := app.subjects.lookup(checkin["session_id"].(string)); !ok ||
+		!slices.Equal(e.facts.packs, []whoamiPack{{Name: "golang-style", Version: packs[0].(map[string]any)["version"].(string)}}) {
+		t.Errorf("the cached facts carry packs %+v (%v), want the delivered golang-style pack", e.facts.packs, ok)
+	}
 	if ttl := checkin["expires_in"].(float64); ttl < 250 || ttl > 300 {
 		t.Errorf("expires_in = %v, want ~300", ttl)
 	}
@@ -357,6 +366,7 @@ func TestCheckinContractFixtures(t *testing.T) {
 		{"checkin-valid-client.json", http.StatusOK, "none", "", false},
 		{"checkin-invalid-no-auth.json", http.StatusBadRequest, "", "", false},
 		{"checkin-invalid-harness-name-long.json", http.StatusBadRequest, "", fmt.Sprintf(harnessNameTooLongMsg, 257, checkinTextMax), false},
+		{"checkin-invalid-harness-name-nul.json", http.StatusBadRequest, "", fmt.Sprintf(checkinNULMsg, "harness.name", nulStepStraza), false},
 		{"checkin-valid-key.json", http.StatusUnauthorized, "", "", true},
 		{"checkin-invalid-key-counter-zero.json", http.StatusBadRequest, "", "", true},
 		{"checkin-invalid-key-with-token.json", http.StatusBadRequest, "", "", true},
@@ -426,7 +436,7 @@ func TestDeviceTokenOpensNoDoor(t *testing.T) {
 	if _, err := app.store.Users().Update(context.Background(), u); err != nil {
 		t.Fatal(err)
 	}
-	if code, body := checkin(); code != http.StatusForbidden || body["error"] != "user is disabled. Contact your administrator" {
+	if code, body := checkin(); code != http.StatusForbidden || body["error"] != disabledUserMsg {
 		t.Fatalf("disabled-user device checkin = %d %v, want 403 for the disabled user", code, body)
 	}
 	u.Status = store.UserActive

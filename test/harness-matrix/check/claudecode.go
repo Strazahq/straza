@@ -142,10 +142,18 @@ func checkClaudeSettings(path string) (errs []string) {
 			errs = append(errs, fmt.Sprintf("%s: hook is not an object", ev))
 			continue
 		}
-		// Exactly type+command: no timeout, no vendor extras. A timeout key
-		// straza never wrote would be someone else's edit surviving a
-		// re-install, and the installer replaces its own entries wholesale.
-		if diff := setDiff([]string{"type", "command"}, mapKeys(hook)); diff != "" {
+		// Exactly type+command, plus onFailure "block" on PreToolUse alone,
+		// which makes claude block the call when the hook cannot run. Any
+		// other key, a timeout among them, would be someone else's edit
+		// surviving a re-install.
+		want := []string{"type", "command"}
+		if ev == "PreToolUse" {
+			want = append(want, "onFailure")
+			if f, _ := hook["onFailure"].(string); f != "block" {
+				errs = append(errs, fmt.Sprintf("PreToolUse: want onFailure \"block\", got %#v", hook["onFailure"]))
+			}
+		}
+		if diff := setDiff(want, mapKeys(hook)); diff != "" {
 			errs = append(errs, fmt.Sprintf("%s: hook keys %s", ev, diff))
 		}
 		if t, _ := hook["type"].(string); t != "command" {

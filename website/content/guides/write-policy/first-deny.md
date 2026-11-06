@@ -36,12 +36,12 @@ strazactl assign local-tools --user dana
 ```
 {{< /command >}}
 
-Under the enterprise profile, a session from a machine whose install is not managed is refused at check-in, because `governance.minAttestation` defaults to `managed`. The outputs on this page come from a server at `http://localhost:8420` where it is set to `none`, as on the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}), which is why the banner below says `attestation advisory`.
+Under the enterprise profile, a session from a machine whose install is not managed is refused at check-in, because `governance.minAttestation` defaults to `managed`. The outputs on this page come from a server at `http://localhost:8420` where it is set to `none`, as on the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}), which is why the one-line `systemMessage` for the person says `attestation advisory`.
 
 ## Write the document
 
 
-Save this as `local-tools-guardrails.yaml`. `match.roles` names an application role, the kind that carries the access rows, so every path to the role's tools is governed. The first rule opens the shell and file tools, because the enterprise profile denies a local tool that no rule allows. The second rule denies any command that matches the glob `rm -rf *`. Patterns are anchored and run against the raw command string, the argv joined again with single spaces, and against every single argv token, so quoting tricks do not slip past. The deny always carries its reason, and the session banner tells the agent to relay it and never retry or work around it.
+Save this as `local-tools-guardrails.yaml`. `match.roles` names an application role, the kind that carries the access rows, so every path to the role's tools is governed. The first rule opens the shell and file tools, because the enterprise profile denies a local tool that no rule allows. The second rule denies any command that matches the glob `rm -rf *`. Patterns are anchored and run against the raw command string, the argv joined again with single spaces, and against every single argv token, so quoting tricks do not slip past. The deny always carries its reason, and the session banner tells the agent to tell the user that reason and not to retry the call or work around it.
 
 ```yaml
 apiVersion: straza.dev/v1beta1
@@ -95,7 +95,7 @@ note: validate refuses only the roles the product reserves, whose names start wi
 
 {{< shot name="policy-yaml" caption="The sheet that **Write YAML instead** opens, shown here with another policy set in it, and **Save draft** at its foot." >}}
 
-Paste the document into the sheet before **Save draft**. The console stores it as your draft, `Add approval set local-tools-guardrails`, and opens the draft's page with the server's checks. **Publish…** there opens the dialog that publishes it. The New policy wizard writes one outcome per run and a shell rule there needs a pattern, so a set like this one, an allow with no pattern beside a deny, goes in through the YAML door.
+Paste the document into the sheet before **Save draft**. The console stores it as your draft, `Add policy set local-tools-guardrails`, and opens the draft's page with the server's checks. **Publish…** there opens the dialog that publishes it. The New policy wizard writes one outcome per run and a shell rule there needs a pattern, so a set like this one, an allow with no pattern beside a deny, goes in through the YAML door.
 {{< /console >}}
 
 
@@ -137,7 +137,7 @@ A session that is already running picks up the new snapshot as soon as the serve
 
 {{< only form="cli" >}}The hook runs on dana's enrolled machine, where the decision is made.{{< /only >}}
 
-Run the hook by hand with the same JSON Claude Code sends. The session start checks the machine in and prints a governance banner that names the identity, the roles and the snapshot in force.
+Run the hook by hand with the same JSON Claude Code sends. The session start checks the machine in and prints a governance banner that names the identity and tells the agent how to treat a deny.
 
 {{< command terminal="dana's machine" purpose="client" >}}
 ```sh
@@ -146,10 +146,10 @@ printf %s '{"hook_event_name":"SessionStart","session_id":"7d1c2f7e-4b1a-4c3e-9e
 {{< /command >}}
 
 ```text
-{"hookSpecificOutput":{"additionalContext":"Straza governance is active for this session. You are operating as \"dana\" (roles: local-tools) against http://localhost:8420; policy snapshot 186e5ced1e33, attestation advisory. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial.","hookEventName":"SessionStart"}}
+{"hookSpecificOutput":{"additionalContext":"Straza governs this session as \"dana\". Every tool call is checked against policy and recorded in the audit log. When a call is denied, tell the user what the reason says, then do what it says next: wait for a person's approval, change the call, or try once more later. A denial that says none of these is a policy decision, and the same call will be denied again. Do not try to reach the denied result another way.","hookEventName":"SessionStart"}}
 ```
 
-The output is trimmed to the context document, and the same run also prints a one-line `systemMessage` for the person.
+The output is trimmed to the context document, and the same run also prints a one-line `systemMessage` for the person that names the roles and the snapshot in force.
 
 
 A matching command comes back as a deny with your reason, on stdout as the harness reads it and on stderr for you, and the process exits with code 2.
@@ -190,7 +190,7 @@ exit 0
 
 The link **open** follows `Audit trail:` at the foot of dana's sheet, and it opens Audit filtered to dana. A row opens the record with its rule, its reason and the chain check.
 
-{{< shot name="audit-deny" caption="A deny record, here alice's on a standalone server: the rule, its reason and the chain check." >}}
+{{< shot name="audit-deny" caption="A deny record, here alice's on a standalone server: the rule, its reason and what ran." >}}
 {{< /console >}}
 
 {{< cli >}}

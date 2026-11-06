@@ -31,7 +31,7 @@ You connect midPoint to Straza once, as the admin of both, from a terminal that 
 
 Straza is one resource in midPoint. A person or an AI agent gets a Straza account by holding a midPoint role that carries the account. Access comes from Straza roles, which are born in Straza and imported into midPoint. Assigning an imported role in midPoint writes that role's membership over SCIM.
 
-Deactivating a user in midPoint deactivates the Straza account, revokes every session it has and removes its per-user grants on connected servers. Deleting the user deactivates the account too. Straza keeps the row, so the audit history stays whole.
+Deactivating a user in midPoint deactivates the Straza account, revokes every session it has and removes its per-user grants on connected servers. Deleting the user deactivates the account too. Straza keeps the row, so the audit history stays whole. When Straza cannot save a deactivation, it answers 500 and the account stays active. midPoint records the operation as failed and does not retry it by itself, so the next reconciliation of the resource sends the deactivation again.
 
 ## Before you start {.nostep}
 
@@ -115,6 +115,7 @@ The objects live under `deploy/compose/eval-stack/midpoint/objects/`. Import the
 6. `resources/straza-resource.xml`, with your values in three configuration properties: `baseUrl` is your strazad address, `apiToken` is the token from the first step, and `schemaFilePath` is where midPoint reads `deploy/compose/eval-stack/midpoint/straza-schema.json`.
 7. `tasks/livesync-tasks.xml`, three LiveSync tasks for accounts, roles and MCP servers. Each one reads the admin API change feed, `GET /v1/admin/changes`, every ten seconds. The feed's cursor only moves forward and delivery is at least once, so a change can arrive twice, and a reconciliation from time to time stays the safety net.
 8. `tasks/initial-recon-tasks.xml`, three one-time reconciliations that pull what already exists, because LiveSync starts from the moment it first runs. The role reconciliation must finish before you assign an imported role.
+9. `tasks/livesync-watchdog.xml`, a task that runs every five minutes and resumes a Straza LiveSync task that midPoint suspended after a failed run. It leaves alone a task that a person suspended or edited since that run, and a failure older than seven days. Its search names the Straza resource by OID, so put your resource's OID in it.
 
 The resource presents the token on `/scim/v2` for users and role membership. It presents the same token on the admin API to read MCP servers and the change feed. Roles reach midPoint as SCIM groups and never cross the admin API.
 
@@ -408,7 +409,7 @@ The row stays in Straza as `disabled`, origin `scim`, with its id. Creating a pe
 Every Straza role renders on the SCIM wire, `straza-admin` included. Anyone who can assign `AR:straza-admin` in midPoint can therefore make a person an administrator through the token's `scim:write` scope. An AI agent that holds the role still gets no admin route, because only a person can use the admin API. Guard that assignment with the approval and certification policy you apply to any admin-grade role. [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md#caveats" >}}) states the same rule for every SCIM client.
 
 
-A LiveSync task that hits a fatal error stays suspended, and midPoint does not resume it by itself. A strazad restart in the middle of a cycle can cause exactly that. Check the four tasks after any strazad restart. If a new Straza role has not appeared as an imported role, run an import of the group object class from the resource once.
+midPoint 4.10 suspends a LiveSync task after one failed run and does not resume it by itself. A strazad restart in the middle of a cycle can cause that. The watchdog task of step 9 resumes such a task within five minutes. Without it, check the three LiveSync tasks after any strazad restart. If a new Straza role has not appeared as an imported role, run an import of the group object class from the resource once.
 
 ## Next {.nostep}
 

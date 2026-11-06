@@ -53,7 +53,7 @@ func TestKeyReuseOfAGoneDevice(t *testing.T) {
 	h.enroll(loginDeviceFlow(t, base, "kim", "hunter2!"), "sha256:gone")
 	d := deviceRow(t, app, h.device)
 	r := httptest.NewRequest(http.MethodPost, "/v1/checkin", nil)
-	if err := app.revokeDevice(r, d.ID, "device revoked by admin"); err != nil {
+	if err := app.revokeDevice(r, d, "device revoked by admin", "revoked-admin"); err != nil {
 		t.Fatal(err)
 	}
 	if app.revokeReusedKey(r, d, 1) {
@@ -105,7 +105,7 @@ func TestKeyCheckinRowChangedBeforeTheWrite(t *testing.T) {
 		{"an admin revoke", func(t *testing.T, raw store.Store, id string) {
 			ev := store.OutboxEvent{Subject: "straza.revocation.device", CE: `{"specversion":"1.0","id":"l4-admin-revoke",` +
 				`"type":"straza.revocation.device","source":"test","data":{"device":"` + id + `"}}`}
-			if err := raw.Devices().Revoke(ctx, id, "device revoked by admin", ev); err != nil {
+			if _, err := raw.Devices().Revoke(ctx, id, "device revoked by admin", ev); err != nil {
 				t.Error(err)
 			}
 		}, true},

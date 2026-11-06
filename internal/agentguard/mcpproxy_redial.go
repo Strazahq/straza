@@ -205,9 +205,13 @@ func (p *mcpProxy) log(event, msg string) {
 // as a corpse: the go-sdk streamable client latches closed once its
 // standalone SSE stream exhausts reconnection, and from then on every send is
 // refused locally. This class triggers REVIVAL, which is always safe: a
-// fresh dial replays nothing by itself.
+// fresh dial replays nothing by itself. An error the gateway answered is
+// never this class, whatever its text says.
 func sessionDeadErr(err error) bool {
-	if err == nil {
+	// strazad passes an upstream server's failure through word for word, so
+	// its answer can carry the sdk's spellings below while the session that
+	// carried it is healthy and the call reached the gateway.
+	if err == nil || gatewayAnswered(err) != nil {
 		return false
 	}
 	if errors.Is(err, mcp.ErrConnectionClosed) {
@@ -225,7 +229,8 @@ func sessionDeadErr(err error) bool {
 // indeterminate (the gateway may have executed the call), and plumbing must
 // never replay a possibly-executed governed call. The indeterminate-but-dead
 // case still revives the lane; the agent is told the session recovered and
-// decides about a re-call itself, with full context.
+// decides about a re-call itself, with full context. An error the gateway
+// answered proves the call arrived, so it is never this class.
 func neverSentErr(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "client is closing")
+	return err != nil && gatewayAnswered(err) == nil && strings.Contains(err.Error(), "client is closing")
 }

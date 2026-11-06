@@ -1,10 +1,24 @@
-# PolicySet, v1beta1 (revision 26)
+# PolicySet, v1beta1 (revision 27)
 
 Status: **beta**. The specification began as v1alpha1, and the move to
 beta changed no wire format. Schema: `policyset.schema.json`. Examples:
 `examples/valid-*.yaml`, `examples/invalid-*.yaml`. The platform parser
 MUST agree with the schema on every example. Decision semantics are
 exercised by the decision-table fixtures in `spec/conformance/decisions/`.
+
+Revision 27 (2026-11-04): **the built-in `straza` app carries the
+granted fact on `straza__whoami` for every subject** (decision semantics
+only, with no document-shape change, so documents keep parsing under every
+revision-26 client). The gateway lists `straza__whoami` to every session,
+and a call of it carries `granted: true`, set as it is for a drafting tool
+after that tool's listing. A call no rule matches is therefore allowed with
+the revision 17 reason, and a rule that fires wins as always, deny, hold
+and ticket included. A rule that denies it hides it from the tool list
+where policy filters the list, as it hides any denied granted tool. The
+three approval tools still never carry the fact. The tool answers the
+calling session's own identity, roles, recording, knowledge packs and tool
+list, and never a rule's patterns. The previous fixtures replay green.
+Fixture: `granted-native-whoami.yaml` in `spec/conformance/decisions/`.
 
 Revision 26 (2026-10-30): **a rule names harness tools by their own
 name** (decision semantics; no document-shape change, so documents keep
@@ -725,7 +739,8 @@ All firing verdicts from all applicable sets are combined:
      own binding check. The hook lane never sets it, `/v1/decide` zeroes
      it on ingress, and the built-in `straza` app carries it only on
      `straza__draft_submit` and `straza__draft_status`, for a subject
-     holding `straza-draft-config` (revision 20).
+     holding `straza-draft-config` (revision 20), and on `straza__whoami`
+     for every subject (revision 27).
    - `mcp.call` without the fact → **deny** (an ungranted tool is invisible
      on the gateway; the reason names the missing access).
    - local tools (`shell.exec`, `file.*`, `net.fetch`, `task.spawn`,

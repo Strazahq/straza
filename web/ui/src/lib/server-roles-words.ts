@@ -69,7 +69,7 @@ export const certifiedHint = (held: number) =>
 // here, so the line names the identity manager and the name it shows.
 // heldRule is what holding freezes, said once under the table.
 export const unheldLine = (name: string) =>
-  "Nobody holds it yet. Your identity manager assigns it: in midPoint it is AR:" + name + " within a sync cycle.";
+  "Nobody holds it yet. Your IGA assigns it as AR:" + name + ", within a sync cycle.";
 export const heldRule = (global: boolean) =>
   "A held role keeps its tools" + (global ? " for its server admin" : "") + " and cannot be deleted until the identity manager removes the holders.";
 // reachHead is the headline over the picture of a role's reach, split so
@@ -103,9 +103,17 @@ export const CREATE_FOOTER = "Creates the role, gives it these tools and, when a
 export const CREATE_ROLE = "Create role";
 
 // previewParts is the live canonical preview under the name field, split
-// so the two names are drawn as code: the name as it will be stored, and
-// the name the identity manager shows.
-export const previewParts = (name: string) => ({ lead: "Stored as ", stored: name, mid: ", in midPoint as ", ar: "AR:" + name, end: "." });
+// so the two names are drawn as code: the role's kind, the name as it will
+// be stored, and the name an IGA imports it under, BR: for a business role
+// and AR: for every other kind.
+const PREVIEW_KIND: Record<string, string> = { application: "Application", business: "Business", approver: "Approver" };
+export const previewParts = (kind: string, name: string) => ({
+  lead: (PREVIEW_KIND[kind] || "Application") + " role, stored as ",
+  stored: name,
+  mid: ". An IGA imports it as ",
+  iga: (kind === "business" ? "BR:" : "AR:") + name,
+  end: ".",
+});
 // cliCreateRole is the same role as one strazactl line, so the console
 // teaches the grammar instead of asking for it. The owning server rides
 // the --app flag, because --server is strazactl's own address flag. The

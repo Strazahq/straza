@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/harnesscfg"
 )
 
@@ -18,20 +19,25 @@ import (
 // wired while the next session start drops to att=none. Three-way verdict
 // per harness: matches the server-published artifact (ok), matches a
 // legitimate local render only (stale or custom layout: warn online, ok
-// with a skipped note offline), matches neither (fail online; warn offline,
-// where a newer published version cannot be ruled out).
+// with a skipped note offline), matches neither (warn, or fail when the
+// served artifact does not verify). strazad keeps the hash of every render
+// it published registered until an operator retires it, so an older
+// Straza's render still attests managed after an upgrade. From the bytes
+// alone it looks the same as a hand edit, so the attestation strazad gave a
+// session of the harness tells the two apart (neitherVerdict).
 
 // managedContentCheck aggregates one Check over every Tier-1 harness with a
 // managed presence. Nil when no managed layout exists (user-mode box:
-// content is unmeasured by design).
-func managedContentCheck(ctx context.Context, cfg Config) *Check {
+// content is unmeasured by design). sessions are the caller's sessions the
+// service holds, nil when it did not answer.
+func managedContentCheck(ctx context.Context, cfg Config, sessions []localapi.SessionStatus) *Check {
 	if !ManagedInstalled() {
 		return nil
 	}
 	worst := checkOK
 	var verdicts []string
 	for _, harness := range []string{"claude-code", "codex", "gemini"} {
-		verdict, status := managedContentVerdict(ctx, cfg, harness)
+		verdict, status := managedContentVerdict(ctx, cfg, harness, sessions)
 		if verdict == "" {
 			continue
 		}
@@ -45,7 +51,9 @@ func managedContentCheck(ctx context.Context, cfg Config) *Check {
 	}
 	hint := ""
 	if worst != checkOK {
-		hint = "re-run elevated `straza install --managed --server <server-url> <harness>` to converge (custom layouts: pass your --bin-dir). A file matching no legitimate render reads as tamper: the next session start drops to attestation none"
+		hint = "an administrator runs elevated `straza install --managed --server <server-url> <harness>` again to take the wiring " +
+			"the server serves now (custom layouts: pass your --bin-dir). Older wiring keeps attesting managed while strazad keeps its hash " +
+			"registered. Edited wiring attests none from the next session start"
 	}
 	return &Check{"managed-content", worst, strings.Join(verdicts, "; "), hint}
 }
@@ -63,7 +71,7 @@ func rank(status string) int {
 // managedContentVerdict inspects one harness. Empty verdict = no managed
 // presence to judge (never installed here, and no governance claim to
 // contradict).
-func managedContentVerdict(ctx context.Context, cfg Config, harness string) (string, string) {
+func managedContentVerdict(ctx context.Context, cfg Config, harness string, sessions []localapi.SessionStatus) (string, string) {
 	path, err := ManagedHookPath(harness)
 	if err != nil {
 		return "", checkOK
@@ -101,11 +109,52 @@ func managedContentVerdict(ctx context.Context, cfg Config, harness string) (str
 		// Reachable but the served document was unusable: the local match is
 		// real, the serving side deserves the eyeball.
 		return harness + ": matches this build's local render; the served artifact could not be verified (" + servedErr.Error() + ")", checkFail
-	case doc != nil || (reachable && servedErr != nil):
-		return harness + ": managed wiring matches NO legitimate render (hand-edited or torn)", checkFail
+	case doc != nil:
+		return neitherVerdict(harness, path, sessions)
+	case reachable && servedErr != nil:
+		return harness + ": matches no local render, and the served artifact could not be verified (" + servedErr.Error() + ")", checkFail
 	default:
 		return harness + ": cannot verify offline (matches no local render; a newer published version cannot be ruled out)", checkWarn
 	}
+}
+
+// neitherVerdict judges the managed wiring of harness at path, which
+// matches neither the served wiring nor this build's render, by the newest
+// attestation strazad gave a session of harness. That level was judged at
+// the check-in that started the session, so it holds for the file only if
+// the file has not changed since. managed means strazad accepted it, so it
+// is an older render. none means strazad accepted some measurement of this
+// machine no longer, and the wiring is only one of them. A file changed
+// since the check-in warns, because no session has been judged on it since,
+// and a change of its metadata alone moves the change time too. Any other
+// level and a service that reports no level leave both readings open.
+func neitherVerdict(harness, path string, sessions []localapi.SessionStatus) (string, string) {
+	const neither = ": managed wiring matches neither the wiring the server serves now nor this build's render"
+	open := harness + neither + ", so an older Straza install wrote it or it was edited"
+	var newest localapi.SessionStatus
+	for _, s := range sessions {
+		if s.Harness.Name == harness && s.Attestation != "" && s.AttestedAt.After(newest.AttestedAt) {
+			newest = s
+		}
+	}
+	fi, err := os.Stat(path)
+	if newest.Attestation == "" || err != nil {
+		return open, checkWarn
+	}
+	if changedAt(fi).After(newest.AttestedAt) {
+		return harness + neither + ", and it changed after the check-in of session " + newest.SessionID +
+			", so strazad has not judged it since. The next session start judges it", checkWarn
+	}
+	switch newest.Attestation {
+	case "managed":
+		return harness + ": managed wiring is older than the wiring the server serves now, and strazad accepted it " +
+			"at the check-in of session " + newest.SessionID + " (attestation managed)", checkWarn
+	case "none":
+		return harness + neither + ", and strazad did not accept this machine's measurements at the check-in of session " +
+			newest.SessionID + " (attestation none). The wiring was edited, strazad no longer registers its hash, " +
+			"or the straza binary or managed configuration does not match the registry", checkFail
+	}
+	return open, checkWarn
 }
 
 // fetchDoctorDoc fetches and verifies one harness's served document on a

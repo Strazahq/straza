@@ -13,14 +13,14 @@ var titleVerbs = []string{"add", "change", "turn off", "remove"}
 var titleNouns = map[Kind][2]string{
 	KindApp:       {"server", "servers"},
 	KindRole:      {"role", "roles"},
-	KindPolicySet: {"approval set", "approval sets"},
+	KindPolicySet: {"policy set", "policy sets"},
 }
 
 // Title names what d does in one line, from its items and never from its
 // note: one phrase per verb in the order add, change, turn off and remove,
-// joined by " and then ", as "Add server github, 2 roles and 1 approval set
+// joined by " and then ", as "Add server github, 2 roles and 1 policy set
 // and then change role developer". Within a phrase the kinds come in the
-// order server, role, approval set, and when the first kind has one object
+// order server, role, policy set, and when the first kind has one object
 // the phrase names it and counts the rest, else it counts every kind. A put
 // adds an object its item's base says did not exist, and changes one that
 // did, so an item not checked yet reads as an add. An undo reads "Undo draft
@@ -65,7 +65,7 @@ func Title(d Draft) string {
 }
 
 // titleObjects words the objects of one phrase, such as "server github, 2
-// roles and 1 approval set".
+// roles and 1 policy set".
 func titleObjects(items []Item) string {
 	byKind := map[Kind][]string{}
 	for _, it := range items {

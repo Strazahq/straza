@@ -1,6 +1,6 @@
 ---
 title: What the agent reads back
-description: The exact words an agent reads from Straza, from the session banner to a deny, a pending approval, a ticket and the built-in approval tools.
+description: The exact words an agent reads from Straza, from the session banner to a deny, a pending approval, a ticket, the built-in approval tools and whoami.
 summary: >-
   An agent reads Straza's words in two places: a banner when its session starts, and an answer
   on each call that does not run at once. A deny carries the rule's own reason, and a held call
@@ -23,23 +23,26 @@ An agent under Straza reads Straza's words in two places: a banner when its sess
 ## The session banner
 
 
-When a session starts, the session-start hook checks in with the server and hands the harness a banner as context for the model. Claude Code and Codex read it from `hookSpecificOutput.additionalContext`, and Gemini reads it from a top-level `additionalContext`. This is the banner alice's agent read on a standalone server:
+When a session starts, the session-start hook checks in with the server and hands the harness a banner as context for the model. The server writes the banner's text into its check-in answer, and a client that talks to an older server uses its own copy of the same text. Claude Code and Codex read it from `hookSpecificOutput.additionalContext`, and Gemini reads it from a top-level `additionalContext`. This is the banner of a session that alice starts:
 
 ```text
-Straza governance is active for this session. You are operating as "alice" (roles: dev) against http://127.0.0.1:8420; policy snapshot cde5c229f4fa, attestation advisory. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial.
+Straza governs this session as "alice". Every tool call is checked against policy and recorded in the audit log. When a call is denied, tell the user what the reason says, then do what it says next: wait for a person's approval, change the call, or try once more later. A denial that says none of these is a policy decision, and the same call will be denied again. Do not try to reach the denied result another way. To see what this session may do, call the straza__whoami tool of the straza MCP server.
 ```
 
-Its last sentence tells the agent how to treat every deny on this page. The agent passes the reason on to its user and does not try again, unless the reason asks for a corrected call, as the object checks below do for a malformed argument.
+The four sentences after the first two tell the agent how to treat every deny on this page. The agent passes the reason on to its user and does the next step the reason names. When the reason says a person can approve the call, as the answers for a held call and a ticket below do, the agent waits for the decision. The object checks below that refuse a malformed argument say what to correct. A refusal caused by a fault that passes on its own, such as a server out of reach, asks for one more try and then tells the agent to tell the user. A deny that names no next step is a policy decision, and the agent does not repeat the call.
 
 
-When a policy records the session's conversations, the banner gains one sentence. With secrets masked it reads as below, and with recording word for word it ends `recorded word for word to the audit system.`
+The last sentence appears only when the session's policy lets it call `straza__whoami`, so a rule that denies the tool also takes the sentence out of the banner. [What this session may do](#what-this-session-may-do) shows the tool's answer.
+
+
+When a policy records the session's conversations, the banner ends with one more sentence. With secrets masked it reads as below, and with recording word for word it ends `recorded word for word in the audit log.`
 
 ```text
-Recording is on: by policy, the prompts and responses of this session are recorded with secrets masked to the audit system.
+By policy, the prompts and responses of this session are recorded with secrets masked in the audit log.
 ```
 
 
-Knowledge packs bound to the session's roles follow the banner, as [Knowledge packs]({{< relref "guides/govern-an-agent/knowledge-packs.md" >}}) shows. For Claude Code and Codex the hook also returns `systemMessage`, one line for the person at the keyboard. It starts with a shield symbol and `Straza governance active:`, then names the user, the roles, the server, the policy and the attestation. Gemini gets the context only.
+Knowledge packs bound to the session's roles follow the banner, as [Knowledge packs]({{< relref "guides/govern-an-agent/knowledge-packs.md" >}}) shows. For Claude Code and Codex the hook also returns `systemMessage`, one line for the person at the keyboard. It starts with a shield symbol and `Straza governance active:`, then names the user, the roles, the server, the policy and the attestation. The banner leaves those out, because the agent cannot act on them. Gemini gets the context only.
 
 
 When the session cannot start, the session-start hook exits with code 2 and a reason that starts `Straza:`, followed by the sentence that says why. That is the server's own refusal, or the sentence of the Straza background service when it does not run or holds no enrollment for the user. Until a session starts, every tool call is denied with `Straza: no active Straza session. Restart the session so straza can check in`. [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows the refusal a server gives a machine below its attestation minimum.
@@ -96,7 +99,7 @@ Gateway call for a tool the session cannot see
 : The JSON-RPC error `unknown tool "<name>"`, the same answer as for a tool that does not exist. A name over 256 bytes is quoted as its first 256 bytes followed by `... (<n> bytes)`, its full length.
 
 Rate limit for that server at the gateway, used up
-: `Straza: rate limit exceeded for the MCP server "<server>" (<n> rps). Retry shortly`
+: `Straza: rate limit exceeded for the MCP server "<server>" (<n> rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.`
 
 Gateway call whose request body is larger than `server.mcpMaxBodyBytes`, 4 MiB by default
 : The JSON-RPC error -32600 `Straza: this MCP request was not read, because its body is larger than <limit> bytes, the most the Straza gateway reads in one request (server.mcpMaxBodyBytes). Send less in one call, for example a file's path or address instead of its content, or ask a Straza administrator to raise server.mcpMaxBodyBytes.` The Straza server never read the call, so it decided nothing and wrote no audit record.
@@ -142,7 +145,10 @@ No background service on the machine
 : ``Straza: Straza's background service isn't running on this machine, so this command can't reach your Straza session. Run `straza doctor` to see why, or ask IT to reinstall Straza. On Linux, `systemctl status straza-service` shows why.`` On Windows the last sentence reads ``On Windows, `Get-Service straza-service` shows whether it runs, and the Application event log under straza-service shows why it stopped.`` A service started with `STRAZA_HOME` set is named by that path instead, with the hint to start it with `straza service` in a shell that has the same `STRAZA_HOME`.
 
 No enrollment for the user in the service
-: ``Straza: This machine isn't enrolled for you yet. Run `straza enroll` and sign in with your work account.``
+: ``Straza: This machine isn't enrolled for you yet. A person runs `straza enroll --server <strazad url>` and signs in with their work account. An AI agent runs `straza enroll --server <strazad url> --headless` with its registered key or the client secret IT installed for it.``
+
+An AI agent's key from `straza keygen` for the user, and no enrollment yet
+: ``Straza: This machine isn't enrolled for you yet. This OS account holds an AI agent's key from `straza keygen`. Once an admin has registered its public key, run `straza enroll --server <strazad url> --headless`.`` On a machine whose managed configuration names the server, this sentence and the one above leave out `--server <strazad url>`, because the service enrolls at that server.
 
 No session on the machine
 : `Straza: no active Straza session. Restart the session so straza can check in`
@@ -151,7 +157,7 @@ Session the server revoked over the kill-switch push
 : `Straza: session revoked (<reason>). Tool calls stay denied until a new session starts and checks in again. If only this session was revoked, that check-in starts a new session. If the device or user was disabled, the check-in is refused until an administrator re-enables it. Inform the user and stop.`
 
 Token expired past the offline grace
-: `Straza: session token expired <age> ago and the offline grace period (<grace>) is exhausted.`, then a sentence that says Straza cannot verify current policy and asks the agent to reconnect and run `straza doctor`
+: `Straza: session token expired <age> ago and the offline grace period (<grace>) is exhausted.`, then sentences that say Straza cannot verify current policy, that this is a connection problem and not a policy decision, and that the agent tries the call once more in a minute and tells the user to check the network and run `straza doctor` if it is denied again
 
 Renewal refused by the server
 : `Straza: session revoked (<the server's sentence>).`, then the same sentences as a revocation push gives, because a refused renewal marks the session revoked
@@ -160,10 +166,16 @@ Newer policy on the server that the machine could not fetch
 : `Straza: this session's policy is out of date: the server holds a newer policy that straza could not fetch.`, then the cause of the failed fetch and a sentence that says tool calls stay denied until straza can fetch the current policy
 
 Approval needed while the server cannot be reached
-: `Straza: security layer unreachable for an approval-gated action. Denied (fail-closed)`
+: `Straza: security layer unreachable for an approval-gated action. Denied (fail-closed). This is a connection problem, not a policy decision. Try the call once more in a minute, and if it is denied again, tell the user.`
 
 Database out of reach while the server looks up an approval
-: `Straza: this call needs an approval, and the Straza server could not reach its database to check for one, so the call did not run. Denied (fail-closed). Retry the call in a moment, and if this keeps happening ask your Straza administrator to check the server's database connection.`
+: `Straza: this call needs an approval, and the Straza server could not reach its database to check for one, so the call did not run. Denied (fail-closed). Try the call once more in a minute. If it is denied again, tell the user to ask the Straza administrator to check the server's database connection.`
+
+Database fault while the server reads who decides the approval
+: `Straza: this call needs an approval, and Straza could not read the user record that says who decides it, so the call did not run. Denied (fail-closed). Try the call once more in a minute. If it is denied again, tell the user to ask the Straza administrator to check the strazad log.`
+
+Too many new approval requests in the last minute
+: `Straza: this call needs a new approval request, and too many were opened for this session or this user in the last minute, so none was opened and no person was asked. Wait a minute, then try again. If it is refused again, tell the user.` A session opens at most 5 new requests at once and then 5 a minute, and a person 10 at once and then 10 a minute. Asking again for a call whose request is still pending spends nothing.
 
 Nobody who can be asked for the approval
 : `Straza: approval cannot be routed: <cause>. Denied (fail-closed)`
@@ -189,7 +201,13 @@ Straza: approval requested (notified roles [release-approvers]); a person decide
 The page address comes from the server's `server.publicUrl`. The last sentence names `straza__approval_await` only when the session's policy allows that tool. Otherwise it reads `Retry this exact call after approval (ref <ref>)`.
 
 
-After a person approves, the same call made again is allowed once, within the rule's `retryTTLSeconds`, and the harness receives a plain allow. A second retry opens a new request, because one approval runs one call. A denial is never reported by the hook, so the next retry opens a new request and reads the same answer with a new reference. The agent learns of a denial from `straza__approval_status` or `straza__approval_await`, which report `"state":"denied"`.
+After a person approves, the same call made again is allowed once, within the rule's `retryTTLSeconds`, and the harness receives a plain allow. A second retry opens a new request, because one approval runs one call. After a person denies the request, the same call made again in the same session is denied until the request's decision window, the rule's `timeoutSeconds`, ends, and no new request opens. The answer names the person and the reference:
+
+```text
+Straza: approval denied by alice (ref 01a112cf-d923-7402-af47-66128f1954a3). A person denied this exact call, so it did not run, and the same call stays denied until 2026-11-05T09:12:00Z. Change the call, or tell the user that it was denied.
+```
+
+A call with other arguments asks again. `straza__approval_status` and `straza__approval_await` also report a denial, as `"state":"denied"`.
 
 A rule that names no approver role sends the request to the person behind the agent, its sponsor. A person with no sponsor confirms their own call, and the answer reads:
 
@@ -206,6 +224,9 @@ The gateway keeps the call open while a person decides, until the rule's decisio
 
 Denied by a person
 : `Straza: approval denied by <name> (ref <ref>)`
+
+The same call again, while that denial stands inside the decision window
+: `Straza: approval denied by <name> (ref <ref>). A person denied this exact call, so it did not run, and the same call stays denied until <time>. Change the call, or tell the user that it was denied.` No new request opens.
 
 Window over with no decision
 : `Straza: approval request expired after <n>s with no decision (ref <ref>)`
@@ -285,16 +306,19 @@ Not a tool this session can call
 : `Straza: <app>:<tool> is not a tool this session can call, so no approval can be requested for it. Check the app and tool name, or ask an admin for access to the tool.` Here and in the reason of a deny, a name over 256 bytes is quoted as its first 256 bytes followed by `... (<n> bytes)`.
 
 Too many requests for one server
-: `Straza: rate limit exceeded for the MCP server "<app>" (<n> rps). Retry shortly`
+: `Straza: rate limit exceeded for the MCP server "<app>" (<n> rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.`
 
 A person denied a ticket for this call, and its window is still open
 : `Straza: ticket <ref> was denied by <name>; this call stays denied until <time>`
+
+Too many new approval requests in the last minute
+: `Straza: this call needs a new approval request, and too many were opened for this session or this user in the last minute, so none was opened and no person was asked. Wait a minute, then try again. If it is refused again, tell the user.` A session opens at most 5 new requests at once and then 5 a minute, and a person 10 at once and then 10 a minute. Asking again for a call whose request is still pending spends nothing.
 
 Nobody who can be asked for the approval
 : `Straza: approval cannot be routed: <cause>. Denied (fail-closed)`
 
 Database out of reach while the server looks up an approval
-: `Straza: this call needs an approval, and the Straza server could not reach its database to check for one, so the call did not run. Denied (fail-closed). Retry the call in a moment, and if this keeps happening ask your Straza administrator to check the server's database connection.`
+: `Straza: this call needs an approval, and the Straza server could not reach its database to check for one, so the call did not run. Denied (fail-closed). Try the call once more in a minute. If it is denied again, tell the user to ask the Straza administrator to check the server's database connection.`
 
 Not a concrete call
 : `Straza: a concrete call is required. approval_request needs action.tool plus an app+tool_name, a command, or argv (free-text requests are rejected)`
@@ -317,3 +341,25 @@ A ticket rule that names no approver role goes to the person behind the agent, i
 
 
 The gateway also serves `straza__draft_submit` and `straza__draft_status`, to a session whose roles include `straza-draft-config`, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) shows. To any other session they do not exist, and a call gets `unknown tool "straza__draft_submit"`.
+
+## What this session may do
+
+
+Every session can call `straza__whoami`. It takes no input and answers for the calling session only: who it acts as, whether that is a person, an AI agent or a service account, who sponsors an agent, the harness, the roles, whether the conversation is recorded, and the knowledge packs bound to the session's roles. Then it lists every tool on the session's tool list, server by server. For each tool it says whether the call runs without approval or a person approves each call first, and on a server that limits roles to some objects, which objects the tool may touch. A session of alice's agent reads an answer like this:
+
+```text
+This session acts as "build-agent", an AI agent sponsored by "alice", through claude-code/2.1.0.
+Roles: dev.
+Recording: the prompts and responses of this session are not recorded.
+Knowledge packs for this session's roles: golang-style version 1.
+Tools this session can call, by server. Each call is still checked when it is made, so a rule on its arguments can deny it.
+ghapp:
+- pr_create: a person approves each call first; repos: Strazahq/pay-api, Strazahq/pay-web
+- repo_list: runs without approval
+straza:
+- whoami: runs without approval
+```
+
+The same facts come as structured content for a client that reads it. The answer never shows a rule's patterns, another user's access, a credential or who decides an approval. Each call of `straza__whoami` writes one audit record, as any tool call does.
+
+A rule that denies `whoami` on the `straza` app turns it off. With `apps.catalog.policyFilter` on, the default, the tool then leaves the session's tool list, and the banner leaves out its sentence. With the filter off, the tool stays listed and a call gets the rule's reason.

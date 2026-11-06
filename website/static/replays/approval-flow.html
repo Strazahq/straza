@@ -290,7 +290,7 @@ var SCENE = {
       text:"[ Deny ]   [ Approve ]", prov:"V17" },
     { action:"flash", variant:"hook", ms:320, target:"btnrow2" },
     { pane:"approver", speaker:"console", variant:"hook", accent:true, charMs:0, ms:760,
-      text:"Approved. make deploy-prod runs now for nova.", runtime:["nova"], prov:"V17" },
+      text:"Approved. make deploy-prod runs for nova if the agent retries it soon.", runtime:["nova"], prov:"V17" },
     { pane:"agent", speaker:"model", variant:"hook", dim:true, action:"type", charMs:26, ms:420,
       text:"Approved, re-running the deploy.", prov:"I" },
     { pane:"agent", speaker:"model", variant:"hook", text:"▸ Bash  make deploy-prod", action:"type", charMs:30, ms:420, prov:"I" },

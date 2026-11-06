@@ -15,6 +15,7 @@ import (
 
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/policy"
+	"github.com/strazahq/straza/internal/server/ratelimit"
 	"github.com/strazahq/straza/internal/store"
 	"github.com/strazahq/straza/internal/store/storetest"
 )
@@ -30,7 +31,7 @@ func serviceOn(st store.Store, bus coreBus, res RoleResolver) *Service {
 	return &Service{
 		st: st, bus: bus, resolver: res, cfg: config.Approval{}, log: slog.Default(),
 		tokenKey: make([]byte, 32), now: time.Now,
-		waiters: map[string][]chan struct{}{},
+		waiters: map[string][]chan struct{}{}, rate: ratelimit.New(),
 	}
 }
 

@@ -317,7 +317,7 @@ func checkE2E(recordsPath, stderrPath, evidencePath string) (errs []string) {
 		if eventOf(r) != "SessionStart" {
 			continue
 		}
-		for _, want := range []string{`"hookEventName":"SessionStart"`, "Straza governance is active"} {
+		for _, want := range []string{`"hookEventName":"SessionStart"`, "Straza governs this session"} {
 			if !strings.Contains(r.ExecStdout, want) {
 				errs = append(errs, fmt.Sprintf(
 					"record %d (SessionStart): enrolled ack is missing %q; the hook did not run against the enrolled session", i, want))

@@ -98,7 +98,7 @@ func (a *App) judgeSession(w http.ResponseWriter, r *http.Request, claims authn.
 		a.emitAuthnLogin(r, "failure", authnFields{Via: via,
 			UserID: ses.UserID, Session: ses.ID,
 			Harness: harness, Reason: "user is disabled"})
-		apiError(w, http.StatusForbidden, "user is disabled. Contact your administrator")
+		apiError(w, http.StatusForbidden, disabledUserMsg)
 		return none()
 	}
 	return u, ses, true

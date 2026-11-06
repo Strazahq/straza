@@ -61,6 +61,7 @@ func (l *Lists) fetch(ctx context.Context, t target) ([]Object, string, bool) {
 	defer cancel()
 	c := newCollector(t.spec)
 	cursor := ""
+	var refused *manager.RefusedError
 	for page := 1; ; page++ {
 		args := json.RawMessage(`{}`)
 		if cursor != "" {
@@ -77,6 +78,8 @@ func (l *Lists) fetch(ctx context.Context, t target) ([]Object, string, bool) {
 			return nil, reasonPageTimeout(tool, page), false
 		case errors.Is(err, manager.ErrNotReady):
 			return nil, reasonNotRunning(t.app.Name, tool), starting
+		case errors.As(err, &refused):
+			return nil, reasonRefused(t.app.Name, tool, plural, refused.Status, secret != nil), false
 		case err != nil || res == nil:
 			return nil, reasonUnreachable(t.app.Name, tool), false
 		case res.IsError:

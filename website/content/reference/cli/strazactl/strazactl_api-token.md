@@ -26,5 +26,5 @@ strazactl api-token [flags]
 * [strazactl](/reference/cli/strazactl/): Straza admin CLI
 * [strazactl api-token create](/reference/cli/strazactl/strazactl_api-token_create/): Mint a long-lived admin API token (shown exactly once)
 * [strazactl api-token list](/reference/cli/strazactl/strazactl_api-token_list/): List admin API token metadata
-* [strazactl api-token revoke](/reference/cli/strazactl/strazactl_api-token_revoke/): Revoke an admin API token
+* [strazactl api-token revoke](/reference/cli/strazactl/strazactl_api-token_revoke/): Revoke an admin API token by its name or its id
 

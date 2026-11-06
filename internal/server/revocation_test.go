@@ -60,7 +60,7 @@ func TestReactivationLift(t *testing.T) {
 	// Store + local half: revoke persists a row and blocks; the lift must
 	// unblock AND remove the row (or every restart re-blocks forever).
 	const userID = "11111111-aaaa-bbbb-cccc-000000000001"
-	app.revokeUserCtx(ctx, userID, "test revoke", store.RevocationOriginAdmin)
+	_, _ = app.revokeUserCtx(ctx, userID, "test revoke", store.RevocationOriginAdmin)
 	if !app.denylist.blocked(claimsFor(userID)) {
 		t.Fatal("user not blocked after revoke")
 	}

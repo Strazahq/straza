@@ -120,8 +120,8 @@ func (u leavingUsers) Update(ctx context.Context, row store.User) (store.User, e
 	return updated, nil
 }
 
-func (u leavingUsers) UpdateFields(ctx context.Context, id string, f store.UserFields) (store.User, error) {
-	updated, err := u.UserRepo.UpdateFields(ctx, id, f)
+func (u leavingUsers) UpdateFields(ctx context.Context, id string, f store.UserFields, revoke *store.UserRevocation) (store.User, error) {
+	updated, err := u.UserRepo.UpdateFields(ctx, id, f, revoke)
 	if err != nil {
 		return updated, err
 	}
@@ -346,9 +346,11 @@ func stallOnce() func(context.Context) error {
 // expired context, or a 5xx. Each answer leaves exactly one Error record
 // with its correlation id and one count in straza_http_errors_total. The
 // kill switch of a lock still completes after the bound, because its writes
-// run on afterCommit's context, and a stand-down finishes the transaction in
-// flight, which ends the whole set of up to 1000 sessions, and starts no
-// other. It shrinks the bound, so it does not run in parallel.
+// run on afterCommit's context. So does the kill switch of a disable whose
+// commit answered the deadline, once the store shows that it committed. A
+// stand-down finishes the transaction in flight, which ends the whole set of
+// up to 1000 sessions, and starts no other. It shrinks the bound, so it does
+// not run in parallel.
 func TestAdminWriteOnAHungStore(t *testing.T) {
 	old := adminWriteBound
 	adminWriteBound = 300 * time.Millisecond
@@ -440,8 +442,17 @@ func TestAdminWriteOnAHungStore(t *testing.T) {
 			answer: untilBound, method: http.MethodPatch, route: "PATCH /v1/admin/users/{id}",
 			path:   func(ada store.User) string { return "/v1/admin/users/" + ada.ID },
 			body:   func(store.User, store.Role) string { return `{"status":"disabled"}` },
-			status: http.StatusInternalServerError,
-			words:  []string{"update failed", "deadline exceeded"},
+			status: http.StatusServiceUnavailable,
+			words:  []string{"did not finish within", "deadline exceeded", "answered 200"},
+			absent: []string{"could not tell whether"},
+			check: func(t *testing.T, app *App, ada store.User) {
+				if got := eventsNaming(t, app, "straza.audit.identity", "user", ada.ID); len(got) != 1 || got[0]["action"] != "user.killed" {
+					t.Errorf("straza.audit.identity records of ada: %v, want one user.killed, because the store showed the disable committed", got)
+				}
+				if got := eventsNaming(t, app, "straza.identity.updated", "id", ada.ID); len(got) != 1 {
+					t.Errorf("straza.identity.updated events naming ada: %v, want one", got)
+				}
+			},
 		},
 		{
 			name: "session revoke whose write answers after the bound", point: beforeRevoke,
@@ -625,7 +636,7 @@ func TestKillSwitchOnAnEndedContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			app.revokeUserCtx(tc.ended(), ada.ID, "l4 cut", store.RevocationOriginAdmin)
+			_, _ = app.revokeUserCtx(tc.ended(), ada.ID, "l4 cut", store.RevocationOriginAdmin)
 			bg := context.Background()
 			if rows, err := app.store.Revocations().ListByTarget(bg, store.RevokeUser, ada.ID); err != nil || len(rows) != 1 {
 				t.Errorf("revocation rows of ada: %d (%v), want 1", len(rows), err)

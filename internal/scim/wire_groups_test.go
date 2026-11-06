@@ -42,7 +42,7 @@ func wireGroupsServer(t *testing.T) (*Server, store.Store, *[]string) {
 	s := New(Deps{
 		Store:        st,
 		Authenticate: func(r *http.Request, _ string) (context.Context, int, string) { return r.Context(), 0, "" },
-		Deactivate:   func(context.Context, string, string) {},
+		Deactivate:   deactivateIn(st),
 		Reactivate:   func(context.Context, string) {},
 		IdentityChanged: func(_ context.Context, _ string, id string) {
 			emitted = append(emitted, id)

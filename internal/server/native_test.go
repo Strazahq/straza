@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -541,12 +542,17 @@ spec:
 		}
 	}
 
-	// an unauthorized role ⇒ every native tool is hidden by the overlay.
+	// an unauthorized role ⇒ every approval tool is hidden by the overlay,
+	// and whoami, which carries the granted fact, stays.
 	ovOther := app.buildOverlay("k2", policy.Subject{Roles: []string{"other"}}, tier1, eng)
+	var otherNative []string
 	for _, tl := range overlayTools(tier1, ovOther) {
 		if strings.HasPrefix(tl.Name, nativeAppName+"__") {
-			t.Errorf("native tool %q leaked to an unauthorized role", tl.Name)
+			otherNative = append(otherNative, tl.Name)
 		}
+	}
+	if !slices.Equal(otherNative, []string{"straza__whoami"}) {
+		t.Errorf("an unauthorized role sees the native tools %v, want whoami alone", otherNative)
 	}
 }
 

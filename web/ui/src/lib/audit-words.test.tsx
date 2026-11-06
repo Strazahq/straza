@@ -231,6 +231,7 @@ const ACTIONS = [
   "enroll-token.create", "enroll-token.refused", "approver.enroll", "approver.revoke",
   "token.connect", "oauth.disconnect", "connection.agents", "identity.created", "identity.updated", "identity.deactivated", "policy.updated",
   "revocation.session", "revocation.sessions", "revocation.user", "revocation.device", "revocation.lift",
+  "device.revoke",
 ];
 
 describe("actionLabel", () => {
@@ -251,6 +252,7 @@ describe("actionLabel", () => {
     ["enroll-token.refused", "Refused enrolling an approver phone or browser for someone"],
     ["approver.enroll", "Enrolled an approver phone or browser"],
     ["approver.revoke", "Revoked an approver phone or browser with its user"],
+    ["device.revoke", "Revoked a user's machine"],
     ["nhi-key.set", "Registered an AI agent's key"],
     ["policy.frobnicate", "Policy set: frobnicate"],
     ["roles.implication.re-rank", "Role: implication re rank"],

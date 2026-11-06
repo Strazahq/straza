@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, type ApiTokenRow, type MintedToken, createApiToken } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import {
+  AREAS,
   AREAS_TITLE,
   AREA_COLUMN,
   COPIED,
@@ -14,11 +15,15 @@ import {
   GRANTS_MISSING,
   GRANTS_PLACEHOLDER,
   LEVEL_WRITE,
+  LIFETIMES,
+  LIFETIME_HINT,
+  MINT_LEDE,
   NAME_FREE,
   NAME_MISSING,
   NEVER_WARN,
   ROOT_WARN,
   SHOWN_ONCE,
+  WRITE_LINE,
   areaHint,
   curlLine,
   expiresLine,
@@ -69,6 +74,20 @@ describe("the mint sheet", () => {
     expect(screen.getByRole("combobox", { name: "Lifetime" }).textContent).toBe("expires in 90 days");
     expect(screen.getByText(GRANTS_PLACEHOLDER)).toBeTruthy();
     expect(sheet().querySelector("[data-scope]")).toBe(null);
+  });
+
+  it("says what a token is for, and when to pick the shortest lifetime", () => {
+    mount();
+    expect(within(sheet()).getByText(MINT_LEDE)).toBeTruthy();
+    expect(within(sheet()).getByText(LIFETIME_HINT)).toBeTruthy();
+  });
+
+  it("offers 1 day and 7 days before the longer lifetimes", async () => {
+    mount();
+    await userEvent.click(screen.getByRole("combobox", { name: "Lifetime" }));
+    const offered = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    expect(offered).toEqual(["expires in 1 day", "expires in 7 days", "expires in 30 days", "expires in 90 days", "expires in 1 year", "never expires"]);
+    expect(offered).toEqual(LIFETIMES.map((l) => l.label));
   });
 
   it("checks the name against the tokens already on screen, as it is typed", async () => {
@@ -139,11 +158,38 @@ describe("the mint sheet", () => {
     expect(segment("audit", "read").getAttribute("aria-checked")).toBe("true");
     expect((table.querySelector("[data-level-hint='audit']") as HTMLElement).textContent).toBe(levelHint("audit", "read"));
     expect(within(areas).getByText(AREAS_TITLE)).toBeTruthy();
-    expect(within(table).getByText(AREA_COLUMN.covers)).toBeTruthy();
+    expect(within(table).getByText(AREA_COLUMN.area)).toBeTruthy();
     expect(within(table).getByText(areaHint("audit"))).toBeTruthy();
     expect(table.querySelector("[data-level-hint='policy']")).toBe(null);
     await userEvent.click(segment("audit", "read and write"));
     expect((table.querySelector("[data-level-hint='audit']") as HTMLElement).textContent).toBe(levelHint("audit", "rw"));
+  });
+
+  it("puts each area's name and what it covers in one wrapping cell, and the access control in its own", async () => {
+    mount();
+    await pick("Custom");
+    const table = sheet().querySelector("[data-area-table]") as HTMLElement;
+    expect([...table.querySelectorAll("th")].map((th) => th.textContent)).toEqual([AREA_COLUMN.area, AREA_COLUMN.access]);
+    for (const [area, hint] of AREAS) {
+      const cells = [...(table.querySelector("[data-area='" + area + "']") as HTMLElement).querySelectorAll("td")];
+      expect(cells.length).toBe(2);
+      const [named, access] = cells;
+      expect(within(named).getByText(area)).toBeTruthy();
+      expect(within(named).getByText(hint)).toBeTruthy();
+      expect(named.className).not.toContain("whitespace-nowrap");
+      expect(access.className).not.toContain("whitespace-nowrap");
+      expect(within(access).getByRole("radiogroup", { name: area + " access" })).toBeTruthy();
+      expect(within(named).queryByRole("radiogroup")).toBe(null);
+    }
+  });
+
+  it("says under the area table that write includes read", async () => {
+    mount();
+    await pick("Custom");
+    const areas = sheet().querySelector("[data-section='Areas']") as HTMLElement;
+    expect(within(areas).getByText(WRITE_LINE)).toBeTruthy();
+    expect(WRITE_LINE).toBe("Write includes read here: each area offers none, read, or read and write.");
+    expect(within(screen.getByRole("radiogroup", { name: "audit access" })).getAllByRole("radio").map((r) => r.textContent)).toEqual(["none", "read", "read and write"]);
   });
 
   it("renders a held write-only grant as its own level and never offers it elsewhere", async () => {
@@ -187,6 +233,18 @@ describe("the mint sheet", () => {
       .toBe(expiresLine(expiresWord(expires), dayOf(expires)));
     await userEvent.click(within(sheet()).getByRole("button", { name: "Done" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  const short: [string, number][] = [["expires in 1 day", 86400], ["expires in 7 days", 604800]];
+  it.each(short)("mints with %s as %i seconds", async (label, seconds) => {
+    mount();
+    await userEvent.type(name(), "alice-terminal-once");
+    await userEvent.click(screen.getByRole("combobox", { name: "Lifetime" }));
+    await userEvent.click(await screen.findByRole("option", { name: label }));
+    expect(screen.queryByText(NEVER_WARN)).toBe(null);
+    await pick("Audit automation");
+    await userEvent.click(screen.getByRole("button", { name: "Mint token" }));
+    await waitFor(() => expect(createApiToken).toHaveBeenCalledWith("alice-terminal-once", "audit:read,sessions:read", seconds));
   });
 
   it("copies the secret and says it copied", async () => {

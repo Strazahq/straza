@@ -113,7 +113,7 @@ github    token  -         true       70c1         2026-12-31T00:00:00Z  sponsor
 midpoint  oauth  keycloak  false      -            -                     sponsor               -
 ```
 
-`straza disconnect github` takes the row away and prints `disconnected github`. `strazactl connect` and `strazactl disconnect` change another user's connection, named with `--user`, for an administrator and for scripts, on an admin API token that holds `apps:read` and `apps:write`, because `strazactl connect` reads the user's connections before it changes one. `strazactl connect github --user joe` pastes a token for the agent joe the same way, and `strazactl disconnect github --user joe` removes it. A sponsor sets or removes an agent's token in the sponsored-agent rows of the Credentials tab.
+`straza disconnect github` takes the row away and prints `disconnected github`. `strazactl connect` and `strazactl disconnect` change another user's connection, named with `--user`, for an administrator and for scripts, on an admin API token that holds `apps:read` and `apps:write`, because `strazactl connect` reads the user's connections before it changes one. `strazactl connect github --user joe` pastes a token for the agent joe the same way, and `strazactl disconnect github --user joe` removes it. A sponsor sets or removes an agent's token in the sponsored-agent rows of the Credentials tab. An AI agent or a service account reads and changes only its own connection, whatever roles it holds, and cannot let agents use it. Naming another user answers 403, and a refused change writes one `connection.refused` record.
 {{< /cli >}}
 
 

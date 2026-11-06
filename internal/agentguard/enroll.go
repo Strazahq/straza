@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/oidcflow"
@@ -59,6 +62,29 @@ func Keygen(ctx context.Context, svc *localapi.Client, username string, force bo
 	fmt.Fprintf(w, "Public key: %s\n\n", ans.PublicKey)
 	fmt.Fprintf(w, "An administrator registers it with:\n  strazactl users nhi-key set %s %s\n", name, ans.PublicKey)
 	fmt.Fprintf(w, "(or: PUT /v1/admin/users/{id}/nhi-key {\"public_key\":\"%s\"})\n", ans.PublicKey)
-	fmt.Fprintf(w, "Then enroll headless:\n  straza enroll --server <strazad-url> --headless --user %s\n", name)
+	server := "--server <strazad-url> "
+	if managedServer() != "" {
+		server = ""
+	}
+	fmt.Fprintf(w, "Then enroll headless:\n  straza enroll %s--headless --user %s\n", server, name)
 	return nil
+}
+
+// managedServer returns the server that this machine's managed
+// configuration names, or "" when there is no managed layout or its
+// configuration names none. The service enrolls at that server whatever
+// --server says, so the enroll line leaves the flag out then.
+func managedServer() string {
+	if !ManagedInstalled() {
+		return ""
+	}
+	raw, err := os.ReadFile(ManagedConfigPath()) // #nosec G304 -- fixed managed layout path
+	if err != nil {
+		return ""
+	}
+	var c Config
+	if yaml.Unmarshal(raw, &c) != nil {
+		return ""
+	}
+	return c.ServerURL
 }

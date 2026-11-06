@@ -74,6 +74,7 @@ func (s *Server) handleUserReplace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 		return
 	}
+	clearNonPersonPassword(&u)
 	updated, err := s.deps.Store.Users().Update(r.Context(), u)
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "uniqueness", "userName already exists")
@@ -86,7 +87,7 @@ func (s *Server) handleUserReplace(w http.ResponseWriter, r *http.Request) {
 	updated, err = s.applyActive(r.Context(), updated, active)
 	if err != nil {
 		s.userUpdated(r.Context(), before, u)
-		writeError(w, http.StatusInternalServerError, "", "status update failed")
+		s.writeActiveError(w, r, active, err)
 		return
 	}
 	u.Status = activeStatus(u.Status, active)
@@ -120,6 +121,7 @@ func (s *Server) handleUserPatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	clearNonPersonPassword(&u)
 	updated, err := s.deps.Store.Users().Update(r.Context(), u)
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "uniqueness", "userName already exists")
@@ -132,7 +134,7 @@ func (s *Server) handleUserPatch(w http.ResponseWriter, r *http.Request) {
 	updated, err = s.applyActive(r.Context(), updated, activeTarget)
 	if err != nil {
 		s.userUpdated(r.Context(), before, u)
-		writeError(w, http.StatusInternalServerError, "", "status update failed")
+		s.writeActiveError(w, r, activeTarget, err)
 		return
 	}
 	u.Status = activeStatus(u.Status, activeTarget)
@@ -151,7 +153,7 @@ func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.applyActive(r.Context(), u, false); err != nil {
 		// A 5xx makes the IdP retry the deprovision; a 204 here would leave
 		// an active user the IdP believes is gone.
-		writeError(w, http.StatusInternalServerError, "", "deactivation failed")
+		s.writeActiveError(w, r, false, err)
 		return
 	}
 	s.deps.IdentityChanged(r.Context(), "straza.identity.deactivated", u.ID)
@@ -183,6 +185,15 @@ func (s *Server) userUpdated(ctx context.Context, before, written store.User) {
 	s.deps.UserWritten(ctx, UserUpdated, written, changed)
 }
 
+// clearNonPersonPassword drops the password hash of u when u is an AI agent
+// or a service account, as the store's Update does, so the row a handler
+// reports is the row the store wrote and a retype's record names password.
+func clearNonPersonPassword(u *store.User) {
+	if u.IsNHI() {
+		u.PasswordHash = ""
+	}
+}
+
 // changedFields answers the names of the fields that differ between before
 // and after, in one fixed order. The names are the admin API's user fields,
 // the names the admin PATCH records, so one reader reads both lanes. It
@@ -199,6 +210,7 @@ func changedFields(before, after store.User) []string {
 		{"display", before.Display != after.Display},
 		{"title", before.Title != after.Title},
 		{"status", before.Status != after.Status},
+		{"password", before.PasswordHash != after.PasswordHash},
 		{"user_type", before.UserType != after.UserType},
 		{"agency_mode", before.AgencyMode != after.AgencyMode},
 		{"sponsor", before.Sponsor != after.Sponsor},
@@ -225,14 +237,19 @@ func activeStatus(status string, active bool) string {
 	return store.UserDisabled
 }
 
-// applyActive reconciles the stored status with the requested active state,
-// running the kill-switch cascade on deactivation. A store failure is
-// returned, never swallowed: reporting success on a failed deactivation would
-// make the IdP mark the user deprovisioned and stop retrying (fail open).
+// applyActive reconciles the stored status with the requested active state.
+// A deactivation is Deps.Deactivate, which writes the status with the
+// user's revocation, so a refused write leaves the user active for the next
+// reconciliation. A store failure is returned, never swallowed: reporting
+// success on a failed deactivation would make the IdP mark the user
+// deprovisioned and stop retrying (fail open).
 func (s *Server) applyActive(ctx context.Context, u store.User, active bool) (store.User, error) {
 	status := activeStatus(u.Status, active)
 	if status == u.Status {
 		return u, nil
+	}
+	if !active {
+		return s.deps.Deactivate(ctx, u.ID, "deactivated via SCIM")
 	}
 	u.Status = status
 	updated, err := s.deps.Store.Users().Update(ctx, u)
@@ -240,10 +257,22 @@ func (s *Server) applyActive(ctx context.Context, u store.User, active bool) (st
 		s.deps.Log.Error("scim: status update failed", "user", u.ID, "err", err)
 		return u, err
 	}
-	if active {
-		s.deps.Reactivate(ctx, u.ID)
-	} else {
-		s.deps.Deactivate(ctx, u.ID, "deactivated via SCIM")
-	}
+	s.deps.Reactivate(ctx, u.ID)
 	return updated, nil
+}
+
+// writeActiveError answers an applyActive that failed. A failed
+// deactivation answers the status and the detail Deps.DeactivationFailed
+// words, which also records it, or 404 when the user's row went meanwhile.
+// A failed reactivation answers 500.
+func (s *Server) writeActiveError(w http.ResponseWriter, r *http.Request, active bool, err error) {
+	switch {
+	case active:
+		writeError(w, http.StatusInternalServerError, "", "status update failed")
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "", "no such user")
+	default:
+		status, detail := s.deps.DeactivationFailed(r, err)
+		writeError(w, status, "", detail)
+	}
 }

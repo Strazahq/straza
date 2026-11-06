@@ -97,7 +97,7 @@ A phone decides only by signing a fresh single-use challenge, and it renews its 
 
 | Kind | Lives in | Lives for | Rotate or revoke | A copy yields |
 |---|---|---|---|---|
-| Local user password | the `users` table as a bcrypt hash | no expiry | `strazactl users set-password` | a login as that user in the standalone profile |
+| Local user password, a person's only, because an AI agent or a service account signs in with its key and strazad refuses it a password | the `users` table as a bcrypt hash | no expiry | `strazactl users set-password` | a login as that user in the standalone profile |
 | Bootstrap admin password | printed once at the first boot of an empty standalone store, as the `password` field of a warning line in the server log, which keeps it in every copy of that log until the password is changed | until changed | `strazactl users set-password admin` | full administration |
 | Break-glass password | printed once, in both profiles, for an account no identity manager can disable, as the `password` field of a warning line in the first boot's server log, which keeps it in every copy of that log until the password is changed | until changed | `strazactl users set-password break-glass` on an admin API token, or a new hash written into the users table as the last resort | full administration in both profiles, through the emergency sign-in in the enterprise profile |
 

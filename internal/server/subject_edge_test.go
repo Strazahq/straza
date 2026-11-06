@@ -218,7 +218,7 @@ var echoParams = map[string]any{"name": "echoapp__echo", "arguments": map[string
 func kimDenials(t *testing.T, app *App, kim store.User, session string, want int) {
 	t.Helper()
 	recs := awaitMCPRecords(t, app, want, func(d map[string]any) bool {
-		return d["session"] == session && d["toolName"] == "echoapp__echo" && d["effect"] == "deny"
+		return d["session"] == session && d["app"] == "echoapp" && d["toolName"] == "echo" && d["effect"] == "deny"
 	})
 	for _, d := range recs {
 		if d["user"] != kim.ID || !strings.Contains(fmt.Sprint(d["reason"]), "no access row for this session's roles admits it") {

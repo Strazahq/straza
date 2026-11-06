@@ -67,9 +67,21 @@ spec:
       events: [tool.pre]
       tools: [shell.exec]
       command:
-        denyPatterns: ["rm -rf *", "git push --force*", "curl * | *sh*"]
+        denyPatterns: ["rm -rf *", "git push --force*"]
       effect: deny
       reason: "Straza: destructive command denied by the agent guardrails"
+    # curl piped into a real shell: sh, bash, zsh, dash, ksh or fish, also
+    # behind sudo, env or a path, and with ; or && after it. A pipe into
+    # grep, jq, shasum and the like passes. The same pattern as prod's
+    # keep-guardrails rule.
+    - id: no-download-to-shell
+      events: [tool.pre]
+      tools: [shell.exec]
+      command:
+        denyPatterns:
+          - 're:(.*[;&|\n]\s*)?(sudo\s+)?curl\s.*\|\s*(sudo\s+(-\S+\s+(\w+\s+)?)*)?(env\s+(\S+=\S*\s+)*)?(\S*/)?(ba|z|da|k|fi)?sh([\s;&|)].*)?'
+      effect: deny
+      reason: "Straza: a download piped into a shell is blocked. Save it to a file and read it first."
     # The next two rules refuse file.read, file.write and file.edit of
     # ~/.straza/credentials.json, and a shell command that names that file.
     # strazactl no longer writes it, because it runs on an admin API token,

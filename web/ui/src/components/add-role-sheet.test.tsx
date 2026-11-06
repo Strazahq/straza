@@ -154,9 +154,9 @@ describe("the Add role sheet of a server", () => {
     mount();
     expect(screen.getByText("Add a role of demo-tools")).toBeTruthy();
     expect(screen.getByText("It reaches this server only. Your identity manager decides who holds it.")).toBeTruthy();
-    expect(preview().textContent).toBe("Stored as demo-tools-, in midPoint as AR:demo-tools-.strazactl roles create demo-tools- --app demo-tools --tools …");
+    expect(preview().textContent).toBe("Application role, stored as demo-tools-. An IGA imports it as AR:demo-tools-.strazactl roles create demo-tools- --app demo-tools --tools …");
     await userEvent.type(screen.getByLabelText("role name suffix"), "Read Only");
-    expect(preview().textContent).toBe("Stored as demo-tools-read-only, in midPoint as AR:demo-tools-read-only.strazactl roles create demo-tools-read-only --app demo-tools --tools …");
+    expect(preview().textContent).toBe("Application role, stored as demo-tools-read-only. An IGA imports it as AR:demo-tools-read-only.strazactl roles create demo-tools-read-only --app demo-tools --tools …");
     await userEvent.click(tick("echo"));
     expect(preview().textContent).toContain("strazactl roles create demo-tools-read-only --app demo-tools --tools echo");
   });

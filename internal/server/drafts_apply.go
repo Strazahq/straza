@@ -268,8 +268,10 @@ type settledRoles struct {
 // otherwise.
 // After checkInTries tries it answers checkInRolesMoving, and a failed apply
 // answers checkInApplyFailed, each with its cause. A failed resolution
-// answers its error and no sentence.
-func (a *App) settleRoles(ctx context.Context, sessionID, userID string, facts sessionFacts, build func([]store.Role) policy.Subject) (settledRoles, string, error) {
+// answers its error and no sentence, and so does a facts read that failed:
+// facts answers the session facts for the resolved roles' ids, so the
+// cache entry holds them from its first read.
+func (a *App) settleRoles(ctx context.Context, sessionID, userID string, facts func(roleIDs []string) (sessionFacts, error), build func([]store.Role) policy.Subject) (settledRoles, string, error) {
 	for try := 1; ; try++ {
 		epoch := a.resolver.Epoch()
 		roles, until, err := a.resolver.ResolveRolesUntil(ctx, userID, a.subjects.now())
@@ -281,12 +283,16 @@ func (a *App) settleRoles(ctx context.Context, sessionID, userID string, facts s
 			return settledRoles{}, checkInApplyFailed, err
 		}
 		if !applied {
-			sub := build(roles)
 			ids := make([]string, len(roles))
 			for i, role := range roles {
 				ids[i] = role.ID
 			}
-			e := cachedSubject{sub: sub, facts: facts, until: until, rolesHash: authn.RolesHash(ids)}
+			f, err := facts(ids)
+			if err != nil {
+				return settledRoles{}, "", err
+			}
+			sub := build(roles)
+			e := cachedSubject{sub: sub, facts: f, until: until, rolesHash: authn.RolesHash(ids)}
 			held := func() bool { return a.resolver.Epoch() == epoch }
 			if prev, had, ok := a.subjects.putIf(sessionID, e, held); ok {
 				return settledRoles{roles: roles, subject: sub, prev: prev, hadPrev: had}, "", nil

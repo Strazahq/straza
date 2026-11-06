@@ -208,6 +208,18 @@ func (r approvalRepo) FindLatestTicketByKey(ctx context.Context, userID, ruleID,
 		userID, ruleID, argvHash))
 }
 
+// FindLatestHoldByKey returns the newest hold-class row of (userID,
+// sessionID, ruleID, argvHash) in any state, ErrNotFound when none; the
+// hold's deny-final lookup for the hook lane. It leads with user_id and
+// orders by the UUIDv7 id, so idx_approvals_user (user_id, id) serves it as
+// it serves FindLatestTicketByKey.
+func (r approvalRepo) FindLatestHoldByKey(ctx context.Context, userID, sessionID, ruleID, argvHash string) (Approval, error) {
+	return scanApproval(r.s.queryRow(ctx, `SELECT `+approvalCols+` FROM approvals
+		WHERE user_id = $1 AND session_id = $2 AND rule_id = $3 AND argv_hash = $4 AND class = 'hold'
+		ORDER BY id DESC LIMIT 1`,
+		userID, sessionID, ruleID, argvHash))
+}
+
 // MarkConsumed is the atomic single-use gate of every approval use, a ticket's
 // grant (spec/policyset revision 6) and a hold's approval (revision 23): it
 // consumes exactly one live approved row and reports whether THIS caller won

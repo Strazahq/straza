@@ -67,6 +67,9 @@ Five detectors run on each session. A detector repeats a verdict for the same se
 | `captureContent` | `critical` | A recorded prompt or reply holds the shape of a credential, such as an AWS access key id, a private key, a GitHub token, a bearer token or a Straza token. It sees only sessions a policy records, and text recorded with secrets masked does not match. |
 | `toolMixAnomaly` | `info` | A user calls a tool outside their usual mix, once they have 50 audit events since strazad started. |
 
+
+One more detector, `credentialEcho`, is not the sentinel's. The gateway raises it itself, with severity `critical`, when an MCP server answers a call with the credential Straza injected for that call, and it withholds that reply from the agent. Its verdict comes whether the sentinel is on or off, carries `strazad` as its source where the sentinel's carry `strazad-sentinel`, has no window and points at the call's deny record. Each withheld reply raises one.
+
 Each verdict holds the session, the user, the detector, the severity, a reason in one sentence, the ids of the records it points at as `evidence`, and the window when the detector has one.
 
 ## Tune the thresholds
@@ -106,7 +109,7 @@ The note under the controls reads `sentinel = type sentinel: the audit watcher's
 
 {{< shot name="audit-sentinel" caption="Verdicts under the `sentinel` lens, with the severity under **Effect**, the detector, its evidence and **Revoke session** on a critical one." >}}
 
-Select a row to open the record. A strip at the top repeats the severity, the detector and the session, with `The sentinel is alert-only: it never revokes on its own, and revoking is your call.` **The record as stored** lists the evidence ids, which you can search for in Audit.
+Select a row to open the record. A strip at the top repeats the severity, the detector and the session, with `The sentinel is alert-only: it never revokes on its own, and revoking is your call.` Open **The record as stored** to read the evidence ids, which you can search for in Audit.
 {{< /console >}}
 
 {{< cli >}}

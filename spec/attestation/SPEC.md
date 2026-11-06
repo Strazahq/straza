@@ -83,6 +83,15 @@ session or a record. The server refuses rather than cuts, because policies
 match the harness name as sent. A straza client sends a few dozen bytes in
 each, so a longer one comes from another program.
 
+A check-in whose `harness.name`, `harness.version`, `client.version` or
+`client.commit`, or an artifact name or a hash in `attestation.hashes`,
+holds a NUL character (U+0000, a zero byte) is refused with 400 and a
+sentence that names the field at the same point, so no token is read and
+no session or record is written. The server stores these fields when a
+check-in starts a session, and a Postgres store cannot hold that character
+in text or jsonb, so the server refuses it in every check-in, a refresh
+included, rather than strip it. A straza client never adds the character itself.
+
 ## Key lane
 
 A device can enroll with an Ed25519 key instead of a device token (openapi
@@ -146,6 +155,17 @@ to the key lane and starts at 1. A person's verified `id_token` with a
 `DPoP` header is refused with 400 as well (section Agent proofs at
 check-in). A device enrolled with a key accepts only its key: an `id_token`
 check-in that names it and a `device_token` on it are refused with 403.
+
+A key enrollment whose `device.name`, `device.platform`,
+`device.fingerprint` or `machine_binding` holds a NUL character (U+0000)
+is refused with 400 and a sentence that names the field, with the other
+checks of the body and before the proof is checked. It writes no record,
+spends no proof and changes no device row or counter. The server stores
+these four fields when an enrollment creates a device row, and a Postgres
+store cannot hold that character in text, so the server refuses it in every
+key enrollment, a re-enrollment included. The `custody` fields are stored
+as JSON text, which escapes the character, so a NUL there is accepted as
+before.
 
 Custody: a person's key enrollment reports where its key is kept in
 `custody.kind` (openapi 0.143.0). `account` is a key holder under its own
@@ -430,6 +450,32 @@ Changes to this artifact follow the additive-change rule in the spec README:
 schema + fixtures + CHANGELOG + version bump in the same PR.
 
 ## Changelog
+- **v1beta1** (2026-11-04, NUL characters): a check-in whose
+  `harness.name`, `harness.version`, `client.version` or `client.commit`,
+  or an artifact name or a hash in `attestation.hashes`, holds a NUL
+  character (U+0000) answers 400 with a sentence that names the field, and
+  writes no session and no record. A key enrollment whose `device.name`,
+  `device.platform`, `device.fingerprint` or `machine_binding` holds one
+  answers 400 the same way before its proof is checked, and writes no
+  record and no device row. A Postgres store cannot hold a NUL character in
+  a text column or a jsonb value, so before this revision such a request
+  answered 500 on Postgres where the field reached the store. Where the
+  field did not reach the store, it answered 200 and now answers 400: a
+  session refresh, a check-in whose `client.commit` holds the character
+  after its 64th byte, which the store does not keep, and a key
+  re-enrollment of a keyed device with it in `device.name` or
+  `device.platform`, which the re-enrollment does not store. The `custody`
+  fields of a key enrollment are stored as JSON text, which escapes the
+  character, so a NUL there is still accepted. A straza client never adds
+  the character itself. The key lanes also refuse a proof whose `jti`
+  holds one (spec/session-token, revision 2026-11-04). The request shape is
+  unchanged. The schema gives the check-in's text fields and the artifact
+  names of `attestation.hashes` a pattern that excludes the character, and
+  its hash values already excluded it. The example
+  `checkin-invalid-harness-name-nul.json`, derived from this document, pins
+  a harness name that ends in a NUL character, and the earlier examples
+  replay as before. These refusals ship as fixes without a major release,
+  so the break rule of the spec README is suspended for them.
 - **v1beta1** (2026-11-01, strazactl sign-in retired): strazactl no longer
   signs in (section strazactl sign-in retired). Enrollment with
   `client_kind` `human` without a `DPoP` header, a check-in under the

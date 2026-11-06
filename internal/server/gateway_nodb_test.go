@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ import (
 // the real request paths and asserts that no forbidden repo of the 18 is touched:
 // gateway tools/list (cold catalog build, then the cached serve), tools/call on
 // both the allow path and the deny path, POST /v1/decide allow and deny, the
-// DECISION lane of an approve-gated tools/call, and the drafting tools.
+// DECISION lane of an approve-gated tools/call, whoami and the drafting tools.
 //
 // Two phases are documented exceptions: the approve phase's escalation lane
 // reads and writes `approvals`, and the drafting phase's tools read and write
@@ -148,8 +149,8 @@ spec:
 		t.Fatal("cached tools/list came back empty")
 	}
 	_, leeList, _ := mcpCall(t, base, leeTok, "tools/list", nil)
-	if n := len(toolNamesOf(t, leeList)); n != 0 {
-		t.Errorf("lee catalog has %d tools, want 0", n)
+	if names := toolNamesOf(t, leeList); !slices.Equal(names, []string{"straza__whoami"}) {
+		t.Errorf("lee catalog lists %v, want whoami alone", names)
 	}
 	assertNoRepoAccess(t, cs, "gateway tools/list", before)
 
@@ -214,7 +215,20 @@ spec:
 	}
 	assertNoRepoAccess(t, cs, "approve-gated tools/call (decision lane)", before, "approvals")
 
-	// ---- phase 6: the drafting tools of the built-in app ----
+	// ---- phase 6: whoami ----
+	//
+	// whoami reads the subject cache, the catalog and overlay, the snapshot
+	// and the object lists, so no repo may move. It runs before the drafting
+	// phase, whose submit wakes the drafts checker.
+	before = cs.snapshot()
+	for _, tok := range []string{kimTok, leeTok} {
+		if text, isErr, _ := callTool(t, base, tok, "straza__whoami", map[string]any{}); isErr {
+			t.Fatalf("whoami = %q", text)
+		}
+	}
+	assertNoRepoAccess(t, cs, "whoami", before)
+
+	// ---- phase 7: the drafting tools of the built-in app ----
 	//
 	// A submit counts the caller's open drafts and writes its own rows, and a
 	// status reads one row by id. The role check, the rates,
@@ -223,7 +237,7 @@ spec:
 	// live state is off the request path but would land in this window, so
 	// the phase holds a.configMu, which every checker tick takes first.
 	seedAgent(t, app, "joe", "kim", DraftConfigRole)
-	joeTok := sessionToken(t, base, "joe")
+	joeTok := agentSessionToken(t, app, base, "joe")
 	func() {
 		app.configMu.Lock()
 		defer app.configMu.Unlock()
@@ -292,4 +306,26 @@ func TestGatewayNoDBObjectGate(t *testing.T) {
 		t.Fatalf("unreadable call = %q", text)
 	}
 	assertNoRepoAccess(t, r.cs, "object gate", before)
+
+	// whoami names the objects the gate admits, from the same input.
+	before = r.cs.snapshot()
+	for user, want := range map[string]string{
+		"pam": "map[count:2 every:false names:[Strazahq/pay-api Strazahq/pay-web] type:repo]",
+		"eve": "map[count:0 every:true type:repo]",
+	} {
+		_, isErr, sc := callTool(t, r.base, r.tokens[user], "straza__whoami", map[string]any{})
+		if isErr || sc == nil {
+			t.Fatalf("%s: whoami failed", user)
+		}
+		got := ""
+		for _, raw := range sc["tools"].([]any) {
+			if tl := raw.(map[string]any); tl["tool"] == "pr_create" {
+				got = fmt.Sprint(tl["objects"])
+			}
+		}
+		if got != want {
+			t.Errorf("%s: pr_create objects %s, want %s", user, got, want)
+		}
+	}
+	assertNoRepoAccess(t, r.cs, "whoami on a server that pins a type", before)
 }

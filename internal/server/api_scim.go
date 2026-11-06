@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -22,15 +23,27 @@ import (
 // long-lived credential this plane takes. On success the returned
 // context names the token as the audit actor, so every straza.audit.admin
 // record the request emits says which token acted. A refusal returns the
-// status and the SCIM error detail.
+// status and the SCIM error detail. A failed token read is a 503 that writes
+// its one Error record and its one error count here, because the SCIM
+// handlers log and count none of their own answers. A write whose context
+// has ended is the exception: runBounded bounds only writes, and
+// scimHandler answers a write past its bound with that write's one record.
 func (a *App) scimAuthenticate(r *http.Request, bearer string) (context.Context, int, string) {
 	ctx := r.Context()
 	if !strings.HasPrefix(bearer, apiTokenPrefix) {
 		return nil, http.StatusUnauthorized, scim.MissingTokenDetail
 	}
-	meta, ok := a.apiTokenAuthenticate(ctx, bearer)
-	if !ok {
-		return nil, http.StatusUnauthorized, "admin API token rejected: unknown, expired or revoked (strazactl api-token list)"
+	meta, err := a.apiTokenAuthenticate(ctx, bearer)
+	switch {
+	case errors.Is(err, errAPITokenRejected):
+		return nil, http.StatusUnauthorized, rejectedAPITokenMsg
+	case err != nil:
+		msg := fmt.Sprintf(apiTokenOutageMsg, reqID(ctx))
+		if ctx.Err() == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
+			a.logFailure(r, "503", msg, fmt.Errorf("admin API token: %w", err))
+			a.countHTTPError(r, "503")
+		}
+		return nil, http.StatusServiceUnavailable, msg
 	}
 	scope, err := tokenscopes.Parse(meta.Scope)
 	if err != nil {
@@ -75,15 +88,13 @@ func (a *App) scimServer() *scim.Server {
 	return scim.New(scim.Deps{
 		Store:        a.store,
 		Authenticate: a.scimAuthenticate,
-		Deactivate: func(ctx context.Context, userID, reason string) {
-			a.revokeUserCtx(ctx, userID, reason, store.RevocationOriginSCIM)
-			a.deprovisionGrants(ctx, userID, reason)
-		},
-		Reactivate: a.liftUserSCIMCtx,
+		Deactivate:   a.scimDeactivate,
+		Reactivate:   a.liftUserSCIMCtx,
 		IdentityChanged: func(ctx context.Context, subject, id string) {
 			a.resolver.Bump()
 			a.emitEventCtx(ctx, subject, map[string]any{"id": id, "origin": "scim"})
 		},
+		DeactivationFailed: a.scimDeactivationFailed,
 		MembershipChanged: func(ctx context.Context, ch scim.MembershipChange) {
 			action := actionRolesAssign
 			if ch.Action == scim.MembershipUnassign {
@@ -105,6 +116,72 @@ func (a *App) scimServer() *scim.Server {
 		RoleProjection:    a.groupRoleProjection,
 		Log:               a.log,
 	})
+}
+
+// The SCIM error details of a deactivation the store did not take, each
+// formatted with the request id.
+const (
+	scimDeactivationNotSavedMsg = "the deactivation was not saved: Straza could not write it to its database, so the user's status did not change and the user stays active. " +
+		"The Straza server that answered already refuses the user, but the other servers do not. Send the deactivation again. " +
+		"An identity manager's next reconciliation sends it again too, because the user still reads active. " +
+		"Without a saved deactivation, that server's refusal lasts until it restarts, or until a Straza administrator lifts it with strazactl users unlock and the user's userName. " +
+		"The strazad log names the cause under request id %s."
+	scimDeactivationUnsureMsg = "Straza could not tell whether its database saved the deactivation, because the write ended without a clear answer. " +
+		"The Straza server that answered already refuses the user. Read the user back, and if it is still active, send the deactivation again. " +
+		"Without a saved deactivation, that server's refusal lasts until it restarts, or until a Straza administrator lifts it with strazactl users unlock and the user's userName. " +
+		"The strazad log names the cause under request id %s."
+)
+
+// scimDeactivate is the SCIM Deactivate seam. It writes the disabled status
+// with the user's revocation row and straza.revocation.user event in one
+// transaction, then runs the rest of the kill switch and removes the user's
+// grants, also after a write whose answer was lost when updateUserFields
+// shows that it committed. A refused write leaves the status active, so the
+// identity manager's next reconciliation sends the deactivation again. Until
+// then this server refuses the user, because the identity manager asked for
+// that and this server can do it without the database.
+func (a *App) scimDeactivate(ctx context.Context, userID, reason string) (store.User, error) {
+	disabled := store.UserDisabled
+	revoke, err := a.userRevocation(ctx, userID, reason, store.RevocationOriginSCIM)
+	var u store.User
+	if err == nil {
+		u, err = a.updateUserFields(ctx, userID, store.UserFields{Status: &disabled}, revoke)
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return store.User{}, err
+	}
+	if err != nil {
+		a.denylist.revokeUser(userID)
+		return store.User{}, err
+	}
+	a.userRevokedCtx(ctx, userID, reason, store.RevocationOriginSCIM)
+	// The status committed, and a resend finds the user disabled and runs
+	// none of this again, so the removal runs on afterCommit's context. The
+	// request's end does not stop it, and a store that stops answering still
+	// ends it at that context's own bound.
+	gctx, cancel := afterCommit(ctx)
+	a.deprovisionGrants(gctx, userID, reason)
+	cancel()
+	return u, nil
+}
+
+// scimDeactivationFailed is the SCIM DeactivationFailed seam: a 500 whose
+// detail says the deactivation was not saved, or that Straza cannot tell
+// when the write may have committed and the store could not say whether it
+// did. It writes the answer's one Error record and one error count while
+// the request's context lives. Once that context has ended, scimHandler
+// holds the answer back and writes the one record of its 503 instead.
+func (a *App) scimDeactivationFailed(r *http.Request, err error) (int, string) {
+	msg := scimDeactivationNotSavedMsg
+	if store.MaybeWritten(err) && !errors.Is(err, errUserWriteNotSaved) {
+		msg = scimDeactivationUnsureMsg
+	}
+	detail := fmt.Sprintf(msg, reqID(r.Context()))
+	if r.Context().Err() == nil {
+		a.logFailure(r, "500", detail, err)
+		a.countHTTPError(r, "500")
+	}
+	return http.StatusInternalServerError, detail
 }
 
 // deprovisionGrants removes every own row of a user who is leaving, OAuth
@@ -388,82 +465,6 @@ func scimCovers(server, typ string, scope *store.ObjectScope, current map[string
 		out[i] = prefix + strings.TrimSuffix(buf.String(), "\n")
 	}
 	return out
-}
-
-// origin records which authority created the row: the
-// SCIM reactivation lift removes scim-origin rows only, so admin/external
-// locks survive IdM writes.
-func (a *App) revokeUserCtx(ctx context.Context, userID, reason, origin string) {
-	// The deactivation this cascade enforces has committed, so each of its
-	// writes runs on afterCommit's context: a client that left or a write
-	// that ran past its bound must not stop the kill switch halfway.
-	wctx, cancel := afterCommit(ctx)
-	_, err := a.store.Revocations().Create(wctx, store.Revocation{
-		Kind: store.RevokeUser, TargetID: userID, Reason: reason, Origin: origin,
-	})
-	cancel()
-	if err != nil {
-		a.log.Error("user revoke: the revocation record could not be written, so the block holds on this replica until it restarts",
-			"user", userID, "err", err)
-	}
-	a.denylist.revokeUser(userID)
-	a.pushRevocation("user", userID)
-	// sessionsRevoked counts only the rows marked revoked. A session whose
-	// write failed stays active in the store, and the user's denylist entry
-	// refuses it on the refresh and on the admin plane.
-	revokedSessions := 0
-	wctx, cancel = afterCommit(ctx)
-	sessions, err := a.store.Sessions().ListByUser(wctx, userID)
-	cancel()
-	if err != nil {
-		a.log.Error("user revoke: the user's sessions could not be listed, so none was marked revoked and the denylist refuses them",
-			"user", userID, "err", err)
-	}
-	for _, s := range sessions {
-		if s.Status != store.SessionActive {
-			continue
-		}
-		wctx, cancel := afterCommit(ctx)
-		err := a.store.Sessions().SetStatus(wctx, s.ID, store.SessionRevoked)
-		cancel()
-		if err != nil {
-			a.log.Error("user revoke: the session could not be marked revoked, so it stays active in the store and the denylist refuses it",
-				"user", userID, "session", s.ID, "err", err)
-		} else {
-			revokedSessions++
-		}
-		a.denylist.revokeSession(s.ID)
-		a.subjects.drop(s.ID)
-		a.pushRevocation("session", s.ID)
-	}
-	a.emitRevokeRecord(ctx, "straza.revocation.user",
-		"user revoke: the revocation event could not be written, so the other replicas miss the block until they restart",
-		map[string]any{"user": userID, "reason": reason, "origin": origin})
-	// The kill switch must leave a chain entry: straza.revocation.* converges
-	// enforcement but only straza.audit.> is hash-chained, so without this
-	// record the kill would leave no audit trace.
-	a.emitRevokeRecord(ctx, "straza.audit.identity",
-		"user revoke: the user.killed record could not be written, so the audit chain holds no record of this revoke",
-		map[string]any{
-			"action": "user.killed", "user": userID, "reason": reason, "origin": origin,
-			"sessionsRevoked": revokedSessions,
-		})
-}
-
-// emitRevokeRecord writes one record of a user revoke to the outbox on
-// afterCommit's context, as emitEventCtx writes a record, and logs a failed
-// write at Error with msg, because a lost record leaves the other replicas
-// or the audit chain without the revoke.
-func (a *App) emitRevokeRecord(ctx context.Context, subject, msg string, data map[string]any) {
-	ctx, cancel := afterCommit(ctx)
-	defer cancel()
-	ev, err := a.cloudEvent(ctx, subject, data)
-	if err == nil {
-		_, err = a.store.Outbox().Insert(ctx, ev)
-	}
-	if err != nil {
-		a.log.Error(msg, "user", data["user"], "err", err)
-	}
 }
 
 // allowUserCtx is the FULL reactivation lift, the compensating mirror of

@@ -285,7 +285,7 @@ func buildProxyFor(t *testing.T, g *fakeGateway, store *Store, server string) (c
 	p.server = server
 	// Production wiring: boot and revival share the dialer (redial tests
 	// wrap p.dial to count attempts).
-	p.dial = newGatewayDialer(p, serviceHTTPClient(NewServiceClient(), "claude-code"), gatewayEndpoint(server))
+	p.dial = newGatewayDialer(p, bridgeHTTPClient(NewServiceClient(), "claude-code"), gatewayEndpoint(server))
 	cs, err := p.dial(ctx)
 	if err != nil {
 		t.Fatalf("connect gateway: %v", err)

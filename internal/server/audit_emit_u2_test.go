@@ -67,9 +67,9 @@ func (hungOutbox) Insert(ctx context.Context, _ store.OutboxEvent) (store.Outbox
 }
 
 // TestEmitOnAHungStore pins that a straza.audit.admin emit whose client has
-// gone still gives up on a store that stops answering: it returns within
-// auditInsertTimeout, the wait the decision path's audit spool uses, and
-// logs the failed insert at Warn.
+// gone still gives up on a store that stops answering: each of its two
+// tries waits auditInsertTimeout, the wait the decision path's audit spool
+// uses, and the lost record is logged at Error with its subject and action.
 func TestEmitOnAHungStore(t *testing.T) {
 	t.Parallel()
 	logger, logs := captureLogger()
@@ -79,16 +79,12 @@ func TestEmitOnAHungStore(t *testing.T) {
 	start := time.Now()
 	app.emitEventCtx(ctx, "straza.audit.admin", map[string]any{"action": "roles.assign", "target": "as-id"})
 	took := time.Since(start)
-	if took < auditInsertTimeout-100*time.Millisecond || took > auditInsertTimeout+2*time.Second {
-		t.Errorf("the emit returned after %v, want about %v", took, auditInsertTimeout)
+	if took < 2*auditInsertTimeout-100*time.Millisecond || took > 2*auditInsertTimeout+2*time.Second {
+		t.Errorf("the emit returned after %v, want about %v", took, 2*auditInsertTimeout)
 	}
-	line := ""
-	for _, l := range strings.Split(logs.String(), "\n") {
-		if strings.Contains(l, "outbox insert failed") {
-			line = l
-		}
-	}
-	if !strings.Contains(line, "level=WARN") || !strings.Contains(line, "subject=straza.audit.admin") || !strings.Contains(line, "deadline exceeded") {
-		t.Errorf("want one Warn line for the failed insert, got:\n%s", logs.String())
+	lines := errorRecords(logs)
+	if len(lines) != 1 || !strings.Contains(lines[0], "subject=straza.audit.admin") || !strings.Contains(lines[0], "action=roles.assign") ||
+		!strings.Contains(lines[0], "deadline exceeded") {
+		t.Errorf("want one Error line for the lost record, got:\n%s", logs.String())
 	}
 }

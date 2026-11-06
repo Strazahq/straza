@@ -8,10 +8,10 @@ import { changeRows } from "@/lib/manifest-edit";
 import { COVERAGE, COVERS_DETAIL, detailWith, trackerRole } from "@/test/drafts-fixture";
 
 // A draft's role and server cards on a server that pins an object type:
-// the objects in the server's own word where the verdict sends a coverage
-// entry, else the covers line before and after as the file writes it, and
-// the pinned type as a change row, so a draft that first pins one is not
-// an empty change.
+// the objects in the server's own word as one row of chips where the
+// verdict sends a coverage entry, else the covers line before and after as
+// the file writes it, and the pinned type as a change row, so a draft that
+// first pins one is not an empty change.
 
 const roleDoc = (name: string, covers: string[]) =>
   ["apiVersion: straza.dev/v1beta1", "kind: Role", "metadata:", "  name: " + name, "spec:", "  kind: application", "  server: ghapp", "  bindings:", "    - app: ghapp", "      tools: [pr_create]"].concat(covers).join("\n") + "\n";
@@ -30,28 +30,46 @@ describe("the objects of a role in a draft, from the coverage list", () => {
   const names = (el: Element | null) => [...(el?.querySelectorAll("[data-name]") || [])].map((n) => [n.textContent, n.hasAttribute("data-added")]);
   const render1 = (d = COVERS_DETAIL) => render(<TooltipProvider><DraftChanges detail={d} /></TooltipProvider>);
 
-  it("shows a changed role's tickets now and after, the added ones marked, and its tools unchanged", () => {
+  it("shows a changed role's tickets as one row, the added ones marked, its tools unchanged, and the sum in its head", () => {
     render1();
     const c = card("Role/tracker-triage");
-    expect(c.querySelector("[data-kind]")?.textContent).toBe("role · owned by tracker");
+    expect(c.querySelector("[data-kind]")?.textContent).toBe("Application role · owned by tracker");
     const row = c.querySelector('[data-fact="Tickets"]') as HTMLElement;
-    expect(names(row.querySelector('[data-side="now"]'))).toEqual([["T-1", false]]);
-    expect(names(row.querySelector('[data-side="after"]'))).toEqual([["T-1", false], ["+ T-2", true], ["+ T-3", true]]);
-    expect(c.querySelector('[data-fact="Tools"]')?.textContent).toBe("Tools3 tools, unchanged");
+    expect(names(row)).toEqual([["+ T-2", true], ["+ T-3", true], ["T-1", false]]);
+    expect(names(c.querySelector('[data-fact="Tools"]'))).toEqual([["ticket_comment", false], ["ticket_read", false], ["ticket_search", false]]);
+    expect([...c.querySelectorAll("[data-sum]")].map((x) => x.textContent)).toEqual(["+2 tickets"]);
     expect(c.querySelector('[data-row="Covers on tracker"]')).toBeNull();
     expect(c.querySelector("table")).toBeNull();
   });
 
-  it("shows an existing role that covered no ticket with nothing now and the ticket it gains", () => {
+  it("shows an existing role that covered no ticket with the ticket it gains", () => {
     render1(detailWith({ ...COVERS_DETAIL, verdict: { ...COVERS_DETAIL.verdict, objects: [{ ...COVERAGE, before: [], after: [{ id: "t2", value: "T-2" }] }] } }));
     const row = card("Role/tracker-triage").querySelector('[data-fact="Tickets"]') as HTMLElement;
-    expect(row.querySelector('[data-side="now"]')?.textContent).toBe("Nownothing");
-    expect(names(row.querySelector('[data-side="after"]'))).toEqual([["+ T-2", true]]);
+    expect(names(row)).toEqual([["+ T-2", true]]);
+  });
+
+  it("strikes the tickets a role drops", () => {
+    render1(detailWith({ ...COVERS_DETAIL, verdict: { ...COVERS_DETAIL.verdict, objects: [{ ...COVERAGE, before: [{ id: "t1", value: "T-1" }, { id: "t2", value: "T-2" }], after: [{ id: "t1", value: "T-1" }] }] } }));
+    const row = card("Role/tracker-triage").querySelector('[data-fact="Tickets"]') as HTMLElement;
+    expect(row.querySelector("[data-removed]")?.textContent).toBe("T-2");
+    expect([...card("Role/tracker-triage").querySelectorAll("[data-sum]")].map((x) => x.textContent)).toEqual(["-1 ticket"]);
   });
 
   it("names every ticket for a role that covers them all", () => {
     render1(detailWith({ ...COVERS_DETAIL, verdict: { ...COVERS_DETAIL.verdict, objects: [{ ...COVERAGE, every_after: true, after: [] }] } }));
-    expect(card("Role/tracker-triage").querySelector('[data-fact="Tickets"] [data-side="after"]')?.textContent).toContain("every ticket");
+    expect(card("Role/tracker-triage").querySelector('[data-fact="Tickets"] [data-added]')?.textContent).toBe("+ every ticket");
+  });
+
+  // The postgres server pins databases, so the same card reads in its words.
+  it("reads the postgres words where the coverage nouns say database", () => {
+    const db = { ...COVERAGE, role: "postgres-helpdesk", server: "postgres", type: "database", plural: "databases", before: [{ id: "d1", value: "helpdesk" }], after: [{ id: "d1", value: "helpdesk" }, { id: "d2", value: "playground" }] };
+    const doc = (dbs: string[]) => trackerRole("postgres-helpdesk", ["delete_rows"], dbs).replaceAll("tracker", "postgres");
+    render1(detailWith({ draft: { items: [{ kind: "Role", name: "postgres-helpdesk", op: "put", doc: doc(["helpdesk", "playground"]), existed: true }] }, live: { "Role/postgres-helpdesk": { op: "put", doc: doc(["helpdesk"]) } }, verdict: { objects: [db], gains: [] } }));
+    const c = card("Role/postgres-helpdesk");
+    expect(c.querySelector("[data-kind]")?.textContent).toBe("Application role · owned by postgres");
+    expect(names(c.querySelector('[data-fact="Databases"]'))).toEqual([["+ playground", true], ["helpdesk", false]]);
+    expect([...c.querySelectorAll("[data-sum]")].map((x) => x.textContent)).toEqual(["+1 database"]);
+    expect(c.textContent).not.toMatch(/ticket|repo/);
   });
 
   it("shows a new role's tickets beside its tools", () => {

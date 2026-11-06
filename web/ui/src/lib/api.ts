@@ -307,6 +307,21 @@ export type ObjectRow = { value: string; id: string; title?: string; attributes?
 // appObjects reads one page of a server's object list. q is the query
 // string of the q, after and limit parameters.
 export const appObjects = (id: string, q = "") => get<ObjectsAnswer>("/v1/admin/apps/" + enc(id) + "/objects" + (q ? "?" + q : ""));
+// ObjectsDraftAnswer is POST /v1/admin/apps/{id}/objects/draft: 201 with
+// the draft that pins what the server's marks declare and its verdict, or
+// 200 with the sentence when the pinned block already matches them.
+export type ObjectsDraftAnswer = DraftAnswer | { unchanged: true; sentence: string };
+export const draftAppObjects = (id: string) => post<ObjectsDraftAnswer>("/v1/admin/apps/" + enc(id) + "/objects/draft");
+// ListingCredential is a stored listing credential: the first four hex
+// characters of the value's SHA-256 and when it was set, never the value.
+export type ListingCredential = { app: string; fingerprint: string; setAt: string };
+// setListingCredential sends the value once, in the body. A server that
+// pins no type, or takes no listing credential, answers 409.
+export const setListingCredential = (id: string, value: string) => post<ListingCredential>("/v1/admin/apps/" + enc(id) + "/objects/credential", { value });
+export const removeListingCredential = (id: string) => del<unknown>("/v1/admin/apps/" + enc(id) + "/objects/credential");
+// refreshAppObjects asks for a listing now: 202 with when it is due, 429
+// with the sentence when the server was listed within the last minute.
+export const refreshAppObjects = (id: string) => post<{ app: string; dueAt: string }>("/v1/admin/apps/" + enc(id) + "/objects/refresh");
 
 // installApp posts the app.yaml text; dryRunApp stops after validation and
 // answers what the manifest declares, the check the wizard runs as you type.

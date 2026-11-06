@@ -48,10 +48,17 @@ func New() *Limiter {
 // rps <= 0 disables limiting for that key. burst is max(rps, 1) so a single
 // call is never rejected on a cold bucket.
 func (l *Limiter) Allow(key string, rps float64) bool {
+	return l.AllowBurst(key, rps, rps)
+}
+
+// AllowBurst is Allow with the bucket's burst given apart from its rate, for
+// a rate under one event a second that must still let a few events through
+// at once. A burst under 1 counts as 1.
+func (l *Limiter) AllowBurst(key string, rps, burst float64) bool {
 	if rps <= 0 {
 		return true
 	}
-	burst := max(rps, 1)
+	burst = max(burst, 1)
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -70,6 +77,23 @@ func (l *Limiter) Allow(key string, rps float64) bool {
 	}
 	l.evictIdle(now)
 	return b.allow(now)
+}
+
+// Ready reports whether AllowBurst with the same arguments would allow an
+// event on key now, and spends nothing and changes no bucket. A key with no
+// bucket is ready, because AllowBurst would create it full.
+func (l *Limiter) Ready(key string, rps, burst float64) bool {
+	if rps <= 0 {
+		return true
+	}
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b := l.buckets[key]
+	if b == nil {
+		return true
+	}
+	return min(max(burst, 1), b.tokens+now.Sub(b.last).Seconds()*rps) >= 1
 }
 
 // evictIdle drops buckets untouched for 10 minutes. Amortized: it scans only

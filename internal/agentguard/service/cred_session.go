@@ -290,7 +290,7 @@ func (s *credStore) holdStart(a *account, rec enrollment, h localapi.Harness, re
 	ses := Session{
 		UID: a.uid, Harness: h, ServerURL: rec.ServerURL, ID: resp.SessionID, User: resp.User,
 		Attestation: resp.Attestation, IssuedAt: now, ExpiresAt: now.Add(time.Duration(resp.ExpiresIn) * time.Second),
-		Packs: packsOf(resp.Packs), SnapshotID: resp.SnapshotID,
+		Packs: packsOf(resp.Packs), SnapshotID: resp.SnapshotID, StartText: resp.StartText,
 	}
 	if held := a.heldID(); held != "" {
 		ses.SnapshotID = held
@@ -443,6 +443,11 @@ func (s *credStore) adoptRefresh(ctx context.Context, a *account, hs *heldSessio
 	hs.token, hs.minted = resp.SessionToken, s.now()
 	hs.s.ExpiresAt = s.now().Add(time.Duration(resp.ExpiresIn) * time.Second)
 	adoptIdentity(&hs.s, resp)
+	if resp.StartText != nil {
+		// A window that starts on this session later reads the text of
+		// the latest check-in, which follows the policy as it is now.
+		hs.s.StartText = resp.StartText
+	}
 	hs.s.SnapshotID = pin
 	hs.s.settlePolicy(resp.SnapshotID, err, held)
 	s.saveSessions(a)
@@ -465,7 +470,7 @@ func (s *credStore) holdReacquire(a *account, hs *heldSession, resp agentguard.C
 	hs.s.ID, hs.s.Attestation, hs.s.IssuedAt = resp.SessionID, resp.Attestation, now
 	hs.s.ExpiresAt = now.Add(time.Duration(resp.ExpiresIn) * time.Second)
 	adoptIdentity(&hs.s, resp)
-	hs.s.Packs = packsOf(resp.Packs)
+	hs.s.Packs, hs.s.StartText = packsOf(resp.Packs), resp.StartText
 	return held
 }
 

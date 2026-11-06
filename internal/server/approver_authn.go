@@ -26,9 +26,11 @@ func approverRefusalKey(c authn.ApproverClaims) string { return c.Device + " " +
 // is marked once the record is in the outbox, a failed write leaves it
 // unmarked for the next refused request, and a request that requireApprover
 // accepts forgets it, so the next suspension writes again. The memory is per
-// replica. The write outlives the request and waits at most
-// auditInsertTimeout, as emitEventCtx's does, because the refusal has
-// already happened when the phone's connection drops.
+// replica. The write outlives the request and gets emitEventCtx's one
+// retry, each try waiting at most auditInsertTimeout, because the refusal
+// has already happened when the phone's connection drops. A write lost
+// after the retry is not counted as a lost record, because the next
+// refused request writes it.
 func (a *App) auditApproverInactive(r *http.Request, u store.User, c authn.ApproverClaims, readErr error) {
 	reason := "user is locked"
 	if readErr != nil || u.Status != store.UserActive {
@@ -45,10 +47,10 @@ func (a *App) auditApproverInactive(r *http.Request, u store.User, c authn.Appro
 	f := authnFields{Via: approverTokenVia, User: u.Username, UserID: c.Subject, Reason: reason}
 	ev, err := a.cloudEvent(ctx, "straza.audit.authn", authnPayload("login", "failure", f, r))
 	if err == nil {
-		_, err = a.store.Outbox().Insert(ctx, ev)
+		err = a.insertRecord(ctx, ev)
 	}
 	if err != nil {
-		a.log.Warn("approver auth: the user_inactive refusal record could not be written; the next refused request writes it",
+		a.log.Error("approver auth: the user_inactive refusal record could not be written; the next refused request writes it",
 			"user", c.Subject, "device", c.Device, "err", err)
 		return
 	}

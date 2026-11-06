@@ -497,11 +497,10 @@ func (a *App) routes() http.Handler {
 	}
 	// Failed password submits enter the chain (spec/events rev 21): the
 	// hook hands over the post-zeroing username, so an unknown account
-	// emits no user field at all.
-	iss.OnLoginFailed = func(username string, r *http.Request) {
+	// emits no user field at all, and the issuer's reason.
+	iss.OnLoginFailed = func(username, reason string, r *http.Request) {
 		a.emitAuthnLogin(r, "failure", authnFields{
-			Via: "password", User: username,
-			Reason: "invalid username or password",
+			Via: "password", User: username, Reason: reason,
 		})
 	}
 	if a.cfg.Profile == config.ProfileEnterprise {
