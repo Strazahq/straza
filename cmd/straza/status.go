@@ -37,14 +37,18 @@ func printStatus(w io.Writer, st localapi.Status, now time.Time) {
 	fmt.Fprintf(w, "service    straza service %s (custody %s)\n", st.Version, st.Custody)
 	e := st.Enrollment
 	if e == nil {
-		fmt.Fprintln(w, "identity   not enrolled (run `straza enroll --server <strazad url>`)")
+		fmt.Fprintln(w, "identity   not enrolled. "+agentguard.NotEnrolledSteps())
 		return
 	}
 	fmt.Fprintf(w, "server     %s\n", e.ServerURL)
 	fmt.Fprintln(w, identityLine(*e))
 	switch {
 	case e.MachineChanged:
-		fmt.Fprintln(w, "warning    This machine's identity changed since it was enrolled, so Straza stopped using its key. Run `straza enroll` to enroll it again.")
+		next := agentguard.PersonChangedSteps(*e)
+		if e.Kind == localapi.KindAgent {
+			next = agentguard.AgentChangedSteps(*e)
+		}
+		fmt.Fprintln(w, "warning    This machine's identity changed since it was enrolled, so Straza stopped using its key. "+next)
 	case now.Before(e.WaitUntil):
 		fmt.Fprintln(w, "warning    Straza is waiting for the server to confirm this machine's last check-in, which takes up to two minutes after a lost connection. Start the session again in a minute.")
 	}
@@ -57,7 +61,7 @@ func printStatus(w io.Writer, st localapi.Status, now time.Time) {
 			idle++
 			continue
 		}
-		fmt.Fprintln(w, sessionLine(s, now))
+		fmt.Fprintln(w, sessionLine(s, now, e.MachineChanged))
 	}
 	switch {
 	case idle == 1:
@@ -82,13 +86,22 @@ func identityLine(e localapi.Enrollment) string {
 }
 
 // sessionLine renders one live session: its harness window, id, user, how
-// long the token lasts, and whether the kill-switch push stream is up.
-func sessionLine(s localapi.SessionStatus, now time.Time) string {
+// long the token lasts or how long ago it lapsed, and whether the
+// kill-switch push stream is up. A lapsed token renews at the next call,
+// unless keyStopped says the service stopped using the machine's key.
+func sessionLine(s localapi.SessionStatus, now time.Time, keyStopped bool) string {
 	h := s.Harness.Name
 	if s.Harness.Version != "" {
 		h += "/" + s.Harness.Version
 	}
 	state := "expires in " + s.ExpiresAt.Sub(now).Round(time.Second).String() + ", kill switch " + s.Push
+	if now.After(s.ExpiresAt) {
+		renews := " and renews at the next call"
+		if keyStopped {
+			renews = ""
+		}
+		state = "token expired " + now.Sub(s.ExpiresAt).Round(time.Second).String() + " ago" + renews + ", kill switch " + s.Push
+	}
 	if s.Revoked != "" {
 		state = "revoked: " + s.Revoked
 	}

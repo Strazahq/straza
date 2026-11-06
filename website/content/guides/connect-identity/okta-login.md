@@ -123,7 +123,7 @@ A sentence that starts `Your identity provider refused the sign-in and said:`
 A console sentence that starts `Your identity provider at` and goes on `did not let this page finish the sign-in.`
 : The browser could not redeem the sign-in at Okta, because the server's origin is not a trusted origin with CORS. Add it under **Trusted Origins**.
 
-``Straza refused this sign-in because the identity provider sent no auth_time claim, so Straza cannot tell that you signed in just now. Ask IT to add the auth_time claim to the ID token of the Straza app, then run `straza enroll` again.``
+``Straza refused this sign-in because the identity provider sent no auth_time claim, so Straza cannot tell that you signed in just now. Ask IT to add the auth_time claim to the ID token of the Straza app, then run `straza enroll --server https://straza.example.com` again.``
 : The ID token lacks `auth_time`. Check the claims of the authorization server you sign in at.
 {{< /fails >}}
 

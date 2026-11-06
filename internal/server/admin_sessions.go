@@ -79,6 +79,8 @@ func (a *App) handleDevicesList(w http.ResponseWriter, r *http.Request) {
 // entry bites during the in-flight window on this pod, the revocation row
 // rebuilds it at boot, the push stands down a live kit on the device, and the
 // straza.revocation.device event (spec/events §subjects) converges peer pods.
+// A revoke that lands chains one straza.audit.admin device.revoke record,
+// and a 404 or a write the database refused chains none.
 func (a *App) handleDeviceRevoke(w http.ResponseWriter, r *http.Request) {
 	userID, deviceID := r.PathValue("id"), r.PathValue("deviceId")
 	d, err := a.store.Devices().GetByID(r.Context(), deviceID)
@@ -92,7 +94,7 @@ func (a *App) handleDeviceRevoke(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusNotFound, "no such device for this user")
 		return
 	}
-	err = a.revokeDevice(r, deviceID, "device revoked by admin")
+	err = a.revokeDevice(r, d, deviceRevokedByAdmin, "revoked-admin")
 	if errors.Is(err, store.ErrNotFound) {
 		// Another revoke deleted the row after the lookup above.
 		apiError(w, http.StatusNotFound, "no such device for this user")
@@ -102,8 +104,19 @@ func (a *App) handleDeviceRevoke(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, http.StatusInternalServerError, fmt.Sprintf(deviceNotRevokedMsg, deviceID, reqID(r.Context())), err)
 		return
 	}
+	a.emitIdentityAudit(r.Context(), map[string]any{
+		"action": actionDeviceRevoke, "target": deviceID, "device": deviceID, "user": d.UserID, "reason": deviceRevokedByAdmin,
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
+
+// actionDeviceRevoke is the straza.audit.admin action of a device that an
+// admin revoked, and deviceRevokedByAdmin is the reason its record and its
+// revocation row both carry.
+const (
+	actionDeviceRevoke   = "device.revoke"
+	deviceRevokedByAdmin = "device revoked by admin"
+)
 
 type sessionPayload struct {
 	ID       string `json:"id"`

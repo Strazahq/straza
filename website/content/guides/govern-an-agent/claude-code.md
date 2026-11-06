@@ -61,7 +61,7 @@ The wiring registers `straza hook --harness claude-code` on the seven Claude Cod
 {
   "hooks": {
     "PreToolUse": [
-      { "hooks": [ { "command": "/usr/bin/straza hook --harness claude-code", "type": "command" } ], "matcher": "*" }
+      { "hooks": [ { "command": "/usr/bin/straza hook --harness claude-code", "onFailure": "block", "type": "command" } ], "matcher": "*" }
     ],
     "SessionStart": [
       { "hooks": [ { "command": "/usr/bin/straza hook --harness claude-code", "type": "command" } ] }
@@ -69,6 +69,8 @@ The wiring registers `straza hook --harness claude-code` on the seven Claude Cod
   }
 }
 ```
+
+The PreToolUse entry sets `onFailure` to `block`. Claude Code 2.1.295 and later then blocks a tool call when `straza hook` cannot start, is killed, times out or prints output Claude Code cannot read, where it would otherwise run the call unchecked. Earlier releases ignore the setting.
 {{< /details >}}
 
 

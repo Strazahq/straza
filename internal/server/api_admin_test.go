@@ -344,7 +344,7 @@ func TestAdminCRUDFlow(t *testing.T) {
 	// The disabled user's ID token no longer works on the admin API.
 	var refusal map[string]string
 	if code := adminReq(t, "GET", base+"/v1/admin/users", idToken, nil, &refusal); code != http.StatusForbidden ||
-		refusal["error"] != "user is disabled. Contact your administrator" {
+		refusal["error"] != disabledUserMsg {
 		t.Fatalf("disabled admin still accepted = %d %v", code, refusal)
 	}
 }

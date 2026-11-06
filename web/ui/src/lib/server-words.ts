@@ -110,7 +110,11 @@ export function lockedAreaLine(count: number, label: string): string {
 
 // REACH_NOT_READABLE replaces the Tools table's closing sentence for a
 // session that may read the server but not its access rows.
-export const REACH_NOT_READABLE = "Which roles reach each tool is not readable with this account, because the access rows belong to the apps area. The tools shown are the server's own list.";
+export const REACH_NOT_READABLE = "Which roles reach each tool is not readable with this account, because the access rows need the scope apps:read. Ask for a role that grants it. The tools shown are the server's own list.";
+// POLICY_NOT_READABLE replaces it for a server's own admin, who reads the
+// access rows of their servers but not the tool list or the policy preview,
+// which are reads of the whole apps area.
+export const POLICY_NOT_READABLE = "The Policy column is not readable with this account, because the policy preview it reads needs the scope apps:read. Ask for a role that grants it. The tools shown are the server's own list.";
 
 // The sentences a server admin reads where a global read or verb is not
 // theirs: the events of a server, the last call in the banner, the wizard

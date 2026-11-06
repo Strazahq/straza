@@ -82,7 +82,7 @@ func TestDisabledUserExternalIDTokenRefused(t *testing.T) {
 	for _, l := range lanes {
 		before, beforeAll := len(authnFailures(t, platform, kim.ID, "user is disabled")), failures()
 		code, msg := l.fire()
-		if want := "user is disabled. Contact your administrator"; code != http.StatusForbidden || msg != want {
+		if want := disabledUserMsg; code != http.StatusForbidden || msg != want {
 			t.Errorf("%s: answer = %d %v, want 403 %q", l.name, code, msg, want)
 		}
 		recs := authnFailures(t, platform, kim.ID, "user is disabled")

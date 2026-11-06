@@ -100,14 +100,20 @@ type approverRow struct {
 	ArgsBytes      int    `json:"args_bytes,omitempty"`
 	ArgvHashPrefix string `json:"argv_hash_prefix,omitempty"`
 	BindingScope   string `json:"binding_scope,omitempty"`
+	// Lane is the record's own lane: hook when the hook on the agent's
+	// machine raised it, gateway when the MCP gateway or its
+	// approval_request tool did. A client words from it when a held call
+	// runs. Additive and omitempty: absent when the full record could not
+	// be read, so a client keeps its own reading of the call.
+	Lane string `json:"lane,omitempty"`
 }
 
-// applyApproverTicketFields copies the class and use wire fields from a full
-// record onto an approver row (null timestamps omitted; a pending record
-// leaves the use fields zero). The passthrough lives here rather than in
-// approval.PendingRow so the mobile surface gains the fields without an
-// internal/approval change; the record is fetched via the exported
-// approval.Get.
+// applyApproverTicketFields copies the class and use wire fields, the decide
+// pool and the lane from a full record onto an approver row (null
+// timestamps omitted; a pending record leaves the use fields zero). The
+// passthrough lives here rather than in approval.PendingRow so the mobile
+// surface gains the fields without an internal/approval change; the record
+// is fetched via the exported approval.Get.
 func applyApproverTicketFields(row *approverRow, rec approval.Record) {
 	row.Class = rec.Class
 	row.GrantExpiresAt = formatTimePtr(rec.GrantExpiresAt)
@@ -115,6 +121,7 @@ func applyApproverTicketFields(row *approverRow, rec approval.Record) {
 	row.ConsumedBy = rec.ConsumedBy
 	row.ApproverRoles = rec.ApproverRoles
 	row.ApproverUsers = rec.ApproverUsers
+	row.Lane = rec.Lane
 }
 
 // enrichApproverRows fills each row's ticket wire fields and its session

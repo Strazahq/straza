@@ -94,12 +94,19 @@ type loginRefusal struct {
 
 func (e *loginRefusal) Error() string { return e.reason }
 
-// disabledRefusal is the refusal of a user whose status is not active, in
-// the words the session lane answers a disabled user with.
+// disabledUserMsg is the 403 sentence for a request by a user whose status is
+// not active, on every lane that judges the user: a sign-in with an ID token,
+// a check-in with a device credential or a key, and a request on a live
+// session. It keeps the words user is disabled, which the hint catalog of
+// straza doctor matches, and names who can enable the user again.
+const disabledUserMsg = "this user is disabled, so Straza refuses this request. " +
+	"Ask your IGA owner or a Straza administrator to enable the user."
+
+// disabledRefusal is the refusal of a user whose status is not active.
 func disabledRefusal(u store.User) *loginRefusal {
 	return &loginRefusal{
 		user: u.Username, userID: u.ID, reason: "user is disabled",
-		sentence: "user is disabled. Contact your administrator",
+		sentence: disabledUserMsg,
 	}
 }
 

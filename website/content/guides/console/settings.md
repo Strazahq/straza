@@ -73,7 +73,7 @@ A strip at the top says how strict check-in is. Under the standalone default it 
 
 {{< shot name="settings-new-token" caption="The New API token sheet, with **Name**, **Lifetime** and the six cards of **The job**." >}}
 
-An admin API token is a credential for automation, a connector or your identity manager, limited to the scopes you give it. Name it after the system that holds it, because the name shows in the list and in audit records. Pick a **Lifetime**: `expires in 30 days`, `expires in 90 days`, which is the default, `expires in 1 year` or `never expires`.
+The sheet opens with `A token lets a script or a program call the admin API, such as an IGA connector, a CI job, or one strazactl call from your terminal. Straza never uses it itself.` The token is limited to the scopes you give it. Name it for who holds it, because the name shows in the list and in audit records. Pick a **Lifetime**: `expires in 1 day`, `expires in 7 days`, `expires in 30 days`, `expires in 90 days`, which is the default, `expires in 1 year` or `never expires`. The hint under the list says `For one call from your terminal, pick 1 day.`
 
 Then pick **The job**. Each card carries the scopes that job needs, each with its reason, and you can remove any of them.
 
@@ -86,11 +86,13 @@ Then pick **The job**. Each card carries the scopes that job needs, each with it
 | Full root | Every admin route, including minting more tokens. Rare on purpose. |
 | Custom | Build the scopes by hand from the area table. |
 
+Under **Custom**, the area table has the columns **Area and what it covers** and **Access**. Each row names an area with what it covers under its name, and offers `none`, `read` or `read and write`. The line under the table says `Write includes read here: each area offers none, read, or read and write.`
+
 The scopes then show as the one string that `strazactl api-token create --scope` takes. Press **Mint token**.
 
 {{< now title="Copy the token now" >}}The token is shown once, on the sheet that follows. Only its SHA-256 is stored, so a lost token cannot be recovered. Revoke it and mint another.{{< /now >}}
 
-{{< only form="cli" >}}`strazactl api-token create` takes any duration in `--ttl`, and a token minted without it never expires. The console offers the four fixed lifetimes above.{{< /only >}}
+{{< only form="cli" >}}`strazactl api-token create` takes any duration in `--ttl`, and a token minted without it never expires. The console offers the fixed lifetimes above.{{< /only >}}
 
 [midPoint]({{< relref "guides/connect-identity/midpoint.md" >}}) and [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md" >}}) say which scopes each connector needs.
 

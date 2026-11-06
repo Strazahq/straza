@@ -134,7 +134,7 @@ func newDraftsFixture(t *testing.T, preRun []func(*App), mutators ...func(*confi
 	mkHuman(t, app, "nell", "id-admins")
 	seedAgent(t, app, "bot", "kim", "draft-reviewers")
 	login := func(name string) string { return loginDeviceFlow(t, base, name, "hunter2!") }
-	f.root, f.erin, f.ada, f.nell, f.bot = login("kim"), login("erin"), login("ada"), login("nell"), login("bot")
+	f.root, f.erin, f.ada, f.nell, f.bot = login("kim"), login("erin"), login("ada"), login("nell"), agentIDToken(t, app, "bot")
 	f.console, _ = checkinTokenAs(t, base, "console")
 	var minted struct {
 		ID    string `json:"id"`

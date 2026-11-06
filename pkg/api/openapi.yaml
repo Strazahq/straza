@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: Straza platform API
-  version: 0.156.0
+  version: 0.160.0
   description: >
     Control-plane API of strazad. This document is the source of
     truth for the /v1 wire surface AND the unauthenticated infra and discovery
@@ -15,10 +15,15 @@ info:
     /oidc/*) and the surfaces outside /v1 (/metrics, /console, /mcp, /scim/v2)
     remain out of scope: the SCIM contract is spec/scim-profile.
     The built-in `straza` MCP server (approval_request, approval_status and
-    approval_await, and draft_submit and draft_status for holders of
+    approval_await, draft_submit and draft_status for holders of
     straza-draft-config, whose schemas are DraftSubmit and DraftAgentStatus
-    below) is served as JSON-RPC tools on the /mcp gateway, NOT as REST
-    routes, so no /v1 paths are added for it.
+    below, and whoami for every session) is served as JSON-RPC tools on the
+    /mcp gateway, NOT as REST routes, so no /v1 paths are added for it.
+    Since 0.160.0 strazad stops reading a request whose header and body
+    have not arrived within 30 seconds. A request to /v1/audit/batch, /mcp
+    or /mcp/{server} whose session token verified gets 4 minutes for its
+    body, so a client that stalls mid-body no longer holds its connection
+    and buffer open.
 
 tags:
   - name: Health and discovery
@@ -202,7 +207,22 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/EnrollResponse" }
-        "400": { $ref: "#/components/responses/Error" }
+        "400":
+          $ref: "#/components/responses/Error"
+          description: >
+            The body is not one the enrollment accepts, and the error says
+            why. Since 0.158.0 a key enrollment whose device.name,
+            device.platform, device.fingerprint or machine_binding holds a
+            NUL character (a zero byte) answers 400 with a sentence that
+            names the field. It answers with the other body checks, before
+            the proof is checked, so it spends no proof and writes no record
+            and no device row. A Postgres store cannot hold that character,
+            so it failed most such enrollments with 500 before. A
+            re-enrollment of an existing keyed device with the character in
+            device.name or device.platform, which the re-enrollment does not
+            store, answered 200 on both stores and answers 400 now. The
+            custody fields are stored as JSON text and accept the character
+            as before.
         "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
@@ -229,7 +249,23 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CheckinResponse" }
-        "400": { $ref: "#/components/responses/Error" }
+        "400":
+          $ref: "#/components/responses/Error"
+          description: >
+            The body is not one the check-in accepts, and the error says
+            why. Since 0.158.0 a harness.name, harness.version,
+            client.version or client.commit, or an artifact name or a hash
+            in attestation.hashes, that holds a NUL character (a zero byte)
+            answers 400 with a sentence that names the field. It answers
+            before any credential is read, as the 256-byte bound of 0.152.0
+            does, so it starts no session and writes no record. A Postgres
+            store cannot hold that character, so it failed most such
+            check-ins with 500 before. Two kinds never reached the store and
+            answered 200 on both stores, and they answer 400 now. They are a
+            session refresh with the character in any of these fields,
+            because a refresh stores none of them, and a check-in whose
+            client.commit holds it after its 64th byte, because the session
+            keeps only the first 64 bytes of the commit.
         "401": { $ref: "#/components/responses/ProofRefused" }
         "403": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
@@ -277,6 +313,12 @@ paths:
             401 "session state expired" instead of evaluating a role-less
             stand-in subject: the client re-checks in with the same session
             token and retries once (the same bounce the MCP gateway uses).
+            Since 0.160.0 a mode:approve call whose hold a person denied is
+            denied again, with that approval's id as approvalId and a reason
+            that names who denied it, until the hold's decision window ends,
+            and no new approval opens. A call that needs a new approval while
+            its session or its user is past the approval request rate is
+            denied with a reason that says to wait a minute, and opens none.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Decision" }
@@ -305,19 +347,37 @@ paths:
             the session it names in data.session only when that session belongs
             to the caller's user and device, and a record that names no session
             takes the caller's. Any other record is refused, left out of the
-            chain and logged, and so is every record that names a new session
-            once a batch has named 1000 sessions other than the caller's. The
-            batch still answers 200, because the client spool deletes a batch on
-            any 2xx and would otherwise resend it forever.
+            chain and logged. The batch still answers 200, because the client
+            spool deletes a batch on any 2xx and would otherwise resend it
+            forever. Since 0.160.0 one upload decodes at most 65,536 JSON
+            values in full, in order, and a record past that budget is stored
+            with its data omitted, as spec/events revision 58 says, with one
+            Warn line per upload that names the count.
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   accepted: { type: integer, description: "The number of records stored for the audit chain." }
-                  refused: { type: integer, description: "The number of records refused because the session they name is not a UUID, is unknown, belongs to another user or another device, or is past the cap of 1000 named sessions. An older client ignores it." }
+                  refused: { type: integer, description: "The number of records refused because the session they name is not a UUID, is unknown, or belongs to another user or another device. An older client ignores it." }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/ProofRefused" }
+        "403":
+          $ref: "#/components/responses/Error"
+          description: >
+            The session, its device or its user is revoked, so nothing from
+            the upload is stored. The client keeps the batch in its spool.
+            Since 0.160.0 each refused upload writes one straza.audit.authn
+            login failure with via session-token and the reason session is
+            no longer active, or device or user revoked.
+        "413":
+          $ref: "#/components/responses/Error"
+          description: >
+            The upload holds more than 1000 records, the most one upload may
+            carry, so none of its records was stored. Since 0.160.0. The
+            straza client never sends more than 1000 and keeps its records,
+            so the sentence says to send them again in smaller uploads and to
+            check what sent this one.
         "429":
           description: >
             Ingest rate limited or backlog at capacity. RETRYABLE: the client
@@ -358,7 +418,11 @@ paths:
           subject can see its fetch tool or its push tool, by the visibility
           check /mcp runs. A session whose token is bound to no key is
           refused with 403 and the sentence POST /v1/grants answers it with.
-          The route decides nothing and writes no audit record.
+          The route decides nothing. Since 0.160.0 a request refused with 403
+          because its session, device or user is revoked, or because its
+          attestation is below governance.minAttestation, writes one
+          straza.audit.mcp record with the event request, as /mcp does, and
+          the route writes no other record of its own.
         required: true
         content:
           application/json:
@@ -411,7 +475,10 @@ paths:
           which also answers a push that names more ref updates than one
           grant can carry, a 403 for a session without a key or for an op the
           server's git block maps to no tool, a 404 and a 409 write no such
-          record.
+          record. Since 0.160.0 a 403 for a revoked session, device or user,
+          or for an attestation below governance.minAttestation, writes one
+          straza.audit.mcp record with the event request instead (spec/events
+          revision 58).
         required: true
         content:
           application/json:
@@ -1821,13 +1888,16 @@ paths:
         failure record, and a store outage answers 503.
         An AI agent's own session is admitted, because straza connect lists
         the agent's connections here.
+        Since 0.160.0 an AI agent or a service account acts only for
+        itself, whatever roles or sponsor link it holds: naming another user
+        answers 403, and a refused read writes no record.
         Since 0.155.0 an admin API token may call this route when its
         scope holds apps:read or full. It must name the user in user,
         else the answer is 400, and any user it names is read. A token
         whose scope lacks apps:read answers 403 and writes no record.
       security: [{ sessionBearer: [] }, { sessionDPoP: [] }, { adminAPIToken: [] }]
       parameters:
-        - { name: user, in: query, schema: { type: string }, description: "Act for this user (username or id): allowed for the user's sponsor and for administrators (0.96.0). Required of an admin API token since 0.155.0." }
+        - { name: user, in: query, schema: { type: string }, description: "Act for this user (username or id): allowed for a person who is the user's sponsor or an administrator. Required of an admin API token since 0.155.0." }
       responses:
         "200":
           description: One entry per managed caller-kind MCP server
@@ -1933,6 +2003,14 @@ paths:
         sign-in is refused with 403 since 0.113.0, because a sign-in is stored
         only for the user of the session that finishes it in a browser. user names an agent the caller
         sponsors, or any user when the caller is an administrator.
+        Since 0.160.0 an AI agent or a service account acts only for itself,
+        whatever roles or sponsor link it holds: naming another user answers
+        403. Each write refused because the caller has no standing for the
+        user it names, an agent or a person who is neither the user's sponsor
+        nor an administrator, writes one straza.identity.updated
+        connection.refused record. So does an agent that starts its own
+        sign-in, and an admin API token that starts one for the user it
+        names. Revision 58 of spec/events lists the reasons.
         The session is judged on every request as on the admin API: a user
         who is disabled, deleted or locked, a revoked session and a revoked
         device are refused with 403 or 401 and one straza.audit.authn login
@@ -1969,7 +2047,7 @@ paths:
               properties:
                 token: { type: string, description: The pasted token (token-kind servers only, at most 8192 bytes) }
                 expires_at: { type: string, format: date-time, description: When the token stops working, as the provider shows it; refused when already past }
-                user: { type: string, description: "Act for this user (username or id), for a sponsor or an administrator. Required of an admin API token since 0.155.0." }
+                user: { type: string, description: "Act for this user (username or id), for a person who is the user's sponsor or an administrator. Required of an admin API token since 0.155.0." }
       responses:
         "200":
           description: The authorization URL (oauth kind) or the stored token's fingerprint (token kind)
@@ -2015,6 +2093,12 @@ paths:
         an agent running as the person can use that session. The Credentials tab of the
         self-service page, on the person's own browser sign-in, makes it. Turning it off is
         admitted from any session.
+        Since 0.160.0 an AI agent or a service account acts only for itself,
+        whatever roles or sponsor link it holds, and cannot turn the opt-in
+        on for its own connection either, because only a person lets agents
+        use a connection. Each such refusal answers 403 and writes one
+        connection.refused record, and so does a change refused to a person
+        who is neither the user's sponsor nor an administrator.
         Since 0.155.0 an admin API token whose scope holds apps:write or
         full may turn the opt-in on or off for the user it names in user,
         which it must send, else the answer is 400. The machine-session
@@ -2034,7 +2118,7 @@ paths:
               required: [allow_agents]
               properties:
                 allow_agents: { type: boolean }
-                user: { type: string, description: "Act for this user, for a sponsor or an administrator. Required of an admin API token since 0.155.0." }
+                user: { type: string, description: "Act for this user, for a person who is the user's sponsor or an administrator. Required of an admin API token since 0.155.0." }
       responses:
         "200":
           description: The opt-in as stored
@@ -2062,6 +2146,10 @@ paths:
         failure record, and a store outage answers 503.
         An AI agent's own session is admitted, because straza disconnect
         removes the agent's own connection here.
+        Since 0.160.0 an AI agent or a service account acts only for itself,
+        whatever roles or sponsor link it holds: naming another user answers
+        403. Each disconnect refused because the caller has no standing for
+        the user it names writes one connection.refused record.
         A write for another user from a session that a machine enrollment started, which the
         background service or strazactl's login holds, is refused with 403 and one
         straza.identity.updated connection.refused record since 0.154.0, because an agent running
@@ -2075,7 +2163,7 @@ paths:
       security: [{ sessionBearer: [] }, { sessionDPoP: [] }, { adminAPIToken: [] }]
       parameters:
         - { name: app, in: path, required: true, schema: { type: string } }
-        - { name: user, in: query, schema: { type: string }, description: "Act for this user, for a sponsor or an administrator (0.96.0). Required of an admin API token since 0.155.0." }
+        - { name: user, in: query, schema: { type: string }, description: "Act for this user, for a person who is the user's sponsor or an administrator. Required of an admin API token since 0.155.0." }
       responses:
         "200":
           description: Disconnected (idempotent)
@@ -2904,7 +2992,14 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
-        "400": { $ref: "#/components/responses/Error" }
+        "400":
+          $ref: "#/components/responses/Error"
+          description: >
+            A field value is not one the route accepts, and nothing was
+            created. Since 0.160.0 a password for an AI agent or a service
+            account is refused too, because it signs in with its key: the
+            sentence says to create it without the password and to register
+            the public key straza keygen prints.
         "409": { $ref: "#/components/responses/Error" }
 
   /v1/admin/users/{id}:
@@ -2935,20 +3030,74 @@ paths:
             schema: { $ref: "#/components/schemas/UserUpdate" }
       responses:
         "200":
-          description: Updated. Only the fields whose value the request changes are written, so a PATCH of another field at the same moment keeps its value, and the answer is the row as stored after the write. Disabling a user revokes their sessions.
+          description: Updated. Only the fields whose value the request changes are written, so a PATCH of another field at the same moment keeps its value, and the answer is the row as stored after the write. Disabling a user revokes their sessions. Since 0.160.0 a write that leaves the user an AI agent or a service account also clears a stored password, and its user.update record names password among the changed fields.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
+        "400":
+          $ref: "#/components/responses/Error"
+          description: >
+            A field value is not one the route accepts, or, since 0.157.0, the
+            database refused a value in the request, such as text that holds a
+            NUL character. Nothing changed and the user is not disabled
+            anywhere. The same request fails the same way, so send it without
+            that value. Since 0.160.0 a password for a user that is, or that
+            the same request makes, an AI agent or a service account is
+            refused this way, because it signs in with its key.
         "404": { $ref: "#/components/responses/Error" }
+        "500":
+          $ref: "#/components/responses/Error"
+          description: >
+            The user could not be read or written. Since 0.157.0 a disable
+            writes the fields, the user's revocation record and the event
+            that tells the other servers in one transaction, so when the
+            database refuses any of them nothing changes and the user stays
+            active. The server that answered refuses the user already, until
+            it restarts or strazactl users unlock lifts the refusal. Since
+            0.158.0, when the write ends without a clear answer, Straza asks
+            the database whether the disable committed. A disable that
+            committed answers 200, as any disable does, and one that did not
+            gets this error with the sentence that nothing changed. Only when
+            the database cannot answer that either does the error say Straza
+            cannot tell whether the disable was saved. Sending the same
+            request again is safe and disables the user.
     delete:
       operationId: deleteUser
       tags: ["Users and devices"]
       summary: Soft-delete a user (revokes sessions, ends role assignments with one audit record each, removes OAuth grants, an agent's key and approver devices, emits revocation)
+      description: >
+        Since 0.160.0 a delete that removes the user writes one
+        straza.audit.admin user.delete record. It carries the actor, the
+        user's id and username and the reason user deleted by admin, and it
+        comes before the records of the grants, assignments, key and
+        approver devices that end with the user. A 404, the refused delete
+        of the break-glass account and a delete the database refused write
+        none.
       security: [{ adminBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "200": { $ref: "#/components/responses/Status" }
         "404": { $ref: "#/components/responses/Error" }
+        "500":
+          $ref: "#/components/responses/Error"
+          description: >
+            The user could not be read or deleted. Since 0.157.0 the delete,
+            the end of the role assignments, the user's revocation record and
+            the event that tells the other servers commit in one transaction,
+            so when the database refuses any of them nothing changes. Since
+            0.158.0 the delete first reads the user's role assignments, and
+            when that read fails nothing is sent and the error says nothing
+            changed. The server that answered refuses the user already, until
+            it restarts or strazactl users unlock lifts the refusal. Since
+            0.158.0, when
+            the write ends without a clear answer, Straza asks the database
+            whether the delete committed. A delete that committed answers 200
+            and finishes as any delete does, and one that did not gets this
+            error with the sentence that nothing changed. Only when the
+            database cannot answer that either does the error say Straza
+            cannot tell whether the delete was saved, and reading the user
+            back tells: a deleted user answers 404. Sending the same request
+            again is safe.
 
   /v1/admin/users/{id}/lock:
     post:
@@ -2990,6 +3139,18 @@ paths:
                   reason: { type: string }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "500":
+          $ref: "#/components/responses/Error"
+          description: >
+            The user could not be read, or the database refused the lock's
+            record or the event that tells the other servers about it. The
+            server that answered refuses the user already. With the event
+            refused, the other servers admit the user until they restart, and
+            after a restart too when the record was refused as well. With only
+            the record refused, every server refuses the user, but the console
+            and the SCIM lock block show no lock, and an identity manager that
+            disables and enables the user lifts it. The error names the case.
+            Sending the same request again is safe and writes what is missing.
 
   /v1/admin/users/{id}/unlock:
     post:
@@ -3051,7 +3212,12 @@ paths:
         belongs-to check: a device that exists under a different user answers
         the same 404 as an unknown id. Enrolling the machine again needs a
         fresh sign-in with straza enroll and mints a new row. A revoked
-        enrollment is never resurrected.
+        enrollment is never resurrected. Since 0.160.0 the revoke also ends
+        the device's active sessions in the same transaction, so the
+        sessions list shows them revoked at once, and each ended session
+        writes one straza.audit.authn session.end record with the outcome
+        revoked-admin and the reason device revoked by admin, before the
+        straza.audit.admin device.revoke record.
       security: [{ adminBearer: [] }]
       parameters:
         - { $ref: "#/components/parameters/id" }
@@ -3065,7 +3231,10 @@ paths:
             The database refused the revoke, or the lookup before it failed,
             so nothing changed and the device stays enrolled. After a refused
             revoke the server that answered refuses the device already.
-            Sending the same request again is safe.
+            Sending the same request again is safe. Since 0.160.0, when the
+            write ends without a clear answer, Straza reads the device back,
+            and a device that is gone answers 200 and writes its records as
+            any revoke does.
 
   /v1/admin/sinks:
     get:
@@ -4328,6 +4497,9 @@ paths:
         agent the caller sponsors, or any user when the caller is an
         administrator, under the same rule as the connect routes. No row
         ever carries a token value.
+        Since 0.160.0 an AI agent or a service account acts only for
+        itself, whatever roles or sponsor link it holds: naming another user
+        answers 403, and a refused read writes no record.
         The session is judged on every request as on the admin API: a user
         who is disabled, deleted or locked, a revoked session and a revoked
         device are refused with 403 or 401 and one straza.audit.authn login
@@ -4336,7 +4508,7 @@ paths:
         routes.
       security: [{ sessionBearer: [] }, { sessionDPoP: [] }]
       parameters:
-        - { name: user, in: query, schema: { type: string }, description: "Act for this user (username or id), for a sponsor or an administrator" }
+        - { name: user, in: query, schema: { type: string }, description: "Act for this user (username or id), for a person who is the user's sponsor or an administrator" }
       responses:
         "200":
           description: The rows, sorted by server name.
@@ -4431,7 +4603,21 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApproverEnrollResponse" }
-        "400": { $ref: "#/components/responses/Error" }
+        "400":
+          $ref: "#/components/responses/Error"
+          description: >
+            The body is malformed or its public_key is not an ECDSA P-256
+            key, and the enroll token is not spent. Since 0.158.0 a
+            device.name, device.key_alg, device.key_security_level,
+            device.attestation.kind or device.attestation.blob that holds a
+            NUL character (a zero byte) answers 400 with a sentence that
+            names the field. It answers before the enroll token is read, so
+            the request does not spend the token and no device or record is
+            written. A request with an empty enroll_token keeps its 401. A
+            Postgres store cannot hold that character, so an enrollment with
+            a valid code failed there with 500 before, after it had spent
+            the code. A NUL character in device.platform is refused with 401
+            by the token's channel, as any platform outside the enum is.
         "401": { $ref: "#/components/responses/Error" }
 
   /v1/approver/refresh/challenge:
@@ -4712,7 +4898,9 @@ components:
         an ID token of a disabled or locked user is refused with 403 and one
         login failure record. A session token bound to a key is
         accepted only under the DPoP scheme with a proof, as sessionDPoP
-        says.
+        says. Since 0.157.0 an admin API token that Straza cannot read
+        from its database is refused with 503 and a Retry-After header,
+        the same answer for a real token and a forged one.
     adminAPIToken:
       type: http
       scheme: bearer
@@ -4722,6 +4910,9 @@ components:
         On the connect routes since 0.155.0 a read needs apps:read, a
         write needs apps:write, and full grants both, as on the admin API.
         A token is no user, so each request names the user it acts for.
+        Since 0.157.0 a token that Straza cannot read from its database
+        is refused with 503 and a Retry-After header, the same answer for
+        a real token and a forged one.
     userBearer:
       type: http
       scheme: bearer
@@ -4798,7 +4989,13 @@ components:
         id_token check-in may send one too, with no ath and no ctr, and the
         session token it mints is bound to the proof's key. Since 0.145.0
         the enterprise profile refuses that check-in without one. The other
-        bearer lanes send none.
+        bearer lanes send none. Since 0.158.0 a proof whose jti holds a NUL
+        character (a zero byte) is refused with 401 and the error
+        invalid_dpop_proof on key enrollment, the key-lane check-in and an
+        AI agent's id_token check-in. On these three lanes the server stores
+        the jti to refuse a replay, and a Postgres store cannot hold that
+        character, so such a proof answered 503 there before. A proof sent
+        with a key-bound session token is unchanged.
   headers:
     DPoPNonce:
       description: >
@@ -5330,6 +5527,7 @@ components:
         args_bytes: { type: integer, description: "The byte length of the redacted preview before truncation, the size a person could have seen at full length. Not the raw pre-redaction size and not the audit copy's size." }
         argv_hash_prefix: { type: string, description: "First 12 hex of the argv_hash digest (no 'sha256:' prefix); the visible non-binding tag beside the honesty line. Present only with args_preview." }
         binding_scope: { type: string, enum: [call, tool_identity], description: "What the record's fingerprint covers. call means the concrete call including canonicalized mcp arguments under approve.binding call; tool_identity means MCP server and tool name only, from an explicit binding tool rule, arguments the server never observed, or an older record. Drives the honesty-line wording. Present only with args_preview." }
+        lane: { type: string, enum: [hook, gateway], description: "The lane that raised the request, the hook on the agent's machine or the MCP gateway. The gateway lane includes its approval_request tool. A hold the hook raised runs only on the agent's retry after the yes. Absent on an older server." }
     ApproverDecideRequest:
       type: object
       required: [request_id, verdict, challenge, signature, ts]
@@ -5855,6 +6053,16 @@ components:
             git on the machine sends only these hosts through Straza. It is
             the same for every subject, because it holds only host URLs and
             feeds one file for the whole machine. Since 0.146.0.
+        start_text:
+          type: string
+          description: >
+            The governance paragraph the agent reads at session start. It
+            says who the session acts as, that every tool call is checked
+            and recorded, and that a denial's reason says what to do next.
+            The straza client injects it in place of its own copy and adds the
+            recording sentence when policy records the session. An empty
+            string turns the paragraph off. An older server omits the field,
+            and the client then uses its built-in copy. Since 0.159.0.
     GitResolveRequest:
       type: object
       description: The repo URL to resolve.
@@ -5953,7 +6161,7 @@ components:
         email: { type: string }
         display: { type: string }
         title: { type: string }
-        password: { type: string }
+        password: { type: string, description: "A person's password for the built-in sign-in page. Refused with 400 on kind nhi since 0.160.0, because an AI agent or a service account signs in with its key." }
         kind:
           type: string
           enum: [human, nhi]
@@ -5979,7 +6187,7 @@ components:
         display: { type: string }
         title: { type: string }
         status: { type: string, enum: [active, disabled] }
-        password: { type: string }
+        password: { type: string, description: "A person's new password. Refused with 400 for an AI agent or a service account since 0.160.0, also when the same request makes the user one." }
         user_type: { type: string, enum: [human, agent, service, ""], description: "set or clear (empty) the typology; standalone-admin lane, since enterprise masters this over SCIM" }
         agency_mode: { type: string, enum: [interactive, supervised, autonomous, ""] }
         sponsor: { type: string }
@@ -6273,7 +6481,7 @@ components:
         reason: { type: string }
         obligations: { type: array, items: { type: string }, description: "Always empty; the field stays for older clients." }
         snapshotId: { type: string }
-        approvalId: { type: string, description: "Set when a mode:approve escalation created or consumed an approval record." }
+        approvalId: { type: string, description: "Set when a mode:approve escalation created or consumed an approval record, or when a person's standing denial of the same call answers the deny." }
     EngineDecision:
       type: object
       description: >

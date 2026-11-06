@@ -656,6 +656,10 @@ for spec in "account account default 1c15 AccountObjectClass" \
 EOF
   import_mp tasks /tmp/recon-task.xml "initial recon task ($1)"
 done
+# midPoint suspends a LiveSync for good after one failed run, such as a run
+# during a strazad restart. The watchdog resumes those tasks and leaves alone
+# any task a person acted on. Its file says how it tells the two apart.
+import_mp tasks /mp/objects/tasks/livesync-watchdog.xml "LiveSync watchdog task"
 
 # --- The access packages: one per Straza business role, rendered from
 # objects/roles/role-br-straza-access.xml.tmpl, each inducing the

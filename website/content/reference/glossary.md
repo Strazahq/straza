@@ -261,5 +261,6 @@ The table above disambiguates words that stay. This one lists the words the prod
 | control-plane role, the straza kind | the kind that carries rights inside strazad | Straza role. The control plane may explain it where a reader first meets it |
 | refused, of a policy outcome | a rule turning a call down | denied. Refused stays for an admin action the server turns down, such as a validation refusal or a delete it does not perform |
 | capture, as a display word | prompts and replies on the chain | recording, word for word, secrets masked. The YAML key `capture:` and wire words such as `capture.mode` stay |
+| approval set | a policy set, in the titles and on the page of a draft | policy set, which the drafts area says too |
 | PolicySet, in a sentence | the policy document | policy set. `kind: PolicySet` and the title of its specification stay |
 | eval stack | the one-command enterprise demonstration | enterprise demo stack, or the demo stack once a page has named it. File paths such as `deploy/compose/eval-stack` stay |

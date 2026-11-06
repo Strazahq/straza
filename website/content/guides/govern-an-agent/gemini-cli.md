@@ -120,7 +120,7 @@ printf %s '{"hook_event_name":"SessionStart"}' | straza hook --harness gemini
 ```
 {{< /command >}}
 
-{{< see >}}`"decision":"allow"` and an `additionalContext` that begins `Straza governance is active for this session.` and names your identity, roles, server, policy snapshot and attestation.{{< /see >}}
+{{< see >}}`"decision":"allow"` and an `additionalContext` that begins `Straza governs this session as` with your username in quotes, and then says how the agent treats a denied call.{{< /see >}}
 
 That context is the banner the model reads at the start of each session. [What the agent reads back]({{< relref "guides/govern-an-agent/what-the-agent-reads-back.md" >}}) quotes it in full.
 

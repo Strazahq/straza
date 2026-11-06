@@ -11,7 +11,7 @@ weight: 15
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server on Linux. The approver lena signed in on the self-service page in headless Chromium, enabled the browser and approved alice's held kubectl apply, which her machine then ran through the Claude Code hook. That sign-in was the code sign-in of its time, and the browser sign-in that replaced it was written from the code on 2026-10-22 and not walked
+  platform: A throwaway standalone server on Linux. The approver lena signed in on the self-service page in headless Chromium, enabled the browser and approved alice's held kubectl apply, which her machine then ran through the Claude Code hook. That sign-in was the code sign-in of its time, and the browser sign-in that replaced it was written from the code on 2026-10-22 and not walked. The strip sentence and the approved toast of a hook hold were reworded from the code on 2026-11-03 and not walked
   date: 2026-10-06
   except: the browser sign-in, written from the code and not walked
 applies_to: both
@@ -96,11 +96,11 @@ The tab now lists the browser as a device, marked `this browser`, with its key a
 
 Each waiting request shows who asked, the call, who decides and how long is left. A row that is yours to decide is marked `yours` and carries **Deny** and **Approve**. The line under the list says which rows those are: `Deny and Approve appear on the rows that are yours to decide: your own agent's calls, the calls of the agents you sponsor, and the calls routed to a role you hold.`
 
-Select the row to read the request before you decide. The sheet titled **Approval request** shows the call, the time left, what happens if you approve and if you deny, and **Who can decide**, such as `You, as a holder of release-approvers. The first to answer decides.` A hold says `The agent is waiting right now for your answer.`, and when the time runs out the call is denied.
+Select the row to read the request before you decide. The sheet titled **Approval request** shows the call, the time left, what happens if you approve and if you deny, and **Who can decide**, such as `You, as a holder of release-approvers. The first to answer decides.` A hold the agent's hook raised says `The agent was told to retry the call after your answer.`, and when the time runs out the call is denied.
 
 Press **Approve**, or **Deny**. The question names the call and the person, such as `Approve kubectl apply -f deploy/app.yaml for alice?` Type an optional reason under **Reason, optional**. The agent and the audit record read it. Then press **Approve request** or **Deny request**.
 
-{{< see >}}`Approved. kubectl apply -f deploy/app.yaml runs now for alice.`{{< /see >}}
+{{< see >}}`Approved. kubectl apply -f deploy/app.yaml runs for alice if the agent retries it soon.`{{< /see >}}
 
 The agent's retry of the same call then runs. Deciding needs no sign-in once the browser is enabled, because the browser's key signs each decision.
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,6 +81,31 @@ func (a *App) refusedRecord(claims authn.Claims, ev policy.Event, target gwTarge
 		claims: claims, ev: ev, target: target,
 		decision:   policy.Decision{Effect: policy.EffectDeny, Reason: reason},
 		snapshotID: a.snapshots.Current().ID,
+	}
+}
+
+// eventRequest is the event of the record of a gateway request refused
+// before its JSON-RPC message is read.
+const eventRequest = "request"
+
+// auditDoorRefusal records a gateway request that gatewayAuth refused once
+// its token verified, for a revocation or an attestation below
+// governance.minAttestation, as /v1/decide records the same refusals: a
+// straza.audit.mcp deny with the event request, ruleID as its rule, the
+// refusal as its reason, and the server of a server endpoint, as asked for
+// and cut by cutUnresolved, in app. It reads no database. The request is
+// refused either way, so a record the queue does not take logs a Warn line.
+func (a *App) auditDoorRefusal(r *http.Request, claims authn.Claims, ruleID, reason string) {
+	rec := mcpAuditRecord{
+		claims:     claims,
+		ev:         policy.Event{Kind: eventRequest, App: cutUnresolved(r.PathValue("server"))},
+		decision:   policy.Decision{Effect: policy.EffectDeny, RuleID: ruleID, Reason: reason},
+		snapshotID: a.snapshots.Current().ID,
+	}
+	if err := a.spoolMCP(r.Context(), rec); err != nil {
+		a.log.Warn("the record of a refused gateway request could not be queued, so this refusal has no audit record. "+
+			"Check that the database is reachable and takes audit records",
+			"user", claims.Subject, "session", claims.Session, "rule", ruleID, "err", err)
 	}
 }
 
@@ -203,8 +229,8 @@ func (a *App) auditMCP(ctx context.Context, rec mcpAuditRecord) bool {
 // 23 adds granted, default, bindingId, role and credentialId, the last
 // three only when set, and count rides on a tools.list record. A call of
 // straza__draft_submit records argumentsDigest and argumentsSize in place of
-// its arguments (revision 37), because the record is written before the
-// handler can refuse a secret in a document, and an approval_request that
+// its arguments (revision 37), because the deny record of a submit refused
+// for a secret would otherwise carry that secret, and an approval_request that
 // describes one records its documents masked (maskDescribedSubmit). Revision
 // 42 adds the resources.list and resources.read events, uri on the latter,
 // capped as arguments are, with uriTruncated when cut. Revision 44 adds

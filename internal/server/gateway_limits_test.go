@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -105,8 +104,9 @@ spec:
 	}
 }
 
-// callHang invokes the hanging tool and asserts the gateway cut it off with
-// an upstream failure well before `within` elapsed.
+// callHang invokes the hanging tool, whose app's time is 1 s, and asserts
+// the gateway cut it off well before `within` elapsed with the answer of a
+// call that may have run.
 func callHang(t *testing.T, base, tok, appName string, within time.Duration) {
 	t.Helper()
 	start := time.Now()
@@ -119,8 +119,10 @@ func callHang(t *testing.T, base, tok, appName string, within time.Duration) {
 	if errObj == nil {
 		t.Fatalf("hanging call did not fail: %s", raw)
 	}
-	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "upstream call failed") {
-		t.Fatalf("error = %q, want upstream call failure", msg)
+	want := "Straza: the MCP server " + appName + " did not answer the call within 1s, so the call may have taken effect, and Straza does not send it again. " +
+		"Check whether it took effect before you try it once more."
+	if msg, _ := errObj["message"].(string); msg != want {
+		t.Fatalf("error = %q, want %q, since a call that ran out of time may have run", msg, want)
 	}
 	if elapsed > within {
 		t.Errorf("timeout fired after %s, want < %s (wrong ceiling applied)", elapsed, within)

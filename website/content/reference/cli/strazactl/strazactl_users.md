@@ -31,6 +31,6 @@ strazactl users [flags]
 * [strazactl users list](/reference/cli/strazactl/strazactl_users_list/): List users
 * [strazactl users lock](/reference/cli/strazactl/strazactl_users_lock/): Lock a user: a revocation that an identity manager cannot lift by enabling the user; the status stays as it is
 * [strazactl users nhi-key](/reference/cli/strazactl/strazactl_users_nhi-key/): Manage an agent identity's headless assertion key (straza keygen prints it)
-* [strazactl users set-password](/reference/cli/strazactl/strazactl_users_set-password/): Set a user's built-in-issuer password (rotation, or a credential for SCIM-born users)
+* [strazactl users set-password](/reference/cli/strazactl/strazactl_users_set-password/): Set a person's built-in-issuer password (rotation, or a credential for SCIM-born people)
 * [strazactl users unlock](/reference/cli/strazactl/strazactl_users_unlock/): Unlock a user: lift the user's revocations and leave the status as it is, so a disabled user still needs `strazactl users enable`
 

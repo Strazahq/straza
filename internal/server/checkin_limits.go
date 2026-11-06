@@ -1,6 +1,9 @@
 package server
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // checkinTextMax is the most bytes of a harness name, a harness version or
 // a client version that a check-in may carry. A straza client sends a few
@@ -25,11 +28,31 @@ const (
 		"so a program other than a straza client likely made this check-in. Find out what sent it, or reinstall straza."
 )
 
+// checkinNULMsg is the refusal of a check-in whose text holds a NUL
+// character, with the name of the field that holds it and the next step,
+// nulStepStraza or nulStepHarness.
+const checkinNULMsg = "The %s field of this check-in holds a NUL character (a zero byte), and strazad does not accept one. " +
+	"strazad stores this field when a check-in starts a session, and a Postgres store cannot hold that character, " +
+	"so strazad refuses it in every check-in. %s"
+
+// The next steps of a NUL refusal. A straza client sets the harness name,
+// its own version and commit, and the attestation hashes itself. It copies
+// the harness version from the harness.
+const (
+	nulStepStraza = "A straza client never puts one there, so a program other than a straza client likely made this check-in. " +
+		"Find out what made it, or reinstall straza."
+	nulStepHarness = "A straza client passes on the version its harness reports, so the harness or a program other than a straza client likely sent it. " +
+		"Update the harness, or find out what made this check-in."
+)
+
 // checkinTextRefusal answers the refusal of req when its harness name,
-// harness version or client version is over checkinTextMax bytes, and ""
-// when all three fit. It refuses and never cuts, because policies match the
-// harness name as sent, and a cut name could match a rule the real one does
-// not.
+// harness version or client version is over checkinTextMax bytes, or when
+// one of them, the client commit or a key or value of the attestation hashes
+// holds a NUL character, and "" when all fit. These are the fields the
+// session keeps. It refuses and never cuts or strips, because policies match
+// the harness name as sent, a cut name could match a rule the real one does
+// not, and a stripped field would make the session record a value the
+// client never sent.
 func checkinTextRefusal(req checkinRequest) string {
 	switch {
 	case len(req.Harness.Name) > checkinTextMax:
@@ -38,6 +61,19 @@ func checkinTextRefusal(req checkinRequest) string {
 		return fmt.Sprintf(harnessVersionTooLongMsg, len(req.Harness.Version), checkinTextMax)
 	case len(req.Client.Version) > checkinTextMax:
 		return fmt.Sprintf(clientVersionTooLongMsg, len(req.Client.Version), checkinTextMax)
+	case strings.Contains(req.Harness.Name, "\x00"):
+		return fmt.Sprintf(checkinNULMsg, "harness.name", nulStepStraza)
+	case strings.Contains(req.Harness.Version, "\x00"):
+		return fmt.Sprintf(checkinNULMsg, "harness.version", nulStepHarness)
+	case strings.Contains(req.Client.Version, "\x00"):
+		return fmt.Sprintf(checkinNULMsg, "client.version", nulStepStraza)
+	case strings.Contains(req.Client.Commit, "\x00"):
+		return fmt.Sprintf(checkinNULMsg, "client.commit", nulStepStraza)
+	}
+	for artifact, hash := range req.Attestation.Hashes {
+		if strings.Contains(artifact, "\x00") || strings.Contains(hash, "\x00") {
+			return fmt.Sprintf(checkinNULMsg, "attestation.hashes", nulStepStraza)
+		}
 	}
 	return ""
 }

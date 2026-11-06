@@ -43,10 +43,31 @@ func TestBareApproveRoutesToSponsor(t *testing.T) {
 	}
 }
 
+// sponsorFaultStore fails every read of a user by name, the read that finds
+// the sponsor, with err, and leaves the read of the requester by id real.
+type sponsorFaultStore struct {
+	store.Store
+	err error
+}
+
+type sponsorFaultUsers struct {
+	store.UserRepo
+	err error
+}
+
+func (u sponsorFaultUsers) GetByUsername(context.Context, string) (store.User, error) {
+	return store.User{}, u.err
+}
+
+func (f *sponsorFaultStore) Users() store.UserRepo { return sponsorFaultUsers{f.Store.Users(), f.err} }
+
 // TestBareApproveUnroutableDenies pins that Routable answers what Request
 // answers for the same call and writes nothing: the same cause for each
-// sponsor that cannot decide, nil when a pending ticket already covers the
-// call, and the same error when the ticket lookup meets a store fault.
+// sponsor that cannot decide and for a requester or sponsor that is not in
+// the store, nil when a pending ticket already covers the call, and the same
+// error when the ticket lookup or the read of the requester or the sponsor
+// meets a store fault. A fault on those reads is ErrDeciderUnreadable and
+// never an *UnroutableError, because who decides is unknown.
 func TestBareApproveUnroutableDenies(t *testing.T) {
 	ctx := context.Background()
 	// agentOf creates the agent nova sponsored by sponsor.
@@ -59,11 +80,12 @@ func TestBareApproveUnroutableDenies(t *testing.T) {
 		return u
 	}
 	cases := []struct {
-		name      string
-		requester func(t *testing.T, h *harness) store.User
-		ticket    bool     // the rule is class ticket
-		wantCause []string // the UnroutableError cause both answer
-		wantFault error    // the store error both answer instead
+		name       string
+		requester  func(t *testing.T, h *harness) store.User
+		ticket     bool     // the rule is class ticket
+		wantCause  []string // the UnroutableError cause both answer
+		wantFault  error    // the store error both answer instead
+		wantUnread bool     // the store error is a failed read of who decides
 	}{
 		{
 			name: "no sponsor",
@@ -75,6 +97,13 @@ func TestBareApproveUnroutableDenies(t *testing.T) {
 				return u
 			},
 			wantCause: []string{`agent "bare" has no sponsor`, `"r-1"`, "Fix:"},
+		},
+		{
+			name: "requester not in the store",
+			requester: func(*testing.T, *harness) store.User {
+				return store.User{ID: "u-ghost", Username: "ghost"}
+			},
+			wantCause: []string{`requester "ghost" could not be read`, "Fix:"},
 		},
 		{
 			name: "unknown sponsor",
@@ -156,6 +185,29 @@ func TestBareApproveUnroutableDenies(t *testing.T) {
 			ticket:    true,
 			wantFault: pgDown,
 		},
+		{
+			name: "a store fault reading the requester",
+			requester: func(t *testing.T, h *harness) store.User {
+				h.seedUser(t, "grace")
+				nova := agentOf(t, h, "grace")
+				h.svc.st = &flakyStore{Store: h.st, userErr: pgDown}
+				return nova
+			},
+			wantFault:  pgDown,
+			wantUnread: true,
+		},
+		{
+			name: "a store fault reading the sponsor of a ticket",
+			requester: func(t *testing.T, h *harness) store.User {
+				h.seedUser(t, "grace")
+				nova := agentOf(t, h, "grace")
+				h.svc.st = &sponsorFaultStore{Store: h.st, err: pgDown}
+				return nova
+			},
+			ticket:     true,
+			wantFault:  pgDown,
+			wantUnread: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -209,8 +261,48 @@ func TestBareApproveUnroutableDenies(t *testing.T) {
 				if !errors.Is(err, tc.wantFault) || errors.As(err, &un) || checked == nil || checked.Error() != err.Error() {
 					t.Errorf("Routable err = %v, Request err = %v, want the same store fault from both", checked, err)
 				}
+				if errors.Is(err, ErrDeciderUnreadable) != tc.wantUnread {
+					t.Errorf("Request err = %v, ErrDeciderUnreadable %v, want %v", err, !tc.wantUnread, tc.wantUnread)
+				}
 			case checked != nil || err != nil:
 				t.Errorf("Routable err = %v, Request err = %v, want both to join the pending ticket", checked, err)
+			}
+		})
+	}
+}
+
+// TestDeciderReadFaultLeavesRolesCarrying pins that a store fault on the
+// read of the requester or the sponsor still opens the record for the
+// approver roles of a rule that names both, as a sponsor who cannot decide
+// does, because those roles alone can decide it.
+func TestDeciderReadFaultLeavesRolesCarrying(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name  string
+		fault func(h *harness) store.Store
+	}{
+		{"the requester read", func(h *harness) store.Store { return &flakyStore{Store: h.st, userErr: pgDown} }},
+		{"the sponsor read", func(h *harness) store.Store { return &sponsorFaultStore{Store: h.st, err: pgDown} }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.seedUser(t, "grace")
+			nova, err := h.st.Users().Create(ctx, store.User{Username: "nova", Email: "n@x.io",
+				UserType: store.UserTypeAgent, Sponsor: "grace"})
+			if err != nil {
+				t.Fatalf("Create nova: %v", err)
+			}
+			h.svc.st = tc.fault(h)
+			spec := bareSpec()
+			spec.Roles = []string{"sec-approvers"}
+			spec.Deciders = []string{policy.DeciderSponsor}
+			rec, err := h.svc.Request(ctx, req("s-1", nova.ID, "nova", spec))
+			if err != nil {
+				t.Fatalf("Request: %v, want the record the roles carry", err)
+			}
+			if len(rec.ApproverUsers) != 0 || len(rec.ApproverRoles) != 1 || rec.ApproverRoles[0] != "sec-approvers" {
+				t.Errorf("pools = %v/%v, want no users and [sec-approvers]", rec.ApproverUsers, rec.ApproverRoles)
 			}
 		})
 	}

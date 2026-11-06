@@ -198,7 +198,7 @@ button.ctl.primary:hover{background:var(--accent-hover);border-color:var(--accen
     </div>
     <div class="pane-body" data-body="ctx"></div>
     <div class="pane-foot">
-      <span id="ctxrule" data-deco data-poster hidden style="font-size:11.5px;color:var(--text);opacity:.9;line-height:1.5">▸ the standing rule the agent must obey: surface a policy denial to the user, and never retry or route around it</span>
+      <span id="ctxrule" data-deco data-poster hidden style="font-size:11.5px;color:var(--text);opacity:.9;line-height:1.5">▸ the standing rule the agent must obey: tell the user why a call was denied, and retry only a call a person approved</span>
     </div>
   </div>
 </div>
@@ -316,13 +316,10 @@ var SCENE = {
     {
       "pane": "ctx",
       "speaker": "STRAZA",
-      "text": "Straza governance is active for this session. You are operating as \"bob\" (roles: dev) against http://localhost:8420; policy snapshot 3f9c1a2b7de4, attestation advisory. Tool use is checked locally against signed policy and every decision is audited. A denied tool call always carries its reason: relay it to the user and do not retry or work around the denial. Recording is on: by policy, the prompts and responses of this session are recorded word for word to the audit system.",
+      "text": "Straza governs this session as \"bob\". Every tool call is checked against policy and recorded in the audit log. When a call is denied, tell the user what the reason says, then do what it says next: wait for a person's approval, change the call, or try once more later. A denial that says none of these is a policy decision, and the same call will be denied again. Do not try to reach the denied result another way. By policy, the prompts and responses of this session are recorded word for word in the audit log.",
       "charMs": 0,
       "ms": 500,
       "dim": true,
-      "runtime": [
-        "3f9c1a2b7de4"
-      ],
       "show": "ctxrule",
       "poster": true,
       "prov": "V(3)"

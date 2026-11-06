@@ -1,14 +1,13 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/strazahq/straza/internal/agentguard"
 	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/dpop"
@@ -135,6 +134,9 @@ type checkinResponse struct {
 	// GitUpstreams lists the git hosts servers serve git for (gitUpstreams).
 	// straza service writes its git host file from it. Additive.
 	GitUpstreams []string `json:"git_upstreams,omitempty"`
+	// StartText is the governance paragraph the agent reads at session
+	// start, which the client injects in place of its own copy. Additive.
+	StartText *string `json:"start_text,omitempty"`
 }
 
 // handleCheckin starts or refreshes a session after enrollment:
@@ -234,7 +236,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			a.emitAuthnLogin(r, "failure", authnFields{Via: via,
 				User: u.Username, UserID: u.ID, Harness: harnessLabel(req.Harness),
 				Reason: "user is disabled"})
-			apiError(w, http.StatusForbidden, "user is disabled. Contact your administrator")
+			apiError(w, http.StatusForbidden, disabledUserMsg)
 			return
 		}
 		// The token's device binding is authoritative; a client-supplied
@@ -410,7 +412,14 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	// that starts or ends mid-session sends the next request back to check
 	// in, and settleRoles caches it only for roles whose config this replica
 	// applied (drafts_apply.go).
-	facts := sessionFacts{person: personUser(u), harness: req.Harness.Name}
+	var (
+		packs    []store.KnowledgePack
+		packsErr error
+	)
+	facts := func(roleIDs []string) (sessionFacts, error) {
+		packs, packsErr = a.store.Packs().ForRoles(r.Context(), roleIDs)
+		return sessionFacts{person: personUser(u), harness: req.Harness.Name, packs: whoamiPacksOf(packs)}, packsErr
+	}
 	settled, refusal, err := a.settleRoles(r.Context(), sessionID, u.ID, facts, func(roles []store.Role) policy.Subject {
 		names := make([]string, len(roles))
 		for i, role := range roles {
@@ -438,6 +447,10 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	if refusal != "" {
 		w.Header().Set("Retry-After", loginOutageRetryAfter)
 		a.fail(w, r, http.StatusServiceUnavailable, refusal, err)
+		return
+	}
+	if packsErr != nil {
+		a.fail(w, r, http.StatusInternalServerError, "could not load knowledge packs", packsErr)
 		return
 	}
 	if err != nil {
@@ -480,11 +493,6 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	packs, err := a.store.Packs().ForRoles(r.Context(), roleIDs)
-	if err != nil {
-		a.fail(w, r, http.StatusInternalServerError, "could not load knowledge packs", err)
-		return
-	}
 	packOut := make([]packPayload, len(packs))
 	for i, p := range packs {
 		packOut[i] = packPayload{Name: p.Name, Version: p.Version, Content: p.Content, Checksum: p.Checksum}
@@ -496,6 +504,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	startText := agentguard.StartText(u.Username, a.whoamiOffered(newSubject))
 	writeJSON(w, http.StatusOK, checkinResponse{
 		SessionID:    sessionID,
 		SessionToken: token,
@@ -511,54 +520,8 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		AdminGrants:  a.adminGrantsForRoles(roles),
 		AdminServers: len(administered),
 		GitUpstreams: a.gitUpstreams(),
+		StartText:    &startText,
 	})
-}
-
-// emitEvent inserts an event into the transactional outbox, which the
-// relay publishes to NATS.
-func (a *App) emitEvent(r *http.Request, subject string, data map[string]any) {
-	a.emitEventCtx(r.Context(), subject, data)
-}
-
-// emitEventCtx is the context-only variant, for callers without a request
-// (snapshot service, background workers). The CE source carries the pod's
-// unique instance id so consumers can tell their own events from other
-// pods' (the convergence consumer skips self-events; in-process handlers
-// already applied the change). The chained records of straza.audit.admin,
-// straza.audit.authn and straza.audit.identity and the straza.identity.*
-// announcements are written even when ctx is cancelled, because the change
-// they record has already happened, and each insert waits at most
-// auditInsertTimeout for the store.
-func (a *App) emitEventCtx(ctx context.Context, subject string, data map[string]any) {
-	switch {
-	case subject == "straza.audit.admin", subject == "straza.audit.authn", subject == "straza.audit.identity",
-		strings.HasPrefix(subject, "straza.identity."):
-		// A client that disconnects after the store write must not take
-		// the record with it, and a store that stops answering must not
-		// hold the handler for ever. The actor is a context value, which
-		// survives.
-		var cancel context.CancelFunc
-		ctx, cancel = afterCommit(ctx)
-		defer cancel()
-	}
-	// Admin mutations are attributed to the authenticated principal
-	// requireAdmin stored in the context: cloudEvent is the one seam that
-	// stamps it, for every emit site and for the records of a publish.
-	ev, err := a.cloudEvent(ctx, subject, data)
-	if err != nil {
-		return
-	}
-	if _, err := a.store.Outbox().Insert(ctx, ev); err != nil {
-		a.log.Warn("outbox insert failed", "subject", subject, "err", err)
-	}
-}
-
-// afterCommit answers the context one write that follows a committed change
-// runs on: ctx's values without its cancel or its deadline, so a client that
-// left or a write that ran past its bound cannot cut it, and at most
-// auditInsertTimeout for the store.
-func afterCommit(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), auditInsertTimeout)
 }
 
 func apiError(w http.ResponseWriter, code int, msg string) {

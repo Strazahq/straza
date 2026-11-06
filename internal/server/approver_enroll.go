@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/strazahq/straza/internal/approval"
@@ -33,13 +34,59 @@ type approverEnrollRequest struct {
 	} `json:"device"`
 }
 
+// approverNULMsg is the refusal of an approver enrollment whose text holds a
+// NUL character, with the name of the field that holds it and the next
+// step, approverNULStepName or approverNULStepApp.
+const approverNULMsg = "The %s field of this approver enrollment holds a NUL character (a zero byte), and strazad does not accept one. " +
+	"The approver device row keeps the field exactly as it was sent, and a Postgres store cannot hold that character. " +
+	"Nothing was enrolled, and this request did not use the enroll code. %s"
+
+// The next steps of an approver NUL refusal. A person may type the device
+// name, and the Straza approver app or the self-service page sets the rest.
+const (
+	approverNULStepName = "Remove the character from the device name, and enroll again."
+	approverNULStepApp  = "The Straza approver app and the self-service page never put one there, so another program likely made this enrollment. " +
+		"Find out what made it, or enroll from the app or the self-service page."
+)
+
+// approverEnrollTextRefusal answers the refusal of req when a text field the
+// approver device row keeps as sent holds a NUL character, and "" when none
+// does. It answers "" for a request without an enroll token, which keeps the
+// 401 that approval.Enroll answers. It leaves out the platform, because the
+// token's channel refuses any platform other than android, ios or browser,
+// and the public key, because a key with the character does not decode.
+func approverEnrollTextRefusal(req approverEnrollRequest) string {
+	if req.EnrollToken == "" {
+		return ""
+	}
+	d := req.Device
+	for _, f := range []struct{ name, value, step string }{
+		{"device.name", d.Name, approverNULStepName},
+		{"device.key_alg", d.KeyAlg, approverNULStepApp},
+		{"device.key_security_level", d.KeySecurityLevel, approverNULStepApp},
+		{"device.attestation.kind", d.Attestation.Kind, approverNULStepApp},
+		{"device.attestation.blob", d.Attestation.Blob, approverNULStepApp},
+	} {
+		if strings.Contains(f.value, "\x00") {
+			return fmt.Sprintf(approverNULMsg, f.name, f.step)
+		}
+	}
+	return ""
+}
+
 // handleApproverEnroll serves POST /v1/approver/enroll (no auth): it consumes
 // the one-time enroll token, registers the P-256 device, and mints the 30-day
-// use=approver device token.
+// use=approver device token. A request with an enroll token whose text
+// field holds a NUL character is refused with 400 before the token is read,
+// so the request does not spend it.
 func (a *App) handleApproverEnroll(w http.ResponseWriter, r *http.Request) {
 	var req approverEnrollRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		apiError(w, http.StatusBadRequest, "malformed JSON body")
+		return
+	}
+	if msg := approverEnrollTextRefusal(req); msg != "" {
+		apiError(w, http.StatusBadRequest, msg)
 		return
 	}
 	res, err := a.approval.Enroll(r.Context(), approval.EnrollInput{

@@ -68,7 +68,7 @@ func TestGatewayBlockedSponsorCredential(t *testing.T) {
 			catRecompile(t, app)
 			aliceTok := sessionToken(t, base, "alice")
 			kimTok, _ := checkinTokenAs(t, base, "console")
-			liveTok, liveSID := gatewaySession(t, base, "joe")
+			liveTok, liveSID := agentCheckin(t, app, base, "joe")
 			if code := adminReq(t, http.MethodPost, base+"/v1/connect/tokapp", aliceTok, map[string]any{"token": "tok-alice-sponsor"}, nil); code != http.StatusOK {
 				t.Fatalf("paste = %d", code)
 			}
@@ -85,7 +85,7 @@ func TestGatewayBlockedSponsorCredential(t *testing.T) {
 			awaitMCPRecords(t, app, 1, sponsorRecord(liveSID))
 
 			tc.act(t, base, kimTok, alice)
-			freshTok, freshSID := gatewaySession(t, base, "joe")
+			freshTok, freshSID := agentCheckin(t, app, base, "joe")
 			for _, s := range []struct {
 				label, tok, sid, want string
 				ran                   int
@@ -104,7 +104,7 @@ func TestGatewayBlockedSponsorCredential(t *testing.T) {
 					continue
 				}
 				rpcErr, _ := body["error"].(map[string]any)
-				if rpcErr["message"] != "upstream call failed: "+s.want {
+				if rpcErr["message"] != "Straza: the call was not sent to the MCP server tokapp: "+s.want+"." {
 					t.Errorf("%s session after %s = %s, want the refusal %q", s.label, tc.name, raw, s.want)
 				}
 				awaitMCPRecords(t, app, 1, func(d map[string]any) bool {

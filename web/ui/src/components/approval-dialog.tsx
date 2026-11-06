@@ -10,6 +10,7 @@ import {
   CARD_PARAMS,
   CLOSE,
   DECIDE_BY_HELP_HOLD,
+  DECIDE_BY_HELP_HOOK,
   DECIDE_BY_HELP_TICKET,
   DENY,
   DETAILS,
@@ -27,7 +28,6 @@ import {
   IF_APPROVE,
   IF_DENY,
   IN_POLICY,
-  KIND_SAYS,
   KIND_WORD,
   NONE_GIVEN,
   ON_SERVER,
@@ -66,6 +66,7 @@ import {
   expiredLine,
   grantWords,
   hashLine,
+  kindSays,
   laneWord,
   metaLine,
   openRole,
@@ -194,7 +195,7 @@ export function ApprovalDialog({ row, open, onOpenChange, seat, holders, isMine,
           {waiting
             ? <WordBadge word={KIND_WORD[kind]} tone={kind === "hold" ? "warn" : "teal"} mono attr="data-kind" />
             : <WordBadge word={PHASE_WORD[phase]} tone={phaseTone(phase)} attr="data-phase" />}
-          {waiting && !closed && <span className={STRIP_SAYS} data-kind-says>{KIND_SAYS[kind]}</span>}
+          {waiting && !closed && <span className={STRIP_SAYS} data-kind-says>{kindSays(row)}</span>}
           {closed && <span className={STRIP_SAYS} data-window-closed>{WINDOW_CLOSED}</span>}
           {!waiting && phase === "expired" && <span className={STRIP_SAYS} data-expired-line>{expiredLine(row, isStuck)}</span>}
           {!waiting && phase !== "expired" && <span className={STRIP_SAYS} data-decided-line>{srStateLine(row, phase, now)}</span>}
@@ -326,7 +327,7 @@ export function ApprovalDialog({ row, open, onOpenChange, seat, holders, isMine,
                 <Fact label={FACT_WHEN}>{relTimeText(row.createdAt)}<Muted>{" · " + absTime(row.createdAt)}</Muted></Fact>
                 <Fact label={FACT_LANE}>{laneWord(row.lane)}</Fact>
                 {waiting && (
-                  <Fact label={FACT_DECIDE_BY} help={<HelpTip label={FACT_DECIDE_BY} text={kind === "hold" ? DECIDE_BY_HELP_HOLD : DECIDE_BY_HELP_TICKET} />}>
+                  <Fact label={FACT_DECIDE_BY} help={<HelpTip label={FACT_DECIDE_BY} text={kind === "ticket" ? DECIDE_BY_HELP_TICKET : row.lane === "hook" ? DECIDE_BY_HELP_HOOK : DECIDE_BY_HELP_HOLD} />}>
                     <span data-decide-by>
                       <span className={"font-mono text-[13px] " + (kind === "ticket" ? "text-link" : "text-warn")}>{timeLeft(row, now)}</span>
                       <Muted>{" · " + decideByRest(row)}</Muted>

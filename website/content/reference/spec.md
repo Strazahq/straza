@@ -59,6 +59,8 @@ A change that refuses what an earlier release accepted is a break. The release t
 - A check-in whose harness name, harness version or client version is longer than 256 bytes is refused.
 - strazactl no longer signs in, so its enrollment, its check-in and its sessions are refused.
 
+The refusals of a NUL character in check-in, enrollment and key proof fields, added on 2026-11-04 after 2.0.0, ship as fixes and are not counted as breaks. A straza client never sends the character, and a Postgres store already failed most such requests with a server error. The attestation and session-token specifications record them in their changelogs.
+
 [Upgrade from 1.1.2 to 2.0.0]({{< relref "guides/operate/backup-and-upgrade.md#upgrade-from-112-to-200" >}}) says what each break asks of an operator.
 
 ## Validate a document

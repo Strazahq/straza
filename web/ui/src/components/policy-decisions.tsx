@@ -9,9 +9,11 @@ import { HelpTip } from "@/components/help-tip";
 import { RecordSheet } from "@/components/record-sheet";
 import { WordBadge } from "@/components/users-table";
 import { type ApiError, type AuditRow, listAudit } from "@/lib/api";
-import { type Row, ceRow, ceWhat, effectTone, effectWord, parseCE, whyOf } from "@/lib/audit-words";
+import { type Row, ceRow, ceWhat, effectTone, effectWord, parseCE, policyQuery, whyOf } from "@/lib/audit-words";
+import { put } from "@/lib/handoff";
 import type { Bucket } from "@/lib/policy-model";
 import { ANY_OUTCOME, ANY_WHO, BUCKET_WORD, DEC_FILTER, DECISION_COLUMN, DECISIONS_FOOT, DECISIONS_HELP, DECISIONS_LINE, NO_DECISIONS, NO_DECISIONS_HERE, OPEN_IN_AUDIT, SINCE, SUBJECT_DECISIONS, TAB, decisionCall, decisionCount } from "@/lib/policy-words";
+import { navigate } from "@/lib/router";
 import { readFailed } from "@/lib/say";
 import { agoWord } from "@/lib/settings-words";
 import { absTime } from "@/lib/words";
@@ -80,6 +82,14 @@ const COLUMNS: ColumnDef<Decision>[] = [
 const BUCKETS: Bucket[] = ["deny", "hum", "allow"];
 const SINCE_KEYS: SinceKey[] = ["day", "week", "month", "all"];
 
+// openPolicyAudit opens the Audit screen on the whole-chain search for the
+// policy's decisions, the same records this tab reads. The search is handed
+// over only when the console really leaves, since the page's leave guard may
+// keep the person on it.
+export function openPolicyAudit(name: string) {
+  navigate("audit", [], false, () => put("audit", { q: policyQuery(name) }));
+}
+
 // onOpenAudit is the door to the Audit screen; the page owns it, so a
 // departure with unpublished edits asks first.
 type Props = { name: string; onOpenAudit: () => void };
@@ -95,7 +105,7 @@ export function PolicyDecisions({ name, onOpenAudit }: Props) {
 
   React.useEffect(() => {
     let alive = true;
-    listAudit("q=" + encodeURIComponent('"setName":"' + name + '"') + "&limit=" + PAGE + "&order=desc").then(
+    listAudit("q=" + encodeURIComponent(policyQuery(name)) + "&limit=" + PAGE + "&order=desc").then(
       (answer) => {
         if (!alive) return;
         setRows((answer || []).map(decision));

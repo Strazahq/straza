@@ -49,8 +49,8 @@ func TestAPITokenLateStampCannotReviveRevokedToken(t *testing.T) {
 
 	// The stamp of that use lands after the revoke.
 	app.stampAPITokenUse(ctx, key, meta)
-	if _, ok := app.apiTokenAuthenticate(ctx, minted.Token); ok {
-		t.Fatal("the revoked token authenticates after a late stamp")
+	if _, err := app.apiTokenAuthenticate(ctx, minted.Token); !errors.Is(err, errAPITokenRejected) {
+		t.Fatalf("the revoked token after a late stamp answers %v, want errAPITokenRejected", err)
 	}
 	if _, err := app.store.Settings().Get(ctx, key); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("the late stamp brought the token row back: %v", err)

@@ -101,7 +101,10 @@ type catalogOverlay struct {
 	key     string // subjectDigest|epoch|snapshotID|tier1.id
 	hidden  map[string]bool
 	schemas map[string]any
-	roles   []string // copy of the session subject's roles, for targeted drops
+	// denied holds every tool the probe did not allow, hidden or not, so
+	// whoami can say policy denies a tool the list still shows.
+	denied map[string]bool
+	roles  []string // copy of the session subject's roles, for targeted drops
 }
 
 // catalogFor returns the tier-1 catalog for a role set, computing and caching
@@ -273,11 +276,11 @@ func (a *App) overlayFor(sessionID string, sub policy.Subject, tier1 *sessionCat
 // justification lane must keep working when filtering is off); an approve-gated
 // allow deep-copies the raw schema and injects `_straza_justification`. A nil
 // engine (never in production) refines nothing. The probe carries the granted
-// fact grantedOf answers (spec/policyset revisions 17 and 20): a bound tool
-// and a drafting tool with no rule stay visible. The approval tools never
-// carry it, so policy stays their only visibility gate.
+// fact grantedOf answers (spec/policyset revisions 17, 20 and 27): a bound
+// tool, a drafting tool and whoami with no rule stay visible. The approval
+// tools never carry it, so policy stays their only visibility gate.
 func (a *App) buildOverlay(key string, sub policy.Subject, tier1 *sessionCatalog, eng *policy.Engine) *catalogOverlay {
-	ov := &catalogOverlay{key: key, hidden: map[string]bool{}, schemas: map[string]any{}}
+	ov := &catalogOverlay{key: key, hidden: map[string]bool{}, schemas: map[string]any{}, denied: map[string]bool{}}
 	if eng == nil {
 		return ov
 	}
@@ -294,7 +297,8 @@ func (a *App) buildOverlay(key string, sub policy.Subject, tier1 *sessionCatalog
 		}, sub)
 		switch {
 		case d.Effect != policy.EffectAllow:
-			// A denied granted tool, a proxied or a drafting one, is hidden
+			ov.denied[t.Name] = true
+			// A denied granted tool, a proxied, a drafting or whoami, is hidden
 			// only under policyFilter. A denied approval tool is ALWAYS hidden:
 			// it has no grant, so policy authorization is its only visibility
 			// gate (default-deny: an unauthorized session sees none).

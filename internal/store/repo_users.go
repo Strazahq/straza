@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -260,8 +261,15 @@ func (r userRepo) SponsoredCounts(ctx context.Context, usernames []string) (map[
 	return out, rows.Err()
 }
 
+// Update writes every column of the live user u and answers the row read
+// back. An AI agent or a service account stores no password hash, because
+// it signs in with its key, so a write that leaves u a non-person clears
+// the hash, as a SCIM retype of a person does.
 func (r userRepo) Update(ctx context.Context, u User) (User, error) {
 	u.UpdatedAt = now()
+	if u.IsNHI() {
+		u.PasswordHash = ""
+	}
 	err := mustAffect(r.s.exec(ctx, `UPDATE users SET external_id = $1, username = $2, email = $3,
 		display = $4, title = $5, status = $6, password_hash = $7, attrs = $8,
 		user_type = $9, agency_mode = $10, sponsor = $11, swarm_id = $12, ephemeral = $13, updated_at = $14
@@ -307,12 +315,25 @@ func ChangedUserFields(read, want User) UserFields {
 	return f
 }
 
+// UserRevocation is the revocation of a user that a user write carries in
+// its own transaction: the reason and origin of the user's revocation row,
+// and the straza.revocation.user event that tells the other servers, which
+// the caller builds and the store bounds. An event that carries an id keeps
+// it, so the caller can ask RevocationCommitted about the write.
+type UserRevocation struct {
+	Reason, Origin string
+	Event          OutboxEvent
+}
+
 // UpdateFields sets only the columns f names, and updated_at with them, on
 // the live user id and answers the row read back after the write, so two
 // writes that name different columns never undo each other. An f that names
-// no column writes nothing and answers the row. A missing or soft-deleted id
-// is ErrNotFound.
-func (r userRepo) UpdateFields(ctx context.Context, id string, f UserFields) (User, error) {
+// no column, with a nil revoke, writes nothing and answers the row. A
+// non-nil revoke writes the user's revocation row and its event in the
+// transaction of the column write, so the database takes all of them or
+// none, and the row is read back inside it. A missing or soft-deleted id is
+// ErrNotFound.
+func (r userRepo) UpdateFields(ctx context.Context, id string, f UserFields, revoke *UserRevocation) (User, error) {
 	var set []string
 	var args []any
 	ph := func(v any) string {
@@ -334,25 +355,56 @@ func (r userRepo) UpdateFields(ctx context.Context, id string, f UserFields) (Us
 	if f.Ephemeral != nil {
 		set = append(set, "ephemeral = "+ph(*f.Ephemeral))
 	}
-	if len(set) == 0 {
+	if len(set) == 0 && revoke == nil {
 		return r.GetByID(ctx, id)
 	}
 	set = append(set, "updated_at = "+ph(r.s.tArg(now())))
 	where := ` WHERE id = ` + ph(id) + ` AND deleted_at IS NULL`
-	if err := mustAffect(r.s.exec(ctx, `UPDATE users SET `+strings.Join(set, ", ")+where, args...)); err != nil {
+	update := `UPDATE users SET ` + strings.Join(set, ", ") + where
+	if revoke == nil {
+		if err := mustAffect(r.s.exec(ctx, update, args...)); err != nil {
+			return User{}, err
+		}
+		return r.GetByID(ctx, id)
+	}
+	ev := revoke.Event
+	ev.CE = boundRecord(ev.CE)
+	var u User
+	err := r.s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, r.s.q(update), args...)
+		if err := mustAffect(res, r.s.mapErr(err)); err != nil {
+			return err
+		}
+		if err := r.s.writeRevocation(ctx, tx, RevokeUser, []string{id}, revoke.Reason, revoke.Origin, ev); err != nil {
+			return err
+		}
+		// A read back after the commit could fail on a change that
+		// committed, and the caller would then report a revoke that holds as
+		// one that did not happen.
+		u, err = scanUser(tx.QueryRowContext(ctx, r.s.q(`SELECT `+userCols+` FROM users WHERE id = $1 AND deleted_at IS NULL`), id))
+		return err
+	})
+	if err != nil {
 		return User{}, err
 	}
-	return r.GetByID(ctx, id)
+	return u, nil
 }
 
 // SoftDelete marks the user deleted and disabled and deletes its role
 // assignment rows in the same transaction. No getter revives a soft-deleted
 // user, so a row that kept its grants would stay a ghost in every assignments
 // read; the removed rows come back so the caller can chain one audit record
-// per ended grant. A missing or already deleted id is ErrNotFound and the
-// transaction rolls back before any assignment row is touched.
-func (r userRepo) SoftDelete(ctx context.Context, id string) ([]RoleAssignment, error) {
+// per ended grant. A non-nil revoke writes the user's revocation row and its
+// event in that transaction too. A missing or already deleted id is
+// ErrNotFound and the transaction rolls back before any assignment row is
+// touched.
+func (r userRepo) SoftDelete(ctx context.Context, id string, revoke *UserRevocation) ([]RoleAssignment, error) {
 	t := r.s.tArg(now())
+	var ev OutboxEvent
+	if revoke != nil {
+		ev = revoke.Event
+		ev.CE = boundRecord(ev.CE)
+	}
 	var removed []RoleAssignment
 	err := r.s.tx(ctx, func(tx *sql.Tx) error {
 		if err := mustAffect(tx.ExecContext(ctx, r.s.q(`UPDATE users SET deleted_at = $1, status = 'disabled', updated_at = $2
@@ -364,12 +416,51 @@ func (r userRepo) SoftDelete(ctx context.Context, id string) ([]RoleAssignment, 
 			return err
 		}
 		_, err = tx.ExecContext(ctx, r.s.q(`DELETE FROM role_assignments WHERE subject_kind = $1 AND subject_id = $2`), SubjectUser, id)
-		return r.s.mapErr(err)
+		if err != nil || revoke == nil {
+			return r.s.mapErr(err)
+		}
+		return r.s.writeRevocation(ctx, tx, RevokeUser, []string{id}, revoke.Reason, revoke.Origin, ev)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return removed, nil
+}
+
+// RevocationCommitted reports whether the user write that carried the
+// revocation event eventID committed, for a writer whose write ended with an
+// error that leaves the commit open. Only that write holds the event's id,
+// so the answer tells it apart from another write that disabled the same
+// user. It also answers the user's row as stored, soft-deleted after a
+// delete. A user with no row is ErrNotFound. It writes nothing and rolls
+// back, so it never waits on a commit of its own.
+func (r userRepo) RevocationCommitted(ctx context.Context, userID, eventID string) (User, bool, error) {
+	tx, err := r.s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, false, r.s.mapErr(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	read := `SELECT ` + userCols + ` FROM users WHERE id = $1`
+	if r.s.d == dialectPostgres {
+		// The write that lost its answer may still hold the row, as a commit
+		// does while it waits for a synchronous standby, and its event shows
+		// only once it ends. The share lock waits for that, so the event read
+		// after it sees the write's outcome. SQLite serializes every
+		// statement on its one connection, so the read alone holds there.
+		read += ` FOR SHARE`
+	}
+	u, err := scanUser(tx.QueryRowContext(ctx, r.s.q(read), userID))
+	if err != nil {
+		return User{}, false, r.s.mapErr(err)
+	}
+	var one int
+	switch err := tx.QueryRowContext(ctx, r.s.q(`SELECT 1 FROM events_outbox WHERE id = $1`), eventID).Scan(&one); {
+	case errors.Is(err, sql.ErrNoRows):
+		return u, false, nil
+	case err != nil:
+		return User{}, false, r.s.mapErr(err)
+	}
+	return u, true, nil
 }
 
 // heldAssignments reads the user's assignment rows inside the delete

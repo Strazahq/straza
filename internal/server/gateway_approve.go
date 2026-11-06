@@ -19,6 +19,7 @@ type approvalGate interface {
 	ConsumeHeld(ctx context.Context, rec approval.Record) (bool, error)
 	ConsumeGrant(ctx context.Context, userID, argvHash, consumingSession string) (approval.Record, bool, error)
 	DeniedTicketWithinWindow(ctx context.Context, userID, ruleID, argvHash string) (approval.Record, bool, error)
+	DeniedHoldWithinWindow(ctx context.Context, userID, sessionID, ruleID, argvHash string) (approval.Record, bool, error)
 	Request(ctx context.Context, in approval.RequestInput) (approval.Record, error)
 	Await(ctx context.Context, id string) (approval.Record, error)
 }
@@ -65,11 +66,11 @@ func (a *App) resolveApprove(ctx context.Context, gate approvalGate, claims auth
 // same call used an approval inside its window, the client-retry-after-timeout
 // case. One approval runs one call, on any replica. Otherwise it carries the
 // refusal the model reads and the audit record keeps: the fail-closed service
-// error, the denied-by reason, the expired/timeout reason, the used-already
-// reason, the pending reason, or afterUse's reason for a client that left
-// while the use was in flight. obj is the object the call names, zero when
-// none. awaitListed says the endpoint lists the
-// straza__approval_await tool, so a pending hold or ticket may name it. It blocks up to
+// error, the denied-by reason, a person's standing denial, the request rate,
+// the expired/timeout reason, the used-already reason, the pending reason, or
+// afterUse's reason for a client that left while the use was in flight. obj
+// is the object the call names, zero when none. awaitListed says the endpoint
+// lists the straza__approval_await tool, so a pending hold or ticket may name it. It blocks up to
 // spec.TimeoutSeconds, bounded by gatewayHold and the request context (a
 // client disconnect collapses the wait to a timeout). Fail closed on every
 // uncertain state.
@@ -128,6 +129,18 @@ func (a *App) gateApproveWithin(ctx context.Context, gate approvalGate, claims a
 		reason, run := a.afterUse(ctx, "gateway", d.RuleID, used.ID)
 		return outcomeOf(reason, run, used.ID)
 	}
+	// A person denied this call after its hold answered pending, and the
+	// decision window is still open: refuse it as the hook lane does rather
+	// than ask the person again.
+	if denied, ok, err := gate.DeniedHoldWithinWindow(ctx, claims.Subject, claims.Session, d.RuleID, key); err != nil {
+		a.failClosed(ctx, "gateway", d.RuleID, err)
+		return approveOutcome{reason: approvalStoreDownReason}
+	} else if ok {
+		if words == wordsGit {
+			return outcomeOf(gitHoldDeniedReason(denied), false, denied.ID)
+		}
+		return outcomeOf(holdDeniedFinalReason(denied), false, denied.ID)
+	}
 	rec, err := gate.Request(ctx, approval.RequestInput{
 		SessionID:     claims.Session,
 		UserID:        claims.Subject,
@@ -145,8 +158,7 @@ func (a *App) gateApproveWithin(ctx context.Context, gate approvalGate, claims a
 		Confirm:       d.Confirm,
 	})
 	if err != nil {
-		a.failClosed(ctx, "gateway", d.RuleID, err)
-		return approveOutcome{reason: a.approveRequestDenyReason(err)}
+		return approveOutcome{reason: a.approveRequestRefused(ctx, "gateway", d.RuleID, err)}
 	}
 	awaitCtx, cancel := context.WithTimeout(ctx, hold)
 	defer cancel()
@@ -325,8 +337,7 @@ func (a *App) resolveTicketGateway(ctx context.Context, gate approvalGate, claim
 		Confirm:       d.Confirm,
 	})
 	if err != nil {
-		a.failClosed(ctx, "gateway", d.RuleID, err)
-		return approveOutcome{reason: a.approveRequestDenyReason(err)}
+		return approveOutcome{reason: a.approveRequestRefused(ctx, "gateway", d.RuleID, err)}
 	}
 	reason := a.ticketPendingReason(rec, d.Approve.TicketTTLSeconds, words == wordsAwait && a.awaitToolVisible(sub))
 	if words == wordsGit {
@@ -353,6 +364,18 @@ func gitTicketDeniedReason(rec approval.Record) string {
 		who = "an approver"
 	}
 	return fmt.Sprintf("Straza: approval ticket %s was denied by %s, so git did not run, and the same git command stays refused until %s.",
+		rec.ID, who, rec.ExpiresAt.UTC().Format(time.RFC3339))
+}
+
+// gitHoldDeniedReason is holdDeniedFinalReason for a person who ran git:
+// the denied approval, who denied it, and until when the same git command
+// stays refused.
+func gitHoldDeniedReason(rec approval.Record) string {
+	who := rec.DecidedByName
+	if who == "" {
+		who = "an approver"
+	}
+	return fmt.Sprintf("Straza: approval %s was denied by %s, so git did not run, and the same git command stays refused until %s.",
 		rec.ID, who, rec.ExpiresAt.UTC().Format(time.RFC3339))
 }
 

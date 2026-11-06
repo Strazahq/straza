@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -135,7 +136,7 @@ spec:
 
 	tok := sessionToken(t, base, "kim")
 	_, list, _ := mcpCall(t, base, tok, "tools/list", nil)
-	if names := toolNamesOf(t, list); len(names) != 1 || names[0] != "echoapp__echo" {
+	if names := toolNamesOf(t, list); !slices.Equal(names, []string{"echoapp__echo", "straza__whoami"}) {
 		t.Fatalf("catalog on postgres = %v", names)
 	}
 	if code, res, raw := mcpCall(t, base, tok, "tools/call", map[string]any{

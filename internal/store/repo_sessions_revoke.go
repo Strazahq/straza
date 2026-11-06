@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -51,7 +52,7 @@ func (r sessionRepo) Revoke(ctx context.Context, ids []string, reason string, ev
 		// The event names the sessions this transaction ended, so it is
 		// made and bounded inside it. Only an admin's reason can make it long.
 		ev.CE = boundRecord(ev.CE)
-		return r.s.writeRevocation(ctx, tx, RevokeSession, ended, reason, ev)
+		return r.s.writeRevocation(ctx, tx, RevokeSession, ended, reason, RevocationOriginAdmin, ev)
 	})
 	if err != nil {
 		return nil, err
@@ -59,17 +60,53 @@ func (r sessionRepo) Revoke(ctx context.Context, ids []string, reason string, ev
 	return ended, nil
 }
 
-// Revoke deletes the device row, writes its revocation row and writes event,
-// in one transaction, so a refused write leaves the device enrolled.
-func (r deviceRepo) Revoke(ctx context.Context, id, reason string, event OutboxEvent) error {
+// Revoke deletes the device row, marks the device's active sessions
+// revoked, writes its revocation row and writes event, in one transaction,
+// so a refused write leaves the device enrolled and its sessions active.
+func (r deviceRepo) Revoke(ctx context.Context, id, reason string, event OutboxEvent) ([]ClosedSession, error) {
 	event.CE = boundRecord(event.CE)
-	return r.s.tx(ctx, func(tx *sql.Tx) error {
+	var ended []ClosedSession
+	err := r.s.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, r.s.q(`DELETE FROM devices WHERE id = $1`), id)
 		if err := mustAffect(res, r.s.mapErr(err)); err != nil {
 			return err
 		}
-		return r.s.writeRevocation(ctx, tx, RevokeDevice, []string{id}, reason, event)
+		// The device's tokens already die with its revocation. Ending the
+		// rows here keeps the sessions list from showing them signed in.
+		if ended, err = endDeviceSessions(ctx, tx, r.s, id); err != nil {
+			return err
+		}
+		return r.s.writeRevocation(ctx, tx, RevokeDevice, []string{id}, reason, RevocationOriginAdmin, event)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return ended, nil
+}
+
+// endDeviceSessions marks the active sessions of device revoked inside tx
+// and answers them ordered by id. The rows are closed before it returns, so
+// the transaction's next statement can run.
+func endDeviceSessions(ctx context.Context, tx *sql.Tx, s *sqlStore, device string) ([]ClosedSession, error) {
+	rows, err := tx.QueryContext(ctx, s.q(`UPDATE sessions SET status = $1 WHERE device_id = $2 AND status = $3 RETURNING id, user_id`),
+		SessionRevoked, device, SessionActive)
+	if err != nil {
+		return nil, s.mapErr(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ClosedSession
+	for rows.Next() {
+		var c ClosedSession
+		if err := rows.Scan(&c.ID, &c.UserID); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, s.mapErr(err)
+	}
+	slices.SortFunc(out, func(a, b ClosedSession) int { return strings.Compare(a.ID, b.ID) })
+	return out, nil
 }
 
 // returnedIDs runs an UPDATE ... RETURNING id inside tx and answers the set
@@ -93,17 +130,17 @@ func (s *sqlStore) returnedIDs(ctx context.Context, tx *sql.Tx, query string, ar
 }
 
 // writeRevocation writes, inside tx, one revocation row of kind with reason
-// and origin admin for each target, then the outbox event ev, unpublished,
-// which the caller has bounded.
+// and origin for each target, then the outbox event ev, unpublished, which
+// the caller has bounded.
 // Six parameters per row keep 1000 targets far inside both drivers' limits.
-func (s *sqlStore) writeRevocation(ctx context.Context, tx *sql.Tx, kind string, targets []string, reason string, ev OutboxEvent) error {
+func (s *sqlStore) writeRevocation(ctx context.Context, tx *sql.Tx, kind string, targets []string, reason, origin string, ev OutboxEvent) error {
 	at := s.tArg(now())
 	values := make([]string, len(targets))
 	args := make([]any, 0, 6*len(targets))
 	for i, id := range targets {
 		n := 6 * i
 		values[i] = fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", n+1, n+2, n+3, n+4, n+5, n+6)
-		args = append(args, newID(), kind, id, reason, RevocationOriginAdmin, at)
+		args = append(args, newID(), kind, id, reason, origin, at)
 	}
 	if _, err := tx.ExecContext(ctx, s.q(`INSERT INTO revocations (id, kind, target_id, reason, origin, created_at) VALUES `+
 		strings.Join(values, ", ")), args...); err != nil {

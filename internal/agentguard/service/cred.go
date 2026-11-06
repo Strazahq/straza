@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,12 +23,57 @@ import (
 // Sentences the credential half answers with. The two lower-case ones are
 // deny reasons the hook prefixes with "Straza: ".
 const (
-	notEnrolledSentence    = "This machine isn't enrolled for you yet. Run `straza enroll` and sign in with your work account."
-	machineChangedSentence = "This machine's identity changed since it was enrolled, so Straza stopped using its key. Run `straza enroll` to enroll it again."
+	notEnrolledSentence = "This machine isn't enrolled for you yet. A person runs `straza enroll --server <strazad url>` and signs in with their work account. " +
+		"An AI agent runs `straza enroll --server <strazad url> --headless` with its registered key or the client secret IT installed for it."
+	agentKeySentence = "This machine isn't enrolled for you yet. This OS account holds an AI agent's key from `straza keygen`. " +
+		"Once an admin has registered its public key, run `straza enroll --server <strazad url> --headless`."
+	machineChangedSentence = "This machine's identity changed since it was enrolled, so Straza stopped using its key. Run `straza enroll --server <strazad url>` to enroll it again."
 	waitingSentence        = "Straza is waiting for the server to confirm this machine's last check-in, which takes up to two minutes after a lost connection. Start the session again in a minute."
 	secondServiceSentence  = "Another Straza background service already uses this state directory, so this one stopped. Stop the other one first, or set a different STRAZA_HOME."
 	noSessionSentence      = "no active Straza session. Restart the session so straza can check in"
+	agentKeyChangedFormat  = "This machine's identity changed since it was enrolled, so Straza stopped using its key. " +
+		"Run `straza keygen --force --user %s`, have an admin register the new public key it prints, and then run `straza enroll --server <strazad url> --headless`."
+	agentSecretChangedFormat = "This machine's identity changed since it was enrolled, so Straza stopped using its key. " +
+		"Run `straza enroll --server <strazad url> --headless --user %s` to enroll the agent again."
 )
+
+// serverFlag is the --server flag of the enroll commands in the sentences
+// above, which onThisMachine fits to this machine.
+const serverFlag = " --server <strazad url>"
+
+// onThisMachine fits the enroll commands in sentence to this machine. A
+// managed configuration that names the server drops the flag, because the
+// service enrolls there whatever --server says, as enrollServer does.
+// Otherwise server, when known, takes the placeholder's place.
+func onThisMachine(sentence, server string) string {
+	if c, managed, err := managedConfig(); err == nil && managed && c.ServerURL != "" {
+		return strings.ReplaceAll(sentence, serverFlag, "")
+	}
+	if server != "" {
+		return strings.ReplaceAll(sentence, serverFlag, " --server "+server)
+	}
+	return sentence
+}
+
+// changedSentence is the refusal after the machine identity changed under
+// rec, in the lane rec enrolled on. A person enrolls again. An agent on the
+// key lane needs a new key, because enrollAgent does not reuse a key whose
+// machine changed. An agent on the client-secret lane enrolls again with its
+// secret. A record with no lane reads as the secret lane, as in agentCheckin.
+func changedSentence(rec enrollment) string {
+	if rec.Kind != localapi.KindAgent {
+		return onThisMachine(machineChangedSentence, rec.ServerURL)
+	}
+	user := rec.Username
+	if user == "" {
+		user = "<agent username>"
+	}
+	format := agentSecretChangedFormat
+	if rec.Lane == laneKey {
+		format = agentKeyChangedFormat
+	}
+	return onThisMachine(fmt.Sprintf(format, user), rec.ServerURL)
+}
 
 // revokedSentence is the deny reason of a session the server revoked.
 func revokedSentence(reason string) string {
@@ -250,9 +296,13 @@ func (a *account) ready() (enrollment, *agentguard.Client, error) {
 	defer a.mu.Unlock()
 	switch {
 	case a.changed:
-		return enrollment{}, nil, &Refused{Status: http.StatusForbidden, Sentence: machineChangedSentence}
+		return enrollment{}, nil, &Refused{Status: http.StatusForbidden, Sentence: changedSentence(*a.rec)}
+	case a.rec != nil && a.rec.Kind == "" && a.key != nil:
+		// A record without a kind is the key Keygen made, and only an
+		// agent's keygen makes one.
+		return enrollment{}, nil, &Refused{Status: http.StatusForbidden, Sentence: onThisMachine(agentKeySentence, "")}
 	case a.rec == nil || a.rec.Kind == "" || a.key == nil || a.api == nil:
-		return enrollment{}, nil, &Refused{Status: http.StatusForbidden, Sentence: notEnrolledSentence}
+		return enrollment{}, nil, &Refused{Status: http.StatusForbidden, Sentence: onThisMachine(notEnrolledSentence, "")}
 	}
 	return *a.rec, a.api, nil
 }
@@ -306,6 +356,7 @@ func (s *credStore) Status(c Caller) localapi.Status {
 		st.Sessions = append(st.Sessions, localapi.SessionStatus{
 			Harness: hs.s.Harness, SessionID: hs.s.ID, User: hs.s.User, SnapshotID: hs.s.SnapshotID,
 			ExpiresAt: hs.s.ExpiresAt, Push: hs.pushState(), Revoked: hs.revoked, PolicyRefused: hs.s.PolicyRefused,
+			Attestation: hs.s.Attestation, AttestedAt: hs.s.IssuedAt,
 		})
 	}
 	drainErr := a.drainErr

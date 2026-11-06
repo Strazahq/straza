@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -286,15 +287,16 @@ spec:
 		t.Errorf("initialize result = %v", res)
 	}
 
-	// Catalogs: kim sees both tools, lee sees nothing.
+	// Catalogs: kim sees both tools, lee sees only whoami, which every
+	// session holds.
 	_, kimList, _ := mcpCall(t, base, kimTok, "tools/list", nil)
 	kimTools := toolNamesOf(t, kimList)
-	if len(kimTools) != 2 || kimTools[0] != "echoapp__echo" || kimTools[1] != "echoapp__env" {
+	if !slices.Equal(kimTools, []string{"echoapp__echo", "echoapp__env", "straza__whoami"}) {
 		t.Errorf("kim catalog = %v", kimTools)
 	}
 	_, leeList, _ := mcpCall(t, base, leeTok, "tools/list", nil)
-	if n := len(toolNamesOf(t, leeList)); n != 0 {
-		t.Errorf("lee catalog has %d tools, want 0", n)
+	if names := toolNamesOf(t, leeList); !slices.Equal(names, []string{"straza__whoami"}) {
+		t.Errorf("lee catalog lists %v, want whoami alone", names)
 	}
 
 	// Allowed call round-trips; the injected credential reaches upstream and
@@ -432,8 +434,8 @@ straza:
 	}
 
 	tok := sessionToken(t, base, "kim")
-	if n := len(toolNamesOf(t, second(mcpCall(t, base, tok, "tools/list", nil)))); n != 0 {
-		t.Fatalf("catalog should start empty, got %d tools", n)
+	if names := toolNamesOf(t, second(mcpCall(t, base, tok, "tools/list", nil))); !slices.Equal(names, []string{"straza__whoami"}) {
+		t.Fatalf("catalog should start with whoami alone, got %v", names)
 	}
 
 	// Open the SSE stream, then bind the app to dev.
@@ -484,7 +486,7 @@ straza:
 	}
 
 	names := toolNamesOf(t, second(mcpCall(t, base, tok, "tools/list", nil)))
-	if len(names) != 1 || names[0] != "openapp__echo" {
+	if !slices.Equal(names, []string{"openapp__echo", "straza__whoami"}) {
 		t.Errorf("catalog after bind = %v", names)
 	}
 }
@@ -621,9 +623,10 @@ func walkToolsList(t *testing.T, base, tok string, maxPer int) ([]string, int) {
 	}
 }
 
-// TestGatewayToolsListPagination walks a 6-tool catalog at pageSize 2: three
-// pages, stable order across the chain, no nextCursor on the final page, and the
-// concatenation equals the full sorted catalog.
+// TestGatewayToolsListPagination walks a 7-tool catalog, six proxied tools
+// and whoami, at pageSize 2: four pages, stable order across the chain, no
+// nextCursor on the final page, and the concatenation equals the full
+// sorted catalog.
 func TestGatewayToolsListPagination(t *testing.T) {
 	t.Parallel()
 	app, base, _ := testAppCounting(t)
@@ -636,11 +639,11 @@ func TestGatewayToolsListPagination(t *testing.T) {
 	tok := sessionToken(t, base, "kim")
 
 	want := []string{
-		"aapp__echo", "aapp__env", "bapp__echo", "bapp__env", "capp__echo", "capp__env",
+		"aapp__echo", "aapp__env", "bapp__echo", "bapp__env", "capp__echo", "capp__env", "straza__whoami",
 	}
 	got, pages := walkToolsList(t, base, tok, 2)
-	if pages != 3 {
-		t.Errorf("walked %d pages, want 3", pages)
+	if pages != 4 {
+		t.Errorf("walked %d pages, want 4", pages)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("paged catalog = %v, want %v", got, want)
@@ -663,8 +666,8 @@ func TestGatewayToolsListPaginationDisabled(t *testing.T) {
 	if _, ok := result["nextCursor"]; ok {
 		t.Error("pageSize 0 must not emit a nextCursor")
 	}
-	if n := len(toolNamesOf(t, res)); n != 4 {
-		t.Errorf("unpaginated catalog = %d tools, want all 4 in one response", n)
+	if n := len(toolNamesOf(t, res)); n != 5 {
+		t.Errorf("unpaginated catalog = %d tools, want all 5, whoami included, in one response", n)
 	}
 }
 
@@ -762,8 +765,9 @@ spec:
 `)
 	tok := sessionToken(t, base, "kim")
 
-	// bapp__env is hidden: 3 visible tools over 2 pages, env never listed.
-	want := []string{"aapp__echo", "aapp__env", "bapp__echo"}
+	// bapp__env is hidden: 4 visible tools, whoami included, over 2 pages,
+	// env never listed.
+	want := []string{"aapp__echo", "aapp__env", "bapp__echo", "straza__whoami"}
 	got, pages := walkToolsList(t, base, tok, 2)
 	if pages != 2 {
 		t.Errorf("walked %d pages, want 2", pages)

@@ -6,7 +6,7 @@
 import { type Covers, coversOf } from "./access-covers";
 import type { DraftConflict, DraftDetail, DraftFinding, DraftGain, DraftItem, DraftKind, DraftOp, DraftPublishBody, DraftVerdict, FindingClass, ManifestDoc } from "./api";
 import { callerKind, changeRows } from "./manifest-edit";
-import { type RuleView, openDoc, rulesOf } from "./policy-model";
+import { type Bucket, type RuleView, bucketOf, openDoc, rulesOf } from "./policy-model";
 import { KIND_NAME, exposeWords, rpsWords, sentWords, timeoutWords, transportWords } from "./server-words";
 import { agentsLine } from "./words";
 
@@ -319,22 +319,53 @@ export function roleToolRows(before: RoleView | null, after: RoleView | null): T
   return rows;
 }
 
+// ToolsMove is what a role's tools on one server do when the draft is
+// published: the tools that join it, the ones that leave it, and the ones
+// it keeps, each in name order.
+export type ToolsMove = { server: string; added: string[]; removed: string[]; same: string[] };
+
+// toolsMoves groups roleToolRows by server, in its order.
+export function toolsMoves(before: RoleView | null, after: RoleView | null): ToolsMove[] {
+  const out: ToolsMove[] = [];
+  for (const r of roleToolRows(before, after)) {
+    let m = out.find((x) => x.server === r.server);
+    if (!m) {
+      m = { server: r.server, added: [], removed: [], same: [] };
+      out.push(m);
+    }
+    (r.before && r.after ? m.same : r.after ? m.added : m.removed).push(r.tool);
+  }
+  return out;
+}
+
 export type RuleMark = "new" | "edited" | "removed" | "same";
 
-// ruleMarks reads the rules of an approval set in the draft's order, each
-// marked against the live text, then the live rules the draft drops.
-export function ruleMarks(liveText: string | null, itemText: string): { rule: RuleView; mark: RuleMark }[] {
+// ruleMarks reads the rules of a policy set in the draft's order, each
+// marked against the live text, then the live rules the draft drops. An
+// edited rule carries its live reading as was.
+export function ruleMarks(liveText: string | null, itemText: string): { rule: RuleView; mark: RuleMark; was?: RuleView }[] {
   const read = (text: string | null) => (text ? rulesOf(openDoc(text)) : []);
   const live = read(liveText);
   const next = read(itemText);
-  const byID = new Map(live.map((r) => [r.id, JSON.stringify(r.raw)]));
-  const out: { rule: RuleView; mark: RuleMark }[] = next.map((rule) => {
+  const byID = new Map(live.map((r) => [r.id, r]));
+  const out: { rule: RuleView; mark: RuleMark; was?: RuleView }[] = next.map((rule) => {
     const was = byID.get(rule.id);
-    return { rule, mark: was === undefined ? "new" : was === JSON.stringify(rule.raw) ? "same" : "edited" };
+    if (!was) return { rule, mark: "new" };
+    return JSON.stringify(was.raw) === JSON.stringify(rule.raw) ? { rule, mark: "same" } : { rule, mark: "edited", was };
   });
   const kept = new Set(next.map((r) => r.id));
   for (const rule of live) if (!kept.has(rule.id)) out.push({ rule, mark: "removed" });
   return out;
+}
+
+// OUTCOME_ORDER is the order a set's outcomes are named in.
+const OUTCOME_ORDER: Bucket[] = ["hum", "deny", "allow"];
+
+// setOutcomes are the outcomes the rules of a policy set document give, in
+// OUTCOME_ORDER, each once: hum for a rule that asks a person first.
+export function setOutcomes(text: string | undefined): Bucket[] {
+  const have = new Set((text ? rulesOf(openDoc(text)) : []).map((r) => bucketOf(r.posture)));
+  return OUTCOME_ORDER.filter((b) => have.has(b));
 }
 
 // objectOf is the Kind/Name an item's lines and live state are keyed by.

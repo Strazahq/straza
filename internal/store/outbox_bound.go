@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -23,6 +25,14 @@ const MaxRecordBytes = 256 << 10
 // omitKeepMax is the most bytes, as JSON, of one string that a record
 // whose data is omitted keeps.
 const omitKeepMax = 256
+
+// MaxRecordValues is the most JSON values a record may hold and still be
+// decoded in full when it is cut. Decoding costs time for every value, so a
+// record of many tiny values costs about ten times what a record of one long
+// string of the same length does. A longer record over it gets its data
+// omitted by OmitCE, which never decodes the rest. A straza client's record
+// holds a few dozen values.
+const MaxRecordValues = 1 << 16
 
 // cutMark is the text that follows the prefix of a cut string: the
 // string's whole length in bytes and the hex SHA-256 of the whole string.
@@ -54,11 +64,15 @@ var boundRecord = boundCE
 // When no length can, the record keeps its envelopeKeys and the keptKeys
 // of its data, each string cut to omitKeepMax, and dataOmitted gives the
 // length and the SHA-256 of the whole record, so every JSON object comes
-// out under the bound. A ce that is not a JSON object, which no producer
-// writes, is answered whole.
+// out under the bound. A longer record of more than MaxRecordValues values
+// gets its data omitted without being decoded. A ce that is not a JSON
+// object, which no producer writes, is answered whole.
 func boundCE(ce string) string {
 	if len(ce) <= MaxRecordBytes {
 		return ce
+	}
+	if CountValues(ce) > MaxRecordValues {
+		return OmitCE(ce)
 	}
 	dec := json.NewDecoder(strings.NewReader(ce))
 	dec.UseNumber()
@@ -71,6 +85,98 @@ func boundCE(ce string) string {
 		return out
 	}
 	return omitData(env, keep, ce)
+}
+
+// BoundCE is boundCE for a producer that bounds its record before it queues
+// it, so the cost lands on the request that made the record and not on the
+// writer every record shares. The write's own bound then finds the record
+// within MaxRecordBytes and keeps it whole.
+func BoundCE(ce string) string { return boundCE(ce) }
+
+// CountValues answers an upper bound of the JSON values in ce: one more
+// than the commas, brackets and braces outside its strings. It reads ce
+// byte by byte without decoding it, so a caller learns what decoding ce
+// would cost before paying for it. On text that is not JSON the number
+// means nothing.
+func CountValues(ce string) int {
+	n := 1
+	for i := 0; i < len(ce); i++ {
+		switch ce[i] {
+		case '"':
+			for i++; i < len(ce) && ce[i] != '"'; i++ {
+				if ce[i] == '\\' {
+					i++
+				}
+			}
+		case ',', '[', '{':
+			n++
+		}
+	}
+	return n
+}
+
+// rawRecord is the type OmitCE decodes a record into: the envelopeKeys, and
+// under data the keptKeys, each held as raw JSON, so the decoder skips every
+// other value without building it. The JSON tags carry the keys, and the
+// field names only number them. encoding/json matches a tag without regard
+// to case, so a key that differs from a kept key only in case fills it too.
+var rawRecord = func() reflect.Type {
+	field := func(name, key string) reflect.StructField {
+		return reflect.StructField{Name: name, Type: reflect.TypeFor[json.RawMessage](), Tag: reflect.StructTag(`json:"` + key + `"`)}
+	}
+	var kept, top []reflect.StructField
+	for i, k := range keptKeys {
+		kept = append(kept, field(fmt.Sprintf("K%d", i), k))
+	}
+	for i, k := range envelopeKeys {
+		top = append(top, field(fmt.Sprintf("E%d", i), k))
+	}
+	return reflect.StructOf(append(top, reflect.StructField{Name: "Data", Type: reflect.StructOf(kept), Tag: `json:"data"`}))
+}()
+
+// OmitCE answers ce in the form boundCE gives a record whose strings it
+// cannot cut: its envelopeKeys, the keptKeys of its data, each string cut to
+// omitKeepMax, and dataOmitted with the length and the SHA-256 of ce. It
+// decodes only those keys and skips every other value, so its cost grows
+// with the bytes of ce and never with the count of its values. A ce that is
+// not a JSON object is answered whole.
+func OmitCE(ce string) string {
+	if !strings.HasPrefix(strings.TrimLeft(ce, " \t\r\n"), "{") {
+		return ce
+	}
+	v := reflect.New(rawRecord).Elem()
+	// A data that is not an object is a type error the decoder reports at
+	// the end, after it filled the envelope, and such a record keeps no
+	// data fields.
+	var typeErr *json.UnmarshalTypeError
+	if err := json.Unmarshal([]byte(ce), v.Addr().Interface()); err != nil && !errors.As(err, &typeErr) {
+		return ce
+	}
+	env := rawScalars(v, envelopeKeys)
+	data := rawScalars(v.Field(len(envelopeKeys)), keptKeys)
+	return omitData(env, scalars(data, keptKeys), ce)
+}
+
+// rawScalars answers keys, read from the raw JSON fields of s in order,
+// whose values are strings, numbers or booleans, decoded one by one.
+func rawScalars(s reflect.Value, keys []string) map[string]any {
+	out := map[string]any{}
+	for i, k := range keys {
+		raw := s.Field(i).Bytes()
+		switch {
+		case len(raw) == 0, raw[0] == '[', raw[0] == '{', raw[0] == 'n':
+		case raw[0] == '"':
+			var str string
+			if json.Unmarshal(raw, &str) == nil {
+				out[k] = str
+			}
+		case raw[0] == 't', raw[0] == 'f':
+			out[k] = raw[0] == 't'
+		default:
+			out[k] = json.Number(raw)
+		}
+	}
+	return out
 }
 
 // leaf is one string inside a record's data and the way to replace it.

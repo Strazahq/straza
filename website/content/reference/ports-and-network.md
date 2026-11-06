@@ -24,7 +24,7 @@ There is no separate metrics port and no debug port. The embedded event bus has 
 | TLS | Plain HTTP until you set `server.tls.certFile` and `server.tls.keyFile`. Under enterprise, strazad logs a warning at every start while the listener is plain. | Always, TLS 1.2 or newer. The certificate is self-signed by default, and the phone pins it at enrollment. |
 
 
-The approver listener allows 10 requests a second from each connecting address, set by `server.approverTLS.perIPRPS`. It takes the address from the connection and never from `X-Forwarded-For`. [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#listener" >}}) shows the listener rows of both profiles side by side.
+The approver listener allows 10 requests a second from each connecting address, set by `server.approverTLS.perIPRPS`. It takes the address from the connection and never from `X-Forwarded-For`, and it counts an IPv6 client by its /64 network, so one host cannot take a fresh budget per address. [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md#listener" >}}) shows the listener rows of both profiles side by side.
 
 ## What the main listener serves
 

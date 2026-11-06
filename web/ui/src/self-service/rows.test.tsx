@@ -39,6 +39,15 @@ describe("toSelfRow", () => {
     expect(decidable(r)).toBe(false);
   });
 
+  it.each([
+    ["the server's hook lane on an MCP call", { lane: "hook" }, "hook"],
+    ["the server's gateway lane on a command an approval_request raised", { lane: "gateway", summary: { tool: "shell.exec" } }, "gateway"],
+    ["an MCP call from an older server, read as the gateway's", {}, "gateway"],
+    ["a command from an older server, read as the hook's", { summary: { tool: "shell.exec" } }, "hook"],
+  ])("reads the lane from %s", (_what, patch, lane) => {
+    expect(toSelfRow({ ...base, ...patch } as ApproverRow).lane).toBe(lane);
+  });
+
   it("maps a decided row with its decider, channel, device and reason", () => {
     const r = toSelfRow({ ...base, challenge: undefined, state: "denied", decided_by: "alice", decided_at: "2026-09-13T14:02:00Z", decided_via: { surface: "browser", device_id: "apd_7f3c" }, decided_reason: "walk cleanup", class: "ticket", grant_expires_at: null });
     expect(r.state).toBe("denied");

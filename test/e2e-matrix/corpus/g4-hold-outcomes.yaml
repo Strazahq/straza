@@ -5,20 +5,19 @@
 # is allowed once with the approver's name, the next identical call raises
 # a new request because the exemption is single use, a different command
 # raises its own record, a denied request stays denied and the same call
-# run again is a new request, a decided record is not decided again (a
+# run again is refused with that denial, a decided record is not decided again (a
 # repeat of the same verdict answers the record, a conflicting verdict is
 # refused), a five-second rule expires to a deny and an expired record
 # cannot be approved, the IdM API token cannot decide because it carries
 # no person, and the state filter lists what it should.
 #
-# The retry after a denial: the how-to guide says a second run of the same
-# command raises a new request and that a deny is final for that request,
-# and the tickets section is where a denial holds for a window. The
-# sentence "Straza: approval denied by NAME (ref ID)" of events revision 31
-# is what a gateway caller reads when the denial lands inside the socket
-# wait, and the hook lane never waits, so this scenario asserts the fresh
-# request. The gateway sibling g4-gateway-refusals shows the binary holding
-# a retry afresh after a denial [live].
+# The retry after a denial: the hook lane never waits, so the model learns
+# of a denial on its next try of the same call. While the denial stands
+# inside the hold's decision window, the same call in the same session is
+# refused with a sentence that opens "Straza: approval denied by NAME (ref
+# ID)" and names when it ends, and no new request opens
+# (internal/server/pdp_approve.go). The gateway sibling
+# g4-gateway-refusals asserts the same refusal on the gateway lane.
 #
 # Shapes the binary forced on the corpus, each with how it was verified: the
 # approvals list is an object with an approvals array, the activate body is
@@ -65,9 +64,9 @@ provenance: >-
   with 401 or 403).
   suspect: the success status codes of the admin routes and the
   approvals.0 path into a one-record list; that the same call run again
-  after a denied hold raises a fresh request on the hook lane, which the
-  how-to guide states for a second run of the same command and the
-  reference events page can be read against; the mapping of 409 to an
+  in the same session after a denied hold is refused with the standing
+  denial and opens no request until the hold's decision window ends, which
+  internal/server/pdp_approve.go does and no page states yet; the mapping of 409 to an
   already decided record and of 410 to an expired one, which the openapi
   lists without a sentence; the status of the IdM token's refused
   decide, which the openapi lists as 403 and the reference page as 401
@@ -254,7 +253,7 @@ steps:
       status: 200
       body: {approval.state: pending}
 
-  # 4. A denied request stays denied, and the same call run again is a new request.
+  # 4. A denied request stays denied, and the same call run again is refused with that denial.
   - name: the admin denies the second request with a reason and the record carries the words
     admin:
       method: POST
@@ -263,14 +262,14 @@ steps:
     want:
       status: 200
       body: {approval.state: denied, approval.decidedReason: "G4-HOLD: not this one"}
-  - name: the same call run again after the denial is not allowed and raises a fresh request
-    # suspect: the how-to guide says a second run of the same command raises a new request and a deny is final for that request only
+  - name: the same call run again after the denial is refused with the denial and raises no request
+    # suspect: the hook lane refuses the same call while a person's denial stands inside the hold's decision window (internal/server/pdp_approve.go), and no published page says so yet
     hook:
       as: carol
       event: {kind: tool.pre, tool: shell.exec, command: "deploy app-one"}
-    want: {decision: deny, reasonContains: "approval requested"}
-  - name: four pending denies are on the chain, one per request the hook lane opened
-    audit: {subject: carol, kind: tool.pre, decision: deny, reasonContains: "approval requested", count: 4}
+    want: {decision: deny, reasonContains: "approval denied by"}
+  - name: three pending denies are on the chain, one per request the hook lane opened
+    audit: {subject: carol, kind: tool.pre, decision: deny, reasonContains: "approval requested", count: 3}
   - name: the denied record stayed denied
     admin:
       method: GET
@@ -278,13 +277,13 @@ steps:
     want:
       status: 200
       body: {approval.state: denied}
-  - name: the other command's record and the fresh one are the two pending records
+  - name: the other command's record is the one pending record
     admin:
       method: GET
       path: /v1/admin/approvals?state=pending
     want:
       status: 200
-      body: {approvals.0.state: pending, approvals.1.state: pending, approvals.2: null}
+      body: {approvals.0.state: pending, approvals.1: null}
 
   # 5. A decided record is not decided again: a repeat of the same verdict answers the record, a conflicting verdict is refused.
   - name: a second approve of the approved record answers with the record again and writes no second decision
@@ -317,9 +316,9 @@ steps:
       body: {approvals.0.state: expired, approvals.0.rule: hold-quick, approvals.1: null}
     save: {holdFour: approvals.0.id}
     within: 30s
-  - name: the expiry resolution is on the chain, nine approval records for five requests
-    # suspect: one request per record, one resolution per decided or expired record and one use of the approved hold gives 3+2+1+1+2
-    audit: {subject: carol, kind: straza.audit.approval, count: 9}
+  - name: the expiry resolution is on the chain, eight approval records for four requests
+    # suspect: one request per record, one resolution per decided or expired record and one use of the approved hold gives 3+2+1+2
+    audit: {subject: carol, kind: straza.audit.approval, count: 8}
   - name: approving the expired record answers 410
     # suspect: the openapi lists 410 on the decide routes without a sentence; an expired record is the reading
     admin:
@@ -356,20 +355,20 @@ steps:
       status: 200
       body: {approvals.0.state: expired, approvals.1.state: expired, approvals.2: null}
     within: 30s
-  - name: the pending filter lists the two records still waiting
+  - name: the pending filter lists the one record still waiting
     admin:
       method: GET
       path: /v1/admin/approvals?state=pending
     want:
       status: 200
-      body: {approvals.0.state: pending, approvals.1.state: pending, approvals.2: null}
-  - name: the all filter lists the six records of the run
+      body: {approvals.0.state: pending, approvals.1: null}
+  - name: the all filter lists the five records of the run
     admin:
       method: GET
       path: /v1/admin/approvals?state=all
     want:
       status: 200
-      body: {approvals.5.lane: hook, approvals.6: null}
+      body: {approvals.4.lane: hook, approvals.5: null}
   - name: an unknown state value is refused with 400
     admin:
       method: GET

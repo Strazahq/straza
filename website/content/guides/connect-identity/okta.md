@@ -231,10 +231,10 @@ strazactl api-token revoke 8026b17c-3568-4018-b817-065b8ccf8e84
 ```
 {{< /command >}}
 
-{{< see >}}`revoked 8026b17c-3568-4018-b817-065b8ccf8e84`.{{< /see >}}
+{{< see >}}`revoked the admin API token 8026b17c-3568-4018-b817-065b8ccf8e84, matched by its id.`{{< /see >}}
 {{< /cli >}}
 
-The next request with the old token answers `401` with the detail "admin API token rejected: unknown, expired or revoked (strazactl api-token list)".
+The next request with the old token answers `401` with the detail "admin API token rejected: this token is unknown, expired or revoked. Mint a new token in the console under Settings, API tokens, or ask a Straza administrator to mint one. Then set STRAZA_API_TOKEN, or the token setting of the connector that sent this request, to the new token."
 
 ## Caveats {.nostep}
 

@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/events"
+	"github.com/strazahq/straza/internal/server/ratelimit"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -72,8 +74,18 @@ type Service struct {
 	// construction, before any request is served; nil means no extra gate.
 	UserBlocked func(userID string) bool
 
+	// OnRecordLost, when set, hears every record this service could not
+	// write to the outbox even after its retry: an approval phase or a Slack
+	// tap's login failure. The server counts it in
+	// straza_outbox_records_lost_total. Wired once at construction.
+	OnRecordLost func()
+
 	mu      sync.Mutex
 	waiters map[string][]chan struct{} // approval id → Await signal channels
+
+	// rate holds the buckets of the request rate (rate.go), in memory on
+	// this replica.
+	rate *ratelimit.Limiter
 
 	// dmu guards lastDelivery, the per-channel most-recent delivery attempt
 	// surfaced on the admin channel-status card (status.go).
@@ -97,6 +109,7 @@ func New(st store.Store, bus *events.Bus, resolver RoleResolver, cfg config.Appr
 		st: st, bus: bus, resolver: resolver, cfg: cfg, log: log, tokenKey: key,
 		now:     time.Now,
 		waiters: map[string][]chan struct{}{},
+		rate:    ratelimit.New(),
 	}
 	if cfg.Channels.Slack.Enabled {
 		sl, err := newSlackChannel(cfg.Channels.Slack, st, s, log)
@@ -252,7 +265,40 @@ func (s *Service) auditPhase(ctx context.Context, phase string, rec Record) {
 	if err != nil {
 		return
 	}
-	if _, err := s.st.Outbox().Insert(ctx, store.OutboxEvent{Subject: auditSubject, CE: string(ce)}); err != nil {
-		s.log.Warn("approval audit insert failed", "phase", phase, "err", err)
+	if err := s.insertRecord(ctx, store.OutboxEvent{Subject: auditSubject, CE: string(ce)}); err != nil {
+		s.log.Error("approval: the record could not be written after one retry, so the approval stands without it on the audit chain",
+			"phase", phase, "approval", rec.ID, "err", err)
 	}
+}
+
+// recordInsertTimeout bounds each try of a record's outbox insert.
+const recordInsertTimeout = 5 * time.Second
+
+// insertRecord writes the record ev to the outbox on a context the
+// caller's end does not cancel, because the change it records has already
+// happened, and tries once more on a fresh bound when the first try fails.
+// The row id is fixed before the first try, so a retry after an insert that
+// committed but lost its answer meets that row, answers ErrConflict and
+// writes no second one. A record still not written is passed to
+// OnRecordLost, and its error is answered for the caller's Error line.
+func (s *Service) insertRecord(ctx context.Context, ev store.OutboxEvent) error {
+	ev.ID = uuid.Must(uuid.NewV7()).String()
+	try := func() error {
+		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordInsertTimeout)
+		defer cancel()
+		_, err := s.st.Outbox().Insert(tctx, ev)
+		return err
+	}
+	err := try()
+	if err == nil {
+		return nil
+	}
+	retryErr := try()
+	if retryErr == nil || errors.Is(retryErr, store.ErrConflict) {
+		return nil
+	}
+	if s.OnRecordLost != nil {
+		s.OnRecordLost()
+	}
+	return errors.Join(err, retryErr)
 }

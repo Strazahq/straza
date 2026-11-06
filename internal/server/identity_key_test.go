@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +58,29 @@ func (h *keyHolder) proof(path, token string, ctr int64) string {
 		h.t.Fatal(err)
 	}
 	return p
+}
+
+// proofJTI signs a proof for POST path with the cached nonce as proof does,
+// with jti as its proof id, so a test can send an id the client package
+// never makes.
+func (h *keyHolder) proofJTI(path, jti string, ctr int64) string {
+	h.t.Helper()
+	pub := h.priv.Public().(ed25519.PublicKey)
+	claims := map[string]any{"htm": http.MethodPost, "htu": h.base + path, "iat": time.Now().Unix(), "jti": jti, "nonce": h.nonce}
+	if ctr > 0 {
+		claims["ctr"] = ctr
+	}
+	segment := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		return base64.RawURLEncoding.EncodeToString(b)
+	}
+	input := segment(map[string]any{"typ": dpop.ProofType, "alg": "EdDSA",
+		"jwk": map[string]string{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pub)}}) +
+		"." + segment(claims)
+	return input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(h.priv, []byte(input)))
 }
 
 // bodyCounter returns the counter of a test body, 0 when it has none.
@@ -312,6 +338,82 @@ func TestKeyEnrollRefusals(t *testing.T) {
 	}
 	if n := len(matching(t, app, "straza.identity.updated", func(e map[string]any) bool { return e["action"] == "enroll" })); n != 0 {
 		t.Errorf("enroll events = %d, want none", n)
+	}
+}
+
+// TestKeyEnrollRefusesNULCharacter pins the refusal of a key enrollment
+// whose device name, platform or fingerprint or machine binding holds a NUL
+// character: 400 with a sentence that names the field, before the proof is
+// checked, so the proof stays unspent, no device row or counter changes and
+// no record is written, as the other body refusals do. The test store is
+// SQLite, which would keep the character, so the refusal does not depend on
+// the store. The custody fields are stored as JSON text, which escapes the
+// character, so a NUL there still enrolls.
+func TestKeyEnrollRefusesNULCharacter(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	kim := seedIdentity(t, app)
+	ctx := context.Background()
+	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
+	// A device enrolled with the fingerprint the refused bodies carry and
+	// checked in once, so a write would enroll it again and reset its counter.
+	first := newKeyHolder(t, base)
+	first.enroll(idToken, "sha256:nul-same")
+	first.mustCheckin()
+
+	device := func(b map[string]any) map[string]string { return b["device"].(map[string]string) }
+	cases := []struct {
+		name  string
+		field string // the field the refusal names, "" when the enrollment passes
+		spoil func(map[string]any)
+	}{
+		{"device name", "device.name", func(b map[string]any) { device(b)["name"] += "\x00" }},
+		{"device platform", "device.platform", func(b map[string]any) { device(b)["platform"] = "li\x00nux" }},
+		{"device fingerprint", "device.fingerprint", func(b map[string]any) { device(b)["fingerprint"] = "\x00sha256:nul-same" }},
+		{"machine binding", "machine_binding", func(b map[string]any) { b["machine_binding"] = "hmac\x00" }},
+		{"custody platform", "", func(b map[string]any) { b["custody"].(map[string]string)["platform"] = "linux\x00/amd64" }},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newKeyHolder(t, base)
+			h.send("/v1/enroll", "", keyEnrollBody(idToken, "sha256:nonce")) // the nonce challenge
+			before, err := app.store.Devices().ListByUser(ctx, kim.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			head, err := app.store.Outbox().Head(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := keyEnrollBody(idToken, "sha256:nul-same")
+			tc.spoil(body)
+			proof := h.proof("/v1/enroll", "", 0)
+			code, _, out := h.post("/v1/enroll", proof, body)
+			if tc.field == "" {
+				if code != http.StatusOK {
+					t.Fatalf("enroll = %d %v, want 200", code, out)
+				}
+				if c := storedCustody(deviceRow(t, app, out["device_id"].(string)).Custody); c == nil || c.Platform != "linux\x00/amd64" {
+					t.Errorf("stored custody = %+v, want the platform as sent", c)
+				}
+				return
+			}
+			if want := fmt.Sprintf(enrollNULMsg, tc.field); code != http.StatusBadRequest || out["error"] != want {
+				t.Fatalf("enroll = %d %v, want 400 with %q", code, out, want)
+			}
+			if after, err := app.store.Devices().ListByUser(ctx, kim.ID); err != nil || !reflect.DeepEqual(after, before) {
+				t.Fatalf("devices after the refusal = %+v (%v), want %+v", after, err, before)
+			}
+			if now, _ := app.store.Outbox().Head(ctx); now != head {
+				t.Fatalf("the refused enrollment wrote an outbox row: head %q, was %q", now, head)
+			}
+			// The refusal came before the proof check, so the proof is
+			// unspent and enrolls the same body without the character.
+			code, _, out = h.post("/v1/enroll", proof, keyEnrollBody(idToken, fmt.Sprintf("sha256:nul-clean-%d", i)))
+			if code != http.StatusOK {
+				t.Fatalf("enroll with the same proof and no NUL = %d %v, want 200", code, out)
+			}
+		})
 	}
 }
 

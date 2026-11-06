@@ -70,22 +70,45 @@ func TestEnrollPrintsWhatTheServiceStreams(t *testing.T) {
 // TestKeygenOutput pins the keygen contract five parsers depend on: the
 // exact "Public key: <base64>" line, the registration lines, and a non-zero
 // failure carrying the service's sentence when a key exists and --force was
-// not given.
+// not given. The enroll line names --server unless a managed configuration
+// names the server, which the service then enrolls at.
 func TestKeygenOutput(t *testing.T) {
-	svc := newFakeService(t)
-	var out bytes.Buffer
-	if err := Keygen(context.Background(), NewServiceClient(), "ci-bot", false, &out); err != nil {
-		t.Fatal(err)
-	}
-	want := "NHI key generated (the Straza background service holds the private half).\n" +
+	const head = "NHI key generated (the Straza background service holds the private half).\n" +
 		"Public key: cHVibGljLWtleQ==\n\n" +
 		"An administrator registers it with:\n  strazactl users nhi-key set ci-bot cHVibGljLWtleQ==\n" +
 		"(or: PUT /v1/admin/users/{id}/nhi-key {\"public_key\":\"cHVibGljLWtleQ==\"})\n" +
-		"Then enroll headless:\n  straza enroll --server <strazad-url> --headless --user ci-bot\n"
-	if out.String() != want {
-		t.Errorf("keygen output =\n%q\nwant\n%q", out.String(), want)
+		"Then enroll headless:\n"
+	cases := []struct {
+		name    string
+		managed string // the managed config.yaml, or "" for no managed layout
+		enroll  string
+	}{
+		{"no managed layout", "", "  straza enroll --server <strazad-url> --headless --user ci-bot\n"},
+		{"a managed config that names the server", "serverUrl: https://straza.example.com\n", "  straza enroll --headless --user ci-bot\n"},
+		{"a managed config that names no server", "trace: journal\n", "  straza enroll --server <strazad-url> --headless --user ci-bot\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sys := t.TempDir()
+			t.Setenv("STRAZA_SYSTEM", sys)
+			if tc.managed != "" {
+				if err := os.WriteFile(filepath.Join(sys, "config.yaml"), []byte(tc.managed), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			newFakeService(t)
+			var out bytes.Buffer
+			if err := Keygen(context.Background(), NewServiceClient(), "ci-bot", false, &out); err != nil {
+				t.Fatal(err)
+			}
+			if want := head + tc.enroll; out.String() != want {
+				t.Errorf("keygen output =\n%q\nwant\n%q", out.String(), want)
+			}
+		})
 	}
 
+	t.Setenv("STRAZA_SYSTEM", t.TempDir())
+	svc := newFakeService(t)
 	svc.keyHeld = true
 	err := Keygen(context.Background(), NewServiceClient(), "ci-bot", false, &bytes.Buffer{})
 	if err == nil || err.Error() != "An agent key already exists for you. Pass --force to replace it." {

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { PolicyProof } from "./policy-proof";
 import { ApiError, listAudit } from "@/lib/api";
+import { take } from "@/lib/handoff";
 import { AUDIT_THIS_POLICY, REEVALUATE, SUBJECT_DECISIONS, WATCHING, WATCH_STOPPED, firstDecision, liveSince, liveSinceNoVersion } from "@/lib/policy-words";
+import { navigate } from "@/lib/router";
 import { readFailed } from "@/lib/say";
 
 vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), listAudit: vi.fn() }));
@@ -55,6 +57,17 @@ describe("the proof banner", () => {
     expect(watch()).toBe("hit");
     expect(line()).toContain(firstDecision("11:43 UTC", "joe", "demo-tools / write-file", "needs approval"));
     expect(screen.getByRole("button", { name: AUDIT_THIS_POLICY })).toBeTruthy();
+  });
+
+  it("opens Audit on the search for this policy's decisions", async () => {
+    vi.mocked(listAudit).mockResolvedValue([record("2026-09-13T11:43:05Z")]);
+    mount(SNAPSHOT);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    // The router with no guard leaves at once, and the hand-off rides the move.
+    vi.mocked(navigate).mockImplementationOnce((_key, _rest, _replace, before) => before?.());
+    fireEvent.click(screen.getByRole("button", { name: AUDIT_THIS_POLICY }));
+    expect(vi.mocked(navigate)).toHaveBeenCalledWith("audit", [], false, expect.any(Function));
+    expect(take("audit")).toEqual({ q: '"setName":"' + NAME + '"' });
   });
 
   it("ignores a record older than the publish", async () => {

@@ -195,6 +195,36 @@ describe("the requests queue", () => {
     expect(WAITING_LINE[kind as "hold" | "ticket"]).toBe(does);
   });
 
+  // The chip's tooltip says where the call runs: an MCP call where its lane
+  // says, any other call on the agent's machine, as the request's own line does.
+  it.each([
+    ["an MCP call through the gateway", "get-sum for joe-java-developer-agent", "Runs through the MCP gateway."],
+    ["a command the hook held", "printf lf-q4-x for joe-java-developer-agent", "Runs on the agent's machine."],
+    ["a command an approval_request ticket asked for through the gateway", "make release for joe-java-developer-agent", "Runs on the agent's machine."],
+  ])("says on the chip where %s runs", async (_what, name, runs) => {
+    const cmdTicket: ApprovalRow = { ...ticket, id: "apr_cmd", summary: "shell.exec: make release" };
+    vi.mocked(listApprovals).mockResolvedValue({ approvals: [...waitingRows(), cmdTicket] });
+    vi.mocked(pageApprovals).mockResolvedValue({ items: [...waitingRows(), cmdTicket, ...decidedRows()], next_cursor: "" });
+    mount();
+    await screen.findByRole("button", { name: "Open " + name });
+    const chip = row(name).querySelector("[data-where]") as HTMLElement;
+    await userEvent.hover(chip);
+    await waitFor(() => {
+      const id = chip.getAttribute("aria-describedby");
+      expect(id).toBeTruthy();
+      expect(document.getElementById(id as string)?.textContent).toBe(runs);
+    });
+  });
+
+  it.each([
+    ["a hold on the gateway", "get-sum for joe-java-developer-agent", "the agent is waiting now"],
+    ["a hold the hook raised", "printf lf-q4-x for joe-java-developer-agent", "runs on the agent's retry, after a yes"],
+  ])("says under %s what the agent does, by the lane", async (_what, name, does) => {
+    mount();
+    await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    expect((row(name).querySelector("[data-state-line]") as HTMLElement).textContent).toBe(does);
+  });
+
   it("drains a hold's bar with the clock, hides it from assistive technology and draws none for a standing approval", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: false });
     build();

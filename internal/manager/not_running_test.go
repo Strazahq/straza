@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// TestNotRunningSentences pins the refusals an agent reads after the
-// gateway's "upstream call failed: " and an operator reads as a health
+// TestNotRunningSentences pins the refusals an agent reads inside the
+// gateway's sentence of a failed call and an operator reads as a health
 // reason: each names the server and the next step in plain words, carries
 // no package name, and still matches its sentinel, or keeps its cause, for
 // errors.Is and errors.Unwrap.

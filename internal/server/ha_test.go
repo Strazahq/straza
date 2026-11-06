@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -255,7 +256,8 @@ spec:
 		return strings.Contains(string(raw), "from-one")
 	})
 
-	// --- 4. Binding deleted via B empties A's catalog (converge:
+	// --- 4. Binding deleted via B leaves A's catalog with only the built-in
+	// whoami tool, which every session lists (converge:
 	// straza.apps.updated → bindings reload).
 	var bindings []map[string]any
 	if code := adminReq(t, "GET", baseB+"/v1/admin/bindings", adminBearer, nil, &bindings); code != http.StatusOK || len(bindings) == 0 {
@@ -266,9 +268,9 @@ spec:
 			t.Fatalf("binding delete via B = %d", code)
 		}
 	}
-	waitForHA(t, "binding deleted via B empties A's catalog", func() bool {
+	waitForHA(t, "binding deleted via B leaves only whoami in A's catalog", func() bool {
 		_, listA, _ := cl.call(baseA, "tools/list", nil)
-		return len(toolNamesOf(t, listA)) == 0
+		return slices.Equal(toolNamesOf(t, listA), []string{"straza__whoami"})
 	})
 
 	// --- 5. The kill switch crosses pods: revoke the A-side session via B.

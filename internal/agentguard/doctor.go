@@ -5,15 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/user"
-	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/strazahq/straza/internal/agentguard/localapi"
-	"github.com/strazahq/straza/internal/agentguard/spool"
 	"github.com/strazahq/straza/internal/version"
 )
 
@@ -50,7 +45,7 @@ func Doctor(ctx context.Context, store *Store, svc *localapi.Client) []Check {
 	e := st.Enrollment
 	if e == nil {
 		out = append(out, Check{"enrollment", checkFail, "this machine isn't enrolled for you yet",
-			"run `straza enroll --server <strazad url>` and sign in with your work account. The local checks below still ran; the server, session and killswitch checks resume once enrolled"})
+			NotEnrolledSteps() + " The local checks below still ran; the server, session and killswitch checks resume once enrolled"})
 		return append(out, localChecks(store, nil)...)
 	}
 	out = append(out, enrollmentCheck(*e, time.Now()))
@@ -70,7 +65,7 @@ func Doctor(ctx context.Context, store *Store, svc *localapi.Client) []Check {
 	// localChecks; this one needs the server and the keys the managed
 	// install pinned, so it runs only enrolled and only on a managed box.
 	if cfg, err := store.LoadConfig(); err == nil {
-		if c := managedContentCheck(ctx, cfg); c != nil {
+		if c := managedContentCheck(ctx, cfg, st.Sessions); c != nil {
 			out = append(out, *c)
 		}
 	}
@@ -80,7 +75,7 @@ func Doctor(ctx context.Context, store *Store, svc *localapi.Client) []Check {
 
 	// The audit spool lives in the service, which uploads it.
 	out = append(out, spoolCheck(st.Spool, time.Now()))
-	if c := droppedAuditCheck(st.Spool, droppedMarkerPath()); c != nil {
+	if c := droppedAuditCheck(st.Spool); c != nil {
 		out = append(out, *c)
 	}
 
@@ -134,14 +129,64 @@ func enrollmentCheck(e localapi.Enrollment, now time.Time) Check {
 	detail := fmt.Sprintf("%s at %s, key %s, straza %s", who, e.ServerURL, shortThumb(e.KeyThumbprint), version.Version)
 	switch {
 	case e.MachineChanged:
-		return Check{"enrollment", checkFail, detail + ": this machine's identity changed since it was enrolled, so Straza stopped using its key",
-			"run `straza enroll` to enroll it again"}
+		hint := PersonChangedSteps(e)
+		if e.Kind == localapi.KindAgent {
+			hint = AgentChangedSteps(e)
+		}
+		return Check{"enrollment", checkFail, detail + ": this machine's identity changed since it was enrolled, so Straza stopped using its key", hint}
 	case now.Before(e.WaitUntil):
 		return Check{"enrollment", checkWarn,
 			detail + ": Straza is waiting for the server to confirm this machine's last check-in until " + e.WaitUntil.Local().Format(time.RFC3339),
 			"new sessions fail until then. Start the session again after that time"}
 	}
 	return Check{"enrollment", checkOK, detail, ""}
+}
+
+// NotEnrolledSteps names how a person and how an AI agent enroll this
+// machine, one sentence each. The service reports an agent key that keygen
+// made as no enrollment too, so straza doctor and straza status cannot tell
+// which one applies. The enroll commands leave out --server when the managed
+// configuration names the server, because the service enrolls there then.
+func NotEnrolledSteps() string {
+	server := enrollServerFlag("")
+	return "A person runs `straza enroll" + server + "` and signs in with their work account. " +
+		"An AI agent runs `straza enroll" + server + " --headless` with its registered key or the client secret IT installed for it."
+}
+
+// PersonChangedSteps says how the person of e enrolls this machine again
+// after its identity changed, at the server e names. The enroll command
+// leaves out --server when the managed configuration names the server.
+func PersonChangedSteps(e localapi.Enrollment) string {
+	return "Run `straza enroll" + enrollServerFlag(e.ServerURL) + "` to enroll it again."
+}
+
+// AgentChangedSteps says how the AI agent of e enrolls again after this
+// machine's identity changed. The service's status does not say which lane
+// the agent signs in on, so it names both: a new key from keygen on the key
+// lane, because the service does not reuse a key whose machine changed, and
+// a headless enrollment alone on the client-secret lane.
+func AgentChangedSteps(e localapi.Enrollment) string {
+	user := e.Username
+	if user == "" {
+		user = "<agent username>"
+	}
+	server := enrollServerFlag(e.ServerURL)
+	return fmt.Sprintf("An agent with a key from `straza keygen` runs `straza keygen --force --user %[1]s`, "+
+		"has an admin register the new public key, and then runs `straza enroll%[2]s --headless`. "+
+		"An agent that signs in with a client secret runs `straza enroll%[2]s --headless --user %[1]s`.", user, server)
+}
+
+// enrollServerFlag is the --server flag of an enroll command these steps
+// name: none when the managed configuration names the server, else server,
+// or a placeholder when server is empty.
+func enrollServerFlag(server string) string {
+	switch {
+	case managedServer() != "":
+		return ""
+	case server == "":
+		return " --server <strazad url>"
+	}
+	return " --server " + server
 }
 
 // shortThumb shortens a key thumbprint for display.
@@ -380,32 +425,18 @@ func spoolCheck(sp localapi.SpoolStatus, now time.Time) Check {
 // unrecoverable. No drop = no line at all: loss is the exception, and a
 // routine "nothing was lost" row would train operators to skim past the day
 // it flips. A drop is a FAIL, because gone audit evidence on a governance box
-// is exactly what doctor's exit-1 gate exists for, and it stays red until an
-// administrator removes marker, the service's record of the drop.
-func droppedAuditCheck(sp localapi.SpoolStatus, marker string) *Check {
+// is exactly what doctor's exit-1 gate exists for. It stays red until the
+// service's next upload reported the loss to strazad.
+func droppedAuditCheck(sp localapi.SpoolStatus) *Check {
 	if sp.Dropped == 0 {
 		return nil
 	}
 	return &Check{"audit-dropped", checkFail,
 		fmt.Sprintf("audit evidence DROPPED, unrecoverable: %d record(s) never reached the server", sp.Dropped),
-		"the service was offline long enough for the spool cap to evict its oldest backlog, or single records outgrew the upload chunk. " +
+		"uploads failed long enough for the spool cap to evict the oldest unsent records, single records outgrew the upload chunk, " +
+			"or the service refused calls because this account had too many running at once. " +
 			"Investigate the gap with your Straza administrator (a failing server check above is the usual cause). " +
-			"After looking into it, an administrator removes " + marker + ", the Straza background service's record of the drop, to acknowledge it. This check stays red until then"}
-}
-
-// droppedMarkerPath is the caller's audit-drop marker in the state directory
-// of the service this client talks to. The caller's folder there is named by
-// the uid, and on Windows by the account's SID, which os/user gives as Uid.
-func droppedMarkerPath() string {
-	_, stateDir, _ := localapi.Paths(serviceHome())
-	uid := strconv.Itoa(os.Getuid())
-	if runtime.GOOS == "windows" {
-		uid = "<your account's SID>"
-		if u, err := user.Current(); err == nil {
-			uid = u.Uid
-		}
-	}
-	return filepath.Join(stateDir, "u", uid, spool.DroppedMarkerName)
+			"The Straza background service reports this loss to strazad with its next upload, and this check clears once strazad took it"}
 }
 
 // denyHints is the hint catalog: every stable deny/failure reason straza

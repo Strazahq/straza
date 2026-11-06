@@ -142,7 +142,7 @@ func TestAdminPlaneRefusesAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	coder := seedAgent(t, app, "coder", "kim", AdminRole)
-	coderSession, coderSessionID := sessionAs(t, base, "coder", "claude-code")
+	coderSession, coderSessionID := agentCheckin(t, app, base, "coder")
 	pending, approved := seedApproval(t, app, "u-other", []string{"dev"}), seedApproval(t, app, "u-other", []string{"dev"})
 	kimConsole, _ := checkinTokenAs(t, base, "console")
 	if code := adminReq(t, http.MethodPost, base+"/v1/admin/approvals/"+approved.ID+"/approve", kimConsole, nil, nil); code != http.StatusOK {
@@ -241,7 +241,7 @@ func TestAdminSessionReadsUserState(t *testing.T) {
 		{http.MethodPost, "/v1/admin/approvals/no-such-request/approve", http.StatusNotFound},
 		{http.MethodGet, "/v1/self", http.StatusOK},
 	}
-	const disabled = "user is disabled. Contact your administrator"
+	const disabled = disabledUserMsg
 	cases := []struct {
 		name         string
 		arm          func(u store.User, device, session string)
@@ -256,7 +256,7 @@ func TestAdminSessionReadsUserState(t *testing.T) {
 			}
 		}, http.StatusForbidden, disabled, "user is disabled"},
 		{"a user deleted with the session row still active", func(u store.User, _, _ string) {
-			if _, err := app.store.Users().SoftDelete(ctx, u.ID); err != nil {
+			if _, err := app.store.Users().SoftDelete(ctx, u.ID, nil); err != nil {
 				t.Fatal(err)
 			}
 		}, http.StatusForbidden, disabled, "user is disabled"},
@@ -370,6 +370,8 @@ func (f *faultStore) Outbox() store.OutboxRepo { return faultOutbox{f.Store.Outb
 // each session row and its two outbox records, counts in user.killed only
 // the sessions whose row it marked revoked, and leaves no session the admin
 // API admits. A revoked count of -1 means no user.killed record is stored.
+// The row and its revocation event share one line that names how far the
+// block reached.
 func TestRevokeUserCountsOnlyWrittenSessions(t *testing.T) {
 	t.Parallel()
 	log, buf := captureLogger()
@@ -378,8 +380,9 @@ func TestRevokeUserCountsOnlyWrittenSessions(t *testing.T) {
 	const (
 		sessionLine = "user revoke: the session could not be marked revoked, so it stays active in the store and the denylist refuses it"
 		listLine    = "user revoke: the user's sessions could not be listed, so none was marked revoked and the denylist refuses them"
-		recordLine  = "user revoke: the revocation record could not be written, so the block holds on this replica until it restarts"
+		recordLine  = "user revoke: the revocation record could not be written, so the event alone blocks the user on every replica, and with no record the console shows no lock and an identity manager that enables the user again lifts the block"
 		eventLine   = "user revoke: the revocation event could not be written, so the other replicas miss the block until they restart"
+		bothLine    = "user revoke: neither the revocation record nor the revocation event could be written, so only this replica blocks the user, and only until it restarts"
 		killedLine  = "user revoke: the user.killed record could not be written, so the audit chain holds no record of this revoke"
 	)
 	cases := []struct {
@@ -394,6 +397,10 @@ func TestRevokeUserCountsOnlyWrittenSessions(t *testing.T) {
 		{"the session list fails", func([]string) { fs.arm("session-list", pgDown) }, 1, 0, listLine, 1},
 		{"the revocation record write fails", func([]string) { fs.arm("revocations", pgDown) }, 1, 1, recordLine, 0},
 		{"the revocation event write fails", func([]string) { fs.arm("outbox:straza.revocation.user", pgDown) }, 1, 1, eventLine, 0},
+		{"the revocation record and event writes fail", func([]string) {
+			fs.arm("revocations", pgDown)
+			fs.arm("outbox:straza.revocation.user", pgDown)
+		}, 1, 1, bothLine, 0},
 		{"the user.killed write fails", func([]string) { fs.arm("outbox:straza.audit.identity", pgDown) }, 1, -1, killedLine, 0},
 	}
 	for i, tc := range cases {
@@ -407,7 +414,7 @@ func TestRevokeUserCountsOnlyWrittenSessions(t *testing.T) {
 				ids = append(ids, id)
 			}
 			tc.arm(ids)
-			app.revokeUserCtx(ctx, u.ID, "test", store.RevocationOriginAdmin)
+			_, _ = app.revokeUserCtx(ctx, u.ID, "test", store.RevocationOriginAdmin)
 			fs.disarm()
 			var killed []map[string]any
 			for _, d := range outboxDataFor(t, app, "straza.audit.identity") {

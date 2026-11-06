@@ -408,6 +408,32 @@ func TestCredRefreshAdoptsIdentity(t *testing.T) {
 	}
 }
 
+// TestCredRefreshAdoptsStartText pins that a refresh adopts the start text
+// the server wrote at that check-in, so a window that starts later reads
+// the text of the policy as it is now, and that a refresh from a server
+// that sends none keeps the text the session holds.
+func TestCredRefreshAdoptsStartText(t *testing.T) {
+	r := newCredRig(t)
+	r.enroll(alice)
+	ses, err := r.start(alice, "w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ses.StartText == nil || *ses.StartText != fakeStartText {
+		t.Fatalf("start: start text %v, want %q", ses.StartText, fakeStartText)
+	}
+	const newer = "Straza governs this test session, and whoami is now off."
+	r.srv.with(func() { r.srv.startText = newer })
+	r.renewNow(t, ses)
+	if again, err := r.start(alice, "w1"); err != nil || !again.Reused || again.StartText == nil || *again.StartText != newer {
+		t.Fatalf("a window after the refresh: %+v, %v, want the newer start text", again, err)
+	}
+	r.srv.with(func() { r.srv.noStartText = true })
+	if kept := r.renewNow(t, ses); kept.StartText == nil || *kept.StartText != newer {
+		t.Fatalf("a refresh with no start text changed it to %v", kept.StartText)
+	}
+}
+
 // TestCredAttestation pins what the service measures: its own binary
 // always, and with the managed layout the managed config and the managed
 // hook wiring of the harness named, which for codex is requirements.toml.

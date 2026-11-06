@@ -339,7 +339,7 @@ func TestOnLoginFailed(t *testing.T) {
 			var fires int
 			var gotUser string
 			var gotReq *http.Request
-			f.issuer.OnLoginFailed = func(username string, r *http.Request) {
+			f.issuer.OnLoginFailed = func(username, _ string, r *http.Request) {
 				fires++
 				gotUser = username
 				gotReq = r
@@ -398,7 +398,7 @@ func TestLoginOnly(t *testing.T) {
 			}
 			var fires int
 			var gotUser string
-			f.issuer.OnLoginFailed = func(username string, _ *http.Request) {
+			f.issuer.OnLoginFailed = func(username, _ string, _ *http.Request) {
 				fires++
 				gotUser = username
 			}
@@ -682,7 +682,7 @@ func TestDeviceAuthorizationClientID(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newIssuerFixture(t)
 			var hooks int
-			f.issuer.OnLoginFailed = func(string, *http.Request) { hooks++ }
+			f.issuer.OnLoginFailed = func(string, string, *http.Request) { hooks++ }
 			f.issuer.OnNHIGrantFailed = func(string, string, string, *http.Request) { hooks++ }
 			code, body := f.postForm(t, "/oidc/device_authorization", url.Values{"client_id": tc.clientID})
 			if tc.wantOK {

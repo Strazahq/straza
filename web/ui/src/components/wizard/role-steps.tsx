@@ -196,7 +196,11 @@ export function NameStep({ draft, roles, apps, read, toolsOf, problem, fromServe
   const check = nameCheck(stored, roles, owned && draft.server ? rolePrefix(draft.server) : "");
   const exact = check && check.exact;
   const hue = check ? (check.level === "error" ? "text-danger" : check.level === "warn" ? "text-warn" : "text-muted-foreground") : "";
-  const preview = previewParts(draft.server ? roleNameOf(draft.server, draft.name) : "");
+  // The preview shows the stored name as it is typed: an application
+  // role's from its server's prefix on, any other role's once it has a name
+  // that no server's prefix claims.
+  const preview = previewParts(draft.kind, owned ? (draft.server ? roleNameOf(draft.server, draft.name) : "") : stored);
+  const previewShown = owned ? !!draft.server : !!stored && !owner;
   return (
     <div className="flex max-w-[900px] flex-col gap-4">
       {fromServer && owned && draft.server === fromServer && (
@@ -245,9 +249,9 @@ export function NameStep({ draft, roles, apps, read, toolsOf, problem, fromServe
         ) : stored ? (
           <p className="m-0 text-[13px] text-ok" data-name-check="free">{NAME_FREE}</p>
         ) : null}
-        {owned && draft.server && (
+        {previewShown && (
           <p className={cn(HINT, "m-0")} data-name-preview>
-            {preview.lead}<span className={CODE}>{preview.stored}</span>{preview.mid}<span className={CODE}>{preview.ar}</span>{preview.end}
+            {preview.lead}<span className={CODE}>{preview.stored}</span>{preview.mid}<span className={CODE}>{preview.iga}</span>{preview.end}
           </p>
         )}
       </Field>

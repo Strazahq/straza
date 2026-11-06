@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/strazahq/straza/internal/authn"
@@ -116,5 +117,27 @@ func TestPendingReasonsNameApprovalsPage(t *testing.T) {
 	want = "Straza: approval ticket " + id + " is pending. A person decides within 24 hours, on " + surfaces + ". Wait for the decision with the straza__approval_await tool (ref " + id + "), or retry this exact call after approval; it fails if denied or expired."
 	if dec.Reason != want {
 		t.Errorf("ticket reason (await visible)\n got %q\nwant %q", dec.Reason, want)
+	}
+}
+
+// TestOutageReasonsBoundTheRetry pins the server's refusals for a fault that
+// passes on its own: each asks for one more try, never an open retry, so an
+// agent that follows its start text cannot loop on them.
+func TestOutageReasonsBoundTheRetry(t *testing.T) {
+	for name, reason := range map[string]string{
+		"approval store down":     approvalStoreDownReason,
+		"approval decider unread": approvalDeciderUnreadReason,
+		"audit queue blocked":     auditQueueFullMsg,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(reason, "Try the call once more in a minute. If it is denied again, tell the user") {
+				t.Errorf("%q does not bound the retry to one more try", reason)
+			}
+			for _, open := range []string{"in a moment", "Retry", "Try again", "keeps happening"} {
+				if strings.Contains(reason, open) {
+					t.Errorf("%q still asks for an open retry with %q", reason, open)
+				}
+			}
+		})
 	}
 }

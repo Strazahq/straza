@@ -43,12 +43,14 @@ type cachedSubject struct {
 
 // sessionFacts is what check-in records beside a session's subject, which
 // policy.Subject does not carry: whether the user is a person by userKind,
-// and the name of the harness the session checked in with. The drafting
-// tools read both (native_drafts.go). The zero value reads as not a person,
-// the stricter reading.
+// the name of the harness the session checked in with, and the knowledge
+// packs check-in delivered. The drafting tools read the first two
+// (native_drafts.go) and whoami reads the person and the packs. The zero
+// value reads as not a person, the stricter reading.
 type sessionFacts struct {
 	person  bool
 	harness string
+	packs   []whoamiPack
 }
 
 func newSubjectCache() *subjectCache {

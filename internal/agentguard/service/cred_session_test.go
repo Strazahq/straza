@@ -56,6 +56,144 @@ func TestCredRefusals(t *testing.T) {
 	}
 }
 
+// TestCredNotEnrolledNamesTheAgentLane pins the next step a session start
+// names before any enrollment: both lanes for an OS account that holds
+// nothing, and the headless enrollment for one that holds an agent's key
+// from keygen, also when keygen --force replaced an enrolled agent's key.
+// Each enroll command carries --server unless the managed configuration
+// names the server, which the service then enrolls at.
+func TestCredNotEnrolledNamesTheAgentLane(t *testing.T) {
+	sam := Caller{UID: testUID(65532)}
+	keygen := func(force bool) func(*testing.T, *credRig) {
+		return func(t *testing.T, r *credRig) {
+			if _, err := r.s.Keygen(context.Background(), sam, localapi.KeygenRequest{Username: "sam", Force: force}); err != nil {
+				t.Fatalf("keygen: %v", err)
+			}
+		}
+	}
+	const (
+		nothing = "This machine isn't enrolled for you yet. A person runs `straza enroll --server <strazad url>` and signs in with their work account. " +
+			"An AI agent runs `straza enroll --server <strazad url> --headless` with its registered key or the client secret IT installed for it."
+		nothingManaged = "This machine isn't enrolled for you yet. A person runs `straza enroll` and signs in with their work account. " +
+			"An AI agent runs `straza enroll --headless` with its registered key or the client secret IT installed for it."
+		key = "This machine isn't enrolled for you yet. This OS account holds an AI agent's key from `straza keygen`. " +
+			"Once an admin has registered its public key, run `straza enroll --server <strazad url> --headless`."
+		keyManaged = "This machine isn't enrolled for you yet. This OS account holds an AI agent's key from `straza keygen`. " +
+			"Once an admin has registered its public key, run `straza enroll --headless`."
+	)
+	cases := []struct {
+		name    string
+		managed bool
+		setup   func(*testing.T, *credRig)
+		want    string
+	}{
+		{"nothing held", false, func(*testing.T, *credRig) {}, nothing},
+		{"nothing held, managed", true, func(*testing.T, *credRig) {}, nothingManaged},
+		{"an agent key from keygen", false, keygen(false), key},
+		{"an agent key from keygen, managed", true, keygen(false), keyManaged},
+		{"keygen --force over an enrolled agent", false, func(t *testing.T, r *credRig) {
+			keygen(false)(t, r)
+			if _, err := r.s.Enroll(context.Background(), sam, localapi.EnrollRequest{ServerURL: r.srv.serverURL(), Headless: true}, func(localapi.EnrollEvent) {}); err != nil {
+				t.Fatalf("headless enroll: %v", err)
+			}
+			keygen(true)(t, r)
+		}, key},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newCredRig(t)
+			tc.setup(t, r)
+			if tc.managed {
+				manageServer(t, "https://straza.example")
+			}
+			var refused *Refused
+			if _, err := r.start(sam, "w1"); !errors.As(err, &refused) || refused.Sentence != tc.want || refused.Status != http.StatusForbidden {
+				t.Fatalf("start = %v, want 403 %q", err, tc.want)
+			}
+			if st := r.s.Status(sam); st.Enrollment != nil {
+				t.Fatalf("status reports an enrollment: %+v", st.Enrollment)
+			}
+		})
+	}
+}
+
+// manageServer writes a managed configuration that names server into the
+// managed root the rig set.
+func manageServer(t *testing.T, server string) {
+	t.Helper()
+	path := filepath.Join(os.Getenv("STRAZA_SYSTEM"), "config.yaml")
+	if err := os.WriteFile(path, []byte("serverUrl: "+server+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// personChangedFor is a person's machine-changed refusal on a machine whose
+// managed configuration names no server, after enrolling at server.
+func personChangedFor(server string) string {
+	return "This machine's identity changed since it was enrolled, so Straza stopped using its key. Run `straza enroll --server " + server + "` to enroll it again."
+}
+
+// TestCredMachineChangedNamesTheLane pins the refusal after the machine
+// identity changed: a person enrolls again, an agent on the key
+// lane makes a new key, and an agent on the client-secret lane, or with a
+// record from before lanes, enrolls headless again. The enroll command names
+// the enrolled server unless the managed configuration names one.
+func TestCredMachineChangedNamesTheLane(t *testing.T) {
+	const head = "This machine's identity changed since it was enrolled, so Straza stopped using its key. "
+	cases := []struct {
+		name    string
+		managed bool
+		rec     enrollment
+		want    string
+	}{
+		{"a person", false, enrollment{ServerURL: "https://s.example", Kind: localapi.KindPerson, Username: "alice"}, personChangedFor("https://s.example")},
+		{"a person, managed", true, enrollment{ServerURL: "https://s.example", Kind: localapi.KindPerson, Username: "alice"},
+			head + "Run `straza enroll` to enroll it again."},
+		{"an agent on the key lane", false, enrollment{ServerURL: "https://s.example", Kind: localapi.KindAgent, Lane: laneKey, Username: "sam"},
+			head + "Run `straza keygen --force --user sam`, have an admin register the new public key it prints, and then run `straza enroll --server https://s.example --headless`."},
+		{"an agent on the key lane, managed", true, enrollment{ServerURL: "https://s.example", Kind: localapi.KindAgent, Lane: laneKey, Username: "sam"},
+			head + "Run `straza keygen --force --user sam`, have an admin register the new public key it prints, and then run `straza enroll --headless`."},
+		{"an agent on the client-secret lane", false, enrollment{ServerURL: "https://s.example", Kind: localapi.KindAgent, Lane: laneSecret, Username: "sam"},
+			head + "Run `straza enroll --server https://s.example --headless --user sam` to enroll the agent again."},
+		{"an agent on the client-secret lane, managed", true, enrollment{ServerURL: "https://s.example", Kind: localapi.KindAgent, Lane: laneSecret, Username: "sam"},
+			head + "Run `straza enroll --headless --user sam` to enroll the agent again."},
+		{"an agent record with no lane", false, enrollment{ServerURL: "https://s.example", Kind: localapi.KindAgent, Username: "sam"},
+			head + "Run `straza enroll --server https://s.example --headless --user sam` to enroll the agent again."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("STRAZA_SYSTEM", t.TempDir())
+			if tc.managed {
+				manageServer(t, "https://s.example")
+			}
+			if got := changedSentence(tc.rec); got != tc.want {
+				t.Errorf("changedSentence =\n%q\nwant\n%q", got, tc.want)
+			}
+		})
+	}
+
+	// The reviewer's probe end to end: an agent that enrolled on the key
+	// lane, then saw its machine identity change.
+	r := newCredRig(t)
+	sam := Caller{UID: testUID(65532)}
+	if _, err := r.s.Keygen(context.Background(), sam, localapi.KeygenRequest{Username: "sam"}); err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	if _, err := r.s.Enroll(context.Background(), sam, localapi.EnrollRequest{ServerURL: r.srv.serverURL(), Headless: true}, func(localapi.EnrollEvent) {}); err != nil {
+		t.Fatalf("headless enroll: %v", err)
+	}
+	if err := os.WriteFile(r.machine, []byte("machine-two\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.restart()
+	want := head + "Run `straza keygen --force --user sam`, have an admin register the new public key it prints, and then run `straza enroll --server " +
+		r.srv.serverURL() + " --headless`."
+	var refused *Refused
+	if _, err := r.start(sam, "w1"); !errors.As(err, &refused) || refused.Sentence != want || refused.Status != http.StatusForbidden {
+		t.Fatalf("start after the machine changed = %v, want 403 %q", err, want)
+	}
+}
+
 // TestCredEnrollPerson pins what a person's enrollment streams and keeps.
 func TestCredEnrollPerson(t *testing.T) {
 	r := newCredRig(t)

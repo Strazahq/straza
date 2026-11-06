@@ -8,8 +8,12 @@ import {
   APPROVE,
   CARD_PARAMS,
   CLOSE,
+  DECIDE_BY_HELP_HOLD,
+  DECIDE_BY_HELP_HOOK,
+  DECIDE_BY_HELP_TICKET,
   DENY,
   DETAILS,
+  FACT_DECIDE_BY,
   FACT_WHO,
   GRANT_UNKNOWN,
   IF_APPROVE,
@@ -29,6 +33,7 @@ import {
   UNVERIFIED,
   WINDOW_CLOSED,
   approveDoes,
+  approvedToast,
   decideBody,
   decideHelp,
   decidedWhere,
@@ -227,6 +232,26 @@ describe("the request dialog", () => {
     expect(screen.queryByText(SHOW_JSON)).toBe(null);
   });
 
+  it.each([
+    ["a gateway hold says the agent waits on the line", () => hold, "The agent is waiting right now for your answer."],
+    ["a hook hold says the agent was told to retry", () => onHook, "The agent was told to retry the call after your answer."],
+    ["a hook hold on an MCP call says the same", () => ({ ...hold, lane: "hook" }), "The agent was told to retry the call after your answer."],
+    ["a ticket says the agent moved on, whatever the lane", () => ({ ...ticket, lane: "hook" }), "The agent moved on. It runs this only after a yes."],
+  ])("words the strip by the lane: %s", (_what, pick, sentence) => {
+    mount(pick());
+    expect(one("[data-kind-says]").textContent).toBe(sentence);
+  });
+
+  it.each([
+    ["an MCP call through the gateway", () => hold, "through the MCP gateway"],
+    ["an MCP call the hook held", () => ({ ...hold, lane: "hook" }), "on its own machine"],
+    ["a command the hook held", () => onHook, "on its own machine"],
+    ["a command an approval_request ticket asked for through the gateway", () => ({ ...ticket, lane: "gateway", summary: "shell.exec: make release" }), "on its own machine"],
+  ])("says where %s runs", (_what, pick, where) => {
+    mount(pick(), false);
+    expect(one("[data-meta]").textContent!.split(" · ")[0]).toBe(where);
+  });
+
   it("says in one line where the call runs, when it was asked and who sponsors the agent", () => {
     const view = mount(hold);
     expect(one("[data-meta]").textContent).toBe("through the MCP gateway · asked 28 s ago · sponsored by you");
@@ -339,6 +364,8 @@ describe("what a yes and a no do", () => {
   it.each([
     ["a hold releases the one call", row({ bindingScope: "call" }), "1 hour", "The call runs now, once."],
     ["a hold says the same whatever the rule binds", row({ bindingScope: "tool_identity" }), null, "The call runs now, once."],
+    ["a hold the hook raised runs on the agent's retry", row({ bindingScope: "call", ...shell }), null, "The call runs once, when the agent retries it soon after your yes."],
+    ["a hook hold on an MCP call runs on the retry too", row({ lane: "hook" }), null, "The call runs once, when the agent retries it soon after your yes."],
     ["a ticket bound to the call covers that exact call", row({ class: "ticket", bindingScope: "call" }), "2 hours", "Its next try of this exact call runs, once, within 2 hours."],
     ["a ticket bound to a command covers that exact command", row({ class: "ticket", bindingScope: "call", ...shell }), "1 hour", "Its next try of this exact command runs, once, within 1 hour."],
     ["a ticket bound to the tool covers every call of it", row({ class: "ticket", bindingScope: "tool_identity" }), "2 hours", "Its next call of this tool runs, once, within 2 hours, whatever the parameters."],
@@ -367,6 +394,10 @@ describe("what a yes and a no do", () => {
   });
 
   it.each([
+    ["a gateway hold runs the call on the line", row({}),
+      "The call runs now, once, and the agent's session gets the answer."],
+    ["a hook hold runs on the agent's retry", row(shell),
+      "The call runs once, when the agent retries it soon after your yes."],
     ["a ticket names its requester, whose every session may use it", row({ class: "ticket" }),
       "The next get-sum call by joe-java-developer-agent, in any of their sessions, within the grant window runs, once."],
     ["a ticket of a requester with no name names the user id", row({ class: "ticket", username: "" }),
@@ -375,9 +406,43 @@ describe("what a yes and a no do", () => {
     expect(decideBody("approve", r)).toBe(sentence);
   });
 
-  it("joins both outcomes into the one line a screen reader hears", () => {
-    const r = row({ bindingScope: "call" });
-    expect(doesLine(r, null)).toBe("If you approve: The call runs now, once. If you deny: The call does not run. The agent is told who said no.");
+  it.each([
+    ["a gateway hold releases the one call", row({}),
+      "Approving a hold releases this one call. The same call later raises a new request."],
+    ["a hook hold lets one retry run inside the rule's retry window", row(shell),
+      "The hook refused the call at once and told the agent to retry it after a decision. Your yes lets one retry of the same call from the same session run, if it comes within the retry window the rule sets. A retry after that raises a new request."],
+  ])("the approve help: %s", (_what, r, sentence) => {
+    expect(decideHelp("approve", r)).toBe(sentence);
+  });
+
+  it.each([
+    ["a gateway hold runs now", row({}), "Approved. get-sum runs now for joe-java-developer-agent."],
+    ["a hook hold runs on the agent's retry", row(shell), "Approved. make deploy ENV=staging runs for joe-java-developer-agent if the agent retries it soon."],
+    ["a ticket may run within its grant window, whatever the lane", row({ class: "ticket", ...shell }), "Approved. make deploy ENV=staging may run once within the grant window for joe-java-developer-agent."],
+  ])("the approved toast: %s", (_what, r, sentence) => {
+    expect(approvedToast(r)).toBe(sentence);
+  });
+
+  it.each([
+    ["a gateway hold", row({ bindingScope: "call" }), "If you approve: The call runs now, once. If you deny: The call does not run. The agent is told who said no."],
+    ["a hook hold", row({ bindingScope: "call", ...shell }), "If you approve: The call runs once, when the agent retries it soon after your yes. If you deny: The call does not run. The agent is told who said no."],
+  ])("joins both outcomes of %s into the one line a screen reader hears", (_what, r, sentence) => {
+    expect(doesLine(r, null)).toBe(sentence);
+  });
+
+  it.each([
+    ["a gateway hold says the call waits on the line", row({ createdAt: at(-28), expiresAt: at(92) }), DECIDE_BY_HELP_HOLD],
+    ["a hook hold says the hook refused it and the agent retries", row({ createdAt: at(-28), expiresAt: at(92), ...shell }), DECIDE_BY_HELP_HOOK],
+    ["a ticket says the agent will call again", row({ createdAt: at(-28), expiresAt: at(86400), class: "ticket" }), DECIDE_BY_HELP_TICKET],
+  ])("the Decide by help of %s", async (_what, r, sentence) => {
+    mount(r);
+    const b = screen.getByRole("button", { name: "Help: " + FACT_DECIDE_BY });
+    await userEvent.hover(b);
+    await waitFor(() => {
+      const id = b.getAttribute("aria-describedby");
+      expect(id).toBeTruthy();
+      expect(document.getElementById(id as string)?.textContent).toBe(sentence);
+    });
   });
 });
 

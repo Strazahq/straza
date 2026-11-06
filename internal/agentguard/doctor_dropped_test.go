@@ -1,9 +1,6 @@
 package agentguard
 
 import (
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -51,26 +48,15 @@ func TestDoctorSpoolChecks(t *testing.T) {
 					t.Errorf("audit-spool detail %q missing %q", c.Detail, want)
 				}
 			}
-			d := droppedAuditCheck(tt.spool, "/var/lib/straza-service/u/1000/audit-dropped")
+			d := droppedAuditCheck(tt.spool)
 			switch {
 			case tt.wantDropped == "" && d != nil:
 				t.Fatalf("audit-dropped line with nothing dropped: %+v", d)
 			case tt.wantDropped != "" && (d == nil || d.Status != tt.wantDropped || d.Hint == "" ||
 				!strings.Contains(d.Detail, "2 record(s) never reached the server") ||
-				!strings.Contains(d.Hint, "an administrator removes /var/lib/straza-service/u/1000/audit-dropped")):
-				t.Fatalf("audit-dropped = %+v, want a %s naming the 2 records and the marker to remove", d, tt.wantDropped)
+				!strings.Contains(d.Hint, "reports this loss to strazad with its next upload")):
+				t.Fatalf("audit-dropped = %+v, want a %s naming the 2 records and the report to strazad", d, tt.wantDropped)
 			}
 		})
-	}
-}
-
-// TestDroppedMarkerPath pins where the hint sends an administrator: the
-// caller's directory in the state directory of the service this client
-// talks to, which STRAZA_HOME picks.
-func TestDroppedMarkerPath(t *testing.T) {
-	t.Setenv("STRAZA_HOME", "/home/kim/.straza-ci")
-	want := filepath.Join("/home/kim/.straza-ci", "service", "u", strconv.Itoa(os.Getuid()), "audit-dropped")
-	if got := droppedMarkerPath(); got != want {
-		t.Errorf("droppedMarkerPath() = %q, want %q", got, want)
 	}
 }

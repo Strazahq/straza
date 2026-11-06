@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -69,8 +70,8 @@ straza:
 	tok := sessionToken(t, base, "kim")
 
 	names := toolNamesOf(t, second(mcpCall(t, base, tok, "tools/list", nil)))
-	if len(names) != 1 || names[0] != "grantapp__echo" {
-		t.Fatalf("catalog = %v, want [grantapp__echo] (granted tool visible, native tools hidden)", names)
+	if !slices.Equal(names, []string{"grantapp__echo", "straza__whoami"}) {
+		t.Fatalf("catalog = %v, want [grantapp__echo straza__whoami] (granted tools visible, approval tools hidden)", names)
 	}
 
 	_, _, raw := mcpCall(t, base, tok, "tools/call", map[string]any{
@@ -90,7 +91,9 @@ straza:
 		}
 	}
 
-	// Exactly one mcp record for the granted call, with the revision 23 fields.
+	// Exactly one mcp record for the granted call, with the revision 23
+	// fields. The probes above have records of their own, which name
+	// grantapp too, so the record is the one of the tool echo.
 	var data map[string]any
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -100,7 +103,7 @@ straza:
 		}
 		var matches []string
 		for _, r := range recs {
-			if strings.Contains(r.CE, `"type":"straza.audit.mcp"`) && strings.Contains(r.CE, `"app":"grantapp"`) {
+			if strings.Contains(r.CE, `"type":"straza.audit.mcp"`) && strings.Contains(r.CE, `"app":"grantapp"`) && strings.Contains(r.CE, `"toolName":"echo"`) {
 				matches = append(matches, r.CE)
 			}
 		}

@@ -1,9 +1,9 @@
 ---
 title: Limit a role to some objects
-description: Pin the repositories ghapp reaches, then give each role the repositories it covers, so an agent with write tools writes only where one of its roles allows.
+description: Pin the repositories ghapp reaches, give Straza its listing credential, then give each role the repositories it covers, so an agent with write tools writes only where one of its roles allows.
 summary: >-
   On ghapp, a role with `pr_create` could open pull requests in every repository the App
-  reaches. You pin ghapp's repositories in its manifest, store a listing credential so Straza
+  reaches. You pin ghapp's repositories from its page, give Straza a listing credential so it
   lists them, and give each role the repositories it covers. The gateway then refuses a call
   whose `repo` no role of the caller covers.
 pagetype: how-to
@@ -11,52 +11,40 @@ weight: 32
 draft: false
 tested:
   version: v1.0.0-1561-g98d49634
-  platform: The enterprise demo stack on Rocky Linux 10.1, with ghapp started beside it from its own deploy kit on a private GitHub App installed on the organization ghapp-straza-test. Every strazactl step but the two publishes ran on an admin API token, and the note strazactl then printed on stderr on a token is left out of the output. Both drafts were then published on the admin's own strazactl login, with y answered at the prompt. strazactl no longer signs in or publishes, so a person publishes each draft in the console, and the last line of each draft's output, which names that way, was written from the code on 2026-11-01 and not run. Both secrets were set from STRAZA_SECRET_VALUE, so no hidden prompt shows. The SCIM read ran on a token with scim:read alone. midPoint had imported both roles before the assignment loop ran, so it did not wait. The four refusals in the table were checked with strazactl drafts check on edited copies of the two role files. The agent's calls ran as joe-java-developer-agent through straza mcp ghapp in the demo stack's harness container, a Debian 12 machine with straza v1.1.0-138-g8cd72d69. The console steps were read from the console's source and not clicked. A fix then changed three sentences, so the second and fourth rows of the refusal table, the agent's calls and the audit records were walked again on 2026-10-20 at v1.0.0-1561-g98d49634. The other steps ran on 2026-10-19 at v1.0.0-1556-ge9afd09a.
-  except: the console steps, read from source, and the last line of each draft's output, written from the code
+  platform: The enterprise demo stack on Rocky Linux 10.1, with ghapp started beside it from its own deploy kit on a private GitHub App installed on the organization ghapp-straza-test. Every strazactl step but the two publishes ran on an admin API token, and the note strazactl then printed on stderr on a token is left out of the output. Both drafts were then published on the admin's own strazactl login, with y answered at the prompt. strazactl no longer signs in or publishes, so a person publishes each draft in the console, and the last line of each draft's output, which names that way, was written from the code on 2026-11-01 and not run. The warning line of the pin's draft was written from the code on 2026-11-05 and not run. Both secrets were set from STRAZA_SECRET_VALUE, so no hidden prompt shows. The SCIM read ran on a token with scim:read alone. midPoint had imported both roles before the assignment loop ran, so it did not wait. The four refusals in the table were checked with strazactl drafts check on edited copies of the two role files. The agent's calls ran as joe-java-developer-agent through straza mcp ghapp in the demo stack's harness container, a Debian 12 machine with straza v1.1.0-138-g8cd72d69. The console steps were read from the console's source and not clicked, and the console's pin and listing credential steps were written on 2026-11-05 from the console's code in the working tree, before it shipped, and not clicked. A fix then changed three sentences, so the second and fourth rows of the refusal table, the agent's calls and the audit records were walked again on 2026-10-20 at v1.0.0-1561-g98d49634. The other steps ran on 2026-10-19 at v1.0.0-1556-ge9afd09a. The console's Pin and listing credential steps were walked on 2026-11-05 at v1.0.0-1746-gdfac0fc2 on the same stack with objwalk, a scratch copy of objects-demo with nothing pinned, rather than with ghapp.
+  except: the lines of each draft's output written from the code
   date: 2026-10-20
 applies_to: both
-keywords: object scope covers repos repositories pin listing credential ghapp github app objects draft scim midpoint strazaCovers refusal
+keywords: object scope covers repos repositories pin listing credential generate ghapp github app objects draft scim midpoint strazaCovers refusal
 who: You, as the admin of the server, and an agent that drafts the change
-where: A terminal with strazactl, the console, your midPoint and the agent's machine
+where: The console or a terminal with strazactl, your midPoint and the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: cli
 ---
 
 
-A role on an MCP server names the tools its holders may call. On ghapp, a GitHub App server that reaches every repository its App is installed on, a role with `pr_create` could then open pull requests in all of them. This page pins ghapp's repositories in Straza and gives each role the repositories it covers, so an agent that holds a write role writes only where that role allows. You end with a role that writes in two repositories, a role that reads in every repository, an agent in midPoint that holds both, and a refused call on a repository the write role does not cover.
+An MCP server such as ghapp marks each of its tools with the object it works on, here a GitHub repository. Pinning turns on Straza's checks for that server and saves a copy of those marks, and Straza decides with that copy from then on. The listing credential is an extra token that lets Straza read the names of the server's objects, so you can pick them for a role.
 
 
-You write no declaration by hand, because ghapp marks its own tools. Each of its 14 repository tools, such as `repo_get`, `pr_create` and `pr_merge`, names its repository in one required argument, `repo`, as owner/name. With git transport on, `git_fetch` and `git_push` name theirs the same way. Its listing tool, `repo_list`, returns every repository the App reaches with GitHub's repository id and the custom properties you ask for, here `team`. That tool reaches every repository at once, so only a role on every repository may hold it, and ghapp has no tool that touches no repository.
+ghapp reaches every repository its GitHub App is installed on. A role with `pr_create` could open pull requests in all of them. This page pins ghapp's repositories, gives Straza the listing credential and gives each role the repositories it covers. You end with a role that writes in two repositories, a role that reads in every one, an agent in midPoint that holds both, and a refused call on a repository the write role does not cover.
+
+
+ghapp marks its own tools, so you write no declaration by hand. Each of its 14 repository tools, such as `repo_get`, `pr_create` and `pr_merge`, names its repository in one required argument, `repo`, as owner/name. With git transport on, `git_fetch` and `git_push` name theirs the same way. Its listing tool, `repo_list`, returns every repository the App reaches with GitHub's id and the custom properties you ask for, here `team`. Because `repo_list` reaches every repository at once, only a role on every repository may hold it.
 
 ## Before you start {.nostep}
 
 
-- ghapp running where strazad can reach it, started with `--http` on that address, with its App id and private key. The App on this page is installed on the organization `ghapp-straza-test`, whose repositories carry the custom property `team`. Start ghapp with `GHAPP_MCP_ATTRIBUTES=team`, so its listing reports that property.
-- Two random values of your own for ghapp. `GHAPP_MCP_GATEWAY_SECRET` is the server's own secret, which Straza sends on every tool call. `GHAPP_MCP_LISTING_TOKEN` opens `repo_list` alone, and Straza lists the repositories with it.
-- A Straza global admin to add ghapp. In the console, from the pin to the roles, ghapp's own admin may do every Straza step. For the strazactl steps, an admin API token in `STRAZA_API_TOKEN` that holds `apps:read`, `apps:write`, `drafts:read` and `drafts:write`, minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows. Reading the audit log needs a global admin or an admin role whose areas include `audit:read`, as [Delegated admin]({{< relref "guides/operate/delegated-admin.md" >}}) sets up.
+- ghapp running where strazad can reach it, started with `--http` on that address, with its App id and private key. The App on this page is installed on the organization `ghapp-straza-test`, whose repositories carry the custom property `team`, and ghapp starts with `GHAPP_MCP_ATTRIBUTES=team` so its listing reports it.
+- Two random values in ghapp's config. `GHAPP_MCP_GATEWAY_SECRET` is the server's own secret, which Straza sends on every tool call. `GHAPP_MCP_LISTING_TOKEN` opens `repo_list` alone and becomes the listing credential. The console can make this second value for you, and ghapp reads it when it starts.
+- A Straza global admin to add ghapp. From the pin to the roles, ghapp's own admin may do every Straza step in the console. For the strazactl steps, an admin API token in `STRAZA_API_TOKEN` that holds `apps:read`, `apps:write`, `drafts:read` and `drafts:write`, minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows. Reading the audit log needs a global admin or an admin role whose areas include `audit:read`, as [Delegated admin]({{< relref "guides/operate/delegated-admin.md" >}}) sets up.
 - midPoint connected to Straza as [midPoint]({{< relref "guides/connect-identity/midpoint.md" >}}) sets it up, an admin API token with the scope `scim:read`, and a midPoint admin login for the assignment. Any SCIM client reads the same `covers` values.
 - An AI agent that calls through Straza's gateway, such as `joe-java-developer-agent` of the demo stack.
-
-## Let an agent draft the change {.nostep}
-
-
-An agent can write both drafts this page needs, and you publish them. A coding agent such as Claude Code with the Straza skill holds no Straza admin credential, so you run the strazactl reads it asks for and hand it their output. It proposes a draft through the tool `straza__draft_submit`, which the gateway lists only to a session that holds the role `straza-draft-config`, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md#let-an-agent-propose-a-change" >}}) shows. No agent can publish, and the listing credential never passes through one, because you type it at a hidden prompt.
-
-Tell the agent which repositories each team works in. It then works in this order:
-
-1. It adds the block that `strazactl apps objects ghapp` prints to the manifest that `strazactl apps export ghapp` prints, from the output you hand it, and submits the file through `straza__draft_submit` as the first draft. `straza__draft_status` reads the server's check.
-2. You publish the first draft and store the listing credential, as the steps below show. Straza then lists ghapp's repositories.
-3. It writes one role file per team from the list that `strazactl apps objects ghapp` now prints, with the repositories you named, and submits the files through `straza__draft_submit` as the second draft.
-4. You publish the second draft and give the roles to agents in your IGA tool.
-
-
-Two drafts are needed because a role can name a repository only once Straza has listed it. A role on every repository needs no list, so it may ride in the first draft. An agent's draft waits under **Drafts** like any other, and you publish it in the console. The steps below make the same change by hand. Run their commands in your own terminal, on a token that no agent can read, never in a terminal an agent shares.
 
 ## Add ghapp
 
 
-ghapp is a remote server that reads a bearer token. Straza sends ghapp's `GHAPP_MCP_GATEWAY_SECRET` as the server's own secret on every tool call. The address `http://ghapp:3003/mcp` is ghapp's name and port on the demo stack's Compose network, so put the address strazad reaches ghapp at in its place.
+ghapp is a remote server that reads a bearer token, and Straza sends `GHAPP_MCP_GATEWAY_SECRET` as the server's own secret on every tool call. The address `http://ghapp:3003/mcp` is ghapp's name and port on the demo stack's Compose network, so put the address strazad reaches ghapp at in its place.
 
 {{< console >}}
 {{< clicks "MCP servers" "Add MCP server" >}}
@@ -109,15 +97,32 @@ installed ghapp (remote runtime). Health: degraded, requires a credential and no
 secret set for the MCP server ghapp: the server's own secret, fingerprint ae0f
 ```
 
-The install says that ghapp needs its secret, and `strazactl apps secret set ghapp` asks for it at a hidden prompt. Type the value of `GHAPP_MCP_GATEWAY_SECRET` there.
+`strazactl apps secret set ghapp` asks for the server's own secret at a hidden prompt. Type the value of `GHAPP_MCP_GATEWAY_SECRET` there.
 {{< /cli >}}
 
 ## Pin ghapp's repositories
 
 
-Pinning copies ghapp's marks into its manifest, and Straza decides with that copy only. A mark that ghapp changes later therefore waits for a person to publish it.
+Pinning saves a copy of ghapp's marks in its manifest. It goes through a draft, like every change to a live server, and nobody's access changes when you pin, because a role made before the pin keeps every repository. A mark that ghapp changes later waits until a person pins again.
+
+{{< console >}}
+
+{{< clicks "MCP servers" "ghapp" "Overview" "Pin repos" >}}
+
+While ghapp's tools name repositories and nothing is pinned, Overview opens with a card that reads `ghapp's tools work on repos. Pin them so roles can pick repos and Straza can list them.` Its first step, `Pin repos. You see what gets pinned before anything changes.`, carries the button **Pin repos**. Its second step waits for the first.
+
+The dialog `Pin repos on ghapp?` says what pinning does: `Straza will check every call against the repos the caller's role covers. Nobody's access changes when you pin: roles made before keep every repo.` Under it, **Object type** reads `repo (repos)`, **Read from** reads `the repo argument, on 14 of 15 tools`, and **Listed by** reads `repo_list, which reaches every repo`. The line `All of it comes from ghapp's own tool marks.` carries a help icon that says what happens when ghapp changes a mark later.
+
+Press **Save draft** to open the draft's page before anything goes live, or **Pin and publish** to make the draft and publish it in one step, as **Save and publish** does in the other editors. Either way the draft is checked and recorded. A draft with nothing to read publishes at once, with the toast `Repos are pinned on ghapp.`, and a warning, such as the one below, opens the publish dialog first. The draft is titled `Change server ghapp`. Its card shows the pinned type and the tool marks, now and after publishing, and ends `No other field changes.` After **Save draft**, publish it with **Publish…** in the band `Before you publish`.
+
+{{< fails >}}
+`ghapp is not running, so Straza cannot read its tool marks. Start it, then draft again.`
+: The dialog shows ghapp's own sentence in place of its buttons, and it does the same for a broken mark. Start ghapp, or fix the mark on its side, then press **Pin repos** again.
+{{< /fails >}}
+{{< /console >}}
 
 {{< cli >}}
+
 {{< command terminal="Your terminal" purpose="administration" >}}
 ```sh
 strazactl apps objects ghapp
@@ -168,25 +173,19 @@ straza:
 Pin it with strazactl apps objects draft ghapp, then publish the draft.
 Created draft 39 with 1 document. Nothing changes until a person publishes it.
   ~   App/ghapp
-  warning   App/ghapp ghapp has no listing credential, so Straza cannot list its repos, and only roles on every repo can use its repo tools until it has one. Add one with strazactl apps secret set ghapp --listing after you publish.
+  warning   App/ghapp ghapp has no listing credential, so Straza cannot list its repos, and only roles on every repo can use its repo tools until it has one. After you publish, set one under Server authentication on the Overview of ghapp, or with strazactl apps secret set ghapp --listing.
 Publish draft 39 in the console under Drafts: http://localhost:8420/console/drafts/39
 ```
 
-
-On a server that pins nothing, the first command prints the `straza.objects` block that ghapp's marks declare and ends with the command that pins it. The second opens a draft of ghapp's manifest with that block, noted `Pins the repos that ghapp declares in its tool marks.` strazactl runs on an admin API token, and a token never publishes, so a person publishes the draft in the console under **Drafts**, as the console form of this step shows.
+The first command prints the `straza.objects` block that ghapp's marks declare. The second opens a draft of ghapp's manifest with that block. strazactl runs on an admin API token, and a token never publishes, so a person publishes the draft in the console under **Drafts**.
 {{< /cli >}}
 
 
-{{< console >}}
-The console has no button that pins a server, so the draft comes from `strazactl apps objects draft ghapp` or from an agent. You review and publish it here:
+The draft's check compares the copy with ghapp's live tools. `repo_list` must be marked read-only, and `repo` must be a required string argument of every tool that names it. Until the next step, the check warns that ghapp has no listing credential yet, and that warning does not stop the publish. When ghapp already has roles, the first pin gives each of them `covers: every`, and the check says so, such as `Pinning repos on ghapp keeps today's reach: ghapp-devs now covers every repo. Narrow it in this draft or later.`
 
-{{< clicks "Drafts" "Waiting" >}}
+{{< details summary="The pinned block, as a manifest file keeps it" >}}
 
-Select the draft. Under **What changes**, ghapp's card shows the row `Pinned type`, which reads `none` now and `repo (repos), listed by repo_list. 14 tools name a repo, 1 reaches every repo.` after publishing. Press **Publish…**, then **Publish**.
-{{< /console >}}
-
-
-The pinned block reads as follows, written as you would keep it in a manifest file, such as one in [the apps directory]({{< relref "guides/serve-mcp-apps/gitops-apps-directory.md" >}}). Each repository tool names `repo`, `repo_list` reaches every repository, and `list.attributes` keeps the `team` property that ghapp reports. The plural `repos`, the word the console uses for the tab and the questions, is the type plus s, so the block leaves it out.
+This is the block the pin writes, as you would keep it in a file of [the apps directory]({{< relref "guides/serve-mcp-apps/gitops-apps-directory.md" >}}). The plural `repos`, the word the console uses for the tab and the questions, is the type plus s, so the block leaves it out.
 
 ```yaml
 straza:
@@ -216,19 +215,25 @@ straza:
 
 
 ghapp reports `setBy: org` for `team` when only the organization's owners may set the property, and `object` otherwise, including when it cannot read the property's settings. Without `GHAPP_MCP_ATTRIBUTES`, the block has no `attributes` line. The attribute shows as a column on the Repos tab and in the strazactl table. A role still covers repositories by name or covers every one, and the role editor's filter matches a repository's name and title only.
+{{< /details >}}
+
+## Give Straza the listing credential
 
 
-The draft's check compares the block with ghapp's live tools. `repo_list` must be marked read-only, and `repo` must be a required string argument of every tool that names it. Because the block names every tool, nothing needs a decision. The check warns `ghapp has no listing credential, so Straza cannot list its repos, and only roles on every repo can use its repo tools until it has one. Add one with strazactl apps secret set ghapp --listing after you publish.` The warning does not stop the publish, and the next step clears it.
+Straza lists ghapp's repositories itself, in the background, so that a role can pick them by name. ghapp checks a token on that call as on every other, and the listing credential is that token. It is neither a GitHub token nor the server's own secret: ghapp keeps the GitHub App's key, and it accepts `GHAPP_MCP_LISTING_TOKEN` on `repo_list` alone. Any other tool called with it answers `The listing token opens repo_list only. Call this tool through Straza.` Straza sends it on its own calls to `repo_list` and on no agent's call, so a leaked listing token can only list names.
 
+{{< console >}}
 
-When the server already has roles, the first pin gives each of them `covers: every`, so no agent gains or loses a repository at that publish. For a role named `ghapp-devs`, the check says `Pinning repos on ghapp keeps today's reach: ghapp-devs now covers every repo. Narrow it in this draft or later.`
+{{< clicks "MCP servers" "ghapp" "Overview" "Set it" >}}
 
-## Store the listing credential
+After the pin, the card's second step reads `Give Straza the listing credential, a second token that ghapp accepts for repo_list only.` **Set it** opens the field on the row **Listing credential** of the Server authentication card, under the server's own secret. Until then the row reads `Not set.` with **Set one**, and its help icon says what the credential is for.
 
+ghapp on this page already runs with its listing token, so paste that value into the box after `or paste` and press **Store**. The line under the field reads `Put the same value in ghapp's config, where it accepts the token for repo_list. Straza stores it sealed, never sends it on an agent's call, and never shows it again.` Once it is stored, the toast says `The listing credential for ghapp is stored. Straza is listing its repos now.`, the row reads `Stored, sealed` with **Set it again** and **Remove**, and with the value's fingerprint until you leave the page, and the card on Overview goes.
 
-Straza lists ghapp's repositories with a credential of its own, the listing credential. It sends that credential on its own calls to `repo_list` and on no other call, and it never falls back to the server's own secret or a role's. On its side, ghapp accepts `GHAPP_MCP_LISTING_TOKEN` on `repo_list` alone and answers any other tool called with it `The listing token opens repo_list only. Call this tool through Straza.` A leaked listing token therefore opens no write.
+For a server whose config holds no value yet, press **Generate** instead. It fills the box with a random value, shown in clear with **Copy** and the line `Put this value in ghapp's config and restart ghapp, then press Store.` Press **Store** only after ghapp runs with the value as `GHAPP_MCP_LISTING_TOKEN`, because storing starts a listing that fails until ghapp holds it. If a listing failed anyway, **List again** on the Repos tab asks for another.
+{{< /console >}}
 
-{{< only form="cli" >}}The console has no box for the listing credential, so this step runs in a terminal.{{< /only >}}
+{{< cli >}}
 
 {{< command terminal="Your terminal" purpose="administration" >}}
 ```sh
@@ -240,8 +245,11 @@ strazactl apps secret set ghapp --listing
 listing credential set for the MCP server ghapp, fingerprint 5606
 ```
 
+Type the value of `GHAPP_MCP_LISTING_TOKEN` at the hidden prompt. The answer names the credential's fingerprint, never its value.
+{{< /cli >}}
 
-Type the value of `GHAPP_MCP_LISTING_TOKEN` at the hidden prompt. The answer names the credential's fingerprint, never its value, and Straza lists ghapp's repositories within about 15 seconds. A listing credential can be stored only once the type is pinned, which is why this step follows the publish. Until one is stored, `strazactl apps objects ghapp` and the Repos tab say `ghapp has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set ghapp --listing, then refresh with strazactl apps objects refresh ghapp.`
+
+Straza lists ghapp's repositories within about 15 seconds of the store. A listing credential can be stored only once the type is pinned, which is why this step follows the publish. Until one is stored, the Repos tab says `ghapp has no listing credential, so Straza cannot list its repos. Set one under Server authentication on Overview, or with strazactl apps secret set ghapp --listing.`, and `strazactl apps objects ghapp` says `ghapp has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set ghapp --listing, then refresh with strazactl apps objects refresh ghapp.`
 
 ## Check the list
 
@@ -268,7 +276,7 @@ ghapp-straza-test/pay-web  1425833185  pay-web  payments  no role
 ghapp-straza-test/site     1425833478  site     web       no role
 ```
 
-The first line says how the last listing went, with its count of repositories. The table has the columns VALUE, ID, TITLE, TEAM and COVERED BY, and a repository reads `no role` until a role covers it.
+The first line says how the last listing went, with its count of repositories, and a repository reads `no role` until a role covers it.
 {{< /cli >}}
 
 
@@ -277,7 +285,7 @@ In the demo organization, `ghapp-straza-test/pay-api` and `ghapp-straza-test/pay
 ## Write the two roles
 
 
-Each role names its tools and the repositories it covers. `ghapp-read` holds the read tools on every repository, the ones the App reaches later included. `ghapp-write-payments` holds the write tools on the two repositories of the team `payments`, by name, and a repository added later stays out until a person adds it. An agent that holds both reads everywhere and writes in those two repositories only.
+`ghapp-read` holds the read tools on every repository, the ones the App reaches later included. `ghapp-write-payments` holds the write tools on the two repositories of the team `payments`, by name, and a repository added later stays out until a person adds it. An agent that holds both reads everywhere and writes in those two repositories only.
 
 {{< console >}}
 
@@ -376,6 +384,7 @@ Publish draft 40 in the console under Drafts: http://localhost:8420/console/draf
 `drafts check` stores nothing, and `drafts create` stores the draft. A person publishes it in the console under **Drafts**, because a token never publishes.
 {{< /cli >}}
 
+{{< details summary="What the check refuses, and what a covered name stays bound to" >}}
 
 The check refuses a role that nothing keeps to its repositories, and each refusal says what to change:
 
@@ -388,6 +397,14 @@ The check refuses a role that nothing keeps to its repositories, and each refusa
 
 
 Straza stores each named repository with its id. A role therefore keeps covering a repository that GitHub renames, and a repository deleted and made again under the old name is not covered by the old line. ghapp's own admin may write `covers: every` on a role ghapp owns while the setting `admin.serverAdminsCoverEvery` is true, its default. Set it to false to leave `every` to a global admin, and the **Every repo** card then reads `On this deployment only a global admin may make ghapp-read cover every repo, including the repos ghapp lists later. Name the repos it covers, or ask a global admin.` [Configuration]({{< relref "reference/configuration.md" >}}) lists the setting.
+{{< /details >}}
+
+{{< details summary="Let an agent draft the roles" >}}
+
+An agent can write the role files of this page, and you publish them. A coding agent such as Claude Code with the Straza skill holds no Straza admin credential, so you run the strazactl reads it asks for and hand it their output. It proposes a draft through the tool `straza__draft_submit`, which the gateway lists only to a session that holds the role `straza-draft-config`, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md#let-an-agent-propose-a-change" >}}) shows. No agent can publish, and the listing credential never passes through one.
+
+Tell the agent which repositories each team works in. It writes one role file per team from the list that `strazactl apps objects ghapp` prints, and `straza__draft_status` reads the server's check. A role can name a repository only once Straza has listed it, so the agent's draft comes after the pin and the listing credential. Run the strazactl reads in your own terminal, on a token that no agent can read, never in a terminal an agent shares.
+{{< /details >}}
 
 ## Give the roles to an agent in midPoint
 
@@ -409,7 +426,7 @@ done
 {"displayName":"ghapp-write-payments","covers":["ghapp:repo \"ghapp-straza-test/pay-api\"","ghapp:repo \"ghapp-straza-test/pay-web\""]}
 ```
 
-`ADMIN_API_TOKEN` holds a token with the scope `scim:read`, such as the one [midPoint]({{< relref "guides/connect-identity/midpoint.md#mint-the-token" >}}) mints. `ghapp-read` gives `ghapp:repo every`. `ghapp-write-payments` gives one value per repository, `ghapp:repo "ghapp-straza-test/pay-api"` and `ghapp:repo "ghapp-straza-test/pay-web"`, and the quotes keep a repository named every from passing for every repository. Like the rest of the group's extension, `covers` is read-only, and a PATCH on it answers `400` with `scimType` `mutability`.
+`ADMIN_API_TOKEN` holds a token with the scope `scim:read`, such as the one [midPoint]({{< relref "guides/connect-identity/midpoint.md#mint-the-token" >}}) mints. The quotes around each repository keep a repository named every from passing for every repository. Like the rest of the group's extension, `covers` is read-only, and a PATCH on it answers `400` with `scimType` `mutability`.
 
 
 Assign the imported roles `AR:ghapp-read` and `AR:ghapp-write-payments` to the agent in midPoint, directly or through an access package, as [Assign an access package]({{< relref "guides/connect-identity/midpoint.md#assign-an-access-package" >}}) shows. midPoint writes one membership per role over SCIM. On the demo stack, this assigns both roles to `joe-java-developer-agent` over midPoint's REST interface:
@@ -495,16 +512,16 @@ Call a write tool on a repository the write role does not cover. From the agent'
 {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"ghapp-straza-test/pay-api (id 1425832684): private, default branch \"main\"."}],"structuredContent":{"archived":false,"defaultBranch":"main","fullName":"ghapp-straza-test/pay-api","htmlUrl":"https://github.com/ghapp-straza-test/pay-api","id":"1425832684","name":"pay-api","owner":"ghapp-straza-test","ownerType":"Organization","private":true}}}
 ```
 
-The first call goes through, because `ghapp-read` covers every repository. The second never reaches ghapp. Its refusal comes back before the answer to `repo_get`, because it never leaves Straza. Straza answers it with a tool result marked as an error, and the agent reads `Straza: pr_create on ghapp-straza-test/site was refused: none of your roles on ghapp covers that repo. Your roles cover pr_create on ghapp-straza-test/pay-api and ghapp-straza-test/pay-web. Check the repo's name, or ask an admin for a role that covers it.`
+The first call goes through, because `ghapp-read` covers every repository. The second never reaches ghapp, which is why its refusal comes back before the answer to `repo_get`. Straza answers it with a tool result marked as an error, and the agent reads `Straza: pr_create on ghapp-straza-test/site was refused: none of your roles on ghapp covers that repo. Your roles cover pr_create on ghapp-straza-test/pay-api and ghapp-straza-test/pay-web. Check the repo's name, or ask an admin for a role that covers it.`
 
 
-That sentence names only repositories the agent's own roles cover, at most ten. A repository that no held role covers and one the list does not hold get the same answer, so an agent learns nothing about repositories it cannot use. Roles on every repository cover one the list does not hold yet, so a repository created a minute ago works at once through such a role. When a refused call names a repository the list does not hold, Straza asks for a listing, at most once a minute, and the new repository then shows in the list, where a person can add it to a role that names repositories. The check runs before any policy, so no policy rule can allow a call it refuses, and the refusal spends no approval.
+That sentence names only repositories the agent's own roles cover, at most ten. A repository that no held role covers and one the list does not hold get the same answer, so an agent learns nothing about repositories it cannot use. The check runs before any policy, so no policy rule can allow a call it refuses, and the refusal spends no approval.
 
 {{< console >}}
 
 {{< clicks "Audit" "deny" >}}
 
-The newest row reads `ghapp.pr_create on ghapp-straza-test/site` under **What**, followed by the call's arguments, with the agent's sentence under **Reason**. Select it. The sheet has a row named Repo with the value and its id in ghapp's list.
+The newest row reads `ghapp.pr_create on ghapp-straza-test/site` under **Action**, followed by the call's arguments, with the agent's sentence under **Reason**. Select it. The sheet has a row named Repo with the value and its id in ghapp's list.
 {{< /console >}}
 
 {{< cli >}}
@@ -524,22 +541,28 @@ strazactl audit tail --app ghapp --type straza.audit.mcp --limit 3
 The deny record carries `object`, with the type `repo`, the reach `argument`, the value `ghapp-straza-test/site` and its id in ghapp's list, `1425833478`. It also carries `rolesChecked` with `ghapp-write-payments`, the held role that binds `pr_create`. It has no `role` and no `bindingId`, because no role admitted the call.
 {{< /cli >}}
 
+{{< details summary="New repositories, and approvals on a covered call" >}}
+
+Roles on every repository cover one the list does not hold yet, so a repository created a minute ago works at once through such a role. When a refused call names a repository the list does not hold, Straza asks for a listing, at most once a minute, and the new repository then shows in the list, where a person can add it to a role that names repositories.
+
 
 A covered call then meets your policies like any other call. An approval that a policy asks for on such a call holds for that repository alone, because Straza ties the approval to the repository's type and value. The approval card names the repository only inside the call's arguments, so with `approval.preview.enabled` set to false the approver does not see it. [Events]({{< relref "reference/events.md" >}}) lists every field of the record.
+{{< /details >}}
+
 
 ## What ghapp promises {.nostep}
 
 
-Straza checks the repository a call names, and ghapp keeps the call to that repository. Every marked server makes three promises that Straza cannot check: a call touches only the object its argument names, the value names exactly one object at the time of the call, and the server accepts calls only from the gateway. [Object marks for server authors]({{< relref "reference/object-marks.md#promises" >}}) states them for a server's author.
+Straza checks the repository a call names, and ghapp keeps the call to that repository. Every marked server makes three promises that Straza cannot check: a call touches only the object its argument names, the value names exactly one object at the time of the call, and the server accepts calls only from the gateway. Straza checks repositories in its gateway only, and its harness hooks never run this check, so an agent that reached ghapp some other way would meet no repository check. [Object marks for server authors]({{< relref "reference/object-marks.md#promises" >}}) states the promises for a server's author, and [the security model]({{< relref "security/security-model.md#the-object-boundary" >}}) draws the boundary.
 
-ghapp keeps them in four ways. It compares the name with GitHub's own spelling byte for byte and never follows a rename redirect. When a role on some repositories admitted the call, Straza sends the repository's id from its list as `params._meta["ai.straza/object-id"]`, and ghapp refuses the call when the name now leads to another id, such as a repository deleted and made again. It then makes a GitHub token for that one repository with only the tool's permissions. Its last guard is the caller: ghapp accepts the gateway secret, a token from a listed identity provider client whose only credential is Straza's client assertion key, and the listing token on `repo_list` alone.
-
-
-Straza checks repositories in its gateway only, and its harness hooks never run this check. An agent that reached ghapp some other way would meet no repository check, which is why the third promise matters. [The security model]({{< relref "security/security-model.md#the-object-boundary" >}}) draws that boundary.
+{{< details summary="How ghapp keeps them" >}}
+ghapp compares the name with GitHub's own spelling byte for byte and never follows a rename redirect. When a role on some repositories admitted the call, Straza sends the repository's id from its list as `params._meta["ai.straza/object-id"]`, and ghapp refuses the call when the name now leads to another id, such as a repository deleted and made again. It then makes a GitHub token for that one repository with only the tool's permissions. Its last guard is the caller: ghapp accepts the gateway secret, a token from a listed identity provider client whose only credential is Straza's client assertion key, and the listing token on `repo_list` alone.
+{{< /details >}}
 
 ## Next {.nostep}
 
 - [Objects]({{< relref "concepts/objects.md" >}}) explains the model behind these steps.
 - [Object marks for server authors]({{< relref "reference/object-marks.md" >}}) is the contract for a server that wants the same limits.
 - [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) previews which tools a role's sessions see and puts a tool behind approval.
+- [When the server's tools change]({{< relref "guides/serve-mcp-apps/add-a-server.md#tool-changes" >}}) says what Straza does when ghapp adds, removes or changes a tool.
 - [midPoint]({{< relref "guides/connect-identity/midpoint.md" >}}) hands the roles out through access packages and takes them away again.

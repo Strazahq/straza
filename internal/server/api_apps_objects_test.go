@@ -191,7 +191,7 @@ func TestAppObjectsAPI(t *testing.T) {
 		queued["app"] != "objects-demo" || queued["dueAt"] == "" {
 		t.Fatalf("refresh = %d %v", code, queued)
 	}
-	const r1 = "objects-demo has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set objects-demo --listing, then refresh with strazactl apps objects refresh objects-demo."
+	const r1 = "objects-demo has no listing credential, so Straza cannot list its repos. Set one on its server page under Server authentication, or with strazactl apps secret set objects-demo --listing. Then press List again on its repos tab, or run strazactl apps objects refresh objects-demo."
 	failed := waitFor("the failed listing", func(o objectsAnswer) bool { return o.Listing.Outcome == store.ObjectsFailed })
 	if failed.Listing.Reason != r1 || len(up.listingAuths()) != 0 {
 		t.Fatalf("failed listing = %+v, listing calls %v", failed.Listing, up.listingAuths())

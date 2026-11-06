@@ -175,7 +175,7 @@ A server admin names the roles that reach their own server. Such a role belongs 
 {{< console >}}
 {{< clicks "MCP servers" "demo-tools" "Server roles" "Add role" >}}
 
-The **Name** field fixes the prefix `demo-tools-`, so you type only the suffix, such as `probes`. Under it the sheet previews `Stored as demo-tools-probes, in midPoint as AR:demo-tools-probes.` and prints the same role as a strazactl line. Tick the tools the role reaches, then press **Save and publish**, or **Save draft** to publish it later from **Drafts**, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) shows.
+The **Name** field fixes the prefix `demo-tools-`, so you type only the suffix, such as `probes`. Under it the sheet previews `Application role, stored as demo-tools-probes. An IGA imports it as AR:demo-tools-probes.` and prints the same role as a strazactl line. Tick the tools the role reaches, then press **Save and publish**, or **Save draft** to publish it later from **Drafts**, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) shows.
 
 {{< shot name="server-roles-add" caption="The Add role sheet as the root admin, with echo and get-sum ticked. A server admin sees the Policy column read-only." >}}
 

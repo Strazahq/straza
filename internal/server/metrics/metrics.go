@@ -18,12 +18,14 @@ type Set struct {
 	latency         *prometheus.HistogramVec
 	decisions       *prometheus.CounterVec
 	throttled       *prometheus.CounterVec
+	withheld        *prometheus.CounterVec
 	catalogOver     prometheus.Counter
 	unroutable      prometheus.Counter
 	auditRefused    prometheus.Counter
 	dropped         prometheus.CounterFunc
 	lost            prometheus.CounterFunc
 	setAside        prometheus.Counter
+	recordsLost     prometheus.Counter
 	transcriptBytes prometheus.Gauge
 	dataDiskFree    prometheus.Gauge
 	sinkParked      *prometheus.CounterVec
@@ -57,6 +59,10 @@ func New(auditDropped, auditLost func() float64) *Set {
 			Name: "straza_gateway_throttled_total",
 			Help: "Gateway tools/call requests rejected by the per-(session,app) rate limit. Rejections are deliberately not audited (a hot loop must not amplify audit work), so this counter is where the abuse volume shows up.",
 		}, []string{"app"}),
+		withheld: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "straza_gateway_replies_withheld_total",
+			Help: "Gateway tools/call replies withheld because they held the credential Straza injects for the server, whole or in a full standard encoding. Each one is a server that echoes its credential, so this counter is an alert lane: each increment also has a deny record on straza.audit.mcp and a critical credentialEcho verdict on straza.audit.sentinel.",
+		}, []string{"app"}),
 		catalogOver: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "straza_gateway_catalog_oversize_total",
 			Help: "Tier-1 catalog builds whose tool count exceeded apps.catalog.warnSize. A plain counter (no per-role label) to keep cardinality bounded; the accompanying warn log carries the role key.",
@@ -67,7 +73,7 @@ func New(auditDropped, auditLost func() float64) *Set {
 		}),
 		auditRefused: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "straza_audit_refused_total",
-			Help: "Client-spooled audit records that POST /v1/audit/batch refused because the session they name is not a UUID, is unknown, belongs to another user or another device, or is past the cap of 1000 named sessions per batch. The client deletes them once the upload is answered, so the strazad warn log line is their only trace and this counter is the alert lane.",
+			Help: "Client-spooled audit records that POST /v1/audit/batch refused because the session they name is not a UUID, is unknown, or belongs to another user or another device. The client deletes them once the upload is answered, so the strazad warn log line is their only trace and this counter is the alert lane.",
 		}),
 		dropped: prometheus.NewCounterFunc(prometheus.CounterOpts{
 			Name: "straza_audit_dropped_total",
@@ -80,6 +86,10 @@ func New(auditDropped, auditLost func() float64) *Set {
 		setAside: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "straza_outbox_set_aside_total",
 			Help: "Outbox rows the relay set aside because the event bus refused them as larger than its maximum message size, max_payload, 1 MiB by default. Such a row stays in events_outbox, unpublished, and its record never reaches the audit chain or the sinks, while every later row publishes. strazad cuts every record it writes to 256 KiB, so the likely cause is an external NATS server whose max_payload is below 256 KiB: raise it. Otherwise the row was written past strazad. Each one leaves one Error log record with the row's id, subject and size and the bus's max_payload.",
+		}),
+		recordsLost: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "straza_outbox_records_lost_total",
+			Help: "Records that strazad writes to the outbox after the change they record, in a write of their own, and could not write even after one retry: the straza.audit.admin, straza.audit.identity, straza.audit.authn and straza.audit.approval records, the straza.identity events and the straza.revocation.user event of a user revoke. The change itself stands, but the record never reaches the audit chain, the sinks or the other servers. Each one leaves one Error log record that says which record was lost, so this counter is an alert lane: any increment is a gap in the audit chain to look into. It also counts once a device revoke whose answer was lost while the device's sessions could not be read, so their session.end records are missing. An approver token's refusal record is not counted, because the phone's next refused request writes it, records that go through the audit queue, such as decision records, count in straza_audit_lost_total instead, and a client's uploaded records stay in its spool until the server takes them.",
 		}),
 		transcriptBytes: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "straza_transcript_store_bytes",
@@ -120,8 +130,8 @@ func New(auditDropped, auditLost func() float64) *Set {
 		}, []string{"route"}),
 	}
 	m.dataDiskFree.Set(-1)
-	reg.MustRegister(m.latency, m.decisions, m.throttled, m.catalogOver, m.unroutable, m.auditRefused,
-		m.dropped, m.lost, m.setAside, m.transcriptBytes, m.dataDiskFree, m.sinkParked, m.sinkDuplicates, m.sinkReplayed, m.httpErrors,
+	reg.MustRegister(m.latency, m.decisions, m.throttled, m.withheld, m.catalogOver, m.unroutable, m.auditRefused,
+		m.dropped, m.lost, m.setAside, m.recordsLost, m.transcriptBytes, m.dataDiskFree, m.sinkParked, m.sinkDuplicates, m.sinkReplayed, m.httpErrors,
 		m.failClosed, m.httpRequests, m.httpLatency)
 	return m
 }
@@ -135,6 +145,10 @@ func (m *Set) HTTPRequest(route, status string, d time.Duration) {
 
 // OutboxSetAside counts one outbox row the relay set aside.
 func (m *Set) OutboxSetAside() { m.setAside.Inc() }
+
+// OutboxRecordLost counts one record that could not be written to the
+// outbox after its retry.
+func (m *Set) OutboxRecordLost() { m.recordsLost.Inc() }
 
 // FailClosed counts one internal failure the PEP answered as a fail-closed
 // deny or tool-level error on the given lane.
@@ -167,6 +181,10 @@ func (m *Set) Observe(effect string, d time.Duration) {
 
 // Throttle records one gateway tools/call rejected by the per-(session,app) limit.
 func (m *Set) Throttle(app string) { m.throttled.WithLabelValues(app).Inc() }
+
+// ReplyWithheld records one gateway tools/call reply of the server app
+// withheld because it held the credential Straza injects for that server.
+func (m *Set) ReplyWithheld(app string) { m.withheld.WithLabelValues(app).Inc() }
 
 // Oversize records one tier-1 catalog build that exceeded apps.catalog.warnSize.
 func (m *Set) Oversize() { m.catalogOver.Inc() }

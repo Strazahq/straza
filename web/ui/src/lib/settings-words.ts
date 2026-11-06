@@ -104,15 +104,17 @@ export const areaHint = (area: string) => (AREAS.find((a) => a[0] === area) || [
 // ---- the mint sheet ----
 
 export const MINT_TITLE = "New API token";
-export const MINT_LEDE = "Name it for who will hold it, pick a lifetime, then the job. The scopes follow.";
+export const MINT_LEDE = "A token lets a script or a program call the admin API, such as an IGA connector, a CI job, or one strazactl call from your terminal. Straza never uses it itself. Name it for who will hold it, pick a lifetime, then the job.";
 export const NAME_HINT = "Shows in this list and in audit records, so say who will hold it.";
 export const NAME_FREE = "No token has this name.";
 export const nameTaken = (name: string) => "A token named " + name + " exists. Pick another name, or revoke it first.";
 export const NAME_MISSING = "Name the token first.";
 export const GRANTS_MISSING = "Pick a job, or build the scopes under Custom.";
-export const LIFETIME_HINT = "30 days, 90 days, 1 year, or never. Never warns and is a choice, not a default.";
+export const LIFETIME_HINT = "1 day, 7 days, 30 days, 90 days, 1 year, or never. For one call from your terminal, pick 1 day. Never warns and is a choice, not a default.";
 export const NEVER_WARN = "No expiry: this credential lives until revoked. Prefer 90 days and rotate.";
 export const LIFETIMES: { seconds: number; label: string }[] = [
+  { seconds: 86400, label: "expires in 1 day" },
+  { seconds: 604800, label: "expires in 7 days" },
   { seconds: 2592000, label: "expires in 30 days" },
   { seconds: 7776000, label: "expires in 90 days" },
   { seconds: 31536000, label: "expires in 1 year" },
@@ -142,6 +144,7 @@ export const LEVEL_NONE = "none";
 export const LEVEL_READ = "read";
 export const LEVEL_RW = "read and write";
 export const LEVEL_WRITE = "write only";
+export const WRITE_LINE = "Write includes read here: each area offers none, read, or read and write.";
 export const levelHint = (area: string, level: string) => {
   if (level === "read") return "read: every GET under " + area + ".";
   if (level === "rw") return "read and write: GET plus every change under " + area + ".";
@@ -258,7 +261,7 @@ export function agoWord(iso: string | undefined): string {
 
 export const NAME_LABEL = "Name";
 export const LIFETIME_LABEL = "Lifetime";
-export const AREA_COLUMN = { area: "area", covers: "what it covers", access: "access" };
+export const AREA_COLUMN = { area: "Area and what it covers", access: "Access" };
 export const areaLevelLabel = (area: string) => area + " access";
 export const removeGrant = (grant: string) => "Remove " + grant;
 export const scopeLine = (scope: string) => "scope: " + scope;

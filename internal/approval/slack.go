@@ -457,8 +457,8 @@ func (sc *slackChannel) auditRefusal(ctx context.Context, u store.User, approval
 	if err != nil {
 		return
 	}
-	if _, err := sc.st.Outbox().Insert(ctx, store.OutboxEvent{Subject: subject, CE: string(ce)}); err != nil {
-		sc.log.Warn("approval slack callback: the refusal record could not be written", "user", u.ID, "approval", approvalID, "err", err)
+	if err := sc.svc.insertRecord(ctx, store.OutboxEvent{Subject: subject, CE: string(ce)}); err != nil {
+		sc.log.Error("approval slack callback: the refusal record could not be written after one retry", "user", u.ID, "approval", approvalID, "err", err)
 	}
 }
 

@@ -26,16 +26,33 @@ func userWrittenServer(t *testing.T, st store.Store) (*http.ServeMux, *[]userWri
 	s := New(Deps{
 		Store:           st,
 		Authenticate:    func(r *http.Request, _ string) (context.Context, int, string) { return r.Context(), 0, "" },
-		Deactivate:      func(context.Context, string, string) {},
+		Deactivate:      deactivateIn(st),
 		Reactivate:      func(context.Context, string) {},
 		IdentityChanged: func(context.Context, string, string) {},
 		UserWritten: func(_ context.Context, action string, u store.User, changed []string) {
 			writes = append(writes, userWrite{action, u.ID, changed})
 		},
+		DeactivationFailed: func(*http.Request, error) (int, string) {
+			return http.StatusInternalServerError, "the deactivation was not saved"
+		},
 	})
 	mux := http.NewServeMux()
 	s.Routes(mux)
 	return mux, &writes
+}
+
+// deactivateIn answers a Deps.Deactivate that writes the disabled status
+// through st's Update, where the server's hook writes it with the user's
+// revocation in one transaction.
+func deactivateIn(st store.Store) func(context.Context, string, string) (store.User, error) {
+	return func(ctx context.Context, id, _ string) (store.User, error) {
+		u, err := st.Users().GetByID(ctx, id)
+		if err != nil {
+			return store.User{}, err
+		}
+		u.Status = store.UserDisabled
+		return st.Users().Update(ctx, u)
+	}
 }
 
 // seedSCIMUser stores a SCIM-born user with every writable field set.

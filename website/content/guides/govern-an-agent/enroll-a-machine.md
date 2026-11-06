@@ -179,7 +179,7 @@ A browser sign-in enrolls a key only when its nonce names that key and its auth_
 You can set `STRAZA_SERVER` in place of `--server`. Enroll then says so on stderr before it starts, in the form `enrolling at http://127.0.0.1:8420 (from $STRAZA_SERVER)`.
 
 
-The service keeps the server's address, the keys that check every policy the server sends, and your key in its state directory. That directory belongs to the service's own OS account when it runs for the whole machine, and to you when you started it with `STRAZA_HOME`. Each enrollment makes a new key and lasts until its sign-in deadline, `governance.signInMaxAge`, 7 days by default. The deadline counts from the moment you signed in at the identity provider, or from the enrollment when the ID token carries no sign-in time, and use never renews it. Past it the server refuses the next session start and the next renewal with a sentence that says to run `straza enroll` and sign in again.
+The service keeps the server's address, the keys that check every policy the server sends, and your key in its state directory. That directory belongs to the service's own OS account when it runs for the whole machine, and to you when you started it with `STRAZA_HOME`. Each enrollment makes a new key and lasts until its sign-in deadline, `governance.signInMaxAge`, 7 days by default. The deadline counts from the moment you signed in at the identity provider, or from the enrollment when the ID token carries no sign-in time, and use never renews it. Past it the server refuses the next session start and the next renewal with a sentence that says to run `straza enroll --server` with the server's address and sign in again.
 
 
 A machine that an older Straza client enrolled holds a bearer device credential, which the server no longer accepts. Its next session start is refused with the sentence below. Update `straza`, start the service, and enroll the machine again.
@@ -187,41 +187,43 @@ A machine that an older Straza client enrolled holds a bearer device credential,
 A machine enrolled with a sign-in code, by `--use-device-code` or by a Straza client older than the browser sign-in, is refused at its next session start once the server's `governance.minSignIn` is `browser`, which is the enterprise default. Update `straza` if it does not open a browser, and run `straza enroll` again in a desktop session on that machine.
 
 
+The sentences below name the example server `https://straza.example.com`, and yours name your own. On a machine whose managed configuration names the server, the sentences that `straza` writes itself leave out `--server`, because the service enrolls at that server whatever the flag says.
+
 {{< fails >}}
 ``This machine has no display, so Straza cannot open a browser here. Run `straza enroll --use-device-code` to sign in with a code on another device, if your Straza admin allows it.``
 : The terminal has neither `BROWSER`, `DISPLAY` nor `WAYLAND_DISPLAY`. Run enroll in a desktop session on this machine, or use the code as the step above shows.
 
-``The browser sign-in did not finish within 5 minutes. Run `straza enroll` again.``
+``The browser sign-in did not finish within 5 minutes. Run `straza enroll --server https://straza.example.com` again.``
 : Nobody finished the sign-in in the browser in time. Run enroll again and sign in when the browser opens.
 
-``Straza refused this sign-in because your identity provider says you last signed in at 2026-10-22 09:14:03 UTC, more than 10 minutes ago. Run `straza enroll` again and sign in when the browser asks.``
+``Straza refused this sign-in because your identity provider says you last signed in at 2026-10-22 09:14:03 UTC, more than 10 minutes ago. Run `straza enroll --server https://straza.example.com` again and sign in when the browser asks.``
 : The identity provider answered with an earlier sign-in instead of asking for your password, and the sentence names the time it gave. Run enroll again. If it keeps happening, ask IT whether the provider honors a request for a fresh sign-in.
 
-``Straza refused this sign-in because the identity provider sent no auth_time claim, so Straza cannot tell that you signed in just now. Ask IT to add the auth_time claim to the ID token of the Straza app, then run `straza enroll` again.``
+``Straza refused this sign-in because the identity provider sent no auth_time claim, so Straza cannot tell that you signed in just now. Ask IT to add the auth_time claim to the ID token of the Straza app, then run `straza enroll --server https://straza.example.com` again.``
 : The identity provider does not say when you signed in. On Entra ID the admin adds the optional claim, as [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}) shows.
 
-``Straza refused this sign-in because it was made for a different enrollment. Run `straza enroll` again and finish the sign-in in the browser it opens.``
+``Straza refused this sign-in because it was made for a different enrollment. Run `straza enroll --server https://straza.example.com` again and finish the sign-in in the browser it opens.``
 : The ID token names another key, or a sign-in of another Straza program reached the enrollment. Run enroll again and finish the sign-in it opens.
 
-``Straza refused this sign-in because it was made for another Straza program. Run `straza enroll` on this machine and finish the sign-in it starts.``
+``Straza refused this sign-in because it was made for another Straza program. Run `straza enroll --server https://straza.example.com` on this machine and finish the sign-in it starts.``
 : A standalone server's sign-in that another Straza program, such as the console, asked for reached the enrollment. Run enroll and finish the sign-in it opens.
 
-``Straza refused this sign-in because your identity provider says you last signed in at 2026-10-22 09:14:03 UTC, longer ago than your Straza admin allows. Sign out at your identity provider, then run `straza enroll` again and sign in.``
+``Straza refused this sign-in because your identity provider says you last signed in at 2026-10-22 09:14:03 UTC, longer ago than your Straza admin allows. Sign out at your identity provider, then run `straza enroll --server https://straza.example.com` again and sign in.``
 : A sign-in with a code reused a sign-in at the identity provider that is already past the sign-in deadline, `governance.signInMaxAge`. Sign out at the provider so it asks for your password, then enroll again.
 
-``Straza refused this sign-in because your Straza admin requires a browser sign-in, and a sign-in code cannot show which machine it was approved for. Run `straza enroll` in a desktop session on this machine.``
+``Straza refused this sign-in because your Straza admin requires a browser sign-in, and a sign-in code cannot show which machine it was approved for. Run `straza enroll --server https://straza.example.com` in a desktop session on this machine.``
 : You ran `--use-device-code`, and the server's `governance.minSignIn` is `browser`. Run enroll without the flag in a desktop session.
 
-``Straza refused this machine because it was enrolled with a sign-in code, and your Straza admin now requires a browser sign-in. Run `straza enroll` in a desktop session on this machine, and update Straza first if it does not open a browser.``
+``Straza refused this machine because it was enrolled with a sign-in code, and your Straza admin now requires a browser sign-in. Run `straza enroll --server https://straza.example.com` in a desktop session on this machine, and update Straza first if it does not open a browser.``
 : The session start of a machine enrolled with a code, once the server requires the browser. Enroll the machine again through the browser.
 
-``Straza could not wait for the sign-in answer on port 8765, because another program uses it. Wait a minute and run `straza enroll` again, or ask your Straza admin to change oidc.loopbackPort.``
+``Straza could not wait for the sign-in answer on port 8765, because another program uses it. Wait a minute and run `straza enroll --server https://straza.example.com` again, or ask your Straza admin to change oidc.loopbackPort.``
 : The server fixes the port of the sign-in answer with `oidc.loopbackPort`, and another program holds it, often another sign-in that is still waiting.
 
-``The Straza server at http://127.0.0.1:8420 does not offer a browser sign-in yet. Run `straza enroll --use-device-code`, or ask your Straza admin to upgrade the server.``
+``The Straza server at http://127.0.0.1:8420 does not offer a browser sign-in yet. Run `straza enroll --server http://127.0.0.1:8420 --use-device-code`, or ask your Straza admin to upgrade the server.``
 : The server is older than the client. Sign in with the code, or upgrade the server.
 
-``the sign-in code expired before it was approved. Run `straza enroll` again and approve the new code it shows``
+``the sign-in code expired before it was approved. Run `straza enroll --server https://straza.example.com` again and approve the new code it shows``
 : Run `straza enroll --use-device-code` again and approve the code it prints this time.
 
 ``Straza's background service for STRAZA_HOME /home/alice/.straza isn't running, so this command can't reach your Straza session. Start it with `straza service` in a shell that has the same STRAZA_HOME.``
@@ -270,7 +272,7 @@ session    none (start a harness session)
 audit      nothing waiting to upload
 ```
 
-No session exists yet, because an agent opens one when it starts. Before you enroll, the identity line reads ``not enrolled (run `straza enroll --server <strazad url>`)``.
+No session exists yet, because an agent opens one when it starts. Before you enroll, the identity line reads ``not enrolled. A person runs `straza enroll --server <strazad url>` and signs in with their work account. An AI agent runs `straza enroll --server <strazad url> --headless` with its registered key or the client secret IT installed for it.`` On a machine whose managed configuration names the server, both commands leave out `--server <strazad url>`.
 
 ## Run the doctor
 
@@ -350,7 +352,7 @@ A single rule can also ask for a level with `require.attestation`, as the [Polic
 A session token lives 300 seconds, and the service renews it when a call arrives with two minutes or less left. When the server cannot be reached, the service keeps deciding from the last policy it verified, for the offline grace that `governance.offlineGraceTTL` sets. That is 15 minutes on a standalone server and 0 on an enterprise server, so an enterprise session denies as soon as its token expires. Past the grace, every call is denied with a reason of this shape, where Straza fills in the two durations:
 
 ```text
-Straza: session token expired <age> ago and the offline grace period (<grace>) is exhausted. Straza cannot verify current policy while the platform is unreachable; reconnect and run `straza doctor`.
+Straza: session token expired <age> ago and the offline grace period (<grace>) is exhausted. Straza cannot verify current policy while the platform is unreachable. This is a connection problem, not a policy decision. Try the call once more in a minute. If it is denied again, tell the user to check the network and run `straza doctor`.
 ```
 
 

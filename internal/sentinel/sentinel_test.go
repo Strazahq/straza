@@ -126,3 +126,56 @@ func TestSentinelEndToEnd(t *testing.T) {
 		t.Errorf("window=%q reason=%q", ce.Data.Window, ce.Data.Reason)
 	}
 }
+
+// TestVerdictCE pins the CloudEvent a verdict is written as, by the sentinel
+// and by the gateway alike: the envelope with the source given, a fresh id,
+// and the pinned data contract, with evidence an empty list when none and
+// window only when set.
+func TestVerdictCE(t *testing.T) {
+	t.Parallel()
+	rows := []struct {
+		name   string
+		v      Verdict
+		source string
+		want   map[string]any
+	}{
+		{"gateway credential echo", Verdict{
+			Session: "sess-1", User: "u-1", Detector: DetectorCredentialEcho, Severity: SeverityCritical,
+			Reason: "a reason", Evidence: []string{"ce-1"},
+		}, "strazad", map[string]any{
+			"session": "sess-1", "user": "u-1", "detector": "credentialEcho", "severity": "critical",
+			"reason": "a reason", "evidence": []any{"ce-1"},
+		}},
+		{"windowed with no evidence", Verdict{
+			Session: "sess-2", Detector: DetectorDenyBurst, Severity: SeverityWarn, Reason: "r", Window: "1m0s",
+		}, "strazad-sentinel", map[string]any{
+			"session": "sess-2", "user": "", "detector": "denyBurst", "severity": "warn",
+			"reason": "r", "evidence": []any{}, "window": "1m0s",
+		}},
+	}
+	for _, row := range rows {
+		raw, err := VerdictCE(row.v, row.source)
+		if err != nil {
+			t.Fatalf("%s: %v", row.name, err)
+		}
+		var ce map[string]any
+		if err := json.Unmarshal(raw, &ce); err != nil {
+			t.Fatalf("%s: %v (%s)", row.name, err, raw)
+		}
+		if ce["specversion"] != "1.0" || ce["type"] != SubjectVerdict || ce["source"] != row.source || ce["id"] == "" || ce["time"] == "" {
+			t.Errorf("%s: envelope = %v", row.name, ce)
+		}
+		if got, _ := json.Marshal(ce["data"]); string(got) != string(mustMarshal(t, row.want)) {
+			t.Errorf("%s: data = %s, want %s", row.name, got, mustMarshal(t, row.want))
+		}
+	}
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

@@ -26,6 +26,14 @@ type UnroutableError struct{ Cause string }
 
 func (e *UnroutableError) Error() string { return "approval unroutable: " + e.Cause }
 
+// ErrDeciderUnreadable reports that the store failed to read the requester
+// or the sponsor, whose user records say who decides a new approval, for a
+// reason other than a missing record. Request and Routable answer it wrapped
+// with the store's error when no approver role carries the record. The PEP
+// then fails closed as a service error and never as an *UnroutableError,
+// because the fault leaves who decides unknown.
+var ErrDeciderUnreadable = errors.New("approval deciders: a user record that says who decides could not be read")
+
 // modeFor maps the PEP's decision marker onto the record's mode column. A
 // sponsor-routed record that fell on its requester is a confirm record too:
 // the same person decides alone, so every lane treats the two alike.
@@ -57,8 +65,10 @@ func bareApprove(in RequestInput) bool {
 // An agent with no sponsor has no person behind it. A resolution failure
 // returns the empty pool plus a cause string; the caller decides whether
 // roles still carry the record (warn-only) or nothing does (UnroutableError,
-// revision 14: deny now, never hold a doomed record).
-func (s *Service) resolveDeciders(ctx context.Context, in RequestInput) (users []string, requesterDecides bool, cause string) {
+// revision 14: deny now, never hold a doomed record). A store fault on
+// either read also returns ErrDeciderUnreadable wrapped in fault, while a
+// missing requester or sponsor is a resolution failure like the others.
+func (s *Service) resolveDeciders(ctx context.Context, in RequestInput) (users []string, requesterDecides bool, cause string, fault error) {
 	wantSponsor := bareApprove(in)
 	for _, dk := range in.Spec.Deciders {
 		if dk == policy.DeciderSponsor {
@@ -66,45 +76,61 @@ func (s *Service) resolveDeciders(ctx context.Context, in RequestInput) (users [
 		}
 	}
 	if !wantSponsor {
-		return nil, false, ""
+		return nil, false, "", nil
 	}
 	requester, err := s.st.Users().GetByID(ctx, in.UserID)
 	if err != nil {
-		return nil, false, fmt.Sprintf("requester %q could not be read (%v)", in.Username, err)
+		cause = fmt.Sprintf("requester %q could not be read (%v)", in.Username, err)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, false, cause, nil
+		}
+		return nil, false, cause, fmt.Errorf("%w: requester %q: %w", ErrDeciderUnreadable, in.Username, err)
 	}
 	if requester.Sponsor == "" {
 		if userIsNHI(requester) {
-			return nil, false, fmt.Sprintf("agent %q has no sponsor", in.Username)
+			return nil, false, fmt.Sprintf("agent %q has no sponsor", in.Username), nil
 		}
-		return nil, true, ""
+		return nil, true, "", nil
 	}
 	su, err := s.st.Users().GetByUsername(ctx, requester.Sponsor)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, false, fmt.Sprintf("sponsor %q is not known to Straza (identity manager sync missing or stale)", requester.Sponsor), nil
+	}
 	if err != nil {
-		return nil, false, fmt.Sprintf("sponsor %q is not known to Straza (identity manager sync missing or stale)", requester.Sponsor)
+		return nil, false, fmt.Sprintf("sponsor %q could not be read (%v)", requester.Sponsor, err),
+			fmt.Errorf("%w: sponsor %q: %w", ErrDeciderUnreadable, requester.Sponsor, err)
 	}
 	if su.Status != store.UserActive {
-		return nil, false, fmt.Sprintf("sponsor %q is not an active user", requester.Sponsor)
+		return nil, false, fmt.Sprintf("sponsor %q is not an active user", requester.Sponsor), nil
 	}
 	if userIsNHI(su) {
-		return nil, false, fmt.Sprintf("sponsor %q is an AI agent or a service account, not a person", requester.Sponsor)
+		return nil, false, fmt.Sprintf("sponsor %q is an AI agent or a service account, not a person", requester.Sponsor), nil
 	}
 	if su.ID == requester.ID && !in.Spec.SelfApproval {
-		return nil, false, fmt.Sprintf("sponsor %q is the requester", su.Username)
+		return nil, false, fmt.Sprintf("sponsor %q is the requester", su.Username), nil
 	}
-	return []string{su.Username}, false, ""
+	return []string{su.Username}, false, "", nil
 }
 
 // deciders resolves the decide pool of a new record for in through
 // resolveDeciders, and approver roles on the rule carry the record instead
 // of the requester. A pool that comes out entirely empty answers an
-// *UnroutableError and logs one warn line. cause is the failed sponsor half
-// of a pool that roles still carry, which the caller logs.
+// *UnroutableError and logs one warn line, or, when a store fault kept the
+// requester or the sponsor from being read, the wrapped ErrDeciderUnreadable
+// and no line, because the PEP logs its fail-closed deny once. cause is the
+// failed sponsor half of a pool that roles still carry, which the caller
+// logs.
 func (s *Service) deciders(ctx context.Context, in RequestInput) (users []string, requesterDecides bool, cause string, err error) {
-	users, requesterDecides, cause = s.resolveDeciders(ctx, in)
+	users, requesterDecides, cause, fault := s.resolveDeciders(ctx, in)
 	// A rule that also names approver roles asked for a second pair of eyes,
 	// so the roles carry the record and it never becomes a self-confirmation.
 	requesterDecides = requesterDecides && len(in.Spec.Roles) == 0
 	if len(users) == 0 && len(in.Spec.Roles) == 0 && !in.Confirm && !in.Spec.SelfApproval && !requesterDecides {
+		if fault != nil {
+			// The fault leaves who decides unknown. The PEP fails closed on
+			// it and counts it as a failure, apart from the routing errors.
+			return nil, false, "", fault
+		}
 		// Revision 14: an entirely empty pool means nobody would ever be
 		// notified and nobody but a console-watching admin could ever decide,
 		// so the call is denied NOW with the cause instead of minting a record
@@ -126,24 +152,34 @@ func (s *Service) deciders(ctx context.Context, in RequestInput) (users []string
 // Routable answers what Request would answer for in before it writes
 // anything, and writes nothing itself: nil when a pending record already
 // covers the call or someone could decide a new one, an *UnroutableError
-// with Request's cause when nobody could, and the lookup's store error
-// otherwise. It runs the same lookup first, as Request does. A nil answer
-// does not promise the later Request, because the store or the sponsor can
-// change in between.
+// with Request's cause when nobody could, and a store error otherwise: the
+// lookup's, or ErrDeciderUnreadable wrapping the read of the requester or
+// the sponsor. A new record over the request rate answers
+// ErrTooManyRequests, and Routable spends nothing from that rate. It runs
+// the same lookup first, as Request does. A nil answer does not promise the
+// later Request, because the store, the sponsor or the rate can change in
+// between.
 func (s *Service) Routable(ctx context.Context, in RequestInput) error {
 	if _, err := s.findPendingDedupe(ctx, in, in.ArgvHash); err == nil {
 		return nil
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("approval request-dedupe: %w", err)
 	}
-	_, _, _, err := s.deciders(ctx, in)
-	return err
+	if _, _, _, err := s.deciders(ctx, in); err != nil {
+		return err
+	}
+	if !s.requestReady(in) {
+		return ErrTooManyRequests
+	}
+	return nil
 }
 
 // Request creates (or dedupes onto) a pending record, then notifies + audits.
 // The dedupe key is (rule, argvHash) among pending rows, scoped per class by
 // findPendingDedupe: session for a hold, USER for a ticket. A hit returns the
-// existing record WITHOUT re-notifying (no channel spam on retry).
+// existing record WITHOUT re-notifying (no channel spam on retry). A new
+// record over the request rate (rate.go) answers ErrTooManyRequests and
+// writes nothing.
 func (s *Service) Request(ctx context.Context, in RequestInput) (Record, error) {
 	// Intake sanitation for the client/model-typed display strings. Postgres
 	// rejects a raw NUL in any text value (SQLSTATE 22021: a justification
@@ -174,6 +210,12 @@ func (s *Service) Request(ctx context.Context, in RequestInput) (Record, error) 
 		// Roles still carry the record; the failed sponsor half is warn-only.
 		s.log.Warn("approval deciders: sponsor unresolved, roles carry the record",
 			"rule", in.RuleID, "user", in.Username, "cause", cause)
+	}
+	// Past the dedupe, so a request that joins a pending record spends
+	// nothing, and past the routing, so a request nobody could decide
+	// spends nothing either.
+	if !s.allowRequest(in) {
+		return Record{}, ErrTooManyRequests
 	}
 
 	now := s.now()
@@ -222,6 +264,11 @@ func (s *Service) Request(ctx context.Context, in RequestInput) (Record, error) 
 		row.RetryTTLSeconds = ttl
 		row.ExpiresAt = now.Add(time.Duration(timeout) * time.Second)
 	}
+	// The insert and its request record run on a context the caller cannot
+	// cancel, as the use of an approval does. A client that leaves while the
+	// insert is in flight could otherwise commit a pending approval that no
+	// record names and no approver hears of, while a retry can still use it.
+	ctx = context.WithoutCancel(ctx)
 	created, err := s.st.Approvals().Insert(ctx, row)
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {

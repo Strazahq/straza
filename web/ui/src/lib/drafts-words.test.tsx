@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { DraftPrincipal } from "./api";
-import { coverageNouns, leadOf, objectsMove } from "./drafts-access";
+import { objectsMove } from "./drafts-access";
 import { changeCounts, confirmBlocks } from "./drafts-model";
 import {
   ackBar,
   ackWords,
   blockTitle,
-  changesLede,
+  changesLine,
+  crumbLabel,
   decidedWords,
   doesOf,
   doorWords,
@@ -15,22 +16,31 @@ import {
   keepDraft,
   keepLive,
   checkedLine,
-  coverLead,
   coveredWords,
-  docsFold,
+  everyChip,
+  fileFold,
+  holdersChip,
   holdsWords,
-  leadLines,
+  inDraftCount,
   needLine,
+  objectsChip,
   outcomeFoot,
+  outcomesWords,
   pickWas,
   proposerWords,
   publishLead,
+  reachesLine,
   revisionLine,
+  roleKindWords,
+  rulesLine,
   signLine,
+  startsLine,
+  toolsChip,
   typedWrong,
+  unchangedFold,
   widenCount,
 } from "./drafts-words";
-import { COVERAGE, COVERS_DETAIL, CUT_RISK, DETAIL, HOST_RISK, REACH_RISK, detailWith } from "@/test/drafts-fixture";
+import { COVERAGE, CUT_RISK, DETAIL, HOST_RISK, REACH_RISK } from "@/test/drafts-fixture";
 
 // The sentences of the Drafts area that are built from values: each one a
 // full sentence in the console's own words.
@@ -58,12 +68,11 @@ describe("who drafted it", () => {
 });
 
 describe("the sentences of the page", () => {
-  it("counts what changes and what goes live", () => {
+  it("counts what goes live", () => {
     const counts = changeCounts(DETAIL.draft.items);
-    expect(changesLede(counts)).toBe("1 new MCP server, 1 changed MCP server, 1 MCP server removed, 1 new role, 2 changed roles, 1 new approval set and 1 changed approval set. They go live together or not at all.");
-    expect(goLive(counts)).toBe("Publishing adds 1 MCP server, 1 role and 1 approval set, changes 1 MCP server, 2 roles and 1 approval set and removes 1 MCP server in one step, or nothing changes.");
+    expect(goLive(counts)).toBe("Publishing adds 1 MCP server, 1 role and 1 policy set, changes 1 MCP server, 2 roles and 1 policy set and removes 1 MCP server in one step, or nothing changes.");
     expect(goLive([{ kind: "App", what: "removed", n: 1 }])).toBe("Publishing removes 1 MCP server in one step, or nothing changes.");
-    expect(goLive([{ kind: "PolicySet", what: "off", n: 1 }])).toBe("Publishing turns off 1 approval set in one step, or nothing changes.");
+    expect(goLive([{ kind: "PolicySet", what: "off", n: 1 }])).toBe("Publishing turns off 1 policy set in one step, or nothing changes.");
     expect(goLive([{ kind: "Role", what: "changed", n: 1 }])).toBe("Publishing changes 1 role in one step, or nothing changes.");
   });
 
@@ -82,7 +91,7 @@ describe("the sentences of the page", () => {
     expect(ackWords(confirmBlocks(risks)[0])).toBe(want);
   });
 
-  it("words the bar: what to do before Publish, counted by confirm block", () => {
+  it("words the band's line: what to do before Publish, counted by confirm block", () => {
     expect(ackBar(1, 1, 0)).toBe("1 line needs your confirmation when you publish.");
     expect(ackBar(3, 3, 2)).toBe("Read 2 warnings first. 3 lines need your confirmation when you publish.");
     expect(ackBar(1, 100, 0)).toBe("Publishing asks you for 1 confirmation.");
@@ -112,8 +121,8 @@ describe("the sentences of the page", () => {
     const line = (code: string, object?: string, key = code + object) => ({ code, object, key });
     const sets = ["a", "b"].map((s) => line("policy.guardrail-changed", "PolicySet/" + s));
     expect(publishLead([line("server.removal", "App/legacy-desk"), ...sets, line("role.covers-wider", "Role/desk-x"), line("access.gated", "Role/desk-y")]))
-      .toBe("Publishing removes 1 MCP server, loosens 2 approval sets and widens 2 roles, in one step, or nothing changes.");
-    expect(publishLead([line("agent.guardrail", "PolicySet/agent-guardrails"), line("policy.guardrail-changed", "PolicySet/agent-guardrails")])).toBe("Publishing loosens 1 approval set, or nothing changes.");
+      .toBe("Publishing removes 1 MCP server, loosens 2 policy sets and widens 2 roles, in one step, or nothing changes.");
+    expect(publishLead([line("agent.guardrail", "PolicySet/agent-guardrails"), line("policy.guardrail-changed", "PolicySet/agent-guardrails")])).toBe("Publishing loosens 1 policy set, or nothing changes.");
     expect(publishLead([line("some.future-code", "App/desk"), line("other.code", "App/desk"), line("x.y", "Ticket/T-1"), line("x.y", "Ticket/T-2")]))
       .toBe("Publishing widens access through 1 MCP server and widens access through 2 objects, in one step, or nothing changes.");
     expect(doesOf("constructor", "toString/x")).toEqual(["widens access through", "object", "objects"]);
@@ -126,7 +135,7 @@ describe("the sentences of the page", () => {
     const cut = (code: string, key: string) => ({ code, key });
     expect(publishLead([cut("server.runs-code", "k1"), cut("server.plain-http", "k2")])).toBe("Publishing widens access through 2 lines, or nothing changes.");
     expect(doesOf("x.y", undefined)).toEqual(["widens access through", "line", "lines"]);
-    expect(blockTitle(doesOf("policy.guardrail-changed", "PolicySet/a"), 20)).toBe("Loosens 20 approval sets");
+    expect(blockTitle(doesOf("policy.guardrail-changed", "PolicySet/a"), 20)).toBe("Loosens 20 policy sets");
   });
 
   const signs: [string, string | null, boolean, boolean, string][] = [
@@ -153,64 +162,68 @@ describe("the sentences of the page", () => {
     expect(coveredWords(tickets, false, [{ id: "t2", value: "T-2" }])).toBe("1 ticket: T-2");
     expect(holdsWords(1)).toBe("1 person holds it.");
     expect(holdsWords(2)).toBe("2 people hold it.");
-    expect(docsFold(2, "open")).toBe("2 files, as they will be published");
-    expect(docsFold(1, "open")).toBe("1 file, as it will be published");
-    expect(docsFold(3, "published")).toBe("3 files, as they were published");
-    expect(docsFold(2, "discarded")).toBe("2 files, as they were drafted");
+    expect(fileFold("ghapp-read", "open")).toBe("ghapp-read.yaml, as it will be published");
+    expect(fileFold("ghapp-read", "published")).toBe("ghapp-read.yaml, as it was published");
+    expect(fileFold("ghapp-read", "discarded")).toBe("ghapp-read.yaml, as it was drafted");
+    expect(crumbLabel("Drafts", "312")).toBe("Drafts / Draft 312");
     expect(decidedWords("published", "alice")).toBe("Published by alice");
     expect(decidedWords("expired", undefined)).toBe("Expired");
   });
 });
 
-// The lead of the review page: what publishing does to the objects of
-// each role, in the server's own nouns, then who holds the roles. The
-// fixture's type is invented, ticket and tickets, so a hardcoded noun
-// fails.
-describe("the lead of the page", () => {
-  const lead = (c = COVERAGE, isNew = false) => coverLead({ coverage: c, move: objectsMove(c), isNew }, coverageNouns(c));
-  const t = (n: number) => ({ id: "t" + n, value: "T-" + n });
+// The words of In this draft and the card heads, built from values. The
+// fixture's type is invented, ticket and tickets, so a hardcoded noun fails.
+describe("the rows and the card heads", () => {
+  const tickets = { type: "ticket", plural: "tickets" };
 
-  const covers: [string, Partial<typeof COVERAGE>, boolean, string][] = [
-    ["a widening", {}, false, "Changes the role tracker-triage: it will reach 2 more tickets on tracker, T-2 and T-3."],
-    ["a widening to every ticket", { every_after: true, after: [] }, false, "Changes the role tracker-triage: it will reach every ticket on tracker, including tickets added later."],
-    ["a narrowing", { before: [t(1), t(2)], after: [t(1)] }, false, "Changes the role tracker-triage: it will stop reaching 1 ticket on tracker, T-2."],
-    ["a swap", { before: [t(1)], after: [t(2)] }, false, "Changes the role tracker-triage: it will reach 1 more ticket on tracker, T-2, and stop reaching 1 ticket, T-1."],
-    ["every narrowed to some", { every_before: true, before: [], after: [t(1), t(2)] }, false, "Changes the role tracker-triage: it will reach only 2 tickets on tracker instead of every ticket: T-1 and T-2."],
-    ["a new role", { before: [], after: [t(9)] }, true, "Adds the role tracker-triage on tracker, for 1 ticket: T-9."],
-    ["a new role on every ticket", { before: [], every_after: true, after: [] }, true, "Adds the role tracker-triage on tracker, for every ticket, including tickets added later."],
+  it("names each kind in full, with the server that owns a role", () => {
+    expect(roleKindWords("application", "ghapp")).toBe("Application role · owned by ghapp");
+    expect(roleKindWords("business", "")).toBe("Business role");
+    expect(roleKindWords("approver", "")).toBe("Approver role");
+    expect(roleKindWords("straza", "")).toBe("Straza role");
+    expect(roleKindWords("", "")).toBe("Role");
+  });
+
+  const chips: [string, string, string][] = [
+    ["one tool that joins", toolsChip("+", 1), "+1 tool"],
+    ["two tools that leave", toolsChip("-", 2), "-2 tools"],
+    ["one ticket that joins", objectsChip("+", 1, tickets), "+1 ticket"],
+    ["three tickets that leave", objectsChip("-", 3, tickets), "-3 tickets"],
+    ["every ticket", everyChip("+", tickets), "+every ticket"],
+    ["nobody holds it", holdersChip(0), "nobody holds it yet"],
+    ["one holder", holdersChip(1), "1 person holds it"],
+    ["many holders", holdersChip(1200), "1,200 people hold it"],
+    ["the unchanged fold", unchangedFold(9), "9 unchanged"],
+    ["one object", inDraftCount(1), "1 object"],
+    ["four objects", inDraftCount(4), "4 objects, published together or not at all"],
+    ["a set that asks and denies", outcomesWords(["hum", "deny"]), "needs approval · denied"],
+    ["a set that allows", outcomesWords(["allow"]), "allowed"],
   ];
-  it.each(covers)("says %s", (_name, over, isNew, want) => {
-    expect(lead({ ...COVERAGE, ...over }, isNew)).toBe(want);
+  it.each(chips)("words %s", (_name, got, want) => {
+    expect(got).toBe(want);
+  });
+
+  const lines: [string, string, string][] = [
+    ["a new server whose tools were read", startsLine(true, 17, false), "Starts it and offers its 17 tools to the roles that reach them."],
+    ["a new server whose tools were not read", startsLine(true, null, false), "Starts it. Its tools are not read yet."],
+    ["a new command server", startsLine(false, null, false), "Starts it."],
+    ["a published new server", startsLine(true, 2, true), "Started it and offered its 2 tools to the roles that reach them."],
+    ["a first pin", changesLine("tickets", [], false, "none"), "Pins tickets."],
+    ["a first pin and a field", changesLine("tickets", ["Rate limit"], false, "none"), "Pins tickets and changes rate limit."],
+    ["two fields, published", changesLine("", ["Rate limit", "Per-call timeout"], true, "none"), "Changed rate limit and per-call timeout."],
+    ["no field", changesLine("", [], false, "No field the server page shows changes."), "No field the server page shows changes."],
+    ["a new role on one server", reachesLine([{ app: "tracker", tools: ["ticket_read", "ticket_search"] }], []), "Reaches 2 tools of tracker."],
+    ["a new role on every tool of two servers", reachesLine([{ app: "tracker", tools: ["*"] }, { app: "desk", tools: ["a"] }], []), "Reaches every tool of tracker and 1 tool of desk."],
+    ["a new business role", reachesLine([], ["tracker-triage"]), "Implies tracker-triage."],
+    ["a new set's rules", rulesLine({ new: 2, edited: 0, removed: 0 }), "2 rules new."],
+    ["a changed set's rules", rulesLine({ new: 1, edited: 1, removed: 1 }), "1 rule new, 1 rule edited and 1 rule removed."],
+    ["a set whose rules stay", rulesLine({ new: 0, edited: 0, removed: 0 }), "Changes no rule."],
+  ];
+  it.each(lines)("says what publishing does to %s", (_name, got, want) => {
+    expect(got).toBe(want);
   });
 
   it("reads a rename of a value as no change, by id", () => {
     expect(objectsMove({ ...COVERAGE, after: [{ id: "t1", value: "T-1-renamed" }] }).changed).toBe(false);
-  });
-
-  it("says the widening and who holds the role for a draft no gain row shows", () => {
-    expect(leadLines(leadOf(COVERS_DETAIL, false), coverageNouns, false).map((l) => l.text)).toEqual([
-      "Changes the role tracker-triage: it will reach 2 more tickets on tracker, T-2 and T-3.", "1 person holds it.",
-    ]);
-  });
-
-  it("says nobody gains when nobody holds the roles, and who loses what they reach today", () => {
-    expect(leadLines(leadOf(DETAIL, false), coverageNouns, false)).toEqual([
-      { text: "Nobody holds github-readers or github-writers yet, so nobody gains access until the identity manager assigns them." },
-      { text: "Holders of demo-tools-readers lose tools they reach today, and their calls to them are refused after publishing.", loses: true },
-    ]);
-  });
-
-  it("claims nothing about the hidden rows, and keeps what it can say about the rows it shows", () => {
-    expect(leadLines(leadOf(DETAIL, true), coverageNouns, true).map((l) => l.text)).toEqual([
-      "Nobody holds github-readers or github-writers yet.",
-      "Holders of demo-tools-readers lose tools they reach today, and their calls to them are refused after publishing.",
-    ]);
-  });
-
-  it("says a held role gains, and nobody gains only when no held role gains", () => {
-    const held = detailWith({ verdict: { gains: [{ ...DETAIL.verdict.gains[0], holders_count: 2 }] } });
-    expect(leadLines(leadOf(held, false), coverageNouns, false).map((l) => l.text)).toEqual(["Holders of github-readers gain access when this is published."]);
-    const loses = detailWith({ verdict: { gains: [DETAIL.verdict.gains[3]] } });
-    expect(leadLines(leadOf(loses, false), coverageNouns, false).map((l) => l.text)[0]).toBe("Nobody gains access when this is published.");
   });
 });

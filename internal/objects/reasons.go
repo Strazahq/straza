@@ -2,6 +2,7 @@ package objects
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"unicode/utf8"
 
@@ -15,7 +16,7 @@ import (
 // first line of a tool's own error text.
 
 func reasonNoCredential(app, plural string) string {
-	return fmt.Sprintf("%[1]s has no listing credential, so Straza cannot list its %[2]s. Add one with strazactl apps secret set %[1]s --listing, then refresh with strazactl apps objects refresh %[1]s.", app, plural)
+	return fmt.Sprintf("%[1]s has no listing credential, so Straza cannot list its %[2]s. Set one on its server page under Server authentication, or with strazactl apps secret set %[1]s --listing. Then press List again on its %[2]s tab, or run strazactl apps objects refresh %[1]s.", app, plural)
 }
 
 func reasonNotRunning(app, tool string) string {
@@ -28,6 +29,17 @@ func reasonToolsUnread(app, tool, plural string) string {
 
 func reasonUnreachable(app, tool string) string {
 	return fmt.Sprintf("Straza could not reach %[1]s to call %[2]s. Check %[1]s's logs on its Activity tab, then refresh.", app, tool)
+}
+
+// reasonRefused is the sentence of a listing call the server answered with
+// HTTP status in place of running it. A 401 or 403 to a call that carried
+// the listing credential means the server does not hold that value.
+func reasonRefused(app, tool, plural string, status int, withCredential bool) string {
+	code := fmt.Sprintf("HTTP %d %s", status, http.StatusText(status))
+	if withCredential && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
+		return fmt.Sprintf("%[1]s refused the listing credential with %[2]s, so Straza could not list its %[3]s. %[1]s's own config must hold the value Straza stores: put it there and restart %[1]s, or store a new value under Server authentication on its server page and give %[1]s that one. Then press List again on its %[3]s tab, or run strazactl apps objects refresh %[1]s.", app, code, plural)
+	}
+	return fmt.Sprintf("%[1]s answered the call to %[2]s with %[3]s, so Straza could not list its %[4]s. Check %[1]s's logs on its Activity tab, then refresh.", app, tool, code, plural)
 }
 
 func reasonNoTool(app, tool, plural string) string {

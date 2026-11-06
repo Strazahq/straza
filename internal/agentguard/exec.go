@@ -46,7 +46,7 @@ func Exec(ctx context.Context, argv []string, errOut io.Writer) int {
 
 	store, err := OpenStore()
 	if err != nil {
-		fmt.Fprintf(errOut, "Straza: state unavailable (%v). Refusing to run\n", err)
+		fmt.Fprintf(errOut, "Straza: state unavailable (%v). Refusing to run.\n", err)
 		return execDenyExit
 	}
 	// Unlike hooks there is no harness session.start, so the wrapper starts
@@ -54,7 +54,7 @@ func Exec(ctx context.Context, argv []string, errOut io.Writer) int {
 	// live exec-wrapper session and checks in only when none is live.
 	svc := NewServiceClient()
 	if _, err := svc.StartSession(ctx, localapi.SessionRequest{Harness: localapi.Harness{Name: execHarness}}); err != nil {
-		fmt.Fprintf(errOut, "%s Refusing to run.\n", denyLine(serviceSentence(err, outcomeNotRun)))
+		fmt.Fprintf(errOut, "%s Refusing to run.\n", endSentence(denyLine(serviceSentence(err, outcomeNotRun))))
 		return execDenyExit
 	}
 
@@ -103,4 +103,10 @@ func denyLine(reason string) string {
 		return reason
 	}
 	return "Straza: " + reason
+}
+
+// endSentence closes s with one period, so a refusal that arrives without
+// one still reads apart from the words after it.
+func endSentence(s string) string {
+	return strings.TrimRight(strings.TrimSpace(s), ". ") + "."
 }

@@ -122,13 +122,13 @@ describe("the publish dialog", () => {
     vi.mocked(publishDraft).mockResolvedValue(PUBLISHED);
     const roles = ["desk-a", "desk-b", "desk-c"].map(wider);
     mount({ ...VERDICT, risks: [...roles, ...SETS, REMOVAL] });
-    expect(dialog().textContent).toContain("Publishing removes 1 MCP server, loosens 20 approval sets and widens 3 roles, in one step, or nothing changes.");
+    expect(dialog().textContent).toContain("Publishing removes 1 MCP server, loosens 20 policy sets and widens 3 roles, in one step, or nothing changes.");
     const [rm, sets, wide] = [...document.querySelectorAll<HTMLElement>("[data-block]")];
     expect(within(rm).getByText("Removes 1 MCP server")).toBeTruthy();
     expect(rm.textContent).toContain(REMOVAL.sentence);
     expect(rm.getAttribute("data-loud")).toBe("true");
-    expect(within(sets).getByText("Loosens 20 approval sets")).toBeTruthy();
-    expect(within(sets).getByText("Show the 20 approval sets")).toBeTruthy();
+    expect(within(sets).getByText("Loosens 20 policy sets")).toBeTruthy();
+    expect(within(sets).getByText("Show the 20 policy sets")).toBeTruthy();
     expect(sets.querySelectorAll("li").length).toBe(20);
     expect(within(wide).getByText("Show the 3 roles")).toBeTruthy();
 
@@ -170,7 +170,7 @@ describe("the publish dialog", () => {
   it("shows an agent's self-loosening loud, accepted by the set's name, and names the sponsor who accepts it", async () => {
     vi.mocked(publishDraft).mockResolvedValue(PUBLISHED);
     mount({ ...VERDICT, risks: [LOOSEN] });
-    expect(dialog().textContent).toContain("Publishing loosens 1 approval set, or nothing changes.");
+    expect(dialog().textContent).toContain("Publishing loosens 1 policy set, or nothing changes.");
     const loud = blockWith(AGENT_LOOSENS);
     expect(loud.getAttribute("data-loud")).toBe("true");
     expect(loud.textContent).toContain(agentWrote("joe-java-developer-agent"));

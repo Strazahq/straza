@@ -107,8 +107,8 @@ func TestGatewayServerCredentialRefusal(t *testing.T) {
 		t.Errorf("views-off answer = %s, want a tool error with no slot", raw)
 	}
 	res = second(mcpCall(t, base, tok, "tools/call", map[string]any{"name": "tokapp__plain"}))
-	if code, msg := rpcErrorOf(t, res, nil); code != -32000 || !strings.HasPrefix(msg, "upstream call failed: "+need) {
-		t.Errorf("/mcp answer = %d %q, want the JSON-RPC error unchanged", code, msg)
+	if code, msg := rpcErrorOf(t, res, nil); code != -32000 || !strings.HasPrefix(msg, "Straza: the call was not sent to the MCP server tokapp: "+need) {
+		t.Errorf("/mcp answer = %d %q, want the JSON-RPC error that says the call was not sent and how to connect", code, msg)
 	}
 }
 

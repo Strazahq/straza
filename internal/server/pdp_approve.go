@@ -17,7 +17,9 @@ import (
 // gateway_approve.go). It first uses the approval a prior human decision left
 // for the SAME call (person, session, rule, event key) inside its use window,
 // once, on any replica; on a hit the retry allows with the approved-by
-// reason. Otherwise it creates (or dedupes onto) a pending record and answers
+// reason. While a person's denial of the same call stands inside the hold's
+// decision window, it denies with who denied it and opens nothing.
+// Otherwise it creates (or dedupes onto) a pending record and answers
 // deny-with-reference so the model retries after a human approves. Any
 // approval-service error denies with the fail-closed reason. It never
 // blocks.
@@ -63,6 +65,18 @@ func (a *App) resolveApproveHook(ctx context.Context, claims authn.Claims, sub p
 			Effect: policy.EffectAllow, RuleID: decision.RuleID, SetName: decision.SetName,
 			Reason:      fmt.Sprintf("Straza: %s by %s (ref %s)", verb, rec.DecidedByName, rec.ID),
 			Obligations: decision.Obligations,
+		}, rec.ID
+	}
+	// The gateway lane tells a held call that a person denied it. This lane
+	// cannot hold the call, so while that denial stands inside the hold's
+	// decision window it refuses the retry rather than ask the person again.
+	if rec, ok, err := a.approval.DeniedHoldWithinWindow(ctx, claims.Subject, claims.Session, decision.RuleID, key); err != nil {
+		a.failClosed(ctx, "hook", decision.RuleID, err)
+		return storeDownApproveDeny(decision.RuleID, decision.SetName), ""
+	} else if ok {
+		return policy.Decision{
+			Effect: policy.EffectDeny, RuleID: decision.RuleID, SetName: decision.SetName,
+			Reason: holdDeniedFinalReason(rec),
 		}, rec.ID
 	}
 
@@ -195,7 +209,7 @@ func failClosedApproveDeny(ruleID, setName string) policy.Decision {
 // approvalStoreDownReason is the fail-closed deny on either lane, for a hold
 // and a ticket alike, when the server cannot reach its database to look up or
 // use an approval before any request opens.
-const approvalStoreDownReason = "Straza: this call needs an approval, and the Straza server could not reach its database to check for one, so the call did not run. Denied (fail-closed). Retry the call in a moment, and if this keeps happening ask your Straza administrator to check the server's database connection."
+const approvalStoreDownReason = "Straza: this call needs an approval, and the Straza server could not reach its database to check for one, so the call did not run. Denied (fail-closed). Try the call once more in a minute. If it is denied again, tell the user to ask the Straza administrator to check the server's database connection."
 
 // storeDownApproveDeny is approvalStoreDownReason in policy.Decision shape
 // (the hook lane).
@@ -206,28 +220,57 @@ func storeDownApproveDeny(ruleID, setName string) policy.Decision {
 	}
 }
 
+// approvalDeciderUnreadReason is the fail-closed deny on every lane when the
+// store failed to read the user record of the requester or the sponsor,
+// which says who decides a new approval (approval.ErrDeciderUnreadable).
+const approvalDeciderUnreadReason = "Straza: this call needs an approval, and Straza could not read the user record that says who decides it, so the call did not run. Denied (fail-closed). Try the call once more in a minute. If it is denied again, tell the user to ask the Straza administrator to check the strazad log."
+
+// approvalRateReason is the deny on every lane when a call needs a new
+// approval and its session or its person is over the approval service's
+// request rate (approval.ErrTooManyRequests). It is a decision, not a
+// failure, so it writes no fail-closed record.
+const approvalRateReason = "Straza: this call needs a new approval request, and too many were opened for this session or this user in the last minute, so none was opened and no person was asked. Wait a minute, then try again. If it is refused again, tell the user."
+
 // approveRequestDenyReason maps a Request() error onto the PEP deny words,
 // shared by all three surfaces (hook, gateway, native) so the lanes cannot
-// drift: an UnroutableError (revision 14: no roles, no usable sponsor)
+// drift. An UnroutableError (revision 14: no roles, no usable sponsor)
 // carries its cause and fix to the calling agent and bumps the unroutable
-// counter; anything else stays the generic fail-closed service error.
+// counter. A failed read of who decides answers approvalDeciderUnreadReason,
+// the request rate answers approvalRateReason, and anything else stays the
+// generic fail-closed service error.
 func (a *App) approveRequestDenyReason(err error) string {
 	var un *approval.UnroutableError
 	if errors.As(err, &un) {
 		a.metrics.UnroutableInc()
 		return "Straza: approval cannot be routed: " + un.Cause + ". Denied (fail-closed)"
 	}
+	if errors.Is(err, approval.ErrDeciderUnreadable) {
+		return approvalDeciderUnreadReason
+	}
+	if errors.Is(err, approval.ErrTooManyRequests) {
+		return approvalRateReason
+	}
 	return "Straza: approval service error. Denied (fail-closed)"
+}
+
+// approveRequestRefused answers the deny words for err from Request or
+// Routable on lane, after writing the fail-closed record a failure owes. A
+// refusal for the request rate is a decision and writes none.
+func (a *App) approveRequestRefused(ctx context.Context, lane, ruleID string, err error) string {
+	if !errors.Is(err, approval.ErrTooManyRequests) {
+		a.failClosed(ctx, lane, ruleID, err)
+	}
+	return a.approveRequestDenyReason(err)
 }
 
 // approveRequestDeny is approveRequestDenyReason in policy.Decision shape
 // (the hook lanes); it also writes the one fail-closed Error record for the
-// service-error case (an UnroutableError is a decision: no record).
+// service-error case (an UnroutableError or the request rate is a decision:
+// no record).
 func (a *App) approveRequestDeny(ctx context.Context, err error, ruleID, setName string) policy.Decision {
-	a.failClosed(ctx, "hook", ruleID, err)
 	return policy.Decision{
 		Effect: policy.EffectDeny, RuleID: ruleID, SetName: setName,
-		Reason: a.approveRequestDenyReason(err),
+		Reason: a.approveRequestRefused(ctx, "hook", ruleID, err),
 	}
 }
 
@@ -362,6 +405,21 @@ func ticketDeniedFinalReason(rec approval.Record) string {
 	return fmt.Sprintf(
 		"Straza: ticket %s was denied by %s; this call stays denied until %s",
 		rec.ID, who, rec.ExpiresAt.UTC().Format(time.RFC3339))
+}
+
+// holdDeniedFinalReason is the hook lane's refusal of a retry while a
+// person's denial of the same hold stands: who denied it, the approval, and
+// until when the same call stays denied. It opens like the gateway lane's
+// answer to a held call that was denied, and it names the next step,
+// because a model that retries the same call only meets the same denial.
+func holdDeniedFinalReason(rec approval.Record) string {
+	who := rec.DecidedByName
+	if who == "" {
+		who = "an approver"
+	}
+	return fmt.Sprintf("Straza: approval denied by %s (ref %s). A person denied this exact call, so it did not run, "+
+		"and the same call stays denied until %s. Change the call, or tell the user that it was denied.",
+		who, rec.ID, rec.ExpiresAt.UTC().Format(time.RFC3339))
 }
 
 // approveSummary is the human-facing label for an approval card: it names the

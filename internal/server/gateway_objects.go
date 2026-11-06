@@ -55,12 +55,25 @@ func (c *sessionCatalog) held(app, tool string) []objects.Holding {
 // state, so simulate and the preview may ask it too: a caller that acts on
 // a real call passes a verdict with Missed set to objectMissed.
 func (a *App) objectGate(tier1 *sessionCatalog, target gwTarget, args json.RawMessage) (v objects.Verdict, pinned bool) {
-	if target.app == nativeAppName {
+	c, pinned := a.objectCall(tier1, target, args)
+	if !pinned {
 		return objects.Verdict{}, false
+	}
+	return objects.Decide(c), true
+}
+
+// objectCall answers what the object gate decides a call to target on:
+// the pinned declaration, the held bindings and this replica's object
+// list, all in memory. pinned is false for the built-in app and for a
+// server that pins no type. whoami reads the same input, so it cannot
+// tell an agent other objects than the gate admits.
+func (a *App) objectCall(tier1 *sessionCatalog, target gwTarget, args json.RawMessage) (c objects.Call, pinned bool) {
+	if target.app == nativeAppName {
+		return objects.Call{}, false
 	}
 	oc, ok := a.manager.ObjectsFor(target.app, target.tool)
 	if !ok {
-		return objects.Verdict{}, false
+		return objects.Call{}, false
 	}
 	list := a.objects.Get(oc.AppID)
 	if list != nil && list.Type != oc.Type {
@@ -68,9 +81,9 @@ func (a *App) objectGate(tier1 *sessionCatalog, target gwTarget, args json.RawMe
 		// nothing about this one until the loop lists the server again.
 		list = nil
 	}
-	return objects.Decide(objects.Call{Server: oc.Server, Type: oc.Type, Plural: oc.Plural, Tool: target.tool,
+	return objects.Call{Server: oc.Server, Type: oc.Type, Plural: oc.Plural, Tool: target.tool,
 		Reach: oc.Reach, Drifted: oc.Drifted, Enabled: a.cfg.Apps.Objects.Enabled, Args: args,
-		Held: tier1.held(target.app, target.tool), List: list}), true
+		Held: tier1.held(target.app, target.tool), List: list}, true
 }
 
 // objectMissed asks for a listing of target's server, as a real call the

@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -46,6 +48,7 @@ func TestMaybeWritten(t *testing.T) {
 	if liteErr == nil {
 		t.Fatal("an insert into a missing table succeeded")
 	}
+	closedMidCommit := commitOnClosedConn(t)
 
 	cases := []struct {
 		name string
@@ -66,6 +69,9 @@ func TestMaybeWritten(t *testing.T) {
 		{"deadline", context.DeadlineExceeded, true},
 		{"cancel", fmt.Errorf("insert: %w", context.Canceled), true},
 		{"connection cut mid-answer", io.ErrUnexpectedEOF, true},
+		{"connection closed while the commit waited for its answer", closedMidCommit, true},
+		{"the store's wrap of a closed connection", fmt.Errorf("users update: %w", closedMidCommit), true},
+		{"a closed connection named by its sentinel", fmt.Errorf("commit: %w", pgconn.ErrConnClosed), true},
 		{"unknown", errors.New("something else"), true},
 	}
 	for _, tc := range cases {
@@ -75,6 +81,43 @@ func TestMaybeWritten(t *testing.T) {
 			}
 		})
 	}
+}
+
+// commitOnClosedConn answers the error pgx gives a COMMIT whose connection
+// closed after the statement was sent and before any answer came back. The
+// server end of an in-memory pipe reads the statement and hangs up, which is
+// what a backend terminated while it waits for a synchronous standby does.
+// pgx then reports its own closed connection, which says it is safe to
+// retry although the statement already left. The test fails unless the
+// statement reached the server end, the positive control that it was sent.
+func commitOnClosedConn(t *testing.T) error {
+	t.Helper()
+	cfg, err := pgconn.ParseConfig("postgres://straza@127.0.0.1/straza")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+	sent := make(chan []byte, 1)
+	go func() {
+		buf := make([]byte, 64)
+		n, _ := server.Read(buf)
+		sent <- buf[:n]
+		_ = server.Close()
+	}()
+	conn, err := pgconn.Construct(&pgconn.HijackedConn{Conn: client, TxStatus: 'T', Config: cfg,
+		ParameterStatuses: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = conn.Exec(context.Background(), "COMMIT").ReadAll()
+	if got := <-sent; !strings.Contains(string(got), "COMMIT") {
+		t.Fatalf("the server end read %q, want the COMMIT statement", got)
+	}
+	if err == nil || !pgconn.SafeToRetry(err) || !errors.Is(err, pgconn.ErrConnClosed) {
+		t.Fatalf("the COMMIT on a closed connection answered %v, want pgx's closed connection that says it is safe to retry", err)
+	}
+	return err
 }
 
 // writeShape is one real write error of a driver and how the store must

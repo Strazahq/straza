@@ -46,34 +46,35 @@ const (
 
 // The answers of the sign-in judgments and of the id-token lane on
 // enterprise. browserTail also tells a person whose Straza is too old to
-// open a browser to update it.
+// open a browser to update it. The last %s of each is the enroll command,
+// which enrollCommand writes.
 const (
 	otherProgramMsg = "Straza refused this sign-in because it was made for another Straza program. " +
-		"Run `straza enroll` on this machine and finish the sign-in it starts."
+		"Run %s on this machine and finish the sign-in it starts."
 	otherKeyMsg = "Straza refused this sign-in because it was made for a different enrollment. " +
-		"Run `straza enroll` again and finish the sign-in in the browser it opens."
+		"Run %s again and finish the sign-in in the browser it opens."
 	noAuthTimeMsg = "Straza refused this sign-in because the identity provider sent no auth_time claim, " +
 		"so Straza cannot tell that you signed in just now. Ask IT to add the auth_time claim to the ID token " +
-		"of the Straza app, then run `straza enroll` again."
+		"of the Straza app, then run %s again."
 	staleSignInMsg = "Straza refused this sign-in because your identity provider says you last signed in at %s, " +
-		"more than 10 minutes ago. Run `straza enroll` again and sign in when the browser asks."
+		"more than 10 minutes ago. Run %s again and sign in when the browser asks."
 	aheadSignInMsg = "Straza refused this sign-in because your identity provider says you signed in at %s, " +
 		"which is ahead of the Straza server's clock. Ask your Straza admin to check the clocks of the Straza " +
-		"server and the identity provider, then run `straza enroll` again."
+		"server and the identity provider, then run %s again."
 	pastDeadlineMsg = "Straza refused this sign-in because your identity provider says you last signed in at %s, " +
-		"longer ago than your Straza admin allows. Sign out at your identity provider, then run `straza enroll` " +
+		"longer ago than your Straza admin allows. Sign out at your identity provider, then run %s " +
 		"again and sign in."
-	browserTail = "Run `straza enroll` in a desktop session on this machine, and update Straza first if it " +
+	browserTail = "Run %s in a desktop session on this machine, and update Straza first if it " +
 		"does not open a browser."
 	codeLaneMsg = "Straza refused this sign-in because your Straza admin requires a browser sign-in, and a " +
 		"sign-in code cannot show which machine it was approved for. " + browserTail
 	codeMachineMsg = "Straza refused this machine because it was enrolled with a sign-in code, and your Straza " +
 		"admin now requires a browser sign-in. " + browserTail
 	personDoorMsg = "Straza refused this session because a sign-in token alone no longer starts a session on " +
-		"this server. Install Straza on this machine and run `straza enroll`."
+		"this server. Install Straza on this machine and run %s."
 	agentProofMsg = "Straza refused this session because the user %s is %s, and this server accepts its " +
 		"check-in only with a key proof. Install a current Straza on the machine it runs on, with `straza service` " +
-		"running, and enroll it there with `straza enroll --headless`."
+		"running, and enroll it there with %s."
 )
 
 // signInFacts is what a person's key enrollment judges about its ID token:
@@ -114,6 +115,14 @@ func (a *App) signInRefused(lane string) bool {
 	return minimum != "" && config.SignInRank(lane) < config.SignInRank(minimum)
 }
 
+// enrollCommand is the straza enroll command, with flags after the
+// server, that enrolls a machine at this server. It names the server,
+// because a machine with no managed configuration enrolls only with
+// --server, and one with it enrolls at its managed server either way.
+func (a *App) enrollCommand(flags string) string {
+	return "`straza enroll --server " + strings.TrimRight(a.cfg.Server.PublicURL, "/") + flags + "`"
+}
+
 // judgeSignIn judges the sign-in facts f of a person's enrollment of the key
 // whose thumbprint is thumbprint at now, in this order: a built-in token was
 // minted for the straza client, the nonce names the key, a browser sign-in
@@ -125,28 +134,28 @@ func (a *App) signInRefused(lane string) bool {
 // the audit reason of the first judgment that fails.
 func (a *App) judgeSignIn(f signInFacts, thumbprint string, now time.Time) (lane, sentence, reason string) {
 	if f.audience != "" && f.audience != keyEnrollAudience {
-		return "", otherProgramMsg, otherProgramReason
+		return "", fmt.Sprintf(otherProgramMsg, a.enrollCommand("")), otherProgramReason
 	}
 	lane, ok := signInLane(f.Nonce, thumbprint)
 	if !ok {
-		return "", otherKeyMsg, otherKeyReason
+		return "", fmt.Sprintf(otherKeyMsg, a.enrollCommand("")), otherKeyReason
 	}
 	if lane == config.SignInBrowser {
 		at := f.AuthTime.UTC().Format(signInTimeLayout)
 		switch {
 		case f.AuthTime.IsZero():
-			return "", noAuthTimeMsg, noAuthTimeReason
+			return "", fmt.Sprintf(noAuthTimeMsg, a.enrollCommand("")), noAuthTimeReason
 		case f.AuthTime.Sub(now) > signInClockAhead:
-			return "", fmt.Sprintf(aheadSignInMsg, at), aheadSignInReason
+			return "", fmt.Sprintf(aheadSignInMsg, at, a.enrollCommand("")), aheadSignInReason
 		case now.Sub(f.AuthTime) > signInFreshFor:
-			return "", fmt.Sprintf(staleSignInMsg, at), staleSignInReason
+			return "", fmt.Sprintf(staleSignInMsg, at, a.enrollCommand("")), staleSignInReason
 		}
 	}
 	if a.signInRefused(lane) {
-		return "", codeLaneMsg, signInBelowReason
+		return "", fmt.Sprintf(codeLaneMsg, a.enrollCommand("")), signInBelowReason
 	}
 	if at := signedInAt(f.LoginFacts, now); now.Sub(at) >= a.cfg.EffectiveSignInMaxAge() {
-		return "", fmt.Sprintf(pastDeadlineMsg, at.Format(signInTimeLayout)), signInPassedReason
+		return "", fmt.Sprintf(pastDeadlineMsg, at.Format(signInTimeLayout), a.enrollCommand("")), signInPassedReason
 	}
 	return lane, "", ""
 }
@@ -208,9 +217,9 @@ func (a *App) idTokenDoorRefusal(u store.User, harness string, proof bool) (stri
 	}
 	switch {
 	case personUser(u) && !adminHarnesses[harness]:
-		return personDoorMsg, personDoorReason
+		return fmt.Sprintf(personDoorMsg, a.enrollCommand("")), personDoorReason
 	case !personUser(u) && !proof:
-		return fmt.Sprintf(agentProofMsg, u.Username, userTypeWord(u)), agentProofReason
+		return fmt.Sprintf(agentProofMsg, u.Username, userTypeWord(u), a.enrollCommand(" --headless")), agentProofReason
 	}
 	return "", ""
 }

@@ -158,10 +158,11 @@ func TestUserPatchRecords(t *testing.T) {
 				return map[string]any{"user_type": " AGENT ", "agency_mode": "Supervised"}
 			},
 			after: func(u store.User) store.User {
-				u.UserType, u.AgencyMode = store.UserTypeAgent, store.AgencySupervised
+				// An agent keeps no password, so the retype clears the person's.
+				u.UserType, u.AgencyMode, u.PasswordHash = store.UserTypeAgent, store.AgencySupervised, ""
 				return u
 			},
-			want: []string{"user_type", "agency_mode"}},
+			want: []string{"password", "user_type", "agency_mode"}},
 		{name: "a PATCH with no field writes no record",
 			body:  func(store.User) map[string]any { return map[string]any{} },
 			after: func(u store.User) store.User { return u }},
@@ -247,12 +248,12 @@ func (r gateUsers) GetByID(ctx context.Context, id string) (store.User, error) {
 	return u, err
 }
 
-func (r gateUsers) UpdateFields(ctx context.Context, id string, f store.UserFields) (store.User, error) {
+func (r gateUsers) UpdateFields(ctx context.Context, id string, f store.UserFields, revoke *store.UserRevocation) (store.User, error) {
 	r.g.mu.Lock()
 	gated, first, bothRead, firstDone := id == r.g.target, r.g.first, r.g.bothRead, r.g.firstDone
 	r.g.mu.Unlock()
 	if !gated {
-		return r.UserRepo.UpdateFields(ctx, id, f)
+		return r.UserRepo.UpdateFields(ctx, id, f, revoke)
 	}
 	if !r.g.wait(bothRead) {
 		return store.User{}, fmt.Errorf("the two PATCH calls never both read the row")
@@ -262,7 +263,7 @@ func (r gateUsers) UpdateFields(ctx context.Context, id string, f store.UserFiel
 	} else if !r.g.wait(firstDone) {
 		return store.User{}, fmt.Errorf("the first write never ran")
 	}
-	return r.UserRepo.UpdateFields(ctx, id, f)
+	return r.UserRepo.UpdateFields(ctx, id, f, revoke)
 }
 
 // patchDirect runs the PATCH handler as kim for the user id and answers the

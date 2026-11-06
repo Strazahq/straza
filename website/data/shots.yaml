@@ -3,17 +3,17 @@
 # ring is the target's box in percent of the crop. width and height are the
 # crop's size in pixels. The comment above each entry is the click path.
 
-# Sign in
+# the screen at /console/overview
 signin:
   alt: "The console's sign-in card with the button Sign in"
   dark: shots/signin-dark.png
   light: shots/signin-light.png
   full_dark: shots/full/signin-dark.png
   full_light: shots/full/signin-light.png
-  ring: {left: 12.95, top: 48.34, width: 74.09, height: 12.0}
+  ring: {left: 13.41, top: 49.0, width: 73.18, height: 11.0}
   width: 440
   height: 400
-  build: strazad v1.0.0-1582-gc6e78918-dirty, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Overview
 overview:
@@ -25,7 +25,7 @@ overview:
   ring: {left: 40.79, top: 31.54, width: 37.89, height: 10.0}
   width: 760
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Users > alice
 alice-assign:
@@ -37,7 +37,7 @@ alice-assign:
   ring: {left: 1.81, top: 85.52, width: 34.44, height: 6.9}
   width: 720
   height: 580
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the screen at /console/users
 user-devices:
@@ -49,7 +49,7 @@ user-devices:
   ring: {left: 1.81, top: 15.62, width: 96.53, height: 68.75}
   width: 720
   height: 128
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Policies > standalone-starter
 starter-rules:
@@ -61,7 +61,7 @@ starter-rules:
   ring: {left: 1.15, top: 46.79, width: 98.85, height: 17.86}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Test a call > Who: alice > Shell command > #pt-command: rm -rf /tmp/x
 test-filled:
@@ -73,7 +73,7 @@ test-filled:
   ring: {left: 1.81, top: 79.29, width: 63.33, height: 10.48}
   width: 720
   height: 420
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Test
 test-answer:
@@ -85,7 +85,7 @@ test-answer:
   ring: {left: 1.81, top: 30.43, width: 96.53, height: 30.73}
   width: 720
   height: 654
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Audit
 audit-list:
@@ -94,34 +94,34 @@ audit-list:
   light: shots/audit-list-light.png
   full_dark: shots/full/audit-list-dark.png
   full_light: shots/full/audit-list-light.png
-  ring: {left: 1.35, top: 70.71, width: 98.65, height: 18.75}
+  ring: {left: 1.35, top: 83.93, width: 98.65, height: 15.18}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the row of alice's rm -rf
 audit-deny:
-  alt: "The audit record of alice's denied rm -rf, with the rule, the reason and the chain check"
+  alt: "The audit record of alice's denied rm -rf, with the rule, the reason and what ran"
   dark: shots/audit-deny-dark.png
   light: shots/audit-deny-light.png
   full_dark: shots/full/audit-deny-dark.png
   full_light: shots/full/audit-deny-light.png
-  ring: {left: 1.81, top: 20.2, width: 96.53, height: 48.57}
+  ring: {left: 1.81, top: 20.2, width: 96.53, height: 41.22}
   width: 720
   height: 490
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the screen at /console/audit
 audit-test-this-call:
   alt: "The same audit record further down, with the button Test this call"
   dark: shots/audit-test-this-call-dark.png
   light: shots/audit-test-this-call-light.png
-  full_dark: shots/full/audit-test-this-call-dark.png
-  full_light: shots/full/audit-test-this-call-light.png
+  full_dark: shots/full/audit-deny-dark.png
+  full_light: shots/full/audit-deny-light.png
   ring: {left: 1.81, top: 88.7, width: 16.11, height: 8.7}
   width: 720
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Test this call > Test
 audit-test-sheet:
@@ -133,7 +133,7 @@ audit-test-sheet:
   ring: {left: 1.81, top: 30.43, width: 96.53, height: 30.73}
   width: 720
   height: 654
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Sessions > User: mara
 sessions-mara:
@@ -145,7 +145,7 @@ sessions-mara:
   ring: {left: 1.45, top: 61.09, width: 98.55, height: 10.87}
   width: 760
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Select every shown row
 sessions-revoke-bar:
@@ -157,7 +157,7 @@ sessions-revoke-bar:
   ring: {left: 81.88, top: 33.7, width: 17.92, height: 9.57}
   width: 960
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Revoke sessions
 sessions-revoke-confirm:
@@ -169,7 +169,7 @@ sessions-revoke-confirm:
   ring: {left: 4.49, top: 9.93, width: 91.03, height: 80.14}
   width: 624
   height: 282
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Users > mara
 user-mara:
@@ -181,7 +181,7 @@ user-mara:
   ring: {left: 80.28, top: 35.65, width: 16.25, height: 8.7}
   width: 720
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Lock user > Reason, recorded on the audit chain: Laptop reported lost
 user-lock:
@@ -193,7 +193,7 @@ user-lock:
   ring: {left: 4.49, top: 9.52, width: 91.03, height: 80.95}
   width: 624
   height: 294
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the screen at /console/users
 user-unlock:
@@ -205,7 +205,7 @@ user-unlock:
   ring: {left: 80.83, top: 24.13, width: 15.69, height: 8.7}
   width: 720
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Disable user
 user-disable:
@@ -217,7 +217,7 @@ user-disable:
   ring: {left: 4.49, top: 11.57, width: 91.03, height: 76.86}
   width: 624
   height: 242
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the screen at /console/users
 user-enable:
@@ -229,7 +229,7 @@ user-enable:
   ring: {left: 80.97, top: 35.65, width: 15.56, height: 8.7}
   width: 720
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Revoke
 device-revoke:
@@ -241,7 +241,7 @@ device-revoke:
   ring: {left: 4.49, top: 11.57, width: 91.03, height: 76.86}
   width: 624
   height: 242
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Open the audit trail
 user-audit-trail:
@@ -253,7 +253,7 @@ user-audit-trail:
   ring: {left: 1.45, top: 47.12, width: 98.55, height: 8.65}
   width: 760
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Users > build-bot > Register key > #user-key: undefined
 agent-key-register:
@@ -265,7 +265,7 @@ agent-key-register:
   ring: {left: 3.61, top: 45.02, width: 92.92, height: 15.12}
   width: 720
   height: 291
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the screen at /console/users
 user-agent-key:
@@ -277,7 +277,7 @@ user-agent-key:
   ring: {left: 1.81, top: 25.4, width: 96.53, height: 64.02}
   width: 720
   height: 189
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Roles > New role > Approver role > Name: release-approvers > #nr-description: Decides approval requests raised under local-tools
 role-new-approver:
@@ -289,7 +289,7 @@ role-new-approver:
   ring: {left: 64.38, top: 24.0, width: 31.15, height: 19.83}
   width: 960
   height: 600
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Next
 role-new-approver-review:
@@ -301,7 +301,7 @@ role-new-approver-review:
   ring: {left: 11.05, top: 69.41, width: 29.87, height: 8.24}
   width: 760
   height: 340
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Roles > release-approvers > Assign to a user > User: lena
 role-assign-user:
@@ -313,7 +313,7 @@ role-assign-user:
   ring: {left: 4.49, top: 10.45, width: 91.03, height: 79.1}
   width: 624
   height: 268
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Policies > New policy > Needs approval
 policy-new-outcome:
@@ -325,7 +325,7 @@ policy-new-outcome:
   ring: {left: 1.15, top: 32.78, width: 31.15, height: 27.5}
   width: 960
   height: 360
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Next > A role > local-tools
 policy-new-who:
@@ -337,7 +337,7 @@ policy-new-who:
   ring: {left: 64.38, top: 63.06, width: 31.15, height: 21.94}
   width: 960
   height: 360
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Next > Shell command > Command patterns: kubectl apply * > Add
 policy-new-calls:
@@ -349,7 +349,7 @@ policy-new-calls:
   ring: {left: 13.42, top: 32.5, width: 18.03, height: 11.11}
   width: 760
   height: 360
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Next > An approver role > An approver role: release-approvers > input[aria-label='A hold, up to']: 5 > #policy-reason: Straza: kubectl apply needs approval before it runs
 policy-new-how:
@@ -361,7 +361,7 @@ policy-new-how:
   ring: {left: 1.04, top: 26.67, width: 40.0, height: 22.86}
   width: 960
   height: 420
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Next > #policy-name: kubectl-apply-hold
 policy-new-review:
@@ -373,7 +373,7 @@ policy-new-review:
   ring: {left: 77.24, top: 88.7, width: 20.13, height: 9.57}
   width: 760
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Save and publish
 policy-publish:
@@ -385,7 +385,7 @@ policy-publish:
   ring: {left: 82.55, top: 80.0, width: 11.59, height: 9.89}
   width: 768
   height: 445
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Approvals
 approvals-waiting:
@@ -394,10 +394,10 @@ approvals-waiting:
   light: shots/approvals-waiting-light.png
   full_dark: shots/full/approvals-waiting-dark.png
   full_light: shots/full/approvals-waiting-light.png
-  ring: {left: 0.5, top: 47.67, width: 99.5, height: 26.0}
+  ring: {left: 0.5, top: 47.67, width: 99.5, height: 31.67}
   width: 1000
   height: 300
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the request
 approval-request:
@@ -409,7 +409,7 @@ approval-request:
   ring: {left: 1.05, top: 1.36, width: 97.91, height: 97.28}
   width: 764
   height: 588
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Approve > Reason, optional: The change window is open until 18:00
 approval-approve:
@@ -421,7 +421,7 @@ approval-approve:
   ring: {left: 4.49, top: 8.05, width: 91.03, height: 83.91}
   width: 624
   height: 348
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Overview > Approvals > the request > Deny > Reason, optional: No second apply in this window
 approval-deny:
@@ -433,7 +433,7 @@ approval-deny:
   ring: {left: 4.49, top: 8.05, width: 91.03, height: 83.91}
   width: 624
   height: 348
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Approvals > Decided
 approvals-decided:
@@ -445,7 +445,7 @@ approvals-decided:
   ring: {left: 85.62, top: 31.74, width: 7.29, height: 7.17}
   width: 960
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Audit > Lens: approvals
 audit-approvals:
@@ -457,7 +457,7 @@ audit-approvals:
   ring: {left: 1.04, top: 30.38, width: 19.17, height: 7.69}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Policies > New policy > Needs approval > Next > A role > local-tools > Next > Shell command > Command patterns: terraform apply* > Add > Next > An approver role > An approver role: release-approvers > A ticket a person grants within > #policy-reason: Straza: terraform apply needs an approval ticket
 policy-new-ticket:
@@ -469,7 +469,7 @@ policy-new-ticket:
   ring: {left: 41.88, top: 31.43, width: 53.75, height: 42.38}
   width: 960
   height: 420
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Approvals
 approvals-ticket:
@@ -481,7 +481,7 @@ approvals-ticket:
   ring: {left: 0.5, top: 47.67, width: 99.5, height: 22.67}
   width: 1000
   height: 300
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Policies > kubectl-apply-hold > More > Turn off
 policy-turn-off:
@@ -493,7 +493,7 @@ policy-turn-off:
   ring: {left: 4.49, top: 8.64, width: 91.03, height: 82.72}
   width: 624
   height: 324
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Approvals > Channels
 channels-push:
@@ -505,7 +505,7 @@ channels-push:
   ring: {left: 1.15, top: 67.5, width: 98.85, height: 17.5}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the screen at /console/approvals/channels
 channels-push-test:
@@ -517,31 +517,7 @@ channels-push-test:
   ring: {left: 81.97, top: 43.33, width: 14.21, height: 13.33}
   width: 760
   height: 300
-  build: strazad v1.1.0-117-g106081a8, standalone
-
-# Approvals > Approver devices > Add a phone > Person: lena
-approver-add-phone:
-  alt: "The Add a phone sheet with the person lena picked"
-  dark: shots/approver-add-phone-dark.png
-  light: shots/approver-add-phone-light.png
-  full_dark: shots/full/approver-add-phone-dark.png
-  full_light: shots/full/approver-add-phone-light.png
-  ring: {left: 1.81, top: 41.33, width: 96.53, height: 14.67}
-  width: 720
-  height: 300
-  build: strazad v1.1.0-117-g106081a8, standalone
-
-# Create the QR code
-enroll-qr:
-  alt: "The enrollment QR code for lena, with the servers the phone tries and how it trusts them"
-  dark: shots/enroll-qr-dark.png
-  light: shots/enroll-qr-light.png
-  full_dark: shots/full/enroll-qr-dark.png
-  full_light: shots/full/enroll-qr-light.png
-  ring: {left: 1.81, top: 20.0, width: 42.78, height: 49.68}
-  width: 720
-  height: 620
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the screen at /self-service/
 selfservice-signin:
@@ -553,7 +529,7 @@ selfservice-signin:
   ring: {left: 89.69, top: 0.91, width: 8.23, height: 11.82}
   width: 960
   height: 440
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Sign in > This browser
 selfservice-browser:
@@ -565,7 +541,7 @@ selfservice-browser:
   ring: {left: 78.33, top: 18.65, width: 19.58, height: 10.0}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Enable this browser > #device-name: lena-laptop browser
 selfservice-enable:
@@ -577,7 +553,7 @@ selfservice-enable:
   ring: {left: 86.53, top: 92.89, width: 11.81, height: 5.78}
   width: 720
   height: 900
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Requests
 selfservice-requests:
@@ -589,7 +565,7 @@ selfservice-requests:
   ring: {left: 89.55, top: 56.67, width: 7.86, height: 17.33}
   width: 1120
   height: 300
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # This browser
 selfservice-browser-enrolled:
@@ -601,7 +577,19 @@ selfservice-browser-enrolled:
   ring: {left: 2.19, top: 64.23, width: 97.81, height: 18.46}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
+
+# Add a phone > Create the QR code
+enroll-qr:
+  alt: "The enrollment QR code lena made for her phone on her self-service page, with the servers the phone tries and how it trusts them"
+  dark: shots/enroll-qr-dark.png
+  light: shots/enroll-qr-light.png
+  full_dark: shots/full/enroll-qr-dark.png
+  full_light: shots/full/enroll-qr-light.png
+  ring: {left: 1.81, top: 20.0, width: 42.78, height: 49.68}
+  width: 720
+  height: 620
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Approvals > Approver devices
 approver-devices:
@@ -613,7 +601,7 @@ approver-devices:
   ring: {left: 1.15, top: 64.57, width: 98.85, height: 20.87}
   width: 960
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Revoke
 approver-revoke:
@@ -625,7 +613,7 @@ approver-revoke:
   ring: {left: 4.49, top: 10.69, width: 91.03, height: 78.63}
   width: 624
   height: 262
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # MCP servers > Add MCP server > #mw-name: scout-tools > #mw-desc: Copy of the demo MCP server, with a header credential > #mw-url: http://demo-tools:3001/mcp
 server-add-server:
@@ -637,7 +625,7 @@ server-add-server:
   ring: {left: 1.45, top: 55.71, width: 77.24, height: 18.81}
   width: 760
   height: 420
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Next > Each caller's own token
 server-add-token:
@@ -649,7 +637,7 @@ server-add-token:
   ring: {left: 6.25, top: 71.79, width: 9.38, height: 5.18}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # One shared secret for this server > #mw-secret: scout-docs-demo-secret
 server-add-credential:
@@ -661,7 +649,7 @@ server-add-credential:
   ring: {left: 66.46, top: 10.0, width: 24.06, height: 5.18}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Next
 server-add-review:
@@ -673,7 +661,7 @@ server-add-review:
   ring: {left: 77.24, top: 88.7, width: 20.13, height: 9.57}
   width: 760
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Save and publish > confirm each block
 draft-publish-typed:
@@ -682,10 +670,10 @@ draft-publish-typed:
   light: shots/draft-publish-typed-light.png
   full_dark: shots/full/draft-publish-typed-dark.png
   full_light: shots/full/draft-publish-typed-light.png
-  ring: {left: 7.4, top: 42.89, width: 85.2, height: 22.85}
-  width: 608
-  height: 499
-  build: strazad v1.1.0-117-g106081a8, standalone
+  ring: {left: 8.68, top: 60.71, width: 82.63, height: 7.86}
+  width: 668
+  height: 509
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the screen at /console/servers/new
 server-add-check:
@@ -697,7 +685,7 @@ server-add-check:
   ring: {left: 3.55, top: 56.43, width: 29.74, height: 7.86}
   width: 760
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # MCP servers
 servers-list:
@@ -709,7 +697,7 @@ servers-list:
   ring: {left: 1.15, top: 69.35, width: 98.85, height: 13.7}
   width: 960
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # scout-tools
 server-overview:
@@ -721,7 +709,7 @@ server-overview:
   ring: {left: 1.04, top: 42.14, width: 61.04, height: 57.86}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Set it again
 server-secret-set:
@@ -733,7 +721,7 @@ server-secret-set:
   ring: {left: 74.75, top: 84.75, width: 13.29, height: 8.47}
   width: 602
   height: 472
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Tools
 server-tools:
@@ -745,7 +733,7 @@ server-tools:
   ring: {left: 10.21, top: 34.81, width: 8.44, height: 7.12}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Roles > New role > Application role > scout-tools > role name suffix: readers > #nr-description: Tool access to the scout-tools server
 role-new-1:
@@ -757,7 +745,7 @@ role-new-1:
   ring: {left: 48.23, top: 46.61, width: 23.85, height: 8.21}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Next > echo > get-sum
 role-new-2:
@@ -769,7 +757,7 @@ role-new-2:
   ring: {left: 1.04, top: 17.68, width: 98.96, height: 5.0}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Next > Next
 role-new-3:
@@ -781,7 +769,7 @@ role-new-3:
   ring: {left: 1.15, top: 85.71, width: 98.85, height: 7.14}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Roles > scout-tools-readers
 role-access:
@@ -793,7 +781,7 @@ role-access:
   ring: {left: 1.15, top: 51.73, width: 98.85, height: 9.42}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Edit access > Choose per tool > get-sum: require approval
 role-edit-access:
@@ -805,9 +793,9 @@ role-edit-access:
   ring: {left: 55.49, top: 22.38, width: 26.83, height: 10.0}
   width: 984
   height: 420
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# the screen at /console/roles/01a1131f-01d9-779d-a0f5-abafbb8a18a3
+# the screen at /console/roles/01a1ad0d-7617-7746-91bd-43297adcc285
 role-edit-save:
   alt: "The foot of Edit access with Save draft and Save and publish"
   dark: shots/role-edit-save-dark.png
@@ -817,7 +805,7 @@ role-edit-save:
   ring: {left: 63.82, top: 87.83, width: 14.47, height: 9.57}
   width: 760
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # MCP servers > scout-tools > Add one for a role > [role=combobox]:has-text('Pick an application role'): scout-tools-readers > css=input[type=password] >> visible=true: scout-readers-docs-secret > Store it
 server-secret-role:
@@ -829,7 +817,7 @@ server-secret-role:
   ring: {left: 30.9, top: 80.82, width: 25.25, height: 8.63}
   width: 602
   height: 417
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Users > dana > [data-grant-pick]: scout-tools-readers > Assign role
 user-assign-confirm:
@@ -841,7 +829,7 @@ user-assign-confirm:
   ring: {left: 4.49, top: 12.61, width: 91.03, height: 74.77}
   width: 624
   height: 222
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Roles > dev > Knowledge packs > Pick a pack: team-conventions
 role-packs:
@@ -853,7 +841,7 @@ role-packs:
   ring: {left: 36.58, top: 62.39, width: 13.16, height: 8.7}
   width: 760
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Drafts
 drafts-waiting:
@@ -862,22 +850,22 @@ drafts-waiting:
   light: shots/drafts-waiting-light.png
   full_dark: shots/full/drafts-waiting-dark.png
   full_light: shots/full/drafts-waiting-light.png
-  ring: {left: 1.15, top: 61.09, width: 98.85, height: 13.48}
+  ring: {left: 1.15, top: 56.74, width: 98.85, height: 13.48}
   width: 960
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the draft
 draft-review:
-  alt: "The draft's page with What changes, Access after publishing, the checks and Publish…"
+  alt: "The draft's page with its title, the Before you publish band with Publish…, In this draft and What changes"
   dark: shots/draft-review-dark.png
   light: shots/draft-review-light.png
   full_dark: shots/full/draft-review-dark.png
   full_light: shots/full/draft-review-light.png
-  ring: {left: 87.4, top: 91.94, width: 10.52, height: 7.1}
-  width: 960
-  height: 620
-  build: strazad v1.1.0-117-g106081a8, standalone
+  ring: {left: 89.75, top: 20.31, width: 8.49, height: 6.88}
+  width: 1190
+  height: 640
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Publish…
 draft-publish:
@@ -886,10 +874,10 @@ draft-publish:
   light: shots/draft-publish-light.png
   full_dark: shots/full/draft-publish-dark.png
   full_light: shots/full/draft-publish-light.png
-  ring: {left: 77.96, top: 67.27, width: 14.64, height: 16.0}
-  width: 608
-  height: 275
-  build: strazad v1.1.0-117-g106081a8, standalone
+  ring: {left: 79.94, top: 64.68, width: 13.32, height: 17.46}
+  width: 668
+  height: 252
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Drafts > the gitops-tools draft
 draft-gitops:
@@ -898,10 +886,10 @@ draft-gitops:
   light: shots/draft-gitops-light.png
   full_dark: shots/full/draft-gitops-dark.png
   full_light: shots/full/draft-gitops-light.png
-  ring: {left: 5.31, top: 46.43, width: 13.65, height: 7.14}
+  ring: {left: 5.31, top: 79.46, width: 13.65, height: 7.14}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # MCP servers > demo-tools
 server-admin-card:
@@ -913,7 +901,7 @@ server-admin-card:
   ring: {left: 36.88, top: 48.21, width: 61.04, height: 51.79}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Server roles > Add role > role name suffix: probes > Description: Checks demo-tools is answering > echo > get-sum
 server-roles-add:
@@ -925,19 +913,19 @@ server-roles-add:
   ring: {left: 11.0, top: 22.14, width: 33.0, height: 7.86}
   width: 1000
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# the screen at /console/servers/01a1131a-6b55-7498-917e-18fd8d7a072a/roles
+# the screen at /console/servers/01a1ad09-1d1d-7aff-8ff5-6d3bf4ff8a17/roles
 server-roles-list:
   alt: "The Server roles tab of demo-tools with demo-tools-probes and its Edit access and Delete actions"
   dark: shots/server-roles-list-dark.png
   light: shots/server-roles-list-light.png
   full_dark: shots/full/server-roles-list-dark.png
   full_light: shots/full/server-roles-list-light.png
-  ring: {left: 1.15, top: 36.74, width: 98.85, height: 26.74}
+  ring: {left: 1.15, top: 36.09, width: 98.85, height: 27.83}
   width: 960
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Remove server
 server-remove:
@@ -949,7 +937,7 @@ server-remove:
   ring: {left: 4.49, top: 9.93, width: 91.03, height: 80.14}
   width: 624
   height: 282
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Roles > mcp-admin-demo-tools > Assign to a user > User: carol
 mcp-admin-assign:
@@ -961,7 +949,7 @@ mcp-admin-assign:
   ring: {left: 4.49, top: 9.09, width: 91.03, height: 81.82}
   width: 624
   height: 308
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # the screen at /console/servers
 carol-servers:
@@ -973,7 +961,7 @@ carol-servers:
   ring: {left: 25.1, top: 53.39, width: 74.9, height: 11.25}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Policies > New policy > Write YAML instead > [role=dialog] textarea: undefined
 policy-yaml:
@@ -985,7 +973,7 @@ policy-yaml:
   ring: {left: 83.47, top: 93.78, width: 15.0, height: 4.89}
   width: 720
   height: 900
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Policies > local-tools-guardrails > Recording: Change > Secrets masked
 policy-recording:
@@ -997,7 +985,7 @@ policy-recording:
   ring: {left: 5.42, top: 55.31, width: 15.42, height: 6.88}
   width: 720
   height: 320
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Add to unpublished changes
 policy-unpublished:
@@ -1009,7 +997,7 @@ policy-unpublished:
   ring: {left: 68.33, top: 54.62, width: 10.62, height: 7.69}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Test a call > Who: dana > Shell command > #pt-command: git status > Test
 test-unpublished:
@@ -1021,7 +1009,7 @@ test-unpublished:
   ring: {left: 1.81, top: 58.18, width: 96.53, height: 27.12}
   width: 720
   height: 660
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Transcripts > Reload
 transcripts:
@@ -1033,7 +1021,7 @@ transcripts:
   ring: {left: 1.15, top: 78.04, width: 98.85, height: 9.78}
   width: 960
   height: 460
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Search transcripts: billing > Search
 transcript-search:
@@ -1045,7 +1033,7 @@ transcript-search:
   ring: {left: 1.04, top: 32.88, width: 40.83, height: 8.46}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Audit > Lens: recording
 audit-recording:
@@ -1057,7 +1045,7 @@ audit-recording:
   ring: {left: 1.04, top: 30.38, width: 19.17, height: 7.69}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Policies > By role
 policies-by-role:
@@ -1069,7 +1057,7 @@ policies-by-role:
   ring: {left: 73.02, top: 85.0, width: 17.92, height: 9.62}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Overview > System details
 overview-system:
@@ -1081,7 +1069,7 @@ overview-system:
   ring: {left: 1.88, top: 8.93, width: 98.12, height: 91.07}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Audit > Lens: sentinel
 audit-sentinel:
@@ -1090,10 +1078,10 @@ audit-sentinel:
   light: shots/audit-sentinel-light.png
   full_dark: shots/full/audit-sentinel-dark.png
   full_light: shots/full/audit-sentinel-light.png
-  ring: {left: 70.42, top: 70.19, width: 14.06, height: 7.69}
+  ring: {left: 64.9, top: 81.15, width: 14.06, height: 7.69}
   width: 960
   height: 520
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Settings
 settings-config:
@@ -1105,7 +1093,7 @@ settings-config:
   ring: {left: 0.59, top: 20.33, width: 10.0, height: 6.17}
   width: 1190
   height: 600
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Attestation registry
 settings-registry:
@@ -1117,7 +1105,7 @@ settings-registry:
   ring: {left: 13.33, top: 21.79, width: 17.6, height: 6.61}
   width: 960
   height: 560
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Settings > API tokens > New API token > Name: ci-drafts > [role=combobox]:has-text('expires in'): 30 days
 settings-new-token:
@@ -1126,10 +1114,10 @@ settings-new-token:
   light: shots/settings-new-token-light.png
   full_dark: shots/full/settings-new-token-dark.png
   full_light: shots/full/settings-new-token-light.png
-  ring: {left: 1.81, top: 38.0, width: 96.53, height: 36.0}
+  ring: {left: 1.81, top: 45.33, width: 96.53, height: 36.0}
   width: 720
   height: 900
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Sign in > Credentials
 selfservice-credentials:
@@ -1141,7 +1129,7 @@ selfservice-credentials:
   ring: {left: 86.13, top: 39.38, width: 11.26, height: 16.25}
   width: 1110
   height: 320
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Paste a token
 selfservice-paste-token:
@@ -1153,7 +1141,7 @@ selfservice-paste-token:
   ring: {left: 83.55, top: 92.89, width: 14.87, height: 5.78}
   width: 760
   height: 900
-  build: strazad v1.1.0-117-g106081a8, standalone
+  build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # New role > Application role > demo-tools > role name suffix: docs-example > #nr-description: Reads the demo tools for the docs walk.
 new-role-1:
@@ -1165,7 +1153,7 @@ new-role-1:
   ring: {left: 1.04, top: 53.39, width: 23.85, height: 7.42}
   width: 960
   height: 620
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise
 
 # the screen at /console/overview
 demo-overview:
@@ -1177,7 +1165,7 @@ demo-overview:
   ring: {left: 62.71, top: 29.29, width: 30.0, height: 9.29}
   width: 960
   height: 560
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise
 
 # the screen at /console/overview
 demo-version:
@@ -1189,7 +1177,7 @@ demo-version:
   ring: {left: 4.85, top: 86.92, width: 56.67, height: 10.0}
   width: 330
   height: 260
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise
 
 # Users
 demo-users:
@@ -1201,7 +1189,7 @@ demo-users:
   ring: {left: 1.15, top: 79.11, width: 98.85, height: 8.93}
   width: 960
   height: 560
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise
 
 # Status
 demo-users-status:
@@ -1213,7 +1201,7 @@ demo-users-status:
   ring: {left: 53.42, top: 25.22, width: 17.89, height: 24.78}
   width: 760
   height: 460
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise
 
 # Roles
 demo-roles:
@@ -1225,7 +1213,7 @@ demo-roles:
   ring: {left: 1.15, top: 69.82, width: 98.85, height: 8.75}
   width: 960
   height: 560
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise
 
 # MCP servers
 demo-servers:
@@ -1237,7 +1225,7 @@ demo-servers:
   ring: {left: 1.15, top: 45.22, width: 98.85, height: 13.91}
   width: 960
   height: 460
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise
 
 # Policies
 demo-policies:
@@ -1249,7 +1237,7 @@ demo-policies:
   ring: {left: 1.15, top: 70.19, width: 98.85, height: 13.08}
   width: 960
   height: 520
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise
 
 # Roles > auditor > Areas
 demo-role-areas:
@@ -1261,7 +1249,7 @@ demo-role-areas:
   ring: {left: 1.04, top: 45.36, width: 98.96, height: 48.57}
   width: 960
   height: 560
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise
 
 # Settings
 demo-settings:
@@ -1273,4 +1261,4 @@ demo-settings:
   ring: {left: 0.42, top: 89.67, width: 98.99, height: 10.33}
   width: 1190
   height: 600
-  build: strazad v1.1.0-104-g07d2df0e, enterprise
+  build: strazad v1.0.0-1752-g76005024, enterprise

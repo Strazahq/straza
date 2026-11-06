@@ -33,6 +33,20 @@ func (s *credStore) Record(c Caller, ceType string, data map[string]any) error {
 	return nil
 }
 
+// The service's accounts keep the ledger the API half notes refusals in.
+var _ refusedLedger = (*credStore)(nil)
+
+// NoteRefused counts one call of c that the API half refused before it
+// could be recorded in c's loss ledger, and starts a drain to report it.
+func (s *credStore) NoteRefused(c Caller, call string) {
+	a := s.account(c.UID)
+	if os.MkdirAll(a.dir, 0o700) != nil {
+		return
+	}
+	a.spool.NoteRefused(call)
+	a.kickDrain()
+}
+
 // kickDrain asks a's drain loop to drain now.
 func (a *account) kickDrain() {
 	select {
@@ -133,23 +147,20 @@ func (a *account) liveToken(now time.Time) string {
 }
 
 // spoolHasRecords reports whether the spool in dir holds a live or parked
-// file, so an idle spool costs no drain.
+// file or a loss ledger to report, so an idle spool costs no drain.
 func spoolHasRecords(dir string) bool {
 	if fi, err := os.Stat(filepath.Join(dir, spoolFile)); err == nil && fi.Size() > 0 {
 		return true
 	}
 	parked, _ := filepath.Glob(filepath.Join(dir, "audit-pending-*.jsonl"))
-	return len(parked) > 0
+	return len(parked) > 0 || spool.Dropped(dir).Events > 0
 }
 
 // spoolStatus is a's spool as status shows it.
 func (a *account) spoolStatus(drainErr string) localapi.SpoolStatus {
 	st := localapi.SpoolStatus{LastError: drainErr}
 	st.Pending, _ = a.spool.Pending()
-	if raw, err := os.ReadFile(filepath.Join(a.dir, spool.DroppedMarkerName)); err == nil { // #nosec G304 -- the service's own state directory
-		d := spool.ParseDroppedMarker(raw)
-		st.Dropped = d.Records + d.Files
-	}
+	st.Dropped = spool.Dropped(a.dir).Lost()
 	if fi, err := os.Stat(filepath.Join(a.dir, spool.LastDrainMarkerName)); err == nil {
 		st.LastDrain = fi.ModTime()
 	}

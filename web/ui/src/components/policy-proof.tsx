@@ -1,10 +1,10 @@
 import * as React from "react";
 import { ArrowRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { openPolicyAudit } from "@/components/policy-decisions";
 import { type ApiError, listAudit } from "@/lib/api";
-import { parseCE, whyOf } from "@/lib/audit-words";
+import { parseCE, policyQuery, whyOf } from "@/lib/audit-words";
 import { AUDIT_THIS_POLICY, REEVALUATE, SUBJECT_DECISIONS, WATCHING, WATCH_STOPPED, decisionCall, firstDecision, liveSince, liveSinceNoVersion } from "@/lib/policy-words";
-import { navigate } from "@/lib/router";
 import { readFailed } from "@/lib/say";
 import { absTime } from "@/lib/words";
 
@@ -46,7 +46,7 @@ export function PolicyProof({ name, snapshot, at }: { name: string; snapshot?: s
 
     const ask = async () => {
       try {
-        const rows = await listAudit("q=" + encodeURIComponent('"setName":"' + name + '"') + "&limit=1");
+        const rows = await listAudit("q=" + encodeURIComponent(policyQuery(name)) + "&limit=1");
         if (!alive) return;
         const row = (rows || [])[0];
         const ce = row ? parseCE(row.ce) : null;
@@ -80,7 +80,7 @@ export function PolicyProof({ name, snapshot, at }: { name: string; snapshot?: s
         {watch.kind === "hit" && (
           <>
             {watch.text}
-            <Button variant="link" size="sm" className="h-auto gap-1 p-0 text-link" onClick={() => navigate("audit")}>
+            <Button variant="link" size="sm" className="h-auto gap-1 p-0 text-link" onClick={() => openPolicyAudit(name)}>
               {AUDIT_THIS_POLICY} <ArrowRightIcon />
             </Button>
           </>

@@ -245,7 +245,7 @@ func TestAuthorizeRefusesUntrustedClientOrRedirect(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newIssuerFixture(t)
 			var judged int
-			f.issuer.OnLoginFailed = func(string, *http.Request) { judged++ }
+			f.issuer.OnLoginFailed = func(string, string, *http.Request) { judged++ }
 			f.issuer.OnLogin = func(string, string) { judged++ }
 			_, challenge := pkce(t)
 			params := authzParams(challenge)
@@ -424,7 +424,7 @@ func TestAuthorizeErrorsRedirectOnceTrusted(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newIssuerFixture(t)
 			var judged int
-			f.issuer.OnLoginFailed = func(string, *http.Request) { judged++ }
+			f.issuer.OnLoginFailed = func(string, string, *http.Request) { judged++ }
 			f.issuer.OnLogin = func(string, string) { judged++ }
 			_, challenge := pkce(t)
 			params := authzParams(challenge)
@@ -486,7 +486,7 @@ func TestAuthorizePasswordSubmit(t *testing.T) {
 			}
 			var fired []string
 			var logins []string
-			f.issuer.OnLoginFailed = func(username string, _ *http.Request) { fired = append(fired, username) }
+			f.issuer.OnLoginFailed = func(username, _ string, _ *http.Request) { fired = append(fired, username) }
 			f.issuer.OnLogin = func(_, username string) { logins = append(logins, username) }
 			_, challenge := pkce(t)
 			params := authzParams(challenge)

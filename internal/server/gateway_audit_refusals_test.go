@@ -183,7 +183,9 @@ func TestCutUnresolved(t *testing.T) {
 // name, a tool the session's overlay hides under policyFilter, and a call
 // the manifest rate cap throttles. The client answers are unchanged, the
 // served calls before the cap keep one allow record each, and fifty probes
-// of an unbound name leave fifty records. A long unknown name is cut in the
+// of an unbound name leave fifty records. The record of an unbound name
+// that holds "__" names the server before it in app and the tool after it
+// in toolName, as a call's record does. A long unknown name is cut in the
 // answer and the record alike, its record stays under 4 KiB, and a served
 // tools/list after it shows that no second record follows.
 func TestGatewayRefusalsAudited(t *testing.T) {
@@ -214,6 +216,7 @@ spec:
 	tok, sid := gatewaySession(t, base, "kim")
 	longName, longAngles := strings.Repeat("n", 64<<10), strings.Repeat("<", 64<<10)
 	cutName, cutAngles := strings.Repeat("n", 256)+"... (65536 bytes)", strings.Repeat("<", 256)+"... (65536 bytes)"
+	longTool := "refapp__" + longName
 	unboundReason := func(name string) string {
 		return `unknown tool "` + name + `": no access row for this session's roles admits it`
 	}
@@ -241,10 +244,17 @@ spec:
 				"granted": false, "default": false, "session": sid, "user": user.ID,
 				"reason": unboundReason(cutAngles),
 			}},
-		{"unbound name", "refapp__nothing", false, false, `unknown tool "refapp__nothing"`,
-			func(d map[string]any) bool { return d["toolName"] == "refapp__nothing" },
+		{"a 64 KiB tool name of a server is cut", longTool, false, true, `unknown tool "` + cutUnresolved(longTool) + `"`,
+			func(d map[string]any) bool { return d["app"] == "refapp" && d["toolName"] == cutName },
 			map[string]any{
-				"effect": "deny", "app": "", "toolName": "refapp__nothing", "ruleId": "", "setName": "",
+				"effect": "deny", "app": "refapp", "toolName": cutName, "ruleId": "", "setName": "",
+				"granted": false, "default": false, "session": sid, "user": user.ID,
+				"reason": unboundReason(cutUnresolved(longTool)),
+			}},
+		{"unbound name", "refapp__nothing", false, false, `unknown tool "refapp__nothing"`,
+			func(d map[string]any) bool { return d["app"] == "refapp" && d["toolName"] == "nothing" },
+			map[string]any{
+				"effect": "deny", "app": "refapp", "toolName": "nothing", "ruleId": "", "setName": "",
 				"granted": false, "default": false, "session": sid, "user": user.ID,
 				"reason": `unknown tool "refapp__nothing": no access row for this session's roles admits it`,
 			}},
@@ -264,7 +274,7 @@ spec:
 				"effect": "deny", "app": "refapp", "toolName": "echo", "ruleId": "", "setName": "",
 				"granted": true, "default": false, "session": sid, "user": user.ID,
 				"bindingId": binding.ID, "role": "dev",
-				"reason": `Straza: rate limit exceeded for the MCP server "refapp" (1 rps). Retry shortly`,
+				"reason": `Straza: rate limit exceeded for the MCP server "refapp" (1 rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.`,
 			}},
 	}
 	lists := 0
@@ -327,7 +337,7 @@ spec:
 				t.Fatalf("probe %d = %v, want -32602 unknown tool", i, call)
 			}
 		}
-		awaitMCPRecords(t, app, 50, func(d map[string]any) bool { return d["toolName"] == "refapp__probe" })
+		awaitMCPRecords(t, app, 50, func(d map[string]any) bool { return d["app"] == "refapp" && d["toolName"] == "probe" })
 	})
 }
 
@@ -343,8 +353,8 @@ func TestGatewayToolsListAudited(t *testing.T) {
 		pageSize   int
 		wantCounts []float64
 	}{
-		{"whole catalog in one answer", 0, []float64{2}},
-		{"one page per answer", 1, []float64{1, 1}},
+		{"whole catalog in one answer", 0, []float64{3}},
+		{"one page per answer", 1, []float64{1, 1, 1}},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
@@ -355,9 +365,9 @@ func TestGatewayToolsListAudited(t *testing.T) {
 			catRecompile(t, app)
 			tok, sid := gatewaySession(t, base, "kim")
 
-			names, pages := walkToolsList(t, base, tok, 2)
-			if len(names) != 2 || pages != len(row.wantCounts) {
-				t.Fatalf("listed %v over %d pages, want 2 tools over %d", names, pages, len(row.wantCounts))
+			names, pages := walkToolsList(t, base, tok, 3)
+			if len(names) != 3 || pages != len(row.wantCounts) {
+				t.Fatalf("listed %v over %d pages, want 3 tools, whoami included, over %d", names, pages, len(row.wantCounts))
 			}
 			recs := awaitMCPRecords(t, app, len(row.wantCounts), isList)
 			var counts []float64

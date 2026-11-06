@@ -133,6 +133,9 @@ func TestWhoGains(t *testing.T) {
 		{"a set that allows a built-in tool opens it", []Item{{Kind: KindPolicySet, Name: "readers-access", Op: OpPut,
 			Doc: gainSet("readers-access", "{ roles: [readers] }", "    - id: tickets\n      tools: [mcp.call]\n      apps: [straza]\n      toolNames: { allow: [approval_request] }\n")}}, nil, nil,
 			[]string{"readers straza/approval_request not-reachable>runs carol"}},
+		{"a set that denies whoami takes it from every holder", []Item{{Kind: KindPolicySet, Name: "readers-quiet", Op: OpPut,
+			Doc: gainSet("readers-quiet", "{ roles: [readers] }", "    - id: no-whoami\n      tools: [mcp.call]\n      apps: [straza]\n      toolNames: { deny: [whoami] }\n      effect: deny\n")}}, nil, nil,
+			[]string{"readers straza/whoami runs>denied [|denied by rule no-whoami of readers-quiet] carol"}},
 		{"a closure that gains the drafting role reaches the drafting tools", []Item{gainRole("readers", "    kind: application\n    implies: ["+DraftConfigRole+"]\n    bindings:\n        - app: github\n          tools: [get_me]\n")}, nil, nil,
 			[]string{"readers straza/draft_status not-reachable>runs carol", "readers straza/draft_submit not-reachable>runs carol"}},
 	}

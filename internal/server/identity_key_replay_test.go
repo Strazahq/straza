@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -164,5 +165,88 @@ func TestKeyEnrollProofReplay(t *testing.T) {
 	}
 	if d := deviceRow(t, app, h.device); d.KeyCounter != 1 {
 		t.Errorf("stored counter = %d, want 1", d.KeyCounter)
+	}
+}
+
+// TestKeyLanesRefuseNULProofID pins the refusal of a proof whose jti holds
+// a NUL character on the three lanes that spend the jti in the store: key
+// enrollment, key check-in and an AI agent's id-token check-in. Each answers
+// 401 with invalid_dpop_proof and its lane's proof sentence, and writes the
+// record its other proof failures write: none on enrollment, one login
+// failure on the check-ins. No device, counter or session changes, and a
+// proof from the same signer with a plain jti passes on each lane.
+func TestKeyLanesRefuseNULProofID(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	kim := seedIdentity(t, app)
+	ctx := context.Background()
+	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
+	bot, botToken := proofAgent(t, app, "bot")
+	keyed := newKeyHolder(t, base)
+	keyed.enroll(idToken, "sha256:nul-jti")
+	const refused = "the DPoP proof was not accepted: jti holds a NUL character (a zero byte), which strazad does not accept in a proof id it stores. "
+
+	lanes := []struct {
+		name      string
+		h         *keyHolder
+		path      string
+		body      func() map[string]any
+		ctr       func() int64
+		wantError string
+		via       string // the via of the login failure the refusal writes, "" for no record
+		userID    string // the user the login failure names, "" for none
+	}{
+		{"key enrollment", newKeyHolder(t, base), "/v1/enroll",
+			func() map[string]any { return keyEnrollBody(idToken, "sha256:nul-jti-enroll") },
+			func() int64 { return 0 }, refused + "Sign a fresh proof with the key you are enrolling.", "", ""},
+		{"key check-in", keyed, "/v1/checkin",
+			func() map[string]any { return keyed.checkinBody(keyed.counter + 1) },
+			func() int64 { return keyed.counter + 1 }, refused + "Sign a fresh proof with the key this machine enrolled.", "device-key", ""},
+		{"agent check-in", newKeyHolder(t, base), "/v1/checkin",
+			func() map[string]any { return nhiCheckinBody(botToken) },
+			func() int64 { return 0 }, refused + "Sign a fresh proof with this agent's key.", "id-token", bot.ID},
+	}
+	for _, lane := range lanes {
+		t.Run(lane.name, func(t *testing.T) {
+			if lane.h.nonce == "" {
+				lane.h.send(lane.path, "", lane.body()) // the nonce challenge
+			}
+			failure := func(d map[string]any) bool {
+				return d["action"] == "login" && d["outcome"] == "failure" && d["via"] == lane.via &&
+					d["reason"] == "the DPoP proof did not verify" && (lane.userID == "" || d["userId"] == lane.userID)
+			}
+			authnBefore := len(outboxDataFor(t, app, "straza.audit.authn"))
+			failuresBefore := len(matching(t, app, "straza.audit.authn", failure))
+			devices, _ := app.store.Devices().ListByUser(ctx, kim.ID)
+			sessions, _ := app.store.Sessions().List(ctx, "")
+
+			code, hdr, out := lane.h.post(lane.path, lane.h.proofJTI(lane.path, "nul\x00jti", lane.ctr()), lane.body())
+			if code != http.StatusUnauthorized || out["error"] != lane.wantError ||
+				!strings.Contains(hdr.Get("WWW-Authenticate"), `error="invalid_dpop_proof"`) {
+				t.Fatalf("%s = %d %v %v, want 401 %q", lane.path, code, hdr, out, lane.wantError)
+			}
+			wantRecords := 0
+			if lane.via != "" {
+				wantRecords = 1
+			}
+			if n := len(outboxDataFor(t, app, "straza.audit.authn")); n != authnBefore+wantRecords {
+				t.Errorf("authn records = %d, want %d", n, authnBefore+wantRecords)
+			}
+			if n := len(matching(t, app, "straza.audit.authn", failure)); lane.via != "" && n != failuresBefore+1 {
+				t.Errorf("login failures via %s = %d, want %d", lane.via, n, failuresBefore+1)
+			}
+			if after, _ := app.store.Devices().ListByUser(ctx, kim.ID); !reflect.DeepEqual(after, devices) {
+				t.Errorf("devices after the refusal = %+v, want %+v", after, devices)
+			}
+			if after, _ := app.store.Sessions().List(ctx, ""); len(after) != len(sessions) {
+				t.Errorf("sessions = %d after the refusal, want %d", len(after), len(sessions))
+			}
+
+			ctr := lane.ctr()
+			if code, _, out := lane.h.post(lane.path, lane.h.proofJTI(lane.path, "plain-jti", ctr), lane.body()); code != http.StatusOK {
+				t.Fatalf("%s with a plain jti = %d %v, want 200", lane.path, code, out)
+			}
+			lane.h.counter = ctr
+		})
 	}
 }

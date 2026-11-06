@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/strazahq/straza/internal/store"
 )
 
 // TestCheckinRecordsClientVersion pins the additive client stamp: a check-in
@@ -134,6 +136,121 @@ func TestCheckinRefusesOverlongHarnessAndClient(t *testing.T) {
 			}
 			if now, _ := app.store.Outbox().Head(ctx); now != head {
 				t.Fatalf("the refused check-in wrote an outbox row: head %q, was %q", now, head)
+			}
+		})
+	}
+}
+
+// TestCheckinRefusesNULCharacter pins the refusal of a check-in whose
+// harness name or version, client version or commit, or an attestation hash
+// holds a NUL character. On every lane it answers 400 with a sentence that
+// names the field, before the check-in reads a credential, so it starts no
+// session and writes no record, as the check-in's other 400 refusals do. The
+// test store is SQLite, which would keep the character, so the refusal does
+// not depend on the store. Each lane answers a check-in without the
+// character as before.
+func TestCheckinRefusesNULCharacter(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	kim := seedIdentity(t, app)
+	ctx := context.Background()
+	idToken := loginDeviceFlow(t, base, "kim", "hunter2!")
+	_, deviceToken := mintDevice(t, app, kim.ID, store.DeviceClientHuman, "host:kim-laptop")
+	sessionToken, _ := checkinTokenAs(t, base, "claude-code")
+	h := newKeyHolder(t, base)
+	h.enroll(idToken, "sha256:fp-nul")
+
+	// body is a check-in under harness with every text field set and the
+	// lane's credential fields.
+	body := func(harness string, credential map[string]any) map[string]any {
+		b := map[string]any{
+			"harness":     map[string]string{"name": harness, "version": "2.1.0"},
+			"client":      map[string]string{"version": "1.1.2", "commit": "abcdef0"},
+			"attestation": map[string]any{"managed": false, "hashes": map[string]string{"self": "sha256:x"}},
+		}
+		for k, v := range credential {
+			b[k] = v
+		}
+		return b
+	}
+	post := func(t *testing.T, b map[string]any) (int, map[string]any) { return postJSON(t, base+"/v1/checkin", b) }
+	lanes := []struct {
+		name string
+		want int // the answer to the lane's check-in without a NUL character
+		body func() map[string]any
+		post func(*testing.T, map[string]any) (int, map[string]any)
+	}{
+		{"id token", http.StatusOK, func() map[string]any {
+			return body("claude-code", map[string]any{"id_token": idToken})
+		}, post},
+		{"console", http.StatusOK, func() map[string]any {
+			return body("console", map[string]any{"id_token": idToken})
+		}, post},
+		{"self-service page", http.StatusOK, func() map[string]any {
+			return body("self-service", map[string]any{"id_token": idToken})
+		}, post},
+		{"device credential", http.StatusForbidden, func() map[string]any {
+			return body("console", map[string]any{"device_token": deviceToken})
+		}, post},
+		{"key", http.StatusOK, func() map[string]any {
+			return body("claude-code", map[string]any{"device_id": h.device, "counter": h.counter + 1})
+		}, func(_ *testing.T, b map[string]any) (int, map[string]any) {
+			code, out := h.call("/v1/checkin", "", b)
+			if code == http.StatusOK {
+				h.counter++
+			}
+			return code, out
+		}},
+		{"session refresh", http.StatusOK, func() map[string]any {
+			return body("claude-code", map[string]any{"session_token": sessionToken})
+		}, post},
+	}
+	text := func(b map[string]any, field string) map[string]string { return b[field].(map[string]string) }
+	hashes := func(b map[string]any) map[string]string {
+		return b["attestation"].(map[string]any)["hashes"].(map[string]string)
+	}
+	fields := []struct {
+		name  string
+		field string // the field the refusal names
+		step  string // the next step the refusal gives for the field
+		spoil func(map[string]any)
+	}{
+		{"harness name", "harness.name", nulStepStraza, func(b map[string]any) { text(b, "harness")["name"] += "\x00" }},
+		{"harness version", "harness.version", nulStepHarness, func(b map[string]any) { text(b, "harness")["version"] = "2.1\x00.0" }},
+		{"client version", "client.version", nulStepStraza, func(b map[string]any) { text(b, "client")["version"] = "\x001.1.2" }},
+		{"client commit", "client.commit", nulStepStraza, func(b map[string]any) { text(b, "client")["commit"] = "abc\x00def0" }},
+		{"attestation hash", "attestation.hashes", nulStepStraza, func(b map[string]any) { hashes(b)["self"] = "sha256:\x00" }},
+		{"attestation artifact", "attestation.hashes", nulStepStraza, func(b map[string]any) { hashes(b)["self\x00"] = "sha256:x" }},
+	}
+	for _, lane := range lanes {
+		t.Run(lane.name, func(t *testing.T) {
+			if code, out := lane.post(t, lane.body()); code != lane.want {
+				t.Fatalf("check-in without a NUL character = %d %v, want %d", code, out, lane.want)
+			}
+			for _, f := range fields {
+				t.Run(f.name, func(t *testing.T) {
+					before, err := app.store.Sessions().List(ctx, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					head, err := app.store.Outbox().Head(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					b := lane.body()
+					f.spoil(b)
+					want := fmt.Sprintf(checkinNULMsg, f.field, f.step)
+					if code, out := lane.post(t, b); code != http.StatusBadRequest || out["error"] != want {
+						t.Fatalf("checkin = %d %v, want 400 with %q", code, out, want)
+					}
+					after, err := app.store.Sessions().List(ctx, "")
+					if err != nil || len(after) != len(before) {
+						t.Fatalf("sessions %d before and %d after the refusal (%v), want no new session", len(before), len(after), err)
+					}
+					if now, _ := app.store.Outbox().Head(ctx); now != head {
+						t.Fatalf("the refused check-in wrote an outbox row: head %q, was %q", now, head)
+					}
+				})
 			}
 		})
 	}

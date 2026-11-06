@@ -59,7 +59,7 @@ func TestKeySessionRefresh(t *testing.T) {
 			signInAgo(t, app, h.device, 8*24*time.Hour)
 		}, http.StatusForbidden,
 			"Your last sign-in on this machine was more than 7 days ago, and your Straza admin requires a new one. " +
-				"Run straza enroll and sign in with your work account.",
+				"Run `straza enroll --server " + app.cfg.Server.PublicURL + "` and sign in with your work account.",
 			signInPassedReason},
 	}
 	for _, tc := range cases {

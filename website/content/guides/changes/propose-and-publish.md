@@ -118,11 +118,15 @@ strazactl drafts create -f dev-access.yaml --note "Hold terraform apply for dev 
 
 The **Waiting** tab lists the open drafts with **What changes**, **Drafted by**, **How it came in** and the counts of the last check, such as `1 widens access` and `2 warnings`. **Published**, **Discarded** and **Expired** keep the drafts that are closed, and **Published** is the change record. **Mine** narrows the list to the drafts you wrote.
 
-Select a draft. Its page opens with a status, such as `Ready to publish`, and the facts: **Drafted by**, **Came from**, each revision, **Last checked** and **Who may publish**, such as `You may publish all of it.` The help icon beside it names what each object needs, such as `The approval set kubectl-apply-hold needs the scope policy:write.` A note from whoever drafted it shows under a heading such as `What alice says`, or `What the agent says` for an AI agent, marked `unverified`, because nobody checked it.
+Select a draft. The breadcrumb reads `Drafts / Draft 7`, and the page is titled with what the draft does, such as `Change policy set kubectl-apply-hold`, beside its status, such as `Ready to publish`, and a chip with its number, `draft 7`. The line under the title names who drafted it with the kind of author in brackets, such as `(you)` or `(an agent, sponsored by you)`, then how it came in, the revision and how long ago. A draft that expires adds `expires` and the date. **Details** opens the rest: where it came from, with the file a draft from the apps directory came from, the revisions, the policy version it was last checked against, who may publish, and the draft an undo undoes. The help icon beside who may publish names what each object needs, such as `The policy set kubectl-apply-hold needs the scope policy:write.` A note from whoever drafted it shows under a heading such as `What alice says`, or `What the agent says` for an AI agent, marked `unverified`, because nobody checked it.
 
-The sections below follow in order. **What changes** shows each object as it would be published. **Access after publishing** shows, for each role the draft touches, what a holder gets now and after publishing: `allowed`, `needs approval`, `no access` or `denied`. **Checks** groups the server's findings under **Refused**, **Widens access**, **Warnings**, **Not checked** and **Passed**, and leaves out a group with no line. **Files** holds the text as it would be published, with secret values shown as `[REDACTED]`.
+{{< see >}}The band `Before you publish`, which stays in view while you scroll. It holds the verdict, such as `Nothing to confirm` or `1 line to confirm`, then who may publish, such as `You may publish all of it.`, what to do first, such as `1 line needs your confirmation when you publish.`, a link `Go to the checks`, **Discard** and **Publish…**.{{< /see >}}
 
-{{< see >}}The foot of the page says what to do before you publish, such as `1 line needs your confirmation when you publish.`{{< /see >}}
+**In this draft** lists one row per object, under `1 object` or a count such as `3 objects, published together or not at all`, with the columns **Kind**, **Name**, **Change** and **What publishing does**. The kind is named in full, such as `MCP server`, `Application role` or `Policy set`, and a role that a server owns says so, such as `owned by ghapp`. A row opens the object's card under **What changes**.
+
+Each card shows its object as it would be published, in the shapes of the server, role and policy pages. A role carries who holds it, such as `nobody holds it yet` or `2 people hold it`. A changed role sums its change up in its head, such as `+1 tool` and `-1 tool`, and shows its tools as chips: a green chip with `+` for a tool that joins, a struck red chip for one that leaves, and a long run of unchanged ones folded into a chip such as `9 unchanged`. An edited rule shows its old sentence struck through above the new one, with the changed words marked. A policy set carries a chip of the outcomes its rules give after publishing, such as `needs approval · denied`. A server card that changes lists only the fields that change, now and after publishing, and ends `No other field changes.` A card of an object that is live links to it, such as `Open kubectl-apply-hold`. Each card ends in a fold of its file, such as `kubectl-apply-hold.yaml, as it will be published`, which says `A value the server keeps secret reads [REDACTED] here.` A card of an object the draft removes, or of one you may not read, has no file fold.
+
+**Access after publishing** shows, for each role the draft touches, what a holder gets now and after publishing: `allowed`, `needs approval`, `no access` or `denied`. **Checks** groups the server's findings under **Refused**, **Widens access**, **Warnings**, **Not checked** and **Passed**, and leaves out a group with no line.
 {{< /console >}}
 
 {{< cli >}}
@@ -136,9 +140,9 @@ strazactl drafts list
 {{< details summary="Recorded output" >}}
 ```text
 Open drafts, newest first.
-ID  STATE  TITLE                        PROPOSER  DOOR        CHECKS       CHECKED               UPDATED
-14  open   Add approval set dev-access  admin     strazactl   1 warn       2026-10-06 20:13 UTC  2026-10-06 20:13 UTC
-9   open   Change role dev              alice     straza app  no findings  2026-10-06 20:04 UTC  2026-10-06 20:04 UTC
+ID  STATE  TITLE                      PROPOSER  DOOR        CHECKS       CHECKED               UPDATED
+14  open   Add policy set dev-access  admin     strazactl   1 warn       2026-10-06 20:13 UTC  2026-10-06 20:13 UTC
+9   open   Change role dev            alice     straza app  no findings  2026-10-06 20:04 UTC  2026-10-06 20:04 UTC
 Counts are from each draft's last check. strazactl drafts show checks it against live state now.
 ```
 {{< /details >}}
@@ -153,7 +157,7 @@ strazactl drafts show 14
 
 {{< details summary="Recorded output" >}}
 ```text
-Draft 14, revision 1, open: Add approval set dev-access
+Draft 14, revision 1, open: Add policy set dev-access
 Revision 1 by admin through strazactl at 2026-10-06 20:13 UTC.
 The note, which Straza did not check: Hold terraform apply for dev until release-approvers decides.
   +   PolicySet/dev-access
@@ -227,17 +231,17 @@ Some servers pin an object type in their manifest, such as ghapp, which pins `re
 The check also refuses a covers line that names no repo, one that names a repo twice, and one on a server that pins no object type.
 
 
-A draft that pins a server's objects reads differently. The first pin gives every role already on the server `covers: every`, so nothing changes for any agent, and the check says so under **Notes**: `Pinning repos on ghapp keeps today's reach: ghapp-read and ghapp-write now cover every repo. Narrow them in this draft or later.` A warning names each tool the pinned block does not decide, which reads as reaching every repo until you name it, and another warns when the server has no listing credential yet. A type change while a role names repos of the old type is refused, and an unpin gets a note that names the roles that lose their lists. The draft's page shows the repos each role covers on ghapp, now and after publishing, and its first sentence says what publishing changes, such as `Changes the role ghapp-write-payments: it will reach 1 more repo on ghapp, Strazahq/pay-web.` `strazactl drafts show` prints the same as a table under `Repos on ghapp, now and after publishing:`. A covers line that makes a role someone holds reach more repos widens access even when its tools stay the same, so the check lists it as a line you tick when you publish: `ghapp-write-payments will reach more repos on ghapp: Strazahq/pay-web.` A role nobody holds raises no such line.
+A draft that pins a server's objects reads differently. The first pin gives every role already on the server `covers: every`, so nothing changes for any agent, and the check says so under **Notes**: `Pinning repos on ghapp keeps today's reach: ghapp-read and ghapp-write now cover every repo. Narrow them in this draft or later.` A warning names each tool the pinned block does not decide, which reads as reaching every repo until you name it, and another warns when the server has no listing credential yet. A type change while a role names repos of the old type is refused, and an unpin gets a note that names the roles that lose their lists. The draft's page shows the repos each role covers on ghapp as chips, now and after publishing, and the role's card and its row in **In this draft** sum the change up, such as `+1 repo`. `strazactl drafts show` prints the same as a table under `Repos on ghapp, now and after publishing:`. A covers line that makes a role someone holds reach more repos widens access even when its tools stay the same, so the check lists it as a line you tick when you publish: `ghapp-write-payments will reach more repos on ghapp: Strazahq/pay-web.` A role nobody holds raises no such line.
 
 ## Publish it
 
 {{< console >}}
 
-{{< clicks "Drafts" "Waiting" "Change approval set kubectl-apply-hold" "Publish…" >}}
+{{< clicks "Drafts" "Waiting" "Change policy set kubectl-apply-hold" "Publish…" >}}
 
 {{< shot name="draft-publish" caption="The publish question of a draft with no line to confirm, ending with the sentence that says who the publish record names." >}}
 
-The question is titled with the draft, such as `Publish draft 7?`, and says what publishing does, such as `Publishing changes 1 approval set in one step, or nothing changes.` A draft with lines that widen access is said by what they do, such as `Publishing widens access through 1 approval set, or nothing changes.` The lines that widen access come in blocks, one per kind, and you confirm each block. A line that republishing the old state can undo has a box to tick, and the lines of one kind share one tick. A line it cannot undo asks you to type its name, such as `Type kubectl-apply-hold to confirm`. Several such lines of one kind ask for their count once instead, such as `Type 20 to confirm`, and the block folds open to list them. A server's removal always asks for the server's name. Each field shows what to type in its placeholder and a check mark once it matches. The question ends with `The publish record names you.`, and its help icon says that the record also names the console and your login.
+The question is titled with the draft, such as `Publish draft 7?`, and says what publishing does, such as `Publishing changes 1 policy set in one step, or nothing changes.` A draft with lines that widen access is said by what they do, such as `Publishing widens access through 1 policy set, or nothing changes.` The lines that widen access come in blocks, one per kind, and you confirm each block. A line that republishing the old state can undo has a box to tick, and the lines of one kind share one tick. A line it cannot undo asks you to type its name, such as `Type kubectl-apply-hold to confirm`. Several such lines of one kind ask for their count once instead, such as `Type 20 to confirm`, and the block folds open to list them. A server's removal always asks for the server's name. Each field shows what to type in its placeholder and a check mark once it matches. The question ends with `The publish record names you.`, and its help icon says that the record also names the console and your login.
 
 Confirm each block and press **Publish**, which stays off until every block is confirmed.
 
@@ -298,9 +302,9 @@ strazactl drafts rebase 5 --pick "Role/dev spec.description=draft"
 An undo is a new draft that holds the state from before the publish. It is checked like any other draft, and it lists what cannot come back, such as each person's connection to a server.
 
 {{< console >}}
-{{< clicks "Drafts" "Published" "Change approval set kubectl-apply-hold" "Undo this publish" >}}
+{{< clicks "Drafts" "Published" "Change policy set kubectl-apply-hold" "Undo this publish" >}}
 
-{{< see >}}A new draft titled `Undo draft 7`, with `Undoes draft 7` among its facts.{{< /see >}}
+{{< see >}}A new draft titled `Undo draft 7`, whose **Details** name the draft it undoes.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -400,7 +404,7 @@ spec:
 `straza__draft_status` answers the check's refused lines, risks, warnings and unchecked lines, so the agent reads a refusal such as `Strazahq/pay-old is not in ghapp's repo list.` itself. Its `next` field then reads `Fix the refused lines and submit again with draft 9.`, and the agent sends the corrected document with `draft` set to that number. It never reads the **Notes**, and it cannot publish. The check refuses an agent's draft that widens what the agent's own roles cover. An agent that holds ghapp-read-payments and sends it again with `covers: every` reads `This draft would let you reach file_get, pr_list, repo_get and search_code on every repo of ghapp, which widens your own reach. An agent's draft may not.`, with the fix `Leave that change out. A person can make it.` A third repo in the list reads `on repos of ghapp that your roles do not cover today` in place of `on every repo of ghapp`. A re-pin or an unpin that widens the agent's reach is refused the same way. The check reads every combination of roles the agent holds, now and at each later moment one of its assignments starts or ends. A draft that widens what any of those combinations reaches is refused the same way, and so is a draft that adds or widens a rule of a policy set that binds the agent at any of those moments. Naming a covered repo by its new name, or narrowing the list, passes.
 
 
-A draft that loosens a policy set that binds the agent is not refused, and a person may accept it instead. Such a draft turns the set off, removes it, changes its match or priority, takes away a role through which the set applies to the agent, or loosens one of its gates. Each such set becomes a line that widens access, such as `agent-guardrails binds the agent that wrote this draft, and this draft turns it off.`, and the agent reads that line too. On the console, the draft's page opens with a red warning that names the agent, such as `joe wrote this draft to loosen its own rules.`, and ends it with `A person may accept it when publishing.` Publishing in the console asks for the set's name, `Type agent-guardrails to accept it`, and the `draft.publish` record names the person who accepted it as its `actor` and lists the set in `agentLoosened`. While `admin.secondPerson` is on, the agent's sponsor cannot publish such a draft, so another administrator must.
+A draft that loosens a policy set that binds the agent is not refused, and a person may accept it instead. Such a draft turns the set off, removes it, changes its match or priority, takes away a role through which the set applies to the agent, or loosens one of its gates. Each such set becomes a line that widens access, such as `agent-guardrails binds the agent that wrote this draft, and this draft turns it off.`, and the agent reads that line too. On the console, the draft's page carries a red warning that names the agent, such as `joe wrote this draft to loosen its own rules.`, and ends it with `A person may accept it when publishing.` Publishing in the console asks for the set's name, `Type agent-guardrails to accept it`, and the `draft.publish` record names the person who accepted it as its `actor` and lists the set in `agentLoosened`. While `admin.secondPerson` is on, the agent's sponsor cannot publish such a draft, so another administrator must.
 
 ## Next {.nostep}
 

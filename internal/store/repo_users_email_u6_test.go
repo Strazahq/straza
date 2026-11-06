@@ -26,7 +26,7 @@ func TestUsersListByEmail(t *testing.T) {
 		gone := create(User{Username: "ana-gone", Email: "ana@example.com"})
 		ana := create(User{Username: "ana", Email: "ana@example.com"})
 		kim := create(User{Username: "kim", Email: "kim@example.com"})
-		if _, err := s.Users().SoftDelete(ctx, gone.ID); err != nil {
+		if _, err := s.Users().SoftDelete(ctx, gone.ID, nil); err != nil {
 			t.Fatalf("SoftDelete: %v", err)
 		}
 

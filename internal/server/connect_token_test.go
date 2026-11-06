@@ -16,12 +16,8 @@ import (
 func seedAgent(t *testing.T, app *App, username, sponsor, roleName string) store.User {
 	t.Helper()
 	ctx := context.Background()
-	hash, err := testPasswordHash("hunter2!")
-	if err != nil {
-		t.Fatal(err)
-	}
 	u, err := app.store.Users().Create(ctx, store.User{
-		Username: username, PasswordHash: hash, UserType: store.UserTypeAgent, Sponsor: sponsor,
+		Username: username, UserType: store.UserTypeAgent, Sponsor: sponsor,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +108,7 @@ func TestConnectTokenLane(t *testing.T) {
 	catRecompile(t, app)
 
 	aliceTok := sessionToken(t, base, "alice")
-	joeTok, joeSID := gatewaySession(t, base, "joe")
+	joeTok, joeSID := agentCheckin(t, app, base, "joe")
 	malloryTok := sessionToken(t, base, "mallory")
 	kimTok := sessionToken(t, base, "kim")
 
@@ -176,7 +172,7 @@ func TestConnectTokenLane(t *testing.T) {
 	const joeToken = "tok-joe-NEVER-LEAK"
 	var refusal map[string]any
 	if code := adminReq(t, http.MethodPost, base+"/v1/connect/tokapp", malloryTok, map[string]any{"token": joeToken, "user": "joe"}, &refusal); code != http.StatusForbidden ||
-		refusal["error"] != "only joe's sponsor or an administrator can manage joe's connections" {
+		refusal["error"] != "mallory cannot read or change joe's connections, because mallory neither sponsors joe nor is an administrator. Ask joe's sponsor alice or an administrator to do this." {
 		t.Fatalf("stranger paste for joe = %d %v", code, refusal)
 	}
 	var forJoe map[string]any
@@ -292,7 +288,7 @@ func TestConnectTokenSharedAndRefusals(t *testing.T) {
 		t.Fatalf("shared secret on ownapp = %d %v", code, out)
 	}
 
-	joeTok := sessionToken(t, base, "joe")
+	joeTok := agentSessionToken(t, app, base, "joe")
 	aliceTok := sessionToken(t, base, "alice")
 	if raw := echoCall(t, base, joeTok, "sharedapp"); !strings.Contains(raw, "echo: hi") || strings.Contains(raw, sharedValue) {
 		t.Fatalf("joe on the shared row = %s", raw)

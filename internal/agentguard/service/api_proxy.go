@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -79,8 +80,11 @@ func (a *api) plainPath(w http.ResponseWriter, r *http.Request, route string) bo
 // proxy streams r to upstream, a plain path, on the session's strazad and
 // the answer back with no buffering, which the standalone GET stream and
 // the gateway's approval hold need. The session comes from the harness
-// headers.
+// headers. Each refusal of its own made before the send carries
+// HeaderNotSent, and no answer from strazad does.
 func (a *api) proxy(w http.ResponseWriter, r *http.Request, upstream string) {
+	// Every answer until the send below is a refusal made before it.
+	w.Header().Set(localapi.HeaderNotSent, "1")
 	h := localapi.Harness{
 		Name:    r.Header.Get(localapi.HeaderHarness),
 		Version: r.Header.Get(localapi.HeaderHarnessVersion),
@@ -101,6 +105,7 @@ func (a *api) proxy(w http.ResponseWriter, r *http.Request, upstream string) {
 		return
 	}
 	target.Path, target.RawPath, target.RawQuery = strings.TrimRight(target.Path, "/")+upstream, "", r.URL.RawQuery
+	w.Header().Del(localapi.HeaderNotSent)
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL = target
@@ -111,14 +116,32 @@ func (a *api) proxy(w http.ResponseWriter, r *http.Request, upstream string) {
 		},
 		Transport:     a.creds.Transport(s),
 		FlushInterval: -1,
+		ModifyResponse: func(resp *http.Response) error {
+			resp.Header.Del(localapi.HeaderNotSent)
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// The credential half refuses before it sends.
 			var refused *Refused
 			if errors.As(err, &refused) {
+				w.Header().Set(localapi.HeaderNotSent, "1")
 				a.refuse(w, r, refused.Status, refused.Sentence)
 				return
 			}
-			a.refuse(w, r, http.StatusBadGateway, fmt.Sprintf("The Straza background service could not reach the "+
-				"Straza server at %s (%v). Check that this machine reaches the server, then run `straza doctor`.", s.ServerURL, err))
+			// A failed dial proves the request never left this machine, so
+			// it answers 503, which a caller may try again. Any other
+			// failure may come after strazad ran the request, so it answers
+			// 502, which a caller must not take as permission to resend.
+			var dial *net.OpError
+			if errors.As(err, &dial) && dial.Op == "dial" {
+				w.Header().Set(localapi.HeaderNotSent, "1")
+				a.refuse(w, r, http.StatusServiceUnavailable, fmt.Sprintf("The Straza background service could not reach the "+
+					"Straza server at %s (%v). Check that this machine reaches the server, then run `straza doctor`.", s.ServerURL, err))
+				return
+			}
+			a.refuse(w, r, http.StatusBadGateway, fmt.Sprintf("The Straza background service did not get an answer from the "+
+				"Straza server at %s (%v), so the request may or may not have run there. Check that this machine reaches the server, "+
+				"then run `straza doctor`.", s.ServerURL, err))
 		},
 	}
 	rp.ServeHTTP(w, r)

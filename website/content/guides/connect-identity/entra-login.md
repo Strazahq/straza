@@ -82,7 +82,7 @@ Open **Authentication**, add a platform of the type **Single-page application**,
 Open **Token configuration**, press **Add optional claim**, pick the token type **ID**, tick `auth_time`, and press **Add**. Entra then says in each ID token when the person signed in. Without the claim, Straza refuses every browser sign-in for a machine, because it cannot tell that the person signed in just now.
 
 {{< fails >}}
-``Straza refused this sign-in because the identity provider sent no auth_time claim, so Straza cannot tell that you signed in just now. Ask IT to add the auth_time claim to the ID token of the Straza app, then run `straza enroll` again.``
+``Straza refused this sign-in because the identity provider sent no auth_time claim, so Straza cannot tell that you signed in just now. Ask IT to add the auth_time claim to the ID token of the Straza app, then run `straza enroll --server https://straza.example.com` again.``
 : The app's ID tokens lack `auth_time`. Add the optional claim as this step shows.
 {{< /fails >}}
 

@@ -67,6 +67,11 @@ const (
 		"so the tools that link it are listed without the link. An administrator checks the server, then runs strazactl apps recheck for it"
 )
 
+// viewEchoes is the reason a view is not served when its document, _meta,
+// name, title or description holds the credential Straza injects for the
+// server, which an agent would read through resources/read.
+const viewEchoes = "it holds the credential Straza injects for the server, and a view must not"
+
 // viewRead is one read of a server's views: the views it serves, sorted by
 // URI, and when the server last answered for each.
 type viewRead struct {
@@ -150,7 +155,11 @@ func (m *Manager) readViews(ctx context.Context, inst *instance, uris []string, 
 		default:
 			reads++
 			var v View
-			if v, reason, answered = readView(pass, inst.runtime, secret, uri, listed[uri]); reason == "" {
+			v, reason, answered = readView(pass, inst.runtime, secret, uri, listed[uri])
+			if reason == "" && echoes(inst.echoValues(secret), v, nil) {
+				reason = viewEchoes
+			}
+			if reason == "" {
 				out.views = append(out.views, v)
 				out.answered[uri] = time.Now()
 				continue

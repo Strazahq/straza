@@ -42,7 +42,7 @@ export const ROUTES: Route[] = [
   { key: "approvals", label: "Approvals", icon: CircleCheckIcon, path: "approvals", areas: ["approvals"], built: true, description: "Review pending requests and past approval decisions." },
   // Drafts opens to the grants that may draft: the drafts area, and the
   // areas whose objects a draft changes.
-  { key: "drafts", label: "Drafts", icon: FilePenLineIcon, path: "drafts", areas: ["drafts", "apps", "identity", "policy"], built: true, description: "Changes to servers, roles, access and approval sets wait here until a person publishes them." },
+  { key: "drafts", label: "Drafts", icon: FilePenLineIcon, path: "drafts", areas: ["drafts", "apps", "identity", "policy"], built: true, description: "Changes to servers, roles, access and policy sets wait here until a person publishes them." },
   { key: "settings", label: "Settings", icon: SettingsIcon, path: "settings", areas: ["config", "tokens"], built: true, description: "Deployment configuration and admin API tokens." },
 ];
 

@@ -10,11 +10,12 @@ import (
 // nativeApp is the built-in straza app. Every session is offered its
 // approval tools and policy alone decides who sees them. The two drafting
 // tools are offered only to a holder of DraftConfigRole, and they count as
-// granted for it.
+// granted for it. whoami is offered to every session and counts as granted
+// for every one.
 const nativeApp = "straza"
 
 var (
-	nativeTools   = []string{"approval_await", "approval_request", "approval_status", "draft_status", "draft_submit"}
+	nativeTools   = []string{"approval_await", "approval_request", "approval_status", "draft_status", "draft_submit", "whoami"}
 	draftingTools = map[string]bool{"draft_status": true, "draft_submit": true}
 )
 
@@ -231,7 +232,7 @@ func (g *gainer) reach(sub [2]policy.Subject) []reached {
 		cl := call{server: nativeApp, tool: t}
 		for i := range 2 {
 			holds := slices.Contains(sub[i].Roles, DraftConfigRole)
-			cl.granted[i] = draftingTools[t] && holds
+			cl.granted[i] = t == "whoami" || (draftingTools[t] && holds)
 			if draftingTools[t] && !holds {
 				cl.reach[i] = OutcomeNotReachable
 			}

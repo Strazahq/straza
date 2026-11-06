@@ -142,7 +142,7 @@ func handleSessionStart(hio HookIO, store *Store, svc *localapi.Client, harness 
 	journalDecision(tl, n, policy.Decision{Effect: policy.EffectAllow},
 		decisionFacts{start: start, snapshot: ans.SnapshotID})
 	info := SessionInfo{User: ans.User, Roles: ans.Roles, SnapshotID: ans.SnapshotID,
-		Attestation: ans.Attestation, ServerURL: ans.ServerURL, Capture: ans.Capture}
+		Attestation: ans.Attestation, ServerURL: ans.ServerURL, Capture: ans.Capture, StartText: ans.StartText}
 	context := GovernanceBanner(info)
 	if pc := PackContext(ans.Packs); pc != "" {
 		context += "\n\n" + pc
@@ -160,40 +160,63 @@ func GovernanceUserLine(info SessionInfo) string {
 	line := fmt.Sprintf("🛡 Straza governance active: %s (%s) @ %s · policy %s · attestation %s",
 		info.User, strings.Join(info.Roles, ","), info.ServerURL, snap, info.Attestation)
 	if info.Capture.Conversations {
-		line += " · conversations recorded " + recordingWords(info.Capture.Mode)
+		line += " · conversations recorded " + RecordingWords(info.Capture.Mode)
 	}
 	return line
 }
 
-// recordingWords names a recording mode the way the console does: word for
+// RecordingWords names a recording mode the way the console does: word for
 // word, or with secrets masked.
-func recordingWords(mode string) string {
+func RecordingWords(mode string) string {
 	if mode == policy.CaptureModeRedact {
 		return "with secrets masked"
 	}
 	return "word for word"
 }
 
-// GovernanceBanner tells the agent, in its own context, that the session is
-// governed: who it operates as, under which policy snapshot, and how to treat
-// denials. Agents should KNOW Straza is live, not discover it by being
-// denied.
+// GovernanceBanner is the agent's session-start context: the start text the
+// server sent, or StartText(info.User, false) when it sent none, then whether
+// policy records the conversation. An empty start text from the server
+// turns the governance paragraph off. It names no roles, server, snapshot or
+// attestation, because the agent cannot act on them and a long role list
+// costs tokens in every session. GovernanceUserLine shows them to the person.
 func GovernanceBanner(info SessionInfo) string {
-	snap := info.SnapshotID
-	if len(snap) > 12 {
-		snap = snap[:12]
+	text := StartText(info.User, false)
+	if info.StartText != nil {
+		text = *info.StartText
 	}
-	banner := fmt.Sprintf(
-		"Straza governance is active for this session. You are operating as %q (roles: %s) "+
-			"against %s; policy snapshot %s, attestation %s. Tool use is checked locally against "+
-			"signed policy and every decision is audited. A denied tool call always carries its "+
-			"reason: relay it to the user and do not retry or work around the denial.",
-		info.User, strings.Join(info.Roles, ", "), info.ServerURL, snap, info.Attestation)
-	if info.Capture.Conversations {
-		banner += fmt.Sprintf(" Recording is on: by policy, the prompts and responses of this "+
-			"session are recorded %s to the audit system.", recordingWords(info.Capture.Mode))
+	if !info.Capture.Conversations {
+		return text
 	}
-	return banner
+	// The recording sentence stays even when the server turned the start
+	// text off, because Gemini shows no session-start line to the person,
+	// so on Gemini this sentence is the only notice of the recording.
+	recorded := fmt.Sprintf("By policy, the prompts and responses of this session are recorded %s in the audit log.",
+		RecordingWords(info.Capture.Mode))
+	if text == "" {
+		return recorded
+	}
+	return text + " " + recorded
+}
+
+// StartText is the governance paragraph an agent reads at session start for
+// user. strazad writes it into its check-in answer, and the client uses its
+// own copy, with whoami false, only when the server sent none. It leaves
+// what to do after a denial to the denial's reason, because each reason
+// says whether a person can approve the call, the call needs changing, or a
+// later try may pass. whoami adds the sentence that names the whoami tool,
+// which strazad sets only when the session's policy lets it call the tool.
+func StartText(user string, whoami bool) string {
+	text := fmt.Sprintf("Straza governs this session as %q. "+
+		"Every tool call is checked against policy and recorded in the audit log. "+
+		"When a call is denied, tell the user what the reason says, then do what it says next: "+
+		"wait for a person's approval, change the call, or try once more later. "+
+		"A denial that says none of these is a policy decision, and the same call will be denied again. "+
+		"Do not try to reach the denied result another way.", user)
+	if whoami {
+		text += " To see what this session may do, call the straza__whoami tool of the straza MCP server."
+	}
+	return text
 }
 
 // encodeDecision writes the decision in the harness's response dialect.

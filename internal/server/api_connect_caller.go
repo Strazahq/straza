@@ -81,13 +81,18 @@ func (a *App) userByRef(ctx context.Context, ref string) (store.User, error) {
 	return u, nil
 }
 
+// connectStandingReason is the reason of the connection.refused record a
+// write leaves when actFor refuses the caller standing for the named user.
+const connectStandingReason = "only a person who is the user's sponsor or an administrator can change another user's connection"
+
 // connectTarget resolves the user a connect request acts for and answers the
 // request itself when it cannot. A session acts for its own user unless ref
-// names another, which actFor judges with 403 or 404. An admin API token is
-// no user, so it must name one: 400 when ref is empty, 404 for an unknown
-// user, and any other user passes, because the token's scope already
-// admitted the request.
-func (a *App) connectTarget(w http.ResponseWriter, r *http.Request, c connectCaller, ref string) (store.User, bool) {
+// names another, which actFor judges with 403 or 404. On a write, app names
+// the server, and a 403 from actFor records one connection.refused event. A
+// read passes app empty and records none. An admin API token is no user, so
+// it must name one: 400 when ref is empty, 404 for an unknown user, and any
+// other user passes, because the token's scope already admitted the request.
+func (a *App) connectTarget(w http.ResponseWriter, r *http.Request, c connectCaller, ref, app string) (store.User, bool) {
 	if c.token != nil && ref == "" {
 		where := "the field user of the body"
 		if r.Method == http.MethodGet || r.Method == http.MethodDelete {
@@ -108,6 +113,8 @@ func (a *App) connectTarget(w http.ResponseWriter, r *http.Request, c connectCal
 	switch {
 	case err != nil:
 		apiError(w, http.StatusNotFound, err.Error())
+	case refusal != "" && app != "":
+		a.refuseConnection(w, r, c, target, app, connectStandingReason, refusal)
 	case refusal != "":
 		apiError(w, http.StatusForbidden, refusal)
 	default:

@@ -385,7 +385,7 @@ describe("Test a call on a server that pins repos", () => {
 
   it.each([
     ["names the missing listing credential", { tool: "repo_list", credential: "missing", outcome: "never", version: 0, count: 0 },
-      "ghapp lists its repos with repo_list. ghapp has no listing credential, so Straza cannot list its repos. Add one with strazactl apps secret set ghapp --listing, then refresh with strazactl apps objects refresh ghapp."],
+      "ghapp lists its repos with repo_list. ghapp has no listing credential, so Straza cannot list its repos. Set one under Server authentication on Overview, or with strazactl apps secret set ghapp --listing."],
     ["says when the first listing runs", { tool: "repo_list", credential: "set", outcome: "never", version: 0, count: 0 },
       "ghapp lists its repos with repo_list. No listing yet. Straza runs the first one within 30 seconds. Reload the page to see it."],
     ["points at the refresh when the list is empty", { tool: "repo_list", credential: "set", outcome: "ok", version: 2, count: 0, listedAt: "2026-10-19T09:00:00Z" },

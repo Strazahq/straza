@@ -36,8 +36,8 @@ Its rows cover the settings that decide who can reach strazad, what it shows wit
 | `server.listen` | The address of the main listener, which serves the API, the console and the gateway | `127.0.0.1:8420`, this machine only | `:8420`, every interface |
 | `server.tls.certFile` and `keyFile` | TLS 1.2 or newer on the main listener | Unset, so plain HTTP with no warning | Unset, so plain HTTP with a warning at every boot |
 | `server.approverTLS.autoMint` | A second listener, HTTPS only, that serves only the phone approver routes | `true`: port 8443 on every interface, with a self-signed certificate it creates in the data directory | `false`: no approver listener until you configure one |
-| `server.approverTLS.perIPRPS` | Requests per second that each connecting address may make to the approver listener | 10 | 10 |
-| `server.loginPerIPRPS` | Requests per second that each client address may make to the password submit, under enterprise to the agent token endpoint too, and from a separate budget to the start of a device code sign-in | 2 | 2 |
+| `server.approverTLS.perIPRPS` | Requests per second that each connecting address may make to the approver listener, where an IPv6 client counts by its /64 network | 10 | 10 |
+| `server.loginPerIPRPS` | Requests per second that each client address may make to the password submit, under enterprise to the agent token endpoint too, and from a separate budget to the start of a device code sign-in, where an IPv6 client counts by its /64 network | 2 | 2 |
 | `server.maxBodyBytes` | The largest request body, except on `/mcp`, which `server.mcpMaxBodyBytes` caps, and `/v1/audit/batch`, which caps its own at 4 MiB | 1 MiB | 1 MiB |
 | `server.mcpMaxBodyBytes` | The largest body of one request to the MCP gateway, on `/mcp` and on each server's own endpoint, from 1 byte to 8 MiB | 4 MiB | 4 MiB |
 | `server.metricsToken` | A bearer token that `/metrics` requires | Unset, so `/metrics` answers anyone who reaches the listener | Unset, the same |
@@ -64,7 +64,7 @@ Every answer of both listeners carries `X-Content-Type-Options: nosniff`, `X-Fra
 `/version` answers anyone who reaches the main listener. It names the exact version and commit, the Go version, the operating system and architecture, the profile and the runtimes this host can start MCP servers with. When strazad serves the approver listener itself, it adds the approver's address, pin and certificate expiry, and the certificate's path when strazad minted it. `strazactl status`, `straza doctor` and the console's footer read it with no token. `/readyz` names a failing component with its error. The approver listener answers both `/version` and `/healthz` with 404, because it serves only the approver routes and `/readyz`.
 
 
-`server.mcpMaxBodyBytes` bounds what one request to the gateway can make strazad hold. The default is 4 MiB and the range is 1 byte to 8 MiB, and strazad refuses to start on 0 or a value outside it, so the cap cannot be turned off. The ceiling is 8 MiB because the straza client keeps at most 8 MiB of a request to send it again after a proof challenge. Each MCP request takes about 6 times its body in strazad's memory until it is decided, and an allowed call takes about 3 times more while strazad forwards it to its server. The worst case is therefore the limit times the requests in flight times 9, about 72 MiB for each 8 MiB request. strazad sets no read deadline on a request body yet, so a client can hold a request open while it sends its body slowly. If you raise the limit, put strazad behind an ingress that times out slow request bodies. An agent whose call is over the limit reads a sentence that names the setting, and strazad logs one warning line with the session's id.
+`server.mcpMaxBodyBytes` bounds what one request to the gateway can make strazad hold. The default is 4 MiB and the range is 1 byte to 8 MiB, and strazad refuses to start on 0 or a value outside it, so the cap cannot be turned off. The ceiling is 8 MiB because the straza client keeps at most 8 MiB of a request to send it again after a proof challenge. Each MCP request takes about 6 times its body in strazad's memory until it is decided, and an allowed call takes about 3 times more while strazad forwards it to its server. The worst case is therefore the limit times the requests in flight times 9, about 72 MiB for each 8 MiB request. strazad gives every request 30 seconds to send its header and body, and gives the body of a gateway request or an audit upload 4 minutes, the same pace for 8 MiB that 30 seconds gives 1 MiB, and only after the session token verified, so a request without a valid session keeps 30 seconds. A client that stalls mid-body therefore holds its connection and buffer for at most that long, while event streams, streamed replies and approval waits, which read their body first, run on. An agent whose body arrives too slowly reads that Straza cut it off and to check the network or send less, and strazad logs one warning line with the session's id. An agent whose call is over the limit reads a sentence that names the setting, and strazad logs one warning line with the session's id.
 
 Two settings in the table open a known limit when you change them. Setting `approval.unsignedOwnDecisions` to true lets an agent that runs as a person approve its own calls with any credential of that person it can read, such as an unexpired ID token. Setting `apps.allowLoopbackUpstreams` to true under enterprise lets a remote manifest reach strazad's own host. [Known limits]({{< relref "security/known-limits.md" >}}) lists every limit with what reduces it.
 
@@ -224,15 +224,18 @@ curl -s -w '\n%{http_code}\n' -H "Authorization: Bearer $ADMIN_API_TOKEN" http:/
 ```
 
 
-Revoking is one command, and a revoked token gets `{"error":"admin API token rejected: unknown, expired or revoked (strazactl api-token list)"}` with status 401 on its next request. `strazactl api-token list` shows every token's scope, expiry and last use, which is where an unused token with a wide scope stands out.
+Revoking is one command, and a revoked token gets `{"error":"admin API token rejected: this token is unknown, expired or revoked. Mint a new token in the console under Settings, API tokens, or ask a Straza administrator to mint one. Then set STRAZA_API_TOKEN, or the token setting of the connector that sent this request, to the new token."}` with status 401 on its next request. `strazactl api-token list` shows every token's scope, expiry and last use, which is where an unused token with a wide scope stands out.
 
 ```sh
 strazactl api-token revoke 1ff50659-4aeb-45f7-b8ed-452840751869
 ```
 
 ```text
-revoked 1ff50659-4aeb-45f7-b8ed-452840751869
+revoked the admin API token 1ff50659-4aeb-45f7-b8ed-452840751869, matched by its id.
 ```
+
+
+When strazad cannot read a token from its database, it refuses the request with status 503 and `Straza could not check this admin API token, because its database did not answer, so it refused the request. Try again in a moment. If this keeps happening, ask a Straza administrator to check strazad's log, which names the cause under request id <id>.` A real token and a forged one get the same answer, so an outage tells nobody whether a token exists. The token keeps working once the database answers again, so there is nothing to mint.
 
 ## Rotate the identity manager's token
 
@@ -260,7 +263,7 @@ strazactl api-token revoke 7db165d8-00cb-4cb9-87e3-d19931d1a07f
 ```
 
 ```text
-revoked 7db165d8-00cb-4cb9-87e3-d19931d1a07f
+revoked the admin API token 7db165d8-00cb-4cb9-87e3-d19931d1a07f, matched by its id.
 ```
 
 The example revoked its own token and left the live one in place, and `strazactl api-token list` no longer carries it. The [midPoint]({{< relref "guides/connect-identity/midpoint.md" >}}) and [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md" >}}) guides show where the value goes on the identity manager's side.

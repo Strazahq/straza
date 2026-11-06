@@ -22,7 +22,7 @@ vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/r
 
 const page = (items: DraftSummary[], next = "") => ({ items, next_cursor: next });
 const CAROL: DraftSummary = {
-  ...SUMMARY, id: "43", title: "Change server demo-tools, role demo-tools-readers and approval set demo-tools-readers-access", door: "console",
+  ...SUMMARY, id: "43", title: "Change server demo-tools, role demo-tools-readers and policy set demo-tools-readers-access", door: "console",
   proposer: { ...ALICE, username: "carol" },
   checks: { refused: 0, risks: 0, warnings: 1, unchecked: 0, revision: 1, checked_at: "2026-09-24T10:03:00Z" }, revision: 1,
 };

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -40,11 +42,14 @@ func TestCredDevicePoll(t *testing.T) {
 		{name: "slow_down waits 5 seconds more", answers: []string{"slow_down", ""}, interval: 1, expiresIn: 600, timeout: 3 * time.Second,
 			wantPolls: 1, wantErr: context.DeadlineExceeded},
 		{name: "cancelled before it starts", answers: []string{""}, interval: 5, expiresIn: 600, cancelled: true, wantErr: context.Canceled},
-		{name: "approved without an ID token", answers: []string{"-"}, interval: 1, expiresIn: 600, wantPolls: 1, wantText: "sent no ID token"},
-		{name: "code already expired", answers: []string{""}, interval: 1, expiresIn: 0, wantErr: errDeviceCodeExpired},
+		{name: "approved without an ID token", answers: []string{"-"}, interval: 1, expiresIn: 600, wantPolls: 1,
+			wantText: "Ask IT to allow the openid scope for the Straza client, then run `straza enroll --server http://127.0.0.1:"},
+		{name: "code already expired", answers: []string{""}, interval: 1, expiresIn: 0, wantErr: errDeviceCodeExpired,
+			wantText: "Run `straza enroll --server http://127.0.0.1:"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("STRAZA_SYSTEM", t.TempDir()) // no managed configuration
 			var polls atomic.Int64
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				n := int(polls.Add(1)) - 1
@@ -88,6 +93,54 @@ func TestCredDevicePoll(t *testing.T) {
 			}
 			if took < tc.minWait || (tc.maxWait > 0 && took > tc.maxWait) {
 				t.Fatalf("took %v, want between %v and %v", took, tc.minWait, tc.maxWait)
+			}
+		})
+	}
+}
+
+// TestEnrollAgainSentences pins the enroll command the expired-code
+// sentence, the code-lane refusal and the refusal of a server error name:
+// the bare command when the managed configuration names a server, because
+// the service enrolls there then, and the command with --server and the
+// server's address otherwise, because the service refuses an enrollment
+// that names no server.
+func TestEnrollAgainSentences(t *testing.T) {
+	const server = "https://straza.example"
+	const (
+		expired  = "the sign-in code expired before it was approved. Run `%s` again and approve the new code it shows"
+		codeLane = "Straza refused this sign-in because your Straza admin requires a browser sign-in, and a sign-in code " +
+			"cannot show which machine it was approved for. Run `%s` in a desktop session on this machine."
+		serverError = "The server could not enroll this machine and answered HTTP 500: the store is down. " +
+			"Run `%s` again in a minute, and run `straza doctor` if it keeps failing."
+	)
+	cases := []struct {
+		name    string
+		managed string // the managed config.yaml, "" for none
+		command string
+	}{
+		{"no managed configuration", "", "straza enroll --server https://straza.example"},
+		{"managed configuration names the server", "serverUrl: https://straza.example\n", "straza enroll"},
+		{"managed configuration without a server", "snapshotKeys: {}\n", "straza enroll --server https://straza.example"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sys := t.TempDir()
+			t.Setenv("STRAZA_SYSTEM", sys)
+			if tc.managed != "" {
+				if err := os.WriteFile(filepath.Join(sys, "config.yaml"), []byte(tc.managed), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := deviceCodeExpired(server)
+			if want := fmt.Sprintf(expired, tc.command); !errors.Is(err, errDeviceCodeExpired) || err.Error() != want {
+				t.Errorf("deviceCodeExpired = %q, want %q wrapping errDeviceCodeExpired", err, want)
+			}
+			if got, want := codeLaneRefused(server), fmt.Sprintf(codeLane, tc.command); got != want {
+				t.Errorf("codeLaneRefused = %q, want %q", got, want)
+			}
+			err = enrollRefusal(server, answer{status: http.StatusInternalServerError, body: []byte(`{"error":"the store is down"}`)})
+			if want := fmt.Sprintf(serverError, tc.command); err == nil || err.Error() != want {
+				t.Errorf("enrollRefusal = %v, want %q", err, want)
 			}
 		})
 	}

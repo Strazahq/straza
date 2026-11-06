@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -73,11 +74,49 @@ type CallInput struct {
 var ErrNotReady = errors.New("the MCP server is not running")
 
 // notRunning refuses a call to the MCP server name while it has no live
-// connection, wrapping ErrNotReady. An agent reads it after the gateway's
-// "upstream call failed: ", so it names the server and where an
+// connection, wrapping ErrNotReady. An agent reads it inside the gateway's
+// sentence of a failed call, so it names the server and where an
 // administrator reads the reason.
 func notRunning(name string) error {
 	return fmt.Errorf("%s was not called because %w. An administrator reads the reason with strazactl apps show %s", name, ErrNotReady, name)
+}
+
+// ErrMayHaveRun is wrapped by the error of a call that the server may have
+// run although no answer came back, such as when it ended its session while
+// the call ran. The error's text says what happened and to check whether
+// the call took effect before trying it once more, so the gateway answers
+// it with no retry advice of its own.
+var ErrMayHaveRun = errors.New("the call may have taken effect")
+
+// mayHaveRun is the error of a call that may have run although no answer
+// Straza could read came back. text is what the agent reads, and cause the
+// runtime's own error, which Manager.Call logs for an administrator and
+// never hands on. It matches ErrMayHaveRun.
+type mayHaveRun struct {
+	text  string
+	cause error
+}
+
+func (e *mayHaveRun) Error() string        { return e.text }
+func (e *mayHaveRun) Is(target error) bool { return target == ErrMayHaveRun }
+
+// mayHaveRunErr is the mayHaveRun error of a call, what happened to it, and
+// cause.
+func mayHaveRunErr(what string, cause error) error {
+	return &mayHaveRun{cause: cause, text: what + ", so the call may have taken effect, and Straza does not send it again. " +
+		"Check whether it took effect before you try it once more"}
+}
+
+// RefusedError is the error of a call the MCP server answered with an HTTP
+// status in place of running it: a 4xx status other than 408, and other
+// than 404 to its session, which reads as a session the server lost.
+type RefusedError struct {
+	Server string
+	Status int
+}
+
+func (e *RefusedError) Error() string {
+	return fmt.Sprintf("the MCP server %s answered the call with HTTP %d %s, so the call did not run", e.Server, e.Status, http.StatusText(e.Status))
 }
 
 func clientImpl() *mcp.Implementation {
@@ -311,13 +350,21 @@ func (r *CommandRuntime) ReadResource(ctx context.Context, _ *Secret, uri string
 }
 
 // Call invokes an upstream tool. in.Secret is ignored (spawn-time env
-// injection).
+// injection). A call the process read and gave no answer Straza could read,
+// because it stopped answering, exited or answered something that does not
+// decode, may have run, so its error matches ErrMayHaveRun, and
+// Manager.Call logs the cause. A JSON-RPC error the process sent, and the
+// end of ctx, keep their own errors.
 func (r *CommandRuntime) Call(ctx context.Context, in CallInput) (*mcp.CallToolResult, error) {
 	s, err := r.session()
 	if err != nil {
 		return nil, err
 	}
-	return callTool(ctx, s, in)
+	res, err := callTool(ctx, s, in)
+	if err != nil && ctx.Err() == nil && !serverAnswered(err) {
+		return nil, mayHaveRunErr(fmt.Sprintf("the MCP server %s gave no answer to the call that Straza could read", r.name), err)
+	}
+	return res, err
 }
 
 // Ping checks child liveness over the session.

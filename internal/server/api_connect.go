@@ -83,33 +83,63 @@ type sessionDeviceKey struct{}
 
 // refuseMachineWrite answers 403, records one connection.refused event and
 // reports true when a write that lets agents in, or that changes another
-// user's connection, arrives on a session a machine enrollment started. The
-// background service holds such sessions, and any
-// program running as the person can use them, an agent included, so only a
-// session that began with the person's own sign-in in a browser makes those
-// writes. grant is a write that turns the agents opt-in on. An admin API
-// token puts no device in the context, so it never meets this rule.
-func (a *App) refuseMachineWrite(w http.ResponseWriter, r *http.Request, callerID string, target store.User, app string, grant bool) bool {
+// user's connection, arrives on a session that did not begin with a person's
+// own sign-in in a browser. A session a machine enrollment started carries
+// its device. The background service holds such sessions, and any program
+// running as the person can use them, an agent included. An agent's or a
+// service account's own session carries no device either, yet no person
+// signed in, so it never lets agents in. actFor has already kept such a
+// caller to its own connection. kind is the server's credential kind, which
+// decides the ways out the refusal names. grant is a write that turns the
+// agents opt-in on. An admin API token puts no device in the context, so it
+// never meets this rule.
+func (a *App) refuseMachineWrite(w http.ResponseWriter, r *http.Request, c connectCaller, target store.User, app, kind string, grant bool) bool {
 	device, _ := r.Context().Value(sessionDeviceKey{}).(string)
-	if device == "" || (target.ID == callerID && !grant) {
+	self := target.ID == c.userID
+	if self && !grant {
 		return false
 	}
 	page := strings.TrimRight(a.cfg.Server.PublicURL, "/") + connectPagePath
+	if self && !personUser(target) {
+		// Only a token server holds a row of an agent's own, which an
+		// administrator can switch or replace for it.
+		msg := fmt.Sprintf("%s cannot let agents use its %s connection, because only a person turns that on and only a person holds a sign-in connection. ",
+			target.Username, app)
+		if kind == manager.CredentialToken {
+			msg = fmt.Sprintf("%[1]s cannot let agents use its %[2]s connection, because only a person turns that on. "+
+				"Ask an administrator to turn it on for %[1]s with strazactl connect %[2]s --user %[1]s --allow-agents, "+
+				"or to set each agent's own token with strazactl connect %[2]s --user <agent>. ", target.Username, app)
+		}
+		a.refuseConnection(w, r, c, target, app, "an agent or a service account cannot allow agents", msg+
+			"An agent whose sponsor is a person can instead run on that person's connection, "+
+			"which the person allows in the Credentials tab of the self-service page: "+page)
+		return true
+	}
+	if device == "" {
+		return false
+	}
 	reason := "a session a machine started cannot change another user's connection"
 	msg := fmt.Sprintf("changing %s's %s connection needs your own sign-in in a browser, because this session was started on a machine, "+
 		"where an agent running as you can use it too. Make the change in the Credentials tab of the self-service page, "+
 		"which lists the agents you sponsor: %s", target.Username, app, page)
-	if target.ID == callerID {
+	if self {
 		reason = "a session a machine started cannot allow agents"
 		msg = fmt.Sprintf("letting the agents you sponsor use your %s connection needs your own sign-in in a browser, because this session "+
 			"was started on a machine, where an agent running as you can use it too. Turn it on in the Credentials tab of the "+
 			"self-service page: %s", app, page)
 	}
-	a.emitEvent(r, "straza.identity.updated", map[string]any{
-		"action": "connection.refused", "user": target.ID, "setBy": callerID, "app": app, "reason": reason,
-	})
-	apiError(w, http.StatusForbidden, msg)
+	a.refuseConnection(w, r, c, target, app, reason, msg)
 	return true
+}
+
+// refuseConnection answers 403 with msg and records one connection.refused
+// event with the user whose connection the request named, the server and
+// reason, stamped with the caller as connectCaller.stamp does.
+func (a *App) refuseConnection(w http.ResponseWriter, r *http.Request, c connectCaller, target store.User, app, reason, msg string) {
+	a.emitEvent(r, "straza.identity.updated", c.stamp(map[string]any{
+		"action": "connection.refused", "user": target.ID, "app": app, "reason": reason,
+	}))
+	apiError(w, http.StatusForbidden, msg)
 }
 
 // callerApp resolves a managed caller-kind app (oauth or token) by name or
@@ -152,11 +182,42 @@ func (a *App) connectRedirectURI() string {
 	return strings.TrimRight(a.cfg.Server.PublicURL, "/") + "/v1/connect/callback"
 }
 
+// nonPersonConnectRefusal is the sentence an agent or a service account
+// reads when it names another user on a connect route, formatted with its
+// username, the named user's username, userTypeWord and connectAsker.
+const nonPersonConnectRefusal = "%[1]s cannot read or change %[2]s's connections, because %[1]s is %[3]s and only a person acts for another user, " +
+	"whatever roles %[1]s holds. Send the request without a user to work on your own connections, " +
+	"or ask %[4]s to do this."
+
+// noStandingRefusal is the sentence a person who neither sponsors the named
+// user nor holds admin standing reads, formatted with the caller's
+// username, the named user's username and connectAsker.
+const noStandingRefusal = "%[1]s cannot read or change %[2]s's connections, because %[1]s neither sponsors %[2]s nor is an administrator. " +
+	"Ask %[3]s to do this."
+
+// connectAsker names whom a caller that may not act for target asks
+// instead: target itself when it is a person, target's sponsor when that
+// sponsor is an active person other than the caller, and always an
+// administrator. A sponsor that cannot be read is left out.
+func (a *App) connectAsker(ctx context.Context, caller, target store.User) string {
+	if personUser(target) {
+		return target.Username + " or an administrator"
+	}
+	if target.Sponsor != "" && target.Sponsor != caller.Username {
+		if s, err := a.store.Users().GetByUsername(ctx, target.Sponsor); err == nil && s.Status == store.UserActive && personUser(s) {
+			return fmt.Sprintf("%s's sponsor %s or an administrator", target.Username, s.Username)
+		}
+	}
+	return "an administrator"
+}
+
 // actFor resolves the user a connect request acts for: the caller when ref
-// is empty, else the named user (username or id) when the caller is that
-// user's sponsor or holds admin standing (the straza-admin role or a
-// delegated apps:write grant). refusal is the sentence for a 403; a user
-// that does not exist is an error for a 404.
+// is empty or names the caller, else the named user (username or id) when
+// the caller is a person who is that user's sponsor or holds admin standing
+// (the straza-admin role or a delegated apps:write grant). An agent or a
+// service account acts only for itself, whatever roles it holds, as on the
+// admin plane. refusal is the sentence for a 403, answered with the named
+// user; a user that does not exist is an error for a 404.
 func (a *App) actFor(ctx context.Context, callerID, ref string) (target store.User, refusal string, err error) {
 	caller, err := a.store.Users().GetByID(ctx, callerID)
 	if err != nil {
@@ -167,6 +228,9 @@ func (a *App) actFor(ctx context.Context, callerID, ref string) (target store.Us
 	}
 	if target, err = a.userByRef(ctx, ref); err != nil {
 		return store.User{}, "", err
+	}
+	if !personUser(caller) {
+		return target, fmt.Sprintf(nonPersonConnectRefusal, caller.Username, target.Username, userTypeWord(caller), a.connectAsker(ctx, caller, target)), nil
 	}
 	if target.Sponsor == caller.Username {
 		return target, "", nil
@@ -183,7 +247,7 @@ func (a *App) actFor(ctx context.Context, callerID, ref string) (target store.Us
 	if a.scopeForRoles(roles).Grants["apps:write"] {
 		return target, "", nil
 	}
-	return store.User{}, fmt.Sprintf("only %s's sponsor or an administrator can manage %s's connections", target.Username, target.Username), nil
+	return target, fmt.Sprintf(noStandingRefusal, caller.Username, target.Username, a.connectAsker(ctx, caller, target)), nil
 }
 
 // connectRequest is the body of POST and PATCH /v1/connect/{app}. Every
@@ -203,8 +267,8 @@ const tokenMaxBytes = 8192
 // app the body carries the pasted token, tested once against the server
 // and sealed under the user's id; on an oauth-kind app it answers a person
 // with the provider authorization URL for the Credentials tab and that
-// tab's address for a terminal, and refuses an agent and an admin API token.
-// POST /v1/connect/{app}.
+// tab's address for a terminal, and refuses an agent and an admin API token
+// with 403 and one connection.refused record. POST /v1/connect/{app}.
 func (a *App) handleConnectStart(w http.ResponseWriter, r *http.Request, c connectCaller) {
 	row, view, err := a.callerApp(r)
 	if err != nil {
@@ -224,8 +288,8 @@ func (a *App) handleConnectStart(w http.ResponseWriter, r *http.Request, c conne
 	}
 	providerName := oauthProviderOf(view)
 	if c.token != nil {
-		if target, ok := a.connectTarget(w, r, c, req.User); ok {
-			apiError(w, http.StatusForbidden, a.tokenSignInRefusal(target, row.Name, providerName))
+		if target, ok := a.connectTarget(w, r, c, req.User, row.Name); ok {
+			a.refuseConnection(w, r, c, target, row.Name, "an admin API token cannot start a sign-in", a.tokenSignInRefusal(target, row.Name, providerName))
 		}
 		return
 	}
@@ -255,7 +319,7 @@ func (a *App) handleConnectStart(w http.ResponseWriter, r *http.Request, c conne
 		return
 	}
 	if !personUser(caller) {
-		apiError(w, http.StatusForbidden, agentSignInRefusal(caller, row.Name, providerName))
+		a.refuseConnection(w, r, c, caller, row.Name, "an agent or a service account cannot start a sign-in", agentSignInRefusal(caller, row.Name, providerName))
 		return
 	}
 	state, err := a.tokens.MintConnectState(userID, row.ID)
@@ -317,11 +381,11 @@ func (a *App) connectToken(w http.ResponseWriter, r *http.Request, row store.App
 		t = t.UTC()
 		expires = &t
 	}
-	target, ok := a.connectTarget(w, r, c, req.User)
+	target, ok := a.connectTarget(w, r, c, req.User, row.Name)
 	if !ok {
 		return
 	}
-	if a.refuseMachineWrite(w, r, c.userID, target, row.Name, false) {
+	if a.refuseMachineWrite(w, r, c, target, row.Name, manager.CredentialToken, false) {
 		return
 	}
 	probeCtx, cancel := context.WithTimeout(r.Context(), a.upstreamTimeout(row.Name))
@@ -375,7 +439,7 @@ func (a *App) connectToken(w http.ResponseWriter, r *http.Request, row store.App
 // handleConnectAgents records the owner's opt-in for their sponsored agents
 // on one connection, on either caller kind. PATCH /v1/connect/{app}.
 func (a *App) handleConnectAgents(w http.ResponseWriter, r *http.Request, c connectCaller) {
-	row, _, err := a.callerApp(r)
+	row, view, err := a.callerApp(r)
 	if err != nil {
 		apiError(w, http.StatusNotFound, err.Error())
 		return
@@ -385,11 +449,11 @@ func (a *App) handleConnectAgents(w http.ResponseWriter, r *http.Request, c conn
 		apiError(w, http.StatusBadRequest, "the body must be a JSON object with allow_agents true or false")
 		return
 	}
-	target, ok := a.connectTarget(w, r, c, req.User)
+	target, ok := a.connectTarget(w, r, c, req.User, row.Name)
 	if !ok {
 		return
 	}
-	if a.refuseMachineWrite(w, r, c.userID, target, row.Name, *req.AllowAgents) {
+	if a.refuseMachineWrite(w, r, c, target, row.Name, view.Manifest.CredentialKind(), *req.AllowAgents) {
 		return
 	}
 	cred, err := a.broker.SetAllowAgents(r.Context(), row.ID, target.ID, *req.AllowAgents)
@@ -412,10 +476,10 @@ func (a *App) handleConnectAgents(w http.ResponseWriter, r *http.Request, c conn
 // handleConnectList reports the acting user's connection on every managed
 // caller-kind app, never a value: the kind, the app's agents setting, the
 // fingerprint of a pasted token, the expiry, who set it and the agents
-// opt-in. GET /v1/connect, with user= for a sponsor, an administrator or an
-// admin API token.
+// opt-in. GET /v1/connect, with user= for a person who is the user's sponsor
+// or an administrator, or for an admin API token.
 func (a *App) handleConnectList(w http.ResponseWriter, r *http.Request, c connectCaller) {
-	target, ok := a.connectTarget(w, r, c, r.URL.Query().Get("user"))
+	target, ok := a.connectTarget(w, r, c, r.URL.Query().Get("user"), "")
 	if !ok {
 		return
 	}
@@ -495,19 +559,19 @@ func (a *App) setterName(ctx context.Context, id string) string {
 }
 
 // handleConnectDelete removes the acting user's connection on one app,
-// grant or token. DELETE /v1/connect/{app}, with user= for a sponsor, an
-// administrator or an admin API token.
+// grant or token. DELETE /v1/connect/{app}, with user= for a person who is
+// the user's sponsor or an administrator, or for an admin API token.
 func (a *App) handleConnectDelete(w http.ResponseWriter, r *http.Request, c connectCaller) {
 	row, view, err := a.callerApp(r)
 	if err != nil {
 		apiError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	target, ok := a.connectTarget(w, r, c, r.URL.Query().Get("user"))
+	target, ok := a.connectTarget(w, r, c, r.URL.Query().Get("user"), row.Name)
 	if !ok {
 		return
 	}
-	if a.refuseMachineWrite(w, r, c.userID, target, row.Name, false) {
+	if a.refuseMachineWrite(w, r, c, target, row.Name, view.Manifest.CredentialKind(), false) {
 		return
 	}
 	if err := a.broker.DeleteGrant(r.Context(), row.ID, target.ID); err != nil {

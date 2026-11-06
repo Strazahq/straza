@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Fact } from "@/components/server-overview";
+import { useListingFact } from "@/components/server-listing";
 import { type ApiError, type AppRow, type Credential, type RoleRow, type SecretRow, listRoles, listSecrets, removeSecret, setSecret } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { KIND_NAME, sentWords } from "@/lib/server-words";
@@ -128,12 +129,15 @@ function SecretForm({ app, perRole, onDone, onCancel, onRefused }: FormProps) {
 // Credential card's rows, one fact each, with the doors to set or remove a
 // sealed secret, and the remove confirm to render beside them. The doors
 // stay on a server a file defines, since a secret never lives in the file.
+// The listing credential row follows the server's own secret where the
+// page's objects answer says the server takes one.
 export function useCredentialFacts(app: AppRow, onRefused: (err: ApiError) => void): { facts: Fact[]; overlay: React.ReactNode } {
   const [secrets, setSecrets] = React.useState<SecretsState>({ kind: "loading" });
   const [nonce, setNonce] = React.useState(0);
   const [form, setForm] = React.useState<"app" | "role" | null>(null);
   const [ask, setAsk] = React.useState<SecretRow | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const listing = useListingFact(app);
 
   React.useEffect(() => {
     let alive = true;
@@ -215,6 +219,7 @@ export function useCredentialFacts(app: AppRow, onRefused: (err: ApiError) => vo
     body: <>{stored}{form === "app" && doorsOpen && <SecretForm app={app} perRole={false} onDone={() => { setForm(null); reload(); }} onCancel={() => setForm(null)} onRefused={onRefused} />}</>,
     warn: own && !sharedRow ? UNUSED : undefined,
   });
+  if (listing) facts.push(listing);
   // Every stored role row shows whatever the kind is, since a row the kind
   // does not read today applies again when agents fall back to the shared
   // secret. The door to add one stays where a role secret is read.

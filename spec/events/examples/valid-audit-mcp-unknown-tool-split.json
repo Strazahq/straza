@@ -1,0 +1,23 @@
+{
+  "specversion": "1.0",
+  "id": "019a54d2-8b20-7c40-8d11-2a3b4c5d6f21",
+  "type": "straza.audit.mcp",
+  "source": "strazad",
+  "time": "2026-11-05T08:55:03.402Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "mcp.call",
+    "app": "payments",
+    "toolName": "refund_create",
+    "effect": "deny",
+    "ruleId": "",
+    "setName": "",
+    "reason": "unknown tool \"payments__refund_create\": no access row for this session's roles admits it",
+    "snapshot": "sha256:44f0be1c",
+    "granted": false,
+    "default": false
+  }
+}

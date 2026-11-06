@@ -176,6 +176,9 @@ func TestCredSavedSessionsResume(t *testing.T) {
 			if err != nil || !again.Reused || again.ID != want.ID || len(again.Packs) == 0 || !slices.Equal(again.Packs, want.Packs) {
 				t.Fatalf("a start after a restart: %+v, %v, want the resumed session reused with its packs", again, err)
 			}
+			if again.StartText == nil || *again.StartText != fakeStartText {
+				t.Fatalf("a start after a restart: start text %v, want the server's %q", again.StartText, fakeStartText)
+			}
 			if a, rc := r.checkins(); a != accepted || rc != received {
 				t.Fatalf("the restart cost check-ins: accepted %d to %d, received %d to %d", accepted, a, received, rc)
 			}

@@ -199,6 +199,69 @@ func TestDoctor(t *testing.T) {
 	}
 }
 
+// TestDoctorEnrollSteps pins the enrollment hints that name an enroll
+// command. A caller with no enrollment reads a person's and an AI agent's
+// command, because the service reports an agent key that keygen made as no
+// enrollment too. After the machine identity changed, a person reads the
+// enroll command at the enrolled server and an agent reads both of its
+// lanes. The enroll commands leave out --server when the managed
+// configuration names the server.
+func TestDoctorEnrollSteps(t *testing.T) {
+	const managed = "serverUrl: https://straza.example\n"
+	agent := localapi.Enrollment{ServerURL: "https://straza.example", Kind: localapi.KindAgent, Username: "ci-bot", KeyThumbprint: "k1", MachineChanged: true}
+	person := localapi.Enrollment{ServerURL: "https://straza.example", Kind: localapi.KindPerson, Username: "alice", DeviceID: "d1", KeyThumbprint: "k1", MachineChanged: true}
+	cases := []struct {
+		name    string
+		managed string // the managed config.yaml, or "" for no managed layout
+		e       *localapi.Enrollment
+		want    string
+	}{
+		{"not enrolled", "", nil,
+			"A person runs `straza enroll --server <strazad url>` and signs in with their work account. " +
+				"An AI agent runs `straza enroll --server <strazad url> --headless` with its registered key or the client secret IT installed for it. " +
+				"The local checks below still ran; the server, session and killswitch checks resume once enrolled"},
+		{"not enrolled, managed", managed, nil,
+			"A person runs `straza enroll` and signs in with their work account. " +
+				"An AI agent runs `straza enroll --headless` with its registered key or the client secret IT installed for it. " +
+				"The local checks below still ran; the server, session and killswitch checks resume once enrolled"},
+		{"a person's machine changed", "", &person, "Run `straza enroll --server https://straza.example` to enroll it again."},
+		{"a person's machine changed, managed", managed, &person, "Run `straza enroll` to enroll it again."},
+		{"an agent's machine changed", "", &agent,
+			"An agent with a key from `straza keygen` runs `straza keygen --force --user ci-bot`, has an admin register the new public key, " +
+				"and then runs `straza enroll --server https://straza.example --headless`. " +
+				"An agent that signs in with a client secret runs `straza enroll --server https://straza.example --headless --user ci-bot`."},
+		{"an agent's machine changed, managed", managed, &agent,
+			"An agent with a key from `straza keygen` runs `straza keygen --force --user ci-bot`, has an admin register the new public key, " +
+				"and then runs `straza enroll --headless`. " +
+				"An agent that signs in with a client secret runs `straza enroll --headless --user ci-bot`."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sys := t.TempDir()
+			t.Setenv("STRAZA_SYSTEM", sys)
+			if tc.managed != "" {
+				if err := os.WriteFile(filepath.Join(sys, "config.yaml"), []byte(tc.managed), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var row Check
+			if tc.e == nil {
+				svc := newFakeService(t)
+				for _, c := range Doctor(context.Background(), svc.store(t), NewServiceClient()) {
+					if c.Name == "enrollment" {
+						row = c
+					}
+				}
+			} else {
+				row = enrollmentCheck(*tc.e, time.Now())
+			}
+			if row.Status != checkFail || row.Hint != tc.want {
+				t.Errorf("enrollment row = %+v, want a failure with the hint\n%q", row, tc.want)
+			}
+		})
+	}
+}
+
 // TestDoctorUnenrolledLocalChecks pins localChecks' contract: a box whose
 // background service does not answer still reports every machine-local
 // finding. The live-wiring-nothing-behind-it machine is exactly where a ghost

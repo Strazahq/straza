@@ -754,8 +754,8 @@ func TestPublishMakesTheSessionCheckInAgainWithoutTheImpliedRole(t *testing.T) {
 		t.Fatalf("the call after the publish = %d, want 401 to check in again", code)
 	}
 	tok = checkInAgain(t, base, tok)
-	if _, list, _ := mcpCall(t, base, tok, "tools/list", nil); len(toolNamesOf(t, list)) != 0 {
-		t.Errorf("after checking in again kim lists %v, want nothing", toolNamesOf(t, list))
+	if _, list, _ := mcpCall(t, base, tok, "tools/list", nil); !slices.Equal(toolNamesOf(t, list), []string{"straza__whoami"}) {
+		t.Errorf("after checking in again kim lists %v, want whoami alone", toolNamesOf(t, list))
 	}
 	if sub, _ := app.subjects.get(sessionOf(t, app, tok)); slices.Contains(sub.Roles, "reader") {
 		t.Errorf("kim's roles after checking in again = %v, want no reader", sub.Roles)

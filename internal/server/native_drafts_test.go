@@ -41,7 +41,7 @@ const (
 	wantNoOpenDraft   = "Straza: no open draft %s of yours. Submit without draft to start a new one."
 	wantNoSuchDraft   = "Straza: no such draft %s"
 	wantSubmitRate    = "Straza: straza__draft_submit takes one draft every 10 seconds for each agent. Wait, then submit again."
-	wantSessionRate   = `Straza: rate limit exceeded for the MCP server "straza" (2 rps). Retry shortly`
+	wantSessionRate   = `Straza: rate limit exceeded for the MCP server "straza" (2 rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.`
 	wantNotSaved      = "Straza: the draft was not saved. "
 	wantSubmitShape   = "Straza: straza__draft_submit takes a JSON object with documents, a list of YAML texts, and optionally note and draft. Send the arguments in that shape."
 	wantStatusShape   = "Straza: straza__draft_status takes a JSON object with draft, the id straza__draft_submit answered. Send the arguments in that shape."
@@ -68,7 +68,7 @@ func newDoorRig(t *testing.T, mutators ...func(*config.Config)) *doorRig {
 func (r *doorRig) agent(t *testing.T, name string) (store.User, string) {
 	t.Helper()
 	u := seedAgent(t, r.app, name, "kim", DraftConfigRole)
-	return u, sessionToken(t, r.base, name)
+	return u, agentSessionToken(t, r.app, r.base, name)
 }
 
 // callTool calls the tool name through the gateway as the session tok and
@@ -202,7 +202,7 @@ func TestDraftingToolsListedOnlyToHolders(t *testing.T) {
 			t.Errorf("joe's tools/list lacks %s: %v", n, listed)
 		}
 	}
-	botTok := sessionToken(t, r.base, "bot")
+	botTok := agentSessionToken(t, r.app, r.base, "bot")
 	for _, n := range toolNamesOf(t, second(mcpCall(t, r.base, botTok, "tools/list", nil))) {
 		if slices.Contains(drafting, n) {
 			t.Errorf("bot, which lacks the role, is listed %s", n)
@@ -222,8 +222,8 @@ func TestDraftingToolsCarryTheGrantedFact(t *testing.T) {
 		t.Errorf("status of an unknown draft = %q (error %v)", text, isErr)
 	}
 	rec := awaitMCPRecords(t, r.app, 1, func(d map[string]any) bool { return d["user"] == joe.ID && d["toolName"] == "draft_status" })[0]
-	for k, v := range map[string]any{"effect": "allow", "granted": true, "default": true, "ruleId": "",
-		"reason": "allowed by role access. No policy rule gates this tool."} {
+	for k, v := range map[string]any{"effect": "deny", "granted": true, "default": true, "ruleId": "",
+		"reason": "Straza: no such draft."} {
 		if rec[k] != v {
 			t.Errorf("the gateway record's %s = %v, want %v", k, rec[k], v)
 		}
@@ -241,10 +241,10 @@ func TestDraftingToolsCarryTheGrantedFact(t *testing.T) {
 		docs    []policy.Document
 		visible []string
 	}{
-		{"no rule, filter off", false, nil, []string{"straza__draft_status", "straza__draft_submit"}},
-		{"no rule, filter on", true, nil, []string{"straza__draft_status", "straza__draft_submit"}},
-		{"a deny, filter off, lists it as a proxied tool is listed", false, []policy.Document{denyJoe}, []string{"straza__draft_status", "straza__draft_submit"}},
-		{"a deny, filter on, hides it", true, []policy.Document{denyJoe}, []string{"straza__draft_status"}},
+		{"no rule, filter off", false, nil, []string{"straza__draft_status", "straza__draft_submit", "straza__whoami"}},
+		{"no rule, filter on", true, nil, []string{"straza__draft_status", "straza__draft_submit", "straza__whoami"}},
+		{"a deny, filter off, lists it as a proxied tool is listed", false, []policy.Document{denyJoe}, []string{"straza__draft_status", "straza__draft_submit", "straza__whoami"}},
+		{"a deny, filter on, hides it", true, []policy.Document{denyJoe}, []string{"straza__draft_status", "straza__whoami"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,7 +296,7 @@ func TestDraftingToolsCarryTheGrantedFact(t *testing.T) {
 func TestDraftingToolRefusedWithoutTheRole(t *testing.T) {
 	t.Parallel()
 	r := newDoorRig(t)
-	botTok := sessionToken(t, r.base, "bot")
+	botTok := agentSessionToken(t, r.app, r.base, "bot")
 	text, isErr, _ := submit(t, r.base, botTok, map[string]any{"documents": []string{draftApp("weather", weatherURL, "The weather.")}})
 	if !isErr || text != `unknown tool "straza__draft_submit"` {
 		t.Errorf("bot's submit = %q, want the unknown tool refusal", text)
@@ -576,7 +576,7 @@ func TestDraftSubmitRefusalStoresNothing(t *testing.T) {
 			wantNotSaved + "The draft holds no document. Add at least one App, Role, PolicySet or Removal document."},
 		{"an agent with no sponsor", func(t *testing.T) (store.User, string) {
 			u := seedAgent(t, r.app, "lone", "", DraftConfigRole)
-			return u, sessionToken(t, r.base, "lone")
+			return u, agentSessionToken(t, r.app, r.base, "lone")
 		}, map[string]any{"documents": []string{draftApp("weather", weatherURL, "The weather.")}},
 			wantNotSaved + "lone has no active sponsor, and an agent's draft needs a person who answers for it. Ask an administrator to set its sponsor in your identity manager, then submit again."},
 		{"an eleventh open draft", func(t *testing.T) (store.User, string) {
@@ -626,7 +626,7 @@ func TestDraftingRates(t *testing.T) {
 	if text, isErr, _ := submit(t, r.base, fastTok, doc); !isErr || text != wantSubmitRate {
 		t.Errorf("a second submit within 10 seconds = %q", text)
 	}
-	if text, isErr, _ := submit(t, r.base, sessionToken(t, r.base, "fast"), doc); !isErr || text != wantSubmitRate {
+	if text, isErr, _ := submit(t, r.base, agentSessionToken(t, r.app, r.base, "fast"), doc); !isErr || text != wantSubmitRate {
 		t.Errorf("a submit from fast's second session = %q", text)
 	}
 	recs := awaitMCPRecords(t, r.app, 2, func(d map[string]any) bool { return d["user"] == fast.ID && d["reason"] == wantSubmitRate })
@@ -656,7 +656,7 @@ func TestDraftingRates(t *testing.T) {
 	if _, err := r.app.snapshots.Recompile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	pollTok = sessionToken(t, r.base, "poll")
+	pollTok = agentSessionToken(t, r.app, r.base, "poll")
 	for i := range 6 {
 		if text, _, _ := callTool(t, r.base, pollTok, "straza__approval_status", map[string]any{"ref": "nope"}); strings.Contains(text, "rate limit") {
 			t.Errorf("approval_status call %d met a rate: %q", i+1, text)
@@ -757,8 +757,9 @@ func TestDraftSubmitApprovalPreviewIsTheDigest(t *testing.T) {
 }
 
 // TestSubjectCacheKeepsTheSessionFacts pins what check-in records beside
-// the subject for the drafting tools: whether the user is a person and
-// the harness name alone.
+// the subject: whether the user is a person and the harness name, which
+// the drafting tools read, and the delivered packs, which whoami reads.
+// The fixture binds golang-style to a role kim holds and none to joe.
 func TestSubjectCacheKeepsTheSessionFacts(t *testing.T) {
 	t.Parallel()
 	r := newDoorRig(t)
@@ -766,14 +767,15 @@ func TestSubjectCacheKeepsTheSessionFacts(t *testing.T) {
 	for _, tc := range []struct {
 		tok    string
 		person bool
-	}{{sessionToken(t, r.base, "kim"), true}, {joeTok, false}} {
+		packs  []whoamiPack
+	}{{sessionToken(t, r.base, "kim"), true, []whoamiPack{{"golang-style", "1"}}}, {joeTok, false, []whoamiPack{}}} {
 		claims, err := r.app.tokens.Verify(tc.tok)
 		if err != nil {
 			t.Fatal(err)
 		}
 		e, ok := r.app.subjects.lookup(claims.Session)
-		if !ok || e.facts != (sessionFacts{person: tc.person, harness: "claude-code"}) {
-			t.Errorf("the cached facts of %s = %+v (%v), want person %v and harness claude-code", e.sub.User, e.facts, ok, tc.person)
+		if !ok || e.facts.person != tc.person || e.facts.harness != "claude-code" || !slices.Equal(e.facts.packs, tc.packs) {
+			t.Errorf("the cached facts of %s = %+v (%v), want person %v, harness claude-code and packs %v", e.sub.User, e.facts, ok, tc.person, tc.packs)
 		}
 	}
 }
@@ -976,7 +978,7 @@ func TestApprovalRequestSeesTheDraftingGrant(t *testing.T) {
 	}{
 		{"a holder with no rule", norule, "Straza: no approval needed. The described call is already allowed by policy; just make the call"},
 		{"a holder under a deny", denied, "Straza: denied by policy. The described call would be denied (Straza: drafting is paused for this agent); an approval ticket cannot override a deny"},
-		{"a session without the role", sessionToken(t, r.base, "bot"), "Straza: straza:draft_submit is not a tool this session can call, so no approval can be requested for it. Check the app and tool name, or ask an admin for access to the tool."},
+		{"a session without the role", agentSessionToken(t, r.app, r.base, "bot"), "Straza: straza:draft_submit is not a tool this session can call, so no approval can be requested for it. Check the app and tool name, or ask an admin for access to the tool."},
 	} {
 		if text, _, _ := callTool(t, r.base, tc.tok, "straza__approval_request", action); !strings.HasPrefix(text, tc.want) {
 			t.Errorf("%s: approval_request = %q, want %q", tc.name, text, tc.want)
@@ -1175,7 +1177,7 @@ func TestDraftSubmitJudgesAValueBeforeItStores(t *testing.T) {
 	armed.Store(true)
 	text, isErr, _ := submit(t, r.base, tok, map[string]any{"documents": []string{waivedRemote("weather", weatherURL, "Changed.")}})
 	armed.Store(false)
-	if !isErr || text != "Straza: the draft was not saved, because Straza could not reach its database. Try again in a minute, and if it keeps failing ask an administrator to read the strazad log." {
+	if !isErr || text != "Straza: the draft was not saved, because Straza could not reach its database. Try once more in a minute. If it fails again, tell the user to ask an administrator to read the strazad log." {
 		t.Errorf("a submit that cannot read live state = %q, want the store refusal", text)
 	}
 	if stored := r.proposed(t, outage); len(stored) != 0 {

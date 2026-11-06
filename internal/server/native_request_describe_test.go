@@ -169,7 +169,7 @@ straza:
 	}
 	for agent, sponsor := range map[string]string{"ivy": "", "orphan": "ghost", "lapsed": "gone"} {
 		seedAgent(t, r.app, agent, sponsor, "gh-every")
-		r.tokens[agent] = sessionToken(t, r.base, agent)
+		r.tokens[agent] = agentSessionToken(t, r.app, r.base, agent)
 	}
 
 	var happyRef, deniedRef string
@@ -288,7 +288,7 @@ straza:
 					"action": map[string]any{"tool": "mcp.call", "app": "rateapp", "tool_name": "echo", "args": map[string]any{}}})
 			},
 			wantText: func() string {
-				return `Straza: rate limit exceeded for the MCP server "rateapp" (1 rps). Retry shortly`
+				return `Straza: rate limit exceeded for the MCP server "rateapp" (1 rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.`
 			},
 			wantEffect: "deny"},
 		{name: "a tool on a stopped server reads as an unbound one", user: "rae",
@@ -457,9 +457,10 @@ spec:
 }
 
 // TestApprovalRequestStoreFault drives approval_request through /mcp while
-// one of its two lookups meets a store fault, the deny-final lookup or the
-// pending-ticket lookup of the route check, and pins that the agent reads
-// the sentence that says to retry, that the call's one record is a deny with
+// one of its lookups meets a store fault, the deny-final lookup, the
+// pending-ticket lookup of the route check or its read of the requester who
+// decides, and pins that the agent reads the sentence that says to retry,
+// the one the other lanes answer, that the call's one record is a deny with
 // that sentence as its reason, that no ticket opens, and that the native
 // lane writes its one fail-closed Error record and counts it once.
 func TestApprovalRequestStoreFault(t *testing.T) {
@@ -468,9 +469,15 @@ func TestApprovalRequestStoreFault(t *testing.T) {
 		name      string
 		repo      string // the faultStore key armed for the call
 		wantCause string // the op-wrapped cause the Error record carries
+		approve   string // the approve block of the ticket rule
+		want      string // the sentence the agent reads and the record keeps
 	}{
-		{name: "the deny-final lookup", repo: "approvals-latest", wantCause: "approval denied-ticket-find: db down"},
-		{name: "the pending-ticket lookup of the route check", repo: "approvals", wantCause: "approval request-dedupe: db down"},
+		{name: "the deny-final lookup", repo: "approvals-latest", wantCause: "approval denied-ticket-find: db down",
+			approve: "{class: ticket, roles: [change]}", want: approvalStoreDownReason},
+		{name: "the pending-ticket lookup of the route check", repo: "approvals", wantCause: "approval request-dedupe: db down",
+			approve: "{class: ticket, roles: [change]}", want: approvalStoreDownReason},
+		{name: "the read of the requester who decides", repo: "users", wantCause: "a user record that says who decides could not be read",
+			approve: "{class: ticket}", want: approvalDeciderUnreadReason},
 	}
 	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {
@@ -495,7 +502,7 @@ spec:
       command: {allowPatterns: ["deploy-prod*"]}
       effect: allow
       mode: approve
-      approve: {class: ticket, roles: [change]}
+      approve: `+tc.approve+`
 `)
 			token, session := gatewaySession(t, base, "kim")
 			// Only the call's own records count, so the capture starts here.
@@ -504,8 +511,8 @@ spec:
 			text, isErr, _ := callTool(t, base, token, "straza__approval_request", map[string]any{
 				"action": map[string]any{"tool": "shell.exec", "command": "deploy-prod --now"}, "reason": "store-fault"})
 			fs.disarm()
-			if !isErr || text != approvalStoreDownReason {
-				t.Fatalf("approval_request = %q (error %v), want approvalStoreDownReason", text, isErr)
+			if !isErr || text != tc.want {
+				t.Fatalf("approval_request = %q (error %v), want %q", text, isErr, tc.want)
 			}
 			rec := assertOneFailClosedRecord(t, buf, "native", "")
 			for _, want := range []string{"correlation_id=", "rule=deploy-ticket", tc.wantCause} {
@@ -525,7 +532,7 @@ spec:
 			got := awaitMCPRecords(t, app, 1, func(d map[string]any) bool {
 				return d["user"] == kim.ID && d["toolName"] == "approval_request"
 			})[0]
-			want := map[string]any{"effect": "deny", "reason": approvalStoreDownReason, "ruleId": "ask", "session": session}
+			want := map[string]any{"effect": "deny", "reason": tc.want, "ruleId": "ask", "session": session}
 			for k, v := range want {
 				if got[k] != v {
 					t.Errorf("the record's %s = %v, want %v", k, got[k], v)

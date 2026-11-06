@@ -96,6 +96,10 @@ type fakeStrazad struct {
 	roles    []string
 	userType string
 	noRoles  bool
+	// startText, when set, replaces fakeStartText in every answer, and
+	// noStartText drops the field, as an older server does.
+	startText   string
+	noStartText bool
 	// auditFail, when set, is the status every audit batch gets.
 	auditFail int
 	// pushRefuse, when set, is the status every push connect gets, and
@@ -269,6 +273,9 @@ func (f *fakeStrazad) mint(user, cnf string) map[string]any {
 	return f.answer(id, tok, user)
 }
 
+// fakeStartText is the start text every fake check-in answer carries.
+const fakeStartText = "Straza governs this test session."
+
 // answer is a check-in or refresh answer for session id with token tok.
 func (f *fakeStrazad) answer(id, tok, user string) map[string]any {
 	f.mu.Lock()
@@ -278,8 +285,14 @@ func (f *fakeStrazad) answer(id, tok, user string) map[string]any {
 		reported = f.snapIDLocked()
 	}
 	out := map[string]any{"session_id": id, "session_token": tok, "expires_in": int(tokenLife / time.Second), "user": user,
-		"attestation": "none", "snapshot_id": reported, "user_type": f.userType,
+		"attestation": "none", "snapshot_id": reported, "user_type": f.userType, "start_text": fakeStartText,
 		"knowledge_packs": []map[string]string{{"name": "golang-style", "version": "1", "content": "always run gofmt", "checksum": "c1"}}}
+	switch {
+	case f.noStartText:
+		delete(out, "start_text")
+	case f.startText != "":
+		out["start_text"] = f.startText
+	}
 	if !f.noRoles {
 		roles := f.roles
 		if roles == nil {

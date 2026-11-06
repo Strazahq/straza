@@ -280,7 +280,7 @@ func TestConnectStartRefusesAnAgent(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.agent, func(t *testing.T) {
-			tok, _ := gatewaySession(t, base, c.agent)
+			tok := agentSessionToken(t, app, base, c.agent)
 			req, _ := http.NewRequest(http.MethodPost, base+"/v1/connect/github", nil)
 			req.Header.Set("Authorization", "Bearer "+tok)
 			resp, err := http.DefaultClient.Do(req)

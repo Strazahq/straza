@@ -1,0 +1,23 @@
+{
+  "specversion": "1.0",
+  "id": "019a54d2-8a10-7c40-8d11-2a3b4c5d6f11",
+  "type": "straza.audit.mcp",
+  "source": "strazad",
+  "time": "2026-11-05T08:52:40.118Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "request",
+    "tool": "",
+    "app": "",
+    "toolName": "",
+    "effect": "deny",
+    "ruleId": "revoked",
+    "setName": "",
+    "reason": "Straza: this session has been revoked. Start a new session: its check-in uses this device's existing enrollment, so re-enrolling is not needed",
+    "snapshot": "sha256:44f0be1c",
+    "granted": false,
+    "default": false
+  }
+}

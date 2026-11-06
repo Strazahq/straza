@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/strazahq/straza/internal/ctl"
@@ -71,16 +73,71 @@ func apiTokenCmd(client func() *ctl.Client) *cobra.Command {
 	})
 
 	cmd.AddCommand(&cobra.Command{
-		Use:   "revoke <id>",
-		Short: "Revoke an admin API token",
-		Args:  cobra.ExactArgs(1),
+		Use:   "revoke <name-or-id>",
+		Short: "Revoke an admin API token by its name or its id",
+		Long: "Revokes one admin API token, and its next request is refused. Pass the name\n" +
+			"the console shows under Settings, API tokens, or the id strazactl api-token list\n" +
+			"prints. An argument in the form of an id is taken as an id. Revoking by name\n" +
+			"reads the token list first, so it needs tokens:read as well as tokens:write.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := client().RevokeAPIToken(cmd.Context(), args[0]); err != nil {
+			c := client()
+			if isTokenID(args[0]) {
+				if err := c.RevokeAPIToken(cmd.Context(), args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "revoked the admin API token %s, matched by its id.\n", args[0])
+				return nil
+			}
+			id, err := apiTokenIDByName(cmd.Context(), c, args[0])
+			if err != nil {
 				return err
 			}
-			fmt.Printf("revoked %s\n", args[0])
+			if err := c.RevokeAPIToken(cmd.Context(), id); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "revoked the admin API token named %s, matched by its name. Its id was %s.\n", args[0], id)
 			return nil
 		},
 	})
 	return cmd
+}
+
+// isTokenID reports whether s has the form of an admin API token id, which
+// strazad mints as a lowercase UUID. revoke sends such an argument as it is,
+// with no list read first, so revoking by id needs tokens:write alone.
+func isTokenID(s string) bool {
+	u, err := uuid.Parse(s)
+	return err == nil && u.String() == s
+}
+
+// apiTokenIDByName finds the id of the one admin API token named name. strazad
+// refuses a duplicate name at mint, and a name that tokens share anyway is
+// refused here with their ids, so revoke never guesses which one was meant.
+func apiTokenIDByName(ctx context.Context, c *ctl.Client, name string) (string, error) {
+	tokens, err := c.APITokens(ctx)
+	if err != nil {
+		// The server's sentence may already end with a period.
+		sep := ". "
+		if strings.HasSuffix(err.Error(), ".") {
+			sep = " "
+		}
+		return "", fmt.Errorf("strazactl reads the token list to find the token named %q, and reading it failed: %w%s"+
+			"If the token in STRAZA_API_TOKEN lacks tokens:read, revoke by the id instead, which needs tokens:write alone, "+
+			"or revoke the token in the console under Settings, API tokens", name, err, sep)
+	}
+	var ids []string
+	for _, t := range tokens {
+		if t.Name == name {
+			ids = append(ids, t.ID)
+		}
+	}
+	switch len(ids) {
+	case 1:
+		return ids[0], nil
+	case 0:
+		return "", fmt.Errorf("no admin API token is named %q. strazactl api-token list prints each token's name and id, and revoke takes either", name)
+	}
+	return "", fmt.Errorf("%d admin API tokens are named %q, so the name does not say which one to revoke. Revoke one by its id: %s",
+		len(ids), name, strings.Join(ids, ", "))
 }

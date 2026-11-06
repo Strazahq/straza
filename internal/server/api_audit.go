@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -177,10 +178,55 @@ func ceMeta(ce string) ceFields {
 // maxAuditBatch caps a single straza spool upload.
 const maxAuditBatch = 4 << 20
 
+// maxBatchEvents is the most records one upload may carry. It is
+// drainChunkRecords in internal/agentguard/spool, the most a straza client
+// has sent in one upload since its uploads were first chunked, before the
+// first public release.
+const maxBatchEvents = 1000
+
+// errTooManyEvents is the decode error of an upload of more than
+// maxBatchEvents records.
+var errTooManyEvents = errors.New("the upload holds more than 1000 records")
+
+// tooManyEventsMsg answers an upload of more than maxBatchEvents records.
+const tooManyEventsMsg = "Straza: this audit upload holds more than 1000 records, the most one upload may carry, " +
+	"so none of its records were stored. Send them again in uploads of at most 1000 records. " +
+	"The straza client never sends more, so check what sent this upload."
+
 // batchRequest is the straza spool-drain body: a list of already-
 // formed CloudEvents to ingest through the same outbox → chain pipeline.
 type batchRequest struct {
-	Events []json.RawMessage `json:"events"`
+	Events batchEvents `json:"events"`
+}
+
+// batchEvents is the events array of an upload. Its decode stops at the
+// record past maxBatchEvents with errTooManyEvents, so refusing an upload
+// of a million tiny records costs no more than decoding a thousand.
+type batchEvents []json.RawMessage
+
+// UnmarshalJSON decodes the array b one record at a time. null holds no
+// records, and any other value that is not an array is an error.
+func (e *batchEvents) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	t, err := dec.Token()
+	if err != nil || t == nil {
+		return err
+	}
+	if t != json.Delim('[') {
+		return errors.New("events is not an array")
+	}
+	*e = (*e)[:0]
+	for dec.More() {
+		if len(*e) == maxBatchEvents {
+			return errTooManyEvents
+		}
+		var ev json.RawMessage
+		if err := dec.Decode(&ev); err != nil {
+			return err
+		}
+		*e = append(*e, ev)
+	}
+	return nil
 }
 
 // handleAuditBatch ingests a batch of client-spooled audit events into the
@@ -200,9 +246,21 @@ func (a *App) handleAuditBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.denylist.blocked(claims) {
-		// A revoked principal writes nothing to the chain. The client keeps
-		// the batch parked in its spool, as it does for every final refusal.
+		// A revoked principal writes nothing to the chain but the record of
+		// its refusal, the login failure the refresh lane writes for the same
+		// revocation, queued so it reads no store. The client keeps the batch
+		// parked in its spool, as it does for every final refusal.
 		a.log.Warn("revoked session refused on the audit batch route", "user", claims.Subject, "session", claims.Session)
+		f := authnFields{Via: "session-token", UserID: claims.Subject, Session: claims.Session, Harness: claims.Harness,
+			Reason: a.denylist.revokedMsg(claims, "session is no longer active", "device or user revoked")}
+		ev, err := a.cloudEvent(r.Context(), "straza.audit.authn", authnPayload("login", "failure", f, r))
+		if err == nil {
+			err = a.audit.submit(r.Context(), ev)
+		}
+		if err != nil {
+			a.log.Warn("the record of a refused audit upload could not be queued, so this refusal has no audit record. "+
+				"Check that the database is reachable and takes audit records", "user", claims.Subject, "session", claims.Session, "err", err)
+		}
 		apiError(w, http.StatusForbidden, a.denylist.revokedMsg(claims,
 			"Straza: this session has been revoked, so its audit events are refused and stay in the spool. Start a new session: its check-in uses this device's existing enrollment, and the spool uploads under it",
 			"Straza: this device or user has been revoked, so its audit events are refused. Contact your administrator"))
@@ -221,13 +279,21 @@ func (a *App) handleAuditBatch(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusTooManyRequests, "audit backlog at capacity; the spool retries")
 		return
 	}
+	// Past every refusal that reads no body, the body gets the bulk window.
+	extendBodyRead(w, r, bulkBodyReadTimeout)
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxAuditBatch))
 	if err != nil {
 		apiError(w, http.StatusBadRequest, "could not read body")
 		return
 	}
 	var req batchRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	if err := json.Unmarshal(body, &req); errors.Is(err, errTooManyEvents) {
+		a.log.Warn("audit batch: an upload of more than 1000 records was refused with 413, and none of its records were stored. "+
+			"A straza client never sends more than 1000 records in one upload, so find out what sent this one.",
+			"session", claims.Session, "user", claims.Subject)
+		apiError(w, http.StatusRequestEntityTooLarge, tooManyEventsMsg)
+		return
+	} else if err != nil {
 		apiError(w, http.StatusBadRequest, "malformed batch")
 		return
 	}
@@ -237,21 +303,28 @@ func (a *App) handleAuditBatch(w http.ResponseWriter, r *http.Request) {
 	// counted and the batch still answers 200, because the spool deletes its
 	// file on any 2xx and a 4xx would resend the batch forever. verdicts holds
 	// one verdict per named session, so a batch reads each session row once,
-	// and at most maxNamedSessions rows in all. A refused session collects
-	// the records that name it, and capped collects those past the cap.
+	// and at most maxBatchEvents rows in all. A refused session collects the
+	// records that name it.
 	verdicts := map[string]*namedVerdict{claims.Session: {}}
 	var refused []*namedVerdict
-	capped := &namedVerdict{}
+	// Decoding costs time for every JSON value, so one upload decodes at most
+	// store.MaxRecordValues values in full, what one record may hold. A
+	// record past that budget gets its data omitted without being decoded,
+	// as the store omits a record it cannot cut, and is stored all the same.
+	// An upload of a straza client holds a few dozen values per record.
+	budget, omitted := store.MaxRecordValues, 0
 	for _, ev := range req.Events {
+		reduced := false
+		if n := store.CountValues(string(ev)); n <= budget {
+			budget -= n
+		} else {
+			ev, reduced = json.RawMessage(store.OmitCE(string(ev))), true
+		}
 		m := decodeClientCE(ev)
 		session := claims.Session
 		if named := namedSession(m); named != "" {
 			id, _ := m["id"].(string)
 			v, known := verdicts[named]
-			if !known && len(verdicts) > maxNamedSessions {
-				capped.add(named, id)
-				continue
-			}
 			if !known {
 				why, rerr := a.spooledSessionRefusal(r.Context(), named, claims)
 				if rerr != nil {
@@ -273,6 +346,9 @@ func (a *App) handleAuditBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		subject, ce := normalizeClientCE(m, session, claims.Subject)
 		events = append(events, store.OutboxEvent{Subject: subject, CE: ce})
+		if reduced {
+			omitted++
+		}
 	}
 	// ONE transaction for the whole batch, because per-event autocommit
 	// inserts drag checkin p99 into seconds at ingest saturation.
@@ -287,16 +363,16 @@ func (a *App) handleAuditBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.relay.Nudge()
+	if omitted > 0 {
+		a.log.Warn(fmt.Sprintf("audit batch: %d spooled records were stored with their data omitted, because their upload holds more than %d JSON values. "+
+			"Each keeps its envelope, its identity and outcome fields, and dataOmitted with its size and SHA-256. "+
+			"A straza client's upload holds far fewer, so find out what sent this one.", omitted, store.MaxRecordValues),
+			"count", omitted, "session", claims.Session, "user", claims.Subject)
+	}
 	// Refusals are logged and counted only now that the batch is stored, so
 	// a batch answered 503 and retried reports each refusal once.
-	writeJSON(w, http.StatusOK, map[string]int{"accepted": accepted, "refused": a.reportSpoolRefusals(claims, refused, capped)})
+	writeJSON(w, http.StatusOK, map[string]int{"accepted": accepted, "refused": a.reportSpoolRefusals(claims, refused)})
 }
-
-// maxNamedSessions caps the distinct sessions other than the uploader's that
-// one batch may name. It mirrors drainChunkRecords in internal/agentguard/spool,
-// the most records a straza client sends in one upload, so no real client
-// reaches it.
-const maxNamedSessions = 1000
 
 // spoolRefusal is why the batch route refused the spooled records that name
 // one session and what an operator can do next, two parts of their Warn line.
@@ -324,7 +400,7 @@ var (
 
 // namedVerdict is the verdict on one session a batch names: why it is
 // refused (nil keeps its records), and the records it refused, counted, with
-// the first record's id. The group past maxNamedSessions is one too.
+// the first record's id.
 type namedVerdict struct {
 	why          *spoolRefusal
 	named, first string
@@ -365,25 +441,17 @@ func (a *App) spooledSessionRefusal(ctx context.Context, id string, c authn.Clai
 	return refusedOtherDevice, nil
 }
 
-// reportSpoolRefusals writes one Warn line per refused named session and one
-// for the records past maxNamedSessions, each with the count of records it
-// covers, counts every refused record in straza_audit_refused_total, and
-// returns that count. The first record's id and the named session are
-// client-chosen, so each is cut to 64 bytes.
-func (a *App) reportSpoolRefusals(c authn.Claims, refused []*namedVerdict, capped *namedVerdict) int {
-	total := capped.count
+// reportSpoolRefusals writes one Warn line per refused named session, with
+// the count of records it covers, counts every refused record in
+// straza_audit_refused_total, and returns that count. The first record's id
+// and the named session are client-chosen, so each is cut to 64 bytes.
+func (a *App) reportSpoolRefusals(c authn.Claims, refused []*namedVerdict) int {
+	total := 0
 	for _, v := range refused {
 		total += v.count
 		a.log.Warn("audit batch: spooled records that name one session were refused because that session "+v.why.why+
 			". The client has already deleted them, because the upload was answered 200, so this line is their only trace, and count says how many it covers. "+v.why.next,
 			"count", v.count, "record", logCut(v.first), "session", c.Session, "user", c.Subject, "named_session", logCut(v.named))
-	}
-	if capped.count > 0 {
-		a.log.Warn(fmt.Sprintf("audit batch: %d spooled records were refused because their batch names more than %d sessions other than the uploader's, "+
-			"and a straza client never sends more than %d records in one upload. The client has already deleted them, because the upload was answered 200, "+
-			"so this line is their only trace. Read the uploader's session in the audit chain, and find out what sent this upload, since a straza client cannot.",
-			capped.count, maxNamedSessions, maxNamedSessions),
-			"count", capped.count, "record", logCut(capped.first), "session", c.Session, "user", c.Subject, "named_session", logCut(capped.named))
 	}
 	a.metrics.AuditRefused(total)
 	return total

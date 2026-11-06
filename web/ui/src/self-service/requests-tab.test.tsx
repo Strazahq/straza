@@ -3,7 +3,7 @@ import { webcrypto } from "node:crypto";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { CLOSE, OPEN_SESSION, waitingCount } from "@/lib/approval-words";
+import { CLOSE, OPEN_SESSION, RUNS_WHERE, RUNS_WHERE_ALONE, waitingCount } from "@/lib/approval-words";
 import { ApproverError, boundDevice, decide, history, pending } from "./approver-api";
 import { SelfContext, type SelfState } from "./context";
 import { RequestsTab } from "./requests-tab";
@@ -208,6 +208,49 @@ describe("the self-service requests tab", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("button", { name: OPEN_SESSION })).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: "dev-guardrails" })).toBeTruthy();
+  });
+
+  // An MCP call can come from the hook too, so the lane the server names
+  // decides the words, and a row from an older server keeps the guess from
+  // the call.
+  it.each([
+    ["a hook hold on an MCP call says it runs on the agent's retry", { lane: "hook" }, "The call runs once, when the agent retries it soon after your yes."],
+    ["a gateway hold says it runs now", { lane: "gateway" }, "The call runs now, once, and the agent's session gets the answer."],
+    ["an MCP row from an older server keeps the gateway words", {}, "The call runs now, once, and the agent's session gets the answer."],
+  ])("words the decision by the row's lane: %s", async (_what, patch, sentence) => {
+    scopes([{ ...sum, ...patch }, env], [own]);
+    mount();
+    await screen.findByRole("button", { name: "Open " + SUM_ROW });
+    await userEvent.click(screen.getByRole("button", { name: "Approve get-sum for joe-java-developer-agent" }));
+    const ask = await screen.findByRole("alertdialog");
+    expect((ask.querySelector("[data-decide-body]") as HTMLElement).textContent).toBe(sentence);
+  });
+
+  it.each([
+    ["an MCP hold the server names as the hook's", { lane: "hook" }, "get-sum", "runs on the agent's retry, after a yes", "The agent was told to retry the call after your answer.", "on its own machine"],
+    ["an MCP hold the server names as the gateway's", { lane: "gateway" }, "get-sum", "the agent is waiting now", "The agent is waiting right now for your answer.", "through the MCP gateway"],
+    ["a ticket an approval_request asked for a command", { lane: "gateway", class: "ticket", summary: { tool: "shell.exec" }, args_preview: "make release" }, "make release", "runs later, after a yes", "The agent moved on. It runs this only after a yes.", "on its own machine"],
+  ])("says what the agent does and where the call runs for %s", async (_what, patch, call, line, says, where) => {
+    scopes([{ ...sum, ...patch } as ApproverRow, env], [own]);
+    mount();
+    const name = call + " for joe-java-developer-agent";
+    await screen.findByRole("button", { name: "Open " + name });
+    expect((openRow(name).querySelector("[data-state-line]") as HTMLElement).textContent).toBe(line);
+    await userEvent.click(openRow(name));
+    const dialog = await screen.findByRole("dialog");
+    expect((dialog.querySelector("[data-kind-says]") as HTMLElement).textContent).toBe(says);
+    expect((dialog.querySelector("[data-meta]") as HTMLElement).textContent!.split(" · ")[0]).toBe(where);
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // The list's chip says where the call runs by the same rule as the
+    // request's own line, in words that stand on their own.
+    const chip = openRow(name).querySelector("[data-where]") as HTMLElement;
+    await userEvent.hover(chip);
+    await waitFor(() => {
+      const id = chip.getAttribute("aria-describedby");
+      expect(id).toBeTruthy();
+      expect(document.getElementById(id as string)?.textContent).toBe(where === RUNS_WHERE.hook ? RUNS_WHERE_ALONE.hook : RUNS_WHERE_ALONE.gateway);
+    });
   });
 
   it("posts exactly one decision, signed over the row's id, its challenge and the reason", async () => {

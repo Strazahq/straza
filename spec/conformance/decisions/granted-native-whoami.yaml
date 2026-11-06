@@ -1,0 +1,79 @@
+# Decision-table fixtures: the built-in straza app's whoami tool carries
+# the granted fact for every subject (revision 27). A conformant gateway
+# lists straza__whoami to every session and sends a call of it with
+# granted: true. A call no rule matches is then allowed with the revision
+# 17 reason, and a rule that fires still wins, deny and hold included. The
+# approval tools still never carry the fact, so without a rule they keep
+# the default deny. The engine does not see the listing, so these cases
+# pin the events a conformant gateway sends.
+# Provenance: derived from spec/policyset revision 27 and the reference
+# engine's granted-fact semantics.
+profile: enterprise
+policies:
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: no-whoami }
+    spec:
+      match: { users: [quiet-agent] }
+      rules:
+        - id: no-whoami
+          events: [tool.pre]
+          tools: [mcp.call]
+          apps: [straza]
+          toolNames: { deny: ["whoami"] }
+          effect: deny
+          reason: "Straza: whoami is turned off in this deployment. Ask an admin what this session may do."
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: approval-tools-only }
+    spec:
+      match: { users: [ticket-agent] }
+      rules:
+        - id: allow-approval-tools
+          events: [tool.pre]
+          tools: [mcp.call]
+          apps: [straza]
+          toolNames: { allow: ["approval_request", "approval_status", "approval_await"] }
+          effect: allow
+  - |
+    apiVersion: straza.dev/v1beta1
+    kind: PolicySet
+    metadata: { name: held-whoami }
+    spec:
+      match: { users: [held-agent] }
+      rules:
+        - id: hold-whoami
+          events: [tool.pre]
+          tools: [mcp.call]
+          apps: [straza]
+          toolNames: { allow: ["whoami"] }
+          effect: allow
+          mode: approve
+          approve: { roles: [platform-reviewers], timeoutSeconds: 120 }
+cases:
+  - name: whoami-no-rule-allows-by-default
+    subject: { user: build-agent, roles: [dev], userType: agent, attestation: managed }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: whoami, granted: true }
+    want: { effect: allow, default: true }
+  - name: whoami-a-person-no-rule-allows-by-default
+    subject: { user: alice, roles: [], userType: human, attestation: advisory }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: whoami, granted: true }
+    want: { effect: allow, default: true }
+  - name: whoami-deny-rule-still-refuses
+    subject: { user: quiet-agent, roles: [dev], userType: agent, attestation: managed }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: whoami, granted: true }
+    want: { effect: deny, ruleId: no-whoami, setName: no-whoami }
+  - name: whoami-hold-rule-still-gates
+    subject: { user: held-agent, roles: [dev], userType: agent, attestation: managed }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: whoami, granted: true }
+    want: { effect: allow, ruleId: hold-whoami, setName: held-whoami, approve: true, approveTimeout: 120 }
+  - name: whoami-an-allow-list-that-skips-it-leaves-the-default
+    subject: { user: ticket-agent, roles: [dev], userType: agent, attestation: managed }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: whoami, granted: true }
+    want: { effect: allow, default: true }
+  - name: approval-tool-still-never-carries-the-fact
+    subject: { user: build-agent, roles: [dev], userType: agent, attestation: managed }
+    event: { kind: tool.pre, tool: mcp.call, app: straza, toolName: approval_status }
+    want: { effect: deny, default: true }

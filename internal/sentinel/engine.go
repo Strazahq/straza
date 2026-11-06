@@ -30,7 +30,7 @@ const (
 type Verdict struct {
 	Session  string
 	User     string
-	Detector string // denyBurst|denyThenVariant|writeThenExecute|captureContent|toolMixAnomaly
+	Detector string // denyBurst|denyThenVariant|writeThenExecute|captureContent|toolMixAnomaly|credentialEcho
 	Severity string // info|warn|critical
 	Reason   string
 	Evidence []string // CE ids of the events that convict
@@ -44,6 +44,11 @@ const (
 	DetectorWriteExec      = "writeThenExecute"
 	DetectorCaptureContent = "captureContent"
 	DetectorToolMix        = "toolMixAnomaly"
+	// DetectorCredentialEcho is the detector of the verdict the gateway
+	// raises when it withholds a reply that held the credential Straza
+	// injected for the call. The gateway raises it on the request path,
+	// whether the sentinel runs or not.
+	DetectorCredentialEcho = "credentialEcho" // #nosec G101 -- a detector name, not a credential
 )
 
 // Severities (the CE data `severity` vocabulary).

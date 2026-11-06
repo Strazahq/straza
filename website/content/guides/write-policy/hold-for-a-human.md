@@ -289,7 +289,7 @@ A hold on an MCP tool is the same rule with `tools: [mcp.call]`, the server in `
 
 {{< shot name="policy-turn-off" caption="The question that turns kubectl-apply-hold off, which says what stops governing." >}}
 
-A request that is still waiting is denied from its row with **Deny**, then **Deny request**, which is final for that request.
+A request that is still waiting is denied from its row with **Deny**, then **Deny request**, which is final for that request. The same call in the same session is then refused, without a new request, until the request's decision window ends.
 {{< /console >}}
 
 {{< cli >}}

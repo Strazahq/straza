@@ -334,12 +334,11 @@ func TestConvergeStartsAServerWhoseSecretArrived(t *testing.T) {
 				return
 			}
 			waitStatus(t, b, "parked", StatusRunning)
+			// A reply that holds the injected secret is withheld, so the
+			// withheld reply is what shows that the server on b reads it.
 			res, err := b.Call(ctx, "parked", "env", mustJSON(t, map[string]string{"name": "TOKEN"}), secret, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := textOf(res); got != "tok-arrived" {
-				t.Errorf("the server on b reads TOKEN = %q, want the secret set through a", got)
+			if !errors.Is(err, ErrCredentialEcho) {
+				t.Errorf("the server on b answers TOKEN with %v, %v, want the withheld echo of the secret set through a", res, err)
 			}
 		})
 	}

@@ -335,7 +335,7 @@ func TestOutboxWritesBoundOutsideTheTransaction(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Devices().Revoke(ctx, d.ID, "lost", OutboxEvent{Subject: "straza.revocation.device", CE: big}); err != nil {
+		if _, err := s.Devices().Revoke(ctx, d.ID, "lost", OutboxEvent{Subject: "straza.revocation.device", CE: big}); err != nil {
 			t.Fatal(err)
 		}
 		if cuts < 4 {

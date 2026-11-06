@@ -170,7 +170,7 @@ func TestCheckJudgesAChangeOfThePinnedType(t *testing.T) {
 	t.Parallel()
 	const (
 		n1 = "info.objects-first-pin App/ghapp | Pinning repos on ghapp keeps today's reach: ghapp-legacy, ghapp-read and ghapp-write-payments now cover every repo. Narrow them in this draft or later."
-		n2 = "ready.objects-listing App/ghapp | ghapp has no listing credential, so Straza cannot list its repos, and only roles on every repo can use its repo tools until it has one. Add one with strazactl apps secret set ghapp --listing after you publish."
+		n2 = "ready.objects-listing App/ghapp | ghapp has no listing credential, so Straza cannot list its repos, and only roles on every repo can use its repo tools until it has one. After you publish, set one under Server authentication on the Overview of ghapp, or with strazactl apps secret set ghapp --listing."
 		r6 = "app.objects-type App/ghapp | ghapp's pinned type changes from repo to project while ghapp-write-payments names repos. Make those roles cover every project, or remove their access rows on ghapp, in this draft."
 		n3 = "info.objects-unpin App/ghapp | Removing ghapp's pinned repos makes every role on ghapp reach every repo again: ghapp-write-payments loses its list of repos."
 		m1 = "access.covers-missing Role/ghapp-write-payments | ghapp-write-payments binds tools that work on projects. Say which projects it covers: every project, or these projects by name."

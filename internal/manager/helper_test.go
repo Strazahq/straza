@@ -115,6 +115,16 @@ func runHelperServer() {
 			})
 	}
 
+	// STRAZA_HELPER_CRASH_TOOL adds a tool whose call ends the process before
+	// it answers, as a child that crashes mid-call.
+	if os.Getenv("STRAZA_HELPER_CRASH_TOOL") == "1" {
+		mcp.AddTool(srv, &mcp.Tool{Name: "crash", Description: "exit before answering"},
+			func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+				os.Exit(3)
+				return nil, nil, nil
+			})
+	}
+
 	// STRAZA_HELPER_META adds a tool that answers the _meta of its call.
 	if os.Getenv("STRAZA_HELPER_META") == "1" {
 		srv.AddTool(&mcp.Tool{Name: "meta", Description: "the call's _meta", InputSchema: map[string]any{"type": "object"}},

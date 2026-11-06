@@ -40,6 +40,13 @@ type fakeApprovalGate struct {
 	deniedFinalHit bool
 	deniedFinalErr error
 
+	// The hold's deny-final: DeniedHoldWithinWindow scripts the lookup of a
+	// person's denial of the same hold that still stands.
+	deniedHold       approval.Record
+	deniedHoldHit    bool
+	deniedHoldErr    error
+	deniedHoldChecks int
+
 	// Hold lane: ConsumeHold scripts the retry's use of an approval (holdKey,
 	// when set, narrows the hit to one fingerprint), and ConsumeHeld the held
 	// call's use of the approval it waited for (won unless heldLost or
@@ -86,6 +93,11 @@ func (f *fakeApprovalGate) ConsumeGrant(_ context.Context, _, argvHash, _ string
 func (f *fakeApprovalGate) DeniedTicketWithinWindow(_ context.Context, _, _, _ string) (approval.Record, bool, error) {
 	f.denyChecks++
 	return f.deniedFinal, f.deniedFinalHit, f.deniedFinalErr
+}
+
+func (f *fakeApprovalGate) DeniedHoldWithinWindow(_ context.Context, _, _, _, _ string) (approval.Record, bool, error) {
+	f.deniedHoldChecks++
+	return f.deniedHold, f.deniedHoldHit, f.deniedHoldErr
 }
 
 func (f *fakeApprovalGate) Request(_ context.Context, in approval.RequestInput) (approval.Record, error) {

@@ -10,7 +10,6 @@ import {
   DISCARD,
   DISCARD_GO,
   DISCARD_KEEP_LIVE,
-  DOCS_MASKED,
   KEEP_DRAFT_TEXT,
   KEEP_LIVE_TEXT,
   MAY_PUBLISH_ALL,
@@ -18,7 +17,9 @@ import {
   NEXT_TITLE,
   OPEN_DRAFTS,
   PICKS_GO,
+  PUBLISH_NOT_YET,
   PUBLISH_OPEN,
+  REFUSED_BAR,
   SAYS_AGENT_HELP,
   STALE_TITLE,
   UNDO,
@@ -27,7 +28,7 @@ import {
   checkedLine,
   discardKeep,
   discardedLine,
-  docsFold,
+  holdersLose,
   keepDraft,
   keepLive,
   publishedLine,
@@ -44,9 +45,9 @@ import { snapshot } from "@/lib/session";
 import { absTime } from "@/lib/words";
 import { ALICE, COVERS_DETAIL, CUT_RISK, DETAIL, GATE_LOST, LOOSEN_RISK, STALE, VERDICT, detailWith } from "@/test/drafts-fixture";
 
-// The review page of one draft: read
-// top to bottom, the same for every door, with the bar that publishes and
-// discards, Check again when live state moved, and Undo once published.
+// The review page of one draft: read top to bottom, the same for every
+// door, with the band that publishes and discards, In this draft above the
+// cards, Check again when live state moved, and Undo once published.
 
 vi.mock("@/lib/drafts-api", async (orig) => ({
   ...(await orig<typeof import("@/lib/drafts-api")>()),
@@ -61,9 +62,10 @@ vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/
 vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 
 const mount = (id = "41") => render(<TooltipProvider><DraftPage id={id} /></TooltipProvider>);
-const title = () => screen.findByRole("heading", { level: 1, name: "Draft 41" });
+const title = (name = DETAIL.draft.title) => screen.findByRole("heading", { level: 1, name });
 const fact = (label: string) => document.querySelector('[data-fact="' + label + '"]') as HTMLElement;
-const bar = () => document.querySelector("[data-publish-bar]") as HTMLElement | null;
+const band = () => document.querySelector("[data-publish-band]") as HTMLElement | null;
+const details = () => userEvent.click(screen.getByRole("button", { name: "Details" }));
 
 describe("the review page", () => {
   beforeEach(() => {
@@ -72,25 +74,47 @@ describe("the review page", () => {
     vi.mocked(getDraft).mockResolvedValue(DETAIL);
   });
 
-  it("opens with the draft's state, the server's title and who drafted it through which door", async () => {
+  it("heads the page with the server's title, its state and id, and one line of who drafted it, how, which revision, when and until when", async () => {
     mount();
     await title();
     expect(document.querySelector("[data-state-badge]")?.textContent).toBe("Ready to publish");
-    expect(screen.getByText(DETAIL.draft.title)).toBeTruthy();
-    expect(fact("Drafted by").textContent).toContain("joe-java-developer-agent");
-    expect(fact("Drafted by").textContent).toContain("an agent, sponsored by you");
+    expect(document.querySelector("[data-draft-id]")?.textContent).toBe("draft 41");
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" }).textContent).toBe("Straza/Drafts / Draft 41");
+    const meta = document.querySelector("[data-meta]") as HTMLElement;
+    expect(fact("Drafted by").textContent).toBe("joe-java-developer-agent");
+    expect(meta.textContent).toContain("(an agent, sponsored by you)");
+    for (const said of ["the straza app", "revision 2", "expires " + absTime(DETAIL.draft.expires_at).slice(0, 10)]) expect(meta.textContent).toContain(said);
+    expect(document.querySelector("[data-facts]")).toBeNull();
+  });
+
+  it("opens the facts under Details", async () => {
+    mount();
+    await title();
+    await details();
+    expect(screen.getByRole("button", { name: "Details" }).getAttribute("aria-expanded")).toBe("true");
     expect(fact("Came from").textContent).toContain("the straza app, from claude-code");
     expect(fact("Revisions").textContent).toContain(revisionLine(2, "joe-java-developer-agent", "straza-app", absTime(DETAIL.revisions[1].created_at), false));
     expect(fact("Last checked").textContent).toContain(checkedLine(absTime(VERDICT.checked_at), "7f3a91c2"));
     expect(fact("Who may publish").textContent).toBe("Who may publish" + MAY_PUBLISH_ALL);
+    await details();
+    expect(document.querySelector("[data-facts]")).toBeNull();
   });
 
-  it("puts the grants publishing needs behind the help of Who may publish", async () => {
+  it("names the reader's own draft with (you)", async () => {
+    vi.mocked(getDraft).mockResolvedValue(detailWith({ draft: { authors: [ALICE], door: "console" } }));
     mount();
     await title();
-    await userEvent.hover(within(fact("Who may publish")).getByRole("button", { name: "Help: Who may publish" }));
+    expect((document.querySelector("[data-meta]") as HTMLElement).textContent).toContain("alice(you)");
+  });
+
+  it("puts the grants publishing needs behind the help of who may publish, in the band", async () => {
+    mount();
+    await title();
+    const may = (band() as HTMLElement).querySelector("[data-may-publish]") as HTMLElement;
+    expect(may.textContent).toBe(MAY_PUBLISH_ALL);
+    await userEvent.hover(within(may).getByRole("button", { name: "Help: Who may publish" }));
     expect((await screen.findByRole("tooltip")).textContent).toContain(
-      "The server github needs the scope apps:write or the role straza-global-mcp-admin. The approval set github-writers-access needs the scope policy:write.",
+      "The server github needs the scope apps:write or the role straza-global-mcp-admin. The policy set github-writers-access needs the scope policy:write.",
     );
   });
 
@@ -113,29 +137,58 @@ describe("the review page", () => {
     expect((document.querySelector("[data-says]") as HTMLElement).textContent).toContain(saysTitle(false, "carol"));
   });
 
-  it("lays out the strip, what changes, access after publishing, the checks and the files", async () => {
+  it("lays out the band, in this draft, what changes, access after publishing and the checks, with no files section and no bottom bar", async () => {
     mount();
     await title();
-    expect(document.querySelector("[data-verdict-strip]")).not.toBeNull();
-    for (const name of ["What changes", "Access after publishing", "Checks", "Files"]) expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
-    expect(screen.getByText(docsFold(8, "open"))).toBeTruthy();
-    expect(screen.getByText(DOCS_MASKED)).toBeTruthy();
+    expect((band() as HTMLElement).querySelector("[data-verdict-strip]")).not.toBeNull();
+    expect((band() as HTMLElement).className).toContain("sticky");
+    for (const name of ["In this draft", "What changes", "Access after publishing", "Checks"]) expect(screen.getByRole("heading", { level: 2, name: new RegExp("^" + name) })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Files" })).toBeNull();
+    expect(document.querySelector("[data-publish-bar]")).toBeNull();
+    expect(document.querySelectorAll("[data-item] [data-file]").length).toBe(6);
   });
 
-  it("says what to do before publishing and opens the publish dialog", async () => {
+  it("says what to do before publishing in the band and opens the publish dialog from it", async () => {
     mount();
     await title();
-    expect(bar()?.textContent).toContain(ackBar(2, 2, 2));
-    await userEvent.click(within(bar() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN }));
+    expect(band()?.textContent).toContain("Before you publish");
+    expect(band()?.textContent).toContain(ackBar(2, 2, 2));
+    expect(within(band() as HTMLElement).getByRole("button", { name: DISCARD })).toBeTruthy();
+    await userEvent.click(within(band() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN }));
     expect(await screen.findByRole("heading", { name: "Publish draft 41?" })).toBeTruthy();
   });
 
-  it("counts the confirm blocks in the bar, not the lines", async () => {
+  it("says once that there is nothing to confirm", async () => {
+    vi.mocked(getDraft).mockResolvedValue(detailWith({ verdict: { risks: [], warnings: [], unchecked: [] } }));
+    mount();
+    await title();
+    expect((band() as HTMLElement).querySelector("[data-strip-none]")?.textContent).toBe("Nothing to confirm");
+    expect((band() as HTMLElement).querySelector("[data-band-line]")).toBeNull();
+  });
+
+  it("counts the confirm blocks in the band, not the lines", async () => {
     vi.mocked(getDraft).mockResolvedValue(detailWith({ verdict: { risks: [LOOSEN_RISK, GATE_LOST] } }));
     mount();
     await title();
-    expect(bar()?.textContent).toContain(ackBar(1, 2, 2));
-    expect(bar()?.textContent).toContain("Publishing asks you for 1 confirmation.");
+    expect(band()?.textContent).toContain(ackBar(1, 2, 2));
+    expect(band()?.textContent).toContain("Publishing asks you for 1 confirmation.");
+  });
+
+  it("lists every item in this draft with its kind, change and what publishing does, and a row moves focus to its card", async () => {
+    mount();
+    await title();
+    const rows = [...document.querySelectorAll("[data-row-item]")] as HTMLElement[];
+    expect(rows.map((r) => r.getAttribute("data-row-item"))).toEqual(DETAIL.draft.items.map((it) => it.kind + "/" + it.name));
+    const row = (o: string) => document.querySelector('[data-row-item="' + o + '"]') as HTMLElement;
+    expect([...row("Role/github-readers").querySelectorAll("td")].map((td) => td.textContent)).toEqual(["Application role", "github-readersowned by github", "new", "Reaches 2 tools of github.nobody holds it yet"]);
+    expect(row("PolicySet/github-writers-access").querySelector("td")?.textContent).toBe("Policy set");
+    expect(row("PolicySet/github-writers-access").querySelector("[data-outcomes]")?.textContent).toBe("needs approval");
+    expect(row("Role/demo-tools-readers").querySelector("[data-sum]")?.textContent).toBe("-1 tool");
+    expect(screen.getByText("8 objects, published together or not at all")).toBeTruthy();
+    await userEvent.click(row("PolicySet/github-writers-access"));
+    expect(document.activeElement).toBe(document.querySelector('[data-item="PolicySet/github-writers-access"]'));
+    await userEvent.click(within(row("App/demo-tools")).getByRole("button", { name: "demo-tools" }));
+    expect(document.activeElement).toBe(document.querySelector('[data-item="App/demo-tools"]'));
   });
 
   it("opens with a red warning naming the agent when its draft loosens the rules that bind it", async () => {
@@ -147,7 +200,7 @@ describe("the review page", () => {
     expect(warn.textContent).toContain(LOOSEN_RISK.sentence + " " + GATE_LOST.sentence);
     expect(warn.textContent).toContain("A person may accept it when publishing.");
     expect(warn.className).toContain("bg-danger-bg");
-    const first = document.querySelector("[data-agent-loosens], [data-lead], [data-facts]");
+    const first = document.querySelector("[data-agent-loosens], [data-publish-band], [data-in-draft]");
     expect(first).toBe(warn);
   });
 
@@ -173,21 +226,27 @@ describe("the review page", () => {
     expect(document.querySelector("[data-agent-loosens]")).toBeNull();
   });
 
-  it("leads with what publishing does to the tickets a held role covers, and who holds it", async () => {
+  it("sums up what publishing does to the tickets a held role covers, and who holds it, on its row", async () => {
     vi.mocked(getDraft).mockResolvedValue(COVERS_DETAIL);
     mount("50");
-    await screen.findByRole("heading", { level: 1, name: "Draft 50" });
-    expect(document.querySelector("[data-lead]")?.textContent).toBe("Changes the role tracker-triage: it will reach 2 more tickets on tracker, T-2 and T-3. 1 person holds it.");
-    expect(bar()?.textContent).toContain(ackBar(1, 1, 0));
+    await title("Change role tracker-triage");
+    const row = document.querySelector('[data-row-item="Role/tracker-triage"]') as HTMLElement;
+    expect([...row.querySelectorAll("[data-sum]")].map((c) => c.textContent)).toEqual(["+2 tickets"]);
+    expect(row.querySelector("[data-holders]")?.textContent).toBe("1 person holds it");
+    expect(screen.getByText("1 object")).toBeTruthy();
+    expect(band()?.textContent).toContain(ackBar(1, 1, 0));
     expect(document.querySelector("[data-strip]")?.textContent).toBe("1line to confirm");
+    expect(document.querySelector("[data-lead]")).toBeNull();
   });
 
-  it("says in the lead that nobody holds the new roles, and drops the note that said it again", async () => {
+  it("says nobody holds a new role on its chip, drops the note that said it again, and keeps the warning that holders lose tools", async () => {
     mount();
     await title();
-    const lead = document.querySelector("[data-lead]") as HTMLElement;
-    expect(lead.textContent).toContain("Nobody holds github-readers or github-writers yet, so nobody gains access until the identity manager assigns them.");
-    expect(lead.querySelector(".text-warn")?.textContent).toContain("Holders of demo-tools-readers lose tools");
+    expect(document.querySelector('[data-item="Role/github-readers"] [data-holders]')?.textContent).toBe("nobody holds it yet");
+    const loses = document.querySelector("[data-loses]") as HTMLElement;
+    expect(loses.textContent).toBe(holdersLose(["demo-tools-readers"]));
+    expect(loses.className).toContain("text-warn");
+    expect(band()?.nextElementSibling).toBe(loses);
     expect(document.querySelector('[data-group="info"]')).toBeNull();
     expect(document.querySelector("[data-gains-lead]")).toBeNull();
   });
@@ -197,9 +256,23 @@ describe("the review page", () => {
     vi.mocked(getDraft).mockResolvedValue(detailWith({ may_publish: false, publish_refusal: refusal }));
     mount();
     await title();
-    expect(bar()?.textContent).toContain(refusal + " " + WAITS_WHOLE);
-    expect(within(bar() as HTMLElement).queryByRole("button", { name: PUBLISH_OPEN })).toBeNull();
-    expect(within(bar() as HTMLElement).getByRole("button", { name: DISCARD })).toBeTruthy();
+    expect((band() as HTMLElement).querySelector("[data-may-publish]")?.textContent).toBe(refusal);
+    expect((band() as HTMLElement).querySelector("[data-band-line]")?.textContent).toBe(WAITS_WHOLE);
+    expect(within(band() as HTMLElement).queryByRole("button", { name: PUBLISH_OPEN })).toBeNull();
+    expect(within(band() as HTMLElement).getByRole("button", { name: DISCARD })).toBeTruthy();
+  });
+
+  it("holds Publish in the band for a refused draft, with the reason as its title", async () => {
+    const refused = { code: "names.taken", class: "refused" as const, object: "App/github", key: "k-r1", sentence: "The name github is taken." };
+    vi.mocked(getDraft).mockResolvedValue(detailWith({ verdict: { refused: [refused] } }));
+    mount();
+    await title();
+    expect(document.querySelector("[data-state-badge]")?.textContent).toBe("Refused");
+    const publish = within(band() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN });
+    expect([publish.getAttribute("aria-disabled"), publish.getAttribute("title")]).toEqual(["true", PUBLISH_NOT_YET]);
+    expect((band() as HTMLElement).querySelector("[data-band-line]")?.textContent).toBe(REFUSED_BAR);
+    await userEvent.click(publish);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("publishes and shows the answer: the proof, the servers and the next steps", async () => {
@@ -213,7 +286,7 @@ describe("the review page", () => {
     vi.mocked(publishDraft).mockResolvedValue(answer);
     mount();
     await title();
-    await userEvent.click(within(bar() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN }));
+    await userEvent.click(within(band() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN }));
     await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Publish" }));
     const proof = await waitFor(() => {
       const p = document.querySelector("[data-published]") as HTMLElement | null;
@@ -224,7 +297,7 @@ describe("the review page", () => {
     expect(proof.textContent).toContain(serverLine("github", "created", "starting"));
     expect(screen.getByText(NEXT_TITLE)).toBeTruthy();
     expect(screen.getByText("Each person runs straza connect github.")).toBeTruthy();
-    expect(bar()).toBeNull();
+    expect(band()).toBeNull();
   });
 
   // publishNow opens the page on an open draft, publishes it through the
@@ -234,7 +307,7 @@ describe("the review page", () => {
     vi.mocked(publishDraft).mockResolvedValue(answer);
     mount();
     await title();
-    await userEvent.click(within(bar() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN }));
+    await userEvent.click(within(band() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN }));
     await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Publish" }));
     await waitFor(() => expect(document.querySelector("[data-published]")).not.toBeNull());
     return answer;
@@ -246,6 +319,7 @@ describe("the review page", () => {
     vi.mocked(getDraft).mockResolvedValueOnce(detailWith({ verdict: { risks: [] } })).mockImplementationOnce(() => new Promise((r) => { finish = r; }));
     const answer = await publishNow();
     expect(lede()).toBe("Reading draft 41.");
+    await details();
     expect(fact("Last checked").textContent).toContain("Reading draft 41.");
     expect(document.body.textContent).not.toContain("stored no check");
     finish(detailWith({ draft: answer.draft, verdict: { ...NO_LINES, checked_at: CHECKED_AT, snapshot: "7f3a91c2d4e5" }, checks: { refused: 0, risks: 0, warnings: 0, unchecked: 0, revision: 2, checked_at: CHECKED_AT }, may_publish: false }));
@@ -256,6 +330,7 @@ describe("the review page", () => {
     vi.mocked(getDraft).mockResolvedValueOnce(detailWith({ verdict: { risks: [] } })).mockRejectedValueOnce(new ApiError("strazad did not answer", 0, true));
     await publishNow();
     await waitFor(() => expect(lede()).toBe("Draft 41 is published. This page could not read it again, so its stored check is not shown. Reload to try again."));
+    await details();
     expect(fact("Last checked").textContent).toContain("Draft 41 is published.");
     expect(document.body.textContent).toContain(readFailed(subjectDraft("41"), new ApiError("strazad did not answer", 0, true)));
     expect(document.body.textContent).not.toContain("stored no check");
@@ -269,8 +344,10 @@ describe("the review page", () => {
   const closedLeft = () => {
     expect(document.querySelector("[data-verdict-strip]")).toBeNull();
     expect(document.querySelector("[data-checks]")).toBeNull();
-    expect(document.querySelector("[data-lead]")).toBeNull();
+    expect(band()).toBeNull();
+    expect(document.querySelector("[data-holders]")).toBeNull();
     expect(fact("Who may publish")).toBeNull();
+    expect(fact("Expires")).toBeNull();
     expect(screen.queryByRole("heading", { level: 2, name: "Access after publishing" })).toBeNull();
     for (const said of ["No object in it needs a grant to publish.", "every read", "No role gains or loses a tool"]) expect(document.body.textContent).not.toContain(said);
   };
@@ -290,6 +367,7 @@ describe("the review page", () => {
     expect((document.querySelector("[data-checks-lede]") as HTMLElement).textContent).toBe(
       "Revision 2 was checked against the live state at " + absTime(CHECKED_AT) + ": 2 widen access, 1 warning. Straza does not check a draft again once it is published.",
     );
+    await details();
     expect(fact("Last checked").textContent).toContain(checkedLine(absTime(CHECKED_AT), "7f3a91c2"));
     closedLeft();
     await userEvent.click(within(proof).getByRole("button", { name: UNDO }));
@@ -301,6 +379,7 @@ describe("the review page", () => {
     vi.mocked(getDraft).mockResolvedValue(detailWith({ draft: { state, decided_at: "2026-09-24T11:00:00Z", decided_by: ALICE }, verdict: { ...NO_LINES, checked_at: "", snapshot: "" }, may_publish: false }));
     mount();
     await title();
+    await details();
     expect(fact("Last checked").textContent).toContain("Straza stored no check of revision 2.");
     expect((document.querySelector("[data-checks-lede]") as HTMLElement).textContent).toBe(
       "Straza stored no check of revision 2. Straza does not check a draft again once it is " + state + ".",
@@ -336,20 +415,20 @@ describe("the review page", () => {
     expect(lead.className).toContain("text-lg");
   });
 
-  it("shows a discarded draft with who discarded it and why, and no bar", async () => {
+  it("shows a discarded draft with who discarded it and why, and no band", async () => {
     vi.mocked(getDraft).mockResolvedValue(detailWith({ draft: { state: "discarded", decided_at: "2026-09-24T11:00:00Z", decided_by: ALICE, decided_reason: "Not needed." } }));
     mount();
     await title();
     expect(document.querySelector("[data-decided]")?.textContent).toContain(discardedLine("alice", absTime("2026-09-24T11:00:00Z")));
     expect(document.querySelector("[data-decided]")?.textContent).toContain(reasonLine("Not needed."));
-    expect(bar()).toBeNull();
+    expect(band()).toBeNull();
   });
 
   it("discards with the reason and the revision the person read", async () => {
     vi.mocked(discardDraft).mockResolvedValue({ draft: { ...DETAIL.draft, state: "discarded" } });
     mount();
     await title();
-    await userEvent.click(within(bar() as HTMLElement).getByRole("button", { name: DISCARD }));
+    await userEvent.click(within(band() as HTMLElement).getByRole("button", { name: DISCARD }));
     await userEvent.type(await screen.findByRole("textbox", { name: "Reason" }), "Not needed.");
     await userEvent.click(screen.getByRole("button", { name: DISCARD_GO }));
     expect(discardDraft).toHaveBeenCalledWith("41", "Not needed.", 2);
@@ -362,8 +441,10 @@ describe("the review page", () => {
     vi.mocked(getDraft).mockResolvedValue(fileDraft([DETAIL.draft.items[1]]));
     mount();
     await title();
-    expect(within(bar() as HTMLElement).getByRole("button", { name: DISCARD_KEEP_LIVE })).toBeTruthy();
+    expect(within(band() as HTMLElement).getByRole("button", { name: DISCARD_KEEP_LIVE })).toBeTruthy();
     expect(fact("Drafted by").textContent).toContain("the file demo-tools.yaml");
+    expect((document.querySelector("[data-meta]") as HTMLElement).textContent).toContain("(no person)");
+    await details();
     expect(fact("Came from").textContent).toBe("Came fromthe apps directory, /etc/straza/apps/demo-tools.yaml");
   });
 
@@ -371,7 +452,7 @@ describe("the review page", () => {
     vi.mocked(getDraft).mockResolvedValue(fileDraft([DETAIL.draft.items[6]]));
     mount();
     await title();
-    expect(within(bar() as HTMLElement).getByRole("button", { name: discardKeep("old-tools") })).toBeTruthy();
+    expect(within(band() as HTMLElement).getByRole("button", { name: discardKeep("old-tools") })).toBeTruthy();
   });
 
   it("contacts a proposed server and reads the draft again", async () => {
@@ -396,7 +477,10 @@ describe("the review page", () => {
       const stale = document.querySelector("[data-stale]") as HTMLElement;
       expect(stale.textContent).toContain(STALE_TITLE);
       expect(stale.textContent).toContain(STALE.sentence);
-      expect(within(bar() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN }).getAttribute("aria-disabled")).toBe("true");
+      const publish = within(band() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN });
+      expect([publish.getAttribute("aria-disabled"), publish.getAttribute("title")]).toEqual(["true", "Check the draft again before publishing."]);
+      await userEvent.click(publish);
+      expect(screen.queryByRole("dialog")).toBeNull();
       await userEvent.click(within(stale).getByRole("button", { name: CHECK_AGAIN }));
       expect(rebaseDraft).toHaveBeenCalledWith("41", { revision: 2 });
       await waitFor(() => expect(getDraft).toHaveBeenCalledTimes(2));

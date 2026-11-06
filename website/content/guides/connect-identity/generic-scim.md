@@ -255,7 +255,9 @@ Errors use the SCIM error schema, with `status` as a string and a `detail` sente
 | `403` | none | A token whose scope lacks `scim:read` or `scim:write`. |
 | `404` | none | An unknown id. |
 | `409` | `uniqueness` | A duplicate `userName` or `externalId`, with the detail "userName or externalId already exists". |
+| `500` | none | Straza could not save a deactivation by PATCH, PUT or DELETE. The status, the revocation record and the event that tells the other servers are one write, so the user stays active and a resend deactivates it. When the write ended without a clear answer, Straza asks the database whether it was saved. A saved deactivation answers as any deactivation does, and only when the database cannot answer does the detail say Straza cannot tell whether it was saved. Either detail names the request id and says how long the server that answered keeps refusing the user. |
 | `501` | none | A POST or DELETE on `/Groups`, and a POST to `/Bulk`. |
+| `503` | none | Straza could not read the token from its database. The detail says to try again in a moment. A real token and a forged one get the same answer. |
 
 The detail of a refused filter names the form the server accepts:
 
@@ -298,10 +300,10 @@ strazactl api-token revoke 1316c606-8b9f-4f14-b590-a74f83297674
 ```
 {{< /command >}}
 
-{{< see >}}`revoked 1316c606-8b9f-4f14-b590-a74f83297674`.{{< /see >}}
+{{< see >}}`revoked the admin API token 1316c606-8b9f-4f14-b590-a74f83297674, matched by its id.`{{< /see >}}
 {{< /cli >}}
 
-The next request with that token answers `401` with the detail `admin API token rejected: unknown, expired or revoked (strazactl api-token list)`.
+The next request with that token answers `401` with the detail `admin API token rejected: this token is unknown, expired or revoked. Mint a new token in the console under Settings, API tokens, or ask a Straza administrator to mint one. Then set STRAZA_API_TOKEN, or the token setting of the connector that sent this request, to the new token.`.
 
 ## Caveats {.nostep}
 

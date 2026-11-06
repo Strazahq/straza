@@ -86,10 +86,13 @@ export function setLeaveGuard(g: LeaveGuard | null) {
 // navigate pushes the area's address, with the screen's segments when
 // given, and tells every subscriber. replace swaps the current entry
 // instead of pushing, for a tab change that should not grow the back stack.
-// A registered guard is asked first when the location changes.
-export function navigate(key: RouteKey, rest: string[] = [], replace = false) {
+// A registered guard is asked first when the location changes. before runs
+// just ahead of the move and only when the move happens, so a hand-off for
+// the next screen is never left behind by a departure the person stayed from.
+export function navigate(key: RouteKey, rest: string[] = [], replace = false, before?: () => void) {
   const next: Location = { kind: "route", key, rest: rest.filter(Boolean) };
   const go = () => {
+    if (before) before();
     const path = pathFor(key, rest);
     if (window.location.pathname !== path) {
       if (replace) window.history.replaceState(null, "", path);

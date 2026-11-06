@@ -238,7 +238,9 @@ func TestDecideApproveLane(t *testing.T) {
 		if d.Effect != policy.EffectDeny || d.RuleID != "needs-human" || recorded || !j.FailClosed {
 			t.Fatalf("offline approve = %+v recorded %v, want a fail-closed deny the service records", d, recorded)
 		}
-		if d.Reason != "Straza: security layer unreachable for an approval-gated action. Denied (fail-closed)" {
+		if d.Reason != "Straza: security layer unreachable for an approval-gated action. Denied (fail-closed). "+
+			"This is a connection problem, not a policy decision. Try the call once more in a minute, "+
+			"and if it is denied again, tell the user." {
 			t.Errorf("deny reason not the verbatim unreachable string: %q", d.Reason)
 		}
 	})

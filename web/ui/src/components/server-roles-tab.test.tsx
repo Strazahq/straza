@@ -97,7 +97,7 @@ describe("the Roles tab of a server", () => {
     expect(reach()).toEqual({ head: "2 of 3tools", cells: ["on", "on", "off"], names: ["echo", "add"] });
     expect(cells[1].getAttribute("title")).toBe("echo, add");
     expect(cells[2].textContent).toBe("0");
-    expect(line().textContent).toBe("Nobody holds it yet. Your identity manager assigns it: in midPoint it is AR:demo-tools-readers within a sync cycle.");
+    expect(line().textContent).toBe("Nobody holds it yet. Your IGA assigns it as AR:demo-tools-readers, within a sync cycle.");
     expect(within(row()).getByRole("button", { name: "Edit access" }).getAttribute("aria-disabled")).toBeNull();
     expect(within(row()).getByRole("button", { name: "Delete" }).getAttribute("aria-disabled")).toBeNull();
   });

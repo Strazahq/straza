@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -78,7 +80,9 @@ func (a *App) gatewayAuth(w http.ResponseWriter, r *http.Request) (authn.Claims,
 		return authn.Claims{}, policy.Subject{}, false
 	}
 	if a.denylist.blocked(claims) {
-		apiError(w, http.StatusForbidden, a.denylist.revokedMsg(claims, revokedSessionMsg, revokedIdentityMsg))
+		msg := a.denylist.revokedMsg(claims, revokedSessionMsg, revokedIdentityMsg)
+		a.auditDoorRefusal(r, claims, "revoked", msg)
+		apiError(w, http.StatusForbidden, msg)
 		return authn.Claims{}, policy.Subject{}, false
 	}
 	// The data plane enforces the minimum attestation from token claims
@@ -87,9 +91,9 @@ func (a *App) gatewayAuth(w http.ResponseWriter, r *http.Request) (authn.Claims,
 	// the request path.
 	if minAtt := a.cfg.Governance.MinAttestation; minAtt != "" &&
 		config.AttestationRank(claims.Attestation) < config.AttestationRank(minAtt) {
-		apiError(w, http.StatusForbidden, fmt.Sprintf(
-			"Straza: attestation level %q is below the required level %q. "+managedInstallStep,
-			claims.Attestation, minAtt))
+		msg := fmt.Sprintf("Straza: attestation level %q is below the required level %q. "+managedInstallStep, claims.Attestation, minAtt)
+		a.auditDoorRefusal(r, claims, "attestation", msg)
+		apiError(w, http.StatusForbidden, msg)
 		return authn.Claims{}, policy.Subject{}, false
 	}
 	e, ok := a.subjects.forToken(claims)
@@ -125,12 +129,19 @@ func (a *App) handleMCP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleMCPPost(w http.ResponseWriter, r *http.Request, claims authn.Claims, sub policy.Subject) {
+	// gatewayAuth verified the session, so the body gets the bulk window.
+	extendBodyRead(w, r, bulkBodyReadTimeout)
 	var req rpcRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, a.cfg.Server.MCPBodyLimit()))
 	if err := dec.Decode(&req); err != nil {
 		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
+		var netErr net.Error
+		switch {
+		case errors.As(err, &tooLarge):
 			a.refuseLargeBody(w, r, claims, bufferedRequestID(dec.Buffered()), tooLarge.Limit)
+			return
+		case errors.Is(err, os.ErrDeadlineExceeded) || errors.As(err, &netErr) && netErr.Timeout():
+			a.refuseSlowBody(w, r, claims, bufferedRequestID(dec.Buffered()))
 			return
 		}
 		writeRPCError(w, nil, -32700, "parse error: single JSON-RPC message expected (batching is not supported)")
@@ -180,6 +191,30 @@ func (a *App) refuseLargeBody(w http.ResponseWriter, r *http.Request, claims aut
 		status, id = http.StatusRequestEntityTooLarge, json.RawMessage("null")
 	}
 	writeJSON(w, status, map[string]any{"jsonrpc": "2.0", "id": id, "error": rpcError{Code: -32600, Message: fmt.Sprintf(largeBodyMsg, limit)}})
+}
+
+// slowBodyMsg is the agent's answer to an MCP request whose body stopped
+// arriving until the read deadline of its connection passed, and
+// slowBodyLog the operator's Warn line of it.
+const (
+	slowBodyMsg = "Straza: this MCP request was not read, because its body arrived too slowly and Straza cut it off. " +
+		"Check the network between this machine and Straza, or send less in one call, then try the call once more. If it fails again, tell the user."
+	slowBodyLog = "strazad cut an MCP request whose body arrived too slowly. One client on a slow or stalled link causes this. " +
+		"When many clients do, check the network in front of strazad"
+)
+
+// refuseSlowBody answers an MCP request whose body read hit its deadline
+// with JSON-RPC error -32600 and slowBodyMsg, and logs slowBodyLog once with
+// the session. With the request's id, from the part that arrived, the
+// answer is HTTP 200, as refuseLargeBody's is, and with no id it is HTTP 408
+// and id null. The request is never read, so it writes no audit record.
+func (a *App) refuseSlowBody(w http.ResponseWriter, r *http.Request, claims authn.Claims, id json.RawMessage) {
+	a.reqlog(r.Context()).Warn(slowBodyLog, "session", claims.Session)
+	status := http.StatusOK
+	if id == nil {
+		status, id = http.StatusRequestTimeout, json.RawMessage("null")
+	}
+	writeJSON(w, status, map[string]any{"jsonrpc": "2.0", "id": id, "error": rpcError{Code: -32600, Message: slowBodyMsg}})
 }
 
 // bufferedRequestID answers the id of a JSON-RPC request from prefix, the

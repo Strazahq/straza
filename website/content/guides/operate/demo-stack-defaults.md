@@ -339,7 +339,7 @@ The last check is `agent-sam` reporting `(healthy)` in the listing of [What runs
 |---|---|---|
 | `Straza: approval ticket … is pending.` from `straza exec` | A ticket rule holds the command until a person decides | Decide it under **Approvals**, then run the same command again within the grant window |
 | The same sentence again, with a new reference, after an approval | The grant was used once already, or its hour passed | Approve the new ticket, then run the same command again |
-| `Straza: user is disabled. Contact your administrator Refusing to run.` from `straza exec` | The agent is disabled in midPoint, and Straza refuses its session | Enable the agent in midPoint |
+| `Straza: this user is disabled, so Straza refuses this request. Ask your IGA owner or a Straza administrator to enable the user. Refusing to run.` from `straza exec` | The agent is disabled in midPoint, and Straza refuses its session | Enable the agent in midPoint |
 | `eval-seed` reads `Exited (1)` | The seeder hit a `FATAL` step | Read its log from the end, fix the cause it names, then run `up eval-seed` on the same files |
 | **Needs attention** on Overview says a sink holds parked events | The sink's target, Elasticsearch here, did not answer | Start Elasticsearch with the same files, then press **Replay elastic** |
 

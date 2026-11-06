@@ -118,6 +118,8 @@ Then enroll headless:
   straza enroll --server <strazad-url> --headless --user build-bot
 ```
 
+On a machine with a managed install, the last line leaves out `--server`, because the managed configuration names the server and the service enrolls there.
+
 
 {{< fails >}}
 ``A key for you already exists on this machine. Run `straza keygen --force` to replace it, and then have an admin register the new public key, because the old one stops working.``
@@ -180,6 +182,12 @@ straza enroll --server http://127.0.0.1:8420 --headless --user build-bot
 ```text
 Enrolled headless as build-bot. The Straza background service holds this agent's key and starts each of its sessions.
 ```
+
+
+{{< fails >}}
+``straza: the identity provider refused the agent's sign-in (invalid_client): the key that signed the request is not the key registered for build-bot. On the agent's machine, run `straza keygen --force --user build-bot` to make a new key. Have an admin register the public key it prints, with `strazactl users nhi-key set` or in the console. Then run `straza enroll --server http://127.0.0.1:8420 --headless`. Check the registered key or client, and that the user is an active agent``
+: The service on this machine holds a different key from the one registered for build-bot, for example after `straza keygen --force` without a new registration. Make a new key, register it, and enroll again.
+{{< /fails >}}
 
 ## Prove a governed call
 
@@ -271,6 +279,13 @@ Check the uid or the SID before you delete, because each folder there holds one 
 
 
 To retire the agent, soft-delete the user with `DELETE /v1/admin/users/{id}`. Neither the console nor `strazactl` has this. The delete revokes its sessions, ends its assignments, and removes its assertion key and per-user OAuth grants, with audit records for the changes.
+
+The delete, the end of the assignments, the revocation record and the event that tells the other servers commit as one write. When the database refuses it, nothing changes, and the answer says so.
+
+{{< fails >}}
+`user build-bot was not deleted: Straza could not write the delete to its database, so nothing changed. This server already refuses the user, and the other servers still treat the user as before. Run the delete again. Without a saved delete, this server's refusal lasts until it restarts, or until strazactl users unlock build-bot lifts it. The strazad log names the cause under request id REQUEST-ID.`
+: Send the same request again once the database answers, and look up REQUEST-ID in the strazad log for the cause. A later status change does not lift the server's refusal, because the user still reads active. When the answer instead says Straza could not tell whether its database saved the delete, read the user back first: a deleted user answers 404.
+{{< /fails >}}
 
 To end the agent's sessions and stop new ones, and keep the identity, revoke only the key.
 

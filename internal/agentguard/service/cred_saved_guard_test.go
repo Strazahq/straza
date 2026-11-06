@@ -79,7 +79,7 @@ func TestCredSavedSessionsOnAnotherMachine(t *testing.T) {
 			w := httptest.NewRecorder()
 			newAPI(r.s, Options{Log: slog.New(slog.DiscardHandler)}).routes().ServeHTTP(w, asCaller(tc.req(), alice.UID))
 			var refusal localapi.Refusal
-			if w.Code != http.StatusForbidden || json.Unmarshal(w.Body.Bytes(), &refusal) != nil || refusal.Error != machineChangedSentence {
+			if w.Code != http.StatusForbidden || json.Unmarshal(w.Body.Bytes(), &refusal) != nil || refusal.Error != personChangedFor(r.srv.serverURL()) {
 				t.Fatalf("%s on the cloned machine: %d %s, want 403 with the machine-changed sentence", tc.name, w.Code, w.Body)
 			}
 			if sent := r.sent.carrying(saved.Sessions[0].Token); len(sent) != 0 {

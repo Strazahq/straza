@@ -52,8 +52,11 @@ export const PHASE_WORD: Record<Phase, string> = { waiting: "Waiting", approved:
 export const phaseTone = (p: Phase): "warn" | "ok" | "danger" | "plain" => (p === "waiting" ? "warn" : p === "approved" || p === "granted" || p === "used" ? "ok" : p === "denied" ? "danger" : "plain");
 export const KIND_WORD: Record<Kind, string> = { hold: "hold", ticket: "ticket" };
 // WAITING_LINE is the small line under a waiting row's kind: what the agent
-// does while the request waits.
+// does while the request waits. WAITING_LINE_HOOK replaces the hold's line
+// for a hold the hook raised, whose call was refused and runs on a retry.
 export const WAITING_LINE: Record<Kind, string> = { hold: "the agent is waiting now", ticket: "runs later, after a yes" };
+export const WAITING_LINE_HOOK = "runs on the agent's retry, after a yes";
+export const waitingLine = (r: ApprovalRow) => (kindOf(r) === "hold" && r.lane === "hook" ? WAITING_LINE_HOOK : WAITING_LINE[kindOf(r)]);
 export const CHANNEL_WORD: Record<string, string> = { console: "the console", slack: "Slack", phone: "the phone", browser: "the browser", api: "the API" };
 export const channelWord = (c: string | undefined) => CHANNEL_WORD[c || ""] || (c ? c : "the console");
 
@@ -80,7 +83,7 @@ export function stateLine(r: ApprovalRow, phase: Phase, now = Date.now()): strin
   const by = (r.decidedByName || r.decidedBy) ? "by " + (r.decidedByName || r.decidedBy) + " from " + channelWord(r.channel) + ", " + relTimeText(r.decidedAt ?? undefined) : "";
   const reason = r.decidedReason ? " · “" + r.decidedReason + "”" : "";
   switch (phase) {
-    case "waiting": return WAITING_LINE[kindOf(r)];
+    case "waiting": return waitingLine(r);
     case "granted": return withinWords(r.grantExpiresAt, now) + (by ? " · " + by : "");
     case "used": return "by session " + shortID(r.consumedBy) + (r.consumedAt ? " · " + relTimeText(r.consumedAt) : "");
     case "lapsed": return "approved by " + (r.decidedByName || r.decidedBy) + ", never used";
@@ -117,11 +120,14 @@ export const REQUEST_TITLE = "Approval request";
 export const LANE_WORD: Record<string, string> = { gateway: "through the MCP gateway", hook: "from the hook on the agent's machine" };
 export const laneWord = (lane: string) => LANE_WORD[lane] || lane;
 // The strip under the title: the kind in plain words, and what happens when
-// the time runs out.
+// the time runs out. KIND_SAYS_HOOK replaces the hold's words for a hold the
+// hook raised, since the hook refused the call and the agent retries it.
 export const KIND_SAYS: Record<Kind, string> = {
   hold: "The agent is waiting right now for your answer.",
   ticket: "The agent moved on. It runs this only after a yes.",
 };
+export const KIND_SAYS_HOOK = "The agent was told to retry the call after your answer.";
+export const kindSays = (r: ApprovalRow) => (kindOf(r) === "hold" && r.lane === "hook" ? KIND_SAYS_HOOK : KIND_SAYS[kindOf(r)]);
 export const atZero = (r: ApprovalRow) => "then the " + (kindOf(r) === "hold" ? "call" : "request") + " is denied";
 // askVerb ends the line over the call: a command runs and a tool is called,
 // and a decided request reads in the past.
@@ -130,11 +136,22 @@ export function askVerb(r: ApprovalRow): string {
 }
 export const ON_SERVER = "on";
 export const RUNS_WHERE: Record<string, string> = { gateway: "through the MCP gateway", hook: "on its own machine" };
+// RUNS_WHERE_ALONE says the same as a sentence that stands on its own, for
+// the list chip's tooltip, where no agent name comes before it.
+export const RUNS_WHERE_ALONE: Record<string, string> = { gateway: "Runs through the MCP gateway.", hook: "Runs on the agent's machine." };
+// runsWhere says where the call runs, for the line under the call and the
+// list's chip alike. Only an MCP call runs where its lane says. Any other
+// call runs through the hook on the agent's machine, even when an
+// approval_request through the gateway asked for it.
+const runsLane = (r: Pick<ApprovalRow, "summary" | "lane">) => (callOf(r.summary).whereKind === "server" ? r.lane : "hook");
+export const runsWhere = (r: Pick<ApprovalRow, "summary" | "lane">) => RUNS_WHERE[runsLane(r)] || runsLane(r);
+// runsWhereAlone is runsWhere for the list chip's tooltip, by the same rule.
+export const runsWhereAlone = (r: Pick<ApprovalRow, "summary" | "lane">) => RUNS_WHERE_ALONE[runsLane(r)] || runsLane(r);
 // metaLine is the one line under the call: where it runs, when it was asked
 // and who sponsors the agent. sponsor is empty when the record names none,
 // and the part is then left out.
 export function metaLine(r: ApprovalRow, sponsor: string, seat: Seat): string {
-  return [RUNS_WHERE[r.lane] || r.lane, "asked " + relTimeText(r.createdAt), sponsor ? sponsoredWords(sponsor === seat.user ? "you" : sponsor) : ""].filter(Boolean).join(" · ");
+  return [runsWhere(r), "asked " + relTimeText(r.createdAt), sponsor ? sponsoredWords(sponsor === seat.user ? "you" : sponsor) : ""].filter(Boolean).join(" · ");
 }
 // The parameters, folded under the call. The hint beside the word says how
 // many values the fold holds, or why it holds no table.
@@ -159,13 +176,19 @@ export const GRANT_UNKNOWN = "the grant window the rule sets";
 // The two boxes under the reason: what a yes does and what a no does.
 export const IF_APPROVE = "If you approve";
 export const IF_DENY = "If you deny";
-// approveDoes is the sentence of the approve box. A hold releases the one
-// call on the line. A ticket covers what the approval's fingerprint binds:
+// HOOK_HOLD_RUNS is what a yes does to a hold the hook raised. The hook
+// refused the call at once, and only the agent's identical retry inside the
+// rule's retry window runs. The record carries no retry window before the
+// decision, so the sentence names no number.
+const HOOK_HOLD_RUNS = "The call runs once, when the agent retries it soon after your yes.";
+// approveDoes is the sentence of the approve box. A hold on the gateway
+// releases the one call on the line, and a hold the hook raised runs on the
+// agent's retry. A ticket covers what the approval's fingerprint binds:
 // the exact call, or the tool whatever its parameters. A record that carries
 // no binding scope claims neither. grant words the ticket's grant window, or
 // GRANT_UNKNOWN.
 export function approveDoes(r: ApprovalRow, grant: string | null): string {
-  if (kindOf(r) === "hold") return "The call runs now, once.";
+  if (kindOf(r) === "hold") return r.lane === "hook" ? HOOK_HOLD_RUNS : "The call runs now, once.";
   const within = "within " + (grant || GRANT_UNKNOWN);
   if (r.bindingScope === "tool_identity") return "Its next call of this tool runs, once, " + within + ", whatever the parameters.";
   if (r.bindingScope === "call") return "Its next try of this exact " + (callOf(r.summary).whereKind === "shell" ? "command" : "call") + " runs, once, " + within + ".";
@@ -190,6 +213,7 @@ export const FACT_WHO = "Who can decide";
 export const WHO_HELP = DECIDES_HELP;
 export const FACT_DECIDE_BY = "Decide by";
 export const DECIDE_BY_HELP_HOLD = "The agent's call is waiting on the line for this long. When the time runs out the call is denied and the agent is told to try again later.";
+export const DECIDE_BY_HELP_HOOK = "The hook refused the call at once and told the agent to retry it after a decision. When the time runs out the request is denied.";
 export const DECIDE_BY_HELP_TICKET = "The agent was told to wait and will call again. When the time runs out the request is denied.";
 // decideByRest is the plain part after the clock: the deadline and what
 // happens at zero.
@@ -256,6 +280,7 @@ export const decideTitle = (v: Verdict, r: ApprovalRow) => (v === "approve" ? "A
 export function decideBody(v: Verdict, r: ApprovalRow): string {
   if (v === "deny") return "The call is denied and the agent is told who denied it.";
   if (kindOf(r) === "ticket") return "The next " + callOf(r.summary).call + " call by " + (r.username || r.user) + ", in any of their sessions, within the grant window runs, once.";
+  if (r.lane === "hook") return HOOK_HOLD_RUNS;
   return "The call runs now, once, and the agent's session gets the answer.";
 }
 export function decideHelp(v: Verdict, r: ApprovalRow): string {
@@ -263,6 +288,7 @@ export function decideHelp(v: Verdict, r: ApprovalRow): string {
     ? "A denied ticket keeps the same call from " + (r.username || r.user) + " refused in every session until " + absTime(r.expiresAt) + ", and no new request opens for it. The audit chain records who denied it and the reason."
     : "A denied hold refuses this one call, and the same call later raises a new request. The audit chain records who denied it and the reason.";
   if (kindOf(r) === "ticket") return "A ticket is used by the first matching call inside the grant window and then it is spent. The audit chain records the approval and the use as two records.";
+  if (r.lane === "hook") return "The hook refused the call at once and told the agent to retry it after a decision. Your yes lets one retry of the same call from the same session run, if it comes within the retry window the rule sets. A retry after that raises a new request.";
   return "Approving a hold releases this one call. The same call later raises a new request.";
 }
 export const REASON_LABEL = "Reason, optional";
@@ -286,7 +312,8 @@ export const notYours = (server: string) => "This request is no longer yours to 
 export function approvedToast(r: ApprovalRow): string {
   const c = callOf(r.summary).call;
   const who = r.username || r.user;
-  return kindOf(r) === "ticket" ? "Approved. " + c + " may run once within the grant window for " + who + "." : "Approved. " + c + " runs now for " + who + ".";
+  if (kindOf(r) === "ticket") return "Approved. " + c + " may run once within the grant window for " + who + ".";
+  return r.lane === "hook" ? "Approved. " + c + " runs for " + who + " if the agent retries it soon." : "Approved. " + c + " runs now for " + who + ".";
 }
 export const deniedToast = (r: ApprovalRow) => "Denied. " + (r.username || r.user) + " is told " + callOf(r.summary).call + " was denied.";
 

@@ -339,7 +339,7 @@ func TestSecondPersonRefusal(t *testing.T) {
 	}
 	bot := seedAgent(t, app, "bot", "lee", "dev")
 	gonebot := seedAgent(t, app, "gonebot", "kim", "dev")
-	if _, err := app.store.Users().SoftDelete(ctx, gonebot.ID); err != nil {
+	if _, err := app.store.Users().SoftDelete(ctx, gonebot.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	as := func(u store.User) draftCaller {

@@ -3,11 +3,12 @@
 // import this file, so none of it lands in the console's entry page. The
 // server's own sentences, a finding's words and a refusal's, are shown as
 // the server answered them and never live here.
-import type { ApiError, DraftCoverage, DraftDoor, DraftKind, DraftObjectName, DraftPrincipal, DraftState, FindingClass, GainOutcome } from "./api";
-import type { CoverLead, Lead, ObjectsMove } from "./drafts-access";
+import type { ApiError, DraftDoor, DraftKind, DraftObjectName, DraftPrincipal, DraftState, FindingClass, GainOutcome } from "./api";
+import type { ObjectsMove } from "./drafts-access";
 import { AGENT_LOOSEN_CODE, type ChangeCount, type ChangeWhat, type ConfirmBlock, type RuleMark, type Shown } from "./drafts-model";
 import { type Nouns, cap, counted } from "./object-words";
-import { list, orList, plural } from "./policy-words";
+import type { Bucket } from "./policy-model";
+import { list, plural } from "./policy-words";
 import { WRITE_UNCONFIRMED } from "./say";
 
 const bare = (s: string) => s.replace(/[.\s]+$/, "");
@@ -39,7 +40,7 @@ export const LOAD_MORE = "Load more";
 export const LEGEND = "A draft changes nothing until a person publishes it. Discarding one keeps your reason with it, where whoever drafted it reads it.";
 export const EMPTY_SEARCH = "No loaded draft matches the filter.";
 export const EMPTY: Record<Tab, { title: string; body: string }> = {
-  waiting: { title: "No draft waits for review", body: "Changes to servers, roles, access and approval sets land here as drafts, from the console, strazactl, an agent or the apps directory. Nothing is live until a person publishes one." },
+  waiting: { title: "No draft waits for review", body: "Changes to servers, roles, access and policy sets land here as drafts, from the console, strazactl, an agent or the apps directory. Nothing is live until a person publishes one." },
   published: { title: "No draft was published yet", body: "Every publish lands here with who published it and when, so this tab is the change record." },
   discarded: { title: "No draft was discarded", body: "A discarded draft stays here with its reason, and nothing live changed." },
   expired: { title: "No draft expired", body: "An agent's open draft expires 14 days after its latest revision, and nothing live changes." },
@@ -85,6 +86,9 @@ export function decidedWords(state: DraftState, who: string | undefined): string
 // ---- the review page ----
 
 export const draftTitle = (id: string) => "Draft " + id;
+// crumbLabel is the breadcrumb of a draft's page, after the area's name.
+export const crumbLabel = (area: string, id: string) => area + " / " + draftTitle(id);
+export const idChip = (id: string) => "draft " + id;
 export const subjectDraft = (id: string) => "Draft " + id;
 export const readingDraft = (id: string) => "Reading draft " + id + ".";
 export const MISSING_TITLE = "This draft is not here";
@@ -95,6 +99,14 @@ export const STATE_WORD: Record<Shown, string> = { ready: "Ready to publish", re
 export const cameInLine = (door: DraftDoor, source: string | undefined, client: string | undefined) =>
   doorWords(door) + (source ? ", " + source : "") + (door === "straza-app" && client ? ", from " + client : "");
 export const FACT = { by: "Drafted by", door: "Came from", revisions: "Revisions", checked: "Last checked", expires: "Expires", undoes: "Undoes", needs: "Who may publish" };
+// The meta line under a draft's title: who drafted it, what kind of author
+// that is in brackets, the door, the revision, when, and the expiry, then
+// the Details toggle that opens the facts.
+export const META_DOT = "·";
+export const kindOfAuthor = (line: string) => "(" + line + ")";
+export const revisionWord = (n: number) => "revision " + n;
+export const expiresWord = (day: string) => "expires " + day;
+export const DETAILS = "Details";
 export const revisionLine = (n: number, who: string, door: string, at: string, mechanical: boolean) =>
   "rev " + n + " by " + who + " in " + doorWords(door) + " at " + at + (mechanical ? ", checked again against live state" : "");
 export const checkedLine = (at: string, version: string) => at + (version ? ", against live policy " + version : "");
@@ -104,7 +116,7 @@ export const MAY_PUBLISH_ALL = "You may publish all of it.";
 export const WAITS_WHOLE = "A draft publishes whole, so it waits under Drafts for someone who may publish all of it.";
 export const NO_NEEDS = "No object in it needs a grant to publish.";
 
-const KIND_WORD: Record<DraftKind, string> = { App: "the server", Role: "the role", PolicySet: "the approval set" };
+const KIND_WORD: Record<DraftKind, string> = { App: "the server", Role: "the role", PolicySet: "the policy set" };
 
 // objectWords names a Kind/Name object in words.
 export function objectWords(object: string): string {
@@ -137,31 +149,84 @@ export const stripWord: Record<"refused" | "risk" | "warning" | "unchecked", (n:
 export const stripJump = (n: number, word: string) => n + " " + word + ": go to the checks";
 export const NOTHING_TO_CONFIRM = "Nothing to confirm";
 
+// Before you publish: the band under the head of an open draft.
+export const BAND_LABEL = "Before you publish";
+export const GO_TO_CHECKS = "Go to the checks";
+
+// In this draft: one row per item, above the cards.
+export const IN_DRAFT = "In this draft";
+export const inDraftCount = (n: number) => (n === 1 ? "1 object" : n + " objects, published together or not at all");
+export const IN_DRAFT_COLUMN = { kind: "Kind", name: "Name", change: "Change", does: "What publishing does" };
+
 // What changes.
 export const CHANGES_TITLE = "What changes";
-const KIND_COUNTED: Record<DraftKind, [string, string]> = { App: ["MCP server", "MCP servers"], Role: ["role", "roles"], PolicySet: ["approval set", "approval sets"] };
-const countPhrase = (c: ChangeCount) => {
-  const noun = plural(c.n, ...KIND_COUNTED[c.kind]);
-  if (c.what === "new") return noun.replace(/^(\d+) /, "$1 new ");
-  if (c.what === "changed") return noun.replace(/^(\d+) /, "$1 changed ");
-  return noun + (c.what === "off" ? " turned off" : " removed");
-};
-export const changesLede = (counts: ChangeCount[]) => (counts.length ? list(counts.map(countPhrase)) + ". They go live together or not at all." : "This draft holds no object.");
-export const changesLedePublished = (counts: ChangeCount[]) => (counts.length ? list(counts.map(countPhrase)) + ". They went live together." : "This draft held no object.");
-export const ITEM_KIND: Record<DraftKind, string> = { App: "MCP server", Role: "role", PolicySet: "approval set" };
-// roleKindWords names a role's kind on its card: the server that owns it,
-// or the kind the Roles area names when no server owns it.
-export function roleKindWords(kind: string, server: string): string {
-  const k: Record<string, string> = { application: "application role", business: "business role", approver: "approver role", straza: "Straza role" };
-  return server ? "role · owned by " + server : k[kind] || "role";
-}
+const KIND_COUNTED: Record<DraftKind, [string, string]> = { App: ["MCP server", "MCP servers"], Role: ["role", "roles"], PolicySet: ["policy set", "policy sets"] };
+export const ITEM_KIND: Record<DraftKind, string> = { App: "MCP server", Role: "Role", PolicySet: "Policy set" };
+const ROLE_KIND: Record<string, string> = { application: "Application role", business: "Business role", approver: "Approver role", straza: "Straza role" };
+// roleKind names a role's kind as the Roles area does.
+export const roleKind = (kind: string) => ROLE_KIND[kind] || ITEM_KIND.Role;
+export const ownedBy = (server: string) => "owned by " + server;
+// roleKindWords names a role's kind on its card, with the server that owns
+// it when one does.
+export const roleKindWords = (kind: string, server: string) => roleKind(kind) + (server ? " · " + ownedBy(server) : "");
 export const MARK: Record<ChangeWhat, string> = { new: "new", changed: "changes", off: "turned off", removed: "removed" };
+// holdersChip says who holds a role the draft touches.
+export const holdersChip = (n: number) => (n === 0 ? "nobody holds it yet" : n === 1 ? "1 person holds it" : n.toLocaleString("en-US") + " people hold it");
+// The summary chips of a changed role: the tools and the objects that join
+// it (+) and leave it (-), in the server's own nouns.
+export type Sign = "+" | "-";
+export const toolsChip = (sign: Sign, n: number) => sign + n + " " + (n === 1 ? "tool" : "tools");
+export const objectsChip = (sign: Sign, n: number, w: Nouns) => sign + counted(n, w);
+export const everyChip = (sign: Sign, w: Nouns) => sign + everyType(w);
+// unchangedFold folds the chips a role keeps once there are more than four.
+export const unchangedFold = (n: number) => n + " unchanged";
+// OUTCOME_OF names a policy set's outcomes in the policy pages' words.
+const OUTCOME_OF: Record<Bucket, GainOutcome> = { hum: "needs-approval", deny: "denied", allow: "runs" };
+export const outcomesWords = (bs: Bucket[]) => bs.map((b) => OUTCOME[OUTCOME_OF[b]]).join(" · ");
+// fileFold heads the fold of a card's file: as it will be published while
+// the draft is open, else as it was published or drafted.
+export const fileFold = (name: string, state: DraftState) =>
+  name + ".yaml, as it " + (state === "open" ? "will be published" : state === "published" ? "was published" : "was drafted");
+export const FILE_MASKED = "A value the server keeps secret reads [REDACTED] here.";
+export const openLive = (name: string) => "Open " + name;
+// LIVE_LIST is what the live link reads to find a server's or a role's
+// page, and notLive says the object it names is not live now.
+export const LIVE_LIST: Record<"App" | "Role", string> = { App: "The server list", Role: "The role list" };
+export const notLive = (name: string) => name + " is not live now, so it has no page to open. Reload the draft to read it against live state again.";
+
+// What publishing does, one line per row of In this draft. A published
+// draft says what its publish did.
+export function startsLine(remote: boolean, tools: number | null, past: boolean): string {
+  const starts = past ? "Started it" : "Starts it";
+  if (tools !== null) return starts + (past ? " and offered its " : " and offers its ") + plural(tools, "tool", "tools") + " to the roles that reach them.";
+  return starts + "." + (remote && !past ? " Its tools are not read yet." : "");
+}
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+// changesLine names what publishing changes on a live object: the first pin
+// of a server's object type by the server's plural, then the fields that
+// change, or none when nothing the object's page shows changes.
+export function changesLine(pins: string, fields: string[], past: boolean, none: string): string {
+  const parts = [pins ? (past ? "pinned " : "pins ") + pins : "", fields.length ? (past ? "changed " : "changes ") + list(fields.map(lowerFirst)) : ""].filter(Boolean);
+  return parts.length ? cap(list(parts)) + "." : none;
+}
+// reachesLine says what a new role reaches: its tools on each server, or
+// the roles it implies when it reaches none of its own.
+export function reachesLine(bindings: { app: string; tools: string[] }[], implies: string[]): string {
+  if (!bindings.length) return implies.length ? "Implies " + list(implies) + "." : "Reaches no tool.";
+  return "Reaches " + list(bindings.map((b) => (b.tools.includes("*") ? "every tool of " + b.app : plural(b.tools.length, "tool", "tools") + " of " + b.app))) + ".";
+}
+// rulesLine counts a policy set's rules that are new, edited and removed.
+export function rulesLine(c: { new: number; edited: number; removed: number }): string {
+  const parts = (["new", "edited", "removed"] as const).filter((k) => c[k]).map((k) => plural(c[k], "rule", "rules") + " " + k);
+  return parts.length ? cap(list(parts)) + "." : "Changes no rule.";
+}
+
 export const NOW_AFTER = { field: "Field", now: "Now", after: "After publishing" };
 export const NOTHING_STARTS = "Nothing starts or connects before publishing.";
 export const TOOLS_ROW = "Tools";
 export const TOOLS_NOT_READ = "not read yet";
 export const contactedLine = (host: string, at: string, n: number) => "Contacted " + host + " at " + at + ": " + plural(n, "tool", "tools") + " read.";
-export const NOT_READABLE_DOC = "The document does not read as YAML, so this card shows it as text under Files.";
+export const NOT_READABLE_DOC = "The document does not read as YAML, so the file below shows it as text.";
 // toolsOn labels a role's tools: Tools alone when the role reaches one
 // server, which its card names, else the server too.
 export const toolsOn = (server: string, one: boolean) => (one ? TOOLS_ROW : "Tools on " + server);
@@ -169,25 +234,18 @@ export const IMPLIES = "Implies";
 export const DESCRIPTION = "Description";
 export const NOTHING = "nothing";
 export const EVERY_TOOL = "every tool, and tools added later";
-export const toolsWords = (tools: string[]) => (tools.includes("*") ? EVERY_TOOL : tools.length ? tools.join(", ") : NOTHING);
-// toolsSame is a role's tools row when no tool joins or leaves it.
-export const toolsSame = (tools: string[]) => (tools.includes("*") ? EVERY_TOOL : plural(tools.length, "tool", "tools")) + ", unchanged";
-export const TOOL_COLUMN = (server: string) => "Tool on " + server;
 // The objects a role covers, in its server's own words.
 export const objectsLabel = (w: Nouns) => cap(w.plural);
 export const everyType = (w: Nouns) => "every " + w.type;
 export const addedMark = (value: string) => "+ " + value;
-export const REACHED = "reached";
-export const NOT_REACHED = "not reached";
-export const JOINS = "joins the role";
-export const LEAVES = "leaves the role";
 export const RULE_COLUMN = { rule: "Rule", does: "What it does" };
 export const RULE_MARK: Record<RuleMark, string> = { new: "new", edited: "edited", removed: "removed", same: "" };
-export const setFold = (name: string) => name + ".yaml, as it would be published";
 export const OFF_LINE = "Off after publishing: the set stays stored and gates nothing.";
 export const GOES_WITH = "What goes with it";
 export const GOES_WITH_ALL = "What goes with the removals";
-export const NO_FIELD_CHANGE = "No field the server page shows changes. The files below hold the whole text.";
+export const NO_FIELD_CHANGE = "No field the server page shows changes.";
+export const NO_ROLE_CHANGE = "No field the role page shows changes.";
+export const NO_OTHER_FIELD = "No other field changes.";
 export const REMOVED_LINE = "Publishing removes it with everything live that belongs to it.";
 export const REMOVED_LINE_PAST = "This publish removed it, with everything live that belonged to it.";
 
@@ -233,45 +291,8 @@ export function objectsLost(w: Nouns, m: ObjectsMove): string {
 export const sameFold = (n: number) => toolCount(n) + ", same outcome as now.";
 export const NO_GAINS = "No role gains or loses a tool when this is published.";
 export const GAINS_HIDDEN = "Part of the access after publishing is hidden from you.";
-export const NOBODY_GAINS = "Nobody gains access when this is published.";
-export const holdersGain = (roles: string[]) => "Holders of " + list(roles) + " gain access when this is published.";
+// holdersLose warns, under the band, that holders of a held role lose tools.
 export const holdersLose = (roles: string[]) => "Holders of " + list(roles) + " lose tools they reach today, and their calls to them are refused after publishing.";
-
-// The lead of the page: what publishing does to the objects of each role
-// on a server that pins a type, then who holds the roles it touches.
-export const NOBODY_YET = "Nobody holds it yet, so nobody gains access until the identity manager assigns it.";
-export function nobodyYet(roles: string[], hidden: boolean): string {
-  if (hidden) return "Nobody holds " + orList(roles) + " yet.";
-  return "Nobody holds " + orList(roles) + " yet, so nobody gains access until the identity manager assigns " + (roles.length === 1 ? "it." : "them.");
-}
-const more = (n: number, w: Nouns) => counted(n, w).replace(/^([\d,]+) /, "$1 more ");
-const everyLater = (w: Nouns) => everyType(w) + ", including " + w.plural + " added later";
-// coverLead says what publishing does to one role's objects.
-export function coverLead(l: CoverLead, w: Nouns): string {
-  const c: DraftCoverage = l.coverage;
-  const m = l.move;
-  if (l.isNew) return "Adds the role " + c.role + " on " + c.server + ", for " + (c.every_after ? everyLater(w) : coveredWords(w, false, c.after)) + ".";
-  const head = "Changes the role " + c.role + ": it will ";
-  if (m.every === "gained") return head + "reach " + everyType(w) + " on " + c.server + ", including " + w.plural + " added later.";
-  if (m.every === "lost") return head + "reach only " + counted(c.after.length, w) + " on " + c.server + " instead of " + everyType(w) + (c.after.length ? ": " + objectNames(c.after) : "") + ".";
-  const add = m.added.length ? "reach " + more(m.added.length, w) + " on " + c.server + ", " + objectNames(m.added) : "";
-  const drop = m.dropped.length ? "stop reaching " + counted(m.dropped.length, w) + (add ? "" : " on " + c.server) + ", " + objectNames(m.dropped) : "";
-  return head + (add && drop ? add + ", and " + drop : add || drop) + ".";
-}
-// leadLines are the lead's sentences in order, each marked when it says
-// that holders lose what they reach today.
-export function leadLines(lead: Lead, nouns: (c: DraftCoverage) => Nouns, hidden: boolean): { text: string; loses?: boolean }[] {
-  const out: { text: string; loses?: boolean }[] = [];
-  for (const l of lead.covers) {
-    out.push({ text: coverLead(l, nouns(l.coverage)) });
-    out.push({ text: l.coverage.holders_count ? holdsWords(l.coverage.holders_count) : NOBODY_YET });
-  }
-  if (lead.gain.length) out.push({ text: holdersGain(lead.gain) });
-  if (lead.nobody.length) out.push({ text: nobodyYet(lead.nobody, hidden) });
-  if (lead.nobodyGains) out.push({ text: NOBODY_GAINS });
-  if (lead.lose.length) out.push({ text: holdersLose(lead.lose), loses: true });
-  return out;
-}
 
 // Checks.
 export const CHECKS_TITLE = "Checks";
@@ -305,18 +326,7 @@ export const CONTACT = "Contact it now";
 export const CONTACT_HELP = "Opens one MCP connection to the address with no credential and asks for its tools. Nothing starts, the tool names are kept with the draft, and the audit chain records who asked.";
 export const CONTACT_FAILED = "The contact did not finish.";
 
-// Files.
-export const DOCS_TITLE = "Files";
-// docsFold counts the files: as they will be published while the draft is
-// open, else as they were published or drafted.
-export function docsFold(n: number, state: DraftState): string {
-  const [it, was] = n === 1 ? ["it", "was"] : ["they", "were"];
-  return plural(n, "file", "files") + ", as " + it + (state === "open" ? " will be published" : " " + was + (state === "published" ? " published" : " drafted"));
-}
-export const DOCS_MASKED = "A value the server keeps secret reads [REDACTED] here, so these files are for reading and cannot be sent back as a draft.";
-export const removalDoc = (object: string) => "Removes " + objectWords(object) + ".";
-
-// ackBar is the bar at the foot of the page: what to do before Publish.
+// ackBar is the band's line: what to do before Publish.
 // It counts the confirmations the way the publish dialog asks for them,
 // one per confirm block, and names them lines while every block holds one
 // line.
@@ -388,14 +398,14 @@ export type Does = [verb: string, one: string, many: string];
 export const PUBLISH_DOES: { code: Record<string, Does>; kind: Record<string, Does>; unread: Does; other: Does } = {
   code: {
     "server.removal": ["removes", "MCP server", "MCP servers"],
-    "policy.guardrail-changed": ["loosens", "approval set", "approval sets"],
-    "agent.guardrail": ["loosens", "approval set", "approval sets"],
+    "policy.guardrail-changed": ["loosens", "policy set", "policy sets"],
+    "agent.guardrail": ["loosens", "policy set", "policy sets"],
     "role.covers-wider": ["widens", "role", "roles"],
   },
   kind: {
     App: ["widens access through", "MCP server", "MCP servers"],
     Role: ["widens", "role", "roles"],
-    PolicySet: ["widens access through", "approval set", "approval sets"],
+    PolicySet: ["widens access through", "policy set", "policy sets"],
   },
   unread: ["widens access through", "line", "lines"],
   other: ["widens access through", "object", "objects"],

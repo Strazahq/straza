@@ -2,8 +2,11 @@ package server
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/strazahq/straza/internal/agentguard"
 )
 
 // TestLockedUserLoginRefused pins that a lock closes every lane that takes an
@@ -126,5 +129,22 @@ func TestBreakGlassSurvivesLockAttempt(t *testing.T) {
 	bgTok := loginDeviceFlow(t, base, BreakGlassUsername, "vaulted-secret")
 	if code := adminReq(t, "GET", base+"/v1/admin/apps", bgTok, nil, nil); code != http.StatusOK {
 		t.Errorf("break-glass on the admin plane after the lock attempt = %d, want 200", code)
+	}
+}
+
+// TestDisabledUserSentenceKeepsItsHint pins the disabled-user refusal to the
+// hint catalog of straza doctor, which matches the words user is disabled.
+// The sentence names who enables the user and ends with a period.
+func TestDisabledUserSentenceKeepsItsHint(t *testing.T) {
+	if agentguard.HintFor(disabledUserMsg) == "" {
+		t.Errorf("straza doctor has no hint for %q", disabledUserMsg)
+	}
+	for _, want := range []string{"user is disabled", "IGA owner", "Straza administrator"} {
+		if !strings.Contains(disabledUserMsg, want) {
+			t.Errorf("refusal %q does not say %q", disabledUserMsg, want)
+		}
+	}
+	if !strings.HasSuffix(disabledUserMsg, ".") {
+		t.Errorf("refusal %q ends without a period, so the words a client adds run into it", disabledUserMsg)
 	}
 }

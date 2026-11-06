@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { DataTable, plain } from "@/components/data-table";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { PageHead } from "@/components/page-head";
+import { Marked } from "@/components/code-lines";
 import { ToneBadge, RecordSheet } from "@/components/record-sheet";
 import { type PickedUser, UserPicker } from "@/components/user-picker";
 import { type ApiError, type AuditRow, listAudit, overview, query, revokeSession } from "@/lib/api";
@@ -21,6 +22,8 @@ import {
 } from "@/lib/audit-words";
 import { canHash, verifyChain } from "@/lib/chain";
 import { take } from "@/lib/handoff";
+import { cutOf, oneLine } from "@/lib/shell-read";
+import { CUT_CHIP, moreLines } from "@/lib/what-ran-words";
 import { notify } from "@/lib/notify";
 import { routeByKey } from "@/lib/routes";
 import { readFailed, refused } from "@/lib/say";
@@ -48,11 +51,12 @@ const REVEAL_STEPS = 10;
 
 const CAPS = "text-[13px] text-muted-foreground";
 
-const LABEL: Record<string, string> = { seq: "Seq", time: "Time", who: "Who", type: "Type", effect: "Effect", what: "What", reason: "Reason" };
+const LABEL: Record<string, string> = { seq: "Seq", time: "Time", who: "Who", type: "Type", effect: "Effect", what: "Action", reason: "Reason" };
 
 // WIDTHS fixes the columns, so the table fits a 1280 px viewport and the
-// header boxes stay put while rows arrive. Reason takes what is left.
-const WIDTHS: Record<string, string> = { seq: "68px", time: "84px", who: "236px", type: "88px", effect: "96px", what: "28%" };
+// header boxes stay put while rows arrive. Action and Reason have no width,
+// so they share what is left equally and a long value wraps in its cell.
+const WIDTHS: Record<string, string> = { seq: "68px", time: "84px", who: "196px", type: "80px", effect: "96px" };
 
 const EFFECTS: { key: string; label: string }[] = [
   { key: "", label: "any effect" },
@@ -106,6 +110,22 @@ function StatusLine({ tone, word, text, tip }: { tone: "ok" | "unknown"; word: s
 // or a sign-in. Its row sits back in the muted tone, so a decision is the
 // brightest thing in the table.
 const quiet = (r: Row) => !r.sentinel && !r.effect;
+
+// CommandLine is a shell record's command on one line: its commands joined
+// by their operators, a here-document as its opener, and the count of the
+// lines the one line leaves out. The record sheet shows all of it.
+function CommandLine({ tool, command, cut }: { tool: string; command: string; cut: boolean }) {
+  const bound = cutOf(command);
+  const one = oneLine(bound ? bound.kept : command);
+  return (
+    <span className="flex min-w-0 items-baseline gap-1.5" data-command-line>
+      {tool && <span className="shrink-0 font-mono text-[13px] font-normal text-muted-foreground">{tool}</span>}
+      <span className="min-w-0 truncate font-mono text-[13px]" title={one.text}><Marked text={one.text} /></span>
+      {one.lines > 1 && <span className="shrink-0 rounded-full border border-border px-1.5 text-xs font-normal text-muted-foreground">{moreLines(one.lines - 1)}</span>}
+      {cut && <span className="shrink-0 rounded-full border border-border px-1.5 text-xs font-normal text-muted-foreground">{CUT_CHIP}</span>}
+    </span>
+  );
+}
 
 type Cells = {
   onUser: (username: string) => void;
@@ -179,7 +199,7 @@ function columnsOf(cells: Cells): ColumnDef<Row>[] {
     },
     {
       id: "what",
-      header: plain("What"),
+      header: plain("Action"),
       cell: ({ row }) => {
         const r = row.original;
         return (
@@ -190,10 +210,12 @@ function columnsOf(cells: Cells): ColumnDef<Row>[] {
                 <span className="text-muted-foreground">{"sentinel verdict · evidence ×" + r.evidence}</span>
               </>
             ) : (
-              <>
-                {r.tool && <span className="font-mono text-[13px] font-normal text-muted-foreground">{r.tool + " "}</span>}
-                {r.what}
-              </>
+              r.command ? <CommandLine tool={r.tool} command={r.command} cut={r.commandCut} /> : (
+                <>
+                  {r.tool && <span className="font-mono text-[13px] font-normal text-muted-foreground">{r.tool + " "}</span>}
+                  {r.what}
+                </>
+              )
             )}
             {r.foldN && (
               <Button

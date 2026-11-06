@@ -202,8 +202,9 @@ func codexRequirementsForeign(path string) (bool, error) {
 	return strings.TrimSpace(strings.Join(lines, "\n")) != "", nil
 }
 
-// settingsForeign: strip straza's own hook entries (and gemini's bare
-// enabled-pin); any remaining key or hook is the operator's.
+// settingsForeign: strip straza's own hook entries, its git env entries
+// (and gemini's bare enabled-pin); any remaining key or hook is the
+// operator's.
 func settingsForeign(harness, path string) (bool, error) {
 	raw, err := os.ReadFile(path) // #nosec G304 -- straza's own managed file
 	if os.IsNotExist(err) {
@@ -222,6 +223,10 @@ func settingsForeign(harness, path string) (bool, error) {
 			delete(settings, "hooks")
 		}
 	}
+	// Straza's own git env entries are Straza's too, while they still hold
+	// its values: otherwise every wiring Straza wrote reads as operator
+	// content, and a re-install takes the local lane for nothing.
+	removeStrazaEnv(settings, harness, gitHostsFileHere())
 	if harness == "gemini" {
 		if hc, _ := settings["hooksConfig"].(map[string]any); len(hc) == 1 && hc["enabled"] == true {
 			delete(settings, "hooksConfig")

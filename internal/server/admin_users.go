@@ -1,9 +1,9 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -56,14 +56,8 @@ func toUserPayload(u store.User) userPayload {
 // admin API, pull connector, NHI key endpoints) with no migration; the
 // engine-side twin is internal/approval userIsNHI.
 func userKind(u store.User) string {
-	if u.UserType == store.UserTypeAgent || u.UserType == store.UserTypeService {
+	if u.IsNHI() {
 		return "nhi"
-	}
-	if u.Attrs != "" {
-		var attrs map[string]any
-		if err := json.Unmarshal([]byte(u.Attrs), &attrs); err == nil && attrs["kind"] == "nhi" {
-			return "nhi"
-		}
 	}
 	return "human"
 }
@@ -175,6 +169,18 @@ func (a *App) handleUsersList(w http.ResponseWriter, r *http.Request) {
 	a.writeUsersPage(w, r, p, users, after)
 }
 
+// The 400 answers to a password for an AI agent or a service account, which
+// signs in with its key. Each names the user, its type word from
+// userTypeWord and the user again in the command.
+const (
+	nonPersonPasswordCreateMsg = "user %s was not created: %s signs in with its key and never with a password. " +
+		"Create it without the password. Then run straza keygen on its machine and register the public key it prints " +
+		"with strazactl users nhi-key set %s <publicKey> or in the console."
+	nonPersonPasswordPatchMsg = "user %s was not changed: it is %s, which signs in with its key and never with a password. " +
+		"Send the request again without the password. To let it sign in, run straza keygen on its machine and register the public key it prints " +
+		"with strazactl users nhi-key set %s <publicKey> or in the console."
+)
+
 func (a *App) handleUsersCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
@@ -215,6 +221,10 @@ func (a *App) handleUsersCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		apiError(w, http.StatusBadRequest, "kind must be human or nhi")
+		return
+	}
+	if req.Password != "" && !personUser(u) {
+		apiError(w, http.StatusBadRequest, fmt.Sprintf(nonPersonPasswordCreateMsg, u.Username, userTypeWord(u), u.Username))
 		return
 	}
 	if req.Password != "" {
@@ -440,12 +450,24 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 			apiError(w, http.StatusBadRequest, "password must not be empty")
 			return
 		}
+		// Judged on the row as the request leaves it, so a request that also
+		// makes the user an agent is refused too.
+		if !personUser(u) {
+			apiError(w, http.StatusBadRequest, fmt.Sprintf(nonPersonPasswordPatchMsg, u.Username, userTypeWord(u), u.Username))
+			return
+		}
 		hash, err := authn.HashPassword(*req.Password)
 		if err != nil {
 			a.fail(w, r, http.StatusInternalServerError, "hash failed", err)
 			return
 		}
 		u.PasswordHash = hash
+	}
+	// An AI agent or a service account stores no password, so a write that
+	// leaves the user one clears a stored hash, and the record names it.
+	cleared := !personUser(u) && u.PasswordHash != ""
+	if cleared {
+		u.PasswordHash = ""
 	}
 	// Only the fields the request changes against the row it read are
 	// written, the set the record names, so a concurrent PATCH keeps what it
@@ -454,128 +476,40 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.Password != nil {
 		f.PasswordHash = &u.PasswordHash
 	}
-	updated, err := a.store.Users().UpdateFields(r.Context(), u.ID, f)
+	// A disable commits with its revocation row and event, so a refused
+	// write leaves the user active and the same request disables it again.
+	var revoke *store.UserRevocation
+	if deactivated {
+		revoke, err = a.userRevocation(r.Context(), u.ID, "user disabled by admin", store.RevocationOriginAdmin)
+	}
+	var updated store.User
+	if err == nil {
+		updated, err = a.updateUserFields(r.Context(), u.ID, f, revoke)
+	}
 	if err != nil {
-		a.fail(w, r, http.StatusInternalServerError, "update failed", err)
+		switch {
+		case errors.Is(err, store.ErrInvalidData):
+			// The request carries a value the database refuses, so the same
+			// request fails the same way, and this server refuses no one.
+			apiError(w, http.StatusBadRequest, fmt.Sprintf(userValueRefusedMsg, u.Username))
+		case deactivated && !errors.Is(err, store.ErrNotFound):
+			a.failUserRevoke(w, r, u.ID, u.Username, "disable", userNotDisabledMsg, err)
+		default:
+			a.fail(w, r, http.StatusInternalServerError, "update failed", err)
+		}
 		return
 	}
 	// The request applied to the read row, never the read-back updated, is
 	// compared, so a concurrent write to this user never enters the record.
-	a.auditUserUpdate(r.Context(), updated, userChanges(before, u, req.Password != nil))
+	a.auditUserUpdate(r.Context(), updated, userChanges(before, u, req.Password != nil || cleared))
 	if deactivated {
-		a.revokeUser(r, updated.ID, "user disabled by admin")
+		a.userRevokedCtx(r.Context(), updated.ID, "user disabled by admin", store.RevocationOriginAdmin)
 	}
 	if reactivated {
 		a.allowUserCtx(r.Context(), updated.ID)
 	}
 	a.identityChanged(r, "straza.identity.updated", updated.ID)
 	writeJSON(w, http.StatusOK, toUserPayload(updated))
-}
-
-func (a *App) handleUsersDelete(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	u, err := a.store.Users().GetByID(r.Context(), id)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		a.fail(w, r, http.StatusInternalServerError, "lookup failed", err)
-		return
-	}
-	if u.Username == BreakGlassUsername {
-		apiError(w, http.StatusForbidden, "the break-glass admin cannot be deleted (lockout guarantee); rotate its credential on-box instead")
-		return
-	}
-	removed, err := a.store.Users().SoftDelete(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			apiError(w, http.StatusNotFound, "no such user")
-			return
-		}
-		a.fail(w, r, http.StatusInternalServerError, "delete failed", err)
-		return
-	}
-	ctx := context.WithoutCancel(r.Context()) // a retried delete answers 404, so a disconnect must not stop this
-	// The grants ended with the row: one record per ended grant names who
-	// deleted the user, so a certifier never finds a grant that stopped
-	// without a record.
-	for _, as := range removed {
-		a.auditAssignment(ctx, actionRolesUnassign, as, "user deleted by admin")
-	}
-	a.revokeUserCtx(ctx, id, "user deleted by admin", store.RevocationOriginAdmin)
-	// The credentials end with the row too, so nothing the deleted user
-	// could authenticate with outlives the delete.
-	a.deprovisionGrants(ctx, id, "user deleted by admin")
-	a.deprovisionNHIKey(ctx, id, "user deleted by admin")
-	a.deprovisionApproverDevices(ctx, id, u.Username, "user deleted by admin")
-	a.identityChangedCtx(ctx, "straza.identity.deactivated", id)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-// deprovisionNHIKey removes the assertion key of a deleted user and writes
-// one straza.audit.admin record when a key was registered. Most users hold
-// no key and leave no record. A failed delete is logged and skipped, never
-// returned: the row is already soft-deleted, so the issuer's lookup refuses
-// the user before it reads the key.
-func (a *App) deprovisionNHIKey(ctx context.Context, userID, reason string) {
-	err := a.store.Settings().Delete(ctx, nhiKeyPrefix+userID)
-	if errors.Is(err, store.ErrNotFound) {
-		return
-	}
-	if err != nil {
-		a.log.Error("deprovision: nhi key delete failed", "user", userID, "reason", reason, "err", err)
-		return
-	}
-	a.emitEventCtx(ctx, "straza.audit.admin", map[string]any{
-		"action": actionNHIKeyRemoved, "target": userID, "user": userID, "reason": reason,
-	})
-}
-
-// revokeUser records the denylist entry and revokes active sessions.
-func (a *App) revokeUser(r *http.Request, userID, reason string) {
-	a.revokeUserCtx(r.Context(), userID, reason, store.RevocationOriginAdmin)
-}
-
-// handleUserLock is the Straza-lane lock: the kill-switch
-// cascade with origin admin|external, WITHOUT touching users.status: the
-// IdM keeps mastering its own lane, and its enable/reconciliation cannot
-// lift this row. wat_ admin API tokens ride the normal admin middleware, so a
-// SOAR/SIEM automation (e.g. a Kibana alert action) can call this directly.
-func (a *App) handleUserLock(w http.ResponseWriter, r *http.Request) {
-	u, err := a.store.Users().GetByID(r.Context(), r.PathValue("id"))
-	if errors.Is(err, store.ErrNotFound) {
-		apiError(w, http.StatusNotFound, "no such user")
-		return
-	}
-	if err == nil && u.Username == BreakGlassUsername {
-		apiError(w, http.StatusForbidden, "the break-glass admin cannot be locked (lockout guarantee)")
-		return
-	}
-	if err != nil {
-		// A store blip on the kill-switch path must not claim the user does
-		// not exist.
-		a.fail(w, r, http.StatusInternalServerError, "get failed", err)
-		return
-	}
-	var req struct {
-		Reason string `json:"reason"`
-		Origin string `json:"origin"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
-		apiError(w, http.StatusBadRequest, "reason is required")
-		return
-	}
-	if req.Origin == "" {
-		req.Origin = store.RevocationOriginAdmin
-	}
-	if req.Origin != store.RevocationOriginAdmin && req.Origin != store.RevocationOriginExternal {
-		apiError(w, http.StatusBadRequest, "origin must be admin or external")
-		return
-	}
-	a.revokeUserCtx(r.Context(), u.ID, req.Reason, req.Origin)
-	a.emitEvent(r, "straza.audit.admin", map[string]any{
-		"action": "user.lock", "target": u.ID, "reason": req.Reason, "origin": req.Origin,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id": u.ID, "locked": true, "origin": req.Origin, "reason": req.Reason,
-	})
 }
 
 // handleUserUnlock lifts EVERY revocation lane for the user, the explicit

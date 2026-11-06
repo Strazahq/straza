@@ -1,0 +1,27 @@
+{
+  "specversion": "1.0",
+  "id": "019a55e0-4b12-7c40-8d11-2a3b4c5d6f81",
+  "type": "straza.audit.tool",
+  "source": "straza",
+  "time": "2026-11-05T10:12:40.017Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "harness": "claude-code/2.1.0",
+    "event": "tool.pre",
+    "tool": "shell.exec",
+    "app": "",
+    "command": "python3 -c 'import json,sys; data = json.load(sys.stdin); print(len(data))' <<'EOF' {\"rows\": [",
+    "commandTruncated": true,
+    "commandHash": "sha256:a4344ec075b85974ac02a0f87dd0179284ec3074a832468f4559979cf0d8b608",
+    "paths": ["/work/proj/data/rows-000001.json", "/work/proj/data/rows-000002.json", "/work/proj/data/rows-00"],
+    "pathsTruncated": true,
+    "pathsHash": "sha256:67509647187f961a6a902aa4c67a316302fcb8b437515806dbe8d5cbcfdeda10",
+    "workspace": "/work/proj",
+    "effect": "allow",
+    "ruleId": "",
+    "setName": "",
+    "reason": "Straza: no rule matched; the profile default allows local tools",
+    "snapshot": "sha256:44f0be1c"
+  }
+}

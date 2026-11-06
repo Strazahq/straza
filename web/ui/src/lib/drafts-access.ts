@@ -1,18 +1,18 @@
 // What a draft does to access as the review page reads it from the verdict:
 // the objects each role covers on a server that pins an object type, now
-// and after publishing, the groups of Access after publishing, what the
-// page's lead says, and the lines of an agent's self-loosening. Every noun
-// comes from the coverage entry's own type and plural. No React and no
-// sentence here: drafts-words.ts words what this file answers.
+// and after publishing, the groups of Access after publishing, who holds
+// each role, and the lines of an agent's self-loosening. Every noun comes
+// from the coverage entry's own type and plural. No React and no sentence
+// here: drafts-words.ts words what this file answers.
 import type { DraftCoverage, DraftDetail, DraftFinding, DraftGain, DraftObjectName, DraftVerdict } from "./api";
-import { AGENT_LOOSEN_CODE, gainGroups, gainMark, gainStory, roleOf } from "./drafts-model";
+import { AGENT_LOOSEN_CODE, gainGroups, gainMark, roleOf } from "./drafts-model";
 import { type Nouns, nounsOf } from "./object-words";
 
 // GUARDRAIL_CHANGED_CODE is the risk of a gate that stops applying, the line
 // that says what an agent's self-loosening takes away.
 export const GUARDRAIL_CHANGED_CODE = "policy.guardrail-changed";
-// NOBODY_HOLDS_CODE is the note of a role nobody holds, which the page's
-// lead says instead when it names that role.
+// NOBODY_HOLDS_CODE is the note of a role nobody holds, which the role's
+// holders chip says instead.
 export const NOBODY_HOLDS_CODE = "info.nobody-holds";
 
 export const coverageNouns = (c: DraftCoverage): Nouns => nounsOf(c);
@@ -27,6 +27,26 @@ export const coverageFor = (v: DraftVerdict, role: string, server: string) => (v
 export function holdersOfRole(v: DraftVerdict, role: string): number | null {
   const c = (v.objects || []).find((x) => x.role === role);
   return c ? c.holders_count : null;
+}
+
+const nobodyNote = (v: DraftVerdict, role: string) => (v.info || []).find((f) => f.code === NOBODY_HOLDS_CODE && f.object === "Role/" + role);
+
+// roleHolders counts the holders of a role from the verdict: its first gain
+// row, else its first coverage entry, else 0 where a note says nobody holds
+// it. It is null when the verdict says nothing about the role.
+export function roleHolders(v: DraftVerdict, role: string): number | null {
+  const g = (v.gains || []).find((x) => x.role === role);
+  if (g) return g.holders_count;
+  const c = holdersOfRole(v, role);
+  if (c !== null) return c;
+  return nobodyNote(v, role) ? 0 : null;
+}
+
+// chipNotes are the keys of the notes that a role of the draft has no
+// holder, which that role's holders chip already says.
+export function chipNotes(d: DraftDetail): string[] {
+  const v = d.verdict;
+  return d.draft.items.filter((it) => it.kind === "Role" && roleHolders(v, it.name) === 0).map((it) => nobodyNote(v, it.name)?.key || "").filter(Boolean);
 }
 
 // An object is the same object by its id, so a value written differently
@@ -98,42 +118,6 @@ export function accessGroups(gains: DraftGain[], objects: DraftCoverage[] | unde
     const [a, b] = [key(x), key(y)];
     return a[0] !== b[0] ? (a[0] < b[0] ? -1 : 1) : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0;
   });
-}
-
-// CoverLead is one sentence of the lead about a role's objects: the entry,
-// what it changes, and whether the draft adds the role.
-export type CoverLead = { coverage: DraftCoverage; move: ObjectsMove; isNew: boolean };
-
-// Lead is what the page's lead says, by kind: the roles whose objects
-// change, the held roles that gain tools, the roles nobody holds, whether it
-// says nobody gains, and the held roles that lose tools.
-export type Lead = { covers: CoverLead[]; gain: string[]; nobody: string[]; nobodyGains: boolean; lose: string[] };
-
-// leadOf reads the lead from the verdict. A role a coverage sentence names
-// is not named again by the gain sentences. Nobody gains is said only when
-// no held role gains a tool or an object, no sentence already says why
-// nobody gains, and the reader reads every row. A role the draft removes
-// gets no coverage sentence: its card says so.
-export function leadOf(d: DraftDetail, hidden: boolean): Lead {
-  const v = d.verdict;
-  const removed = (role: string) => d.draft.items.some((it) => it.kind === "Role" && it.name === role && it.op === "remove");
-  const covers = (v.objects || []).map((c) => ({ coverage: c, move: objectsMove(c), isNew: isNewRole(d, c.role) })).filter((l) => l.move.changed && !removed(l.coverage.role));
-  const said = new Set(covers.map((l) => l.coverage.role));
-  const story = gainStory(v.gains || []);
-  const objectGain = covers.some((l) => l.coverage.holders_count > 0 && (l.move.added.length > 0 || l.move.every === "gained"));
-  const anyoneGains = story.gain.length > 0 || objectGain;
-  const gain = story.gain.filter((r) => !said.has(r));
-  const nobody = anyoneGains ? [] : story.nobodyHolds.filter((r) => !said.has(r));
-  const unheldCover = covers.some((l) => !l.coverage.holders_count);
-  const nobodyGains = !anyoneGains && !nobody.length && !unheldCover && !hidden && (!story.none || covers.length > 0);
-  return { covers, gain, nobody, nobodyGains, lose: story.lose };
-}
-
-// mergedNotes are the keys of the notes the lead already says: a role
-// nobody holds, named by the lead's coverage or nobody sentence.
-export function mergedNotes(v: DraftVerdict, lead: Lead): string[] {
-  const nobody = new Set([...lead.nobody, ...lead.covers.filter((l) => !l.coverage.holders_count).map((l) => l.coverage.role)]);
-  return (v.info || []).filter((f) => f.code === NOBODY_HOLDS_CODE && nobody.has((f.object || "").replace(/^Role\//, ""))).map((f) => f.key);
 }
 
 // Loosening is one set an agent's draft loosens while the set binds that

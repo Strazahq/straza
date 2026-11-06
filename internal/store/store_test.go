@@ -201,7 +201,7 @@ func TestUsersCRUD(t *testing.T) {
 			t.Errorf("GetByIDs(nil) = %v, %v, want empty", empty, err)
 		}
 
-		if _, err := s.Users().SoftDelete(ctx, u.ID); err != nil {
+		if _, err := s.Users().SoftDelete(ctx, u.ID, nil); err != nil {
 			t.Fatalf("SoftDelete: %v", err)
 		}
 		if _, err := s.Users().GetByID(ctx, u.ID); !errors.Is(err, ErrNotFound) {
@@ -214,7 +214,7 @@ func TestUsersCRUD(t *testing.T) {
 		if len(users) != 1 {
 			t.Errorf("List after soft-delete = %d, want 1", len(users))
 		}
-		if _, err := s.Users().SoftDelete(ctx, u.ID); !errors.Is(err, ErrNotFound) {
+		if _, err := s.Users().SoftDelete(ctx, u.ID, nil); !errors.Is(err, ErrNotFound) {
 			t.Errorf("double soft-delete: want ErrNotFound, got %v", err)
 		}
 	})
@@ -482,9 +482,12 @@ func TestSessionsRevoke(t *testing.T) {
 }
 
 // TestDevicesRevoke pins the device revoke transaction on both drivers. An
-// enrolled device is deleted with one revocation row and one event, a gone
+// enrolled device is deleted with one revocation row and one event, and its
+// active sessions end with it and come back, while its closed session and
+// the sessions of another device or of none stay as they were. A gone
 // device answers ErrNotFound and writes nothing, and a write the database
-// refuses leaves the device enrolled with no row and no event.
+// refuses leaves the device enrolled, its sessions active, and no row and
+// no event.
 func TestDevicesRevoke(t *testing.T) {
 	forEachStore(t, func(t *testing.T, s Store) {
 		ctx := context.Background()
@@ -492,11 +495,32 @@ func TestDevicesRevoke(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		other, err := s.Devices().Create(ctx, Device{UserID: u.ID, Name: "other", Fingerprint: "fp-l4-other"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		session := func(t *testing.T, device, status string) string {
+			t.Helper()
+			ses, err := s.Sessions().Create(ctx, Session{UserID: u.ID, DeviceID: device, Status: status})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return ses.ID
+		}
+		status := func(t *testing.T, id string) string {
+			t.Helper()
+			ses, err := s.Sessions().GetByID(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return ses.Status
+		}
 		const subject = "straza.revocation.device"
 		ev := OutboxEvent{Subject: subject, CE: `{"data":{"device":"l4"}}`}
 		cases := []struct{ name, table string }{
 			{"the revocations table is gone", "revocations"},
 			{"the outbox table is gone", "events_outbox"},
+			{"the sessions table is gone", "sessions"},
 			{"a healthy store", ""},
 		}
 		for i, tc := range cases {
@@ -504,8 +528,16 @@ func TestDevicesRevoke(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			active := []string{session(t, d.ID, SessionActive), session(t, d.ID, SessionActive)}
+			slices.Sort(active)
+			kept := map[string]string{
+				session(t, d.ID, SessionClosed):     SessionClosed,
+				session(t, other.ID, SessionActive): SessionActive,
+				session(t, "", SessionActive):       SessionActive,
+			}
 			before := outboxCount(t, s, subject)
-			run := func() { err = s.Devices().Revoke(ctx, d.ID, "l4 test", ev) }
+			var ended []ClosedSession
+			run := func() { ended, err = s.Devices().Revoke(ctx, d.ID, "l4 test", ev) }
 			if tc.table == "" {
 				run()
 			} else {
@@ -513,19 +545,34 @@ func TestDevicesRevoke(t *testing.T) {
 			}
 			_, getErr := s.Devices().GetByID(ctx, d.ID)
 			rows, events := revocationCount(t, s, RevokeDevice, d.ID), outboxCount(t, s, subject)-before
+			want := SessionRevoked
 			if tc.table != "" {
-				if err == nil || getErr != nil || rows != 0 || events != 0 {
-					t.Errorf("%s: Revoke = %v, device lookup %v, %d rows, %d events, want an error with the device enrolled and nothing written",
-						tc.name, err, getErr, rows, events)
+				if err == nil || ended != nil || getErr != nil || rows != 0 || events != 0 {
+					t.Errorf("%s: Revoke = %v, %v, device lookup %v, %d rows, %d events, want an error with the device enrolled and nothing written",
+						tc.name, ended, err, getErr, rows, events)
 				}
-				continue
-			}
-			if err != nil || !errors.Is(getErr, ErrNotFound) || rows != 1 || events != 1 {
+				want = SessionActive
+			} else if err != nil || !errors.Is(getErr, ErrNotFound) || rows != 1 || events != 1 {
 				t.Fatalf("%s: Revoke = %v, device lookup %v, %d rows, %d events, want the device gone with one row and one event",
 					tc.name, err, getErr, rows, events)
 			}
-			if err := s.Devices().Revoke(ctx, d.ID, "l4 test", ev); !errors.Is(err, ErrNotFound) {
-				t.Errorf("a gone device = %v, want ErrNotFound", err)
+			for _, id := range active {
+				kept[id] = want
+			}
+			for id, w := range kept {
+				if got := status(t, id); got != w {
+					t.Errorf("%s: session %s is %s, want %s", tc.name, id, got, w)
+				}
+			}
+			if tc.table != "" {
+				continue
+			}
+			wantEnded := []ClosedSession{{ID: active[0], UserID: u.ID}, {ID: active[1], UserID: u.ID}}
+			if !slices.Equal(ended, wantEnded) {
+				t.Errorf("%s: Revoke ended %v, want %v", tc.name, ended, wantEnded)
+			}
+			if ended, err := s.Devices().Revoke(ctx, d.ID, "l4 test", ev); !errors.Is(err, ErrNotFound) || ended != nil {
+				t.Errorf("a gone device = %v, %v, want ErrNotFound and no session", ended, err)
 			}
 			if rows, events := revocationCount(t, s, RevokeDevice, d.ID), outboxCount(t, s, subject)-before; rows != 1 || events != 1 {
 				t.Errorf("a gone device wrote: %d rows and %d events in all, want still 1 and 1", rows, events)
@@ -572,7 +619,7 @@ func TestDevicesAndSessions(t *testing.T) {
 		if got, _ = s.Devices().GetByID(ctx, kit.ID); got.ClientKind != DeviceClientKit {
 			t.Errorf("client kind = %q, want kit", got.ClientKind)
 		}
-		if err := s.Devices().Revoke(ctx, kit.ID, "test cleanup", OutboxEvent{Subject: "straza.revocation.device", CE: "{}"}); err != nil {
+		if _, err := s.Devices().Revoke(ctx, kit.ID, "test cleanup", OutboxEvent{Subject: "straza.revocation.device", CE: "{}"}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -643,7 +690,7 @@ func TestDevicesAndSessions(t *testing.T) {
 			t.Errorf("second CloseIdle = %v, %v; want none", again, err)
 		}
 
-		if err := s.Devices().Revoke(ctx, d.ID, "test cleanup", OutboxEvent{Subject: "straza.revocation.device", CE: "{}"}); err != nil {
+		if _, err := s.Devices().Revoke(ctx, d.ID, "test cleanup", OutboxEvent{Subject: "straza.revocation.device", CE: "{}"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -818,7 +865,7 @@ func TestUsersSoftDeleteEndsAssignments(t *testing.T) {
 					want[a.ID] = true
 				}
 
-				removed, err := s.Users().SoftDelete(ctx, u.ID)
+				removed, err := s.Users().SoftDelete(ctx, u.ID, nil)
 				if err != nil {
 					t.Fatalf("SoftDelete: %v", err)
 				}
@@ -849,13 +896,13 @@ func TestUsersSoftDeleteEndsAssignments(t *testing.T) {
 				if err != nil || counts[dev.ID] != 1 || counts[ops.ID] != 0 {
 					t.Errorf("AssignmentCountsByRole = %v, %v, want dev 1 and ops 0", counts, err)
 				}
-				if _, err := s.Users().SoftDelete(ctx, u.ID); !errors.Is(err, ErrNotFound) {
+				if _, err := s.Users().SoftDelete(ctx, u.ID, nil); !errors.Is(err, ErrNotFound) {
 					t.Errorf("double soft-delete: want ErrNotFound, got %v", err)
 				}
 			})
 		}
 
-		if _, err := s.Users().SoftDelete(ctx, "no-such-user"); !errors.Is(err, ErrNotFound) {
+		if _, err := s.Users().SoftDelete(ctx, "no-such-user", nil); !errors.Is(err, ErrNotFound) {
 			t.Errorf("SoftDelete of a missing id: want ErrNotFound, got %v", err)
 		}
 		list, err := s.Roles().ListAssignments(ctx, SubjectUser, keeper.ID)

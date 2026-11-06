@@ -179,20 +179,33 @@ func TestHookUndetectedHarnessFailsClosed(t *testing.T) {
 	}
 }
 
+// TestGovernanceBannerAndUserLine pins the agent's session-start context
+// word for word and the person's one line. The context names the user and
+// no roles, server, snapshot or attestation, which only the person's line
+// shows. It leaves the next step after a denial to the denial's reason and
+// forbids no retry outright.
 func TestGovernanceBannerAndUserLine(t *testing.T) {
 	info := SessionInfo{
 		User: "bob", Roles: []string{"dev"},
 		SnapshotID:  "81e69834b9d78b8037ddc64150e79bad",
 		Attestation: "none", ServerURL: "http://localhost:8420",
 	}
-	banner := GovernanceBanner(info)
-	for _, want := range []string{`"bob"`, "roles: dev", "http://localhost:8420", "81e69834b9d7", "Straza governance is active", "do not retry"} {
-		if !strings.Contains(banner, want) {
-			t.Errorf("banner missing %q:\n%s", want, banner)
-		}
+	const rules = `Straza governs this session as "bob". ` +
+		"Every tool call is checked against policy and recorded in the audit log. " +
+		"When a call is denied, tell the user what the reason says, then do what it says next: " +
+		"wait for a person's approval, change the call, or try once more later. " +
+		"A denial that says none of these is a policy decision, and the same call will be denied again. " +
+		"Do not try to reach the denied result another way."
+	if got := StartText("bob", false); got != rules {
+		t.Fatalf("StartText =\n%q\nwant\n%q", got, rules)
 	}
+	whoami := rules + " To see what this session may do, call the straza__whoami tool of the straza MCP server."
+	if got := StartText("bob", true); got != whoami {
+		t.Fatalf("StartText with whoami =\n%q\nwant\n%q", got, whoami)
+	}
+	banner := GovernanceBanner(info)
 	line := GovernanceUserLine(info)
-	for _, want := range []string{"bob", "dev", "81e69834b9d7", "Straza governance active"} {
+	for _, want := range []string{"bob", "dev", "http://localhost:8420", "81e69834b9d7", "attestation none", "Straza governance active"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("user line missing %q: %s", want, line)
 		}
@@ -225,28 +238,61 @@ func TestGovernanceBannerAndUserLine(t *testing.T) {
 		wantBanner string
 		wantLine   string
 	}{
-		{"off", policy.CaptureDirective{}, "", ""},
+		{"off", policy.CaptureDirective{}, rules, ""},
 		{"word for word", policy.CaptureDirective{Conversations: true, Mode: policy.CaptureModeVerbatim},
-			"Recording is on: by policy, the prompts and responses of this session are recorded word for word to the audit system.",
+			rules + " By policy, the prompts and responses of this session are recorded word for word in the audit log.",
 			" · conversations recorded word for word"},
 		{"secrets masked", policy.CaptureDirective{Conversations: true, Mode: policy.CaptureModeRedact},
-			"Recording is on: by policy, the prompts and responses of this session are recorded with secrets masked to the audit system.",
+			rules + " By policy, the prompts and responses of this session are recorded with secrets masked in the audit log.",
 			" · conversations recorded with secrets masked"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := info
 			rec.Capture = tc.capture
 			banner, line := GovernanceBanner(rec), GovernanceUserLine(rec)
-			if !strings.HasSuffix(banner, tc.wantBanner) || !strings.HasSuffix(line, tc.wantLine) {
-				t.Errorf("banner %q or line %q does not end with %q and %q", banner, line, tc.wantBanner, tc.wantLine)
+			if banner != tc.wantBanner {
+				t.Errorf("banner =\n%q\nwant\n%q", banner, tc.wantBanner)
 			}
-			if tc.wantBanner == "" && (strings.Contains(banner, "Recording") || strings.Contains(line, "recorded")) {
-				t.Errorf("banner %q or line %q speaks of recording for a session policy does not record", banner, line)
+			if !strings.HasSuffix(line, tc.wantLine) {
+				t.Errorf("line %q does not end with %q", line, tc.wantLine)
+			}
+			if tc.wantLine == "" && strings.Contains(line, "recorded") {
+				t.Errorf("line %q speaks of recording for a session policy does not record", line)
 			}
 			for _, retired := range []string{"capture", "ACTIVE", "verbatim", "redact"} {
 				if strings.Contains(banner, retired) || strings.Contains(line, retired) {
 					t.Errorf("banner %q or line %q still says %q", banner, line, retired)
 				}
+			}
+		})
+	}
+}
+
+// TestGovernanceBannerServerText pins whose start text the agent reads:
+// the server's when it sent one, the client's own when it sent none, and no
+// governance paragraph when it sent an empty one. The recording sentence
+// follows policy in every case.
+func TestGovernanceBannerServerText(t *testing.T) {
+	recorded := "By policy, the prompts and responses of this session are recorded word for word in the audit log."
+	on := policy.CaptureDirective{Conversations: true, Mode: policy.CaptureModeVerbatim}
+	custom, empty := "Ask the platform team before you touch production.", ""
+	for _, tc := range []struct {
+		name    string
+		server  *string
+		capture policy.CaptureDirective
+		want    string
+	}{
+		{"an older server sends none", nil, policy.CaptureDirective{}, StartText("dana", false)},
+		{"an older server sends none, recorded", nil, on, StartText("dana", false) + " " + recorded},
+		{"the server's text", &custom, policy.CaptureDirective{}, custom},
+		{"the server's text, recorded", &custom, on, custom + " " + recorded},
+		{"the server turned it off", &empty, policy.CaptureDirective{}, ""},
+		{"the server turned it off, recorded", &empty, on, recorded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := GovernanceBanner(SessionInfo{User: "dana", StartText: tc.server, Capture: tc.capture})
+			if got != tc.want {
+				t.Errorf("banner =\n%q\nwant\n%q", got, tc.want)
 			}
 		})
 	}

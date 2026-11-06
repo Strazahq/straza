@@ -91,8 +91,8 @@ func pinNotes(it Item, w, after World) []Finding {
 	case p != nil && p.LiveType == "":
 		if p.Credential == "missing" {
 			out = append(out, note(codeObjectsListing, ClassWarning, it.Object(), fmt.Sprintf(
-				"%s has no listing credential, so Straza cannot list its %s, and only roles on every %s can use its %s tools until it has one. Add one with strazactl apps secret set %s --listing after you publish.",
-				it.Name, p.Plural, p.Type, p.Type, it.Name)))
+				"%[1]s has no listing credential, so Straza cannot list its %[2]s, and only roles on every %[3]s can use its %[3]s tools until it has one. After you publish, set one under Server authentication on the Overview of %[1]s, or with strazactl apps secret set %[1]s --listing.",
+				it.Name, p.Plural, p.Type)))
 		}
 		if _, existed := w.Apps[it.Name]; !existed {
 			break

@@ -117,17 +117,29 @@ func TestExecSpawnFailure(t *testing.T) {
 }
 
 func TestExecNoSessionFailsClosed(t *testing.T) {
-	// No service, or a service that refuses the session: the wrapper must
-	// refuse to run ANYTHING (fail closed) with an actionable remedy.
+	// No state directory, no service, or a service that refuses the session:
+	// the wrapper must refuse to run ANYTHING (fail closed) with an actionable
+	// remedy, and the refusal reads as closed sentences.
 	tests := []struct {
 		name   string
 		seed   func(t *testing.T)
 		remedy string
 	}{
+		{"no state directory", func(t *testing.T) {
+			t.Setenv("STRAZA_HOME", "")
+			t.Setenv("HOME", "")
+			t.Setenv("USERPROFILE", "") // windows UserHomeDir
+		}, "Straza: state unavailable (locate home: "},
 		{"no service", func(t *testing.T) { noService(t) }, "Start it with `straza service`"},
 		{"not enrolled", func(t *testing.T) {
 			newFakeService(t).refuse = "This machine isn't enrolled for you yet. Run `straza enroll` and sign in with your work account."
 		}, "Run `straza enroll`"},
+		{"a disabled user", func(t *testing.T) {
+			newFakeService(t).refuse = "this user is disabled, so Straza refuses this request. Ask your IGA owner or a Straza administrator to enable the user."
+		}, "Straza: this user is disabled, so Straza refuses this request. Ask your IGA owner or a Straza administrator to enable the user. Refusing to run.\n"},
+		{"a refusal without a closing period", func(t *testing.T) {
+			newFakeService(t).refuse = "user is disabled. Contact your administrator"
+		}, "Straza: user is disabled. Contact your administrator. Refusing to run.\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -139,7 +151,7 @@ func TestExecNoSessionFailsClosed(t *testing.T) {
 			}
 			if !strings.HasPrefix(errOut.String(), "Straza") || strings.HasPrefix(errOut.String(), "Straza: Straza") ||
 				!strings.Contains(errOut.String(), tt.remedy) ||
-				!strings.HasSuffix(errOut.String(), " Refusing to run.\n") {
+				!strings.HasSuffix(errOut.String(), ". Refusing to run.\n") {
 				t.Errorf("refusal = %q, want the marker, the remedy %q and the refusal", errOut.String(), tt.remedy)
 			}
 		})

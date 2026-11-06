@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/strazahq/straza/internal/scim"
 )
 
 // TestAPITokenLifecycle pins the long-lived admin API token kind. An IGA
@@ -243,5 +245,79 @@ func TestAPITokenExpiryAndLastUsed(t *testing.T) {
 				t.Errorf("list row misses expires: %+v", r)
 			}
 		}
+	}
+}
+
+// TestRejectedAPITokenSentence pins the 401 a dead admin API token gets on
+// the admin plane, on the connect routes and on the SCIM plane, where the
+// sentence is the detail of an RFC 7644 error body. A forged, an expired and
+// a revoked token read alike, so the answer tells none of them apart, and the
+// next step it names works without a valid token.
+func TestRejectedAPITokenSentence(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	ctx := context.Background()
+	user := seedIdentity(t, app)
+	grantAdmin(t, app, user.ID)
+	adminTok, _ := checkinToken(t, app, base)
+
+	var revoked struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if code := adminReq(t, http.MethodPost, base+"/v1/admin/api-tokens", adminTok,
+		map[string]any{"name": "retired", "scope": "full"}, &revoked); code != http.StatusCreated {
+		t.Fatalf("mint = %d", code)
+	}
+	if code := adminReq(t, http.MethodDelete, base+"/v1/admin/api-tokens/"+revoked.ID, adminTok, nil, nil); code != http.StatusOK {
+		t.Fatalf("revoke = %d", code)
+	}
+	expired := apiTokenPrefix + "expired-fixture"
+	sum := sha256.Sum256([]byte(expired))
+	past := time.Now().Add(-time.Hour).UTC()
+	meta, _ := json.Marshal(apiTokenMeta{ID: "tok-x", Name: "dead", Scope: "full", Created: past, Expires: &past})
+	if err := app.store.Settings().Set(ctx, apiTokenKeyPrefix+hex.EncodeToString(sum[:]), string(meta)); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct{ name, token, path string }{
+		{"a forged token on the admin plane", apiTokenPrefix + "forgery", "/v1/admin/users"},
+		{"an expired token on the admin plane", expired, "/v1/admin/users"},
+		{"a revoked token on the admin plane", revoked.Token, "/v1/admin/users"},
+		{"a revoked token on the connect routes", revoked.Token, "/v1/connect"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out struct {
+				Error string `json:"error"`
+			}
+			if code := adminReq(t, http.MethodGet, base+tc.path, tc.token, nil, &out); code != http.StatusUnauthorized {
+				t.Fatalf("GET %s = %d, want 401", tc.path, code)
+			}
+			if out.Error != rejectedAPITokenMsg {
+				t.Errorf("refusal = %q, want %q", out.Error, rejectedAPITokenMsg)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, token string }{
+		{"a forged token on the SCIM plane", apiTokenPrefix + "forgery"},
+		{"an expired token on the SCIM plane", expired},
+		{"a revoked token on the SCIM plane", revoked.Token},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := scimReq(t, http.MethodGet, base, tc.token, "/scim/v2/Users", "")
+			if code != http.StatusUnauthorized {
+				t.Fatalf("GET /scim/v2/Users = %d, want 401", code)
+			}
+			schemas, _ := body["schemas"].([]any)
+			if len(schemas) != 1 || schemas[0] != scim.SchemaError || body["status"] != "401" {
+				t.Errorf("error body = %v, want the SCIM error schema alone and status \"401\"", body)
+			}
+			if body["detail"] != rejectedAPITokenMsg {
+				t.Errorf("detail = %q, want %q", body["detail"], rejectedAPITokenMsg)
+			}
+		})
+	}
+	if strings.Contains(rejectedAPITokenMsg, "api-token list") {
+		t.Errorf("the refusal names a command that needs the token it refuses: %q", rejectedAPITokenMsg)
 	}
 }
