@@ -1,6 +1,8 @@
 ---
 title: Changelog
 description: List what changed in each release.
+seo_title: "Straza release notes: what's new in each version"
+seo_description: "What changed in each Straza release: 2.1.0 adds an agent whoami tool and object pinning in the console, 2.0 a local service that keeps credentials from agents."
 pagetype: reference
 weight: 20
 draft: false
