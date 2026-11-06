@@ -17,6 +17,7 @@
 </p>
 
 <p align="center">
+  <a href="https://straza.ai/">Website</a> ·
   <a href="https://docs.straza.ai/">Docs</a> ·
   <a href="#run-the-whole-stack-on-one-machine">Demo stack</a> ·
   <a href="#quickstart">Quickstart</a> ·
