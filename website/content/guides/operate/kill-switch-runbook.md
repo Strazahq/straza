@@ -15,8 +15,8 @@ tested:
   except: the console's device revoke and fleet stand-down, and the route from the IGA
   date: 2026-10-06
 applies_to: both
-who: You, as the admin, or a delegated admin who holds the identity and sessions areas
-where: The console or a terminal with strazactl, and the agent's machine for the check
+who: Admin, or a delegated admin who holds the identity and sessions areas
+where: Console or strazactl, and the agent's machine for the check
 steps: true
 modes: [console, cli]
 mode_default: console

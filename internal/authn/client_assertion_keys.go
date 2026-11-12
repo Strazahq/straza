@@ -37,6 +37,11 @@ const (
 	// key that an administrator retired, so after two missed reloads and the
 	// third it refuses both.
 	assertionKeysMaxStale = 3 * KeyReloadInterval
+	// promoteAfter is the youngest a staged key may be when it is promoted:
+	// two reload intervals, by which every replica publishes it, so an
+	// identity provider that reads the key document from any replica finds
+	// the key before the first assertion it signs.
+	promoteAfter = 2 * KeyReloadInterval
 )
 
 var (
@@ -45,7 +50,8 @@ var (
 	// was retired by hand.
 	ErrNoAssertionKey = errors.New("authn: no client assertion key is active")
 	// ErrAssertionKeyStaged is the ErrNoAssertionKey of a deployment whose
-	// staged key waits for its promotion, so signing starts by itself.
+	// staged key waits for an administrator to promote it. A StagedKeyError
+	// carries it with the key's id.
 	ErrAssertionKeyStaged = fmt.Errorf("%w: a staged key waits for its promotion", ErrNoAssertionKey)
 	// ErrAssertionKeysStale says this replica has not read the key store for
 	// longer than assertionKeysMaxStale and therefore publishes and signs
@@ -61,6 +67,37 @@ type WrongPurposeError struct {
 
 func (e *WrongPurposeError) Error() string {
 	return fmt.Sprintf("authn: signing key %s has the purpose %s", e.KID, e.Purpose)
+}
+
+// StagedKeyError says no client assertion key signs while the staged key KID
+// waits for its promotion. It matches ErrAssertionKeyStaged and
+// ErrNoAssertionKey.
+type StagedKeyError struct{ KID string }
+
+func (e *StagedKeyError) Error() string {
+	return fmt.Sprintf("authn: the client assertion key %s is staged and waits for its promotion", e.KID)
+}
+
+func (e *StagedKeyError) Unwrap() error { return ErrAssertionKeyStaged }
+
+// KeyStatusError says a client assertion key is in a status the asked step
+// does not take: a retiring or retired key is not promoted, and a retired key
+// has no certificate.
+type KeyStatusError struct{ KID, Status string }
+
+func (e *KeyStatusError) Error() string {
+	return fmt.Sprintf("authn: client assertion key %s is %s", e.KID, e.Status)
+}
+
+// PromoteTooEarlyError says a staged key is younger than promoteAfter, and
+// Wait is how long until it may be promoted.
+type PromoteTooEarlyError struct {
+	KID  string
+	Wait time.Duration
+}
+
+func (e *PromoteTooEarlyError) Error() string {
+	return fmt.Sprintf("authn: client assertion key %s can be promoted in %s", e.KID, e.Wait.Round(time.Second))
 }
 
 // checkPurpose refuses a record that is not of the purpose its loader serves.
@@ -84,19 +121,40 @@ type KeySealer interface {
 // ClientAssertionKeys manages the RSA keys that sign the client assertion an
 // agent's client presents at the customer's identity provider. Whoever holds
 // a private key can get a token as any agent, so no method returns one: the
-// type signs and it publishes public keys. Keys are born staged, the store
-// allows one staged and one active key, and the life cycle and its timing
-// are those of the session keys (rotation.go). A load that meets a record it
-// cannot trust fails as a whole and leaves the previous state in place.
+// type signs and it publishes public keys and their certificates. Keys are
+// born staged, the store allows one staged and one active key, and a staged
+// key becomes active only when an administrator promotes it. The retirement
+// of a demoted key follows the timing of the session keys (rotation.go). A
+// load that meets a record it cannot trust fails as a whole and leaves the
+// previous state in place.
 type ClientAssertionKeys struct {
 	repo   store.SigningKeyRepo
 	sealer KeySealer
 
-	mu        sync.RWMutex
-	active    jwk.Key // nil while no key is active
-	hasStaged bool    // a staged key was in the last good load
-	doc       []byte  // the JWKS document of the last good load
-	loadedAt  time.Time
+	mu       sync.RWMutex
+	state    assertionState
+	loadedAt time.Time
+}
+
+// assertionState is what one good load built.
+type assertionState struct {
+	active     jwk.Key         // nil while no key is active
+	activeKID  string          // empty while no key is active
+	activePriv *rsa.PrivateKey // the active key, for a header without its kid
+	stagedKID  string          // the staged key of the load, empty when none
+	doc        []byte          // the JWKS document
+	certs      map[string]KeyCertificate
+}
+
+// signable reports why the state signs nothing, or nil when a key is active.
+func (st assertionState) signable() error {
+	switch {
+	case st.active != nil:
+		return nil
+	case st.stagedKID != "":
+		return &StagedKeyError{KID: st.stagedKID}
+	}
+	return ErrNoAssertionKey
 }
 
 // NewClientAssertionKeys loads the keys and returns a ready service. An
@@ -159,26 +217,31 @@ func (s *ClientAssertionKeys) open(rec store.SigningKey) (*rsa.PrivateKey, error
 	return priv, nil
 }
 
-// Reload pulls the keys from the store and rebuilds the signing key and the
-// key document: the active key signs, and the staged, active and retiring
-// keys are published. The document is built from the opened private keys,
-// which the KEK authenticates, never from the public column, so a database
-// write alone cannot publish a key. Any failure leaves the previous state.
+// Reload pulls the keys from the store and rebuilds the signing key, the key
+// document and the certificates: the active key signs, and the staged, active
+// and retiring keys are published, each with its certificate. The document is
+// built from the opened private keys, which the KEK authenticates, never from
+// the public column, so a database write alone cannot publish a key. Any
+// failure leaves the previous state.
 func (s *ClientAssertionKeys) Reload(ctx context.Context, now time.Time) error {
 	recs, err := s.repo.ListByPurpose(ctx, store.KeyPurposeClientAssertion)
 	if err != nil {
 		return fmt.Errorf("authn: list client assertion keys: %w", err)
 	}
-	var active jwk.Key
-	staged := false
+	st := assertionState{certs: map[string]KeyCertificate{}}
 	set := jwk.NewSet()
 	for _, rec := range recs {
 		if rec.Status == store.KeyRetired {
 			continue
 		}
-		staged = staged || rec.Status == store.KeyStaged
+		if rec.Status == store.KeyStaged {
+			st.stagedKID = rec.KID
+		}
 		priv, err := s.open(rec)
 		if err != nil {
+			return err
+		}
+		if st.certs[rec.KID], err = buildCertificate(priv, rec.KID, rec.CreatedAt); err != nil {
 			return err
 		}
 		pub, err := jwk.Import(&priv.PublicKey)
@@ -194,22 +257,22 @@ func (s *ClientAssertionKeys) Reload(ctx context.Context, now time.Time) error {
 		if rec.Status != store.KeyActive {
 			continue
 		}
-		if active != nil {
+		if st.active != nil {
 			return fmt.Errorf("authn: two active client assertion keys, %s and another, refused", rec.KID)
 		}
-		if active, err = jwk.Import(priv); err != nil {
+		if st.active, err = jwk.Import(priv); err != nil {
 			return fmt.Errorf("authn: import private key %s: %w", rec.KID, err)
 		}
-		if err := annotateRS256(active, rec.KID); err != nil {
+		if err := annotateRS256(st.active, rec.KID); err != nil {
 			return err
 		}
+		st.activeKID, st.activePriv = rec.KID, priv
 	}
-	doc, err := json.Marshal(set)
-	if err != nil {
+	if st.doc, err = json.Marshal(set); err != nil {
 		return fmt.Errorf("authn: encode the client assertion key set: %w", err)
 	}
 	s.mu.Lock()
-	s.active, s.hasStaged, s.doc, s.loadedAt = active, staged, doc, now
+	s.state, s.loadedAt = st, now
 	s.mu.Unlock()
 	return nil
 }
@@ -224,42 +287,39 @@ func annotateRS256(key jwk.Key, kid string) error {
 }
 
 // fresh reports the state of the last good load, or ErrAssertionKeysStale.
-func (s *ClientAssertionKeys) fresh(now time.Time) (active jwk.Key, staged bool, doc []byte, err error) {
+func (s *ClientAssertionKeys) fresh(now time.Time) (assertionState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if now.Sub(s.loadedAt) > assertionKeysMaxStale {
-		return nil, false, nil, ErrAssertionKeysStale
+		return assertionState{}, ErrAssertionKeysStale
 	}
-	return s.active, s.hasStaged, s.doc, nil
+	return s.state, nil
 }
 
 // JWKS returns the public keys as an RFC 7517 document, from memory. It
 // answers ErrAssertionKeysStale instead of a document this replica can no
 // longer vouch for.
 func (s *ClientAssertionKeys) JWKS(now time.Time) ([]byte, error) {
-	_, _, doc, err := s.fresh(now)
-	return doc, err
+	st, err := s.fresh(now)
+	return st.doc, err
 }
 
 // SignAssertion signs one client assertion for clientID (RFC 7523 section
 // 2.2, self-issued: iss and sub are the client id). The caller vouches that
 // clientID is the verified subject of the calling session. It answers
-// ErrNoAssertionKey while no key is active, as ErrAssertionKeyStaged when a
-// staged key waits for its promotion, and ErrAssertionKeysStale on a replica
-// that lost the store.
+// ErrNoAssertionKey while no key is active, a StagedKeyError when a staged
+// key waits for its promotion, and ErrAssertionKeysStale on a replica that
+// lost the store.
 func (s *ClientAssertionKeys) SignAssertion(now time.Time, clientID, audience string) (string, error) {
 	if clientID == "" || audience == "" {
 		return "", errors.New("authn: a client assertion needs a client id and an audience")
 	}
-	key, staged, _, err := s.fresh(now)
+	st, err := s.fresh(now)
 	if err != nil {
 		return "", err
 	}
-	if key == nil && staged {
-		return "", ErrAssertionKeyStaged
-	}
-	if key == nil {
-		return "", ErrNoAssertionKey
+	if err := st.signable(); err != nil {
+		return "", err
 	}
 	iat := now.UTC().Truncate(time.Second)
 	tok, err := jwt.NewBuilder().
@@ -273,7 +333,7 @@ func (s *ClientAssertionKeys) SignAssertion(now time.Time, clientID, audience st
 	if err != nil {
 		return "", fmt.Errorf("authn: build client assertion: %w", err)
 	}
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256(), key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256(), st.active))
 	if err != nil {
 		return "", fmt.Errorf("authn: sign client assertion: %w", err)
 	}
@@ -291,9 +351,9 @@ type StagedKey struct {
 // Stage begins a rotation, or creates the first key: it stores a new key
 // with status staged and reloads, so this replica publishes it at once and
 // every other replica does at its next Reload. The key signs nothing until
-// Advance promotes it. While a staged key exists Stage answers with that
-// key, also when a peer staged it a moment earlier, because the store holds
-// one staged key of this purpose.
+// an administrator promotes it with Promote. While a staged key exists Stage
+// answers with that key, also when a peer staged it a moment earlier, because
+// the store holds one staged key of this purpose.
 func (s *ClientAssertionKeys) Stage(ctx context.Context, now time.Time) (StagedKey, error) {
 	out, err := s.staged(ctx)
 	if err != nil || out.KID != "" {
@@ -356,10 +416,12 @@ func (s *ClientAssertionKeys) staged(ctx context.Context) (StagedKey, error) {
 }
 
 // Advance is the rotation step every replica runs once per
-// KeyReloadInterval, with the timing contract of TokenService.Advance. Both
-// writes are compare-and-set in the store, so of several replicas running
-// the same step exactly one reports the promotion or the retirement, and
-// that replica records it.
+// KeyReloadInterval: it retires each retiring key once retireAfter has passed
+// since its demotion. It never promotes, because a client assertion key
+// becomes active only through Promote, after the administrator has given its
+// certificate to every identity provider that needs it. The write is
+// compare-and-set in the store, so of several replicas running the same step
+// exactly one reports the retirement, and that replica records it.
 func (s *ClientAssertionKeys) Advance(ctx context.Context, now time.Time, retireAfter time.Duration) (Advance, error) {
 	var out Advance
 	recs, err := s.repo.ListByPurpose(ctx, store.KeyPurposeClientAssertion)
@@ -367,29 +429,99 @@ func (s *ClientAssertionKeys) Advance(ctx context.Context, now time.Time, retire
 		return out, fmt.Errorf("authn: list client assertion keys: %w", err)
 	}
 	for _, rec := range recs {
-		switch {
-		case rec.Status == store.KeyStaged && !rec.CreatedAt.After(now.Add(-2*KeyReloadInterval)):
-			changed, err := s.repo.Promote(ctx, rec.KID)
-			if err != nil {
-				return out, fmt.Errorf("authn: promote client assertion key %s: %w", rec.KID, err)
-			}
-			if changed {
-				out.Promoted = rec.KID
-			}
-		case rec.Status == store.KeyRetiring && rec.RotatedAt != nil && !rec.RotatedAt.After(now.Add(-retireAfter)):
-			changed, err := s.repo.Retire(ctx, rec.KID, store.KeyRetiring)
-			if err != nil {
-				return out, fmt.Errorf("authn: retire client assertion key %s: %w", rec.KID, err)
-			}
-			if changed {
-				out.Retired = append(out.Retired, rec.KID)
-			}
+		if rec.Status != store.KeyRetiring || rec.RotatedAt == nil || rec.RotatedAt.After(now.Add(-retireAfter)) {
+			continue
+		}
+		changed, err := s.repo.Retire(ctx, rec.KID, store.KeyRetiring)
+		if err != nil {
+			return out, fmt.Errorf("authn: retire client assertion key %s: %w", rec.KID, err)
+		}
+		if changed {
+			out.Retired = append(out.Retired, rec.KID)
 		}
 	}
-	if out.Promoted == "" && len(out.Retired) == 0 {
+	if len(out.Retired) == 0 {
 		return out, nil
 	}
 	return out, s.Reload(ctx, now)
+}
+
+// Promotion is what Promote reports: the key, the status it held, whether
+// this call promoted it, and the key that signed before and now retires,
+// empty when none did or nothing changed.
+type Promotion struct {
+	KID         string
+	Was         string
+	Changed     bool
+	PreviousKID string
+}
+
+// Promote makes the staged client assertion key kid the signing key and
+// demotes the key that signed before to retiring, then reloads, so this
+// replica signs with the new key at once and every other replica does at its
+// next Reload. The store write is compare-and-set, so of several concurrent
+// calls exactly one reports Changed. A key that is active already answers
+// with Changed false. It refuses a key staged less than promoteAfter ago with
+// a PromoteTooEarlyError, a retiring or retired key with a KeyStatusError, an
+// unknown kid with store.ErrNotFound and a key of another purpose with a
+// WrongPurposeError.
+func (s *ClientAssertionKeys) Promote(ctx context.Context, now time.Time, kid string) (Promotion, error) {
+	// A concurrent promotion or retirement can move the status once between
+	// the read and the write.
+	for range 2 {
+		rec, previous, err := s.find(ctx, kid)
+		if err != nil {
+			return Promotion{}, err
+		}
+		switch rec.Status {
+		case store.KeyActive:
+			return Promotion{KID: kid, Was: rec.Status}, nil
+		case store.KeyStaged:
+		default:
+			return Promotion{}, &KeyStatusError{KID: kid, Status: rec.Status}
+		}
+		if wait := rec.CreatedAt.Add(promoteAfter).Sub(now); wait > 0 {
+			return Promotion{}, &PromoteTooEarlyError{KID: kid, Wait: wait}
+		}
+		changed, err := s.repo.Promote(ctx, kid)
+		if err != nil {
+			return Promotion{}, fmt.Errorf("authn: promote client assertion key %s: %w", kid, err)
+		}
+		if changed {
+			return Promotion{KID: kid, Was: store.KeyStaged, Changed: true, PreviousKID: previous}, s.Reload(ctx, now)
+		}
+	}
+	return Promotion{}, fmt.Errorf("authn: client assertion key %s changed state twice while it was promoted, run the command again", kid)
+}
+
+// find reads the client assertion key kid and the id of the key that signs
+// today, empty when none does. A kid that names no client assertion key
+// answers store.ErrNotFound or a WrongPurposeError.
+func (s *ClientAssertionKeys) find(ctx context.Context, kid string) (rec store.SigningKey, activeKID string, err error) {
+	recs, err := s.repo.ListByPurpose(ctx, store.KeyPurposeClientAssertion)
+	if err != nil {
+		return store.SigningKey{}, "", fmt.Errorf("authn: list client assertion keys: %w", err)
+	}
+	found := false
+	for _, r := range recs {
+		if r.KID == kid {
+			rec, found = r, true
+		}
+		if r.Status == store.KeyActive {
+			activeKID = r.KID
+		}
+	}
+	if found {
+		return rec, activeKID, nil
+	}
+	if rec, err = s.repo.Get(ctx, kid); err != nil {
+		return store.SigningKey{}, "", fmt.Errorf("authn: read signing key %s: %w", kid, err)
+	}
+	if rec.Purpose != store.KeyPurposeClientAssertion {
+		return store.SigningKey{}, "", &WrongPurposeError{KID: kid, Purpose: rec.Purpose}
+	}
+	// A peer staged the key between the list and the read.
+	return rec, activeKID, nil
 }
 
 // Retire takes one client assertion key out of service at once, whatever

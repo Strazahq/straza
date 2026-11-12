@@ -1,8 +1,8 @@
 ---
 title: strazactl signing-keys rotate
-description: Stage a new key of one purpose; the server promotes it once every replica holds it
+description: 'Stage a new key of one purpose: a session key promotes itself, a client assertion key waits for promote'
 pagetype: reference
-weight: 90
+weight: 92
 draft: false
 sources:
   - cmd/strazactl
@@ -23,5 +23,5 @@ strazactl signing-keys rotate {session|client_assertion} [flags]
 
 ## See also
 
-* [strazactl signing-keys](/reference/cli/strazactl/strazactl_signing-keys/): List, rotate and retire signing keys
+* [strazactl signing-keys](/reference/cli/strazactl/strazactl_signing-keys/): List, rotate, promote and retire signing keys, and print a client assertion key's certificate
 

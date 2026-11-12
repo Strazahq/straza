@@ -18,14 +18,19 @@ import (
 // leak test can look for it and for its opening letters.
 const testAssertion = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJzYW0tc3JlLWFnZW50In0.c2lnbmF0dXJlLWJ5dGVz"
 
+// testCertAssertion is the certificate assertion of an Entra blueprint, shaped
+// like a signed JWT with an x5t#S256 header.
+const testCertAssertion = "eyJhbGciOiJSUzI1NiIsIng1dCNTMjU2IjoidGh1bWIifQ.eyJzdWIiOiJibHVlcHJpbnQifQ.Y2VydC1zaWduYXR1cmU"
+
 // fakeSigner signs by counting: every call returns a fresh value, as the real
 // signer does with its jti, or the scripted error.
 type fakeSigner struct {
-	mu       sync.Mutex
-	calls    int
-	clientID string
-	audience string
-	err      error
+	mu        sync.Mutex
+	calls     int
+	certCalls int
+	clientID  string
+	audience  string
+	err       error
 }
 
 func (s *fakeSigner) SignAssertion(_ time.Time, clientID, audience string) (string, error) {
@@ -37,6 +42,20 @@ func (s *fakeSigner) SignAssertion(_ time.Time, clientID, audience string) (stri
 	s.calls++
 	s.clientID, s.audience = clientID, audience
 	return fmt.Sprintf("%s%d", testAssertion, s.calls), nil
+}
+
+// testKID is the key id the fake signer names for a certificate assertion.
+const testKID = "6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10"
+
+func (s *fakeSigner) SignCertificateAssertion(_ time.Time, clientID, audience string) (string, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return "", "", s.err
+	}
+	s.certCalls++
+	s.clientID, s.audience = clientID, audience
+	return fmt.Sprintf("%s%d", testCertAssertion, s.certCalls), testKID, nil
 }
 
 // clock is a settable time source.

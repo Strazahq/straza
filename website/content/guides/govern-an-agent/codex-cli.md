@@ -15,8 +15,8 @@ tested:
   date: 2026-10-06
   except: straza install, the trust step in Codex, the doctor's codex-hooks line and straza uninstall, which were not run
 applies_to: both
-who: You, on the machine where Codex CLI runs
-where: A terminal on that machine
+who: The person at the machine where Codex CLI runs
+where: Terminal on that machine
 steps: true
 keywords: codex cli hooks enroll install harness
 ---
@@ -152,7 +152,7 @@ Straza: destructive command denied by the agent guardrails
 ```
 
 
-That reason comes from the demo stack's guardrails policy. On a standalone server, the seeded `standalone-starter` PolicySet denies the same command for every identity, with the reason `Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.`
+That reason comes from the demo stack's guardrails policy. On a standalone server, the seeded `standalone-starter` PolicySet denies the same command for every identity, with the reason `Straza starter policy: this sample rule denies commands that start with rm -rf. Delete files individually, or an admin can edit the standalone-starter PolicySet.`
 
 
 Now send a safe command.
@@ -188,7 +188,12 @@ When the server cannot be reached, the service keeps deciding for the offline gr
 ## When Codex adds a tool {.nostep}
 
 
-When a Codex release adds a tool that this Straza client does not know yet, the hook sends the tool as `other` with its own name. An enterprise server denies it with a reason that names the tool and the rule that allows it, and a standalone server allows it by default. An admin allows, holds or denies exactly that tool with a rule of `tools: [other]` and `toolNames: {allow: [<name>]}`, with no Straza release, as [Harness tools by name]({{< relref "reference/policyset-grammar.md#harness-tools-by-name" >}}) shows. A later Straza release puts the tool into its kind, and the rule keeps governing it.
+When a Codex release adds a tool that this Straza client does not know yet, the hook sends the tool as `other` with its own name and its input. Its audit record keeps that input as sent in `arguments`, as every tool's record does, so it can hold a secret the tool takes. An enterprise server denies it with a reason that names the tool and the rule that allows it, and a standalone server allows it by default. An admin allows, holds or denies exactly that tool with a rule of `tools: [other]` and `toolNames: {allow: [<name>]}`, with no Straza release, as [Harness tools by name]({{< relref "reference/policyset-grammar.md#harness-tools-by-name" >}}) shows. A later Straza release puts the tool into its kind, and the rule keeps governing it.
+
+{{< details summary="Write the rule in the console" >}}
+
+In Policies, the **Denied by default** view lists the tool when a call to it was denied in the last 24 hours. **Write a rule** on its row opens **New policy** with **Harness tool** and the tool's name answered under **Which calls**, and the wizard writes the same rule, as [Policies]({{< relref "guides/console/policies.md#read-the-policy-list" >}}) shows.
+{{< /details >}}
 
 ## Next {.nostep}
 

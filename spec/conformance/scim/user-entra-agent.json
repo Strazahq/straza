@@ -1,0 +1,207 @@
+{
+  "name": "user-entra-agent",
+  "steps": [
+    {
+      "note": "an agent is created with entraAgentId in the Straza extension (spec/scim-profile \u00a73.4), sent in upper case and stored and rendered in lower case",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:ietf:params:scim:schemas:extension:agent:2.0:Agent",
+            "urn:straza:params:scim:schemas:extension:2.0:User"
+          ],
+          "userName": "sam-entra",
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "DC013442-2B7A-4C1E-9F1A-0123456789AB"
+          }
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "userName": "sam-entra",
+          "userType": "agent",
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "dc013442-2b7a-4c1e-9f1a-0123456789ab"
+          }
+        }
+      },
+      "capture": {
+        "uid": "id"
+      }
+    },
+    {
+      "note": "a PUT that leaves entraAgentId out keeps it, as the \u00a73.2 PUT rule keeps every writable extension attribute",
+      "request": {
+        "method": "PUT",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:ietf:params:scim:schemas:extension:agent:2.0:Agent"
+          ],
+          "userName": "sam-entra"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "dc013442-2b7a-4c1e-9f1a-0123456789ab"
+          }
+        }
+      }
+    },
+    {
+      "note": "a second agent cannot take an id another live user holds: 409 uniqueness, nothing stored",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:ietf:params:scim:schemas:extension:agent:2.0:Agent",
+            "urn:straza:params:scim:schemas:extension:2.0:User"
+          ],
+          "userName": "joe-entra",
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "dc013442-2b7a-4c1e-9f1a-0123456789ab"
+          }
+        }
+      },
+      "expect": {
+        "status": 409,
+        "subset": {
+          "scimType": "uniqueness"
+        }
+      }
+    },
+    {
+      "note": "a person cannot hold an Entra agent identity: 400 invalidValue, nothing stored",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:straza:params:scim:schemas:extension:2.0:User"
+          ],
+          "userName": "carol-entra",
+          "userType": "human",
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "5f8c2a1e-3b4d-4e6f-9a7b-1c2d3e4f5a6b"
+          }
+        }
+      },
+      "expect": {
+        "status": 400,
+        "subset": {
+          "scimType": "invalidValue"
+        }
+      }
+    },
+    {
+      "note": "a value that is not a GUID is 400 invalidValue, never stored",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "entraAgentId",
+              "value": "sam-entra"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 400,
+        "subset": {
+          "scimType": "invalidValue"
+        }
+      }
+    },
+    {
+      "note": "an agent that holds an id keeps its type until the id is removed: 400 invalidValue",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "userType",
+              "value": "human"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 400,
+        "subset": {
+          "scimType": "invalidValue"
+        }
+      }
+    },
+    {
+      "note": "a PATCH remove on the bare path clears the id",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "remove",
+              "path": "entraAgentId"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "userName": "sam-entra"
+        }
+      }
+    },
+    {
+      "note": "a PATCH replace on the URN-qualified path sets another id",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{uid}",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+          ],
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "urn:straza:params:scim:schemas:extension:2.0:User:entraAgentId",
+              "value": "5f8c2a1e-3b4d-4e6f-9a7b-1c2d3e4f5a6b"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "5f8c2a1e-3b4d-4e6f-9a7b-1c2d3e4f5a6b"
+          }
+        }
+      }
+    }
+  ]
+}

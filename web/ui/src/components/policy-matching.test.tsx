@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { PolicyMatching } from "./policy-matching";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { EventSupport } from "@/lib/api";
+import { HARNESS_NAME_HINT } from "@/lib/harness-words";
 import { type Doc, type RuleView, docText, openDoc, rulesOf } from "@/lib/policy-model";
 import {
   ADD_PATTERN, ADD_TOOL, ADVANCED, CHOOSE_EVENTS, EVERY_WORD, MATCH, PATTERNS_HINT, REQUIRE_NONE, WHERE_WORD, eventsCoverage,
@@ -62,6 +63,21 @@ spec:
       reason: "Straza: secret writes need an attested session"
 `;
 
+// A harness tool rule, whose names are chips the same way.
+const harnessText = `apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: harness
+spec:
+  rules:
+    # The language server and the notebook editor run on this seat.
+    - id: harness-tools
+      tools: [other]
+      toolNames:
+        allow: [LSP, NotebookEdit]
+      effect: allow
+`;
+
 const matrix: EventSupport = {
   harnesses: ["claude-code", "codex", "gemini"],
   events: [
@@ -75,8 +91,8 @@ const commentLines = (t: string) => t.split("\n").map((l) => l.trim()).filter((l
 
 const state = { text };
 
-function Harness({ id, events, onSplit }: { id: string; events: EventSupport | null; onSplit?: (name: string) => void }) {
-  const [stored, setStored] = React.useState(text);
+function Harness({ id, events, onSplit, start = text }: { id: string; events: EventSupport | null; onSplit?: (name: string) => void; start?: string }) {
+  const [stored, setStored] = React.useState(start);
   const rule = rulesOf(openDoc(stored)).find((r) => r.id === id) as RuleView;
   const onEdit = (_touched: string, fn: (d: Doc) => void) => {
     const next = openDoc(stored);
@@ -140,6 +156,23 @@ describe("what the rule matches", () => {
     await userEvent.click(screen.getByRole("button", { name: ADD_PATTERN }));
     expect(now("no-force-push").names).toEqual(["git push --force*", "git reset --hard*"]);
     expect(commentLines(state.text)).toEqual(commentLines(text));
+  });
+
+  it("edits a harness tool rule's names with the harness hint, and keeps the last name", async () => {
+    state.text = harnessText;
+    render(<TooltipProvider><Harness id="harness-tools" events={matrix} start={harnessText} /></TooltipProvider>);
+    await userEvent.click(fold());
+    expect(cell("tools").textContent).toContain(HARNESS_NAME_HINT);
+    expect(screen.getByTitle("toolNames.allow").textContent).toBe(MATCH.tools);
+    await userEvent.type(within(cell("tools")).getByRole("textbox", { name: MATCH.tools }), "WebSearch");
+    await userEvent.click(screen.getByRole("button", { name: ADD_TOOL }));
+    expect(now("harness-tools").names).toEqual(["LSP", "NotebookEdit", "WebSearch"]);
+    await userEvent.click(screen.getByRole("button", { name: removePick("NotebookEdit") }));
+    await userEvent.click(screen.getByRole("button", { name: removePick("WebSearch") }));
+    expect(now("harness-tools").names).toEqual(["LSP"]);
+    expect(cell("tools").querySelector('[data-name="LSP"]')).toBeTruthy();
+    expect(screen.queryByRole("button", { name: removePick("LSP") })).toBeNull();
+    expect(commentLines(state.text)).toEqual(commentLines(harnessText));
   });
 });
 

@@ -89,8 +89,10 @@ func TestOpenBrowserRunsBROWSER(t *testing.T) {
 	if out.String() != want {
 		t.Errorf("printed %q\nwant %q", out.String(), want)
 	}
+	// The browser runs in the background, and macOS may check a script it
+	// has not seen before it first runs, so the wait allows ten seconds.
 	var got []byte
-	for range 100 {
+	for range 500 {
 		if b, err := os.ReadFile(record); err == nil {
 			got = b
 			break

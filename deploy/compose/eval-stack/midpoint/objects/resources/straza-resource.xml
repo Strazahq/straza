@@ -161,6 +161,20 @@
                     <source><path>$user/extension/ext:strazaSwarmId</path></source>
                 </outbound>
             </attribute>
+            <!-- Straza stores the Entra agent id in lower case, so the value
+                 is lower-cased here too. Without that, an id typed in upper
+                 case would differ from the stored one on every reconcile,
+                 and this strong mapping would write it again each time. -->
+            <attribute>
+                <ref>ri:entraAgentId</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source><path>$user/extension/ext:strazaEntraAgentId</path></source>
+                    <expression>
+                        <script><code>strazaEntraAgentId?.trim()?.toLowerCase()</code></script>
+                    </expression>
+                </outbound>
+            </attribute>
             <!-- NHI login binding: push a PINNED IdP subject into SCIM
                  externalId so the enterprise client-credentials lane
                  resolves the agent (strazad matches token sub against

@@ -16,8 +16,8 @@ tested:
   except: the Slack app, the card and the taps, read at source and not run against a workspace
 applies_to: both
 keywords: slack approve channel
-who: You, as the admin, with admin rights on the Slack workspace
-where: The Slack app settings, the strazad configuration and the console
+who: Admin with admin rights on the Slack workspace
+where: Slack app settings, strazad config file, and the console
 steps: true
 modes: [console, cli]
 mode_default: console

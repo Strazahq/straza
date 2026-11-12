@@ -83,6 +83,8 @@ const goodReplay = `#!/bin/sh
 verdict=$(strazactl policy simulate --user "$u" -f "$d" | grep -E '^(live and file agree|the live policy says)')
 `
 
+const goodDoc = "# Quickstart\n\n```sh\nstrazactl policy simulate --user alice -f block-rm.yaml\n```\n"
+
 // fixture writes a consistent tree and returns its root.
 func fixture(t *testing.T) string {
 	t.Helper()
@@ -100,6 +102,8 @@ func fixture(t *testing.T) string {
 		"plugins/.claude-plugin/plugin.json":                                   `{"name":"straza","version":"0.2.0"}`,
 		"plugins/gemini-extension.json":                                        `{"name":"straza","version":"0.2.0"}`,
 		"plugins/.codex-plugin/plugin.json":                                    `{"name":"straza","version":"0.2.0"}`,
+		"README.md":                                                            goodDoc,
+		"docs/quickstart-standalone.md":                                        goodDoc,
 	}
 	for rel, body := range files {
 		write(t, root, rel, body)
@@ -118,7 +122,8 @@ func write(t *testing.T, root, rel, body string) {
 	}
 }
 
-// walkPlugins stands in for git ls-files in a tree that is not a repository.
+// walkPlugins stands in for git ls-files in a tree that is not a repository:
+// every file under plugins/ and each command document that exists.
 func walkPlugins(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(filepath.Join(root, pluginsDir), func(p string, d os.DirEntry, err error) error {
@@ -132,6 +137,11 @@ func walkPlugins(root string) ([]string, error) {
 		out = append(out, rel)
 		return nil
 	})
+	for _, doc := range commandDocs {
+		if exists(filepath.Join(root, doc)) {
+			out = append(out, filepath.FromSlash(doc))
+		}
+	}
 	return out, err
 }
 
@@ -322,6 +332,52 @@ func TestVerbRuleKeepsOperands(t *testing.T) {
 		}
 		if len(got) != 0 {
 			t.Errorf("%s: want no finding, got %v", line, got)
+		}
+	}
+}
+
+// TestCommandDocs runs one command line from README.md and the standalone
+// quickstart through the gate. Each document carries a docs link with no
+// page, which passes because only the command check applies to them.
+func TestCommandDocs(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"a good command", "strazactl policy simulate --user alice -f block-rm.yaml", ""},
+		{"an unknown verb", "strazactl policy publish -f block-rm.yaml",
+			`unknown command "strazactl policy publish": no page for it under website/content/reference/cli, in "strazactl policy publish -f block-rm.yaml". Fix the command, or run make docs-gen`},
+		{"an unknown flag", "straza install --everywhere claude-code",
+			`flag --everywhere is not on the straza install reference page, in "straza install --everywhere claude-code". Fix the command, or run make docs-gen`},
+		{"a placeholder operand", "strazactl sessions revoke <session-id>", ""},
+		{"a foreign command after the separator", "straza exec -- rm -rf /tmp/x", ""},
+		{"foreign flags after the separator", "straza exec -- ls -l --all /tmp", ""},
+	}
+	for _, doc := range commandDocs {
+		for _, tc := range cases {
+			t.Run(doc+"/"+tc.name, func(t *testing.T) {
+				root := fixture(t)
+				writeGroup(t, root, "strazactl sessions", "strazactl sessions revoke <session-id> [flags]")
+				write(t, root, "website/content/reference/cli/straza/straza_exec.md",
+					"---\ntitle: straza exec\n---\n```\nstraza exec -- <command> [args...] [flags]\n```\n")
+				write(t, root, doc, "# Doc\n\nRead https://docs.straza.ai/guides/no-such-page/.\n\n```sh\n"+tc.line+"\n```\n")
+				got, err := run(root, walkPlugins)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var lines []string
+				for _, f := range got {
+					lines = append(lines, f.String())
+				}
+				all := strings.Join(lines, "\n")
+				if tc.want == "" && all != "" {
+					t.Fatalf("want no finding, got:\n%s", all)
+				}
+				if want := filepath.FromSlash(doc) + ":6: " + tc.want; tc.want != "" && !strings.Contains(all, want) {
+					t.Fatalf("want a finding containing %q, got:\n%s", want, all)
+				}
+			})
 		}
 	}
 }

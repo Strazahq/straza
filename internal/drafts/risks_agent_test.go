@@ -151,6 +151,9 @@ func TestAgentGuardrail(t *testing.T) {
 			rewrite("    - id: no-some\n      events: [tool.pre]\n      tools: [other]\n      toolNames: { allow: [SomeTool] }\n"), widens("no-some"), alsoChanges("no-some")},
 		{"a deny kept by id that becomes an allow", denyLocal("    - id: no-write\n      events: [tool.pre]\n      tools: [file.write]\n      effect: deny\n"),
 			rewrite("    - id: no-write\n      events: [tool.pre]\n      tools: [file.write, net.fetch]\n      effect: allow\n"), widens("no-write"), alsoChanges("no-write")},
+		{"an approval added for the tools of a server that is not registered", guardWorld(),
+			[]Item{setPut("agent-guardrails", agentGuardrails+"    - id: hold-chrome\n      events: [tool.pre]\n      tools: [mcp.call]\n      apps: [claude-in-chrome]\n"+
+				"      mode: approve\n      effect: allow\n      approve: { roles: [sec-approvers] }\n")}, widens("hold-chrome"), widens("hold-chrome")},
 		{"an approval kept by id that opens another tool kind", denyLocal(holdShellPre),
 			rewrite(strings.Replace(holdShellPre, "tools: [shell.exec]", "tools: [shell.exec, net.fetch]", 1)), widens("hold-shell"), widens("hold-shell")},
 		{"a gate kept by id that becomes a plain allow where the deployment allows by default", guardWorld(),

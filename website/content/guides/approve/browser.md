@@ -15,8 +15,8 @@ tested:
   date: 2026-10-06
   except: the browser sign-in, written from the code and not walked
 applies_to: both
-who: A person who decides requests, after you as the admin give them the role
-where: A browser on the self-service page
+who: The approver, after an admin gives them the role
+where: Self-service page
 steps: true
 keywords: approve browser self-service enable this browser approver device requests decide straza-enroll-browser signed decision
 ---

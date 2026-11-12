@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -60,7 +59,11 @@ func (a *App) handlePacksList(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handlePacksCreate(w http.ResponseWriter, r *http.Request) {
 	var req packAdminPayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+	err := decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil || req.Name == "" {
 		apiError(w, http.StatusBadRequest, bodyRefusal("a pack", err))
 		return
 	}
@@ -83,7 +86,11 @@ func (a *App) handlePackBind(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RoleID string `json:"role_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RoleID == "" {
+	err := decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil || req.RoleID == "" {
 		apiError(w, http.StatusBadRequest, "role_id is required")
 		return
 	}

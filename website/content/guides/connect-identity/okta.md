@@ -14,8 +14,8 @@ tested:
   date: 2026-10-06
   except: the Okta console steps, with no Okta tenant, and the Straza console forms, read at source
 applies_to: both
-who: You, as the Okta admin and the Straza admin
-where: The Okta admin console, and a terminal with strazactl and curl
+who: Okta admin and Straza admin
+where: Okta Admin Console, and a terminal with strazactl and curl
 steps: true
 modes: [console, cli]
 mode_default: cli
@@ -101,6 +101,7 @@ Map the Okta profile onto the attributes Straza stores. Straza ignores every oth
 | `title` | `title` | |
 | `email` | `emails[primary eq true].value` | the email marked primary is stored, or the first when none is |
 | status | `active` | boolean or the strings `"True"` and `"False"` |
+| the agent's manager | `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager` | on a user whose `userType` is `agent`, the manager becomes its sponsor. Send the manager's `userName` in Straza, and provision the manager first |
 
 [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md#what-the-server-accepts" >}}) lists every user attribute Straza accepts, the AI agent fields included.
 

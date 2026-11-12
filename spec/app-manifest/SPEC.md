@@ -16,6 +16,18 @@ one JSON Schema cannot express. Registry-import fixtures live in
 `spec/conformance/registry/` (real registry `server.json` captures + golden
 imported manifests).
 
+Revision 10 (2026-11-08, https://docs.straza.ai/guides/serve-mcp-apps/caller-credentials/):
+section 3 gains the case of a provider whose operator configuration names a
+Microsoft Entra agent identity blueprint. `credential.agents:
+client_credentials` then gives each agent the token of its own Entra agent
+identity, and the client id is the Entra agent identity the platform holds
+on the verified agent's own record instead of the username. Only the text
+changes. The grammar and the schema stay as they are, so every earlier valid
+example parses unchanged and a platform of an earlier revision reads every
+manifest the same. Example `valid-entra-remote-client-credentials.yaml`
+(derived from this revision's text and the reference parser in
+internal/manager, not fired against a live platform: [doc]).
+
 Revision 9 (2026-10-24): the `straza:` block gains `git`, which lets an
 agent run plain git against a git host through Straza (§8). The block names
 the resource server's public base URL, the git host's base URL and the tools
@@ -178,6 +190,17 @@ calls closed while no grant exists), or `token`
   identity the upstream sees. The token stays gateway-side like every other
   credential. A human caller never gets such a token, and an agent's own
   stored sign-in wins over it.
+- On a provider whose operator configuration names a Microsoft Entra agent
+  identity blueprint (revision 10), the platform gets that token in the two
+  grants of the Entra agent identity exchange. The blueprint authenticates
+  with a certificate assertion the platform signs and asks for an exchange
+  token for the agent's Entra agent identity, which then presents it and
+  gets its own token. The client id is then the Entra agent identity the
+  platform holds on the verified calling agent's own record, written by the
+  identity source or an administrator. It MUST NOT come from the manifest,
+  the request, a header or a tool argument either. An agent whose record
+  holds none MUST be refused before the identity provider is asked, and the
+  exchange token MUST NOT be kept, logged or returned.
 - `inject` is required exactly when `kind != none`, and forbidden for `none`.
 - `inject.as: header` is only valid for `remote` runtimes; `inject.as: env`
   only for `command` and `oci` runtimes (stdio has no headers; remotes get no

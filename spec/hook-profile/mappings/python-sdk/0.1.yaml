@@ -39,7 +39,9 @@ notes: |
   timeout, or an unreadable response on an ENFORCED check as deny
   (fail-closed, test-pinned in kits/python).
   tool_input keys: command (string), paths (list of strings), url (string);
-  the kit only includes keys the caller provided.
+  the kit only includes keys the caller provided. For a tool of kind other
+  the kit, from 0.4.0, sends the call's own arguments as tool_input, an
+  empty object for a call with none, and the event carries them as args.
   No transcript file exists for SDK agents: SessionEnd carries the model
   reply IN the payload as `prompt_response` (the same payload-borne lane as
   gemini's AfterAgent). There is no transcript_path field in this dialect.

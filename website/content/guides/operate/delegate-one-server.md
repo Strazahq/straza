@@ -15,8 +15,8 @@ tested:
   except: carol's refused writes, read at source, and the Add role sheet and Remove server dialog, never clicked
   date: 2026-10-06
 applies_to: both
-who: You, as the global MCP admin, and the server admins you hand a server to
-where: The console or a terminal with strazactl
+who: Global MCP admin, and the server admins you hand a server to
+where: Console or strazactl
 steps: true
 modes: [console, cli]
 mode_default: console

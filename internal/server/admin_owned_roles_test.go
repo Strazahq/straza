@@ -413,8 +413,10 @@ func TestServerAdminRouteParity(t *testing.T) {
 	// The client assertion key routes pass a full administrator only and
 	// refuse everyone else with their own sentence.
 	fullOnly := map[string]bool{
-		"POST /v1/admin/signing-keys/client-assertion/rotate":       true,
-		"POST /v1/admin/signing-keys/client-assertion/{kid}/retire": true,
+		"POST /v1/admin/signing-keys/client-assertion/rotate":           true,
+		"POST /v1/admin/signing-keys/client-assertion/{kid}/retire":     true,
+		"POST /v1/admin/signing-keys/client-assertion/{kid}/promote":    true,
+		"GET /v1/admin/signing-keys/client-assertion/{kid}/certificate": true,
 	}
 	// Contact dials the address a draft names and passes only the scope
 	// apps:write or straza-global-mcp-admin, with its own sentence.

@@ -2,7 +2,7 @@
 title: strazactl users unlock
 description: 'Unlock a user: lift the user''s revocations and leave the status as it is, so a disabled user still needs `strazactl users enable`'
 pagetype: reference
-weight: 112
+weight: 118
 draft: false
 sources:
   - cmd/strazactl

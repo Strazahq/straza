@@ -10,13 +10,13 @@ pagetype: how-to
 weight: 32
 draft: false
 tested:
-  version: v1.0.0-1577-ged23b225-dirty
-  platform: Not walked. The Entra steps follow Microsoft's documentation as read on 2026-10-22, and the Straza side follows the code of the working tree of the browser sign-in before its commit. No step ran against an Entra tenant. The console address step and the console's sign-in were written from the code on 2026-10-22 and not walked
-  date: 2026-10-22
-  except: every Entra step, which has not run against a real tenant
+  version: v1.0.0-1795-gcff33da1
+  platform: Walked in a free Entra lab tenant against the eval stack on Docker Desktop for Mac. On 2026-11-07 the app was registered as this page shows, apart from the admin centre's button names and the manifest that its form made unnecessary, and a person provisioned without externalId signed in to the console, which linked the account by preferred_username. On 2026-11-08 straza enroll ran on a Linux VM whose 127.0.0.1 callback port the host's browser reached, and the person enrolled, on a random loopback port and with auth_time checked. On 2026-11-09 the lab tenant's own SCIM provisioning sent three people. The one sent with Entra's default mapping was refused at the first sign-in as the section on how a token finds its account says, the two sent after the mapping row from mailNickname to externalId was deleted signed in, and a person removed from the app met AADSTS50105 once Assignment required was on. Later that day, on the build that links on oid, the person sent with mailNickname was refused in a sentence that named her account, then signed in on her object ID after the externalId row's source became objectId and Provision on demand ran, and the admin linked by sub signed in unchanged
+  date: 2026-11-09
+  except: the manifest route of the loopback redirect, the device code lane and a fixed loopback port
 applies_to: enterprise
-who: You, as the Entra admin and the Straza admin
-where: The Microsoft Entra admin center, strazad's configuration file, and a terminal on a person's machine
+who: Entra admin and Straza admin
+where: Microsoft Entra admin center, strazad config file, and a terminal on a person's machine
 steps: true
 keywords: entra microsoft azure oidc login provider sign in browser
 ---
@@ -24,7 +24,7 @@ keywords: entra microsoft azure oidc login provider sign in browser
 
 You make Microsoft Entra ID the login provider of an enterprise Straza, as the admin of both. You register an app for Straza in the Microsoft Entra admin center, point strazad at your tenant, and enroll a machine. At the end people sign in to Straza with their Entra account, in a browser on the machine they enroll, and Straza never holds their password.
 
-No step on this page has been fired against a real Entra tenant yet. The Entra settings follow Microsoft's documentation, and the Straza side follows the code. [Keycloak login]({{< relref "guides/connect-identity/keycloak-login.md" >}}) is the provider that was walked end to end.
+The steps on this page were walked in an Entra lab tenant, apart from the answers that say they have not been seen from a real tenant.
 
 ## Before you start {.nostep}
 
@@ -53,9 +53,9 @@ Straza's programs run on people's machines and hold no secret, so at Entra they 
 ## Add the loopback redirect
 
 
-Straza's redirect is `http://127.0.0.1:<port>/callback`, on a port that each sign-in picks. Microsoft recommends 127.0.0.1 over localhost for a loopback redirect, but the portal's form leans to localhost, so add the redirect in the app's manifest. Open **Manifest** and add `http://127.0.0.1/callback` as a redirect of the public client, then save.
+Straza's redirect is `http://127.0.0.1:<port>/callback`, on a port that each sign-in picks. Microsoft recommends 127.0.0.1 over localhost for a loopback redirect. Open **Authentication** and press **Add Redirect URI**, which asks for the platform first. Pick **Mobile and desktop applications**, leave its suggested redirects unticked, type `http://127.0.0.1/callback` into the custom redirect field, and save.
 
-In the Microsoft Graph format of the manifest, the redirect goes under `publicClient`, which nobody has yet confirmed for a 127.0.0.1 redirect against a real tenant:
+If the form refuses 127.0.0.1, add the redirect in the app's manifest instead. Open **Manifest** and add `http://127.0.0.1/callback` as a redirect of the public client, then save. In the Microsoft Graph format of the manifest, the redirect goes under `publicClient`:
 
 ```json
 "publicClient": {
@@ -67,14 +67,14 @@ In the Microsoft Graph format of the manifest, the redirect goes under `publicCl
 
 In the older AAD Graph format, it goes under `replyUrlsWithType`, with the type `InstalledClient`. Either way, **Authentication** then lists it under **Mobile and desktop applications**. A redirect registered only as `http://localhost/callback` does not match, because Straza never sends localhost.
 
-Microsoft documents that Entra ignores the port of a localhost redirect of a desktop app, and Straza relies on the same for 127.0.0.1 until a tenant confirms it. So leave `oidc.loopbackPort` at 0. If Entra refuses the redirect because of its port, register a fixed one instead, such as `http://127.0.0.1:8765/callback`, and set `oidc.loopbackPort: 8765` on strazad.
+Entra ignores the port of a 127.0.0.1 redirect of a desktop app, so a sign-in on the port that `straza enroll` picks matches the redirect without one. So leave `oidc.loopbackPort` at 0. If Entra refuses the redirect because of its port, register a fixed one instead, such as `http://127.0.0.1:8765/callback`, and set `oidc.loopbackPort: 8765` on strazad.
 
 ## Add the console address
 
 
 The console and the self-service page sign in within the browser tab, and Entra sends the tab back to the address people open the console at, normally your strazad public URL, followed by `/console/signin`. Because the tab builds that address from its own origin, a server that people open under two addresses needs both. Entra lets the tab redeem the code itself only for a redirect on the platform **Single-page application**.
 
-Open **Authentication**, add a platform of the type **Single-page application**, and enter that address, such as `https://straza.example.com/console/signin`. Add one address for each address people open the console at, on each Straza server. Keep `http://127.0.0.1/callback` under **Mobile and desktop applications**, because `straza enroll` still uses it.
+Open **Authentication**, press **Add Redirect URI**, pick the platform **Single-page application**, and enter that address, such as `https://straza.example.com/console/signin`. Add one address for each address people open the console at, on each Straza server. Keep `http://127.0.0.1/callback` under **Mobile and desktop applications**, because `straza enroll` still uses it.
 
 ## Add the auth_time claim
 
@@ -91,7 +91,7 @@ Open **Token configuration**, press **Add optional claim**, pick the token type 
 
 Open **API permissions**, press **Add a permission**, pick **Microsoft Graph**, then **Delegated permissions**, and tick `openid` and `profile` under **OpenId permissions**. Then press **Grant admin consent** for your tenant, so nobody is asked to consent at their first sign-in.
 
-Straza asks for both scopes on every sign-in. With `profile`, Entra puts `preferred_username` in the ID token, which strazad matches to the account your identity manager provisioned.
+Straza asks for both scopes on every sign-in. With `profile`, Entra puts the person's object ID as `oid` and their `preferred_username` in the ID token, which strazad matches to the account your identity manager provisioned.
 
 ## Require assignment
 
@@ -121,9 +121,13 @@ oidc:
 ## How a token finds its account {.nostep}
 
 
-The first sign-in links an account that your identity manager provisioned by matching the ID token's `preferred_username` to the account's `userName`, and only while the account has no `externalId`. Entra's `preferred_username` is usually the person's user principal name, so provision `userName` with the same value.
+Entra writes the person's object ID into the ID token as `oid`, and it is the same for every app of your tenant. strazad first looks for the account whose `externalId` is that object ID, then for one whose `externalId` is the token's `sub`, which Entra makes different for each app. When neither matches, the first sign-in links the account whose `userName` equals the token's `preferred_username`, if that account has no `externalId` yet, and stores the object ID as its `externalId`. Entra's `preferred_username` is usually the person's user principal name, so provision `userName` with the same value.
 
-Entra's own SCIM provisioning sends `mailNickname` as `externalId` by default. That never equals the ID token's `sub`, which Entra makes different for each app, so such a person is refused at the first sign-in. strazad's log names the cause in a line `enroll: login not accepted` whose error says `username ... is bound to another identity`. Straza does not link on Entra's `oid` claim yet. Until it does, provision people without `externalId`, and the first sign-in links each account by username.
+strazad reads `oid` only when `oidc.issuer` is one tenant's v2.0 issuer, written as the previous step shows. With any other issuer, the token's `sub` links the account.
+
+Entra's own SCIM provisioning sends `mailNickname` as `externalId` by default, which no token carries. With the issuer of the previous step, and before the first person is sent, open the provisioning app's **Attribute mapping**, open the row whose target is `externalId`, and change its source attribute from `mailNickname` to `objectId`. Every person then arrives with the object ID their sign-in carries. A person sent with `mailNickname` before the change gets the object ID at Entra's next provisioning cycle, or at once with **Provision on demand**. An account that an earlier sign-in linked by `sub` keeps signing in.
+
+A sign-in whose username names an account with any other `externalId` is refused, so a second identity with the same name never takes the account over. The refusal names the account and says what to correct, and the audit trail records a login failure with the account and the reason `the account is linked to another identity at the identity provider`.
 
 ## Sign in
 
@@ -158,8 +162,11 @@ Entra shows the error AADSTS50105 in the browser
 A console sentence that starts `Your identity provider` and says it refused the sign-in or did not let this page finish it
 : The console address sits on a platform other than **Single-page application**, where Microsoft documents that Entra refuses a code that a browser redeems. This answer has not been seen from a real tenant yet. Move the address to **Single-page application**.
 
+A refusal that says the account `is linked to another identity at your identity provider`
+: The console shows it after `You signed in at your identity provider, but Straza refused the session:`, and `straza enroll` shows it on its own. The account carries an `externalId` that is neither the person's object ID nor the token's `sub`, usually the `mailNickname` of Entra's default mapping. Change the mapping row as the section on how a token finds its account shows, run **Provision on demand** for the person, and sign in again.
+
 ``login not accepted: run `straza enroll` again``
-: strazad did not accept the ID token. Look in strazad's log for the line `enroll: login not accepted`, or `session exchange: login not accepted` for a console sign-in. When its error says `username ... is bound to another identity`, the provisioned account carries an `externalId` that is not the ID token's `sub`, as the section on how a token finds its account explains.
+: strazad did not accept the ID token. Look in strazad's log for the line `enroll: login not accepted`, or `session exchange: login not accepted` for a console sign-in. When its error says `oidc: token is expired` within seconds of the sign-in, the person's straza client is older than your strazad and asks Entra for `max_age=0`, which Entra answers with an ID token that has already expired. Install the straza client of your strazad's version and enroll again.
 {{< /fails >}}
 
 ## Caveats {.nostep}
@@ -171,4 +178,5 @@ Disabling a person in Entra stops new sign-ins and enrollments and nothing more.
 
 - [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) walks the enrollment and every refusal it can meet.
 - [Okta login]({{< relref "guides/connect-identity/okta-login.md" >}}) sets up the same sign-in at Okta.
+- [An agent's own Entra agent identity]({{< relref "guides/serve-mcp-apps/caller-credentials.md#entra-agent-identity" >}}) gives each AI agent a token of its own Entra agent identity at a server that trusts Entra. This page signs people in, and agents still sign in to Straza with their own key.
 - [Configuration]({{< relref "reference/configuration.md" >}}) lists `oidc.loopbackPort` and `governance.minSignIn` with their defaults.

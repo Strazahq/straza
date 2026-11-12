@@ -14,8 +14,8 @@ tested:
   date: 2026-09-28
 applies_to: both
 keywords: deny rule reason activate
-who: You, as the admin
-where: The console or a terminal with strazactl, and the agent's machine for the proof
+who: Admin
+where: Console or strazactl, and the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: cli
@@ -27,7 +27,7 @@ A policy set is one YAML document that says what the sessions of a role may do. 
 ## Before you start {.nostep}
 
 
-You need an administrator's console sign-in, or an admin API token for `strazactl` in `STRAZA_API_TOKEN` minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows, an application role, a user who holds it, and a machine enrolled as that user, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. This page uses the role `local-tools` and the user `dana`. The role reaches no MCP server and is there for policy rules only, and only the CLI makes such a role:
+You need an administrator's console sign-in, or an admin API token for `strazactl` in `STRAZA_API_TOKEN` minted in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows, an application role, a user who holds it, and a machine enrolled as that user, as [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows. This page uses the role `local-tools` and the user `dana`. The role reaches no MCP server and is there for policy rules only. The console makes such a role only together with a policy, through **A new role** in the New policy wizard, so this page makes it with the CLI:
 
 {{< command terminal="Terminal" purpose="administration" >}}
 ```sh

@@ -15,8 +15,8 @@ tested:
   except: the Windows and macOS steps, run only outside this page, and ghapp's settings and start lines, read from its code
   date: 2026-10-24
 applies_to: both
-who: You, as the admin of ghapp, and the people whose agents run git
-where: A terminal with strazactl, ghapp's settings, and an agent's Linux, macOS or Windows machine
+who: Admin, and the people whose agents run git
+where: Terminal with strazactl, ghapp's settings, and an agent's Linux, macOS or Windows machine
 steps: true
 keywords: git push fetch clone git grant ghapp github git-remote-straza remote helper host file approval repo force push ruleset windows msi path macos pkg
 ---

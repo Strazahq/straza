@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { HelpTip } from "@/components/help-tip";
 import { HINT } from "@/components/wizard/parts";
 import type { EventSupport } from "@/lib/api";
+import { HARNESS_NAME_HINT } from "@/lib/harness-words";
 import { type Doc, type Plain, type RuleView, setEvents, setNames } from "@/lib/policy-model";
 import {
   ADD_PATH, ADD_PATTERN, ADD_TOOL, ADVANCED, AS_WRITTEN, AS_WRITTEN_HELP, CHOOSE_EVENTS, CONDITION_HELP, EVENTS_DEFAULT_HELP, EVERY_SERVER,
@@ -53,7 +54,7 @@ function Row({ slot, label, yamlKey, help, children }: { slot: string; label: st
 // Names are what the rule matches on its lane, one chip each. Removing the
 // last chip widens the rule to every call on the lane, which is what an
 // absent matcher means, so nothing is confirmed.
-function Names({ rule, label, add, hint, onEdit, onSplit }: { rule: RuleView; label: string; add: string; hint?: string; onEdit: Props["onEdit"]; onSplit?: Props["onSplit"] }) {
+function Names({ rule, label, add, hint, onEdit, onSplit, keepOne }: { rule: RuleView; label: string; add: string; hint?: string; onEdit: Props["onEdit"]; onSplit?: Props["onSplit"]; keepOne?: boolean }) {
   const [text, setText] = React.useState("");
   const names = rule.names || [];
   const split = onSplit && names.length > 1 ? onSplit : null;
@@ -72,9 +73,11 @@ function Names({ rule, label, add, hint, onEdit, onSplit }: { rule: RuleView; la
           <span key={n} className="inline-flex items-center gap-1">
             <span className={CHIP} data-name={n}>
               {n}
-              <button type="button" aria-label={removePick(n)} className="text-muted-foreground hover:text-foreground" onClick={() => write(names.filter((x) => x !== n))}>
-                <XIcon className="size-3" aria-hidden="true" />
-              </button>
+              {!(keepOne && names.length === 1) && (
+                <button type="button" aria-label={removePick(n)} className="text-muted-foreground hover:text-foreground" onClick={() => write(names.filter((x) => x !== n))}>
+                  <XIcon className="size-3" aria-hidden="true" />
+                </button>
+              )}
             </span>
             {split && (
               <Button variant="link" size="sm" className="h-6 px-1" aria-label={moveOut(n)} data-move-out={n} onClick={() => split(n)}>{MOVE_OUT}</Button>
@@ -178,7 +181,7 @@ export function PolicyMatching({ rule, events, onEdit, onSplit }: Props) {
   const [open, setOpen] = React.useState(false);
   const requires = requireWords(rule.raw);
   const written = asWritten(rule);
-  const editable = rule.lane === "mcp" || rule.lane === "shell" || rule.lane === "files";
+  const editable = rule.lane === "mcp" || rule.lane === "shell" || rule.lane === "files" || rule.lane === "harness";
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="rounded-md border border-border bg-background" data-fold={rule.id}>
       <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
@@ -197,6 +200,11 @@ export function PolicyMatching({ rule, events, onEdit, onSplit }: Props) {
         {rule.lane === "mcp" && (
           <Row slot="tools" label={MATCH.tools} yamlKey={rule.namesKey}>
             <Names rule={rule} onEdit={onEdit} onSplit={onSplit} label={MATCH.tools} add={ADD_TOOL} />
+          </Row>
+        )}
+        {rule.lane === "harness" && (
+          <Row slot="tools" label={MATCH.tools} yamlKey={rule.namesKey}>
+            <Names rule={rule} onEdit={onEdit} onSplit={onSplit} label={MATCH.tools} add={ADD_TOOL} hint={HARNESS_NAME_HINT} keepOne />
           </Row>
         )}
         {rule.lane === "shell" && (

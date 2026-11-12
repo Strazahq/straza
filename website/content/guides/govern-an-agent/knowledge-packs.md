@@ -14,8 +14,8 @@ tested:
   date: 2026-10-06
   except: the console steps, read in the console source and not clicked
 applies_to: both
-who: You, as the admin
-where: A terminal, the console, and the agent's machine
+who: Admin
+where: Terminal, the console, and the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: cli

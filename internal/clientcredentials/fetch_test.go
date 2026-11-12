@@ -93,9 +93,11 @@ func TestRefusalSentences(t *testing.T) {
 		want    string
 	}{
 		{name: "no key", signer: authn.ErrNoAssertionKey,
-			want: "This Straza deployment has no client assertion key that signs: none was created yet, or the last one was retired. An administrator runs strazactl signing-keys rotate client_assertion, and agents can call about a minute later."},
-		{name: "staged key", signer: authn.ErrAssertionKeyStaged,
-			want: "The client assertion key was created moments ago and starts signing within a minute. Call again then."},
+			want: "This Straza deployment has no client assertion key that signs: none was created yet, or the last one was retired. An administrator runs strazactl signing-keys rotate client_assertion, then strazactl signing-keys promote client_assertion with the new key's id, and the agent calls again."},
+		{name: "staged key", signer: &authn.StagedKeyError{KID: "6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10"},
+			want: "The client assertion key 6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10 is staged and signs nothing until an administrator promotes it with strazactl signing-keys promote client_assertion 6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10, then the agent calls again."},
+		{name: "expired certificate", signer: &authn.CertificateExpiredError{KID: "6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", NotAfter: time.Date(2028, 11, 6, 12, 0, 0, 0, time.UTC)},
+			want: "The certificate of client assertion key 6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10 expired on 2028-11-06, so Entra would refuse it. An administrator runs strazactl signing-keys rotate client_assertion, uploads the new key's certificate to the Entra blueprint and promotes that key with strazactl signing-keys promote client_assertion and its id, then the agent calls again."},
 		{name: "stale replica", signer: authn.ErrAssertionKeysStale,
 			want: "This Straza replica has lost contact with its key store and signs nothing until it reads the keys again. An administrator checks the replica's database connection in the strazad log, then the agent calls again."},
 		{name: "another signer failure", signer: errors.New("rsa: internal error with secret material"),
@@ -161,7 +163,7 @@ func TestProviderWithoutTheBlockIsRefused(t *testing.T) {
 	r := newRig(t)
 	q := sam()
 	q.Provider = "okta"
-	const want = "agent sam-sre-agent could not get a midpoint token. Server midpoint sets credential.agents to client_credentials, and the provider okta has no clientCredentials settings. Add oauth.providers.okta.clientCredentials.assertionAudience to strazad's config, or set credential.agents to own, sponsor or shared."
+	const want = "agent sam-sre-agent could not get a midpoint token. Server midpoint sets credential.agents to client_credentials, and the provider okta has no clientCredentials settings. Add oauth.providers.okta.clientCredentials to strazad's config, with assertionAudience for Keycloak or Okta, or with entraBlueprint for an Entra agent blueprint. Otherwise set credential.agents to own, sponsor or shared."
 	if _, err := r.tokens.Token(bg, q); err == nil || err.Error() != want {
 		t.Fatalf("err = %v\nwant  %s", err, want)
 	}

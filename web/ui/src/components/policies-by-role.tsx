@@ -17,8 +17,9 @@ import { cn } from "@/lib/utils";
 
 // PolicyDoor is what a door hands the New policy wizard: the role it opens
 // on (null for Everyone, absent for no choice), the intent the door names,
-// and the lane when the Lane filter names one.
-export type PolicyDoor = { role?: string | null; intent?: "deny" | "approve"; lane?: string };
+// and the lane when the Lane filter names one. A door from a denied call
+// names the server and the tools that were asked for.
+export type PolicyDoor = { role?: string | null; intent?: "deny" | "approve"; lane?: string; app?: string; tools?: string[] };
 
 // openNewPolicy hands the wizard the prefill and goes there. The prefill
 // travels in module memory, never the address, so a reload lands on the

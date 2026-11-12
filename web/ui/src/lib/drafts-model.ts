@@ -4,8 +4,9 @@
 // item's document. No React here, and no sentence: drafts-words.ts words
 // what this file answers.
 import { type Covers, coversOf } from "./access-covers";
-import type { DraftConflict, DraftDetail, DraftFinding, DraftGain, DraftItem, DraftKind, DraftOp, DraftPublishBody, DraftVerdict, FindingClass, ManifestDoc } from "./api";
+import type { Draft, DraftConflict, DraftDetail, DraftFinding, DraftGain, DraftItem, DraftKind, DraftOp, DraftPublishBody, DraftVerdict, FindingClass, ManifestDoc } from "./api";
 import { callerKind, changeRows } from "./manifest-edit";
+import { nounsOf } from "./object-words";
 import { type Bucket, type RuleView, bucketOf, openDoc, rulesOf } from "./policy-model";
 import { KIND_NAME, exposeWords, rpsWords, sentWords, timeoutWords, transportWords } from "./server-words";
 import { agentsLine } from "./words";
@@ -90,6 +91,50 @@ export const UNLISTED_CODE = "unchecked.tools";
 export const AGENT_LOOSEN_CODE = "agent.guardrail";
 // COVERS_WIDER_CODE is the risk of a held role that reaches more objects.
 export const COVERS_WIDER_CODE = "role.covers-wider";
+// SECRET_MISSING_CODE is the warning of a server whose credential is one
+// shared secret with none stored, and LISTING_MISSING_CODE the warning of
+// a server that pins an object type and has no listing credential. The
+// review page's publish dialog asks for both values.
+export const SECRET_MISSING_CODE = "ready.secret-missing";
+export const LISTING_MISSING_CODE = "ready.objects-listing";
+
+// SecretAsk is a server the publish dialog asks values of: its name, the
+// address its check's words name, whether its secret is asked, the fix of
+// that warning, which is the line of the publish's Next list a stored
+// secret answers, and the nouns and the lister of its pinned type when its
+// listing credential is asked.
+export type SecretAsk = { name: string; url: string; secret: boolean; fix: string; listing: { type: string; plural: string; tool: string } | null };
+
+// secretAsks are the servers the verdict's secret and listing warnings
+// name, in the verdict's order. A listing warning is asked only where the
+// server's document names its pinned type, whose words the dialog needs.
+export function secretAsks(d: Draft, v: DraftVerdict): SecretAsk[] {
+  const out: SecretAsk[] = [];
+  for (const f of v.warnings || []) {
+    if ((f.code !== SECRET_MISSING_CODE && f.code !== LISTING_MISSING_CODE) || !f.object || !f.object.startsWith("App/")) continue;
+    const name = f.object.slice("App/".length);
+    const m = manifestOf(d.items.find((i) => i.kind === "App" && i.name === name)?.doc);
+    const pin = m?.straza?.objects;
+    if (f.code === LISTING_MISSING_CODE && !pin) continue;
+    let ask = out.find((a) => a.name === name);
+    if (!ask) {
+      ask = { name, url: m?.straza?.runtime?.remote?.url || "", secret: false, fix: "", listing: null };
+      out.push(ask);
+    }
+    if (f.code === SECRET_MISSING_CODE) {
+      ask.secret = true;
+      ask.fix = f.fix || "";
+    } else if (pin) {
+      ask.listing = { ...nounsOf(pin), tool: pin.list?.tool || "" };
+    }
+  }
+  return out;
+}
+
+// askedLine says whether the publish dialog asks the value a warning
+// names, for the line under it in Checks.
+export const askedLine = (asks: SecretAsk[], f: DraftFinding) =>
+  asks.some((a) => f.object === "App/" + a.name && (f.code === SECRET_MISSING_CODE ? a.secret : f.code === LISTING_MISSING_CODE && !!a.listing));
 
 // ConfirmBlock is one thing the person confirms when publishing: a tick, a
 // typed name, or a typed count over several typed lines of one group.

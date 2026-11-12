@@ -14,8 +14,8 @@ tested:
   platform: A throwaway standalone server on Linux with the sentinel turned on in its config file, where a person's machine sent six denied commands through the Claude Code hook within a minute. The verdicts were read with strazactl and in headless Chromium, and no session was revoked
   date: 2026-10-06
 applies_to: both
-who: You, as the admin who runs strazad
-where: The config file, a terminal and the console
+who: Admin
+where: Config file, a terminal, and the console
 steps: true
 modes: [console, cli]
 mode_default: console

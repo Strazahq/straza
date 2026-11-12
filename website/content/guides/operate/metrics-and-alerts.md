@@ -15,8 +15,8 @@ tested:
   except: the Prometheus scrape job and the alert rules, never loaded into Prometheus
   date: 2026-10-06
 applies_to: both
-who: You, as the operator who runs strazad
-where: The strazad config file and your Prometheus server
+who: Operator
+where: strazad config file and your Prometheus server
 steps: true
 keywords: metrics prometheus alerts scrape monitoring metricstoken counters
 ---
@@ -82,7 +82,7 @@ The route label is the route pattern strazad matched, such as `GET /version`, `P
 |---|---|
 | `straza_pdp_decisions_total` | By `effect`. Decisions strazad makes itself, `allow` or `deny`. They come from `POST /v1/decide`, which a client calls for a rule that needs a person's approval or a server check, and from the MCP gateway. A hook that decides from its local snapshot does not count here. |
 | `straza_pdp_decision_seconds` | By `effect`. How long those decisions took, as a histogram from 20 microseconds to 100 milliseconds. |
-| `straza_failclosed_total` | By `lane`. Internal failures answered as a deny, with `hook` for `/v1/decide`, `gateway` for a call to an MCP server on `/mcp`, and `native` for Straza's own tools on `/mcp`, such as `straza__approval_request`. A failed approval service, fingerprint or classifier counts, and so does a record the full audit queue refused under `block`. Policy denies and approval outcomes never count. |
+| `straza_failclosed_total` | By `lane`. Internal failures answered as a deny, with `hook` for `/v1/decide`, `gateway` for a call to an MCP server on `/mcp`, `native` for Straza's own tools on `/mcp`, such as `straza__approval_request`, and `simulate` for a policy simulation whose classifier failed. A failed approval service, fingerprint or classifier counts, and so does a record the full audit queue refused under `block`. Policy denies and approval outcomes never count. |
 | `straza_gateway_throttled_total` | By `app`. Tool calls the gateway refused because one session called one MCP server faster than the server's `straza.limits.rps` allows. A server whose manifest sets no rate has no limit. The drafting tools of the built-in `straza` server have their own limits: two calls a second for one session, and one submitted draft every ten seconds for one person. |
 | `straza_gateway_replies_withheld_total` | By `app`. Tool replies the gateway withheld because they held the credential Straza injects for that server. Each one also leaves a deny record and a critical `credentialEcho` verdict on the audit chain, so alert on any increment. |
 | `straza_gateway_catalog_oversize_total` | Catalog builds with more tools than `apps.catalog.warnSize`, 100 by default. The warning in the log names the role. |

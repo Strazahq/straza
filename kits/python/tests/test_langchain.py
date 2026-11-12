@@ -111,7 +111,7 @@ class ToolMapExtractionTest(StubbedCase):
         p = self.decide(mw, "mystery_tool", {"whatever": 1})
         self.assertEqual(p["tool_name"], "other")
         self.assertEqual(p["native_tool_name"], "mystery_tool")
-        self.assertNotIn("tool_input", p)  # nothing extractable for `other`
+        self.assertEqual(p["tool_input"], {"whatever": 1})  # an unclassified tool sends its own arguments
 
     def test_constructor_rejects_non_canonical_kinds(self):
         with self.assertRaises(ValueError):

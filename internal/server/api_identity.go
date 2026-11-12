@@ -418,7 +418,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	)
 	facts := func(roleIDs []string) (sessionFacts, error) {
 		packs, packsErr = a.store.Packs().ForRoles(r.Context(), roleIDs)
-		return sessionFacts{person: personUser(u), harness: req.Harness.Name, packs: whoamiPacksOf(packs)}, packsErr
+		return sessionFacts{person: personUser(u), harness: req.Harness.Name, packs: whoamiPacksOf(packs), entraAgentID: u.EntraAgentID}, packsErr
 	}
 	settled, refusal, err := a.settleRoles(r.Context(), sessionID, u.ID, facts, func(roles []store.Role) policy.Subject {
 		names := make([]string, len(roles))
@@ -487,6 +487,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		Subject: u.ID, Session: sessionID, Device: deviceID,
 		Harness:     joinHarness(req.Harness.Name, req.Harness.Version),
 		Attestation: attLevel, RolesHash: authn.RolesHash(roleIDs), Snapshot: snapshotID, CNF: cnf,
+		EntraAgentID: u.EntraAgentID,
 	})
 	if err != nil {
 		a.fail(w, r, http.StatusInternalServerError, "could not mint session token", err)

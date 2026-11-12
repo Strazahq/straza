@@ -104,7 +104,9 @@ func (c *check) setWarnings(name string, written bool) []Finding {
 		for _, s := range rule.Apps {
 			_, live := c.w.Apps[s]
 			if _, ok := c.after.Apps[s]; !ok && s != nativeApp && (written || live) {
-				out = append(out, warning(codeRuleNothing, object, fmt.Sprintf("Rule %s of %s names %s, which is not a registered server.", rule.ID, name, s), "Fix the name."))
+				out = append(out, warning(codeRuleNothing, object, fmt.Sprintf(
+					"Rule %s of %s names %s, which is not a registered server, so it matches only an MCP server that a person's own harness runs under that name.",
+					rule.ID, name, s), "If you meant a registered server, fix the name."))
 			}
 		}
 	}

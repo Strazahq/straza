@@ -43,6 +43,13 @@ export const CLOSE_DROP = "Close and drop the changes";
 
 // The Add MCP server wizard.
 export const publishRow = (name: string) => "Publish " + name;
+export const checkRow = (name: string) => "Check " + name;
+// The doors after the check, which the review page's publish dialog shares
+// once it stored a server's secret.
+export const STORE_AND_CHECK = "Store the secret and check";
+export const SET_AGAIN = "Set the secret again";
+export const RECHECK = "Recheck";
+export const finishLater = (name: string) => "Finish later, open " + name;
 export const SECRET_WAITS = "Save draft keeps the manifest only. A secret never goes into a draft, so store it on the server's page once the draft is published.";
 export const notListed = (name: string) =>
   name + " is published, but the server list did not name it yet, so its secret and check did not run. Open MCP servers, then set the secret on its page.";

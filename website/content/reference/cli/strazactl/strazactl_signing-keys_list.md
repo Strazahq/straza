@@ -2,7 +2,7 @@
 title: strazactl signing-keys list
 description: List every signing key with its purpose and status
 pagetype: reference
-weight: 88
+weight: 89
 draft: false
 sources:
   - cmd/strazactl
@@ -23,5 +23,5 @@ strazactl signing-keys list [flags]
 
 ## See also
 
-* [strazactl signing-keys](/reference/cli/strazactl/strazactl_signing-keys/): List, rotate and retire signing keys
+* [strazactl signing-keys](/reference/cli/strazactl/strazactl_signing-keys/): List, rotate, promote and retire signing keys, and print a client assertion key's certificate
 

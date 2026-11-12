@@ -15,8 +15,8 @@ tested:
   except: the token step and the console's browser sign-in, written from the code
   date: 2026-10-06
 applies_to: standalone
-who: You, as the operator of the host
-where: A terminal on the host, and a browser for the sign-in
+who: Operator
+where: Terminal on the host, and a browser for the sign-in
 steps: true
 modes: [console, cli]
 mode_default: cli

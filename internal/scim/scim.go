@@ -85,6 +85,10 @@ type Deps struct {
 	// names of the fields that changed, for a write that changed at least
 	// one. nil means no audit consumer.
 	UserWritten func(ctx context.Context, action string, u store.User, changed []string)
+	// WriteRefused reports one write the server refused, once per request
+	// that reached the route, so the server logs and records it. A request
+	// refused at the token check is not reported. nil means no consumer.
+	WriteRefused func(r *http.Request, ref Refusal)
 	// ProtectedUsername names the break-glass local admin (revision 12).
 	// That account is invisible to this surface end to end: never
 	// rendered, never a member, and every id-addressed op answers as if
@@ -178,12 +182,18 @@ func (s *Server) requireToken(next http.HandlerFunc) http.HandlerFunc {
 		// Bound every SCIM body (mirrors the gateway's cap): IdM payloads are
 		// small, and an unbounded json.Decode is a one-request memory bomb.
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		next(w, r)
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			next(w, r)
+			return
+		}
+		s.reportRefusal(next, w, r)
 	}
 }
 
-// writeError emits an RFC 7644 error body.
+// writeError emits an RFC 7644 error body and notes it for the refusal
+// report of a write.
 func writeError(w http.ResponseWriter, status int, scimType, detail string) {
+	noteError(w, status, scimType, detail)
 	body := map[string]any{
 		"schemas": []string{SchemaError},
 		"status":  fmt.Sprintf("%d", status),

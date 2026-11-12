@@ -226,10 +226,11 @@ verify-release:
 # reference page carries, a docs link with no page, an example document the
 # validators reject, a SKILL.md without a compatibility line, and manifests
 # whose versions disagree. A change to plugins/ also bumps the version.
-# The served copy
+# The commands in README.md and docs/quickstart-standalone.md get the same
+# command check. The served copy
 # under website/static/.well-known comes from make docs-gen.
 plugins-gate:
-	@go run ./tools/pluginsgate && echo "plugins gate: plugins/ is current"
+	@go run ./tools/pluginsgate && echo "plugins gate: plugins/ and the commands in README.md and docs/quickstart-standalone.md are current"
 
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
@@ -314,10 +315,11 @@ harness-matrix:
 E2E_TEST := go test -count=1 -timeout 45m -run TestJourneys -v ./test/e2e-matrix
 E2E_IMAGE ?= mirror.gcr.io/library/golang:$(patsubst go%,%,$(shell go env GOVERSION))-bookworm
 e2e-matrix:
-	@if [ -d /run/straza-service ]; then \
+	@if [ -d /run/straza-service ] || [ -d /opt/straza/run ]; then \
 		echo "e2e-matrix: this machine runs the Straza system service, so the journeys run in $(E2E_IMAGE)"; \
 		docker run --rm --network none --user "$$(id -u):$$(id -g)" -e HOME=/tmp/home -e GOCACHE=/tmp/gocache \
 			-e GOMODCACHE=/go/pkg/mod -e GOTOOLCHAIN=local -e STRAZA_E2E_MATRIX=1 \
+			-e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/src \
 			-e STRAZA_E2E_SCENARIOS="$$STRAZA_E2E_SCENARIOS" -v "$(CURDIR)":/src \
 			-v "$$(go env GOMODCACHE)":/go/pkg/mod:ro -w /src $(E2E_IMAGE) $(E2E_TEST); \
 	else \

@@ -48,7 +48,7 @@ import subprocess  # nosec B404 - spawning straza IS the design
 import threading
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional
 
 __all__ = [
     "Decision",
@@ -136,7 +136,7 @@ def _invoke(payload: dict, enforce: bool) -> Decision:
     try:
         proc = subprocess.run(  # nosec B603 - fixed binary, no shell
             argv + ["hook"],
-            input=json.dumps(payload).encode("utf-8"),
+            input=json.dumps(payload, default=str).encode("utf-8"),
             capture_output=True,
             timeout=_TIMEOUT_SECS,
             env=env,
@@ -179,7 +179,7 @@ def _payload(event: str, **extra: Any) -> dict:
     return p
 
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 def check(
@@ -190,14 +190,20 @@ def check(
     url: Optional[str] = None,
     app: Optional[str] = None,
     tool_name: Optional[str] = None,
+    args: Optional[Mapping[str, Any]] = None,
 ) -> Decision:
     """Decide one tool call before running it. `tool` is the canonical
     taxonomy: shell.exec, file.write, file.edit, file.read, net.fetch,
     task.spawn, other; or pass app= + tool_name= for an MCP-style call
     (sent as the mcp__<app>__<tool> form the dialect parses). tool_name
     without app is the framework's own name of the tool, which policy can
-    allow, hold or deny by name (sent as native_tool_name)."""
-    return _invoke(_tool_payload("PreToolUse", tool, command, paths, url, app, tool_name), enforce=True)
+    allow, hold or deny by name (sent as native_tool_name). args is the
+    call's own arguments, sent for a tool of kind other, which has no
+    command, path or url to describe it: Straza records them and an
+    approval binds them. An empty mapping is a call with no arguments, and
+    None is arguments the caller never saw. A value JSON cannot carry is
+    sent as its text. Any other kind ignores args."""
+    return _invoke(_tool_payload("PreToolUse", tool, command, paths, url, app, tool_name, args), enforce=True)
 
 
 def _tool_payload(
@@ -208,6 +214,7 @@ def _tool_payload(
     url: Optional[str],
     app: Optional[str],
     tool_name: Optional[str],
+    args: Optional[Mapping[str, Any]] = None,
 ) -> dict:
     """The payload of one tool event, shared by check() and tool_result()."""
     native, own_name = tool, tool_name
@@ -220,7 +227,12 @@ def _tool_payload(
         tool_input["paths"] = list(paths)
     if url is not None:
         tool_input["url"] = url
-    return _payload(event, tool_name=native, native_tool_name=own_name, tool_input=tool_input)
+    payload = _payload(event, tool_name=native, native_tool_name=own_name, tool_input=tool_input)
+    if args is not None and native == "other":
+        # Set after _payload, which drops an empty value: an empty mapping
+        # is the observed call with no arguments and must still be sent.
+        payload["tool_input"] = dict(args)
+    return payload
 
 
 def guard(
@@ -229,19 +241,22 @@ def guard(
     name: Optional[str] = None,
     command_from: Optional[Callable[..., str]] = None,
     paths_from: Optional[Callable[..., Iterable[str]]] = None,
+    args_from: Optional[Callable[..., Mapping[str, Any]]] = None,
 ) -> Callable:
     """Decorator: decide before every call of the wrapped tool function.
     name is the tool's own name, which policy can allow, hold or deny by
     name. command_from/paths_from derive the policy-relevant fields from the
     call's own arguments; without them the call is decided on the tool kind
-    alone. Deny raises StrazaDenied (frameworks surface the message to the
-    model)."""
+    alone. args_from answers the arguments of a call to a tool of kind
+    other as a mapping, which check() sends as args. Deny raises
+    StrazaDenied (frameworks surface the message to the model)."""
 
     def wrap(fn: Callable) -> Callable:
         def guarded(*args: Any, **kwargs: Any) -> Any:
             cmd = command_from(*args, **kwargs) if command_from else None
             pth = paths_from(*args, **kwargs) if paths_from else None
-            d = check(tool, command=cmd, paths=pth, tool_name=name)
+            own = args_from(*args, **kwargs) if args_from else None
+            d = check(tool, command=cmd, paths=pth, tool_name=name, args=own)
             if not d.allowed:
                 raise StrazaDenied(d.reason)
             return fn(*args, **kwargs)
@@ -273,7 +288,8 @@ def tool_result(
     """Report that a tool call COMPLETED (canonical `tool.post`). Purely
     observational, since the decision was already made at `check()`; this closes
     the pair in the audit trail the way a harness's PostToolUse does.
-    Arguments mirror `check()`. Never raises."""
+    Arguments mirror `check()` without `args`: a completed call is not
+    decided again, so its arguments are not sent again. Never raises."""
     _invoke(_tool_payload("PostToolUse", tool, command, paths, url, app, tool_name), enforce=False)
 
 

@@ -15,8 +15,8 @@ tested:
   except: the token scope probe, the refusal of AI agents and omar's browser sign-in, written from the code
   date: 2026-10-06
 applies_to: both
-who: You, as the root admin
-where: The server's config file, then the console or a terminal with strazactl
+who: Root admin
+where: strazad config file, then console or strazactl
 steps: true
 modes: [console, cli]
 mode_default: cli
@@ -41,8 +41,8 @@ A scope is an area and a verb, written `area:read` or `area:write`, and the verb
 | `identity` | users, roles, assignments, devices, locks and knowledge packs |
 | `sessions` | listing sessions and revoking them, one or all, which is the kill switch |
 | `transcripts` | recorded conversation content, kept apart from every other area on purpose |
-| `audit` | the decision and admin event history, content free |
-| `policy` | PolicySets: read, write, validate, simulate and activate |
+| `audit` | the decision and admin event history, which holds each tool's input and no conversation text |
+| `policy` | PolicySets: read, write, validate, simulate and activate, and the list of tools that were denied because no rule covers them |
 | `apps` | MCP servers, access rows, secrets, health and the tool catalog |
 | `drafts` | drafts of changes to MCP servers, roles, access rows and policy sets: `drafts:read` lists and reads them, and `drafts:write` checks, creates, changes, reverts, discards and publishes them, where a publish also needs a person with standing over every object in the draft, as [Who may draft and publish]({{< relref "guides/changes/who-may-draft.md" >}}) explains |
 | `approvals` | pending approval requests, approval channels and enrolled approver phones |

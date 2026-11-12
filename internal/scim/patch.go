@@ -14,6 +14,9 @@ type patchOp struct {
 	op    string // add|replace|remove
 	path  string // lowercased; "" = whole-resource object value
 	value any
+	// second says the path named the Straza User extension by its second
+	// name. applyUserOp sets it and rewrites the path to Straza's own name.
+	second bool
 }
 
 // mutabilityError maps to scimType "mutability".
@@ -63,6 +66,10 @@ func normalizePath(p string) string {
 	end := strings.LastIndexByte(p, '"')
 	return strings.ToLower(p[:open]) + p[open:end+1] + strings.ToLower(p[end+1:])
 }
+
+// emailValuePathRe matches the path of one filtered address's value, such
+// as emails[type eq "work"].value.
+var emailValuePathRe = regexp.MustCompile(`^emails\[[^\]]*\]\.value$`)
 
 // memberFilterRe matches the value-filter removal form IdMs send:
 // members[value eq "<id>"].

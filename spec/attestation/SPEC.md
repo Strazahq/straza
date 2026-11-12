@@ -259,7 +259,7 @@ the server refuses it (section strazactl sign-in retired).
 The server sees only the ID token. A client obtains it through an
 authorization code request with PKCE (RFC 7636, `S256`) that redirects to
 `http://127.0.0.1:<port>/callback` (RFC 8252), with the scopes `openid
-profile`, `state`, the nonce above, `prompt=login` and `max_age=0`. The
+profile`, `state`, the nonce above, `prompt=login` and `max_age=600`. The
 straza client makes that request from the Straza background service, which
 alone holds the PKCE verifier. The rules above are the contract, and they
 do not depend on the identity provider. They leave one gap. The server
@@ -450,6 +450,17 @@ Changes to this artifact follow the additive-change rule in the spec README:
 schema + fixtures + CHANGELOG + version bump in the same PR.
 
 ## Changelog
+- **v1beta1** (2026-11-08, max_age of the browser sign-in): the straza
+  client's authorization request carries `max_age=600` instead of
+  `max_age=0` (section Person sign-in at key enrollment). Microsoft Entra
+  answers `max_age=0` with an ID token that expires the moment it is
+  issued, as seen against a real tenant on 2026-11-08, so the server
+  refused every browser sign-in through Entra as expired. 600 seconds is
+  the window in which the server accepts a browser sign-in's `auth_time`,
+  so the request asks for no older sign-in than the server takes, and
+  `max_age` still obliges the provider to send `auth_time`. The server's
+  rules, the request schema and the examples are unchanged, so the change
+  is additive.
 - **v1beta1** (2026-11-04, NUL characters): a check-in whose
   `harness.name`, `harness.version`, `client.version` or `client.commit`,
   or an artifact name or a hash in `attestation.hashes`, holds a NUL

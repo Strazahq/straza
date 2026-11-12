@@ -90,6 +90,7 @@ Each row says how long one thing lasts and what happens when it runs out. The sm
 | The views a server links | Read again every 10 minutes | A copy the server stops answering for is dropped at most about 20 minutes after its last answer. |
 | A person's sign-in at a server's OAuth provider, from Connect to the callback | 10 minutes | The callback is refused. Start connecting again. |
 | A person's OAuth token for a server <span class="knob">oauth.refreshWindow, oauth.refreshInterval</span> | Refreshed once it expires within 10 minutes, checked every minute | The refresh worker renews it before it expires. |
+| An agent's own token on `credential.agents: client_credentials` | As long as the provider says, about an hour from Entra, kept in memory and renewed 60 seconds before it expires. One fetch, both requests of the Entra exchange included, gets 3 seconds | A fetch that runs out refuses the call and says the provider did not answer. After a refused fetch the agent's next request to the provider waits 1 second, doubling up to 30 seconds. A disable in Entra reaches the agent at its next fetch. |
 | An AI agent's token from your identity provider for a server | Renewed 60 seconds before it expires, and kept for 24 hours at most | Straza fetches a new token from the provider. |
 
 ## Audit and retention
@@ -112,7 +113,7 @@ Each row says how long one thing lasts and what happens when it runs out. The sm
 | What | Default | When it runs out |
 |---|---|---|
 | The previous session signing key, after a rotation | The new key signs about 60 seconds after the rotation, and the previous key verifies for 30 days more, or for `governance.deviceTokenTTL` when that is longer | The previous key stops verifying once every credential it signed has expired. [Keys, certificates and tokens]({{< relref "security/keys-certificates-and-tokens.md" >}}) describes the rotation. |
-| The previous client assertion key, after a rotation | The new key signs about 60 seconds after the rotation, and the previous key leaves the key document about 60 seconds after that | Your identity provider no longer finds the previous key in the document. |
+| The previous client assertion key, after a promote | A staged key signs only once an administrator promotes it, at the earliest a minute after the rotation, and the previous key leaves the key document about 60 seconds after the promote | Your identity provider no longer finds the previous key in the document. An Entra blueprint accepts it until its certificate is removed there. |
 | An admin change | strazactl waits 30 seconds, and strazad stops a write after 5 minutes | strazactl says the change may still be running and how to check it. strazad answers that the change did not finish and may or may not have been applied. A session or device revoke that runs past the 5 minutes gets that same answer, and its write either committed whole or changed nothing, so read the session or device back before you run it again. |
 | The push stream to a client | A heartbeat every 25 seconds | A proxy in front of strazad must keep an idle stream open for longer than this. |
 | An idle keep-alive connection | 120 seconds | strazad closes it. The listener sets no write timeout, because held calls and event streams stay open on purpose. |

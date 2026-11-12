@@ -114,12 +114,18 @@ func TestRequireFullAdmin(t *testing.T) {
 				}
 			}
 
-			// The two real routes sit behind the wrapper: a credential it
+			// The four real routes sit behind the wrapper: a credential it
 			// refuses gets the same status there, and one it passes reaches
-			// the handlers, which answer 200 and 404 for an unknown kid.
+			// the handlers, which answer 200, and 404 for an unknown kid.
 			wantRotate, wantRetire := tc.want, tc.want
 			if tc.want == http.StatusNoContent {
 				wantRotate, wantRetire = http.StatusOK, http.StatusNotFound
+			}
+			for _, route := range []string{"POST /no-such-kid/promote", "GET /no-such-kid/certificate"} {
+				method, path, _ := strings.Cut(route, " ")
+				if code := adminReq(t, method, base+"/v1/admin/signing-keys/client-assertion"+path, tc.bearer, nil, nil); code != wantRetire {
+					t.Errorf("the route %s = %d, want %d", route, code, wantRetire)
+				}
 			}
 			if code := adminReq(t, "POST", base+"/v1/admin/signing-keys/client-assertion/rotate", tc.bearer, nil, nil); code != wantRotate {
 				t.Errorf("the rotate route = %d, want %d", code, wantRotate)

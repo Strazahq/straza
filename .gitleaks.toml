@@ -62,12 +62,27 @@ minutes after 2026-10-27T12:00Z, so it is not a credential for any server."""
 paths = ['''spec/session-token/examples/id-token/[a-z0-9-]+\.json''']
 
 [[allowlists]]
+description = """spec/session-token example session tokens. Each is signed \
+with the issuer key made from the fixed Ed25519 seed of 32 bytes 0x0a, for \
+the example issuer https://straza.example, and expired 300 seconds after \
+2026-11-09T12:00Z, so it is not a credential for any server. The key-bound \
+ones also need a proof from the seed 0x07 key."""
+paths = ['''spec/session-token/examples/session-token/[a-z0-9-]+\.json''']
+
+[[allowlists]]
 description = """spec/grant example git grants. Each is signed with a key from \
 the fixed seeds the example states (Ed25519 seeds of 32 bytes 0x0a and 0x09, \
 the machine key 0x07), not a credential: it names the audience \
 https://ghapp.example, it expired two minutes after 2026-10-24T12:00Z, and it \
 opens nothing without a proof from the seed 0x07 key."""
 paths = ['''spec/grant/examples/[a-z0-9-]+\.json''']
+
+[[allowlists]]
+description = """RFC 9500 section 2.1 test key "testRSA2048", copied verbatim \
+from the PEM block PRINTED IN THE RFC, whose purpose is to be a publicly known \
+key for tests. The golden test of the client assertion certificate builds its \
+certificate from it. The file contains nothing else."""
+paths = ['''internal/authn/testdata/rfc9500-testRSA2048\.pem''']
 
 # --- leak-detector positive controls ---------------------------------------
 
@@ -143,16 +158,19 @@ regexTarget = "match"
 condition = "AND"
 
 [[allowlists]]
-description = """Client credentials lane tests: two hand-made strings in the \
+description = """Client credentials lane tests: three hand-made strings in the \
 shape of a JWT, because the leak test must find a token or an assertion in an \
 error or a log line if one ever gets there. Their third part is not a \
-signature: it is the base64 of the words signature-bytes and token-signature, \
-and the payloads are {"sub":"sam-sre-agent"} and {"azp":"sam"}. No key signed \
-them and no provider issued them."""
+signature: it is the base64 of the words signature-bytes, token-signature and \
+cert-signature, and the payloads are {"sub":"sam-sre-agent"}, {"azp":"sam"} \
+and {"sub":"blueprint"}, the last under the header \
+{"alg":"RS256","x5t#S256":"thumb"} of the Entra certificate assertion. No key \
+signed them and no provider issued them."""
 paths = ['''internal/clientcredentials/helpers_test\.go''', '''internal/clientcredentials/fetch_test\.go''']
 regexes = [
   '''eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiJzYW0tc3JlLWFnZW50In0\.c2lnbmF0dXJlLWJ5dGVz''',
   '''eyJhbGciOiJSUzI1NiJ9\.eyJhenAiOiJzYW0ifQ\.dG9rZW4tc2lnbmF0dXJl''',
+  '''eyJhbGciOiJSUzI1NiIsIng1dCNTMjU2IjoidGh1bWIifQ\.eyJzdWIiOiJibHVlcHJpbnQifQ\.Y2VydC1zaWduYXR1cmU''',
 ]
 regexTarget = "match"
 condition = "AND"
@@ -273,5 +291,19 @@ regexes = [
   '''pzXwnoH6Vcc/cs\+T/gxsrZ/SGMzU7J7nQSgfKWy5AUg=''',
   '''huw3t4\+Vrf69fExt1wBKWkQB9bZMD\+eSAVsCs03\+cTc=''',
 ]
+regexTarget = "match"
+condition = "AND"
+
+# --- classifier test commands ------------------------------------------------
+
+[[allowlists]]
+description = """The classifier's test table of shell commands. The curl \
+basic-auth rule reads across five rows, from the curl of one test command to \
+the row named "review 4c sudo -u from fetch", whose -u is sudo's user flag \
+and whose value is the command substitution the classifier must deny. No \
+curl in that match carries -u or --user of its own, and every host in it is \
+example.com, so it holds no login."""
+paths = ['''internal/classifier/heuristic_test\.go''']
+regexes = ['''review 4c sudo -u from fetch''']
 regexTarget = "match"
 condition = "AND"

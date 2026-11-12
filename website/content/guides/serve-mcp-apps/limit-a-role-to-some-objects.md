@@ -16,8 +16,8 @@ tested:
   date: 2026-10-20
 applies_to: both
 keywords: object scope covers repos repositories pin listing credential generate ghapp github app objects draft scim midpoint strazaCovers refusal
-who: You, as the admin of the server, and an agent that drafts the change
-where: The console or a terminal with strazactl, your midPoint and the agent's machine
+who: Admin, and an agent that drafts the change
+where: Console or strazactl, your midPoint, and the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: cli

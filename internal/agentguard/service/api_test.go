@@ -66,6 +66,7 @@ type sessionCall struct {
 type decideCall struct {
 	event              policy.Event
 	agentType, agentID string
+	input              *localapi.ToolInput
 }
 
 type apiRecord struct {
@@ -137,9 +138,9 @@ func (f *apiDouble) Policy(ctx context.Context, s Session) (*policy.Engine, int6
 	return f.engine, f.maxAge, snapshot, f.policyErr
 }
 
-func (f *apiDouble) Decide(ctx context.Context, _ Session, ev policy.Event, agentType, agentID string) (DecideOutcome, error) {
+func (f *apiDouble) Decide(ctx context.Context, _ Session, ev policy.Event, agentType, agentID string, input *localapi.ToolInput) (DecideOutcome, error) {
 	f.mu.Lock()
-	f.decideCalls = append(f.decideCalls, decideCall{event: ev, agentType: agentType, agentID: agentID})
+	f.decideCalls = append(f.decideCalls, decideCall{event: ev, agentType: agentType, agentID: agentID, input: input})
 	f.mu.Unlock()
 	if f.decide == nil {
 		return DecideOutcome{}, errors.New("dial tcp 127.0.0.1:1: connect: connection refused")

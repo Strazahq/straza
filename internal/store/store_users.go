@@ -16,6 +16,9 @@ type UserRepo interface {
 	// rows without an address.
 	ListByEmail(ctx context.Context, email string) ([]User, error)
 	GetByExternalID(ctx context.Context, externalID string) (User, error)
+	// GetByEntraAgentID answers the live user that holds the normalized
+	// Entra agent id. An empty id is ErrNotFound.
+	GetByEntraAgentID(ctx context.Context, id string) (User, error)
 	List(ctx context.Context) ([]User, error)
 	// Page returns limit users after the cursor in the order srt names (the
 	// zero Sort is newest first), skipping soft-deleted rows like List,

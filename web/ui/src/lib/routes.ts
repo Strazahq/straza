@@ -43,7 +43,7 @@ export const ROUTES: Route[] = [
   // Drafts opens to the grants that may draft: the drafts area, and the
   // areas whose objects a draft changes.
   { key: "drafts", label: "Drafts", icon: FilePenLineIcon, path: "drafts", areas: ["drafts", "apps", "identity", "policy"], built: true, description: "Changes to servers, roles, access and policy sets wait here until a person publishes them." },
-  { key: "settings", label: "Settings", icon: SettingsIcon, path: "settings", areas: ["config", "tokens"], built: true, description: "Deployment configuration and admin API tokens." },
+  { key: "settings", label: "Settings", icon: SettingsIcon, path: "settings", areas: ["config", "tokens"], built: true, description: "Deployment configuration, admin API tokens and agent signing keys." },
 ];
 
 // landing is the first built area in table order, the page the base path

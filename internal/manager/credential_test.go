@@ -126,8 +126,10 @@ func (t *tableTokens) Token(_ context.Context, r ClientTokenRequest) (string, er
 // is pinned whole: it names the credentials page for the person who must
 // act and strazactl only where an administrator must act. On agents
 // client_credentials an agent with no row runs on its own client's token,
-// asked for under the session's username and nothing else, and every other
-// row proves by its fetch count that no person and no other path asks.
+// asked for under the session's username and nothing else, with the Entra
+// agent identity its check-in read beside it, and every other row proves by
+// its fetch count that no person and no other path asks, a person who
+// somehow holds an Entra agent identity included.
 func TestCredentialResolution(t *testing.T) {
 	const page = "https://straza.example/self-service/credentials"
 	const admin = "strazactl connect github --user joe-java-developer-agent"
@@ -147,6 +149,11 @@ func TestCredentialResolution(t *testing.T) {
 	orphanCC := Caller{UserID: "joe", User: "joe-java-developer-agent", Roles: []string{"dev"}, Agent: true, Session: "ses-1"}
 	humanCC := Caller{UserID: "alice", User: "alice", Roles: []string{"dev"}, Session: "ses-2"}
 	joeRequest := ClientTokenRequest{Provider: "keycloak", Server: "github", ServerID: "app-1", UserID: "joe", ClientID: "joe-java-developer-agent", Session: "ses-1"}
+	const entraID = "dc013442-beba-4440-919b-b7abb594e67f"
+	agentEntra, humanEntra := agentCC, humanCC
+	agentEntra.EntraAgentID, humanEntra.EntraAgentID = entraID, entraID
+	joeEntraRequest := joeRequest
+	joeEntraRequest.EntraAgentID = entraID
 	const refused = "agent joe-java-developer-agent could not get a github token. keycloak refused the client joe-java-developer-agent: invalid_client."
 
 	cases := []struct {
@@ -238,6 +245,10 @@ func TestCredentialResolution(t *testing.T) {
 			wantSource: SourceClientCredentials, wantID: "client_credentials:app-1:joe", wantFetch: &joeRequest},
 		{name: "client credentials: an agent without a sponsor needs none", kind: CredentialOAuth, agents: AgentsClientCredentials, runtime: RuntimeRemote, caller: orphanCC,
 			wantSource: SourceClientCredentials, wantID: "client_credentials:app-1:joe", wantFetch: &joeRequest},
+		{name: "client credentials: an agent's Entra agent identity rides along", kind: CredentialOAuth, agents: AgentsClientCredentials, runtime: RuntimeRemote, caller: agentEntra,
+			wantSource: SourceClientCredentials, wantID: "client_credentials:app-1:joe", wantFetch: &joeEntraRequest},
+		{name: "client credentials: a person with an Entra agent identity is never asked for", kind: CredentialOAuth, agents: AgentsClientCredentials, runtime: RuntimeRemote, caller: humanEntra,
+			wantErr: "MCP server github needs your own keycloak sign-in and you have not connected. Run straza connect github, or sign in on your credentials page at " + page},
 		{name: "client credentials: a person is untouched", kind: CredentialOAuth, agents: AgentsClientCredentials, runtime: RuntimeRemote, caller: humanCC,
 			wantErr: "MCP server github needs your own keycloak sign-in and you have not connected. Run straza connect github, or sign in on your credentials page at " + page},
 		{name: "client credentials: a person keeps their own sign-in", kind: CredentialOAuth, agents: AgentsClientCredentials, runtime: RuntimeRemote, caller: humanCC,

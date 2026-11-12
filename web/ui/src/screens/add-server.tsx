@@ -20,7 +20,7 @@ import { useWizardForm } from "@/components/wizard/use-wizard-form";
 import { type AppRow, type ProviderRow, listApps, listProviders } from "@/lib/api";
 import { EMPTY_FORM, type Form, NAME_RE, SERVER_PICK_ANOTHER, appNameCheck, buildManifest, manifestReady, manifestYAML, needsSecret, serverTaken } from "@/lib/manifest";
 import { version } from "@/lib/public";
-import { SAVE_DRAFT, SAVE_PUBLISH, SECRET_WAITS, publishRow } from "@/lib/save-words";
+import { RECHECK, SAVE_DRAFT, SAVE_PUBLISH, SECRET_WAITS, SET_AGAIN, STORE_AND_CHECK, checkRow, finishLater, publishRow } from "@/lib/save-words";
 import { registerNeedsGlobal } from "@/lib/server-words";
 import { adminAreas, adminServers } from "@/lib/session";
 import { navigate } from "@/lib/router";
@@ -146,7 +146,7 @@ export function AddServer() {
   const planned: Row[] = [
     { key: "install", label: publishRow(label), state: "pending" },
     ...(needsSecret(f) ? [{ key: "secret", label: "Store its secret", state: "pending" } as Row] : []),
-    { key: "check", label: "Check " + label, state: "pending" },
+    { key: "check", label: checkRow(label), state: "pending" },
   ];
   const spin = <Loader2Icon className="animate-spin" />;
   const push = <span className="flex-1" />;
@@ -159,7 +159,7 @@ export function AddServer() {
   } else if (step === "credential") {
     body = <CredentialStep f={f} errors={errors} control={form.control} field={field} set={set} providers={providers} installed={installed ? installed.name : ""} dry={dry} yaml={yaml} />;
     footer = installed
-      ? <>{push}<Button onClick={() => void storeAgain()} disabled={install.busy}>{install.busy && spin}Store the secret and check</Button></>
+      ? <>{push}<Button onClick={() => void storeAgain()} disabled={install.busy}>{install.busy && spin}{STORE_AND_CHECK}</Button></>
       : <><Button variant="ghost" onClick={back}>Back</Button>{push}<Button onClick={() => void next()}>Next</Button></>;
   } else if (step === "review") {
     body = (
@@ -194,10 +194,10 @@ export function AddServer() {
       </>
     ) : (
       <>
-        {landed.read && landed.read.kind === "refused" && needsSecret(f) && <Button variant="outline" onClick={() => setAt(1)} disabled={install.busy}>Set the secret again</Button>}
-        <Button variant="outline" onClick={() => void install.recheck()} disabled={install.busy}><RefreshCwIcon className={cn(install.busy && "animate-spin")} />Recheck</Button>
+        {landed.read && landed.read.kind === "refused" && needsSecret(f) && <Button variant="outline" onClick={() => setAt(1)} disabled={install.busy}>{SET_AGAIN}</Button>}
+        <Button variant="outline" onClick={() => void install.recheck()} disabled={install.busy}><RefreshCwIcon className={cn(install.busy && "animate-spin")} />{RECHECK}</Button>
         {push}
-        <Button variant="ghost" onClick={open}>{"Finish later, open " + installed.name}</Button>
+        <Button variant="ghost" onClick={open}>{finishLater(installed.name)}</Button>
       </>
     );
   }

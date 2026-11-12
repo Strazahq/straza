@@ -1,0 +1,201 @@
+{
+  "name": "user-manager",
+  "steps": [
+    {
+      "note": "the manager is provisioned first, as a person (spec/scim-profile §3.5)",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "ben-manager",
+          "userType": "human"
+        }
+      },
+      "expect": {"status": 201, "subset": {"userName": "ben-manager"}},
+      "capture": {"mid": "id"}
+    },
+    {
+      "note": "the create body Microsoft Entra ID sent for an agent user on 2026-11-10, with the tenant's values replaced: it names the enterprise extension in schemas and carries no manager and no entraAgentId",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+          ],
+          "externalId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+          "userName": "lab-agent@straza.example",
+          "active": true,
+          "displayName": "lab-agent",
+          "meta": {"resourceType": "User"},
+          "userType": "agent"
+        }
+      },
+      "expect": {"status": 201, "subset": {"userName": "lab-agent@straza.example", "userType": "agent"}},
+      "capture": {"aid": "id"}
+    },
+    {
+      "note": "the PATCH Entra sent right after the create: the manager on the URN-qualified path, with op Add and the manager's Straza id as a plain string. The agent's sponsor becomes the manager's userName",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "Add", "path": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager", "value": "{mid}"}
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {"urn:straza:params:scim:schemas:extension:2.0:User": {"sponsor": "ben-manager"}}
+      }
+    },
+    {
+      "note": "the PATCH Entra sent on its next pass: entraAgentId on the Straza URN path, with op Add",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "Add", "path": "urn:straza:params:scim:schemas:extension:2.0:User:entraAgentId", "value": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "sponsor": "ben-manager",
+            "entraAgentId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+          }
+        }
+      }
+    },
+    {
+      "note": "a second manager is provisioned, so the next step proves a change of sponsor",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "ada-manager",
+          "userType": "human"
+        }
+      },
+      "expect": {"status": 201, "subset": {"userName": "ada-manager"}}
+    },
+    {
+      "note": "the manager as the RFC 7643 object, by userName, inside the whole enterprise extension beside an attribute Straza does not map: the sponsor changes to the new manager",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+              "value": {"department": "Platform", "manager": {"value": "ada-manager", "displayName": "Ada"}}
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {"urn:straza:params:scim:schemas:extension:2.0:User": {"sponsor": "ada-manager"}}
+      }
+    },
+    {
+      "note": "a PATCH that names an attribute Straza does not map beside a mapped one answers 200 and applies the mapped one (§3)",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "Add", "path": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:department", "value": "Platform"},
+            {"op": "Replace", "path": "displayName", "value": "Lab agent"}
+          ]
+        }
+      },
+      "expect": {"status": 200, "subset": {"displayName": "Lab agent"}}
+    },
+    {
+      "note": "a manager Straza does not know is refused, and nothing is saved",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "replace", "path": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager", "value": "nobody-here"}
+          ]
+        }
+      },
+      "expect": {"status": 400, "subset": {"scimType": "invalidValue", "status": "400"}}
+    },
+    {
+      "note": "a create that names a manager Straza does not know answers 201, as a revision 22 server answered it. The agent is saved without a sponsor, which a subset match cannot show, so the reference server's unit test TestAgentManagerBecomesSponsor asserts it",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+          ],
+          "userName": "late-manager-agent@straza.example",
+          "userType": "agent",
+          "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {"manager": {"value": "nobody-here"}}
+        }
+      },
+      "expect": {"status": 201, "subset": {"userName": "late-manager-agent@straza.example", "userType": "agent"}}
+    },
+    {
+      "note": "a user's groups stay read-only on a PATCH",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "add", "path": "groups", "value": [{"value": "any-role"}]}
+          ]
+        }
+      },
+      "expect": {"status": 400, "subset": {"scimType": "mutability", "status": "400"}}
+    },
+    {
+      "note": "a person's manager is accepted and not stored",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{mid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "Add", "path": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager", "value": "{aid}"}
+          ]
+        }
+      },
+      "expect": {"status": 200, "subset": {"userName": "ben-manager", "userType": "human"}}
+    },
+    {
+      "note": "a remove of the manager answers 200. It clears the agent's sponsor, which a subset match cannot show, so the reference server's unit test TestAgentManagerBecomesSponsor asserts it",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "remove", "path": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager"}
+          ]
+        }
+      },
+      "expect": {"status": 200, "subset": {"userName": "lab-agent@straza.example", "userType": "agent"}}
+    }
+  ]
+}

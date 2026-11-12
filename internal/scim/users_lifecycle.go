@@ -52,7 +52,15 @@ func (s *Server) handleUserReplace(w http.ResponseWriter, r *http.Request) {
 	}
 	before := u
 	var doc userDocument
-	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil || doc.UserName == "" {
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		detail := wrongTypeDetail(err)
+		if detail == "" {
+			detail = "malformed JSON body"
+		}
+		writeError(w, http.StatusBadRequest, "invalidValue", detail)
+		return
+	}
+	if doc.UserName == "" {
 		writeError(w, http.StatusBadRequest, "invalidValue", "userName is required")
 		return
 	}
@@ -74,9 +82,15 @@ func (s *Server) handleUserReplace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 		return
 	}
+	if !s.applyManager(w, r, &u, doc.managerWrite()) || s.refuseEntraAgentID(w, r, before, u) {
+		return
+	}
 	clearNonPersonPassword(&u)
 	updated, err := s.deps.Store.Users().Update(r.Context(), u)
 	if errors.Is(err, store.ErrConflict) {
+		if u.EntraAgentID != "" && s.refuseEntraAgentID(w, r, before, u) {
+			return
+		}
 		writeError(w, http.StatusConflict, "uniqueness", "userName already exists")
 		return
 	}
@@ -108,9 +122,9 @@ func (s *Server) handleUserPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeTarget := u.Status == store.UserActive
+	patch := userPatch{active: u.Status == store.UserActive}
 	for _, op := range ops {
-		if err := applyUserOp(&u, &activeTarget, op); err != nil {
+		if err := applyUserOp(&u, &patch, op); err != nil {
 			var me mutabilityError
 			if errors.As(err, &me) {
 				writeError(w, http.StatusBadRequest, "mutability", err.Error())
@@ -120,10 +134,17 @@ func (s *Server) handleUserPatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	activeTarget := patch.active
+	if !s.applyManager(w, r, &u, patch.manager) || s.refuseEntraAgentID(w, r, before, u) {
+		return
+	}
 
 	clearNonPersonPassword(&u)
 	updated, err := s.deps.Store.Users().Update(r.Context(), u)
 	if errors.Is(err, store.ErrConflict) {
+		if u.EntraAgentID != "" && s.refuseEntraAgentID(w, r, before, u) {
+			return
+		}
 		writeError(w, http.StatusConflict, "uniqueness", "userName already exists")
 		return
 	}
@@ -216,6 +237,7 @@ func changedFields(before, after store.User) []string {
 		{"sponsor", before.Sponsor != after.Sponsor},
 		{"swarm_id", before.SwarmID != after.SwarmID},
 		{"ephemeral", before.Ephemeral != after.Ephemeral},
+		{"entra_agent_id", before.EntraAgentID != after.EntraAgentID},
 	} {
 		if f.differs {
 			changed = append(changed, f.name)

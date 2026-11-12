@@ -66,6 +66,27 @@ describe("ceRow", () => {
     expect(r.reason).toBe("rule iga-writes");
   });
 
+  it("reads an unclassified harness tool as its own name with its arguments", () => {
+    const lsp = rec(6997, {
+      type: "straza.audit.tool", time: "2026-11-10T21:31:56Z",
+      data: { session: SESSION, user: USER_ID, harness: "claude-code", event: "tool.pre", tool: "other", app: "", toolName: "LSP", arguments: "{\"character\":7,\"filePath\":\"/w/main.go\",\"line\":12,\"operation\":\"goToDefinition\"}", command: "", effect: "deny", ruleId: "", setName: "" },
+    }, { username: "lab-straza-born-agent" });
+    const r = ceRow(lsp);
+    expect(r.tool).toBe("other");
+    expect(r.what).toBe("LSP · {\"character\":7,\"filePath\":\"/w/main.go\",\"line\":12,\"operation\":\"goToDefinition\"}");
+  });
+
+  it("names the harness's own tool behind a classified kind, with its input when nothing else says what it did", () => {
+    const data = { session: SESSION, user: USER_ID, harness: "claude-code", event: "tool.pre", app: "", command: "", effect: "allow", ruleId: "", setName: "" };
+    const skill = ceRow(rec(7301, { type: "straza.audit.tool", time: "2026-11-11T09:14:02Z", data: { ...data, tool: "file.read", nativeTool: "Skill", arguments: "{\"skill\":\"deploy\"}" } }));
+    expect(skill.tool).toBe("file.read");
+    expect(skill.what).toBe("Skill · {\"skill\":\"deploy\"}");
+    const write = ceRow(rec(7302, { type: "straza.audit.tool", time: "2026-11-11T09:14:03Z", data: { ...data, tool: "file.write", nativeTool: "Write", paths: ["/w/a.txt"], arguments: "{\"content\":\"body\",\"file_path\":\"/w/a.txt\"}" } }));
+    expect(write.what).toBe("Write · /w/a.txt");
+    const older = ceRow(rec(7303, { type: "straza.audit.tool", time: "2026-11-10T09:14:03Z", data: { ...data, tool: "file.read", nativeTool: "Skill" } }));
+    expect(older.what).toBe("Skill");
+  });
+
   it("reads an approval as the requester, the action, the verdict and the decider", () => {
     const r = ceRow(approval);
     expect(r.approval).toBe(true);
@@ -228,7 +249,7 @@ const ACTIONS = [
   "nhi-key.set", "oauth.connect", "oauth.connect.refused", "attestation-hash.registered", "attestation-hash.removed",
   "user.killed", "user.reactivated", "user.lift.blocked",
   "session.start", "enroll", "renew", "breakglass.login", "approver-enroll", "approver-self-enroll-token", "approver-device-revoked",
-  "enroll-token.create", "enroll-token.refused", "approver.enroll", "approver.revoke",
+  "enroll-token.create", "enroll-token.refused", "scim.refused", "approver.enroll", "approver.revoke",
   "token.connect", "oauth.disconnect", "connection.agents", "identity.created", "identity.updated", "identity.deactivated", "policy.updated",
   "revocation.session", "revocation.sessions", "revocation.user", "revocation.device", "revocation.lift",
   "device.revoke",
@@ -250,6 +271,7 @@ describe("actionLabel", () => {
     ["user.update", "Changed a user"],
     ["enroll-token.create", "Started enrolling an approver phone or browser"],
     ["enroll-token.refused", "Refused enrolling an approver phone or browser for someone"],
+    ["scim.refused", "Refused an identity manager's SCIM write"],
     ["approver.enroll", "Enrolled an approver phone or browser"],
     ["approver.revoke", "Revoked an approver phone or browser with its user"],
     ["device.revoke", "Revoked a user's machine"],

@@ -234,7 +234,7 @@ func TestCredAgainstRealStrazad(t *testing.T) {
 	if d := eng.Evaluate(policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec", Command: "ls -la"}, ses.Subject()); d.Effect != policy.EffectAllow {
 		t.Fatalf("local decision on ls: %+v", d)
 	}
-	out, err := r.s.Decide(ctx, ses, rm, "", "")
+	out, err := r.s.Decide(ctx, ses, rm, "", "", nil)
 	if err != nil || out.Answer.Effect != policy.EffectDeny || out.Status != http.StatusOK || out.Correlation == "" || out.Bounced {
 		t.Fatalf("server decide: %+v, %v", out, err)
 	}
@@ -287,7 +287,7 @@ func TestCredAgainstRealStrazad(t *testing.T) {
 		if err != nil || got.ID != w.ID {
 			t.Fatalf("window %s after a restart: %+v, %v", w.Harness.Session, got, err)
 		}
-		out, err := r.s.Decide(ctx, got, rm, "", "")
+		out, err := r.s.Decide(ctx, got, rm, "", "", nil)
 		if err != nil || out.Answer.Effect != policy.EffectDeny || out.Status != http.StatusOK || out.Bounced {
 			t.Fatalf("server decide of %s after a restart: %+v, %v", w.Harness.Session, out, err)
 		}

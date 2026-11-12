@@ -14,8 +14,8 @@ tested:
   platform: A Linux container against the demo stack, as a person who holds the seeded developer and demo-tools-readers roles, with a script that signed the approval the way an enabled browser does. The standalone notes come from an earlier run against a standalone server
   date: 2026-09-28
 applies_to: both
-who: You, on the machine where your MCP client runs
-where: A terminal, and a browser for the approval
+who: The person at the machine where the MCP client runs
+where: Terminal and a browser
 steps: true
 keywords: mcp client gateway tier 2 straza service socket
 ---

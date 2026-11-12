@@ -15,8 +15,8 @@ tested:
   date: 2026-10-21
   except: the console forms, the session end at a key change, the fresh enterprise server and the OS account handoff, none walked
 applies_to: both
-who: You, as the admin
-where: The console or a terminal with strazactl, and a terminal on the agent's machine
+who: Admin
+where: Console or strazactl, and a terminal on the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: cli
@@ -211,7 +211,7 @@ Straza: destructive command denied by the agent guardrails
 ```
 
 
-Against a standalone server, the denied line carries the reason of the seeded `standalone-starter` PolicySet, `Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.` On the demo stack, the always-on `agent-sam` container runs as the AI agent `sam-sre-agent` and enrolls the same way at boot, through a service container of its own. Its logs show the signed assertion accepted, a session bound to the service's key, and a destructive command denied with the same reason.
+Against a standalone server, the denied line carries the reason of the seeded `standalone-starter` PolicySet, `Straza starter policy: this sample rule denies commands that start with rm -rf. Delete files individually, or an admin can edit the standalone-starter PolicySet.` On the demo stack, the always-on `agent-sam` container runs as the AI agent `sam-sre-agent` and enrolls the same way at boot, through a service container of its own. Its logs show the signed assertion accepted, a session bound to the service's key, and a destructive command denied with the same reason.
 
 
 Check the agent's setup with the doctor.

@@ -16,8 +16,8 @@ tested:
   except: the console's browser sign-in, written from the code and not walked
 applies_to: both
 keywords: console approve hold retry
-who: You, as an admin who decides held calls
-where: The console in a browser, or a terminal with strazactl
+who: Admin
+where: Console or strazactl
 steps: true
 modes: [console, cli]
 mode_default: console

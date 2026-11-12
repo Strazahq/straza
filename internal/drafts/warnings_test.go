@@ -40,7 +40,8 @@ func TestSetWarnings(t *testing.T) {
 			"ready.match-unknown PolicySet/readers-access match.roles of readers-access names raeders, which is not a role in Straza, so the set matches nobody. | Fix the name, or create the role in this draft."}},
 		{"a rule that names a server that does not exist", true, set("{ roles: [readers] }", "    - id: d\n      tools: [mcp.call]\n      apps: [gitlab]\n      effect: deny\n"),
 			"ready.rule-names-nothing", []string{
-				"ready.rule-names-nothing PolicySet/readers-access Rule d of readers-access names gitlab, which is not a registered server. | Fix the name."}},
+				"ready.rule-names-nothing PolicySet/readers-access Rule d of readers-access names gitlab, which is not a registered server, " +
+					"so it matches only an MCP server that a person's own harness runs under that name. | If you meant a registered server, fix the name."}},
 		{"a rule that names a tool the server does not offer", true, set("{ roles: [readers] }", "    - id: d\n      tools: [mcp.call]\n      apps: [github]\n      toolNames: { deny: [get_you, 'get_*'] }\n"),
 			"ready.rule-names-nothing", []string{
 				"ready.rule-names-nothing PolicySet/readers-access Rule d of readers-access names get_you on github, which the server does not offer. | Fix the name."}},

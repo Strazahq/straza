@@ -15,20 +15,24 @@ import (
 )
 
 // oauthProviderPayload is one configured oauth provider on the admin
-// surface: its name, default scopes and the redirect URI to register at the
-// provider. Never the client secret.
+// surface: its name, default scopes, the redirect URI to register at the
+// provider, and the client id of the Entra agent identity blueprint its
+// agents' tokens go through, when they do. Never the client secret.
 type oauthProviderPayload struct {
-	Name        string   `json:"name"`
-	Scopes      []string `json:"scopes"`
-	RedirectURI string   `json:"redirect_uri"`
+	Name           string   `json:"name"`
+	Scopes         []string `json:"scopes"`
+	RedirectURI    string   `json:"redirect_uri"`
+	EntraBlueprint string   `json:"entra_blueprint,omitempty"`
 }
 
 // handleOAuthProviders lists the oauth providers this server is configured
-// with, sorted by name, for the credential step's provider picker.
+// with, sorted by name, for the credential step's provider picker and for
+// the console's agent signing keys, which show the Entra steps only when a
+// provider names a blueprint.
 func (a *App) handleOAuthProviders(w http.ResponseWriter, _ *http.Request) {
 	out := make([]oauthProviderPayload, 0, len(a.oauthProviders))
 	for name, p := range a.oauthProviders {
-		out = append(out, oauthProviderPayload{Name: name, Scopes: nonNilStrings(p.Scopes), RedirectURI: a.connectRedirectURI()})
+		out = append(out, oauthProviderPayload{Name: name, Scopes: nonNilStrings(p.Scopes), RedirectURI: a.connectRedirectURI(), EntraBlueprint: a.clientTokens.Blueprint(name)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	writeJSON(w, http.StatusOK, out)

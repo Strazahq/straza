@@ -67,6 +67,9 @@ type whoamiAnswer struct {
 	Recording string       `json:"recording,omitempty"`
 	Packs     []whoamiPack `json:"packs"`
 	Tools     []whoamiTool `json:"tools"`
+	// EntraAgentID is the Entra agent identity the agent acts as at Entra,
+	// as its last check-in read it, absent when it holds none.
+	EntraAgentID string `json:"entraAgentId,omitempty"`
 }
 
 // whoami answers the calling session's identity and access, or the refusal
@@ -79,7 +82,7 @@ func (a *App) whoami(claims authn.Claims, sub policy.Subject) (*mcp.CallToolResu
 		return nil, whoamiNoSession
 	}
 	ans := whoamiAnswer{User: sub.User, Kind: "agent", Sponsor: sub.Sponsor, Harness: sub.Harness,
-		Roles: sub.Roles, Packs: e.facts.packs, Tools: []whoamiTool{}}
+		Roles: sub.Roles, Packs: e.facts.packs, Tools: []whoamiTool{}, EntraAgentID: e.facts.entraAgentID}
 	switch {
 	case e.facts.person:
 		ans.Kind = "person"
@@ -132,6 +135,9 @@ func (w whoamiAnswer) text() string {
 	}
 	b.WriteString(".\n")
 	fmt.Fprintf(&b, "Roles: %s.\n", joinOr(w.Roles, "none"))
+	if w.EntraAgentID != "" {
+		fmt.Fprintf(&b, "Entra agent identity: %s.\n", w.EntraAgentID)
+	}
 	if w.Recorded {
 		fmt.Fprintf(&b, "Recording: the prompts and responses of this session are recorded %s in the audit log.\n",
 			agentguard.RecordingWords(w.Recording))

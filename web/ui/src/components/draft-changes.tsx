@@ -8,7 +8,7 @@ import { type ApiError, type DraftCoverage, type DraftDetail, type DraftItem, li
 import { coverageFor, coverageNouns, objectsMove } from "@/lib/drafts-access";
 import { wordDiff } from "@/lib/drafts-diff";
 import { type ItemFacts, cardId, itemFacts } from "@/lib/drafts-items";
-import { type RoleView, type Sides, type ToolsMove, appFacts, appRows, hostOf, impliedOf, manifestOf, objectOf, remoteApp, ruleMarks } from "@/lib/drafts-model";
+import { type RoleView, type Sides, type ToolsMove, appFacts, appRows, hostOf, impliedOf, manifestOf, objectOf, remoteApp, ruleMarks, secretAsks } from "@/lib/drafts-model";
 import {
   DESCRIPTION,
   EVERY_TOOL,
@@ -29,6 +29,9 @@ import {
   REMOVED_LINE_PAST,
   RULE_COLUMN,
   RULE_MARK,
+  SECRET_LINE,
+  SECRET_LINE_BOTH,
+  SECRET_ROW,
   TOOLS_NOT_READ,
   TOOLS_ROW,
   contactedLine,
@@ -110,19 +113,27 @@ function AppBody({ item, sides, detail, open }: { item: DraftItem; sides: Sides;
   const tools: [string, React.ReactNode] | null = !remoteApp(sides.after.doc) ? null : seen
     ? [TOOLS_ROW, <span key="t" className="flex flex-col gap-1"><NameChips names={seen.tools} /><span className="text-[13px] text-muted-foreground">{contactedLine(host, absTime(seen.at), seen.tools.length)}</span></span>]
     : sides.before || !open ? null : [TOOLS_ROW, <DraftChip key="t" word={TOOLS_NOT_READ} tone="unknown" />];
+  // An open draft whose check warns that the server has no secret says so
+  // on its card, and that the publish dialog asks for it, with the listing
+  // credential when that is missing too.
+  const ask = detail.draft.state === "open" ? secretAsks(detail.draft, detail.verdict).find((a) => a.name === item.name && a.secret) : undefined;
+  const secret: [string, React.ReactNode] | null = ask ? [SECRET_ROW, <span key="s" className="text-warn" data-secret-row>{ask.listing ? SECRET_LINE_BOTH : SECRET_LINE}</span>] : null;
   if (sides.before) {
     const rows = appRows(manifestOf(sides.before.doc) || {}, m);
+    const facts = [secret, tools].filter((r) => r !== null);
     return (
       <>
         {rows.length ? <NowAfter rows={rows} /> : null}
-        {tools && <Facts rows={[tools]} />}
+        {facts.length > 0 && <Facts rows={facts} />}
         <p className="m-0 text-[13px] text-muted-foreground" data-no-other>{rows.length ? NO_OTHER_FIELD : NO_FIELD_CHANGE}</p>
       </>
     );
   }
+  const facts: [string, React.ReactNode][] = appFacts(m);
+  if (secret) facts.splice(facts.findIndex((r) => r[0] === "Sent as") + 1, 0, secret);
   return (
     <>
-      <Facts rows={[...appFacts(m), ...(tools ? [tools] : [])]} />
+      <Facts rows={[...facts, ...(tools ? [tools] : [])]} />
       {open && <p className="m-0 text-[13px] text-muted-foreground">{NOTHING_STARTS}</p>}
     </>
   );

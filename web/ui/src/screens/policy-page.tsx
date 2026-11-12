@@ -19,7 +19,7 @@ import { PolicyTest } from "@/components/policy-test";
 import { PolicyUnpublished } from "@/components/policy-unpublished";
 import { PolicyYaml } from "@/components/policy-yaml";
 import { WordBadge } from "@/components/users-table";
-import { type ApiError, type EventSupport, type PolicyDoc, type RoleRow, activatePolicy, applyPolicy, deactivatePolicy, deletePolicy, eventSupport, getPolicy, listRoles, validatePolicy } from "@/lib/api";
+import { type ApiError, type EventSupport, type PolicyDoc, type RoleRow, activatePolicy, applyPolicy, deactivatePolicy, deletePolicy, eventSupport, getPolicy, listApps, listRoles, validatePolicy } from "@/lib/api";
 import { type Doc, type Plain, addRule, docProblems, docText, openDoc, posturesOf, posturesOfRules, proposeRuleId, readSet, removeRule, splitRule } from "@/lib/policy-model";
 import {
   ADD_RULE, CANCEL, DELETE, DELETE_BODY, DELETE_LIVE_TITLE, DRAFT, DRAFT_TITLE, EDITED, EDITED_TITLE, LEAVE, LEAVE_BODY, LEAVE_TITLE,
@@ -75,6 +75,7 @@ export function PolicyPage({ name, tab }: Props) {
   const [roles, setRoles] = React.useState<RoleRow[]>([]);
   const [rolesProblem, setRolesProblem] = React.useState<string | null>(null);
   const [events, setEvents] = React.useState<EventSupport | null>(null);
+  const [registered, setRegistered] = React.useState<string[] | null>(null);
   const [problem, setProblem] = React.useState<string | null>(null);
   const [lastRead, setLastRead] = React.useState<Date | null>(null);
   const [refusal, setRefusal] = React.useState<{ subject: string; message: string } | null>(null);
@@ -112,6 +113,7 @@ export function PolicyPage({ name, tab }: Props) {
       if (err.status !== 401) setRolesProblem(readFailed(SUBJECT_ROLES, err));
     });
     eventSupport().then(setEvents, () => setEvents(null));
+    listApps().then((apps) => setRegistered(apps.map((a) => a.name)), () => setRegistered(null));
   }, []);
 
   const current = TABS.includes((tab || "") as typeof TABS[number]) ? (tab as string) : TABS[0];
@@ -374,7 +376,7 @@ export function PolicyPage({ name, tab }: Props) {
             {view ? (
               <>
                 <PolicyFacts view={view} roles={roles} onEdit={edit} />
-                <PolicyRules rules={rules} changed={changes} added={added} openId={sheet} onOpen={setSheet} />
+                <PolicyRules rules={rules} changed={changes} added={added} openId={sheet} onOpen={setSheet} registered={registered} />
               </>
             ) : (
               <div className="flex flex-col gap-1.5" data-not-parsed>

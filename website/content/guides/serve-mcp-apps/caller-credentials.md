@@ -10,14 +10,14 @@ pagetype: how-to
 weight: 25
 draft: false
 tested:
-  version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server in an Alpine container on Linux, started with this page's provider block for an identity provider that does not exist, and two servers that point at the demo stack's MCP reference server, github with each caller's token and midpoint with each caller's keycloak sign-in. alice ran straza at a terminal in her own container, and the AI agents joe, sponsored by alice, and ivy, with no sponsor, called through straza mcp in theirs. Three steps did not run. A sign-in itself needs a running provider, the expired-token deny needs a date that has passed, and strazactl connect and disconnect with --user were not run for this page. strazactl no longer signs in, so those two run on an admin API token, which needs apps:read and apps:write for connect and apps:write for disconnect. The console steps were read from the console's source and not clicked
-  except: a real sign-in, the expired-token deny, strazactl connect and disconnect with --user, and the console steps
-  date: 2026-10-06
+  version: v1.0.0-1785-gb9f78577
+  platform: A throwaway standalone server in an Alpine container on Linux, started with this page's provider block for an identity provider that does not exist, and two servers that point at the demo stack's MCP reference server, github with each caller's token and midpoint with each caller's keycloak sign-in. alice ran straza at a terminal in her own container, and the AI agents joe, sponsored by alice, and ivy, with no sponsor, called through straza mcp in theirs. That walk ran v1.1.0-117-g106081a8 on 2026-10-06. The expired-token deny needs a date that has passed, and strazactl connect and disconnect with --user were not run for this page. strazactl no longer signs in, so those two run on an admin API token, which needs apps:read and apps:write for connect and apps:write for disconnect. The console steps were read from the console's source and not clicked, except the Credentials tab's sign-in. On 2026-11-08 the eval stack ran the Entra parts against a lab tenant, with a test server that checks Microsoft's signature on every token. A person signed in from the Credentials tab and called as themselves from a Linux machine, strazad renewed that sign-in every two minutes on one replica and on two at once, and straza disconnect ended it. An agent called with its own Entra agent identity, and the agent without one, the missing certificate, the disabled agent identity and the agent identity under another blueprint each gave the sentence this page quotes
+  except: the expired-token deny, strazactl connect and disconnect with --user, most console steps, AADSTS700016, a disabled blueprint and a staged key
+  date: 2026-11-08
 applies_to: both
 keywords: caller token oauth sign-in connect sponsor agents
-who: You as the admin, then each person who uses the server
-where: The console and each person's self-service page, or a terminal
+who: Admin, then each person who uses the server
+where: Console and each person's self-service page, or a terminal
 steps: true
 modes: [console, cli]
 mode_default: console
@@ -145,6 +145,21 @@ oauth:
 
 The key under `providers`, here `keycloak`, is the name a manifest's `credential.oauth.provider` names. `clientId` is required, and so is one of `clientSecret` and `clientSecretFile`, where the file wins when both are set. `authUrl` and `tokenUrl` are required too, except for a provider named `github`, which defaults both to github.com. `scopes` are asked for when a manifest names none. The `github` provider alone can also take its client from `STRAZA_OAUTH_GITHUB_CLIENT_ID` with `STRAZA_OAUTH_GITHUB_CLIENT_SECRET` or `STRAZA_OAUTH_GITHUB_CLIENT_SECRET_FILE`. strazad reads the config at start, so restart it after the change. A provider with no `clientId`, secret or endpoints fails the start with a sentence that names the missing key.
 
+For Microsoft Entra, Straza's client is an app registration of its own, apart from the one people sign in to Straza with in [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}), because this one keeps a client secret on the server. Register it with the redirect address under the platform **Web** and add a client secret under **Certificates & secrets**. On the app registration of the API that the MCP server checks tokens for, open **Expose an API** and add a delegated scope, such as `access_as_user`. Then add that scope to Straza's client under **API permissions** and grant admin consent. The scopes Straza asks for name that scope and `offline_access`, because Entra hands out a refresh token only for `offline_access`. Without one, a person's sign-in ends when its first token expires, after about an hour.
+
+```yaml
+oauth:
+  providers:
+    entra-crm:
+      clientId: <client id of Straza's connect app registration>
+      clientSecretFile: /etc/straza/entra-crm-secret
+      authUrl: https://login.microsoftonline.com/<tenant id>/oauth2/v2.0/authorize
+      tokenUrl: https://login.microsoftonline.com/<tenant id>/oauth2/v2.0/token
+      scopes: ["api://<client id of the API>/access_as_user", "offline_access"]
+```
+
+The same block can also carry `clientCredentials`, so that agents get tokens of their own Entra agent identities, as [An agent's own Entra agent identity](#entra-agent-identity) shows.
+
 ## Declare a server that takes each caller's sign-in
 
 
@@ -189,6 +204,11 @@ On the self-service page, open **Credentials** and press **Sign in with keycloak
 `straza connect midpoint` prints the address of that tab and waits there. The sign-in itself always finishes in a browser.
 {{< /cli >}}
 
+
+Straza keeps the sign-in's tokens sealed on the server and renews them before they expire, so the person signs in once. Every `oauth.refreshInterval`, one minute by default, strazad renews each sign-in whose token expires within `oauth.refreshWindow`, ten minutes by default, and stores the new refresh token when the provider sends one. Only a sign-in that came with a refresh token is renewed. A renewal the provider refuses keeps the old token, and once that expires the person's calls are denied until a later renewal works or the person signs in again. `straza disconnect midpoint` removes it. At Entra a refresh token lasts 90 days by default and each renewal brings a new one, so a sign-in in use stays until an administrator resets the person's password in the Entra or Microsoft 365 admin centre, or the person or an administrator revokes the person's sessions. A password the person changes themselves leaves it alone.
+
+Every strazad replica runs that renewal on its own, without a lock, and keeps the token it renewed itself. Entra accepts a refresh token again after it was used once, so two replicas that renew one sign-in at the same moment both get a working token.
+
 {{< fails >}}
 `MCP server midpoint needs your own keycloak sign-in and you have not connected. Run straza connect midpoint, or sign in on your credentials page at https://straza.example/self-service/credentials`
 : Sign in on the Credentials tab of the self-service page.
@@ -225,7 +245,69 @@ An agent cannot open a browser or receive a token from a vendor, so the manifest
 - `own`, the default, means nothing. The call is denied until the agent's sponsor pastes a token for it in the sponsored-agent rows of the Credentials tab, or an administrator does with `strazactl connect github --user joe`.
 - `sponsor` means the sponsor's own row, once the sponsor allowed it. The audit record then names the agent as the caller and the sponsor as the owner of the credential.
 - `shared` means the server's shared secret, set as for a static server.
-- `client_credentials`, on a sign-in server only, means a token the agent's own client gets at the provider, and only the manifest sets it. The provider's block in the config then needs `clientCredentials.assertionAudience`, the audience the provider wants in a client assertion: Keycloak takes its realm issuer URL, and Okta its token endpoint URL.
+- `client_credentials`, on a sign-in server only, means a token the agent's own client gets at the provider, and only the manifest sets it. The provider's block in the config then needs `clientCredentials.assertionAudience`, the audience the provider wants in a client assertion: Keycloak takes its realm issuer URL, and Okta its token endpoint URL. For Microsoft Entra it names an agent blueprint instead, as [An agent's own Entra agent identity](#entra-agent-identity) shows. Straza's client assertion key signs that assertion. A full administrator creates the key with `strazactl signing-keys rotate client_assertion` and, a minute later, makes it the signing key with `strazactl signing-keys promote client_assertion <kid>`, or does both under Settings, **Agent signing keys** in the console. Every later rotation ends with the same promote, as [Keys, certificates and tokens]({{< relref "security/keys-certificates-and-tokens.md" >}}) explains.
+
+## An agent's own Entra agent identity {#entra-agent-identity .nostep}
+
+
+When the server trusts Microsoft Entra, `client_credentials` gives each agent a token of its own Entra agent identity, so the upstream sees that agent and not a shared account. The agent never holds an Entra credential. Three things must be in place:
+
+1. An agent blueprint in your tenant that holds the certificate of Straza's client assertion key. A full administrator downloads it under Settings, **Agent signing keys** in the console, or prints it with `strazactl signing-keys certificate client_assertion <kid>`, and an Agent ID Administrator uploads it under the blueprint's Credentials, Certificates. The console shows the certificate's SHA-1 thumbprint, the value Entra lists it under, and the blueprint's client id from the provider block in step 3. Give Straza a blueprint of its own, because whoever holds a blueprint's credential can get a token as every agent identity under it, and Microsoft draws one blueprint around one trust boundary.
+2. For each agent, an agent identity under that blueprint, and its client id on the agent's Straza record as `entraAgentId`. Your IGA writes it over SCIM, or an administrator runs `strazactl users entra-agent-id set <agent> <client id>`. The agent's page under Users in the console shows the client id it is linked to and who owns the link, and does not change it.
+3. A provider block that names the blueprint instead of an assertion audience:
+
+```yaml
+oauth:
+  providers:
+    entra-crm:
+      clientId: <client id of Straza's connect app registration>
+      clientSecretFile: /etc/straza/entra-crm-secret
+      authUrl: https://login.microsoftonline.com/<tenant id>/oauth2/v2.0/authorize
+      tokenUrl: https://login.microsoftonline.com/<tenant id>/oauth2/v2.0/token
+      clientCredentials:
+        entraBlueprint: <client id of the agent blueprint>
+        scopes: ["api://<client id of the resource>/.default"]
+```
+
+The tenant is the one `tokenUrl` names, by id or by domain, so it is never `common`, `organizations` or `consumers`. `scopes` holds exactly one scope that ends in `/.default`. It names the resource the agents' tokens open, and only strazad's config sets it. `assertionAudience` stays out, because Entra takes the token endpoint as the audience. The fields for people's sign-in stay required, as for every provider. strazad checks all of this at start and names the key to fix. Run every replica on this version before the config gains `entraBlueprint`, because an older replica refuses to start with it.
+
+On an agent's call the gateway sends two requests to the token endpoint within the one limit of 3 seconds. The blueprint signs in with Straza's certificate and asks for an exchange token for the agent's identity. The agent identity then presents that exchange token and gets its own token. Straza keeps that token in memory until shortly before it expires, about an hour, and never keeps or logs the exchange token. The Entra agent identity comes only from the agent's record as its check-in read it, which Straza signs into the agent's session token, never from a header, the request or a tool argument. A change of `entraAgentId` takes effect with no restart, on every strazad replica, once the agent holds a session token from a check-in that began after the change. The replica that took the change drops the agent's session state, so the agent's next call there checks in again and runs as the new identity. A session token from before the change can still run as the old identity on another replica until it expires, at most 330 seconds: its 300-second lifetime and the 30 seconds of clock skew Straza allows. A person never gets such a token.
+
+What this does not do yet:
+
+- A server that answers its tool list only with a token offers no tool, because Straza reads a server's tool list with its own credential and never with an agent's. An identity of Straza's own at the provider, used only for that read, is planned.
+- One provider entry names one blueprint and one resource. A second resource is a second entry with the same tenant and blueprint. Agents of a second blueprint need an entry of their own and a server that names it.
+- A disable of the agent identity in Entra takes effect at its next token request, up to an hour later. Disable or lock the agent in Straza to cut it at once.
+- The audit record of a call names the source `client_credentials` and the agent, not the Entra agent identity. The agent's record holds the mapping.
+- Straza's certificate is self-signed and valid for 730 days, so a tenant policy that limits certificate lifetime or requires a trusted certificate authority refuses its upload.
+
+{{< fails >}}
+`agent sam-sre-agent could not get a crm token. The agent has no Entra agent identity on its Straza record. Ask the identity team to set entraAgentId for sam-sre-agent, or set it with strazactl users entra-agent-id set sam-sre-agent <client id>, then call again.`
+: Set the agent's `entraAgentId`. Entra is not asked until it is set.
+
+`agent sam-sre-agent could not get a crm token. Entra refused the blueprint 5f8c2a1e-3b4d-4e6f-9a7b-1c2d3e4f5a6b (AADSTS700027), because it holds no certificate of the client assertion key 6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10. An Agent ID Administrator uploads the certificate that strazactl signing-keys certificate client_assertion 6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10 prints to that blueprint, then the agent calls again.`
+: Upload the certificate of that key to the blueprint.
+
+`agent sam-sre-agent could not get a crm token. Entra has no agent identity 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a in tenant 0e1d2c3b-4a59-4687-9a1b-2c3d4e5f6a7b (AADSTS700016). Check entraAgentId on sam-sre-agent's Straza record against the agent identity in the Entra admin centre, correct it with strazactl users entra-agent-id set, then call again.`
+: Compare the client id on the agent's record with the agent identity in the Entra admin centre.
+
+`agent sam-sre-agent could not get a crm token. Entra says the agent identity 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a is disabled (AADSTS7000112). Ask the identity team why it was disabled, and call again once it is enabled.`
+: The identity team enables the agent identity in the Entra admin centre.
+
+`agent sam-sre-agent could not get a crm token. Entra says the blueprint 5f8c2a1e-3b4d-4e6f-9a7b-1c2d3e4f5a6b is disabled (AADSTS7000112), so no agent of it gets a token. Ask the identity team why it was disabled, and call again once it is enabled.`
+: A disabled blueprint stops every agent of it. Ask the identity team to enable it in the Entra admin centre. This answer is derived from the code and has not been seen from a real tenant.
+
+`agent sam-sre-agent could not get a crm token. Entra has no blueprint 5f8c2a1e-3b4d-4e6f-9a7b-1c2d3e4f5a6b in tenant 0e1d2c3b-4a59-4687-9a1b-2c3d4e5f6a7b (AADSTS700016). Check oauth.providers.entra-crm.clientCredentials.entraBlueprint in strazad's config against the agent blueprint in the Entra admin centre, then call again.`
+: `entraBlueprint` in the provider block names no blueprint of that tenant. Copy the blueprint's client id from the Entra admin centre into the config and restart strazad. This answer is derived from the code and has not been seen from a real tenant.
+
+`agent sam-sre-agent could not get a crm token. Entra refused the agent identity 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a at the second step (AADSTS7002134), which Entra answers when the agent identity sits under another blueprint than 5f8c2a1e-3b4d-4e6f-9a7b-1c2d3e4f5a6b, the one Straza signs in as. Check entraAgentId on sam-sre-agent's Straza record against that blueprint's agent identities in the Entra admin centre, correct it with strazactl users entra-agent-id set, then call again.`
+: The agent's record names an agent identity of another blueprint. Set the client id of its agent identity under Straza's blueprint, or create one there.
+
+`agent sam-sre-agent could not get a crm token. The client assertion key 6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10 is staged and signs nothing yet. An Agent ID Administrator uploads its certificate, which strazactl signing-keys certificate client_assertion 6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10 prints, to the Entra blueprint 5f8c2a1e-3b4d-4e6f-9a7b-1c2d3e4f5a6b, then an administrator promotes it with strazactl signing-keys promote client_assertion 6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10, and the agent calls again.`
+: Upload the staged key's certificate, then promote the key.
+{{< /fails >}}
+
+Every other refusal from Entra names the step, the blueprint or the agent identity, Entra's error code and where to look. Its line in the strazad log carries Entra's `error`, `error_codes`, `trace_id` and `correlation_id`, which find the request in Entra's sign-in log, and never Entra's own description.
 
 ## Who signs in for whom {.nostep}
 
@@ -249,6 +331,9 @@ A server with `kind: token` or `kind: oauth` can pin its objects as well, as [Ad
 
 
 A pasted token is sealed under the same server key as every other stored secret, and there is no per-person encryption, because the gateway must open the row on every call, including an agent's calls while the person is away.
+
+
+Your identity manager names an agent's sponsor. It can send the agent's manager, which Straza makes the sponsor, as [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md" >}}) shows. Whoever can change an agent's manager there therefore chooses whose connections the agent can reach. The sponsor can paste a token for the agent. On a server with `agents: sponsor`, the agent's calls run on the sponsor's own row once the sponsor has allowed agents on it. Straza does not check that the manager is a person, so weigh who in your identity manager may change one.
 
 ## Next {.nostep}
 

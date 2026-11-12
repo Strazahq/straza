@@ -1,0 +1,9 @@
+{
+  "error": "unauthorized_client",
+  "error_description": "AADSTS7000112: Application 'cccccccc-3333-4333-8333-cccccccccccc'(straza agents) is disabled. Trace ID: dddddddd-4444-4444-8444-dddddddddddd Correlation ID: eeeeeeee-5555-4555-8555-eeeeeeeeeeee Timestamp: 2026-11-07 17:51:33Z",
+  "error_codes": [7000112],
+  "timestamp": "2026-11-07 17:51:33Z",
+  "trace_id": "dddddddd-4444-4444-8444-dddddddddddd",
+  "correlation_id": "eeeeeeee-5555-4555-8555-eeeeeeeeeeee",
+  "error_uri": "https://login.microsoftonline.com/error?code=7000112"
+}

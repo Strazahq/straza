@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -278,6 +279,59 @@ describe("the Audit screen", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("loads the start of a short chain once and offers no older records after seq 1", async () => {
+    // Identical reads fold into one row, so the 250 records draw fast and the
+    // counts below are what tell a duplicate apart.
+    const short = chain(1, Array.from({ length: 250 }, () => read("2026-09-12T09:00:00Z")));
+    vi.mocked(overview).mockResolvedValue({ audit: { head_seq: 250 } });
+    vi.mocked(listAudit).mockImplementation((q: string) => {
+      const p = new URLSearchParams(q);
+      if (p.get("limit") === "1000") return Promise.resolve([]);
+      if (p.get("order") === "desc") return Promise.resolve(short.slice(-200).reverse());
+      const after = Number(p.get("after")), limit = Number(p.get("limit"));
+      return Promise.resolve(short.filter((r) => r.seq > after).slice(0, limit));
+    });
+    mount();
+    await waitFor(() => expect(screen.getByText(loadedWords(200, 250))).toBeTruthy());
+    await userEvent.click(screen.getByRole("button", { name: "Load older" }));
+    await waitFor(() => expect(screen.getByText(loadedWords(250, 250))).toBeTruthy());
+    expect(vi.mocked(listAudit).mock.calls.filter((c) => c[0].startsWith("after=") && !c[0].endsWith("limit=1000")).map((c) => c[0])).toEqual(["after=0&limit=50"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Chain verified" + chainVerified(250, 250));
+    expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+  });
+
+  it("drops an older window when a tail read trimmed the records it was read against", async () => {
+    // Identical reads fold into one row, so the 2,305 records draw fast.
+    const long = chain(1, Array.from({ length: 2305 }, () => read("2026-09-12T09:00:00Z")));
+    let head = 2300;
+    let answer!: (rows: AuditRow[]) => void;
+    vi.mocked(overview).mockResolvedValue({ audit: { head_seq: head } });
+    vi.mocked(listAudit).mockImplementation((q: string) => {
+      const p = new URLSearchParams(q);
+      const after = Number(p.get("after")), limit = Number(p.get("limit"));
+      if (p.get("order") === "desc") return Promise.resolve(long.slice(head - 200, head).reverse());
+      if (limit === 1000) return Promise.resolve(long.filter((r) => r.seq > after && r.seq <= head));
+      if (after === 100) return new Promise((resolve) => { answer = resolve; });
+      return Promise.resolve(long.filter((r) => r.seq > after).slice(0, limit));
+    });
+    mount();
+    await waitFor(() => expect(screen.getByText(loadedWords(200, 2300))).toBeTruthy());
+    for (let n = 400; n <= 2000; n += 200) {
+      await userEvent.click(screen.getByRole("button", { name: "Load older" }));
+      await waitFor(() => expect(screen.getByText(loadedWords(n, 2300))).toBeTruthy());
+    }
+    await userEvent.click(screen.getByRole("button", { name: "Load older" }));
+    // Five records land while the older window is out, and the tail trims
+    // the five oldest it held, the record the window was read against first.
+    head = 2305;
+    await waitFor(() => expect(screen.getByText(loadedWords(2000, 2305))).toBeTruthy(), { timeout: 3000 });
+    answer(long.slice(100, 300));
+    await new Promise((done) => setTimeout(done, 300));
+    expect(screen.getByText(loadedWords(2000, 2305))).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  }, 20000);
+
   it("switches to the server search on what is typed and on the effect, and returns to the tail when both are cleared", async () => {
     const hit = WINDOW.filter((r) => r.seq === 4214);
     vi.mocked(listAudit).mockImplementation((q: string) => Promise.resolve(serve(q, hit)));
@@ -470,6 +524,30 @@ describe("the Audit tail", () => {
     expect(reads("after=")).toBe(2);
   });
 
+  it("commits nothing while the tail reads find nothing new", async () => {
+    let commits = 0;
+    render(<TooltipProvider><React.Profiler id="audit" onRender={() => { commits++; }}><Audit /></React.Profiler></TooltipProvider>);
+    await loaded(9);
+    await tick(1000);
+    const before = commits;
+    await tick(5000);
+    expect(reads("after=4219&limit=1000")).toBe(6);
+    expect(commits).toBe(before);
+  });
+
+  it("quotes the time of the last read that answered when a later tail read fails", async () => {
+    vi.setSystemTime(new Date("2026-09-12T10:52:00Z"));
+    mount();
+    await loaded(9);
+    await tick(3000);
+    const answered = new Date();
+    vi.mocked(listAudit).mockRejectedValue(failure("unreachable", 0, true));
+    await tick(1000);
+    await until(() => !!document.querySelector("[data-fetch-error]"));
+    expect(document.querySelector("[data-fetch-error]")?.textContent).toContain("last successful read " + answered.toLocaleTimeString([], { hour12: false }) + ".");
+    expect(answered.getTime() - new Date("2026-09-12T10:52:00Z").getTime()).toBeGreaterThanOrEqual(3000);
+  });
+
   it.each([
     { n: 4, step: 1, gap: 250 },
     { n: 25, step: 3, gap: 100 },
@@ -540,6 +618,31 @@ describe("the Audit tail", () => {
     // A broken chain is read no further.
     await tick(3000);
     expect(reads("after=")).toBe(1);
+  });
+
+  it("lands each record once when a Reload answers while a tail read is out", async () => {
+    let answer!: (fresh: AuditRow[]) => void;
+    const fresh = batch(2);
+    let reloaded = false;
+    vi.mocked(listAudit).mockImplementation((q: string) => {
+      const p = new URLSearchParams(q);
+      if (p.get("after") === String(HEAD)) return new Promise((resolve) => { answer = resolve; });
+      if (reloaded && p.get("order") === "desc") return Promise.resolve(WINDOW.concat(fresh).reverse());
+      return Promise.resolve(serve(q));
+    });
+    mount();
+    await loaded(9);
+    await tick(1000);
+    expect(reads("after=4219")).toBe(1);
+    reloaded = true;
+    vi.mocked(overview).mockResolvedValue({ audit: { head_seq: HEAD + 2 } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload the chain" }));
+    await until(() => !!screen.queryByText(loadedWords(11, HEAD + 2)));
+    answer(fresh);
+    await tick(1000);
+    await until(() => rows().includes("4221"));
+    expect(rows().filter((seq) => seq === "4220" || seq === "4221")).toEqual(["4221", "4220"]);
+    expect(screen.getByText(loadedWords(11, HEAD + 2))).toBeTruthy();
   });
 
   it("starts no second tail read while one is unanswered, so no record lands twice", async () => {

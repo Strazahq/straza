@@ -4,6 +4,7 @@ import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { cn } from "@/lib/utils";
+import type { HealthRead } from "@/lib/words";
 
 // The pieces every wizard step draws with. Wizards after this one reuse
 // them, so each takes only what a step needs to say.
@@ -112,7 +113,7 @@ export function OptionCard({ value, label, lead, name, tag, line, on, off, dashe
 }
 
 export type RowState = "pending" | "running" | "done" | "failed" | "refused";
-export type Row = { key: "install" | "secret" | "check"; label: string; state: RowState };
+export type Row = { key: "install" | "secret" | "listing" | "check"; label: string; state: RowState };
 
 const ROW_HUE: Record<RowState, string> = { pending: "text-muted-foreground", running: "text-muted-foreground", done: "text-ok", failed: "text-danger", refused: "text-danger" };
 
@@ -129,6 +130,22 @@ export function Landed({ rows, numbered }: { rows: Row[]; numbered?: boolean }) 
         </li>
       ))}
     </ol>
+  );
+}
+
+const TONE: Record<HealthRead["tone"], { box: string; lead: string }> = {
+  ok: { box: "border-ok/40 bg-ok-bg", lead: "text-ok" },
+  warn: { box: "border-warn/40 bg-warn-bg", lead: "text-warn" },
+  danger: { box: "border-danger/40 bg-danger-bg", lead: "text-danger" },
+};
+
+// HealthBox is what the check read, in its tone: the lead, then the
+// sentence.
+export function HealthBox({ read }: { read: HealthRead }) {
+  return (
+    <div className={cn("rounded-md border px-3 py-2.5 text-sm text-foreground", TONE[read.tone].box)} data-health={read.kind}>
+      <b className={cn("font-semibold", TONE[read.tone].lead)}>{read.lead}</b>{" " + read.text}
+    </div>
   );
 }
 

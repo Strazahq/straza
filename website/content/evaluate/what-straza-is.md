@@ -35,11 +35,11 @@ An action that bypasses all of them is outside Straza's view. The gateway enforc
 ## Who Straza is for
 
 
-Straza is for a team that runs AI agents against real systems and wants each agent's actions to follow the roles it already governs. Its server, strazad, is one static binary with a standalone and an enterprise profile.
+Straza is for a company that runs AI agents against real systems and wants each agent's actions to follow the roles the company already governs. Its server, strazad, is one static binary with an enterprise and a standalone profile.
 
-The standalone profile runs on one host, with SQLite and an event bus inside the process. strazad signs people in itself, and an admin assigns roles and [sponsors]({{< relref "concepts/identities.md" >}}). It suits a developer or a small team. It is also how you try Straza on a laptop.
+The enterprise profile is the one a company runs. It runs on Postgres and scales out on Kubernetes with the Helm chart. Your identity provider checks sign-in, and your IGA sends people, agents, [sponsors]({{< relref "concepts/identities.md" >}}) and role membership over SCIM 2.0.
 
-The enterprise profile runs on Postgres and scales out on Kubernetes with the Helm chart. Your identity provider checks sign-in, and your IGA sends people, agents, sponsors and role membership over SCIM 2.0. It suits an organization that already governs identities in an IGA.
+The standalone profile runs on one host, with SQLite and an event bus inside the process. strazad signs people in itself, and an admin assigns roles and sponsors. It is how you try Straza on a laptop, and it also suits a developer or a small team.
 
 
 Neither profile ties you to a vendor. Sign-in is standard OIDC, with guides for Entra ID, Okta and Keycloak. Provisioning is standard SCIM 2.0, and the guides cover midPoint, Okta and any other SCIM client. Roles are made in Straza, and your IGA, or an admin on standalone, assigns them. [Identity and your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}) says which system checks what.

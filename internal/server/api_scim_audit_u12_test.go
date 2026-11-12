@@ -11,8 +11,9 @@ import (
 // create and on the revive of a deactivated row, and user.update with the
 // names of the changed fields on every write that changes one, a status
 // flip included, each naming the admin API token that acted and origin
-// scim on user.create. A write that changes nothing and a refused write
-// chain none. A status flip also chains its straza.audit.identity record.
+// scim on user.create. A write that changes nothing chains none, and a
+// refused write chains its one scim.refused record. A status flip also
+// chains its straza.audit.identity record.
 // The rows run in order on one server, because later rows use what
 // earlier rows created.
 func TestSCIMUserWritesChainAdminRecords(t *testing.T) {
@@ -83,6 +84,10 @@ func TestSCIMUserWritesChainAdminRecords(t *testing.T) {
 			name: "refuse a create over an active userName", method: http.MethodPost, path: usersPath,
 			body: `{"schemas":[` + core + `],"userName":"ada"}`,
 			code: http.StatusConflict,
+			want: func() map[string]any {
+				return asToken(map[string]any{"action": "scim.refused", "route": "POST /scim/v2/Users", "httpStatus": 409,
+					"scimType": "uniqueness", "reason": "userName or externalId already exists", "username": "ada"})
+			},
 		},
 		{
 			name: "PATCH the email and the title", method: http.MethodPatch, path: userPath("ada"),
@@ -103,6 +108,11 @@ func TestSCIMUserWritesChainAdminRecords(t *testing.T) {
 			name: "refuse a PATCH of the read-only lock block", method: http.MethodPatch, path: userPath("ada"),
 			body: patch + `[{"op":"replace","path":"locked","value":true}]}`,
 			code: http.StatusBadRequest,
+			want: func() map[string]any {
+				return asToken(map[string]any{"action": "scim.refused", "route": "PATCH /scim/v2/Users/{id}", "httpStatus": 400,
+					"scimType": "mutability", "reason": "the Straza lock block is read-only over SCIM, because a lock is Straza's own decision about the account. Lift it through the Straza admin API",
+					"target": got["ada"], "user": got["ada"], "username": "ada"})
+			},
 		},
 		{
 			name: "PUT that replaces the display name", method: http.MethodPut, path: userPath("ada"),

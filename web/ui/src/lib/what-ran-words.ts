@@ -57,7 +57,7 @@ export const DOC_CUT_END = "… the record keeps no more of this command";
 
 export const unreadable = (error: string) => "Straza cannot split this command into steps: " + error + ". It is shown as it ran.";
 
-export const hiddenHead = (n: number) => "This command holds " + plural(n, "character", "characters") + " that do not show on screen.";
+export const hiddenHead = (n: number, input = false) => (input ? "This call's input holds " : "This command holds ") + plural(n, "character", "characters") + " that do not show on screen.";
 export const HIDDEN_TAIL = "They can make the text read differently from what ran. Both views mark them.";
 
 export const cutHead = (kept: number) => "Straza kept the first " + kept.toLocaleString("en-US") + " characters of this command.";
@@ -65,6 +65,10 @@ export const cutHead = (kept: number) => "Straza kept the first " + kept.toLocal
 // length when the record says it.
 export const cutBody = (bytes: number) => (bytes > 0 ? "The whole command was " + bytes.toLocaleString("en-US") + " bytes. Its SHA-256 is " : "The whole command's SHA-256 is ");
 export const CUT_TAIL = ", so a copy the client kept can be checked against it.";
+// INPUT_CUT_HEAD and INPUT_CUT_BODY are the same notice for a tool's input,
+// which the record shortens by its longest values and not from its end.
+export const INPUT_CUT_HEAD = "The record keeps a shortened copy of what this call was given.";
+export const INPUT_CUT_BODY = "The SHA-256 of the whole text is ";
 
 export const rawCount = (lines: number, chars: number) => linesWord(lines) + ", " + chars.toLocaleString("en-US") + " characters, " + RAW_NOTE;
 

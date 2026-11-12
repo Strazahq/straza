@@ -5,10 +5,18 @@ import userEvent from "@testing-library/user-event";
 import { RecordSheet } from "./record-sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { COPIED, SENTINEL, type Row, ceRow } from "@/lib/audit-words";
+import { take } from "@/lib/handoff";
+import { WRITE_RULE_FOR_CALL } from "@/lib/harness-words";
 import { notify } from "@/lib/notify";
 import { ENGINE_FIELDS } from "@/lib/policy-words";
+import { navigate } from "@/lib/router";
+import { snapshot } from "@/lib/session";
 
 vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: vi.fn() } }));
+vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
+// The session answers no grant unless a suite names one, so the sheet
+// offers no rule to write.
+vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/session")>()), snapshot: vi.fn() }));
 // The Test a call sheet is its own suite; here only the call it is handed
 // matters, so the seam stands in for it.
 vi.mock("@/components/policy-test", () => ({
@@ -218,5 +226,47 @@ describe("the record sheet", () => {
     const foot = document.querySelector("[data-slot=\"sheet-footer\"]") as HTMLElement;
     await userEvent.click(within(foot).getByRole("button", { name: "Close" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("a call no rule decided", () => {
+  // The hook's records of a call only a rule can let run: a tool of an MCP
+  // server the harness runs itself, and a harness tool Straza does not
+  // classify. Neither names a rule.
+  const MACHINE = { session: SESSION, user: USER_ID, tool: "mcp.call", app: "claude-in-chrome", toolName: "navigate", effect: "deny", ruleId: "", reason: "no rule matched this call" };
+  const HARNESS = { session: SESSION, user: USER_ID, tool: "other", toolName: "LSP", effect: "deny", ruleId: "", reason: "no rule matched this call" };
+  const writeRule = () => document.querySelector("[data-write-rule]") as HTMLElement | null;
+
+  beforeEach(() => {
+    vi.mocked(snapshot).mockReturnValue({ user: "alice", roles: [], grants: "policy:read,policy:write", expiresIn: 300, sessionID: "s1" });
+    vi.mocked(navigate).mockClear();
+    take("policies-new");
+  });
+
+  it.each([
+    ["a tool of a server on the person's machine", MACHINE, { lane: "mcp", app: "claude-in-chrome", tools: ["navigate"] }],
+    ["a harness tool", HARNESS, { lane: "harness", tools: ["LSP"] }],
+  ])("opens the New policy wizard on %s", async (_, data, door) => {
+    show(row(data));
+    expect(writeRule()?.textContent).toBe(WRITE_RULE_FOR_CALL);
+    await userEvent.click(screen.getByRole("button", { name: WRITE_RULE_FOR_CALL }));
+    expect(take("policies-new")).toEqual(door);
+    expect(navigate).toHaveBeenCalledWith("policies", ["new"]);
+  });
+
+  it.each([
+    ["a denial a rule decided", { ...MACHINE, ruleId: "deny-chrome", setName: "browser-guard" }, "straza.audit.tool"],
+    ["a gateway record", MACHINE, "straza.audit.mcp"],
+    ["a harness tool with no name", { ...HARNESS, toolName: "" }, "straza.audit.tool"],
+    ["an allowance", { ...HARNESS, effect: "allow" }, "straza.audit.tool"],
+  ])("offers no rule on %s", (_, data, type) => {
+    show(row(data, type));
+    expect(writeRule()).toBeNull();
+  });
+
+  it("offers no rule to a session that may not write policy", () => {
+    vi.mocked(snapshot).mockReturnValue({ user: "joe", roles: [], grants: "policy:read", expiresIn: 300, sessionID: "s2" });
+    show(row(MACHINE));
+    expect(writeRule()).toBeNull();
   });
 });

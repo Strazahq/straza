@@ -28,6 +28,7 @@ node_modules/
 
 # Local tool settings and flags, never committed
 .claude/allow-core
+.claude/blind-lane
 .claude/settings.local.json
 
 # Scratch worktrees of local tools, which no tree walk should read
@@ -50,3 +51,6 @@ docs/design/brand-straza/linkedin/art/card-template/inter/
 
 # Local tool caches (headless browsers, scratch installs); never shipped.
 .tools/
+
+# Finder metadata
+.DS_Store

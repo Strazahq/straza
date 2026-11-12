@@ -213,8 +213,8 @@ class StrazaMiddleware(AgentMiddleware):
             ``task.spawn`` defaults, which it may override. Unmapped tools use
             ``default_tool``.
         default_tool: canonical kind for tools absent from ``tool_map``
-            (default ``"other"``, still policy-decided, just without
-            kind-specific argument extraction).
+            (default ``"other"``, still policy-decided, with the call's
+            own arguments sent whole in place of kind-specific extraction).
         capture: emit prompt/reply capture from ``before_model``/
             ``after_model``. Set False when a ``StrazaCallbackHandler`` is
             attached at request time, so capture happens exactly once in the
@@ -245,7 +245,8 @@ class StrazaMiddleware(AgentMiddleware):
         args = tool_call.get("args")
         kind = self.tool_map.get(name, self.default_tool)
         command, paths, url = _extract(kind, args if isinstance(args, dict) else {})
-        decision = check(kind, command=command, paths=paths, url=url, tool_name=name or None)
+        decision = check(kind, command=command, paths=paths, url=url, tool_name=name or None,
+                         args=args if isinstance(args, dict) else None)
         if decision.allowed:
             return handler(request)
         reason = decision.reason or "denied by policy"

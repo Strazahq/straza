@@ -50,7 +50,7 @@ their help. A retired verb exits 2 and names what replaced it.
 * [strazactl policy](/reference/cli/strazactl/strazactl_policy/): Validate and manage PolicySets
 * [strazactl roles](/reference/cli/strazactl/strazactl_roles/): Manage roles
 * [strazactl sessions](/reference/cli/strazactl/strazactl_sessions/): Inspect and revoke sessions
-* [strazactl signing-keys](/reference/cli/strazactl/strazactl_signing-keys/): List, rotate and retire signing keys
+* [strazactl signing-keys](/reference/cli/strazactl/strazactl_signing-keys/): List, rotate, promote and retire signing keys, and print a client assertion key's certificate
 * [strazactl sinks](/reference/cli/strazactl/strazactl_sinks/): Inspect SIEM sinks and replay parked (dead-letter) events
 * [strazactl spec](/reference/cli/strazactl/strazactl_spec/): Work with the Straza spec artifacts
 * [strazactl status](/reference/cli/strazactl/strazactl_status/): Report the resolved target server, then strazad health and version

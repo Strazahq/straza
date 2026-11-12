@@ -8,9 +8,10 @@ import (
 )
 
 // TestSignAssertionTellsStagedFromNone pins the two refusals a caller must
-// tell apart: a deployment with no key, where an administrator has to act,
-// and a key that waits for its promotion, where waiting is the whole fix. A
-// staged key still answers ErrNoAssertionKey to callers that ask only that.
+// tell apart: a deployment with no key, where an administrator has to stage
+// one, and a key that waits for its promotion, where the administrator has to
+// promote it, so the refusal names the staged key. A staged key still answers
+// ErrNoAssertionKey to callers that ask only that.
 func TestSignAssertionTellsStagedFromNone(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
@@ -37,8 +38,8 @@ func TestSignAssertionTellsStagedFromNone(t *testing.T) {
 	staged := time.Now()
 	check("a staged first key", staged, true, true)
 
-	if _, err := keys.Advance(ctx, staged.Add(2*KeyReloadInterval), caRetireAfter); err != nil {
-		t.Fatalf("Advance: %v", err)
+	if _, err := keys.Promote(ctx, staged.Add(2*KeyReloadInterval), first.KID); err != nil {
+		t.Fatalf("Promote: %v", err)
 	}
 	check("a promoted key signs", staged.Add(2*KeyReloadInterval), false, false)
 
@@ -48,7 +49,7 @@ func TestSignAssertionTellsStagedFromNone(t *testing.T) {
 	check("a staged key beside the signing key changes nothing", staged.Add(2*KeyReloadInterval), false, false)
 
 	// Retiring the signing key by hand leaves the staged key of the rotation,
-	// so the answer is the staged one until the janitor promotes it.
+	// so the answer is the staged one until an administrator promotes it.
 	if _, _, err := keys.Retire(ctx, time.Now(), first.KID); err != nil {
 		t.Fatalf("Retire: %v", err)
 	}
@@ -62,18 +63,12 @@ func TestSignAssertionRetiredByHandIsNotStaged(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
 	keys := testAssertionKeys(t, repo, testSealer(t))
-	first, err := keys.Stage(ctx, time.Now())
-	if err != nil {
-		t.Fatalf("Stage: %v", err)
-	}
-	now := time.Now().Add(2 * KeyReloadInterval)
-	if _, err := keys.Advance(ctx, now, caRetireAfter); err != nil {
-		t.Fatalf("Advance: %v", err)
-	}
-	if _, _, err := keys.Retire(ctx, now, first.KID); err != nil {
+	first := stagedAndPromoted(t, keys)
+	now := time.Now()
+	if _, _, err := keys.Retire(ctx, now, first); err != nil {
 		t.Fatalf("Retire: %v", err)
 	}
-	_, err = keys.SignAssertion(now, "sam-sre-agent", "https://idp.example/realms/x")
+	_, err := keys.SignAssertion(now, "sam-sre-agent", "https://idp.example/realms/x")
 	if !errors.Is(err, ErrNoAssertionKey) || errors.Is(err, ErrAssertionKeyStaged) {
 		t.Errorf("SignAssertion after a retirement by hand = %v, want ErrNoAssertionKey and not ErrAssertionKeyStaged", err)
 	}
@@ -87,29 +82,16 @@ func TestSignAssertionRetiringKeyIsNotStaged(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
 	keys := testAssertionKeys(t, repo, testSealer(t))
-	if _, err := keys.Stage(ctx, time.Now()); err != nil {
-		t.Fatalf("Stage: %v", err)
-	}
-	now := time.Now().Add(2 * KeyReloadInterval)
-	if _, err := keys.Advance(ctx, now, caRetireAfter); err != nil {
-		t.Fatalf("Advance: %v", err)
-	}
-	second, err := keys.Stage(ctx, now)
-	if err != nil {
-		t.Fatalf("Stage the successor: %v", err)
-	}
-	now = time.Now().Add(4 * KeyReloadInterval)
-	step, err := keys.Advance(ctx, now, time.Hour)
-	if err != nil || step.Promoted != second.KID {
-		t.Fatalf("Advance = %+v, %v, want the successor %s promoted", step, err, second.KID)
-	}
-	if _, _, err := keys.Retire(ctx, now, second.KID); err != nil {
+	stagedAndPromoted(t, keys)
+	second := stagedAndPromoted(t, keys)
+	now := time.Now()
+	if _, _, err := keys.Retire(ctx, now, second); err != nil {
 		t.Fatalf("Retire: %v", err)
 	}
 	if doc := assertionDoc(t, keys, now); len(doc) != 1 {
 		t.Fatalf("the document holds %d keys, want the one retiring key", len(doc))
 	}
-	_, err = keys.SignAssertion(now, "sam-sre-agent", "https://idp.example/realms/x")
+	_, err := keys.SignAssertion(now, "sam-sre-agent", "https://idp.example/realms/x")
 	if !errors.Is(err, ErrNoAssertionKey) || errors.Is(err, ErrAssertionKeyStaged) {
 		t.Errorf("SignAssertion beside a retiring key only = %v, want ErrNoAssertionKey and not ErrAssertionKeyStaged", err)
 	}

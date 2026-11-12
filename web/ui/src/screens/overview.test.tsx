@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Overview } from "./overview";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -69,6 +69,9 @@ import {
   waitingLine,
 } from "@/lib/config-words";
 import { listDrafts } from "@/lib/drafts-api";
+import { entraBlueprints, listSigningKeys } from "@/lib/keys-api";
+import { certExpiredLine } from "@/lib/keys-words";
+import { adminAreas } from "@/lib/session";
 import { version as readVersion } from "@/lib/public";
 import { SUMMARY } from "@/test/drafts-fixture";
 import { readFailed, refused } from "@/lib/say";
@@ -238,6 +241,8 @@ vi.mock("@/lib/api", async (orig) => ({
   replaySink: vi.fn(),
 }));
 vi.mock("@/lib/public", async (orig) => ({ ...(await orig<typeof import("@/lib/public")>()), version: vi.fn() }));
+vi.mock("@/lib/keys-api", async (orig) => ({ ...(await orig<typeof import("@/lib/keys-api")>()), listSigningKeys: vi.fn(), entraBlueprints: vi.fn() }));
+vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/session")>()), adminAreas: vi.fn(() => ({})) }));
 vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: vi.fn() } }));
 vi.mock("@/lib/drafts-api", async (orig) => ({ ...(await orig<typeof import("@/lib/drafts-api")>()), listDrafts: vi.fn() }));
 
@@ -281,6 +286,8 @@ describe("the Overview screen", () => {
     vi.mocked(replaySink).mockResolvedValue({ sink: "elastic", replayed: 1204, remaining: 0 });
     vi.mocked(readVersion).mockResolvedValue({ version: STRAZAD, commit: SERVER_COMMIT, go: "go1.25.1", profile: "enterprise" });
     vi.mocked(listDrafts).mockResolvedValue({ items: [], next_cursor: "" });
+    vi.mocked(listSigningKeys).mockClear();
+    vi.mocked(entraBlueprints).mockReset().mockResolvedValue(["76568ffa-de8d-4d35-986d-4efe2a9f8787"]);
     window.localStorage.clear();
   });
 
@@ -774,5 +781,34 @@ describe("the Overview screen", () => {
     expect((panel("posture").querySelector("[data-strict-line]") as HTMLElement).textContent).toMatch(
       new RegExp("^(" + strictLine(postureOf(configRows({ ...STRICT_CONFIG, governance: undefined, oidc: { jit_provision: true } })).strictWords).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "|" + ALL_STRICT + ")$"),
     );
+  });
+
+  it("reads the signing keys for a full administrator only, and names an expired certificate", async () => {
+    vi.mocked(listSigningKeys).mockResolvedValue([
+      { kid: "6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", purpose: "client_assertion", status: "active", created_at: "2024-11-01T09:14:00Z", certificate_expires_at: "2026-11-01T09:14:00Z" },
+      { kid: "s-1", purpose: "session", status: "active", created_at: "2026-09-01T00:00:00Z" },
+    ]);
+    mount();
+    await settled();
+    expect(listSigningKeys).not.toHaveBeenCalled();
+    expect(entraBlueprints).not.toHaveBeenCalled();
+    cleanup();
+
+    vi.mocked(adminAreas).mockReturnValue(null);
+    mount();
+    await settled();
+    await waitFor(() => expect(attention()).toContain(certExpiredLine("6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", "2026-11-01T09:14:00Z")));
+    expect(listSigningKeys).toHaveBeenCalledTimes(1);
+    expect(entraBlueprints).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    // No provider uses Entra, so an expired certificate stops nothing and
+    // the Overview says nothing about it.
+    vi.mocked(entraBlueprints).mockResolvedValue([]);
+    mount();
+    await settled();
+    await waitFor(() => expect(listSigningKeys).toHaveBeenCalledTimes(2));
+    expect(attention().some((t) => (t || "").includes("6f1c2f0e"))).toBe(false);
+    vi.mocked(adminAreas).mockReturnValue({});
   });
 });

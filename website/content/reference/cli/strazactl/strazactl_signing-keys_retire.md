@@ -2,7 +2,7 @@
 title: strazactl signing-keys retire
 description: Retire one client assertion key at once, for a key that may have been copied
 pagetype: reference
-weight: 89
+weight: 91
 draft: false
 sources:
   - cmd/strazactl
@@ -23,5 +23,5 @@ strazactl signing-keys retire <kid> [flags]
 
 ## See also
 
-* [strazactl signing-keys](/reference/cli/strazactl/strazactl_signing-keys/): List, rotate and retire signing keys
+* [strazactl signing-keys](/reference/cli/strazactl/strazactl_signing-keys/): List, rotate, promote and retire signing keys, and print a client assertion key's certificate
 

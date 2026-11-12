@@ -34,7 +34,11 @@ func (a *App) handleNHIKeySet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PublicKey string `json:"public_key"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PublicKey == "" {
+	err := decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil || req.PublicKey == "" {
 		apiError(w, http.StatusBadRequest, "public_key (base64 Ed25519) is required")
 		return
 	}

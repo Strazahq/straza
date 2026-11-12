@@ -200,7 +200,7 @@ func TestCredEnrollBrowser(t *testing.T) {
 	var nonce string
 	r.srv.with(func() { asked, nonce = r.srv.authorized, r.srv.enrolledNonce })
 	want := map[string]string{"response_type": "code", "client_id": "straza", "scope": "openid profile",
-		"code_challenge_method": "S256", "prompt": "login", "max_age": "0"}
+		"code_challenge_method": "S256", "prompt": "login", "max_age": "600"}
 	for k, v := range want {
 		if asked.Get(k) != v {
 			t.Errorf("authorization request %s = %q, want %q", k, asked.Get(k), v)

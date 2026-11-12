@@ -15,8 +15,8 @@ tested:
   date: 2026-10-22
   except: every Okta step, which has not run against a real Okta org
 applies_to: enterprise
-who: You, as the Okta admin and the Straza admin
-where: The Okta Admin Console, strazad's configuration file, and a terminal on a person's machine
+who: Okta admin and Straza admin
+where: Okta Admin Console, strazad config file, and a terminal on a person's machine
 steps: true
 keywords: okta oidc login provider sign in browser native app pkce
 ---

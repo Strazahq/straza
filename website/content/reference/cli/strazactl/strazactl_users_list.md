@@ -2,7 +2,7 @@
 title: strazactl users list
 description: List users
 pagetype: reference
-weight: 106
+weight: 112
 draft: false
 sources:
   - cmd/strazactl

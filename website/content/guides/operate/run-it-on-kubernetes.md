@@ -11,7 +11,7 @@ aliases:
 pagetype: tutorial
 weight: 31
 draft: false
-who: You, as the admin
+who: Admin
 where: Two terminals and a browser, on a machine with Docker
 steps: true
 modes: [console, cli]
@@ -136,7 +136,7 @@ helm install straza deploy/helm/straza \
 ```
 {{< /command >}}
 
-{{< see >}}The release status `deployed`, followed by the chart's notes. They name the release `straza-straza`, the image `ghcr.io/strazahq/straza:2.1.0` or your own tag, the profile `standalone`, one replica, the public address `http://127.0.0.1:18420`, embedded per-pod events and a per-pod SQLite store.{{< /see >}}
+{{< see >}}The release status `deployed`, followed by the chart's notes. They name the release `straza-straza`, the image `ghcr.io/strazahq/straza:2.2.0` or your own tag, the profile `standalone`, one replica, the public address `http://127.0.0.1:18420`, embedded per-pod events and a per-pod SQLite store.{{< /see >}}
 
 Each value has a reason:
 
@@ -279,7 +279,7 @@ strazactl policy simulate --roles dev --tool shell.exec --command 'rm -rf /tmp/x
 
 ```text
 This call would be denied.
-Decided by rule block-recursive-delete in policy standalone-starter: Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.
+Decided by rule block-recursive-delete in policy standalone-starter: Straza starter policy: this sample rule denies commands that start with rm -rf. Delete files individually, or an admin can edit the standalone-starter PolicySet.
 Simulated against the policies live right now, your file included if you passed one. This is today's answer, not a replay of any past decision.
 
 subject   roles dev · attestation none

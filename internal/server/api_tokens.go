@@ -141,7 +141,10 @@ func (a *App) handleAPITokenCreate(w http.ResponseWriter, r *http.Request) {
 		Scope     string `json:"scope"`
 		ExpiresIn int64  `json:"expires_in"` // seconds; 0 = never
 	}
-	err := json.NewDecoder(r.Body).Decode(&req)
+	err := decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
 	var typeErr *json.UnmarshalTypeError
 	switch {
 	case errors.As(err, &typeErr) && typeErr.Field == "expires_in":

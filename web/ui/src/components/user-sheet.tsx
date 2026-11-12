@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { EntraLink } from "@/components/entra-link";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { Facts, Glance, ListRow, Section, StateBox, StateRow } from "@/components/sheet-parts";
@@ -393,6 +394,7 @@ function Body({ user, roles, rolesStale = false, onOpenChange, onChanged, onFilt
             )}
           </Section>
         )}
+        {agent && <EntraLink user={shown} />}
       </div>
 
       <SheetFooter className="mt-0 border-t border-border">

@@ -116,7 +116,7 @@ func TestCredSavedSessionsResume(t *testing.T) {
 		}},
 		{"re-acquired", func(t *testing.T, r *credRig, ses Session) Session {
 			r.srv.expireSessions()
-			if out, err := r.s.Decide(ctx, ses, toolPre, "", ""); err != nil || !out.Bounced {
+			if out, err := r.s.Decide(ctx, ses, toolPre, "", "", nil); err != nil || !out.Bounced {
 				t.Fatalf("decide after strazad forgot the session: %+v, %v", out, err)
 			}
 			got, err := r.s.Session(ctx, alice, ses.Harness, false)
@@ -169,7 +169,7 @@ func TestCredSavedSessionsResume(t *testing.T) {
 			if _, _, from, err := r.s.Policy(ctx, got); err != nil || from != want.SnapshotID {
 				t.Fatalf("policy after a restart: from %s, %v, want %s", from, err, want.SnapshotID)
 			}
-			if out, err := r.s.Decide(ctx, got, toolPre, "", ""); err != nil || out.Bounced {
+			if out, err := r.s.Decide(ctx, got, toolPre, "", "", nil); err != nil || out.Bounced {
 				t.Fatalf("decide after a restart: %+v, %v, want the saved token accepted", out, err)
 			}
 			again, err := r.s.Session(ctx, alice, want.Harness, true)
@@ -233,7 +233,7 @@ func TestCredSavedRevocationSurvives(t *testing.T) {
 				refused.Status != http.StatusForbidden || refused.Sentence != revokedSentence(reason) {
 				t.Fatalf("the revoked window after a restart: %v, want 403 %q", err, revokedSentence(reason))
 			}
-			if _, err := r.s.Decide(ctx, ses, toolPre, "", ""); !errors.As(err, &refused) || refused.Sentence != revokedSentence(reason) {
+			if _, err := r.s.Decide(ctx, ses, toolPre, "", "", nil); !errors.As(err, &refused) || refused.Sentence != revokedSentence(reason) {
 				t.Fatalf("decide on the revoked window after a restart: %v", err)
 			}
 			if st := r.s.Status(alice); len(st.Sessions) != 1 || st.Sessions[0].Revoked != reason || st.Sessions[0].Push != localapi.PushOff {
@@ -405,7 +405,7 @@ func TestCredSavedFifteenWindows(t *testing.T) {
 			}
 			if err == nil {
 				var out DecideOutcome
-				if out, err = r.s.Decide(ctx, got, toolPre, "", ""); err == nil && out.Bounced {
+				if out, err = r.s.Decide(ctx, got, toolPre, "", "", nil); err == nil && out.Bounced {
 					err = errors.New("the decide bounced, so the saved token was not used")
 				}
 			}

@@ -35,10 +35,14 @@ const (
 // the words of an error description do not.
 var longRun = regexp.MustCompile(`[A-Za-z0-9_+=.-]{32,}`)
 
-// fetch signs one assertion for the request's client and runs the grant. It
-// returns the token and its lifetime, or a refusal. The assertion and the
-// token go nowhere but the request and the return value.
+// fetch gets the request's token at the provider: one grant with a client
+// assertion Straza signs, or the Entra exchange for a provider with a
+// blueprint. It returns the token and its lifetime, or a refusal. The
+// assertion and the token go nowhere but the request and the return value.
 func (t *Tokens) fetch(ctx context.Context, p Provider, r Request) (string, time.Duration, error) {
+	if p.Blueprint != "" {
+		return t.exchange(ctx, p, r)
+	}
 	assertion, err := t.signer.SignAssertion(t.now(), r.ClientID, p.Audience)
 	if err != nil {
 		return "", 0, t.unsigned(r, err)
@@ -52,6 +56,28 @@ func (t *Tokens) fetch(ctx context.Context, p Provider, r Request) (string, time
 	if len(p.Scopes) > 0 {
 		form.Set("scope", strings.Join(p.Scopes, " "))
 	}
+	token, lifetime, err := t.grant(ctx, p, r, form, r.ClientID, func(at string, status int, body []byte, warn warnFunc) *refusal {
+		return t.refused(r, at, status, body, assertion, warn)
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	t.log.Debug("client credentials: token fetched", "provider", r.Provider, "server", r.Server, "client", r.ClientID, "lifetime", lifetime.String())
+	return token, lifetime, nil
+}
+
+// warnFunc logs one warning about a token request, with the names of the
+// request and the HTTP status of its answer.
+type warnFunc = func(what string, args ...any)
+
+// onRefused turns an answer whose HTTP status is not 200 into a refusal.
+type onRefused func(at string, status int, body []byte, warn warnFunc) *refusal
+
+// grant posts one client credentials grant to the provider's token endpoint
+// and reads the answer. client is the client the form names, for the
+// sentences and the log, and an answer other than 200 goes to refused. It
+// returns the access token and its lifetime, or a refusal.
+func (t *Tokens) grant(ctx context.Context, p Provider, r Request, form url.Values, client string, refused onRefused) (string, time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		t.log.Warn("client credentials: the token endpoint is not a usable URL", "provider", r.Provider)
@@ -71,7 +97,11 @@ func (t *Tokens) fetch(ctx context.Context, p Provider, r Request) (string, time
 		return "", 0, t.unanswered(r, at, err)
 	}
 	warn := func(what string, args ...any) {
-		t.log.Warn("client credentials: "+what, append([]any{"provider", r.Provider, "server", r.Server, "client", r.ClientID, "status", resp.StatusCode}, args...)...)
+		names := []any{"provider", r.Provider, "server", r.Server, "client", client, "status", resp.StatusCode}
+		if client != r.ClientID {
+			names = append(names, "agent", r.ClientID)
+		}
+		t.log.Warn("client credentials: "+what, append(names, args...)...)
 	}
 	switch {
 	case len(body) > maxAnswer:
@@ -81,7 +111,7 @@ func (t *Tokens) fetch(ctx context.Context, p Provider, r Request) (string, time
 		warn("the token endpoint answered with a redirect")
 		return "", 0, asked(r, "%s answered the token request at %s with a redirect, which Straza never follows with a client assertion. Set oauth.providers.%s.tokenUrl in strazad's config to the provider's final token endpoint, then call again.", r.Provider, at, r.Provider)
 	case resp.StatusCode != http.StatusOK:
-		return "", 0, t.refused(r, at, resp.StatusCode, body, assertion, warn)
+		return "", 0, refused(at, resp.StatusCode, body, warn)
 	}
 
 	var ans struct {
@@ -95,27 +125,31 @@ func (t *Tokens) fetch(ctx context.Context, p Provider, r Request) (string, time
 		return "", 0, asked(r, "%s answered the token request with something other than the JSON of RFC 6749, so the call is refused. Check oauth.providers.%s.tokenUrl in strazad's config, then call again.", r.Provider, r.Provider)
 	case ans.AccessToken == "":
 		warn("the answer holds no access token")
-		return "", 0, asked(r, "%s answered the token request without an access token, so the call is refused. Ask the identity team to check the client %s at the provider, then call again.", r.Provider, r.ClientID)
+		return "", 0, asked(r, "%s answered the token request without an access token, so the call is refused. Ask the identity team to check the client %s at the provider, then call again.", r.Provider, client)
 	case !strings.EqualFold(ans.TokenType, "Bearer"):
 		warn("the token is not a Bearer token")
-		return "", 0, asked(r, "%s answered with a token that is not a Bearer token, so the call is refused. Ask the identity team to issue Bearer access tokens to the client %s, then call again.", r.Provider, r.ClientID)
+		return "", 0, asked(r, "%s answered with a token that is not a Bearer token, so the call is refused. Ask the identity team to issue Bearer access tokens to the client %s, then call again.", r.Provider, client)
 	case ans.ExpiresIn < 1:
 		warn("the token names no lifetime")
-		return "", 0, asked(r, "%s answered with a token that names no lifetime (expires_in), so Straza can neither keep nor renew it and the call is refused. Ask the identity team to set an access token lifetime for the client %s, then call again.", r.Provider, r.ClientID)
+		return "", 0, asked(r, "%s answered with a token that names no lifetime (expires_in), so Straza can neither keep nor renew it and the call is refused. Ask the identity team to set an access token lifetime for the client %s, then call again.", r.Provider, client)
 	}
-	lifetime := time.Duration(min(ans.ExpiresIn, maxLifetime.Seconds())) * time.Second
-	t.log.Debug("client credentials: token fetched", "provider", r.Provider, "server", r.Server, "client", r.ClientID, "lifetime", lifetime.String())
-	return ans.AccessToken, lifetime, nil
+	return ans.AccessToken, time.Duration(min(ans.ExpiresIn, maxLifetime.Seconds())) * time.Second, nil
 }
 
 // unsigned is the refusal for an assertion that could not be signed. Each key
 // state has its own next step, and any other failure is logged and not told.
 func (t *Tokens) unsigned(r Request, err error) *refusal {
+	var staged *authn.StagedKeyError
+	var expired *authn.CertificateExpiredError
 	switch {
-	case errors.Is(err, authn.ErrAssertionKeyStaged):
-		return refuse(r, "The client assertion key was created moments ago and starts signing within a minute. Call again then.")
+	case errors.As(err, &staged):
+		return refuse(r, "The client assertion key %s is staged and signs nothing until an administrator promotes it with strazactl signing-keys promote client_assertion %s, then the agent calls again.", staged.KID, staged.KID)
+	case errors.As(err, &expired):
+		return refuse(r, "The certificate of client assertion key %s expired on %s, so Entra would refuse it. "+
+			"An administrator runs strazactl signing-keys rotate client_assertion, uploads the new key's certificate to the Entra blueprint and promotes that key with strazactl signing-keys promote client_assertion and its id, then the agent calls again.",
+			expired.KID, expired.NotAfter.UTC().Format(time.DateOnly))
 	case errors.Is(err, authn.ErrNoAssertionKey):
-		return refuse(r, "This Straza deployment has no client assertion key that signs: none was created yet, or the last one was retired. An administrator runs strazactl signing-keys rotate client_assertion, and agents can call about a minute later.")
+		return refuse(r, "This Straza deployment has no client assertion key that signs: none was created yet, or the last one was retired. An administrator runs strazactl signing-keys rotate client_assertion, then strazactl signing-keys promote client_assertion with the new key's id, and the agent calls again.")
 	case errors.Is(err, authn.ErrAssertionKeysStale):
 		return refuse(r, "This Straza replica has lost contact with its key store and signs nothing until it reads the keys again. An administrator checks the replica's database connection in the strazad log, then the agent calls again.")
 	}
@@ -148,14 +182,14 @@ func (t *Tokens) unanswered(r Request, at string, err error) *refusal {
 // error code reaches the sentence, and only when it is a plain code. The
 // provider's description goes to the log, bounded and only when it cannot be
 // a credential.
-func (t *Tokens) refused(r Request, at string, status int, body []byte, assertion string, warn func(string, ...any)) *refusal {
+func (t *Tokens) refused(r Request, at string, status int, body []byte, assertion string, warn warnFunc) *refusal {
 	var oauth struct {
 		Error       string `json:"error"`
 		Description string `json:"error_description"`
 	}
 	if json.Unmarshal(body, &oauth) != nil || oauth.Error == "" {
 		warn("the token endpoint answered without an OAuth error")
-		return asked(r, "%s answered the token request at %s with HTTP %d and no OAuth error. Check oauth.providers.%s.tokenUrl in strazad's config and that the provider is healthy, then call again.", r.Provider, at, status, r.Provider)
+		return noOAuthError(r, at, status)
 	}
 	code := plainCode(oauth.Error)
 	warn("the provider refused the client", "error", code, "description", logSafe(oauth.Description, assertion))
@@ -175,6 +209,12 @@ func (t *Tokens) refused(r Request, at string, status int, body []byte, assertio
 			"Ask the identity team to assign them to the client, or correct the list in strazad's config, then call again.", r.Provider, r.ClientID, r.Provider)
 	}
 	return asked(r, "%s refused the client %s: %s. %s", r.Provider, r.ClientID, code, readLog)
+}
+
+// noOAuthError is the refusal for an answer that is not 200 and carries no
+// OAuth error.
+func noOAuthError(r Request, at string, status int) *refusal {
+	return asked(r, "%s answered the token request at %s with HTTP %d and no OAuth error. Check oauth.providers.%s.tokenUrl in strazad's config and that the provider is healthy, then call again.", r.Provider, at, status, r.Provider)
 }
 
 // plainCode returns an OAuth error code that is safe to repeat: lower case

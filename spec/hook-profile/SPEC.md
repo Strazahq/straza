@@ -8,6 +8,53 @@ snake_case), and `python-sdk`, the shape straza-agentkit itself emits
 from Python agents.
 Conformance fixtures: `spec/conformance/hooks/<harness>/<version>/`.
 
+Revision (2026-11-11): **the known interpreter set gains `eval`**. `eval`
+is the shell builtin that runs its arguments as code, so a command that
+starts with it hides its payload from a command pattern the way `bash -c`
+does. The detector of section 1.1 now tags it, and the `interpreter`
+attribute of such a `shell.exec` event is `eval`. A policy that denies or
+classifies by `interpreters` reaches these commands from this revision on.
+A PEP built before it leaves the attribute absent, and a server at this
+revision computes it when the client sent none. Additive: no schema
+change, existing fixtures unchanged, and one new fixture pins the tag.
+
+Revision (2026-11-11): **a classified tool's input travels beside the
+event**. The PEP that forwards a classified local tool for a decision sends
+the harness `tool_input` beside the event as `toolInput` on the decide
+request, as it sends `nativeTool`, so the `straza.audit.tool` record can
+keep it (spec/events revision 65). `toolInput` is an object of `text`, the
+`tool_input` as JSON text, shortened to 8 KiB the way that revision
+shortens `arguments`, and of `hash`, `sha256:` followed by the hex SHA-256
+of the whole text, present only when `text` was shortened. The client
+shortens it, because a written file can be longer than the decide request
+a server reads. The canonical event of a
+classified tool is unchanged and still carries no `args`: the approval
+fingerprint binds `args`, and a ticket opened for a described command is
+keyed on the command alone, so a real call whose key also bound the rest
+of its input could never use that ticket. No rule reads `toolInput` and no
+fingerprint binds it. An implementation that sends none loses the input on
+the record and nothing else. Additive: no schema change, existing fixtures
+unchanged, and one new fixture pins the canonical event of a Claude Code
+`Skill` call, which carries neither a command nor a path.
+
+Revision (2026-11-10): **an unclassified tool carries its input**. An
+`other` event MAY carry the `args` attribute of section 1.1a, the harness
+`tool_input` object verbatim, as an `mcp.call` event does. Before this
+revision an implementation dropped the input of a tool it could not
+classify, so the event and its audit record named the tool and nothing it
+was asked to do. A classified local tool still carries no `args`: its
+`command` or `paths` describe the call, and its input can hold the content
+of a file. The approval fingerprint of a hold on an `other` tool binds the
+forwarded arguments, since every kind but `mcp.call` binds its concrete
+call (spec/policyset revision 7), and the `straza.audit.tool` record of an
+`other` tool keeps them (spec/events revision 64). An implementation that
+forwards none keeps the fingerprint it had. The python-sdk dialect sends
+the call's own arguments as `tool_input` for an `other` tool. Additive: no
+schema change beyond the description of `args`. The expected event of the
+three fixtures whose payload already carried a `tool_input` for an
+unclassified tool gains `args`, and one fixture pins a Claude Code `LSP`
+call.
+
 Revision (2026-10-30): **an unclassified tool carries its own name**, and
 the claude-code mapping table gains two built-ins that fell to `other`.
 `SubagentHandback`, which returns a subagent's report to the agent that
@@ -110,7 +157,7 @@ observational (audit) or context-injection points (`session.start`).
 | `net.fetch` | outbound network egress | `WebFetch`, `WebSearch`, `Artifact`, `PushNotification` |
 | `mcp.call` | MCP tool call; carries `app`, `toolName`, `args` | `mcp__<app>__<tool>` |
 | `task.spawn` | spawn/manage a subagent, task, or scheduled agent run | `Task`, `Agent`, `Workflow`, `TaskStop`, `CronCreate` |
-| `other` | anything unmapped; carries the harness's own name in `toolName` | none |
+| `other` | anything unmapped; carries the harness's own name in `toolName` and its input in `args` | none |
 
 The full per-harness assignment lives in the mapping tables (`mappings/`).
 Assignment rule: the kind is the tool's side effect outside the
@@ -140,8 +187,9 @@ shared detector, so client- and server-side tagging cannot drift:
 - The value is the lowercased, `.exe`-trimmed basename of the first
   non-wrapper token WHEN it is a known interpreter; otherwise the attribute
   is absent. Known set: `sh`, `bash`, `zsh`, `dash`, `ksh`, `fish`,
-  `python`, `python2`, `python3`, `node`, `nodejs`, `deno`, `bun`, `ruby`,
-  `perl`, `php`, `pwsh`, `powershell`, `lua`. Version-suffixed pythons
+  `eval`, `python`, `python2`, `python3`, `node`, `nodejs`, `deno`, `bun`,
+  `ruby`, `perl`, `php`, `pwsh`, `powershell`, `lua`. `eval` is the shell
+  builtin, in the set since revision 2026-11-11. Version-suffixed pythons
   (`python3.12`) match by prefix (digits and dots only, so `python-config`
   does not); everything else is exact on the basename.
 
@@ -155,8 +203,12 @@ The attribute MAY under-report; it MUST never mis-report.
 `mcp.call` events MAY carry an `args` attribute: the call's `tools/call`
 arguments verbatim (the harness `tool_input` object), forwarded so the
 server-side approval fingerprint can bind the exact call
-(spec/policyset revision 7, `approve.binding: call`). Semantics are
-three-valued and load-bearing:
+(spec/policyset revision 7, `approve.binding: call`). Since revision
+2026-11-10 an `other` event MAY carry it too, with the same three values,
+because nothing else on that event says what the tool was asked to do. Its
+fingerprint binds the concrete call whether `args` is absent or not, so
+absent and `{}` key alike there. Semantics are three-valued and
+load-bearing:
 
 - **absent**: the arguments were NOT observed (an older client, an
   argless dialect). The server keys the approval at tool scope and the
@@ -168,11 +220,11 @@ three-valued and load-bearing:
   that rewrites `9007199254740993` would split the fingerprint across
   lanes).
 
-`args` is fingerprint input only: v1beta1 policy matchers never read it,
-and the local PDP ignores it. Emitted by straza normalization for
-`mcp.call` events whose dialect payload carries a `tool_input` object;
-the gateway PEP populates the same attribute server-side from the actual
-call body.
+`args` is fingerprint and audit input only: v1beta1 policy matchers never
+read it, and the local PDP ignores it. Emitted by straza normalization for
+`mcp.call` and `other` events whose dialect payload carries a `tool_input`
+object; the gateway PEP populates the same attribute server-side from the
+actual call body.
 
 #### 1.2 Gateway-proxied MCP calls (revision 2026-07-20)
 

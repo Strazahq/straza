@@ -13,8 +13,8 @@ tested:
   platform: A throwaway standalone server on Linux. The admin ran every strazactl drafts verb shown except contact, which refused the admin API token it ran on. The admin saved, published, undid and discarded a draft and pressed Contact it now in headless Chromium, and a person's agent submitted a draft through straza mcp
   date: 2026-10-06
 applies_to: both
-who: You, as the admin who changes Straza, and an agent that proposes a change
-where: The console or a terminal
+who: Admin, and an agent that proposes a change
+where: Console or a terminal
 steps: true
 modes: [console, cli]
 mode_default: console
@@ -244,6 +244,9 @@ A draft that pins a server's objects reads differently. The first pin gives ever
 The question is titled with the draft, such as `Publish draft 7?`, and says what publishing does, such as `Publishing changes 1 policy set in one step, or nothing changes.` A draft with lines that widen access is said by what they do, such as `Publishing widens access through 1 policy set, or nothing changes.` The lines that widen access come in blocks, one per kind, and you confirm each block. A line that republishing the old state can undo has a box to tick, and the lines of one kind share one tick. A line it cannot undo asks you to type its name, such as `Type kubectl-apply-hold to confirm`. Several such lines of one kind ask for their count once instead, such as `Type 20 to confirm`, and the block folds open to list them. A server's removal always asks for the server's name. Each field shows what to type in its placeholder and a check mark once it matches. The question ends with `The publish record names you.`, and its help icon says that the record also names the console and your login.
 
 Confirm each block and press **Publish**, which stays off until every block is confirmed.
+
+
+A draft that adds a server whose credential is one shared secret with none stored asks for that secret in the same question, under the heading `Secret`, in a field such as `Secret of gitops-tools` with **Add it later** under it. A server that pins its objects and has no listing credential gets a second field, such as `Listing credential of ghapp`. The button then names what it stores, such as **Publish and store the secret** or **Publish and store 2 secrets**, and stays off until each field holds a value or is ticked for later. After the publish the question stays open while Straza stores each value and checks the server, and it ends with the check's sentence, such as `Running.` A value that was not stored comes back as an empty field with **Store the secret and check** or **Store the listing credential**, which stores it with no second publish. A value never goes into the draft, and a refused publish sends none. A value ticked for later is set on the server's page, under Server authentication, as [Credentials]({{< relref "guides/serve-mcp-apps/credentials.md" >}}) shows.
 
 {{< see >}}`Published by admin at 2026-10-06 20:03:49 UTC from the console. Draft 7 is live.`, with your own name, time and number, and **Undo this publish** under it.{{< /see >}}
 {{< /console >}}

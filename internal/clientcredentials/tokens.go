@@ -30,10 +30,12 @@ const (
 	pauseMax   = 30 * time.Second
 )
 
-// Signer signs the client assertion of RFC 7523 section 2.2 for clientID. The
-// production signer is *authn.ClientAssertionKeys.
+// Signer signs the client assertion of RFC 7523 section 2.2 for clientID, and
+// the certificate assertion of an Entra blueprint, which also names the key
+// that signed it. The production signer is *authn.ClientAssertionKeys.
 type Signer interface {
 	SignAssertion(now time.Time, clientID, audience string) (string, error)
+	SignCertificateAssertion(now time.Time, clientID, audience string) (assertion, kid string, err error)
 }
 
 // Provider is one identity provider whose operator settings say that it
@@ -43,6 +45,11 @@ type Provider struct {
 	TokenURL string
 	Audience string
 	Scopes   []string
+	// Blueprint is the client id of the Entra agent identity blueprint of a
+	// provider that runs the Entra exchange (entra.go), and Tenant is the
+	// tenant its TokenURL names. Both are empty for every other provider.
+	Blueprint string
+	Tenant    string
 }
 
 // Options configures Tokens.
@@ -64,18 +71,23 @@ type Options struct {
 
 // Request names whose token is wanted. ClientID must be the username of the
 // verified session subject, because it becomes the client the provider
-// authenticates. Every field is required.
+// authenticates. EntraAgentID must be the Entra agent identity that the
+// session's check-in read from the agent's record, because on an Entra
+// provider it becomes the identity Entra issues the token to. It may be
+// empty, and every other field is required.
 type Request struct {
-	Provider string // the provider name of the server's manifest
-	Server   string // the server's name, for the sentences
-	ServerID string
-	UserID   string
-	ClientID string
-	Session  string
+	Provider     string // the provider name of the server's manifest
+	Server       string // the server's name, for the sentences
+	ServerID     string
+	UserID       string
+	ClientID     string
+	EntraAgentID string
+	Session      string
 }
 
 // key identifies one cached token. It holds the client id beside the user id
 // so that a served token was always fetched for the client the request names.
+// On an Entra provider the client is the Entra agent identity.
 type key struct{ provider, server, user, client string }
 
 // entry is the cache state of one key. Tokens.mu guards it.
@@ -149,7 +161,14 @@ func (t *Tokens) Token(ctx context.Context, r Request) (string, error) {
 	if !ok {
 		return "", noSettings(r)
 	}
-	k := key{provider: r.Provider, server: r.ServerID, user: r.UserID, client: r.ClientID}
+	client := r.ClientID
+	if p.Blueprint != "" {
+		if r.EntraAgentID == "" {
+			return "", unmapped(r)
+		}
+		client = r.EntraAgentID
+	}
+	k := key{provider: r.Provider, server: r.ServerID, user: r.UserID, client: client}
 
 	t.mu.Lock()
 	now := t.now()
@@ -259,6 +278,14 @@ func (t *Tokens) sweep(now time.Time) {
 			delete(t.entries, k)
 		}
 	}
+}
+
+// Blueprint returns the client id of the Entra agent identity blueprint
+// that a provider's agent tokens go through, in lower case, or "" when that
+// provider's tokens do not go through Entra. The providers are fixed at New,
+// so it takes no lock.
+func (t *Tokens) Blueprint(provider string) string {
+	return t.providers[provider].Blueprint
 }
 
 // DropUser forgets every token of the user, for a disabled or locked agent.

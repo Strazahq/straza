@@ -16,8 +16,8 @@ tested:
   date: 2026-10-01
 applies_to: both
 keywords: mcp apps views ui resources claude desktop
-who: You, as a global admin of MCP servers
-where: A terminal with strazactl, and a chat app on a Mac
+who: Global MCP admin
+where: Terminal with strazactl, and a chat app on a Mac
 steps: true
 ---
 

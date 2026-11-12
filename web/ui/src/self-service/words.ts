@@ -84,7 +84,7 @@ export const SIGN_OUT_VS_REVOKE = "Sign out (top right) ends your signed-in sess
 // The tab before this browser is enrolled: one sentence of consequence, then
 // the honest next step for the account that is looking at it.
 export const DECIDING_MEANS = "Deciding means signing with a key that stays in this browser, so nobody can decide for you from a copied link.";
-export const ENABLE_SIGN_IN_FIRST = "Sign in with your organisation account first, then enable this browser.";
+export const ENABLE_SIGN_IN_FIRST = "Sign in with your organization account first, then enable this browser.";
 export const ENABLE_HERE = "Your account may enroll this browser: use Enable this browser above.";
 export const ENABLE_PHONE_ONLY = "Your account may enroll a phone, not a browser: use Add a phone above.";
 export const ELIGIBILITY_UNREAD = "Straza could not say what your account may enroll, so nothing is offered here.";

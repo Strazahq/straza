@@ -216,7 +216,7 @@ A harness can have tools Straza does not classify, such as a tool Claude Code ad
 - The rule lists only `other` in `tools` and carries no `apps`, `command`, `paths` or `interpreters` block.
 - A client older than this feature sends no name, so its unknown tools stay denied, with a reason that says to update the client.
 
-To find the tools a harness added, list the tool records and keep the ones whose `tool` is `other`. Their `toolName` names the tool:
+To find the tools a harness added, list the tool records and keep the ones whose `tool` is `other`. Their `toolName` names the tool, and `arguments` shows what it was asked:
 
 ```sh
 strazactl audit tail --type straza.audit.tool --limit 500 | grep '"tool":"other"'

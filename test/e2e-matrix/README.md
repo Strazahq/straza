@@ -16,6 +16,17 @@ of the docs site, the security model's invariants among them. That rule is
 what makes this lane a guardrail: the implementation cannot grade its own
 homework.
 
+Two checks hold the rule. The owner creates the file `.claude/blind-lane`
+for a session that writes the corpus and removes it when that work ends.
+While it exists, a hook refuses the Read, Grep and Glob tools on a path
+under `internal/` or `cmd/`, and the Bash guard refuses a command that names
+such a path. The commit gate refuses a commit that stages files under
+`corpus/` together with files under `internal/` or `cmd/`, so a scenario and
+the code it tests land in separate commits. Both checks guard against drift,
+not against a determined author. A shell command can still get around the
+Bash guard, and a search over the whole repository still shows lines from
+the code.
+
 ## Run it
 
 ```
@@ -38,13 +49,17 @@ install, makes every `straza` ignore `STRAZA_HOME`, so the lane's identities
 would reach that service and replace the key and enrolment of the account
 running the lane. The test refuses such a machine before it builds anything,
 and `make e2e-matrix` runs it there in a container instead, which has no
-system service and needs no network. The target runs this command:
+system service and needs no network. Docker Desktop on macOS shows the
+mounted tree as owned by root, which git refuses to read, so the command
+names `/src` as a safe directory for the container's git. The target runs
+this command:
 
 ```
 docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp/home \
   -e GOCACHE=/tmp/gocache -e GOMODCACHE=/go/pkg/mod -e GOTOOLCHAIN=local \
+  -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/src \
   -e STRAZA_E2E_MATRIX=1 -v "$PWD":/src -v "$(go env GOMODCACHE)":/go/pkg/mod:ro \
-  -w /src golang:1.26.10-bookworm \
+  -w /src golang:1.26.11-bookworm \
   go test -count=1 -timeout 45m -run TestJourneys -v ./test/e2e-matrix
 ```
 

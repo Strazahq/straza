@@ -23,15 +23,24 @@ func (a agentTokens) Token(ctx context.Context, r manager.ClientTokenRequest) (s
 // names of the providers in it. The lane takes every setting from the
 // operator's config: a provider is in it only when its clientCredentials
 // block says that the provider trusts this deployment's client assertion
-// keys. Every user and session revocation drops that principal's tokens.
+// keys, or that an Entra blueprint holds their certificate. Every user and
+// session revocation drops that principal's tokens.
 func (a *App) buildClientTokens(cfg config.Config, log *slog.Logger) []string {
 	var withBlock []string
 	providers := map[string]clientcredentials.Provider{}
 	for name, p := range cfg.OAuth.Providers {
-		if cc := p.ClientCredentials; cc != nil {
-			withBlock = append(withBlock, name)
-			providers[name] = clientcredentials.Provider{TokenURL: p.TokenURL, Audience: cc.AssertionAudience, Scopes: cc.Scopes}
+		cc := p.ClientCredentials
+		if cc == nil {
+			continue
 		}
+		withBlock = append(withBlock, name)
+		lane := clientcredentials.Provider{TokenURL: p.TokenURL, Audience: cc.AssertionAudience, Scopes: cc.Scopes}
+		if cc.EntraBlueprint != "" {
+			// Validation passed the token endpoint, so the tenant parses.
+			lane.Blueprint = strings.ToLower(cc.EntraBlueprint)
+			lane.Tenant, _ = config.EntraTenant(p.TokenURL)
+		}
+		providers[name] = lane
 	}
 	a.clientTokens = clientcredentials.New(clientcredentials.Options{
 		Providers: providers, Signer: a.assertionKeys, Log: log,

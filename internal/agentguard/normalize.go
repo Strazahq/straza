@@ -8,6 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/policy"
 )
 
@@ -41,6 +42,11 @@ type Normalized struct {
 	// that names a tool keeps it after a release classifies the tool, while
 	// the canonical event stays identical across dialects.
 	NativeTool string
+	// ToolInput is the input of a classified local tool, shortened to
+	// ArgumentsMax by CutArguments, and nil when the harness sent none. It
+	// travels beside the event as NativeTool does, for the audit record
+	// alone.
+	ToolInput *localapi.ToolInput
 	// GatewayProxied marks a tool call the harness routes through the Straza
 	// gateway registration (mcp__straza__*, or a gemini mcp_context naming
 	// the gateway server). Such a call cannot bypass the gateway PEP, which
@@ -194,18 +200,31 @@ func Normalize(a *Adapter, payload map[string]any) (Normalized, error) {
 				n.NativeTool = native
 			}
 		}
-		// mcp.call: forward the harness tool_input verbatim as the canonical
-		// `args` attribute (spec/hook-profile); the server's approval
-		// fingerprint binds it (v2, binding: call). Runs AFTER the mcp_context
-		// re-attribution so a gemini-named tool is already mcp.call here.
-		// Absent tool_input stays nil = "args not observed", which the server
-		// keys as tool scope. encoding/json marshals maps with sorted keys and
+		// mcp.call and other: forward the harness tool_input verbatim as the
+		// canonical `args` attribute (spec/hook-profile); the server's approval
+		// fingerprint binds it (v2, binding: call), and the audit record
+		// keeps it. Runs AFTER the mcp_context re-attribution so a
+		// gemini-named tool is already mcp.call here. Absent tool_input stays
+		// nil = "args not observed", which the server keys as tool scope for
+		// mcp.call. encoding/json marshals maps with sorted keys and
 		// ParsePayload preserved number literals, so the bytes are
 		// deterministic.
-		if ev.Tool == policy.ToolMCPCall && toolInput != nil {
-			if b, err := json.Marshal(toolInput); err == nil {
-				ev.Args = b
-			}
+		b, err := json.Marshal(toolInput)
+		switch {
+		case toolInput == nil || err != nil:
+		case ev.Tool == policy.ToolMCPCall || ev.Tool == policy.ToolOther:
+			ev.Args = b
+		// A classified local tool's input travels beside the event, for the
+		// record alone. On the event the key would bind it, and the ticket
+		// that approval_request opens for a described command, keyed on the
+		// command, would never match the real call. It is shortened here,
+		// because a written file can be longer than the decide request
+		// strazad reads.
+		case len(b) <= ArgumentsMax:
+			n.ToolInput = &localapi.ToolInput{Text: string(b)}
+		default:
+			text, hash := cutArguments(toolInput, b)
+			n.ToolInput = &localapi.ToolInput{Text: text, Hash: hash}
 		}
 	}
 	// Interpreter tagging (spec/hook-profile `interpreter`):
@@ -335,10 +354,11 @@ func mapField(payload map[string]any, keys ...string) map[string]any {
 }
 
 // ParsePayload decodes a raw hook stdin body into a generic map. Numbers
-// decode as json.Number (literal-preserving), not float64: mcp.call tool_input
-// is re-marshaled into Event.Args for the server-side approval fingerprint,
-// and a float64 round-trip would mangle large-integer literals into a
-// different canonical form than the gateway lane's raw bytes.
+// decode as json.Number (literal-preserving), not float64: the tool_input of
+// an mcp.call or an unclassified tool is re-marshaled into Event.Args for
+// the server-side approval fingerprint, and a float64 round-trip would
+// mangle large-integer literals into a different canonical form than the
+// gateway lane's raw bytes.
 func ParsePayload(raw []byte) (map[string]any, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()

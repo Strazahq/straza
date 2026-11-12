@@ -1,0 +1,9 @@
+{
+  "error": "invalid_client",
+  "error_description": "AADSTS7002134: description not recorded. Trace ID: dddddddd-4444-4444-8444-dddddddddddd Correlation ID: eeeeeeee-5555-4555-8555-eeeeeeeeeeee Timestamp: 2026-11-08 11:41:28Z",
+  "error_codes": [7002134],
+  "timestamp": "2026-11-08 11:41:28Z",
+  "trace_id": "dddddddd-4444-4444-8444-dddddddddddd",
+  "correlation_id": "eeeeeeee-5555-4555-8555-eeeeeeeeeeee",
+  "error_uri": "https://login.microsoftonline.com/error?code=7002134"
+}

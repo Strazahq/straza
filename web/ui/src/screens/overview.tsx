@@ -66,9 +66,12 @@ import {
   summaryLastRead,
   summaryUnread,
 } from "@/lib/config-words";
+import { ASSERTION_PURPOSE, type SigningKeyRow, entraBlueprints, listSigningKeys, usesEntra } from "@/lib/keys-api";
+import { SUBJECT_KEYS } from "@/lib/keys-words";
 import { version as readVersion } from "@/lib/public";
 import { routeByKey } from "@/lib/routes";
 import { readFailed } from "@/lib/say";
+import { adminAreas } from "@/lib/session";
 import { relTimeText } from "@/lib/words";
 
 // waitingOf reads one page of the open drafts as the attention line's
@@ -167,6 +170,12 @@ type State = {
   approvals: ApprovalRow[] | null;
   approvalsDenied: boolean;
   drafts: Waiting | null;
+  // keys is the client assertion key list, read for a full administrator
+  // only, the one seat that can act on its attention lines.
+  keys: SigningKeyRow[] | null;
+  // blueprints are the providers' Entra blueprints, read with the keys,
+  // and null when not known.
+  blueprints: string[] | null;
   apps: AppRow[] | null;
   sinks: SinkRow[] | null;
   sessions: SessionRow[] | null;
@@ -188,6 +197,8 @@ const START: State = {
   approvals: null,
   approvalsDenied: false,
   drafts: null,
+  keys: null,
+  blueprints: null,
   apps: null,
   sinks: null,
   sessions: null,
@@ -236,7 +247,8 @@ export function Overview() {
 
   const readAll = React.useCallback(async () => {
     const changeQuery = (type: string) => listAudit(query({ order: "desc", limit: CHANGE_SCAN, q: typeNeedle(type) }));
-    const [ovR, cfgR, apR, chainR, sinkR, sessR, appsR, adminR, identityR, policyR, draftsR] = await Promise.allSettled([
+    const full = adminAreas() === null;
+    const [ovR, cfgR, apR, chainR, sinkR, sessR, appsR, adminR, identityR, policyR, draftsR, keysR, blueprintsR] = await Promise.allSettled([
       overview(),
       getConfig(),
       listApprovals("pending"),
@@ -248,6 +260,8 @@ export function Overview() {
       changeQuery(CHANGE_TYPES[1]),
       changeQuery(CHANGE_TYPES[2]),
       listDrafts("state=open&limit=200"),
+      full ? listSigningKeys() : Promise.resolve(null),
+      full ? entraBlueprints() : Promise.resolve(null),
     ]);
 
     const ov = fold(ovR, SUBJECT_OVERVIEW);
@@ -259,6 +273,7 @@ export function Overview() {
     const apps = fold(appsR, SUBJECT_SERVERS);
     const changes = foldChanges([adminR, identityR, policyR]);
     const drafts = fold(draftsR, SUBJECT_DRAFTS);
+    const keys = fold(keysR, SUBJECT_KEYS);
 
     const problems: Problem[] = [
       { subject: SUBJECT_OVERVIEW, detail: ov.problem },
@@ -270,6 +285,7 @@ export function Overview() {
       { subject: SUBJECT_SERVERS, detail: apps.problem },
       { subject: SUBJECT_CHANGES, detail: changes.problem },
       { subject: SUBJECT_DRAFTS, detail: drafts.problem },
+      { subject: SUBJECT_KEYS, detail: keys.problem },
     ].filter((p) => p.detail);
 
     setState((prev) => ({
@@ -279,6 +295,8 @@ export function Overview() {
       approvals: approvals.value ? approvals.value.approvals || [] : approvals.denied ? null : prev.approvals,
       approvalsDenied: approvals.denied,
       drafts: drafts.value ? waitingOf(drafts.value) : drafts.denied ? null : prev.drafts,
+      keys: keys.value ? keys.value.filter((k) => k.purpose === ASSERTION_PURPOSE) : keys.denied ? null : prev.keys,
+      blueprints: blueprintsR.status === "fulfilled" ? blueprintsR.value : null,
       apps: keep(prev.apps, apps),
       sinks: keep(prev.sinks, sinks),
       sessions: sessions.value ? sessions.value.items || [] : sessions.denied ? null : prev.sessions,
@@ -407,7 +425,7 @@ export function Overview() {
   const fresh = live.rows && live.base !== null ? live.rows.filter((r) => r.seq > (live.base as number)).length : 0;
   const stale = (subject: string) => state.problems.some((p) => p.subject === subject) && state.readTimes[subject]
     ? relTimeText(state.readTimes[subject].toISOString()) : undefined;
-  const attentionProps = { chain: state.chain, apps: state.apps, approvals: state.approvals, drafts: state.drafts, push: answer?.push, sinks: state.sinks, relaxed: [] };
+  const attentionProps = { chain: state.chain, apps: state.apps, approvals: state.approvals, drafts: state.drafts, keys: state.keys, entra: usesEntra(state.blueprints), push: answer?.push, sinks: state.sinks, relaxed: [] };
   const hasAttention = attentionItems(attentionProps).length > 0;
   const attention = <Attention {...attentionProps} compact onDetails={tab === "system" ? undefined : openSystem} incomplete={!rows || rows.some((r) => r.value === VALUE_UNAVAILABLE) || problems.length > 0} />;
 

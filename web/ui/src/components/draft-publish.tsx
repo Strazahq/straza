@@ -1,5 +1,6 @@
 import * as React from "react";
 import { CheckIcon, Loader2Icon } from "lucide-react";
+import { type Field, type OnChecked, SecretFields, SecretRunView, askState, fieldsOf, useSecretRun } from "@/components/draft-secrets";
 import { RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { Button } from "@/components/ui/button";
@@ -7,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import type { ApiError, Draft, DraftPublished, DraftVerdict } from "@/lib/api";
 import { publishDraft, refusalOf } from "@/lib/drafts-api";
-import { AGENT_LOOSEN_CODE, type Acks, type ConfirmBlock, acknowledged, changeCounts, confirmBlocks, firstMissing, gainStory, gainsHidden, publishBody, typedWrongly } from "@/lib/drafts-model";
+import { AGENT_LOOSEN_CODE, type Acks, type ConfirmBlock, acknowledged, changeCounts, confirmBlocks, firstMissing, gainStory, gainsHidden, publishBody, type SecretAsk, secretAsks, typedWrongly } from "@/lib/drafts-model";
 import {
   ACCEPT,
   ACK_MISSING,
@@ -27,6 +28,7 @@ import {
   blockTitle,
   doesOf,
   goLive,
+  notSent,
   publishLead,
   publishTitle,
   publishedToast,
@@ -55,7 +57,10 @@ export type DraftPublishProps = {
   verdict: DraftVerdict;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onPublished: (answer: DraftPublished) => void;
+  // onPublished takes the answer of a publish that landed. stays marks one
+  // after which the dialog stays open to store the values it was given,
+  // so the caller shows the answer and leaves the dialog open.
+  onPublished: (answer: DraftPublished, stays?: boolean) => void;
   // onVerdict takes the verdict a 409 carries, so the page shows a line
   // that appeared since the check before the next try.
   onVerdict?: (verdict: DraftVerdict) => void;
@@ -71,6 +76,12 @@ export type DraftPublishProps = {
   // quiet leaves the toast after a publish to the caller, whose toast
   // carries Undo.
   quiet?: boolean;
+  // onChecked turns on the Secrets section, which asks for each value a
+  // new server needs and nothing stores yet, and stores and checks them
+  // once the publish lands. It takes each server after its check. Only the
+  // review page passes it: the Add MCP server wizard asks for its secret
+  // in a step of its own.
+  onChecked?: OnChecked;
 };
 
 const NO_ACKS: Acks = { ticked: {}, typed: {} };
@@ -180,7 +191,9 @@ function Block({ b, acks, agent, onTick, onType }: { b: ConfirmBlock; acks: Acks
   );
 }
 
-function Body({ draft, verdict, onOpenChange, onPublished, onVerdict, onRefused, title, warnings, quiet }: Omit<DraftPublishProps, "open">) {
+const NO_CHECKS: OnChecked = () => undefined;
+
+function Body({ draft, verdict, onOpenChange, onPublished, onVerdict, onRefused, title, warnings, quiet, onChecked }: Omit<DraftPublishProps, "open">) {
   const [acks, setAcks] = React.useState<Acks>(NO_ACKS);
   // A new verdict, such as the one a 409 carries, can add a line to a
   // block the person already confirmed, so every block starts again.
@@ -191,6 +204,12 @@ function Body({ draft, verdict, onOpenChange, onPublished, onVerdict, onRefused,
   }
   const [busy, setBusy] = React.useState(false);
   const [refusal, setRefusal] = React.useState<string | null>(null);
+  // values holds each value typed until the click, later the fields ticked
+  // for later, and dropped counts the values a refused publish dropped.
+  const [values, setValues] = React.useState<Record<string, string>>({});
+  const [later, setLater] = React.useState<Record<string, boolean>>({});
+  const [dropped, setDropped] = React.useState(0);
+  const run = useSecretRun(onChecked || NO_CHECKS);
   const hint = React.useId();
   const blocks = confirmBlocks(verdict.risks || []);
   const missing = firstMissing(blocks, acks);
@@ -200,18 +219,46 @@ function Body({ draft, verdict, onOpenChange, onPublished, onVerdict, onRefused,
   // the server hid rows from.
   const nobody = story.nobodyHolds.length && !story.gain.length && !gainsHidden(verdict) ? " " + NOBODY_UNTIL : "";
   const lead = (blocks.length ? publishLead(blocks.flatMap((b) => b.lines)) : goLive(changeCounts(draft.items))) + nobody;
+  const asks = onChecked ? secretAsks(draft, verdict) : [];
+  const fields = fieldsOf(asks);
+  const ask = askState(fields, values, later);
+  const lines = [missing && !blocked ? ACK_MISSING : "", ask.need].filter(Boolean);
 
+  // publish sends the confirmations. With values to store, the dialog shows
+  // the run's rows at once and takes each value out of its state, so a
+  // value lives in the run alone and goes out only once the publish landed.
   const publish = async () => {
-    if (busy || missing) return;
+    if (busy || missing || ask.need) return;
+    const take = (a: SecretAsk, kind: Field["kind"]) => {
+      const f = fields.find((x) => x.ask === a && x.kind === kind);
+      return f && !later[f.key] ? values[f.key] : null;
+    };
+    const sends = asks.map((a) => ({ ask: a, secret: take(a, "secret"), listing: take(a, "listing") }));
+    const count = sends.reduce((n, x) => n + (x.secret !== null ? 1 : 0) + (x.listing !== null ? 1 : 0), 0);
+    const stays = count > 0;
+    setValues({});
     setBusy(true);
     setRefusal(null);
+    setDropped(0);
+    if (stays) run.begin(sends.map((x) => ({ ask: x.ask, secret: x.secret !== null, listing: x.listing !== null })), ask.label);
     try {
       const answer = await publishDraft(draft.id, publishBody(draft.revision, verdict, acks));
-      if (!quiet) notify.ok(publishedToast(draft.id));
-      onPublished(answer);
+      // A dialog that stays says the draft is live in its own title once the
+      // run ends, so only a dialog that closes leaves it to a toast.
+      if (!quiet && !stays) notify.ok(publishedToast(draft.id));
+      if (stays) {
+        onPublished(answer, true);
+        void run.start(sends);
+      } else {
+        onPublished(answer);
+      }
     } catch (e) {
       const err = e as ApiError;
+      run.reset();
       if (err.status === 401) return;
+      // A publish nobody answered may have landed, so the line that says
+      // nothing was published stays for a refusal the server answered.
+      if (!err.unreachable) setDropped(count);
       const body = refusalOf(err);
       if (body && body.verdict && onVerdict) onVerdict(body.verdict);
       setRefusal(answered(err));
@@ -222,6 +269,7 @@ function Body({ draft, verdict, onOpenChange, onPublished, onVerdict, onRefused,
   };
 
   const agent = proposerAgent(draft);
+  if (run.runs) return <SecretRunView id={draft.id} run={run} onClose={() => onOpenChange(false)} />;
   return (
     <>
       <DialogHeader>
@@ -251,17 +299,35 @@ function Body({ draft, verdict, onOpenChange, onPublished, onVerdict, onRefused,
         </div>
       )}
 
+      {fields.length > 0 && (
+        <SecretFields
+          asks={asks}
+          agent={agent}
+          values={values}
+          later={later}
+          onValue={(key, value) => setValues((v) => ({ ...v, [key]: value }))}
+          onLater={(key, on) => {
+            setLater((l) => ({ ...l, [key]: on }));
+            if (on) setValues((v) => ({ ...v, [key]: "" }));
+          }}
+        />
+      )}
+
       <p className="flex items-start gap-2 border-t border-border pt-3 text-sm leading-relaxed text-text-2" data-sign>
         <span>{signLine(sponsoredAgent(draft), blocks.some((b) => loosens(b) && !b.blocked), blocks.length > 0)}</span>
         <HelpTip label={SIGN_LABEL} text={SIGN_HELP} className="mt-0.5" />
       </p>
 
-      {refusal && <RefusedError subject={PUBLISH} heading={NOT_PUBLISHED} message={refusal} />}
-      {missing && !blocked && <p id={hint} className="m-0 text-sm text-muted-foreground" data-ack-missing>{ACK_MISSING}</p>}
+      {refusal && <RefusedError subject={PUBLISH} heading={NOT_PUBLISHED} message={refusal}>{dropped ? notSent(dropped) : null}</RefusedError>}
+      {lines.length > 0 && (
+        <div id={hint} className="flex flex-col gap-0.5 text-sm text-muted-foreground" data-ack-missing>
+          {lines.map((l) => <span key={l}>{l}</span>)}
+        </div>
+      )}
 
       <DialogFooter>
         <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy} className={FOCUS_RING} data-cancel>{CANCEL}</Button>
-        <Button onClick={() => void publish()} disabled={busy || !!missing} aria-describedby={missing && !blocked ? hint : undefined} data-publish>{busy && <Loader2Icon className="animate-spin" />}{PUBLISH}</Button>
+        <Button onClick={() => void publish()} disabled={busy || !!missing || !!ask.need} aria-describedby={lines.length ? hint : undefined} data-publish>{busy && <Loader2Icon className="animate-spin" />}{ask.label}</Button>
       </DialogFooter>
     </>
   );

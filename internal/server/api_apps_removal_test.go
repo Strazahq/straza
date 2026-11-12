@@ -194,7 +194,7 @@ func TestDryRunAnswersLikeTheInstall(t *testing.T) {
 			`credential.oauth.provider "github" is not configured on this server. Add oauth.providers.github to the strazad config, or pick one of: keycloak.`},
 		{"client credentials without the block", ccManifest(up.URL),
 			http.StatusUnprocessableEntity, http.StatusUnprocessableEntity,
-			"server echoapp sets credential.agents to client_credentials, and the provider keycloak has no clientCredentials settings. Add oauth.providers.keycloak.clientCredentials.assertionAudience to strazad's config, or set credential.agents to own, sponsor or shared."},
+			"server echoapp sets credential.agents to client_credentials, and the provider keycloak has no clientCredentials settings. Add oauth.providers.keycloak.clientCredentials to strazad's config, with assertionAudience for Keycloak or Okta, or with entraBlueprint for an Entra agent blueprint. Otherwise set credential.agents to own, sponsor or shared."},
 		{"a name a file names, with a known provider", owned, http.StatusOK, http.StatusCreated, ""},
 	}
 	for _, tc := range cases {

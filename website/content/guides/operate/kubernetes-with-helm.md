@@ -15,8 +15,8 @@ tested:
   except: the Secrets, install, port-forward, upgrade and rollback, for want of a cluster
   date: 2026-10-06
 applies_to: enterprise
-who: You, as the operator of the cluster
-where: A terminal with helm and kubectl against your cluster
+who: Operator of the cluster
+where: Terminal with helm and kubectl against your cluster
 steps: true
 keywords: kubernetes helm chart values pvc emptydir
 ---
@@ -101,7 +101,7 @@ The Deployment is where the runtime footprint is decided. Trimmed to the lines t
         runAsUser: 65532
       containers:
         - name: strazad
-          image: ghcr.io/strazahq/straza:2.1.0
+          image: ghcr.io/strazahq/straza:2.2.0
           args: ["serve", "--profile", "enterprise", "--listen", "0.0.0.0:8420"]
           env:
             - name: STRAZA_PUBLIC_URL
@@ -218,7 +218,7 @@ Two replicas, the default, can start together on a new database. The store keeps
 `helm upgrade` with a newer chart or `image.tag` rolls the Deployment, and each new pod migrates the store at start, as [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md" >}}) describes. The chart keeps the default rolling update, so for a moment an old pod and a new pod serve side by side.
 
 
-A rollback moves the schema down with the newer image before the older one starts, because an older strazad refuses a database that a newer one migrated. Set the shell variable `TARGET` to the newest migration of the release you return to. This release carries migrations 37 to 41, and [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md#roll-back" >}}) lists what each step down gives up. A release older than migration 37 comes back only through a restore of the database.
+A rollback moves the schema down with the newer image before the older one starts, because an older strazad refuses a database that a newer one migrated. Set the shell variable `TARGET` to the newest migration of the release you return to. This release carries migrations 37 to 42, and [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md#roll-back" >}}) lists what each step down gives up. A release older than migration 37 comes back only through a restore of the database.
 
 Take three steps:
 

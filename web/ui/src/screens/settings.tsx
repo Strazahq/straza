@@ -1,20 +1,23 @@
 import * as React from "react";
-import { PencilIcon, PlusIcon } from "lucide-react";
+import { KeyRoundIcon, PencilIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHead } from "@/components/page-head";
 import { ConfigTab } from "@/components/settings-config";
+import { KeysTab } from "@/components/settings-keys";
 import { RegistryTab } from "@/components/settings-registry";
 import { TokensTab } from "@/components/settings-tokens";
 import { listApiTokens, listAttestationHashes } from "@/lib/api";
 import { DRAFT_TITLE } from "@/lib/config-words";
+import { ASSERTION_PURPOSE, type SigningKeyRow, listSigningKeys } from "@/lib/keys-api";
+import { CREATE_KEY, ROTATE_KEY, hiddenKeysTabLine } from "@/lib/keys-words";
 import { navigate } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
 import { adminAreas } from "@/lib/session";
 import { NEW_TOKEN, type SettingsTab, TABS, hiddenTabsLine, hiddenTokensTabLine, rendersOf } from "@/lib/settings-words";
 
-// Settings is the configuration read-out, the attestation registry and the
-// API tokens: one tab
+// Settings is the configuration read-out, the attestation registry, the
+// API tokens and the signing keys: one tab
 // each with the tab in the address, the tab's own action in the page head,
 // and the tabs a delegated seat cannot read left out with one line saying
 // which grant they need.
@@ -31,16 +34,22 @@ export function Settings({ tab }: Props) {
   const areas = adminAreas();
   const canConfig = !areas || !!areas.config;
   const canTokens = !areas || !!areas.tokens;
-  const tabs = TABS.filter((t) => (t.area === "config" ? canConfig : canTokens));
+  const canKeys = !areas;
+  const tabs = TABS.filter((t) => (t.area === "config" ? canConfig : t.area === "tokens" ? canTokens : canKeys));
   const hidden = TABS.filter((t) => !tabs.includes(t));
   const current: SettingsTab = tabs.some((t) => t.key === tab) ? (tab as SettingsTab) : tabs[0].key;
 
   const [counts, setCounts] = React.useState<Counts>({ registry: null, tokens: null });
+  // keys is the client assertion key list, from the page's read and from
+  // each read the tab makes, so the count and the head's action follow a
+  // rotation. null is a list this seat may not read or a read that failed.
+  const [keys, setKeys] = React.useState<SigningKeyRow[] | null>(null);
   // Each action button moves its tab's counter; the tab opens its sheet
   // when the counter moves, so the head owns the action and the tab owns
   // the panel it opens.
   const [mintRequest, setMintRequest] = React.useState(0);
   const [draftRequest, setDraftRequest] = React.useState(0);
+  const [rotateRequest, setRotateRequest] = React.useState(0);
 
   // The counts ride their own reads and never fail the page: a count that
   // could not be read is left off the label, and the tab's own body says
@@ -59,20 +68,35 @@ export function Settings({ tab }: Props) {
         () => undefined,
       );
     }
+    if (canKeys) {
+      listSigningKeys().then(
+        (rows) => { if (alive) setKeys((rows || []).filter((k) => k.purpose === ASSERTION_PURPOSE)); },
+        () => undefined,
+      );
+    }
     return () => { alive = false; };
-  }, [canConfig, canTokens]);
+  }, [canConfig, canTokens, canKeys]);
 
-  const hiddenLine = hidden.length === 0 ? ""
-    : hidden[0].area === "config" ? hiddenTabsLine(hidden.map((t) => t.label))
-      : hiddenTokensTabLine(hidden[0].label);
+  const hiddenConfig = hidden.filter((t) => t.area === "config").map((t) => t.label);
+  const hiddenLine = [
+    hiddenConfig.length ? hiddenTabsLine(hiddenConfig) : "",
+    ...hidden.filter((t) => t.area === "tokens").map((t) => hiddenTokensTabLine(t.label)),
+    ...hidden.filter((t) => t.area === "full").map((t) => hiddenKeysTabLine(t.label)),
+  ].filter(Boolean).join(" ");
 
+  // While a rotation runs, its panel carries the next step, so the head
+  // offers no second rotation.
+  const rotating = !!keys && keys.some((k) => k.status === "staged" || k.status === "retiring");
+  const keysAction = !keys || rotating ? undefined
+    : <Button onClick={() => setRotateRequest((n) => n + 1)}><KeyRoundIcon /> {keys.some((k) => k.status === "active") ? ROTATE_KEY : CREATE_KEY}</Button>;
   const actions = current === "tokens"
     ? <Button onClick={() => setMintRequest((n) => n + 1)}><PlusIcon /> {NEW_TOKEN}</Button>
     : current === "configuration"
       ? <Button variant="outline" onClick={() => setDraftRequest((n) => n + 1)}><PencilIcon /> {DRAFT_TITLE}</Button>
-      : undefined;
+      : current === "keys" ? keysAction : undefined;
 
-  const countOf = (key: SettingsTab) => (key === "registry" ? counts.registry : key === "tokens" ? counts.tokens : null);
+  const liveKeys = keys ? keys.filter((k) => k.status !== "retired").length : null;
+  const countOf = (key: SettingsTab) => (key === "registry" ? counts.registry : key === "tokens" ? counts.tokens : key === "keys" ? liveKeys : null);
 
   return (
     <>
@@ -100,6 +124,9 @@ export function Settings({ tab }: Props) {
           )}
           {tabs.some((t) => t.key === "tokens") && (
             <TabsContent value="tokens"><TokensTab mintRequest={mintRequest} /></TabsContent>
+          )}
+          {tabs.some((t) => t.key === "keys") && (
+            <TabsContent value="keys"><KeysTab rotateRequest={rotateRequest} onRows={setKeys} /></TabsContent>
           )}
         </Tabs>
       </div>

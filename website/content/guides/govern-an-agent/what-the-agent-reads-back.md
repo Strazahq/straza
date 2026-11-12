@@ -72,7 +72,7 @@ Straza: blocked by policy rule dev-rules/no-force-push
 A rule's own `reason` is passed on word for word, so the clearest denies come from rules that say what to do instead. Each case below names the reason the agent reads.
 
 Deny rule with a `reason`
-: The rule's reason. The standalone starter policy's reads `Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.`
+: The rule's reason. The standalone starter policy's reads `Straza starter policy: this sample rule denies commands that start with rm -rf. Delete files individually, or an admin can edit the standalone-starter PolicySet.`
 
 Deny rule without a `reason`
 : `Straza: blocked by policy rule <set>/<rule>`
@@ -345,7 +345,7 @@ The gateway also serves `straza__draft_submit` and `straza__draft_status`, to a 
 ## What this session may do
 
 
-Every session can call `straza__whoami`. It takes no input and answers for the calling session only: who it acts as, whether that is a person, an AI agent or a service account, who sponsors an agent, the harness, the roles, whether the conversation is recorded, and the knowledge packs bound to the session's roles. Then it lists every tool on the session's tool list, server by server. For each tool it says whether the call runs without approval or a person approves each call first, and on a server that limits roles to some objects, which objects the tool may touch. A session of alice's agent reads an answer like this:
+Every session can call `straza__whoami`. It takes no input and answers for the calling session only: who it acts as, whether that is a person, an AI agent or a service account, who sponsors an agent, the harness, the roles, the Entra agent identity of an agent that holds one, which is the identity a server that trusts Entra sees on the agent's calls, whether the conversation is recorded, and the knowledge packs bound to the session's roles. Then it lists every tool on the session's tool list, server by server. For each tool it says whether the call runs without approval or a person approves each call first, and on a server that limits roles to some objects, which objects the tool may touch. A session of alice's agent reads an answer like this:
 
 ```text
 This session acts as "build-agent", an AI agent sponsored by "alice", through claude-code/2.1.0.

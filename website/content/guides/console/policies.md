@@ -16,8 +16,8 @@ tested:
   date: 2026-10-06
   except: saving from the New policy wizard, which was opened and not saved
 applies_to: both
-who: You, as an admin
-where: The console in a browser
+who: Admin
+where: Console
 steps: true
 keywords: console policies policy page rules yaml decisions new policy wizard test a call save draft publish turn off recording
 ---
@@ -43,6 +43,11 @@ The list opens on the **Sets** view. Policies that hold for every session sit un
 
 **By role** shows one row per application role, plus **Everyone**, the floor under every role. Each row counts the role's own live denials, approval gates and allows, and says whether its sessions are recorded. An empty **Denied** or **Needs approval** cell opens **New policy** with that role already picked.
 
+
+{{< clicks "Policies" "Denied by default" >}}
+
+**Denied by default** lists the tools that were denied in the last 24 hours because no rule covers them: the tools of MCP servers on people's own machines, and the harness tools Straza does not classify. Each row says how often, in which harness and when last, and **Write a rule** opens **New policy** with **Which calls** answered.
+
 ## Open a policy
 
 
@@ -52,7 +57,7 @@ The head shows the status, the description and a count such as `1 rule: 1 denied
 
 {{< shot name="starter-rules" caption="The starter policy of a standalone server on its **Rules** tab: the shell patterns it denies, the reason the agent reads, and the rule id." >}}
 
-The **Rules** tab lists each rule with its call type, the calls it matches, what happens, the reason the agent reads and the rule id. A rule that only an automated check decides, such as a classify rule, reads `An automated check, kept as written. Change it on the YAML tab.` The **YAML** tab holds the whole policy as stored, comments included, with **Validate** and **Copy**. The **Decisions** tab lists the calls this policy decided, newest first, from the audit chain, and a row opens the same record sheet that [Audit]({{< relref "guides/console/overview-and-audit.md#read-one-record" >}}) opens.
+The **Rules** tab lists each rule with its call type, the calls it matches, what happens, the reason the agent reads and the rule id. **Add rule** offers the same five kinds of call as the wizard. A rule that only an automated check decides, such as a classify rule, reads `An automated check, kept as written. Change it on the YAML tab.` The **YAML** tab holds the whole policy as stored, comments included, with **Validate** and **Copy**. The **Decisions** tab lists the calls this policy decided, newest first, from the audit chain, and a row opens the same record sheet that [Audit]({{< relref "guides/console/overview-and-audit.md#read-one-record" >}}) opens.
 
 ## Build a policy with the wizard
 
@@ -61,13 +66,26 @@ The **Rules** tab lists each rule with its call type, the calls it matches, what
 
 {{< shot name="policy-new-outcome" caption="The first step, **What should happen**, with **Needs approval** picked and **Write YAML instead** under the cards." >}}
 
-The wizard asks one question per step: **What should happen**, **Who**, **Which calls**, **How** and **Review**. Nothing is stored until you save a draft or publish.
+The wizard asks one question per step: **What should happen**, **Applies to**, **Which calls**, **Who decides** and **Review**. Nothing is stored until you save a draft or publish.
 
-1. What should happen: **Needs approval**, **Denied** or **Allowed**. Allowed is for a local tool the profile denies by default, such as a shell command under the enterprise profile, because an MCP tool runs by role access and needs no allow.
-2. Who: **Everyone** or **A role**. Only application roles are offered, because a business role governs one assignment path only.
-3. Which calls: pick the call type, then the tools of a server, the **Command patterns** or the **Paths**. A pattern is a shell-style glob over the whole command line, such as `kubectl apply *`.
-4. How, for an approval: **Who decides** is **The person behind the agent** or **An approver role**, and the wait is **A hold, up to** a time for a call the agent waits on, or **A ticket a person grants within** a time for planned work. For a denial, write the **Reason the agent reads**.
+1. What should happen: **Needs approval**, **Denied** or **Allowed**. Allowed is for a tool the deployment denies by default, such as a shell command under the enterprise profile or an MCP server on a person's own machine. A registered server's tools run by role access and need no allow.
+2. Applies to: **Everyone** or **A role**. Only application roles are offered, because a business role governs one assignment path only. A full administrator also gets **A new role**, made in the same draft as the policy.
+3. Which calls: pick **MCP tool**, **Shell command**, **File path**, **Network** or **Harness tool**, then the tools, the **Command patterns** or the **Paths**. A pattern is a shell-style glob over the whole command line, such as `kubectl apply *`.
+4. Who decides, for an approval: **Who decides** is **The person behind the agent** or **An approver role**, and the wait is **A hold, up to** a time for a call the agent waits on, or **A ticket a person grants within** a time for planned work. For a denial, the step is **Reason**: write the **Reason the agent reads**. An allowed policy has no such step and stores no reason.
 5. Review: the name, the facts in words and the policy text as the server stores it, then **Save draft** or **Save and publish**.
+
+{{< details summary="Tools on people's own machines" >}}
+
+An MCP server that a person adds to their own harness is not registered in Straza. Every profile denies its tools until a rule allows them. Under **MCP tool**, the **Server** list has two groups, **Registered in Straza** and **On people's own machines**. The second group lists the servers whose calls were denied in the last 24 hours, and **A server not seen yet** asks for the server's name. For such a server, the list holds the tools that were asked for and denied, and **Add tool** adds any other by its name. That name may be a pattern, such as `read_*`. Under **Harness tool**, the list holds the denied harness tools, and a name you add must be exact, such as `LSP`.
+
+**A new role** makes an application role that belongs to no server. Its policy is named after the role with `-access`. A business role can compose it, and your identity manager assigns it like any other role.
+
+**Add rule** on a policy's page offers the same two server groups and suggests the denied tools as chips under **Asked for and denied**. The rules table and the rule's sheet show the names in a rule on harness tools, and the sheet changes them. A rule for a server on people's machines carries the chip `on people's machines`.
+
+In the **Denied by default** view, **Open in Audit** opens a row's newest record. The view shows no caller and no arguments, and a row leaves once a newer call to the tool was decided by a rule. In Audit, the record of such a denied call has **Write a rule for this call**, which opens the wizard the same way.
+
+A rule that allows the tools of a server Straza has not registered is a risk the publisher ticks, and so is a gate that names such a server. With `admin.secondPerson` on, another administrator publishes such a draft. A rule that names a server that is not registered also gets the warning `Rule <id> of <set> names <server>, which is not a registered server, so it matches only an MCP server that a person's own harness runs under that name.`, with the fix `If you meant a registered server, fix the name.`
+{{< /details >}}
 
 **Write YAML instead** opens the whole policy as text, for a rule the wizard does not write, such as a classify rule. What you write there is saved as a draft, which you then publish under Drafts. [Hold a call for a person]({{< relref "guides/write-policy/hold-for-a-human.md" >}}) and [Tickets]({{< relref "guides/write-policy/tickets.md" >}}) build a full approval rule with the wizard, and [Your first deny]({{< relref "guides/write-policy/first-deny.md" >}}) writes a deny.
 

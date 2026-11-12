@@ -445,7 +445,7 @@ func TestAddedGateRisks(t *testing.T) {
 			say("ask-shell", "file.write and shell.exec", "the requester confirms it")},
 		{"a classifier", true, gateRule("scan", policy.ModeClassify, "shell.exec", "tool.pre"), false, say("scan", "shell.exec", "a classifier allows it")},
 		{"a server check", true, gateRule("check", policy.ModeServerCheck, "net.fetch", "tool.pre"), false, say("check", "net.fetch", "the server allows it")},
-		{"a classifier of every tool", true, gateRule("scan-all", policy.ModeClassify, "shell.exec, file.read, file.write, file.edit, net.fetch, task.spawn, other, mcp.call", "tool.pre"), false,
+		{"a classifier of every tool", true, gateRule("scan-all", policy.ModeClassify, "shell.exec, file.read, file.write, file.edit, net.fetch, task.spawn, other", "tool.pre"), false,
 			say("scan-all", "every local tool kind", "a classifier allows it")},
 		{"an agent's gate in a set that does not bind it", true, gateRule("hold-shell", policy.ModeApprove, "shell.exec", "tool.pre"), true, say("hold-shell", "shell.exec", "a person approves it")},
 	}

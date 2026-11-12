@@ -2,7 +2,7 @@
 title: strazactl status
 description: Report the resolved target server, then strazad health and version
 pagetype: reference
-weight: 97
+weight: 99
 draft: false
 sources:
   - cmd/strazactl

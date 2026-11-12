@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -46,7 +45,11 @@ func (a *App) handleAssignmentsList(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleAssignmentsCreate(w http.ResponseWriter, r *http.Request) {
 	var req assignmentPayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+	err := decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil ||
 		req.SubjectID == "" || req.RoleID == "" || req.SubjectKind != store.SubjectUser {
 		apiError(w, http.StatusBadRequest, "subject_kind (user), subject_id and role_id are required (group subjects retired with the unified role model)")
 		return

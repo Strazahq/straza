@@ -153,9 +153,13 @@ func (c *callback) link(challenge string) string {
 	q.Set("code_challenge", challenge)
 	q.Set("code_challenge_method", "S256")
 	// A fresh sign-in every time, so a live session cookie at the provider
-	// cannot answer for the person.
+	// cannot answer for the person. max_age also obliges the provider to put
+	// auth_time in the ID token (OpenID Connect Core section 3.1.2.1), which
+	// strazad holds to 10 minutes. It is that window, 600 seconds, and not 0,
+	// because Microsoft Entra answers max_age=0 with an ID token that has
+	// already expired.
 	q.Set("prompt", "login")
-	q.Set("max_age", "0")
+	q.Set("max_age", "600")
 	u.RawQuery = q.Encode()
 	return u.String()
 }

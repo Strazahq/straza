@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -190,7 +189,11 @@ func (a *App) handleAppListingCredentialSet(w http.ResponseWriter, r *http.Reque
 	var req struct {
 		Value string `json:"value"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Value == "" {
+	err = decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil || req.Value == "" {
 		apiError(w, http.StatusBadRequest, "value is required")
 		return
 	}

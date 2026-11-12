@@ -415,7 +415,7 @@ func (a *App) buildSecrets(ctx context.Context, cfg config.Config, log *slog.Log
 	}
 	// The client assertion key is sealed under the same KEK as the stored
 	// credentials, so a replica with another KEK refuses to boot here.
-	if a.assertionKeys, err = authn.NewClientAssertionKeys(ctx, st.SigningKeys(), provider, time.Now()); err != nil {
+	if a.assertionKeys.ClientAssertionKeys, err = authn.NewClientAssertionKeys(ctx, st.SigningKeys(), provider, time.Now()); err != nil {
 		return err
 	}
 	a.broker = secrets.NewBroker(st, provider)

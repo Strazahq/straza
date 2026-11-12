@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: Straza platform API
-  version: 0.160.0
+  version: 0.166.0
   description: >
     Control-plane API of strazad. This document is the source of
     truth for the /v1 wire surface AND the unauthenticated infra and discovery
@@ -24,6 +24,13 @@ info:
     or /mcp/{server} whose session token verified gets 4 minutes for its
     body, so a client that stalls mid-body no longer holds its connection
     and buffer open.
+    Since 0.165.0 a route under /v1/admin answers 400 to a request body
+    that carries a field the route does not take, and the answer names the
+    field, so a misspelled field is never read as a default. Two routes
+    there read their bodies as before: POST /v1/admin/approvers/enroll-token,
+    which refuses every caller, and POST /v1/admin/apps/import, whose body
+    is another registry's document. The routes outside /v1/admin keep
+    reading a body from a newer client.
 
 tags:
   - name: Health and discovery
@@ -294,6 +301,16 @@ paths:
                 nativeTool:
                   type: string
                   description: The harness's own name of a classified local tool, such as Bash for shell.exec, which a policy rule that names harness tools reads. Since 0.148.0. The canonical event stays harness-neutral, so the name rides here and a nativeTool inside the event is not read.
+                toolInput:
+                  type: object
+                  description: The input of a classified local tool for the audit record, as the client cut it. No rule reads it and no approval binds it.
+                  properties:
+                    text:
+                      type: string
+                      description: The tool input as JSON text, at most 8 KiB.
+                    hash:
+                      type: string
+                      description: "sha256: followed by the hex SHA-256 of the whole text. Present only when text was cut."
               required: [event]
       responses:
         "200":
@@ -544,6 +561,52 @@ paths:
                   error: { type: string }
                   correlation_id: { type: string, description: "The correlation id of the answer, as the server log records it." }
                 required: [error]
+
+  /v1/admin/default-denials:
+    get:
+      operationId: listDefaultDenials
+      tags: ["PolicySets"]
+      summary: List the tools that were denied because no policy rule covers them
+      description: >
+        The tool calls of the overview's decision window, about the last 24
+        hours, that no rule decided: tools of an MCP server a harness runs
+        itself and Straza has not registered, and harness tools Straza does
+        not classify. A tool leaves the list once a newer call to it was
+        decided by a rule, and a server leaves it once it is registered. The read belongs to the policy area and carries no
+        caller and no arguments; lastSeq names the newest record, which the
+        audit area reads. It rides the overview's scan and its 60 second
+        cache.
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: Tools denied by default, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [since, servers, tools]
+                properties:
+                  since: { type: string, format: date-time, description: Start of the window. }
+                  truncated: { type: boolean, description: True when the scan left a tool out because it already tracked 200. }
+                  servers:
+                    type: array
+                    description: MCP servers Straza has not registered.
+                    items:
+                      type: object
+                      required: [server, harnesses, count, lastSeq, lastTime, tools]
+                      properties:
+                        server: { type: string }
+                        harnesses: { type: array, items: { type: string }, description: Sorted harness names that asked. }
+                        count: { type: integer }
+                        lastSeq: { type: integer }
+                        lastTime: { type: string, format: date-time }
+                        tools:
+                          type: array
+                          items: { $ref: "#/components/schemas/DeniedTool" }
+                  tools:
+                    type: array
+                    description: Harness tools Straza does not classify. A tool the harness sent no name for has an empty name.
+                    items: { $ref: "#/components/schemas/DeniedTool" }
 
   /v1/admin/audit:
     get:
@@ -1252,6 +1315,7 @@ paths:
                     name: { type: string }
                     scopes: { type: array, items: { type: string }, description: "Default scopes when a manifest declares none" }
                     redirect_uri: { type: string, description: "The callback to register at the provider" }
+                    entra_blueprint: { type: string, description: "The client id of the Entra agent identity blueprint that agents' tokens at this provider go through, in lower case. Absent when they do not go through Entra. Since 0.163.0." }
   /v1/admin/access/grant-only:
     get:
       operationId: listGrantOnlyAccess
@@ -1669,6 +1733,8 @@ paths:
         writes and its admin API reads.
         0.90.0: the SCIM token kind and its /v1/admin/scim-tokens routes are
         removed, so this is the only long-lived credential.
+        0.165.0: a field the request does not take, such as a misspelled
+        expires_in, answers 400 and mints nothing.
       security: [{ adminBearer: [] }]
       requestBody:
         description: "The token's name and scope, either full or a comma-separated list of area:verb scopes."
@@ -1682,6 +1748,9 @@ paths:
                 scope:
                   type: string
                   description: '"full" or comma-separated area:verb scopes, e.g. "identity:read,changes:read"'
+                expires_in:
+                  type: integer
+                  description: "Seconds until the token expires. Left out or 0, the token never expires."
               required: [name, scope]
       responses:
         "201":
@@ -2889,7 +2958,7 @@ paths:
       parameters:
         - { name: name, in: path, required: true, schema: { type: string } }
       requestBody:
-        description: "The status to set, active or draft; an absent body means active."
+        description: "The status to set, active or draft. An absent body means active, and since 0.165.0 a body that is not valid JSON answers 400, where it used to turn the set on."
         content:
           application/json:
             schema:
@@ -3045,6 +3114,12 @@ paths:
             the same request makes, an AI agent or a service account is
             refused this way, because it signs in with its key.
         "404": { $ref: "#/components/responses/Error" }
+        "409":
+          $ref: "#/components/responses/Error"
+          description: >
+            Another user holds the entra_agent_id in the request. Nothing
+            changed. The answer names the user that holds it and the strazactl
+            command that clears it there. Since 0.162.0.
         "500":
           $ref: "#/components/responses/Error"
           description: >
@@ -3965,8 +4040,9 @@ paths:
       description: >
         Lists the client assertion, session and snapshot keys (0.111.0) so an
         operator can see that a staged key was promoted or an old key
-        retired. The answer carries no key material of either half. The
-        scope area is sessions.
+        retired. Since 0.161.0 a client assertion key that is not retired
+        also names the end of its certificate's validity. The answer
+        carries no key material of either half. The scope area is sessions.
       security: [{ adminBearer: [] }]
       responses:
         "200":
@@ -3983,6 +4059,7 @@ paths:
                     status: { type: string, enum: [staged, active, retiring, retired] }
                     created_at: { type: string, format: date-time }
                     rotated_at: { type: string, format: date-time, description: "When the status last changed. Absent for a key whose status never changed." }
+                    certificate_expires_at: { type: string, format: date-time, description: "Since 0.161.0. The end of validity of the key's certificate, 730 days after the key was created. Present only for a client assertion key that is not retired." }
                   required: [kid, purpose, status, created_at]
 
   /v1/admin/signing-keys/client-assertion/rotate:
@@ -3999,9 +4076,12 @@ paths:
         that a coding harness checked in is refused even for a full
         administrator. The server creates an RSA 3072 key with status staged,
         seals its private half under the secrets KEK and publishes the public
-        half in the client assertion key document at once. Two reload
-        intervals later the janitor promotes it, and the previous key stays
-        published until every assertion it signed has expired. The database
+        half in the client assertion key document at once. Since 0.161.0 the
+        key signs nothing until an administrator promotes it with the
+        promote route, which accepts it two reload intervals after staging,
+        once every replica publishes it. Before 0.161.0 the janitor promoted
+        it at that moment by itself. The previous key stays published until
+        every assertion it signed has expired. The database
         holds at most one staged and one active key, so concurrent calls on
         several replicas stage one key, and a call while a staged key exists
         answers with that key. The call that created the key writes one
@@ -4019,8 +4099,8 @@ paths:
                   kid: { type: string }
                   status: { type: string, enum: [staged] }
                   previous_kid: { type: string, description: "The key that signs today. Absent when none does." }
-                  active_in_seconds: { type: integer, description: "Seconds until the janitor promotes the key, two reload intervals." }
-                  previous_key_verifies_for_seconds: { type: integer, description: "Seconds from now until the previous key leaves the key document." }
+                  active_in_seconds: { type: integer, description: "Seconds until the promote route accepts the key, two reload intervals. Before 0.161.0 the janitor promoted the key at that moment." }
+                  previous_key_verifies_for_seconds: { type: integer, description: "Seconds from now until the previous key leaves the key document if the key is promoted as soon as the promote route accepts it." }
                   jwks_uri: { type: string, description: "The key document, to register as the JWKS URL of each agent's client." }
                 required: [kid, status, active_in_seconds, previous_key_verifies_for_seconds, jwks_uri]
         "403": { $ref: "#/components/responses/Error" }
@@ -4035,9 +4115,11 @@ paths:
         same full administrator gate as the rotate route. The key leaves this
         replica's key document at once and every other replica's at its next
         reload. Retiring the key that signs leaves nothing to sign with until
-        a new key is staged and promoted, so every agent that uses client
-        credentials is refused for about a minute after the next rotate call.
-        The identity provider may hold the retired key in its own cache. The
+        a new key is staged and an administrator promotes it, so every agent
+        that uses client credentials is refused until then. The identity
+        provider may hold the retired key in its own cache, and an Entra
+        agent blueprint accepts the key until its certificate is removed
+        there. The
         call that retired the key writes one straza.audit.admin record with
         action signing-keys.retire, purpose, kid and was. A key that is
         retired already answers 200 with was retired and writes no record. A
@@ -4057,11 +4139,86 @@ paths:
                   status: { type: string, enum: [retired] }
                   was: { type: string, enum: [staged, active, retiring, retired] }
                   leaves_document_in_seconds: { type: integer, description: "Seconds until every replica has dropped the key, one reload interval." }
-                  next_key_active_in_seconds: { type: integer, description: "Seconds a key staged now would need before it signs." }
+                  next_key_active_in_seconds: { type: integer, description: "Seconds after staging before the promote route accepts a new key." }
                 required: [kid, status, was, leaves_document_in_seconds, next_key_active_in_seconds]
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/signing-keys/client-assertion/{kid}/promote:
+    post:
+      operationId: promoteClientAssertionKey
+      tags: ["Sessions and transcripts"]
+      summary: Make a staged client assertion key the signing key
+      description: >
+        Since 0.161.0 a client assertion key becomes the signing key only
+        through this route, behind the same full administrator gate as the
+        rotate route, so an administrator can first upload the key's
+        certificate to an Entra agent blueprint. The staged key becomes
+        active and the key that signed before becomes retiring. This
+        replica signs with the new key at once and every other replica
+        within one reload interval, and the previous key leaves the key
+        document once every assertion it signed has expired. A key staged
+        less than two reload intervals ago answers 409 with the seconds to
+        wait, because every replica must publish it first. The call that
+        promoted the key writes one straza.audit.admin record with action
+        signing-keys.promote, purpose, kid and the administrator's actor
+        fields. A key that signs already answers 200 with was active and
+        writes no record. A retiring or retired key and a key of another
+        purpose answer 409.
+      security: [{ adminBearer: [] }]
+      parameters:
+        - { name: kid, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The promoted key and the state it was in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kid: { type: string }
+                  status: { type: string, enum: [active] }
+                  was: { type: string, enum: [staged, active] }
+                  every_replica_signs_in_seconds: { type: integer, description: "Seconds until every replica signs with the key, one reload interval." }
+                  previous_kid: { type: string, description: "The key that signed before and now retires. Absent when none did or nothing changed." }
+                  previous_key_leaves_document_in_seconds: { type: integer, description: "Seconds until every replica has dropped the previous key from the key document. Present with previous_kid." }
+                required: [kid, status, was, every_replica_signs_in_seconds]
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/signing-keys/client-assertion/{kid}/certificate:
+    get:
+      operationId: getClientAssertionKeyCertificate
+      tags: ["Sessions and transcripts"]
+      summary: The certificate of one client assertion key
+      description: >
+        Since 0.161.0. The self-signed X.509 certificate of a staged, active
+        or retiring client assertion key, which an administrator uploads to
+        an Entra agent blueprint so that Entra accepts the key's certificate
+        assertions. Its subject names the kid, it is valid from the key's
+        creation for 730 days, its serial comes from the kid, and it is
+        signed with SHA-256 and RSA PKCS#1 v1.5. Every replica builds the
+        same bytes, so every replica serves one thumbprint, and nothing is
+        stored. The certificate holds the public key only. The route sits
+        behind the same full administrator gate as the rotate route. A
+        retired key and a key of another purpose answer 409, and a replica
+        that has not read its key store for longer than three reload
+        intervals answers 503.
+      security: [{ adminBearer: [] }]
+      parameters:
+        - { name: kid, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: One PEM CERTIFICATE block
+          content:
+            application/x-pem-file:
+              schema: { type: string }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 
   /v1/admin/sessions/{id}/transcript:
     get:
@@ -5235,6 +5392,16 @@ components:
               status: { type: string }
               sets_off: { type: array, items: { type: string } }
   schemas:
+    DeniedTool:
+      type: object
+      description: One tool that was denied by default, and the newest record that says so.
+      required: [name, harnesses, count, lastSeq, lastTime]
+      properties:
+        name: { type: string }
+        harnesses: { type: array, items: { type: string }, description: Sorted harness names that asked. }
+        count: { type: integer }
+        lastSeq: { type: integer }
+        lastTime: { type: string, format: date-time }
     Count:
       type: object
       properties:
@@ -6147,6 +6314,7 @@ components:
         sponsor: { type: string, description: "the accountable person behind an agent identity" }
         swarm_id: { type: string }
         ephemeral: { type: boolean }
+        entra_agent_id: { type: string, description: "The client id of the Entra agent identity an AI agent acts as at Entra, a lower-case GUID. Absent when the user holds none. Only an agent holds one, and no two users hold the same. Since 0.162.0." }
         sponsored_count:
           type: integer
           readOnly: true
@@ -6193,6 +6361,15 @@ components:
         sponsor: { type: string }
         swarm_id: { type: string }
         ephemeral: { type: boolean }
+        entra_agent_id:
+          type: string
+          description: >
+            Sets the client id of the Entra agent identity the agent acts as
+            at Entra, a GUID in any case, stored in lower case. An empty
+            string clears it. A 400 refuses a value that is not a GUID, a user
+            that is not of type agent, and a user_type change of an agent that
+            holds one. A 409 refuses an id another user holds. Each refusal
+            says what to do next. Since 0.162.0.
     Role:
       type: object
       properties:
@@ -6485,10 +6662,12 @@ components:
     EngineDecision:
       type: object
       description: >
-        The policy engine's own decision object, returned verbatim by the
-        simulate what-if. The /v1/decide response is the slimmer Decision
-        above, which carries no setName. Every field but effect is omitted
-        when empty.
+        The policy engine's own decision object, as the simulate what-if
+        returns it. An allow that a classify rule gave comes back with the
+        classifier's verdict applied, as /v1/decide applies it: a refusal is
+        a deny with the classifier's reason that keeps the rule. The
+        /v1/decide response is the slimmer Decision above, which carries no
+        setName. Every field but effect is omitted when empty.
       properties:
         effect: { type: string, enum: [allow, deny] }
         ruleId: { type: string, description: "winning rule; omitted when no rule fired" }
@@ -6496,7 +6675,7 @@ components:
         reason: { type: string }
         obligations: { type: array, items: { type: string }, description: "Always empty; the field stays for older clients." }
         serverCheck: { type: boolean, description: "a local PDP must not act on this alone; the caller asks POST /v1/decide" }
-        classify: { type: boolean, description: "allow pending a classifier verdict (fail-closed)" }
+        classify: { type: boolean, description: "This server never sets it, because it applies the classifier's verdict before it answers. An older server set it on an allow pending that verdict." }
         approve: { type: object, description: "normalized approve spec when a person's decision gates this allow (mode approve or confirm)" }
         confirm: { type: boolean, description: "the requester is the sole decider (mode confirm)" }
         default: { type: boolean, description: "no rule fired; a profile default applied" }
@@ -6804,13 +6983,16 @@ components:
         next_cursor: { type: string, description: "Empty on the last page." }
       required: [items, next_cursor]
     DraftBodyItem:
-      description: One object of a request's items form. The server stamps every item it stores or checks, so the item carries no base.
+      description: One object of a request's items form. The server stamps every item it stores or checks, so it ignores the base, existed and withheld that a client sends back from a read.
       type: object
       properties:
         kind: { type: string, enum: [App, Role, PolicySet] }
         name: { type: string }
         op: { type: string, enum: [put, "off", remove], description: "put writes doc, off stores a PolicySet turned off with doc as its text, and remove deletes." }
         doc: { type: string, description: "The document: the app.yaml of an App, a Role document, the text of a PolicySet. Empty for a removal." }
+        base: { type: string, description: "Accepted and ignored. A read answers it, and the server stamps its own." }
+        existed: { type: boolean, description: "Accepted and ignored. A read answers it." }
+        withheld: { type: string, description: "Accepted and ignored. A read answers it." }
       required: [kind, name, op]
     DraftBody:
       type: object
@@ -6819,6 +7001,7 @@ components:
         items: { type: array, items: { $ref: "#/components/schemas/DraftBodyItem" } }
         note: { type: string, description: "At most 2,000 bytes, without invisible direction or zero-width characters." }
         working: { type: boolean, description: "Add to the caller's working draft. People only." }
+        revision: { type: integer, description: "Accepted and ignored. A new draft starts at revision 1, and a check stores no revision." }
     DraftUpdate:
       type: object
       properties:
@@ -6826,6 +7009,7 @@ components:
         documents: { type: array, items: { type: string } }
         items: { type: array, items: { $ref: "#/components/schemas/DraftBodyItem" } }
         note: { type: string }
+        working: { type: boolean, description: "Accepted and ignored. An update revises the draft its path names and never adds to the caller's working draft." }
       required: [revision]
     DraftDiscard:
       type: object

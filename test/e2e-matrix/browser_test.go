@@ -106,7 +106,7 @@ func TestBrowserSignIn(t *testing.T) {
 			link := issuer.URL + "/oidc/authorize?" + url.Values{
 				"response_type": {"code"}, "client_id": {"straza"}, "redirect_uri": {callback.URL + "/callback"},
 				"scope": {"openid profile"}, "state": {"st+1&2"}, "nonce": {"jkt.r"}, "code_challenge": {"cc"},
-				"code_challenge_method": {"S256"}, "prompt": {"login"}, "max_age": {"0"},
+				"code_challenge_method": {"S256"}, "prompt": {"login"}, "max_age": {"600"},
 			}.Encode()
 			err := browserSignIn(t.Context(), link, "erin", "Walk-2026!")
 			if tc.want == "" {

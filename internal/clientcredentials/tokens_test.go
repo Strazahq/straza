@@ -479,3 +479,18 @@ func TestTwoReplicasShareNothing(t *testing.T) {
 		t.Fatalf("two replicas made %d fetches for four cold calls, want 4", n)
 	}
 }
+
+// TestBlueprintNamesOnlyAnEntraProvider checks what the providers list
+// shows the console: the blueprint of a provider whose tokens go through
+// Entra, and nothing for one that takes the assertion itself or is unknown.
+func TestBlueprintNamesOnlyAnEntraProvider(t *testing.T) {
+	tk := New(Options{Signer: &fakeSigner{}, Providers: map[string]Provider{
+		"entra-lab": {TokenURL: "https://login.example/t/oauth2/v2.0/token", Blueprint: "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb", Tenant: "t"},
+		"keycloak":  {TokenURL: "https://kc.example/token", Audience: "https://kc.example/realms/straza"},
+	}})
+	for provider, want := range map[string]string{"entra-lab": "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb", "keycloak": "", "nobody": ""} {
+		if got := tk.Blueprint(provider); got != want {
+			t.Errorf("Blueprint(%q) = %q, want %q", provider, got, want)
+		}
+	}
+}

@@ -7,7 +7,7 @@ module github.com/strazahq/straza
 // hangs approval pushes. TestGoDirectiveRequires126 gates the directive.
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/Microsoft/go-winio v0.6.4

@@ -49,7 +49,7 @@ On enterprise your IGA sends an agent as a SCIM user. Straza stores it as an age
 ## A sponsor
 
 
-A sponsor is the person accountable for an agent, or for any user who has one, such as a contractor. Straza keeps the sponsor as a username on the user. When a held call's rule names no approver role, the request goes to the requester's sponsor. Straza reads the sponsor when the request is raised and keeps it on the request, so a later change of sponsor never moves an open request.
+A sponsor is the person accountable for an agent, or for any user who has one, such as a contractor. Straza keeps the sponsor as a username on the user. Your IGA sends the sponsor, or it sends the agent's manager and Straza makes that manager the agent's sponsor. When a held call's rule names no approver role, the request goes to the requester's sponsor. Straza reads the sponsor when the request is raised and keeps it on the request, so a later change of sponsor never moves an open request.
 
 
 A usable sponsor is an active person other than the requester. An agent cannot sponsor an agent, because that leaves no person accountable.
@@ -61,7 +61,7 @@ When an agent has no usable sponsor and the rule names no approver role, Straza 
 A person needs no sponsor. When a rule names no approver role, a person with no sponsor decides their own request, and a person with a sponsor waits for that sponsor. [Approvals]({{< relref "concepts/approvals-model.md" >}}) covers who decides in full.
 
 
-These rules do not depend on the identity provider. User type, agency mode and sponsor arrive from your IGA over SCIM, or from an admin on standalone, whether people sign in with Entra ID, Okta or Keycloak. Straza stores the sponsor name as it arrives and checks it only when a request needs it. The sponsor must therefore be the username of an existing user. A name that matches nobody denies the agent's first held call, and the reason says that the sponsor is not known to Straza.
+These rules do not depend on the identity provider. User type, agency mode and sponsor arrive from your IGA over SCIM, or from an admin on standalone, whether people sign in with Entra ID, Okta or Keycloak. Straza stores the sponsor name as it arrives and checks it only when a request needs it. The sponsor must therefore be the username of an existing user. A name that matches nobody denies the agent's first held call, and the reason says that the sponsor is not known to Straza. A manager is checked when it arrives instead. Straza refuses a `PATCH` that names a manager it does not know. Straza still saves a create or `PUT` with such a manager, keeps the agent's sponsor as it was and logs the warning `SCIM manager not applied`. So your IGA sends the manager before the agent, or sends the agent again once the manager exists.
 
 {{< details summary="What your IGA records on each user" >}}
 

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -375,8 +374,16 @@ func (a *App) handlePolicyActivate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Status string `json:"status"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	err := decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	switch {
+	case errors.Is(err, io.EOF):
 		req.Status = "active"
+	case err != nil:
+		apiError(w, http.StatusBadRequest, "The request body is not valid JSON: "+err.Error()+`. Send {"status": "active"} or {"status": "draft"}, or no body to turn the set on.`)
+		return
 	}
 	if req.Status != "active" && req.Status != "draft" {
 		apiError(w, http.StatusBadRequest, "status must be active or draft")

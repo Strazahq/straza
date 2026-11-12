@@ -15,8 +15,8 @@ tested:
   date: 2026-09-28
 applies_to: both
 keywords: capture verbatim redact transcript
-who: You, as the admin
-where: The console or a terminal with strazactl, and the agent's machine for the prompt
+who: Admin
+where: Console or strazactl, and the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: console

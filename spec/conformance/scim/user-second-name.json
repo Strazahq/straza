@@ -1,0 +1,269 @@
+{
+  "name": "user-second-name",
+  "steps": [
+    {
+      "note": "the create body Microsoft Entra ID sent for an agent user on 2026-11-10, once the target attribute was named in Microsoft's form, with the tenant's values replaced: entraAgentId sits under the second name of the Straza extension, which schemas does not list (spec/scim-profile §3.6). Straza stores it with the create and renders it under its own name",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+          ],
+          "externalId": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+          "userName": "lab-alias-agent@straza.example",
+          "active": true,
+          "displayName": "lab-alias-agent",
+          "meta": {"resourceType": "User"},
+          "userType": "agent",
+          "urn:ietf:params:scim:schemas:extension:straza:2.0:User": {
+            "entraAgentId": "6fa459ea-ee8a-4ca4-894e-db77e160355e"
+          }
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "userName": "lab-alias-agent@straza.example",
+          "userType": "agent",
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "6fa459ea-ee8a-4ca4-894e-db77e160355e"
+          }
+        }
+      },
+      "capture": {"aid": "id"}
+    },
+    {
+      "note": "the PATCH Entra sent on a later pass on 2026-11-10 while both names were mapped, with the tenant's values replaced: one Add of entraAgentId under each name, with the same value. It answers 200 and the stored id stays",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "Add", "path": "urn:straza:params:scim:schemas:extension:2.0:User:entraAgentId", "value": "6fa459ea-ee8a-4ca4-894e-db77e160355e"},
+            {"op": "Add", "path": "urn:ietf:params:scim:schemas:extension:straza:2.0:User:entraAgentId", "value": "6fa459ea-ee8a-4ca4-894e-db77e160355e"}
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "6fa459ea-ee8a-4ca4-894e-db77e160355e"
+          }
+        }
+      }
+    },
+    {
+      "note": "derived from the reference server, as every step from here on: both names with different values, Straza's own name first. The value under Straza's own name is stored",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "replace", "path": "urn:straza:params:scim:schemas:extension:2.0:User:entraAgentId", "value": "16fd2706-8baf-433b-82eb-8c7fada847da"},
+            {"op": "replace", "path": "urn:ietf:params:scim:schemas:extension:straza:2.0:User:entraAgentId", "value": "6fa459ea-ee8a-4ca4-894e-db77e160355e"}
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "16fd2706-8baf-433b-82eb-8c7fada847da"
+          }
+        }
+      }
+    },
+    {
+      "note": "both names with different values as two keys of one PATCH with no path: the value under Straza's own name is stored again, and swarmId, which only the second name carries, is applied",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {
+              "op": "add",
+              "value": {
+                "urn:ietf:params:scim:schemas:extension:straza:2.0:User": {
+                  "entraAgentId": "16fd2706-8baf-433b-82eb-8c7fada847da",
+                  "swarmId": "alias-swarm"
+                },
+                "urn:straza:params:scim:schemas:extension:2.0:User": {
+                  "entraAgentId": "6fa459ea-ee8a-4ca4-894e-db77e160355e"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "entraAgentId": "6fa459ea-ee8a-4ca4-894e-db77e160355e",
+            "swarmId": "alias-swarm"
+          }
+        }
+      }
+    },
+    {
+      "note": "a PATCH path under the second name in mixed case sets the attribute, with the string form of a boolean",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "Replace", "path": "URN:IETF:Params:SCIM:Schemas:Extension:Straza:2.0:User:Ephemeral", "value": "True"}
+          ]
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {"urn:straza:params:scim:schemas:extension:2.0:User": {"ephemeral": true}}
+      }
+    },
+    {
+      "note": "a PUT with the extension under the second name sets agencyMode, lower-cased, and keeps the extension attributes it leaves out (§3.2 PUT rule)",
+      "request": {
+        "method": "PUT",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "lab-alias-agent@straza.example",
+          "userType": "agent",
+          "urn:ietf:params:scim:schemas:extension:straza:2.0:User": {"agencyMode": "Supervised"}
+        }
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "agencyMode": "supervised",
+            "entraAgentId": "6fa459ea-ee8a-4ca4-894e-db77e160355e",
+            "swarmId": "alias-swarm"
+          }
+        }
+      }
+    },
+    {
+      "note": "the lock block is read-only under the second name",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "replace", "path": "urn:ietf:params:scim:schemas:extension:straza:2.0:User:locked", "value": false}
+          ]
+        }
+      },
+      "expect": {"status": 400, "subset": {"scimType": "mutability", "status": "400"}}
+    },
+    {
+      "note": "kind is read-only inside the whole extension under the second name, and the writable key beside it is not saved",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {
+              "op": "replace",
+              "path": "urn:ietf:params:scim:schemas:extension:straza:2.0:User",
+              "value": {"swarmId": "smuggled", "kind": "human"}
+            }
+          ]
+        }
+      },
+      "expect": {"status": 400, "subset": {"scimType": "mutability", "status": "400"}}
+    },
+    {
+      "note": "origin is read-only inside a PATCH with no path keyed by the second name",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "add", "value": {"urn:ietf:params:scim:schemas:extension:straza:2.0:User": {"origin": "local"}}}
+          ]
+        }
+      },
+      "expect": {"status": 400, "subset": {"scimType": "mutability", "status": "400"}}
+    },
+    {
+      "note": "a value under the second name is checked like a value under Straza's own: an entraAgentId that is not a GUID is refused",
+      "request": {
+        "method": "PATCH",
+        "path": "/scim/v2/Users/{aid}",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          "Operations": [
+            {"op": "Add", "path": "urn:ietf:params:scim:schemas:extension:straza:2.0:User:entraAgentId", "value": "lab-alias-agent"}
+          ]
+        }
+      },
+      "expect": {"status": 400, "subset": {"scimType": "invalidValue", "status": "400"}}
+    },
+    {
+      "note": "the four refused PATCH requests saved nothing: the user still holds what the PUT left",
+      "request": {"method": "GET", "path": "/scim/v2/Users/{aid}"},
+      "expect": {
+        "status": 200,
+        "subset": {
+          "urn:straza:params:scim:schemas:extension:2.0:User": {
+            "locked": false,
+            "kind": "human",
+            "origin": "scim",
+            "entraAgentId": "6fa459ea-ee8a-4ca4-894e-db77e160355e",
+            "swarmId": "alias-swarm"
+          }
+        }
+      }
+    },
+    {
+      "note": "a person cannot hold entraAgentId under the second name either (§3.4)",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          "userName": "person-second-name",
+          "userType": "human",
+          "urn:ietf:params:scim:schemas:extension:straza:2.0:User": {
+            "entraAgentId": "9b2d3c4e-5f60-4a71-8b92-0c1d2e3f4a5b"
+          }
+        }
+      },
+      "expect": {"status": 400, "subset": {"scimType": "invalidValue", "status": "400"}}
+    },
+    {
+      "note": "the second name in schemas is not the agent mark (§5): the user is stored with kind human. A subset match cannot show that no answer carries the second name, so the reference server's unit test TestUserExtensionSecondName asserts it",
+      "request": {
+        "method": "POST",
+        "path": "/scim/v2/Users",
+        "body": {
+          "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            "urn:ietf:params:scim:schemas:extension:straza:2.0:User"
+          ],
+          "userName": "plain-second-name",
+          "urn:ietf:params:scim:schemas:extension:straza:2.0:User": {"swarmId": "plain-swarm"}
+        }
+      },
+      "expect": {
+        "status": 201,
+        "subset": {
+          "userName": "plain-second-name",
+          "urn:straza:params:scim:schemas:extension:2.0:User": {"kind": "human", "swarmId": "plain-swarm"}
+        }
+      }
+    }
+  ]
+}

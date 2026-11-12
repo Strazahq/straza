@@ -16,8 +16,8 @@ tested:
   except: the QR scan and tap on a real phone, and the role and Add a phone steps, which were not walked
 applies_to: both
 keywords: phone approver enroll push signature
-who: The person who decides on their phone, after you as the admin give them the role
-where: The self-service page, the console or a terminal with strazactl, and the Straza approver app on the person's phone
+who: The approver, after an admin gives them the role
+where: Self-service page, console or strazactl, and the approver app
 steps: true
 modes: [console, cli]
 mode_default: console

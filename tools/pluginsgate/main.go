@@ -5,7 +5,8 @@
 // quotes the CLI output it parses, a SKILL.md without a compatibility line
 // naming a product version, and manifests whose versions disagree. A change
 // to plugins/ also bumps that version, because Claude Code users receive an
-// update only when the string changes.
+// update only when the string changes. The commands in README.md and
+// docs/quickstart-standalone.md get the same command check.
 //
 // Findings print one per line as path:LINE: message and the exit code is 1
 // when there is at least one. make check runs the same check.
@@ -17,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -27,6 +29,10 @@ const (
 	docsDir    = "website/content"
 	staticDir  = "website/static"
 )
+
+// commandDocs are the documents outside plugins/ whose commands the gate
+// checks. The content checks for the skill do not apply to them.
+var commandDocs = []string{"README.md", "docs/quickstart-standalone.md"}
 
 // finding is one gate violation anchored to a file and a line (0 when the
 // whole file is meant).
@@ -56,13 +62,14 @@ func main() {
 		fmt.Println(f)
 	}
 	if len(findings) > 0 {
-		fmt.Fprintf(os.Stderr, "pluginsgate: %d finding(s); the skill under plugins/ drifted from the product\n", len(findings))
+		fmt.Fprintf(os.Stderr, "pluginsgate: %d finding(s); the skill under plugins/ or a command in README.md or docs/quickstart-standalone.md drifted from the product\n", len(findings))
 		os.Exit(1)
 	}
 }
 
 // run executes every check against root. list names the tracked files under
-// plugins/ relative to root; main passes the git index and tests pass a walk.
+// plugins/ and the command documents relative to root; main passes the git
+// index and tests pass a walk.
 func run(root string, list func(root string) ([]string, error)) ([]finding, error) {
 	idx, err := loadCLIIndex(root)
 	if err != nil {
@@ -85,6 +92,9 @@ func run(root string, list func(root string) ([]string, error)) ([]finding, erro
 			return nil, err
 		}
 		out = append(out, checkCommands(rel, data, ext == ".sh", idx)...)
+		if slices.Contains(commandDocs, filepath.ToSlash(rel)) {
+			continue
+		}
 		if ext == ".sh" {
 			out = append(out, checkParsedOutput(rel, data)...)
 		}
@@ -98,10 +108,11 @@ func run(root string, list func(root string) ([]string, error)) ([]finding, erro
 	return out, nil
 }
 
-// gitTracked lists the git-tracked files under plugins/, relative to root,
-// so an untracked draft never reaches the gate.
+// gitTracked lists the git-tracked files under plugins/ and the command
+// documents, relative to root, so an untracked draft never reaches the gate.
 func gitTracked(root string) ([]string, error) {
-	cmd := exec.Command("git", "-C", root, "ls-files", "-z", "--", pluginsDir) //nolint:gosec // G204: fixed argv, only the operator-named root varies
+	args := append([]string{"-C", root, "ls-files", "-z", "--", pluginsDir}, commandDocs...)
+	cmd := exec.Command("git", args...) //nolint:gosec // G204: fixed argv, only the operator-named root varies
 	outb, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git ls-files under %s failed: %w", root, err)

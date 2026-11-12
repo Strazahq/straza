@@ -5,6 +5,9 @@ import { Attention, attentionItems } from "./overview-attention";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { type AppRow, type SinkRow, replaySink } from "@/lib/api";
 import { NOTHING_TO_DO, configRows, draftsLine, postureOf, replayWord, replayedWords } from "@/lib/config-words";
+import type { SigningKeyRow } from "@/lib/keys-api";
+import { certExpiredLine, certExpiringLine, stagedWaitingLine } from "@/lib/keys-words";
+import { KEYS_TAB } from "@/lib/settings-words";
 import { navigate } from "@/lib/router";
 import { relTimeText } from "@/lib/words";
 import { notify } from "@/lib/notify";
@@ -73,5 +76,56 @@ describe("Needs attention", () => {
     mount({ ...QUIET, sinks: [SINK] });
     await userEvent.click(screen.getByRole("button", { name: replayWord("elastic") }));
     await waitFor(() => expect(vi.mocked(notify.ok)).toHaveBeenCalledWith(replayedWords("elastic", 12, 0)));
+  });
+
+  describe("the signing key lines", () => {
+    const DAY = 86_400_000;
+    const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+    const key = (over: Partial<SigningKeyRow>): SigningKeyRow => ({ kid: "6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", purpose: "client_assertion", status: "active", created_at: at(-400 * DAY), ...over });
+
+    it.each([
+      { name: "a certificate that expired", keys: [key({ certificate_expires_at: at(-DAY) })], key: "cert:6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", tone: "danger" },
+      { name: "a certificate within 30 days", keys: [key({ certificate_expires_at: at(12 * DAY - 1000) })], key: "cert:6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", tone: "warn" },
+      { name: "a key staged over a day ago", keys: [key({ status: "staged", created_at: at(-2 * DAY), certificate_expires_at: at(700 * DAY) })], key: "staged:6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", tone: "warn" },
+    ])("names $name", ({ keys, key: want, tone }) => {
+      const items = attentionItems({ ...QUIET, keys });
+      expect(items.map((i) => [i.key, i.tone])).toEqual([[want, tone]]);
+    });
+
+    it("stays quiet for a healthy key, a fresh staged key and a retired key", () => {
+      const keys = [
+        key({ certificate_expires_at: at(31 * DAY) }),
+        key({ kid: "3a9e41c2", status: "staged", created_at: at(-3600_000), certificate_expires_at: at(729 * DAY) }),
+        key({ kid: "1b7d0a93", status: "retired", created_at: at(-800 * DAY) }),
+      ];
+      expect(attentionItems({ ...QUIET, keys })).toEqual([]);
+      expect(attentionItems({ ...QUIET, keys: null })).toEqual([]);
+    });
+
+    it("drops the certificate lines when no provider uses Entra, and keeps the staged line", () => {
+      const keys = [
+        key({ certificate_expires_at: at(-DAY) }),
+        key({ kid: "3a9e41c2", status: "staged", created_at: at(-2 * DAY), certificate_expires_at: at(700 * DAY) }),
+      ];
+      expect(attentionItems({ ...QUIET, keys, entra: false }).map((i) => i.key)).toEqual(["staged:3a9e41c2"]);
+    });
+
+    it("puts an expired certificate with the danger lines and opens the Agent signing keys tab", async () => {
+      const expired = key({ certificate_expires_at: "2026-11-01T09:14:00Z" });
+      const staged = key({ kid: "3a9e41c2-58d0-4f7b-b1e6-7c2d90a4f513", status: "staged", created_at: at(-2 * DAY), certificate_expires_at: at(700 * DAY) });
+      const items = attentionItems({ ...QUIET, apps: APPS, keys: [expired, staged] });
+      expect(items.map((i) => i.key)).toEqual(["failed", "cert:" + expired.kid, "degraded", "staged:" + staged.kid]);
+      expect(items[1].text).toBe(certExpiredLine(expired.kid, "2026-11-01T09:14:00Z"));
+      expect(items[3].text).toBe(stagedWaitingLine(staged.kid, 2));
+      mount({ ...QUIET, keys: [expired] });
+      await userEvent.click(screen.getByRole("link", { name: new RegExp(KEYS_TAB) }));
+      expect(navigate).toHaveBeenCalledWith("settings", ["keys"]);
+    });
+
+    it("counts whole days left on an expiring certificate", () => {
+      const at12 = at(12 * DAY - 1000);
+      const [item] = attentionItems({ ...QUIET, keys: [key({ certificate_expires_at: at12 })] });
+      expect(item.text).toBe(certExpiringLine("6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", 12, at12));
+    });
   });
 });

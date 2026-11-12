@@ -46,6 +46,8 @@ The gateway is a security boundary for a server the agent cannot call directly, 
 
 `straza exec` decides each command it is given and none of the programs that command starts. On an open machine it is also advisory. Inside the documented sandbox image it is the only way to run a program, with the gaps described below.
 
+[What each lane stops]({{< relref "evaluate/what-each-lane-stops.md" >}}) says what counts as a finding.
+
 {{< details summary="The sandbox image, the Python kit and the console" >}}
 
 Inside the sandbox image the path holds only the shim, the wrapper shell and the agent's interpreter. Every other file loses its execute bit at build time. A file that keeps it fails the build. With the documented runtime flags, the root filesystem is read-only, every writable mount is noexec, all capabilities are dropped and no process can gain privileges. Computation inside the interpreter stays ungoverned, because the interpreter is the agent. Every binary on the image's allowlist can still run without a decision, so a rule on a tool's arguments is enforced at the boundary only for a tool that is absent from the image. A tool whose arguments must be enforced belongs behind the gateway.
@@ -88,4 +90,4 @@ Straza relies on these without checking them:
 
 Every decision Straza makes is a deterministic policy evaluation, and no AI model takes part in a decision. The classify check is a heuristic with no model, no network and no state. The audit sentinel, off by default, runs fixed rules over the record after the fact, for patterns such as a written file that is then run, and blocks nothing. Straza does not proxy model traffic, because a proxy there would see prompts and miss the tool calls that policy decides.
 
-{{< next "evaluate/identity-and-your-iga.md" >}}
+{{< next "evaluate/what-each-lane-stops.md" >}}

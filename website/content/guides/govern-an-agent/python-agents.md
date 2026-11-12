@@ -56,7 +56,7 @@ for cmd in ("rm -rf /tmp/x", "git status"):
 
 The `check` call takes the canonical tool name and the fields policy matches on. For a real tool loop you wrap the function with `@straza.guard(...)`, which raises `StrazaDenied` on a deny so your framework surfaces the reason to the model.
 
-A tool of your own that fits no canonical kind, such as `refund_order`, goes in as `other` with its name: `straza.check("other", tool_name="refund_order")` or `@straza.guard("other", name="refund_order")`. The LangChain and OpenAI Agents glue sends every tool's name this way. The enterprise profile denies such a tool until an admin allows, holds or denies it by name, as [Harness tools by name]({{< relref "reference/policyset-grammar.md#harness-tools-by-name" >}}) shows, and a new tool needs no Straza release.
+A tool of your own that fits no canonical kind, such as `refund_order`, goes in as `other` with its name and its arguments: `straza.check("other", tool_name="refund_order", args={"order": "A-1"})`, or `@straza.guard("other", name="refund_order", args_from=lambda order: {"order": order})`, which takes them from each call. An empty mapping means a call with no arguments, and leaving `args` out means the arguments were not seen. The audit record keeps the arguments as sent, so a secret among them reaches the audit sinks too. An approval binds them, so other arguments need a new approval. For a classified kind the record keeps what the kit sent, which is the command, the paths or the url. The LangChain and OpenAI Agents glue sends every tool's name this way, and the arguments of a tool it sends as `other`. The enterprise profile denies such a tool until an admin allows, holds or denies it by name, as [Harness tools by name]({{< relref "reference/policyset-grammar.md#harness-tools-by-name" >}}) shows, and a new tool needs no Straza release.
 
 ## Run it against your server
 
@@ -73,7 +73,7 @@ git status -> allowed
 ```
 
 
-Against a standalone server, the first line carries the reason of the seeded `standalone-starter` PolicySet, `Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.` The second line is unchanged, because the standalone default allows a local tool no rule matches.
+Against a standalone server, the first line carries the reason of the seeded `standalone-starter` PolicySet, `Straza starter policy: this sample rule denies commands that start with rm -rf. Delete files individually, or an admin can edit the standalone-starter PolicySet.` The second line is unchanged, because the standalone default allows a local tool no rule matches.
 
 The decisions ride the same audit trail as any harness session, under the `python-sdk` harness name. To take the kit back out, remove the `straza` calls from the loop; the enrollment on the machine stays until you revoke its device or delete its identity.
 
@@ -88,6 +88,6 @@ Run `straza trace show` on the machine to see the decision journal the kit produ
 The kit denies when `straza` is missing, unenrolled, cannot reach `straza service`, times out, or errors, so a broken setup fails closed rather than running ungoverned. It cannot see code an agent runs outside its tool loop, which is why it is advisory on an open machine. A rule's `require.attestation` can demand `managed` for sensitive roles, and a `python-sdk` session carries its own harness name, so policy can give it tighter rules.
 
 
-When your agent delegates, the subagent is the enforcement boundary: a bare delegation leaves the child's tools ungoverned, so use the framework glue (`govern_subagents` for LangChain, `guard_agent` for the OpenAI Agents SDK) that pushes enforcement into every child graph. For calls to an MCP server, do not map them as tools; point the framework's MCP client at the Straza gateway instead.
+When your agent delegates, the subagent is the enforcement boundary: a bare delegation leaves the child's tools ungoverned, so use the framework glue (`govern_subagents` for LangChain, `guard_agent` for the OpenAI Agents SDK) that pushes enforcement into every child graph. For the Claude Agent SDK, `straza_hooks()` gives `ClaudeAgentOptions` the hooks that Claude Code itself runs. For calls to an MCP server, do not map them as tools; point the framework's MCP client at the Straza gateway instead.
 
 [MCP servers and the gateway]({{< relref "concepts/mcp-apps-and-the-gateway.md" >}})

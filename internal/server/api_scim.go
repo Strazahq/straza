@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -111,7 +112,11 @@ func (a *App) scimServer() *scim.Server {
 				return
 			}
 			a.auditUserUpdate(ctx, u, changed)
+			if slices.Contains(changed, "entra_agent_id") {
+				a.entraAgentIDChanged(ctx, u.ID)
+			}
 		},
+		WriteRefused:      a.scimWriteRefused,
 		ProtectedUsername: BreakGlassUsername,
 		RoleProjection:    a.groupRoleProjection,
 		Log:               a.log,

@@ -56,8 +56,8 @@ type App struct {
 	snapKeys  *authn.SnapshotKeys
 	snapshots *snapshot.Service
 	// assertionKeys signs the client assertions of agents' clients and
-	// publishes their key document (admin_keys.go).
-	assertionKeys *authn.ClientAssertionKeys
+	// publishes their key document and certificates (admin_keys.go).
+	assertionKeys assertionKeySet
 	// clientTokens fetches and caches the upstream tokens of agents' own
 	// clients, for servers with credential.agents client_credentials.
 	clientTokens *clientcredentials.Tokens
@@ -305,14 +305,15 @@ func (a *App) routeTable() []route {
 		{"POST", "/v1/admin/sessions/revoke", admin(a.handleSessionsBulkRevoke)},
 		{"POST", "/v1/admin/signing-keys/rotate", admin(a.handleSigningKeyRotate)},
 		{"GET", "/v1/admin/signing-keys", admin(a.handleSigningKeysList)},
-		// The client assertion key can sign in as any agent at the identity
-		// provider, so no area grant and no server's admin role opens it.
+		// The client assertion key signs in as any agent, so no area grant or server admin role opens these.
 		{"POST", "/v1/admin/signing-keys/client-assertion/rotate", a.requireFullAdmin(a.handleClientAssertionKeyRotate)},
 		{"POST", "/v1/admin/signing-keys/client-assertion/{kid}/retire", a.requireFullAdmin(a.handleClientAssertionKeyRetire)},
+		{"POST", "/v1/admin/signing-keys/client-assertion/{kid}/promote", a.requireFullAdmin(a.handleClientAssertionKeyPromote)},
+		{"GET", "/v1/admin/signing-keys/client-assertion/{kid}/certificate", a.requireFullAdmin(a.handleClientAssertionKeyCertificate)},
 		{"GET", "/v1/admin/sessions/{id}/transcript", admin(a.handleSessionTranscript)},
 		{"GET", "/v1/admin/transcripts", admin(a.handleTranscriptsList)},
 		{"GET", "/v1/admin/transcripts/search", admin(a.handleTranscriptSearch)},
-
+		{"GET", "/v1/admin/default-denials", admin(a.handleDefaultDenials)},
 		{"GET", "/v1/admin/audit", admin(a.handleAuditList)},
 		{"GET", "/v1/admin/changes", admin(a.handleChangesList)},
 		{"GET", "/v1/admin/drafts", a.requireDrafts(a.handleDraftsList)},
