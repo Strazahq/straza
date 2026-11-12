@@ -2,7 +2,7 @@
 title: strazactl users nhi-key unset
 description: Revoke the agent identity's key, which ends its running sessions and refuses its next token request
 pagetype: reference
-weight: 110
+weight: 116
 draft: false
 sources:
   - cmd/strazactl

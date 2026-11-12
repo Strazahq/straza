@@ -38,8 +38,18 @@ func asked(r Request, format string, args ...any) *refusal {
 // met only when the block left the config after the install.
 func noSettings(r Request) *refusal {
 	return refuse(r, "Server %s sets credential.agents to client_credentials, and the provider %s has no clientCredentials settings. "+
-		"Add oauth.providers.%s.clientCredentials.assertionAudience to strazad's config, or set credential.agents to own, sponsor or shared.",
+		"Add oauth.providers.%s.clientCredentials to strazad's config, with assertionAudience for Keycloak or Okta, or with entraBlueprint for an Entra agent blueprint. "+
+		"Otherwise set credential.agents to own, sponsor or shared.",
 		r.Server, r.Provider, r.Provider)
+}
+
+// unmapped is the refusal for an agent whose record holds no Entra agent
+// identity, on a provider that runs the Entra exchange. Nothing is asked, so
+// the first call after the mapping is written runs.
+func unmapped(r Request) *refusal {
+	return refuse(r, "The agent has no Entra agent identity on its Straza record. "+
+		"Ask the identity team to set entraAgentId for %s, or set it with strazactl users entra-agent-id set %s <client id>, then call again.",
+		r.ClientID, r.ClientID)
 }
 
 // paused repeats the refusal that began a pause and says when it ends.

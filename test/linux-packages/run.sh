@@ -291,7 +291,7 @@ is_allowed() {
 
 is_denied() {
 	[ "$(rc_of "$1")" = 2 ] && [ "$(hook_field "$1" .hookSpecificOutput.permissionDecision)" = deny ] &&
-		[[ $(hook_field "$1" .hookSpecificOutput.permissionDecisionReason) == *"recursive force-delete"* ]]
+		[[ $(hook_field "$1" .hookSpecificOutput.permissionDecisionReason) == *"denies commands that start with rm -rf"* ]]
 }
 
 check_hook() {

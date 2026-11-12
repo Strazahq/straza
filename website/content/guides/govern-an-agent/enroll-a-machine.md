@@ -15,8 +15,8 @@ tested:
   date: 2026-10-21
   except: the browser sign-in and its refusals, the macOS section and moving a machine to another server, written from the code and not walked
 applies_to: both
-who: You, on the machine where your agent runs
-where: A terminal and a browser
+who: The person at the machine where the agent runs
+where: Terminal and a browser
 steps: true
 keywords: enroll straza service background service key custody sign in attestation status doctor offline grace kill switch
 ---

@@ -113,6 +113,43 @@ func TestEventKeyV2Shell(t *testing.T) {
 	}
 }
 
+// TestEventKeyV2UnclassifiedToolBindsArgs pins the key of a hold on a
+// harness tool Straza does not classify: it binds the exact arguments the
+// client forwarded, whatever the rule's binding says, as every lane but
+// mcp.call binds its concrete call. A client that forwards no arguments
+// keeps the key it had before, the one of the observed call with none, so
+// an approval it opened still matches its retry.
+func TestEventKeyV2UnclassifiedToolBindsArgs(t *testing.T) {
+	ev := func(args string) policy.Event {
+		e := policy.Event{Tool: policy.ToolOther, ToolName: "refund_order"}
+		if args != "" {
+			e.Args = []byte(args)
+		}
+		return e
+	}
+	a := mustKeyV2(t, ev(`{"order":"A-1"}`), policy.ApproveBindingCall)
+	rows := []struct {
+		name    string
+		ev      policy.Event
+		binding string
+		same    bool // the key equals a's
+	}{
+		{"the same arguments in another key order", ev(` { "order" : "A-1" } `), policy.ApproveBindingCall, true},
+		{"other arguments", ev(`{"order":"B-2"}`), policy.ApproveBindingCall, false},
+		{"no arguments observed", ev(""), policy.ApproveBindingCall, false},
+		{"binding tool does not widen it", ev(`{"order":"B-2"}`), policy.ApproveBindingTool, false},
+	}
+	for _, row := range rows {
+		k := mustKeyV2(t, row.ev, row.binding)
+		if !strings.HasPrefix(k, "v2:call:") || (k == a) != row.same {
+			t.Errorf("%s: key %q against %q, want call scope and equal=%v", row.name, k, a, row.same)
+		}
+	}
+	if none, empty := mustKeyV2(t, ev(""), policy.ApproveBindingCall), mustKeyV2(t, ev(`{}`), policy.ApproveBindingCall); none != empty {
+		t.Errorf("a client that forwards no arguments keys %q, the observed empty call %q, want the same key", none, empty)
+	}
+}
+
 // TestEventKeyV2MalformedArgs: ambiguous args (dup keys, bad JSON) error so
 // the PEP denies fail-closed, never a part-read hash.
 func TestEventKeyV2MalformedArgs(t *testing.T) {

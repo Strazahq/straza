@@ -1,6 +1,6 @@
 ---
 title: strazactl signing-keys
-description: List, rotate and retire signing keys
+description: List, rotate, promote and retire signing keys, and print a client assertion key's certificate
 pagetype: reference
 weight: 87
 draft: false
@@ -24,7 +24,9 @@ strazactl signing-keys [flags]
 ## See also
 
 * [strazactl](/reference/cli/strazactl/): Straza admin CLI
+* [strazactl signing-keys certificate](/reference/cli/strazactl/strazactl_signing-keys_certificate/): Print the certificate of a client assertion key, to upload to an Entra agent blueprint
 * [strazactl signing-keys list](/reference/cli/strazactl/strazactl_signing-keys_list/): List every signing key with its purpose and status
+* [strazactl signing-keys promote](/reference/cli/strazactl/strazactl_signing-keys_promote/): Make a staged client assertion key the signing key
 * [strazactl signing-keys retire](/reference/cli/strazactl/strazactl_signing-keys_retire/): Retire one client assertion key at once, for a key that may have been copied
-* [strazactl signing-keys rotate](/reference/cli/strazactl/strazactl_signing-keys_rotate/): Stage a new key of one purpose; the server promotes it once every replica holds it
+* [strazactl signing-keys rotate](/reference/cli/strazactl/strazactl_signing-keys_rotate/): Stage a new key of one purpose: a session key promotes itself, a client assertion key waits for promote
 

@@ -107,6 +107,7 @@ type decisionCE struct {
 		// Tool and carries no ToolName.
 		ToolName string `json:"toolName"`
 		App      string `json:"app"`
+		Harness  string `json:"harness"`
 		Effect   string `json:"effect"`
 		Reason   string `json:"reason"`
 		RuleID   string `json:"ruleId"`
@@ -169,10 +170,14 @@ func takePending(pending map[string][]pendingRequest, key string, at time.Time, 
 // minute; the mutex is held across the scan so concurrent pollers wait for
 // that one scan instead of starting their own.
 type decisionsCache struct {
-	mu      sync.Mutex
-	at      time.Time
-	block   decisionsPayload
-	minutes minutesCache
+	mu    sync.Mutex
+	at    time.Time
+	block decisionsPayload
+	// denials are the tools the same scan found denied by default, and
+	// denialsCut says it left some untracked.
+	denials    []defaultDenial
+	denialsCut bool
+	minutes    minutesCache
 }
 
 // minutesCache holds the last hour's buckets for minutesCacheTTL. It has its
@@ -205,12 +210,16 @@ func (a *App) decisionsBlock(ctx context.Context) (decisionsPayload, error) {
 		return a.decisions.block, nil
 	}
 	since := now.Truncate(time.Hour).Add(-time.Duration(decisionHours-1) * time.Hour)
-	buckets, groups, err := a.countDecisions(ctx, since, time.Hour, decisionHours)
+	buckets, groups, denied, err := a.countDecisions(ctx, since, time.Hour, decisionHours)
 	if err != nil {
 		return decisionsPayload{}, err
 	}
 	out := decisionsPayload{Since: since, Buckets: buckets, Stopped: topStopped(groups)}
-	a.decisions.block, a.decisions.at = out, now
+	denials := make([]defaultDenial, 0, len(denied.groups))
+	for _, d := range denied.groups {
+		denials = append(denials, *d)
+	}
+	a.decisions.block, a.decisions.denials, a.decisions.denialsCut, a.decisions.at = out, denials, denied.cut, now
 	return out, nil
 }
 
@@ -226,7 +235,7 @@ func (a *App) minutesBlock(ctx context.Context) ([]decisionBucketPayload, error)
 		return c.buckets, nil
 	}
 	since := now.Truncate(time.Minute).Add(-time.Duration(decisionMinutes-1) * time.Minute)
-	buckets, _, err := a.countDecisions(ctx, since, time.Minute, decisionMinutes)
+	buckets, _, _, err := a.countDecisions(ctx, since, time.Minute, decisionMinutes)
 	if err != nil {
 		return nil, err
 	}
@@ -235,17 +244,17 @@ func (a *App) minutesBlock(ctx context.Context) ([]decisionBucketPayload, error)
 }
 
 // countDecisions counts the decision records from since on into n buckets
-// of length step, oldest first, and groups the calls policy stopped among
-// them. It pages the window in batches and decodes each record's type, time
+// of length step, oldest first, groups the calls policy stopped among them
+// and lists the tools that were denied by default. It pages the window in batches and decodes each record's type, time
 // and decision keys; a record that does not decode, is not a decision, or
 // falls outside the window is skipped, because a dashboard must render what
 // it can read rather than go dark on one bad row.
-func (a *App) countDecisions(ctx context.Context, since time.Time, step time.Duration, n int) ([]decisionBucketPayload, map[string]*stoppedGroup, error) {
+func (a *App) countDecisions(ctx context.Context, since time.Time, step time.Duration, n int) ([]decisionBucketPayload, map[string]*stoppedGroup, denialTally, error) {
 	buckets := make([]decisionBucketPayload, n)
 	for i := range buckets {
 		buckets[i].Start = since.Add(time.Duration(i) * step)
 	}
-	groups := map[string]*stoppedGroup{}
+	groups, denied := map[string]*stoppedGroup{}, denialTally{groups: map[string]*defaultDenial{}}
 	// A held call is two records: the approval request, then the decision
 	// record the lane spools once the hold resolves, keyed by the same
 	// session and rule. The request arrives first in chain order, so the
@@ -255,7 +264,7 @@ func (a *App) countDecisions(ctx context.Context, since time.Time, step time.Dur
 	for afterSeq := int64(0); ; {
 		recs, err := a.store.Audit().ListSince(ctx, since, afterSeq, decisionScanBatch)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, denialTally{}, err
 		}
 		for _, rec := range recs {
 			afterSeq = rec.Seq
@@ -277,6 +286,7 @@ func (a *App) countDecisions(ctx context.Context, since time.Time, step time.Dur
 			if ce.Type != "straza.audit.tool" && ce.Type != "straza.audit.mcp" {
 				continue
 			}
+			denied.tally(ce, rec.Seq)
 			outcome := decisionOutcome(ce.Data.Effect)
 			if outcome == outcomeAllowed || outcome == outcomeDenied {
 				if takePending(pending, ce.Data.Session+"\x00"+ce.Data.RuleID, ce.Time.UTC(), window) != nil {
@@ -316,7 +326,7 @@ func (a *App) countDecisions(ctx context.Context, since time.Time, step time.Dur
 			tallyStopped(groups, outcomeApproval, ce, r.seq)
 		}
 	}
-	return buckets, groups, nil
+	return buckets, groups, denied, nil
 }
 
 // tallyStopped counts one stopped call into its (app, tool, outcome) group

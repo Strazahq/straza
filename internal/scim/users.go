@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +39,11 @@ type userDocument struct {
 	// classification on every recon); clearing goes through PATCH remove.
 	UserType  string        `json:"userType"`
 	Extension *extensionDoc `json:"urn:straza:params:scim:schemas:extension:2.0:User"`
+	// SecondExtension is the same extension under its second name, the form
+	// Microsoft Entra ID asks of a custom attribute (spec/scim-profile §3.6).
+	SecondExtension *extensionDoc `json:"urn:ietf:params:scim:schemas:extension:straza:2.0:User"`
+	// Enterprise carries the manager, which becomes an agent's sponsor.
+	Enterprise *enterpriseDoc `json:"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"`
 }
 
 // extensionDoc is the writable half of the Straza User extension.
@@ -46,6 +52,7 @@ type extensionDoc struct {
 	Sponsor    string `json:"sponsor"`
 	SwarmID    string `json:"swarmId"`
 	Ephemeral  any    `json:"ephemeral"` // bool or Azure-style "True"/"False"; nil = absent
+	EntraID    string `json:"entraAgentId"`
 }
 
 func (d userDocument) displayName() string {
@@ -147,24 +154,45 @@ func applyTypologyDoc(u *store.User, doc userDocument) error {
 		}
 		u.UserType = v
 	}
-	if doc.Extension == nil {
+	// The second name is applied first, so a value under Straza's own name
+	// is the one stored, and both are checked.
+	for _, ext := range []*extensionDoc{doc.SecondExtension, doc.Extension} {
+		if err := applyExtensionDoc(u, ext); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyExtensionDoc applies one Straza extension block of a POST or PUT
+// document onto the user, as applyTypologyDoc says. A nil block applies
+// nothing.
+func applyExtensionDoc(u *store.User, ext *extensionDoc) error {
+	if ext == nil {
 		return nil
 	}
-	if doc.Extension.AgencyMode != "" {
-		v, err := normVocab(doc.Extension.AgencyMode, "agencyMode", scimAgencyModes)
+	if ext.AgencyMode != "" {
+		v, err := normVocab(ext.AgencyMode, "agencyMode", scimAgencyModes)
 		if err != nil {
 			return err
 		}
 		u.AgencyMode = v
 	}
-	if doc.Extension.Sponsor != "" {
-		u.Sponsor = doc.Extension.Sponsor
+	if ext.Sponsor != "" {
+		u.Sponsor = ext.Sponsor
 	}
-	if doc.Extension.SwarmID != "" {
-		u.SwarmID = doc.Extension.SwarmID
+	if ext.SwarmID != "" {
+		u.SwarmID = ext.SwarmID
 	}
-	if doc.Extension.Ephemeral != nil {
-		b, err := parseEphemeral(doc.Extension.Ephemeral)
+	if ext.EntraID != "" {
+		id, err := normEntraAgentID(ext.EntraID)
+		if err != nil {
+			return err
+		}
+		u.EntraAgentID = id
+	}
+	if ext.Ephemeral != nil {
+		b, err := parseEphemeral(ext.Ephemeral)
 		if err != nil {
 			return err
 		}
@@ -250,6 +278,9 @@ func extensionBlock(u store.User, rows []store.Revocation) map[string]any {
 	}
 	if u.SwarmID != "" {
 		block["swarmId"] = u.SwarmID
+	}
+	if u.EntraAgentID != "" {
+		block["entraAgentId"] = u.EntraAgentID
 	}
 	if u.Ephemeral {
 		block["ephemeral"] = true
@@ -356,9 +387,17 @@ func (s *Server) handleUsersList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 	var doc userDocument
 	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		if detail := wrongTypeDetail(err); detail != "" {
+			// The decoder reads on past a value of the wrong type, so the
+			// refusal can still name the userName the body asks for.
+			noteUser(w, doc.UserName)
+			writeError(w, http.StatusBadRequest, "invalidValue", detail)
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalidSyntax", "malformed JSON body")
 		return
 	}
+	noteUser(w, doc.UserName)
 	if doc.UserName == "" {
 		writeError(w, http.StatusBadRequest, "invalidValue", "userName is required")
 		return
@@ -392,6 +431,9 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 		return
 	}
+	if !s.applyManager(w, r, &u, doc.managerWrite()) || s.refuseEntraAgentID(w, r, store.User{}, u) {
+		return
+	}
 	created, err := s.deps.Store.Users().Create(r.Context(), u)
 	if errors.Is(err, store.ErrConflict) {
 		if revived, ok := s.reviveDeactivated(r.Context(), u); ok {
@@ -399,6 +441,9 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 			s.userCreated(r.Context(), revived)
 			w.Header().Set("Location", "/scim/v2/Users/"+revived.ID)
 			writeSCIM(w, http.StatusCreated, s.userResourceCtx(r.Context(), revived))
+			return
+		}
+		if u.EntraAgentID != "" && s.refuseEntraAgentID(w, r, store.User{}, u) {
 			return
 		}
 		writeError(w, http.StatusConflict, "uniqueness", "userName or externalId already exists")
@@ -426,6 +471,7 @@ func (s *Server) userByID(w http.ResponseWriter, r *http.Request) (store.User, b
 		writeError(w, http.StatusInternalServerError, "", "lookup failed")
 		return store.User{}, false
 	}
+	noteUser(w, u.Username)
 	return u, true
 }
 
@@ -437,6 +483,17 @@ func (s *Server) handleUserGet(w http.ResponseWriter, r *http.Request) {
 
 // strazaURNLower is the extension URN as normalizePath renders it.
 const strazaURNLower = "urn:straza:params:scim:schemas:extension:2.0:user"
+
+// strazaSecondURNLower is the second name of the extension (§3.6) as
+// normalizePath renders it.
+const strazaSecondURNLower = "urn:ietf:params:scim:schemas:extension:straza:2.0:user"
+
+// strazaWritableAttrs are the writable attributes of the extension, as
+// normalizePath renders them.
+var strazaWritableAttrs = []string{"agencymode", "sponsor", "swarmid", "ephemeral", "entraagentid"}
+
+// coreUserURNLower is the core User schema URN as normalizePath renders it.
+const coreUserURNLower = "urn:ietf:params:scim:schemas:core:2.0:user"
 
 // lockAttrPath reports whether a normalized (lowercased) PATCH path targets
 // the read-only lock half of the Straza extension (§3.1): the bare
@@ -457,19 +514,57 @@ func strazaBornFactPath(p string) bool {
 	return p == "kind" || p == "origin"
 }
 
-// applyUserOp mutates the mapped attributes for one PATCH operation.
-func applyUserOp(u *store.User, activeTarget *bool, op patchOp) error {
+// userPatch is what a PATCH's operations ask for beside the user's own
+// fields: the active state, and the manager and sponsor applyManager judges
+// once every operation is applied.
+type userPatch struct {
+	active  bool
+	manager managerWrite
+	// own lists the attributes the PATCH has named outside the second name
+	// of the extension, bare or under Straza's own name, which an operation
+	// under the second name does not replace.
+	own []string
+}
+
+// applyUserOp mutates the mapped attributes for one PATCH operation. An
+// attribute Straza does not map is ignored, as a create ignores it, so an
+// identity manager that maps more than Straza stores is not refused.
+func applyUserOp(u *store.User, w *userPatch, op patchOp) error {
+	// A path may name a core attribute with its schema URN (RFC 7644 §3.10),
+	// or be that URN alone with an object value. It is judged as the bare
+	// path or as a PATCH without a path, so a mapped attribute, a
+	// deactivation above all, is never ignored for the form of its path.
+	op.path = strings.TrimPrefix(op.path, coreUserURNLower+":")
+	if op.path == coreUserURNLower {
+		op.path = ""
+	}
+	// The extension under its second name is judged as under its own, so the
+	// read-only half below is refused under both.
+	if op.path == strazaSecondURNLower || strings.HasPrefix(op.path, strazaSecondURNLower+":") {
+		op.path, op.second = strazaURNLower+op.path[len(strazaSecondURNLower):], true
+	}
 	if lockAttrPath(op.path) {
 		return mutabilityError{"the Straza lock block is read-only over SCIM, because a lock is Straza's own decision about the account. Lift it through the Straza admin API"}
 	}
 	if strazaBornFactPath(op.path) {
 		return mutabilityError{"kind and origin are Straza-born facts, read-only over SCIM: kind is fixed at create by the agentic extension and origin records how the account was born. Leave both out of the PATCH"}
 	}
+	if op.path == "groups" || strings.HasPrefix(op.path, "groups[") || strings.HasPrefix(op.path, "groups.") {
+		return mutabilityError{"a user's groups are read-only over SCIM, because a membership is written on the group. Send the membership as a members operation on /scim/v2/Groups/{id}"}
+	}
+	if w.manager.patch(op) {
+		return nil
+	}
 	// Whole-extension PATCH: apply per key, so writable typology passes and
 	// any lock key inside still refuses (§3.1/§3.2).
 	if op.path == strazaURNLower {
 		if op.op == "remove" {
-			u.AgencyMode, u.Sponsor, u.SwarmID, u.Ephemeral = "", "", "", false
+			for _, attr := range strazaWritableAttrs {
+				sub := patchOp{op: op.op, path: strazaURNLower + ":" + attr, second: op.second}
+				if err := applyUserOp(u, w, sub); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		obj, ok := op.value.(map[string]any)
@@ -477,12 +572,24 @@ func applyUserOp(u *store.User, activeTarget *bool, op patchOp) error {
 			return errors.New("extension PATCH value must be an object")
 		}
 		for k, v := range obj {
-			sub := patchOp{op: op.op, path: strazaURNLower + ":" + strings.ToLower(k), value: v}
-			if err := applyUserOp(u, activeTarget, sub); err != nil {
+			sub := patchOp{op: op.op, path: strazaURNLower + ":" + strings.ToLower(k), value: v, second: op.second}
+			if err := applyUserOp(u, w, sub); err != nil {
 				return err
 			}
 		}
 		return nil
+	}
+	// An attribute a PATCH names under both names of the extension keeps the
+	// value under Straza's own name, bare or qualified, in either order. The
+	// form of the value under the second name is still checked, on a copy
+	// that is never stored.
+	attr := strings.TrimPrefix(op.path, strazaURNLower+":")
+	switch {
+	case !op.second:
+		w.own = append(w.own, attr)
+	case slices.Contains(w.own, attr):
+		checked := *u
+		u = &checked
 	}
 	switch op.path {
 	case "usertype":
@@ -508,6 +615,7 @@ func applyUserOp(u *store.User, activeTarget *bool, op patchOp) error {
 		u.AgencyMode = v
 		return nil
 	case "sponsor", strazaURNLower + ":sponsor":
+		w.manager.sponsor = true
 		if op.op == "remove" {
 			u.Sponsor = ""
 			return nil
@@ -515,6 +623,8 @@ func applyUserOp(u *store.User, activeTarget *bool, op patchOp) error {
 		v, _ := op.value.(string)
 		u.Sponsor = v
 		return nil
+	case "entraagentid", strazaURNLower + ":entraagentid":
+		return applyEntraOp(u, op)
 	case "swarmid", strazaURNLower + ":swarmid":
 		if op.op == "remove" {
 			u.SwarmID = ""
@@ -546,7 +656,7 @@ func applyUserOp(u *store.User, activeTarget *bool, op patchOp) error {
 		}
 		for k, v := range obj {
 			sub := patchOp{op: op.op, path: strings.ToLower(k), value: v}
-			if err := applyUserOp(u, activeTarget, sub); err != nil {
+			if err := applyUserOp(u, w, sub); err != nil {
 				return err
 			}
 		}
@@ -559,7 +669,7 @@ func applyUserOp(u *store.User, activeTarget *bool, op patchOp) error {
 		if err != nil {
 			return err
 		}
-		*activeTarget = b
+		w.active = b
 		return nil
 	case "username":
 		if op.op == "remove" {
@@ -570,6 +680,15 @@ func applyUserOp(u *store.User, activeTarget *bool, op patchOp) error {
 			return errors.New("userName must be a non-empty string")
 		}
 		u.Username = v
+		return nil
+	case "name":
+		// The name object: formatted is its one mapped sub-attribute.
+		obj, _ := op.value.(map[string]any)
+		for k, v := range obj {
+			if strings.EqualFold(k, "formatted") {
+				return applyUserOp(u, w, patchOp{op: op.op, path: "name.formatted", value: v})
+			}
+		}
 		return nil
 	case "displayname", "name.formatted":
 		if op.op == "remove" {
@@ -610,7 +729,12 @@ func applyUserOp(u *store.User, activeTarget *bool, op patchOp) error {
 		}
 		u.Email = doc.email()
 		return nil
-	default:
-		return fmt.Errorf("PATCH path %q is not mapped on Users: Straza maps userName, displayName, title, emails, externalId, active and the typology attributes userType, agencyMode, sponsor, swarmId and ephemeral. Send one of those", op.path)
 	}
+	// Straza stores one address, so the value of any one filtered address,
+	// the form Entra sends, is that address.
+	if emailValuePathRe.MatchString(op.path) {
+		v, _ := op.value.(string)
+		u.Email = v
+	}
+	return nil
 }

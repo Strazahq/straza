@@ -8,8 +8,8 @@ summary: >-
   needs a publisher other than its author.
 pagetype: how-to
 weight: 20
-who: You, as the admin who delegates admin rights or runs automation that proposes changes
-where: The config file and a terminal
+who: Admin
+where: Config file and a terminal
 draft: false
 aliases:
   - /guides/operate/drafts-and-publishing/

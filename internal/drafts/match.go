@@ -323,31 +323,75 @@ func isGate(r policy.Rule) bool {
 
 // tightens reports whether adding r to a set can only tighten it, which
 // an agent may do: r cannot allow, or its mode is a gate that lets through
-// no call the deployment denies by default.
-func tightens(r policy.Rule, localDefault string) bool {
-	return !canAllow(r) || (gateMode(r) && !opensDefault(r, localDefault))
+// no call that is denied by default. apps holds the registered servers.
+func tightens(r policy.Rule, localDefault string, apps map[string]App) bool {
+	return !canAllow(r) || (gateMode(r) && !opensDefault(r, localDefault, apps))
 }
 
-// opensDefault reports whether r, a gate, turns a call the deployment
-// denies by default into a held or checked one: a rule of a gate
-// mode that can allow, on an event that waits for its decision, for a tool
-// deniedKinds names.
-func opensDefault(r policy.Rule, localDefault string) bool {
-	return gateMode(r) && canAllow(r) && blocks(r) && len(deniedKinds(r, localDefault)) > 0
+// opensDefault reports whether r, a gate, turns a call that is denied by
+// default into a held or checked one: a rule of a gate mode that can
+// allow, on an event that waits for its decision, for a tool deniedKinds
+// names or for an MCP server gateServers names.
+func opensDefault(r policy.Rule, localDefault string, apps map[string]App) bool {
+	if !gateMode(r) || !canAllow(r) || !blocks(r) {
+		return false
+	}
+	return len(deniedKinds(r, localDefault)) > 0 || len(gateServers(r, apps)) > 0
+}
+
+// gateServers answers the MCP servers the gate r opens that apps does not
+// hold: the ones it names, as unregistered answers them. A gate that names
+// no server reaches every such server, and the empty name stands for that,
+// only when no person decides its call: a server check or a classifier. An
+// approval or a confirmation by tool name stays a change that only
+// tightens, because a person still decides each call it lets through.
+func gateServers(r policy.Rule, apps map[string]App) []string {
+	if !governsMCP(r) {
+		return nil
+	}
+	if len(r.Apps) > 0 {
+		return unregistered(r, apps)
+	}
+	if r.Mode == policy.ModeServerCheck || r.Mode == policy.ModeClassify {
+		return []string{""}
+	}
+	return nil
 }
 
 // deniedKinds answers the local tool kinds r governs that the deployment
 // denies when no rule fires, sorted: those kinds while localToolDefault is
 // deny, and none otherwise. The answer may be shared, so the caller must
-// not change it. A gate on mcp.call never counts: the gateway enforces MCP
-// calls where the access row grants the tool, the hook lane's default for
-// an MCP tool is advisory, and who gains judges such a gate by the
-// gateway's outcome.
+// not change it. mcp.call never counts here: the gateway enforces the
+// calls of a registered server where the access row grants the tool, and
+// unregistered answers the servers a harness runs itself.
 func deniedKinds(r policy.Rule, localDefault string) []string {
 	if localDefault != policy.EffectDeny {
 		return nil
 	}
 	return localKinds(r)
+}
+
+// unregistered answers the MCP servers r names that apps does not hold,
+// sorted, the built-in straza server aside. A harness runs such a server
+// itself, and every profile denies its tools until a rule allows them.
+func unregistered(r policy.Rule, apps map[string]App) []string {
+	if !governsMCP(r) {
+		return nil
+	}
+	var out []string
+	for _, s := range r.Apps {
+		if _, ok := apps[s]; !ok && s != nativeApp {
+			out = append(out, s)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// governsMCP reports whether r can decide an mcp.call.
+func governsMCP(r policy.Rule) bool {
+	kinds := toolKinds(r)
+	return kinds == nil || slices.Contains(kinds, policy.ToolMCPCall)
 }
 
 // blocks reports whether r decides an event that waits for its answer,

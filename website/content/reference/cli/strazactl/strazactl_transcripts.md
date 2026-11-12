@@ -2,7 +2,7 @@
 title: strazactl transcripts
 description: Search recorded conversations by text or by a secret's value
 pagetype: reference
-weight: 98
+weight: 100
 draft: false
 sources:
   - cmd/strazactl

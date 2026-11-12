@@ -14,8 +14,8 @@ tested:
   platform: A throwaway standalone server on Linux, read as the admin in headless Chromium after a person's machine had sent allowed, denied and held calls through the hook, with strazactl audit verify run from a terminal
   date: 2026-10-06
 applies_to: both
-who: You, as an admin
-where: The console in a browser
+who: Admin
+where: Console
 steps: true
 keywords: console overview audit chain verified live tail lens search record test this call export verify
 ---
@@ -49,7 +49,7 @@ The foot of the menu names the profile and the strazad build, and its tooltip ad
 
 {{< shot name="overview" caption="The **Summary** tab: the counts at the top, and **Tool decisions** with its switch between **Last 24 hours** and **Last hour**." >}}
 
-Beside the chart, **Needs attention** lists only what a person should act on: approvals that wait, drafts that wait for review, MCP servers that failed or degraded, a broken audit chain, a push lane that is down, and sinks that hold parked events. A line reads, for example, `1 draft waits for review, the oldest from alice, drafted 16 m ago.`, and each line opens the area where you act. Below it, the configuration note counts the settings that loosen the server, and **Review settings** opens them. A fresh standalone server shows `4 settings to review`, because its defaults suit a first try on one machine.
+Beside the chart, **Needs attention** lists only what a person should act on: approvals that wait, drafts that wait for review, MCP servers that failed or degraded, a broken audit chain, a push lane that is down, and sinks that hold parked events. For a full administrator it also names a client assertion key whose certificate expires within 30 days or has expired, when a provider uses Entra, and a key that has been staged for over a day without a promote. A line reads, for example, `1 draft waits for review, the oldest from alice, drafted 16 m ago.`, and each line opens the area where you act. Below it, the configuration note counts the settings that loosen the server, and **Review settings** opens them. A fresh standalone server shows `4 settings to review`, because its defaults suit a first try on one machine.
 
 **Denied and held calls** lists the tools with the most denials or approval requests in the last 24 hours. **View reason** shows the reason recorded most often and a link to Audit filtered to that tool. The line at the foot, `Latest records verified (up to 25)`, is the chain check this page runs.
 
@@ -108,7 +108,7 @@ Select a row. The sheet is titled with the record's number and type, such as `Re
 
 **What ran** follows, with two views. **Readable** opens first and lays the call out. A shell command reads as its commands, numbered, with the words for how each leads to the next between them, such as `then, only if it succeeded` for `&&` or `its output goes into` for `|`. Each redirection gets its words beside it, such as `errors into output` for `2>&1`. A here-document, such as a python script an agent feeds on its input, shows as its own numbered code block. **Paths named in the command** lists the files and folders the text names, which is what the command names, not proof of what it touched. Every character of the command stays on screen. **Raw** shows the command exactly as the record holds it, line by line, with **Wrap lines** and **Copy command**, and the browser remembers the view you picked last.
 
-Readable never guesses. When it cannot split a command, such as one with a quote that never closes, it reads `Straza cannot split this command into steps:` and why, and shows the command as it ran. Characters that do not show on screen, such as a zero-width space or a right-to-left override, get a warning that names each one and its line, and both views mark them. A command the record cut says how much Straza kept and gives the SHA-256 of the whole command. For a gateway call the view is a table of its arguments, one row each, and a file tool shows its paths from the workspace, with `The record holds the path. It does not hold what changed in the file.`
+Readable never guesses. When it cannot split a command, such as one with a quote that never closes, it reads `Straza cannot split this command into steps:` and why, and shows the command as it ran. Characters that do not show on screen, such as a zero-width space or a right-to-left override, get a warning that names each one and its line, and both views mark them. A command the record cut says how much Straza kept and gives the SHA-256 of the whole command. For a gateway call the view is a table of its arguments, one row each. A harness tool whose record holds its input reads the same way, under the harness's own name of the tool, so a write shows the text it put in the file, shortened when it is long. An older client's record of a file tool holds only its paths, shown from the workspace with `The record holds the path. It does not hold what changed in the file.`
 
 {{< shot name="audit-deny" caption="The record of alice's denied `rm -rf`: the outcome, the rule and policy that decided it, and what ran." >}}
 
@@ -125,6 +125,9 @@ Open the record of a decision, then press **Test this call** at the foot of the 
 {{< shot name="audit-test-this-call" caption="**Test this call** at the foot of a record, under **The record as stored**." >}}
 
 {{< see >}}An **Answer** such as `Denied`, with `Decided under the policy version live right now.`{{< /see >}}
+
+
+A denied call that no rule decided, to an MCP server on a person's own machine or of a harness tool Straza does not classify, has **Write a rule for this call** at the foot of its sheet. The button shows when your session may write policy. It opens **New policy** with **Which calls** answered, as [Policies]({{< relref "guides/console/policies.md#build-a-policy-with-the-wizard" >}}) shows.
 
 [Simulate a call]({{< relref "guides/write-policy/simulate-and-coverage.md" >}}) covers the same test from the policy side and from the CLI.
 

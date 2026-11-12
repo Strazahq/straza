@@ -15,8 +15,8 @@ tested:
   date: 2026-10-06
   except: building the sandbox image and every docker run step, whose output comes from an earlier recorded walk
 applies_to: both
-who: You, on the machine that runs the process
-where: A terminal with Docker
+who: The person at the machine that runs the process
+where: Terminal with Docker
 steps: true
 keywords: sandbox exec hookless tier 3 straza service background service
 ---
@@ -58,7 +58,7 @@ hello
 That block ran under a headless enrollment with a key, and a workstation enrollment behaves the same way. A session from the wrapper checks in under the harness name `exec-wrapper`, so a PolicySet can give these processes rules of their own. On an open machine this is still advisory, and the next steps close that.
 
 
-Against a standalone server, the denied line carries the reason of the seeded `standalone-starter` PolicySet, `Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.`
+Against a standalone server, the denied line carries the reason of the seeded `standalone-starter` PolicySet, `Straza starter policy: this sample rule denies commands that start with rm -rf. Delete files individually, or an admin can edit the standalone-starter PolicySet.`
 
 ## Build the sandbox image
 

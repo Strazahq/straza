@@ -6,8 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ApiError, DraftDetail, DraftFinding, DraftVerdict, FindingClass } from "@/lib/api";
 import { holdersOfRole } from "@/lib/drafts-access";
-import { COVERS_WIDER_CODE, type ConfirmBlock, UNLISTED_CODE, confirmBlocks, findingGroups, objectOf, remoteApp } from "@/lib/drafts-model";
-import { CONTACT, CONTACT_FAILED, CONTACT_HELP, GROUP, NOTHING_TO_CONFIRM, STRIP_LABEL, ackWords, answered, holdsWords, nowAfter, riskTail, stripJump, stripWord } from "@/lib/drafts-words";
+import { COVERS_WIDER_CODE, type ConfirmBlock, UNLISTED_CODE, askedLine, confirmBlocks, findingGroups, objectOf, remoteApp, secretAsks } from "@/lib/drafts-model";
+import { CONTACT, CONTACT_FAILED, CONTACT_HELP, GROUP, NOTHING_TO_CONFIRM, SECRET_CHECKS_LINE, STRIP_LABEL, ackWords, answered, holdsWords, nowAfter, riskTail, stripJump, stripWord } from "@/lib/drafts-words";
 import { cn } from "@/lib/utils";
 
 // The verdict of a draft as the review page draws it: the strip that counts
@@ -142,6 +142,11 @@ export function DraftChecks({ detail, onContact, omit }: Props) {
     const n = f.code === COVERS_WIDER_CODE && f.object ? holdersOfRole(detail.verdict, f.object.replace(/^Role\//, "")) : null;
     return n ? " " + holdsWords(n) : "";
   };
+  // fixOf is a line's fix. On an open draft the publish dialog asks for a
+  // server's secret and listing credential, so their warnings say that in
+  // place of the fix that names strazactl, or of none.
+  const asks = open ? secretAsks(detail.draft, detail.verdict) : [];
+  const fixOf = (f: DraftFinding) => (askedLine(asks, f) ? SECRET_CHECKS_LINE : f.fix);
 
   return (
     <div className="flex flex-col gap-3" data-checks>
@@ -158,12 +163,13 @@ export function DraftChecks({ detail, onContact, omit }: Props) {
         );
         const body = lines.map((f) => {
           const block = blockOf.get(f.key);
+          const fix = fixOf(f);
           return (
             <div key={f.key} className="flex gap-2.5 border-b border-border px-3.5 py-2 last:border-b-0" data-finding={f.code}>
               <Icon className={cn("mt-0.5 size-4 shrink-0", hue)} aria-hidden="true" />
               <div className="flex min-w-0 max-w-[75ch] flex-col gap-1 text-[15px] leading-relaxed text-text-2">
                 <span className="text-foreground">{f.sentence + holds(f)}</span>
-                {f.fix && <span>{f.fix}</span>}
+                {fix && <span>{fix}</span>}
                 {(f.before || f.after) && <span className="text-sm">{nowAfter(f.before || "", f.after || "")}</span>}
                 {cls === "risk" && block && <span className="text-[13px] text-muted-foreground" data-ack-words>{ackWords(block)}</span>}
                 {contactable(f) && (

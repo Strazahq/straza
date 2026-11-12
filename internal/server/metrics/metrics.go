@@ -117,7 +117,7 @@ func New(auditDropped, auditLost func() float64) *Set {
 		}, []string{"route", "status"}),
 		failClosed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "straza_failclosed_total",
-			Help: "Internal failures the PEP answered as a fail-closed deny or a tool-level error (approval service, fingerprint, classifier, or an audit record that the full audit queue refused under block), by lane (hook = /v1/decide, gateway = a call to an MCP server on /mcp, native = the built-in straza tools on /mcp). Each increment has exactly one Error log record carrying the correlation_id of the request; policy denies, pending/expired/denied approvals and unroutable approvals are decisions and never count here.",
+			Help: "Internal failures the PEP answered as a fail-closed deny or a tool-level error (approval service, fingerprint, classifier, or an audit record that the full audit queue refused under block), by lane (hook = /v1/decide, gateway = a call to an MCP server on /mcp, native = the built-in straza tools on /mcp, simulate = a classifier failure in the policy simulate what-if). Each increment has exactly one Error log record carrying the correlation_id of the request; policy denies, pending/expired/denied approvals and unroutable approvals are decisions and never count here.",
 		}, []string{"lane"}),
 		httpRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "straza_http_requests_total",

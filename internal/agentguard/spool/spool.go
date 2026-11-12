@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,14 +185,15 @@ func (s *Spool) Drain(ctx context.Context, client Uploader, sessionToken string)
 	dir := filepath.Dir(s.path)
 	s.mu.Lock()
 	if fi, err := os.Stat(s.path); err == nil && fi.Size() > 0 {
-		_ = os.Rename(s.path, filepath.Join(dir, "audit-pending-"+uuid.NewString()+".jsonl"))
+		// The time-ordered name is what sortParked reads the park order from.
+		_ = os.Rename(s.path, filepath.Join(dir, "audit-pending-"+uuid.Must(uuid.NewV7()).String()+".jsonl"))
 	}
 	s.mu.Unlock()
 	pending, err := filepath.Glob(filepath.Join(dir, "audit-pending-*.jsonl"))
 	if err != nil {
 		return 0, err
 	}
-	sort.Strings(pending)
+	sortParked(pending)
 	total, err := upload(ctx, client, sessionToken, dir, pending)
 	if err != nil {
 		// What a drain could not deliver is the backlog the cap bounds, so it
@@ -203,6 +205,43 @@ func (s *Spool) Drain(ctx context.Context, client Uploader, sessionToken string)
 	s.markDrainedIfFlushed()
 	s.mu.Unlock()
 	return total, nil
+}
+
+// sortParked puts the parked files at pending into the order they were
+// parked, because the server numbers records in the order they arrive. A
+// drain parks a file under a version 7 UUID, which is time-ordered, so those
+// files go in name order. Any other name is an older client's random UUID
+// with no park time in it. Those files were parked before the upgrade, so
+// they go first, oldest modification time first and the name on a tie.
+func sortParked(pending []string) {
+	type parked struct {
+		path string
+		v7   bool
+		mod  time.Time
+	}
+	files := make([]parked, len(pending))
+	for i, p := range pending {
+		files[i].path = p
+		mid := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "audit-pending-"), ".jsonl")
+		if id, err := uuid.Parse(mid); err == nil && id.Version() == 7 {
+			files[i].v7 = true
+		} else if fi, err := os.Stat(p); err == nil {
+			files[i].mod = fi.ModTime()
+		}
+	}
+	sort.Slice(files, func(i, j int) bool {
+		a, b := files[i], files[j]
+		switch {
+		case a.v7 != b.v7:
+			return b.v7
+		case !a.v7 && !a.mod.Equal(b.mod):
+			return a.mod.Before(b.mod)
+		}
+		return a.path < b.path
+	})
+	for i, f := range files {
+		pending[i] = f.path
+	}
 }
 
 // upload sends the loss ledger first, so loss reaches the server ahead of

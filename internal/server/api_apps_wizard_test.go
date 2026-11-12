@@ -168,13 +168,14 @@ func TestAppsWizardAPI(t *testing.T) {
 		t.Fatalf("enable = %d", code)
 	}
 
-	// Providers: names, scopes and the redirect URI, never the client secret.
+	// Providers: names, scopes and the redirect URI, never the client secret,
+	// and no blueprint on a provider whose agents do not go through Entra.
 	var providers []oauthProviderPayload
 	if code := adminReq(t, "GET", base+"/v1/admin/oauth/providers", bearer, nil, &providers); code != http.StatusOK {
 		t.Fatalf("providers = %d", code)
 	}
 	if len(providers) != 1 || providers[0].Name != "keycloak" || !strings.HasSuffix(providers[0].RedirectURI, "/v1/connect/callback") ||
-		strings.Join(providers[0].Scopes, ",") != "openid" {
+		strings.Join(providers[0].Scopes, ",") != "openid" || providers[0].EntraBlueprint != "" {
 		t.Errorf("providers = %+v", providers)
 	}
 	if raw, _ := json.Marshal(providers); strings.Contains(string(raw), "kc-client-secret") {

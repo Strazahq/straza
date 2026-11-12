@@ -1,20 +1,25 @@
+import { parse } from "yaml";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NewPolicy } from "./new-policy";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
-  type AppRow, type BindingRow, type PolicySetRow, type RoleRow, type ToolRow,
-  activatePolicy, applyPolicy, catalogPreview, getPolicy, listApps, listBindings, listPolicies, listRoles, listSessions, listTools, listUsers, simulate, validatePolicy,
+  type AppRow, type BindingRow, type DefaultDenials, type PolicySetRow, type RoleRow, type ToolRow,
+  activatePolicy, applyPolicy, catalogPreview, getPolicy, listApps, listBindings, listDefaultDenials, listPolicies, listRoles, listSessions, listTools, listUsers, simulate, validatePolicy,
 } from "@/lib/api";
 import { put, take } from "@/lib/handoff";
 import {
-  CALLS_Q, HOW_HOLD, HOW_Q, HOW_TICKET, INTENT, NAME_BAD, NAME_FREE, NAME_TAKEN, NEXT, REASON, RECORDING_NOTE, REVIEW_NAME,
-  RUNS_TODAY, SERVER, STEPS, WHAT_Q, WHO_MISSING, WHO_Q, WHO_ROLE, WHO_SPONSOR, WHO_TEAM, WHOLE_SERVER, W1, alreadyToday, pickedCount,
+  ALSO_CREATES, HARNESS_HINT, NEW_ROLE_MISSING, NEW_ROLE_NAME, NEW_ROLE_TAKEN, WHO_NEW, alsoCreates, doorNote, newRoleDescription, newRoleName,
+} from "@/lib/harness-words";
+import {
+  CALLS_MISSING, CALLS_Q, HOW_HOLD, HOW_Q, HOW_TICKET, INTENT, LANE_LABEL, NAME_BAD, NAME_FREE, NAME_TAKEN, NEXT, REASON, RECORDING_NOTE, REVIEW_FACT, REVIEW_NAME,
+  RUNS_TODAY, SERVER, STEP_REASON, STEPS, WHAT_Q, WHO_EVERYONE, WHO_MISSING, WHO_Q, WHO_ROLE, WHO_SPONSOR, WHO_TEAM, WHOLE_SERVER, W1, alreadyToday, pickedCount,
   publishTitle, reasonApprove, removePick, roleCount, searchRoles, serversNarrowed, unitWord, validWords, VALID_NOW, addToExisting,
   existingSet, PICK_ALL_TITLE, WRITE_YAML, WRITE_YAML_START,
 } from "@/lib/policy-words";
 import { navigate } from "@/lib/router";
+import { snapshot } from "@/lib/session";
 import { checkDraft, createDraft } from "@/lib/drafts-api";
 import { SAVE_DRAFT, SAVE_PUBLISH } from "@/lib/save-words";
 import { VERDICT } from "@/test/drafts-fixture";
@@ -28,6 +33,7 @@ vi.mock("@/lib/api", async (orig) => ({
   listPolicies: vi.fn(),
   listUsers: vi.fn(),
   listSessions: vi.fn(),
+  listDefaultDenials: vi.fn(),
   catalogPreview: vi.fn(),
   validatePolicy: vi.fn(),
   applyPolicy: vi.fn(),
@@ -39,6 +45,9 @@ vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/r
 vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: vi.fn(), undo: vi.fn() } }));
 // A new set's Save draft joins the working draft through the drafts.
 vi.mock("@/lib/drafts-api", async (orig) => ({ ...(await orig<typeof import("@/lib/drafts-api")>()), checkDraft: vi.fn(), createDraft: vi.fn() }));
+// The session holds no grant unless a test names one, and only a full
+// grant may make a role.
+vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/session")>()), snapshot: vi.fn() }));
 
 const roles: RoleRow[] = [
   { id: "r1", name: "dev-tools", kind: "application", description: "The developer seat's tools", holder_count: 2 },
@@ -118,6 +127,18 @@ spec:
 
 const SUBJECT = "write-file and delete-file on demo-tools";
 
+// The calls no rule covers: the two tools people asked for on a server
+// their harness runs itself, two harness tools, and a harness tool the
+// harness sent no name for.
+const denied = (name: string) => ({ name, harnesses: ["claude-code"], count: 2, lastSeq: 9002, lastTime: "2026-11-11T09:40:00Z" });
+const denials: DefaultDenials = {
+  since: "2026-11-10T10:00:00Z",
+  servers: [{ server: "claude-in-chrome", harnesses: ["claude-code"], count: 4, lastSeq: 9001, lastTime: "2026-11-11T09:30:00Z", tools: [denied("navigate"), denied("form_input")] }],
+  tools: [denied("LSP"), denied("NotebookEdit"), denied("")],
+};
+const DOOR = { lane: "mcp", app: "claude-in-chrome", tools: ["navigate", "form_input"] };
+const FULL = { user: "alice", roles: [], grants: "full", expiresIn: 300, sessionID: "s1" };
+
 const mount = () => render(<TooltipProvider><NewPolicy /></TooltipProvider>);
 const click = (name: string) => userEvent.click(screen.getByRole("button", { name }));
 const pick = (name: string) => userEvent.click(screen.getByRole("radio", { name }));
@@ -166,6 +187,8 @@ describe("the New policy wizard", () => {
     vi.mocked(listPolicies).mockResolvedValue({ items: sets });
     vi.mocked(listUsers).mockResolvedValue({ items: [{ username: "joe" }, { username: "agent-sam" }] as never, next_cursor: "" });
     vi.mocked(listSessions).mockResolvedValue({ items: [], next_cursor: "" });
+    vi.mocked(listDefaultDenials).mockResolvedValue(denials);
+    vi.mocked(snapshot).mockReturnValue(null);
     vi.mocked(catalogPreview).mockResolvedValue(preview as never);
     vi.mocked(validatePolicy).mockResolvedValue({ ok: true, rules: 1, matchRoles: ["dev-tools"] });
     vi.mocked(applyPolicy).mockResolvedValue({ name: "dev-tools-approvals", status: "draft" });
@@ -185,6 +208,13 @@ describe("the New policy wizard", () => {
     expect(stepLabels()).toEqual([STEPS.what, STEPS.who, STEPS.calls, STEPS.how, STEPS.review]);
     await pick(INTENT.allow.title);
     expect(stepLabels()).toEqual([STEPS.what, STEPS.who, STEPS.calls, STEPS.review]);
+  });
+
+  it("names the fourth step of a denial after the reason it asks for", async () => {
+    mount();
+    await heading(WHAT_Q);
+    await pick(INTENT.deny.title);
+    expect(stepLabels()).toEqual([STEPS.what, STEPS.who, STEPS.calls, STEP_REASON, STEPS.review]);
   });
 
   it("opens on Which calls when a door named the role, the intent and the lane", async () => {
@@ -439,5 +469,128 @@ describe("the New policy wizard", () => {
     await waitFor(() => expect(yaml()).toBe(WRITTEN));
     await userEvent.click(foot().getByRole("button", { name: SAVE_PUBLISH }));
     expect(await screen.findByText(publishTitle("dev-tools-approvals"))).toBeTruthy();
+  });
+
+  it("stores no reason for an Allowed policy and says none on the review", async () => {
+    mount();
+    await heading(WHAT_Q);
+    await pick(INTENT.allow.title);
+    await click(NEXT);
+    await pick(WHO_ROLE);
+    await pick("dev-tools");
+    await click(NEXT);
+    await heading(CALLS_Q);
+    await screen.findByRole("checkbox", { name: "write-file" });
+    await tick("write-file");
+    await click(NEXT);
+    await screen.findByRole("textbox", { name: REVIEW_NAME });
+    expect(yaml()).toContain("effect: allow");
+    expect(yaml()).not.toContain("reason:");
+    expect(textOf("[data-review-facts]")).toContain(REVIEW_FACT.allowed);
+    expect(textOf("[data-review-facts]")).not.toContain(REVIEW_FACT.reason);
+  });
+
+  describe("tools on people's machines", () => {
+    // fromDoor opens the wizard the way Write a rule on a denied call does.
+    const fromDoor = async () => {
+      put("policies-new", DOOR);
+      mount();
+      await heading(WHAT_Q);
+    };
+    const ticked = () => (screen.getAllByRole("checkbox") as HTMLInputElement[]).map((b) => [b.getAttribute("aria-label"), b.checked]);
+
+    it("opens a door from a denied call on What, and Which calls is answered after Everyone", async () => {
+      await fromDoor();
+      expect(textOf("[data-door-note]")).toBe(doorNote("claude-in-chrome", ["navigate", "form_input"]));
+      await click(NEXT);
+      await heading(WHO_Q);
+      await pick(WHO_EVERYONE);
+      await click(NEXT);
+      await heading(CALLS_Q);
+      expect(screen.getByRole("combobox", { name: SERVER }).textContent).toContain("claude-in-chrome");
+      expect(attr("[data-machine-tools]", "data-machine-tools")).toBe("mcp");
+      expect(ticked()).toEqual([["navigate", true], ["form_input", true]]);
+    });
+
+    it("keeps the server and its tools when Who is answered again", async () => {
+      await fromDoor();
+      await click(NEXT);
+      await pick(WHO_EVERYONE);
+      await pick(WHO_ROLE);
+      await pick("dev-tools");
+      await click(NEXT);
+      await heading(CALLS_Q);
+      expect(screen.getByRole("combobox", { name: SERVER }).textContent).toContain("claude-in-chrome");
+      expect(ticked()).toEqual([["navigate", true], ["form_input", true]]);
+    });
+
+    it("offers a new role to a full grant, named after the server, and refuses a name a role carries", async () => {
+      vi.mocked(snapshot).mockReturnValue(FULL);
+      await fromDoor();
+      await click(NEXT);
+      await heading(WHO_Q);
+      await pick(WHO_NEW);
+      const box = screen.getByRole("textbox", { name: NEW_ROLE_NAME }) as HTMLInputElement;
+      expect(box.value).toBe(newRoleName("claude-in-chrome"));
+      await userEvent.clear(box);
+      await userEvent.type(box, "dev-tools");
+      expect(textOf("[data-role-problem]")).toBe(NEW_ROLE_TAKEN);
+      await click(NEXT);
+      expect(foot().getByText(NEW_ROLE_MISSING)).toBeTruthy();
+      expect(document.querySelector('[data-step="who"]')).toBeTruthy();
+    });
+
+    it("makes the role with the policy, in the same draft and before it", async () => {
+      vi.mocked(snapshot).mockReturnValue(FULL);
+      const role = newRoleName("claude-in-chrome");
+      await fromDoor();
+      await pick(INTENT.allow.title);
+      await click(NEXT);
+      await pick(WHO_NEW);
+      await click(NEXT);
+      await heading(CALLS_Q);
+      await click(NEXT);
+      const name = await screen.findByRole("textbox", { name: REVIEW_NAME }) as HTMLInputElement;
+      expect(name.value).toBe(role + "-access");
+      expect(textOf("[data-review-facts]")).toContain(ALSO_CREATES + alsoCreates(role));
+      await click(SAVE_DRAFT);
+      await waitFor(() => expect(createDraft).toHaveBeenCalled());
+      const items = vi.mocked(createDraft).mock.calls[0][0].items || [];
+      expect(items.map((i) => [i.kind, i.name, i.op])).toEqual([["Role", role, "put"], ["PolicySet", role + "-access", "put"]]);
+      const doc = parse(items[0].doc || "");
+      expect(doc.spec.kind).toBe("application");
+      expect(doc.spec.description).toBe(newRoleDescription("claude-in-chrome"));
+      expect(doc.spec.server).toBeUndefined();
+      expect(doc.spec.bindings).toBeUndefined();
+      expect(parse(items[1].doc || "").spec.match.roles).toEqual([role]);
+    });
+
+    it.each([
+      ["no session", null],
+      ["policy:write alone", { ...FULL, grants: "policy:read,policy:write" }],
+    ])("offers no new role with %s", async (_, session) => {
+      vi.mocked(snapshot).mockReturnValue(session);
+      await fromDoor();
+      await click(NEXT);
+      await heading(WHO_Q);
+      expect(screen.queryByRole("radio", { name: WHO_NEW })).toBeNull();
+    });
+
+    it("writes a rule for a harness tool people asked for", async () => {
+      await toCalls();
+      await click(LANE_LABEL.harness);
+      expect(screen.getByText(HARNESS_HINT)).toBeTruthy();
+      expect(attr("[data-machine-tools]", "data-machine-tools")).toBe("harness");
+      expect(ticked()).toEqual([["LSP", false], ["NotebookEdit", false]]);
+      await click(NEXT);
+      expect(foot().getByText(CALLS_MISSING)).toBeTruthy();
+      await tick("LSP");
+      await click(NEXT);
+      await heading(HOW_Q);
+      await click(NEXT);
+      await screen.findByRole("textbox", { name: REVIEW_NAME });
+      expect(yaml()).toContain("      tools: [other]\n      toolNames:\n        allow: [LSP]\n");
+      expect(yaml()).not.toContain("apps:");
+    });
   });
 });

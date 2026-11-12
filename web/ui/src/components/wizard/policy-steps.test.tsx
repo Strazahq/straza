@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { type Draft, EMPTY_DRAFT, HowStep, nameProblem, reasonDefault, ruleIdOf, ruleOf, secondsOf, todayWords } from "./policy-steps";
+import { type Draft, EMPTY_DRAFT, HowStep, nameProblem, pickedNames, reasonDefault, ruleIdOf, ruleOf, secondsOf, todayWords } from "./policy-steps";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { PreviewEntry, RoleRow } from "@/lib/api";
 import { DEPENDS_ON_ROLE, HOW_TICKET, NOT_REACHED_TODAY, RUNS_TODAY, WHO_TEAM, alreadyToday, reasonApprove, reasonDeny } from "@/lib/policy-words";
@@ -14,6 +14,7 @@ const draft = (patch: Partial<Draft>): Draft => ({ ...EMPTY_DRAFT, ...patch });
 const mcp = draft({ role: "dev-tools", app: "demo-tools", tools: ["write-file", "delete-file"], reason: "Straza: it needs approval" });
 const shell = draft({ intent: "deny", lane: "shell", patterns: ["rm -rf *"] });
 const files = draft({ intent: "allow", lane: "files", paths: ["**/build/*"] });
+const harness = draft({ intent: "allow", lane: "harness", tools: ["LSP", "NotebookEdit"] });
 
 describe("the wizard's answers as a rule", () => {
   it("reads a window as the seconds the rule stores", () => {
@@ -61,6 +62,19 @@ describe("the wizard's answers as a rule", () => {
     expect(reasonDefault(shell)).toBe(reasonDeny("shell commands matching rm -rf *", true));
   });
 
+  it("offers no reason for an allow, which no agent reads", () => {
+    expect(reasonDefault(files)).toBe("");
+    expect(reasonDefault(harness)).toBe("");
+  });
+
+  it("writes a harness tool rule from the tools picked, with no server", () => {
+    const stray = draft({ ...harness, app: "demo-tools", wholeServer: true });
+    expect(pickedNames(stray)).toEqual(["LSP", "NotebookEdit"]);
+    expect(ruleIdOf(harness)).toBe("allow-harness-lsp-notebookedit");
+    expect(ruleOf(stray, "r")).toEqual({ id: "r", tools: ["other"], toolNames: { allow: ["LSP", "NotebookEdit"] }, effect: "allow" });
+    expect(ruleOf(draft({ ...harness, intent: "deny", reason: "Straza: no" }), "r")).toEqual({ id: "r", tools: ["other"], toolNames: { deny: ["LSP", "NotebookEdit"] }, effect: "deny", reason: "Straza: no" });
+  });
+
   it("says why a name cannot be stored", () => {
     const taken = ["dev-guardrails", "org-baseline"];
     const cases: [string, string][] = [
@@ -68,6 +82,7 @@ describe("the wizard's answers as a rule", () => {
       ["dev-guardrails", "taken"],
       ["new", "taken"],
       ["by-role", "taken"],
+      ["denied", "taken"],
       ["Dev Tools", "bad"],
       ["-leading", "bad"],
       ["", "bad"],

@@ -5,12 +5,13 @@ line, the task fields of a tutorial or how-to, and In short. */ -}}
 {{ . }}
 {{ end }}
 {{- if in (slice "tutorial" "how-to") .Params.pagetype }}
-{{- $profiles := dict "standalone" "Standalone" "enterprise" "Enterprise" "both" "Standalone and enterprise" -}}
+{{- /* The profile line shows only when the steps hold for one profile, as on
+the page itself. */ -}}
+{{- $profiles := dict "standalone" "Standalone only" "enterprise" "Enterprise only" -}}
 {{- $p := .Params }}
 {{ with $p.who }}- Who: {{ . }}
 {{ end }}{{ with $p.where }}- Where: {{ . }}
-{{ end }}{{ with $p.applies_to }}- Profile: {{ index $profiles . | default . }}
-{{ end }}{{ with $p.time }}- Time: {{ . }}
+{{ end }}{{ with index $profiles ($p.applies_to | default "") }}- Profile: {{ . }}
 {{ end }}
 {{- end }}
 {{- with .Params.summary }}

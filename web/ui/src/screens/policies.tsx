@@ -3,6 +3,7 @@ import { Columns3Icon, PlayIcon, PlusIcon } from "lucide-react";
 import { FetchError } from "@/components/error-state";
 import { PageHead } from "@/components/page-head";
 import { type PolicyDoor, PoliciesByRole, openNewPolicy } from "@/components/policies-by-role";
+import { PoliciesDenied } from "@/components/policies-denied";
 import { HIDEABLE, PoliciesTable } from "@/components/policies-table";
 import { PolicyTest } from "@/components/policy-test";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { type ApiError, type BindingRow, type PoliciesAnswer, type PolicySetRow, type RoleRow, listBindings, listPolicies, listRoles, query } from "@/lib/api";
 import { AREA_DESC, CATEGORY, COLUMN, COLUMNS, DRAFT, EDITED, EVERYONE, FILTER, LANE_FILTER, LIST_FOOT, LIVE, NEW_POLICY, NO_MATCH, OUTSIDE_FOOT, READING, RELOAD_NOW, SEARCH, SHOWN_COLUMNS, SUBJECT_POLICIES, SUBJECT_REACH, SUBJECT_ROLES, TEST_A_CALL, VIEW, VIEW_LABEL, countWords, roleCountWords } from "@/lib/policy-words";
+import { DENIED_VIEW } from "@/lib/harness-words";
 import { navigate } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
 import { readFailed } from "@/lib/say";
@@ -60,7 +62,7 @@ function categoryOf(row: PolicySetRow): Category {
   return "everyone";
 }
 
-export function Policies({ view = "sets" }: { view?: "sets" | "roles" }) {
+export function Policies({ view = "sets" }: { view?: "sets" | "roles" | "denied" }) {
   const [state, setState] = React.useState<State>({ kind: "loading" });
   const [side, setSide] = React.useState<Side>({ roles: null, bindings: null, problems: [] });
   const [needle, setNeedle] = React.useState("");
@@ -133,7 +135,7 @@ export function Policies({ view = "sets" }: { view?: "sets" | "roles" }) {
   const lastRead = state.kind === "ready" ? state.lastRead : null;
   const hasOutside = rows.some((r) => categoryOf(r) === "outside");
 
-  const viewButton = (key: "sets" | "roles", label: string, rest: string[]) => (
+  const viewButton = (key: "sets" | "roles" | "denied", label: string, rest: string[]) => (
     <Button
       variant="outline"
       size="sm"
@@ -205,14 +207,17 @@ export function Policies({ view = "sets" }: { view?: "sets" | "roles" }) {
                 ...(side.roles || []).map((r) => ["role:" + r.name, r.name] as [string, string]),
                 ["outside", FILTER.outside],
               ])}
-              {picker(FILTER.lane, lane, pick(setLane), [["", FILTER.any], ...Object.entries(LANE_FILTER)])}
+              {view !== "denied" && picker(FILTER.lane, lane, pick(setLane), [["", FILTER.any], ...Object.entries(LANE_FILTER)])}
               <div role="group" aria-label={VIEW_LABEL} className="flex items-center">
                 {viewButton("sets", VIEW.sets, [])}
                 {viewButton("roles", VIEW.roles, ["by-role"])}
+                {viewButton("denied", DENIED_VIEW, ["denied"])}
               </div>
-              <span className="ml-auto text-[13px] text-muted-foreground" data-row-count>
-                {sets ? countWords(shown.length, rows.length) : roleCountWords(shownRoles.length)}
-              </span>
+              {view !== "denied" && (
+                <span className="ml-auto text-[13px] text-muted-foreground" data-row-count>
+                  {sets ? countWords(shown.length, rows.length) : roleCountWords(shownRoles.length)}
+                </span>
+              )}
               {sets && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -263,7 +268,7 @@ export function Policies({ view = "sets" }: { view?: "sets" | "roles" }) {
                 })}
                 <p className="text-[13px] text-muted-foreground">{LIST_FOOT}{hasOutside ? "" : " " + OUTSIDE_FOOT}</p>
               </>
-            ) : (
+            ) : view === "denied" ? <PoliciesDenied needle={needle} /> : (
               <PoliciesByRole
                 rows={rows}
                 roles={shownRoles}

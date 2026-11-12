@@ -60,6 +60,16 @@ func (c *Client) SetUserPassword(ctx context.Context, id, password string) (User
 		map[string]string{"password": password}, &out)
 }
 
+// SetEntraAgentID sets the Entra agent identity the agent id acts as at
+// Entra, or clears it when clientID is empty. The server normalizes the
+// value and refuses one that is not a GUID, a user that is not an agent and
+// an id another agent holds, each with a sentence.
+func (c *Client) SetEntraAgentID(ctx context.Context, id, clientID string) (User, error) {
+	var out User
+	return out, c.Do(ctx, http.MethodPatch, "/v1/admin/users/"+url.PathEscape(id),
+		map[string]string{"entra_agent_id": clientID}, &out)
+}
+
 // LockUser places a Straza-lane lock: an origin-tagged revocation that
 // survives IdM enables and reconciliation. users.status is untouched.
 // origin "" defaults server-side to admin, and "external" marks SOAR/SIEM

@@ -144,9 +144,13 @@ type User struct {
 	Sponsor    string // accountable human for an agent (username/ref)
 	SwarmID    string // fleet membership (policy match + fleet kill)
 	Ephemeral  bool   // short-lived task agent
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	DeletedAt  *time.Time
+	// EntraAgentID is the client id of the Entra agent identity an agent
+	// acts as at Entra, a lower-case GUID, or empty for none. Only an agent
+	// holds one, and no two live users hold the same.
+	EntraAgentID string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
 }
 
 // Role is the unit of entitlement (policy selectors, tool bindings, packs).

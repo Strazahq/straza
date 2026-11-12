@@ -15,8 +15,8 @@ tested:
   date: 2026-10-21
   except: the console steps, the midPoint notes, the admin API token and the session end at a key revoke, none of them walked
 applies_to: both
-who: You, as the admin, and the AI agent's machine
-where: A terminal with strazactl and curl, and a terminal on the agent's machine
+who: Admin
+where: Terminal with strazactl and curl, and a terminal on the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: cli
@@ -69,6 +69,7 @@ Each field tells Straza something different.
 | The agent schema, or `userType` `agent` | Records the identity as an AI agent. An AI agent never decides an approval, and it may sign in with a key. Either signal is enough, for a connector that cannot send the schema. |
 | `agencyMode` | Policy can match it with `match.identity.agencyMode`. With `autonomous`, a rule that asks for the requester's own confirmation denies, because no person stands behind the session. `supervised` and `interactive` change nothing beyond what a policy matches on them. |
 | `sponsor` | The username of the person behind the agent. An approval rule that names no deciders and no approver roles goes to this person, and a rule can name them beside approver roles with `deciders: [sponsor]`. |
+| `manager` of the SCIM enterprise User extension | Becomes the agent's sponsor. [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md" >}}) has the rules. |
 
 The read-only `kind` in the SCIM render is `nhi` only when the create carried the agent schema, and it never changes after creation. A row created with `userType` `agent` alone reads `kind` `human` there for good, while the admin surface and the key sign-in treat it as an agent. The mismatch stays visible to a certifier.
 

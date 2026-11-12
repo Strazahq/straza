@@ -44,13 +44,16 @@ type cachedSubject struct {
 // sessionFacts is what check-in records beside a session's subject, which
 // policy.Subject does not carry: whether the user is a person by userKind,
 // the name of the harness the session checked in with, and the knowledge
-// packs check-in delivered. The drafting tools read the first two
-// (native_drafts.go) and whoami reads the person and the packs. The zero
-// value reads as not a person, the stricter reading.
+// packs check-in delivered, and the Entra agent id of an agent that holds
+// one, read from the user row check-in loaded. The drafting tools read the
+// first two (native_drafts.go), whoami reads the person, the packs and the
+// Entra agent id, and forToken compares the Entra agent id with the token's
+// eai claim. The zero value reads as not a person, the stricter reading.
 type sessionFacts struct {
-	person  bool
-	harness string
-	packs   []whoamiPack
+	person       bool
+	harness      string
+	packs        []whoamiPack
+	entraAgentID string
 }
 
 func newSubjectCache() *subjectCache {
@@ -107,13 +110,13 @@ func (c *subjectCache) lookup(sessionID string) (cachedSubject, bool) {
 
 // forToken returns the cache entry of the session claims names, under the
 // edge rule of get, only while the entry holds the roles the token's rol
-// claim hashes. A token minted for other roles, by a check-in on another
-// replica after a role changed, reads as missing, so the request path
-// answers its check-in-again 401 and never serves roles the token does not
-// carry.
+// claim hashes and the Entra agent id its eai claim names. A token minted
+// for other roles or another id, by a check-in on another replica after
+// either changed, reads as missing, so the request path answers its
+// check-in-again 401 and never serves a subject the token does not carry.
 func (c *subjectCache) forToken(claims authn.Claims) (cachedSubject, bool) {
 	e, ok := c.lookup(claims.Session)
-	if !ok || e.rolesHash != claims.RolesHash {
+	if !ok || e.rolesHash != claims.RolesHash || e.facts.entraAgentID != claims.EntraAgentID {
 		return cachedSubject{}, false
 	}
 	return e, true

@@ -106,6 +106,46 @@ describe("What ran", () => {
     expect(document.querySelector("[data-paths]")?.textContent).toBe("Writes src/area.ts" + FILE_NOTE);
   });
 
+  it("lays a harness tool's input out under the harness's own name of the tool", () => {
+    show({ tool: "file.read", nativeTool: "Skill", workspace: "/work/proj", arguments: JSON.stringify({ args: "staging", skill: "deploy" }) });
+    expect((document.querySelector("[data-what-ran-meta]") as HTMLElement).textContent).toBe("file.read Skill in /work/proj");
+    const cells = [...document.querySelectorAll("[data-args] tr")].map((tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent));
+    expect(cells).toEqual([["args", "staging"], ["skill", "deploy"]]);
+  });
+
+  it("lays a spawn's input out as its arguments and keeps its subagent type out of the shell view", () => {
+    show({ tool: "task.spawn", nativeTool: "Agent", command: "Explore", arguments: JSON.stringify({ description: "sweep", prompt: "Find every caller.", subagent_type: "Explore" }) });
+    expect((document.querySelector("[data-what-ran-meta]") as HTMLElement).textContent).toBe("task.spawn Agent");
+    const cells = [...document.querySelectorAll("[data-args] tr")].map((tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent));
+    expect(cells).toEqual([["description", "sweep"], ["prompt", "Find every caller."], ["subagent_type", "Explore"]]);
+    expect(document.querySelector("[data-step-line]")).toBeNull();
+  });
+
+  it("still reads an older spawn record, which holds no input, as its subagent type", () => {
+    show({ tool: "task.spawn", nativeTool: "Agent", command: "Explore" });
+    expect(steps()).toEqual(["Explore"]);
+  });
+
+  it("shows the text a write put in the file when the record holds it", () => {
+    show({ tool: "file.write", nativeTool: "Write", paths: ["/work/game/src/area.ts"], workspace: "/work/game", arguments: JSON.stringify({ content: "export const area = 4;\n", file_path: "/work/game/src/area.ts" }) });
+    const cells = [...document.querySelectorAll("[data-args] tr")].map((tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent));
+    expect(cells).toEqual([["content", "export const area = 4;\n"], ["file_path", "/work/game/src/area.ts"]]);
+    expect(screen.queryByText(FILE_NOTE)).toBeNull();
+  });
+
+  it("says the record shortened a tool's input, gives the hash of the whole and still lays out every field", () => {
+    const hash = "9f".repeat(32);
+    show({ tool: "file.write", nativeTool: "Write", arguments: JSON.stringify({ content: "aaaa... (20000 bytes)", file_path: "/w/secret.env" }), argumentsTruncated: true, argumentsHash: "sha256:" + hash });
+    expect(document.querySelector("[data-notice=\"cut\"]")?.textContent).toBe("The record keeps a shortened copy of what this call was given.The SHA-256 of the whole text is " + hash + ".");
+    const cells = [...document.querySelectorAll("[data-args] tr")].map((tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent));
+    expect(cells).toEqual([["content", "aaaa... (20000 bytes)"], ["file_path", "/w/secret.env"]]);
+  });
+
+  it("words hidden characters in a tool's input as the input's and not a command's", () => {
+    show({ tool: "file.read", nativeTool: "Skill", arguments: JSON.stringify({ skill: "de\u200bploy" }) });
+    expect((document.querySelector("[data-notice=\"hidden\"]") as HTMLElement).textContent).toContain("This call's input holds 1 character that do not show on screen.");
+  });
+
   it("renders nothing for a record that holds no call", () => {
     const { container } = show({ effect: "allow" });
     expect(container.textContent).toBe("");

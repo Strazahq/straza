@@ -102,6 +102,7 @@
         "agencyMode": { "path": "ext:agencyMode", "creatable": true, "updateable": true, "clearVia": "patchOnly" },
         "sponsor": { "path": "ext:sponsor", "creatable": true, "updateable": true, "clearVia": "patchOnly" },
         "swarmId": { "path": "ext:swarmId", "creatable": true, "updateable": true, "clearVia": "patchOnly" },
+        "entraAgentId": { "path": "ext:entraAgentId", "creatable": true, "updateable": true, "clearVia": "patchOnly" },
         "ephemeral": { "path": "ext:ephemeral", "dataType": "Boolean", "creatable": true, "updateable": true, "clearVia": "patchOnly" },
         "//readonly": "Membership reflection, the lock block and the Straza-born facts are declared read-only so midPoint never writes them.",
         "groups": { "path": "groups[].value", "multivalued": true },

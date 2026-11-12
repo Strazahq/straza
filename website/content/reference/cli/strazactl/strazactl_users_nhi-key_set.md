@@ -2,7 +2,7 @@
 title: strazactl users nhi-key set
 description: Register the agent identity's Ed25519 public key, or rotate it and end the agent's running sessions
 pagetype: reference
-weight: 109
+weight: 115
 draft: false
 sources:
   - cmd/strazactl

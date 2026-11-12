@@ -16,8 +16,8 @@ tested:
   date: 2026-10-06
 applies_to: both
 keywords: ticket grant consume window
-who: You as the admin, and lena as the approver
-where: The console or a terminal with strazactl, and the agent's machine for the calls
+who: Admin, and lena as the approver
+where: Console or strazactl, and the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: console
@@ -43,7 +43,7 @@ A ticket is an approval that outlives the moment it was asked for. The agent's c
 2. Under Who decides, pick **An approver role** and `release-approvers`. Under How, pick **A ticket a person grants within**. The windows start at 1 day for the decision and 1 hour for the run. Type the reason, then press **Next**.
 3. On Review, name the set `deploy-ticket` and press **Save and publish**, then **Publish**.
 
-{{< shot name="policy-new-ticket" caption="The How step with **A ticket a person grants within** picked, 1 day to decide and 1 hour to run." >}}
+{{< shot name="policy-new-ticket" caption="The Who decides step with **A ticket a person grants within** picked, 1 day to decide and 1 hour to run." >}}
 {{< /console >}}
 
 

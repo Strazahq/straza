@@ -56,6 +56,9 @@ func (c *check) policyRisks() []Finding {
 		if hasA && c.w.LocalToolDefault == policy.EffectDeny {
 			out = append(out, localAllow(name, b, hadB, a)...)
 		}
+		if hasA {
+			out = append(out, serverAllow(name, b, hadB, a, c.registered())...)
+		}
 		out = append(out, c.identityScoped(name, ops[name])...)
 	}
 	_, loosened, guard := c.guardrail()
@@ -146,10 +149,7 @@ func localAllow(name string, b policy.Document, hadB bool, a policy.Document) []
 		if i := ruleIndex(b, ra.ID); hadB && !wider && i >= 0 && sameRule(b.Spec.Rules[i], ra) {
 			continue
 		}
-		what := listWords(kinds, "and")
-		if len(kinds) == len(localTools) {
-			what = "every tool kind"
-		}
+		what := localWhat(ra, kinds, "every tool kind")
 		out = append(out, risk(codeLocalAllow, "PolicySet/"+name, "", fmt.Sprintf("Rule %s of %s allows %s on managed machines, where this deployment denies it by default.", ra.ID, name, what),
 			"", ra.ID+": "+strings.Join(kinds, ", ")))
 	}
@@ -247,7 +247,7 @@ func (c *check) guardrailOf(subj [2]policy.Subject) (refused, loosened, risks []
 			if !appB {
 				base, hadBase = policy.Document{}, false
 			}
-			changedWhileBinding(name, base, hadBase, a, c.w.LocalToolDefault, add)
+			changedWhileBinding(name, base, hadBase, a, c.w.LocalToolDefault, c.registered(), add)
 		}
 	}
 	if !agent {
@@ -296,7 +296,7 @@ func (c *check) guardFinding(name, clause, them string, takeover bool) (f Findin
 // in it is added too. A gate kept by its id widens when it comes to let
 // through calls it held or refused: it allows where it could not, fires
 // on more calls or stops gating, unless it can only tighten the set.
-func changedWhileBinding(name string, b policy.Document, hadB bool, a policy.Document, localDefault string, add func(string, ...Finding)) {
+func changedWhileBinding(name string, b policy.Document, hadB bool, a policy.Document, localDefault string, apps map[string]App, add func(string, ...Finding)) {
 	if hadB && !sameMatch(b, a) {
 		var parts []Finding
 		if matchNarrows(b.Spec.Match, a.Spec.Match) || b.Spec.Priority != a.Spec.Priority {
@@ -314,18 +314,18 @@ func changedWhileBinding(name string, b policy.Document, hadB bool, a policy.Doc
 		case sameRule(rb, a.Spec.Rules[i]):
 		case isGate(rb):
 			clause, ra := "changes rule "+rb.ID, a.Spec.Rules[i]
-			if !tightens(ra, localDefault) && (!canAllow(rb) || firesMore(rb, ra) || (gateMode(rb) && !gateMode(ra))) {
+			if !tightens(ra, localDefault, apps) && (!canAllow(rb) || firesMore(rb, ra) || (gateMode(rb) && !gateMode(ra))) {
 				clause = widensRule + rb.ID
 			}
 			add(clause, gateRisk(name, rb, "changes the rule", ruleRef(ra)))
-		case tightens(a.Spec.Rules[i], localDefault):
+		case tightens(a.Spec.Rules[i], localDefault, apps):
 			add("changes rule " + rb.ID)
 		default:
 			add(widensRule + rb.ID)
 		}
 	}
 	for _, ra := range a.Spec.Rules {
-		if ruleIndex(b, ra.ID) < 0 && !tightens(ra, localDefault) {
+		if ruleIndex(b, ra.ID) < 0 && !tightens(ra, localDefault, apps) {
 			add(widensRule + ra.ID)
 		}
 	}
@@ -347,16 +347,17 @@ func (c *check) addedGateRisks() []Finding {
 			continue
 		}
 		for _, r := range a.Spec.Rules {
-			if ruleIndex(c.docsW[name], r.ID) >= 0 || !opensDefault(r, c.w.LocalToolDefault) {
+			if ruleIndex(c.docsW[name], r.ID) >= 0 || !opensDefault(r, c.w.LocalToolDefault, c.registered()) {
 				continue
 			}
-			kinds := deniedKinds(r, c.w.LocalToolDefault)
-			what := listWords(kinds, "and")
-			if len(kinds) == len(localTools) {
-				what = "every local tool kind"
+			if kinds := deniedKinds(r, c.w.LocalToolDefault); len(kinds) > 0 {
+				out = append(out, risk(codeGuardrail, "PolicySet/"+name, "", fmt.Sprintf(
+					"Rule %s of %s lets %s run on managed machines once %s, where this deployment denies it by default.",
+					r.ID, name, localWhat(r, kinds, "every local tool kind"), onceWords[r.Mode]), "", ruleRef(r)))
 			}
-			out = append(out, risk(codeGuardrail, "PolicySet/"+name, "", fmt.Sprintf(
-				"Rule %s of %s lets %s run on managed machines once %s, where this deployment denies it by default.", r.ID, name, what, onceWords[r.Mode]), "", ruleRef(r)))
+			for _, s := range gateServers(r, c.registered()) {
+				out = append(out, risk(codeGuardrail, "PolicySet/"+name, "", unregisteredWords(name, r, s, onceWords[r.Mode]), "", ruleRef(r)+" on "+cmp.Or(s, "every MCP server")))
+			}
 		}
 	}
 	return out

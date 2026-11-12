@@ -323,7 +323,7 @@ spec:
           - "sudo rm -rf *"
           - "sudo rm -fr *"
       effect: deny
-      reason: "Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet."
+      reason: "Straza starter policy: this sample rule denies commands that start with rm -rf. Delete files individually, or an admin can edit the standalone-starter PolicySet."
 `
 
 // bootstrapStarterPolicy seeds the starter PolicySet on a fresh standalone

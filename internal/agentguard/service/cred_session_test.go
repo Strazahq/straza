@@ -230,12 +230,12 @@ func TestCredDecideBounce(t *testing.T) {
 	}
 	r.waitStream(t, alice, "w1")
 	ev := policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec", Command: "ls"}
-	out, err := r.s.Decide(context.Background(), ses, ev, "", "")
+	out, err := r.s.Decide(context.Background(), ses, ev, "", "", nil)
 	if err != nil || out.Answer.Effect != policy.EffectAllow || out.Status != http.StatusOK || out.Bounced {
 		t.Fatalf("decide: %+v, %v", out, err)
 	}
 	r.srv.expireSessions()
-	out, err = r.s.Decide(context.Background(), ses, ev, "", "")
+	out, err = r.s.Decide(context.Background(), ses, ev, "", "", nil)
 	if err != nil || out.Answer.Effect != policy.EffectAllow || out.Status != http.StatusOK || !out.Bounced {
 		t.Fatalf("decide after the server forgot the session: %+v, %v", out, err)
 	}
@@ -321,7 +321,7 @@ func TestCredAgentLane(t *testing.T) {
 		if ses.User != "sam" {
 			t.Fatalf("agent session user %q", ses.User)
 		}
-		if out, err := r.s.Decide(ctx, ses, policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec"}, "", ""); err != nil || out.Bounced {
+		if out, err := r.s.Decide(ctx, ses, policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec"}, "", "", nil); err != nil || out.Bounced {
 			t.Fatalf("a bound agent session's decide: %+v, %v", out, err)
 		}
 	}
@@ -538,7 +538,7 @@ func TestCredPushRefusedAtConnect(t *testing.T) {
 			if tc.reacquires {
 				waitFor(t, "the re-acquire", func() bool { return current().ID != first.ID })
 				waitFor(t, "the new stream", func() bool { return r.s.Status(alice).Sessions[0].Push == localapi.PushConnected })
-				if _, err := r.s.Decide(context.Background(), current(), ev, "", ""); err != nil {
+				if _, err := r.s.Decide(context.Background(), current(), ev, "", "", nil); err != nil {
 					t.Fatalf("decide after the re-acquire: %v", err)
 				}
 				return
@@ -548,7 +548,7 @@ func TestCredPushRefusedAtConnect(t *testing.T) {
 				_, err := r.s.Session(context.Background(), alice, first.Harness, false)
 				return errors.As(err, &refused) && refused.Sentence == revokedSentence(deadline)
 			})
-			if _, err := r.s.Decide(context.Background(), first, ev, "", ""); !errors.As(err, &refused) || refused.Status != http.StatusForbidden {
+			if _, err := r.s.Decide(context.Background(), first, ev, "", "", nil); !errors.As(err, &refused) || refused.Status != http.StatusForbidden {
 				t.Fatalf("decide after the terminal renewal: %v, want the revoked refusal", err)
 			}
 			again, err := r.start(alice, first.Harness.Session)
@@ -592,7 +592,7 @@ func TestCredTerminalRenewalRevokes(t *testing.T) {
 			if _, err := r.s.Session(ctx, alice, first.Harness, false); !errors.As(err, &refused) || refused.Status != http.StatusForbidden {
 				t.Fatalf("the next call: %v, want the revoked refusal", err)
 			}
-			if _, err := r.s.Decide(ctx, first, policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec"}, "", ""); !errors.As(err, &refused) {
+			if _, err := r.s.Decide(ctx, first, policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec"}, "", "", nil); !errors.As(err, &refused) {
 				t.Fatalf("decide: %v, want the revoked refusal", err)
 			}
 			if st := r.s.Status(alice); st.Sessions[0].Revoked != deadline {
@@ -686,7 +686,7 @@ func TestCredSessionStartFindsDroppedSession(t *testing.T) {
 				t.Fatalf("second start: reused %v same id %v, %d check-ins, %d refreshes", again.Reused, again.ID == first.ID, accepted, refreshes)
 			}
 			r.srv.with(func() { r.srv.refreshRefuse = "" })
-			if _, err := r.s.Decide(context.Background(), again, policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec"}, "", ""); err != nil {
+			if _, err := r.s.Decide(context.Background(), again, policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec"}, "", "", nil); err != nil {
 				t.Fatalf("decide on the started session: %v", err)
 			}
 			r.srv.assertCounters(t)
@@ -859,7 +859,7 @@ func TestCredLapsedBounceKeepsTheRefusal(t *testing.T) {
 	armed.Store(true)
 	r.renewNow(t, ses)
 	armed.Store(false)
-	_, err = r.s.Decide(context.Background(), ses, policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec"}, "", "")
+	_, err = r.s.Decide(context.Background(), ses, policy.Event{Kind: policy.EventToolPre, Tool: "shell.exec"}, "", "", nil)
 	if deny := onlineDenyReason(err, "an approval-gated action", "Denied (fail-closed)"); !strings.Contains(deny, "refused this session") {
 		t.Fatalf("deny %q, want the server's refusal of the session", deny)
 	}

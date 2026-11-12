@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -31,6 +30,8 @@ type userPayload struct {
 	Sponsor    string `json:"sponsor,omitempty"`
 	SwarmID    string `json:"swarm_id,omitempty"`
 	Ephemeral  bool   `json:"ephemeral,omitempty"`
+	// EntraAgentID is the Entra agent identity an agent acts as at Entra.
+	EntraAgentID string `json:"entra_agent_id,omitempty"`
 	// Provisioning timestamps.
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -41,7 +42,7 @@ func toUserPayload(u store.User) userPayload {
 		Title:  u.Title,
 		Status: u.Status, Origin: u.Origin, Kind: userKind(u), ExternalID: u.ExternalID,
 		UserType: u.UserType, AgencyMode: u.AgencyMode, Sponsor: u.Sponsor,
-		SwarmID: u.SwarmID, Ephemeral: u.Ephemeral,
+		SwarmID: u.SwarmID, Ephemeral: u.Ephemeral, EntraAgentID: u.EntraAgentID,
 		CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt}
 }
 
@@ -196,7 +197,11 @@ func (a *App) handleUsersCreate(w http.ResponseWriter, r *http.Request) {
 		// it is stored as an agent, so no non-human row is born untyped.
 		UserType string `json:"user_type"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" {
+	err := decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil || req.Username == "" {
 		apiError(w, http.StatusBadRequest, "username is required")
 		return
 	}
@@ -392,8 +397,15 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 		Sponsor    *string `json:"sponsor"`
 		SwarmID    *string `json:"swarm_id"`
 		Ephemeral  *bool   `json:"ephemeral"`
+		// EntraAgentID sets the Entra agent identity of an agent, and an
+		// empty string clears it.
+		EntraAgentID *string `json:"entra_agent_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	err = decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil {
 		apiError(w, http.StatusBadRequest, "malformed JSON body")
 		return
 	}
@@ -435,6 +447,17 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.Ephemeral != nil {
 		u.Ephemeral = *req.Ephemeral
 	}
+	if req.EntraAgentID != nil {
+		id := ""
+		if strings.TrimSpace(*req.EntraAgentID) != "" {
+			var ok bool
+			if id, ok = store.NormalizeEntraAgentID(*req.EntraAgentID); !ok {
+				apiError(w, http.StatusBadRequest, fmt.Sprintf(entraNotGUIDMsg, *req.EntraAgentID))
+				return
+			}
+		}
+		u.EntraAgentID = id
+	}
 	deactivated, reactivated := false, false
 	if req.Status != nil {
 		if *req.Status != store.UserActive && *req.Status != store.UserDisabled {
@@ -469,6 +492,9 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	if cleared {
 		u.PasswordHash = ""
 	}
+	if a.refuseEntraAgentID(w, r, before, u) {
+		return
+	}
 	// Only the fields the request changes against the row it read are
 	// written, the set the record names, so a concurrent PATCH keeps what it
 	// wrote to any other field, and a value sent unchanged never restores one.
@@ -485,6 +511,10 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	var updated store.User
 	if err == nil {
 		updated, err = a.updateUserFields(r.Context(), u.ID, f, revoke)
+	}
+	// An id another user took after the check above is refused here.
+	if errors.Is(err, store.ErrConflict) && u.EntraAgentID != "" && a.refuseEntraAgentID(w, r, before, u) {
+		return
 	}
 	if err != nil {
 		switch {
@@ -507,6 +537,9 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if reactivated {
 		a.allowUserCtx(r.Context(), updated.ID)
+	}
+	if before.EntraAgentID != u.EntraAgentID {
+		a.entraAgentIDChanged(r.Context(), updated.ID)
 	}
 	a.identityChanged(r, "straza.identity.updated", updated.ID)
 	writeJSON(w, http.StatusOK, toUserPayload(updated))

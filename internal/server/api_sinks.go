@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -108,7 +107,11 @@ func (a *App) handleSinkReplay(w http.ResponseWriter, r *http.Request) {
 		Limit int `json:"limit"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		err := decodeAdmin(r.Body, &req)
+		if refusedUnknownField(w, err) {
+			return
+		}
+		if err != nil {
 			apiError(w, http.StatusBadRequest, "body must be JSON: {\"limit\": N} (optional)")
 			return
 		}

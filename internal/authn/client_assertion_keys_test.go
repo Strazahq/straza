@@ -75,8 +75,9 @@ func sortedKIDs(doc map[string]map[string]any) string {
 }
 
 // TestClientAssertionKeyLifecycle walks two keys through staged, active,
-// retiring and retired with a caller-supplied clock. At every step it pins
-// which key signs, what the key document carries and what this replica
+// retiring and retired with a caller-supplied clock. The janitor step never
+// promotes, so each key becomes active only through Promote. At every step it
+// pins which key signs, what the key document carries and what this replica
 // reports, and that a peer replica running the same step reports nothing, so
 // each transition is recorded exactly once. The store stamps its rows with
 // the real clock, so every step's time is an offset from a reading taken just
@@ -89,14 +90,14 @@ func TestClientAssertionKeyLifecycle(t *testing.T) {
 	peer := testAssertionKeys(t, repo, sealer)
 	const client, audience = "sam-sre-agent", "https://idp.example/realms/x"
 
-	step := func(name string, now time.Time, wantPromoted string, wantRetired []string, wantSigner string, wantDoc ...string) {
+	step := func(name string, now time.Time, wantRetired []string, wantSigner string, wantDoc ...string) {
 		t.Helper()
 		got, err := keys.Advance(ctx, now, caRetireAfter)
 		if err != nil {
 			t.Fatalf("%s: Advance: %v", name, err)
 		}
-		if got.Promoted != wantPromoted || strings.Join(got.Retired, ",") != strings.Join(wantRetired, ",") {
-			t.Errorf("%s: Advance = %+v, want promoted %q and retired %v", name, got, wantPromoted, wantRetired)
+		if got.Promoted != "" || strings.Join(got.Retired, ",") != strings.Join(wantRetired, ",") {
+			t.Errorf("%s: Advance = %+v, want no promotion and retired %v", name, got, wantRetired)
 		}
 		echo, err := peer.Advance(ctx, now, caRetireAfter)
 		if err != nil {
@@ -129,7 +130,7 @@ func TestClientAssertionKeyLifecycle(t *testing.T) {
 		}
 	}
 
-	step("an empty store publishes an empty document and signs nothing", time.Now(), "", nil, "")
+	step("an empty store publishes an empty document and signs nothing", time.Now(), nil, "")
 
 	first, err := keys.Stage(ctx, time.Now())
 	if err != nil {
@@ -146,9 +147,13 @@ func TestClientAssertionKeyLifecycle(t *testing.T) {
 		t.Fatalf("second Stage = %+v, want the staged key %s and created false", again, first.KID)
 	}
 	staged1 := time.Now()
-	step("one interval after staging the key is published and does not sign", staged1.Add(KeyReloadInterval), "", nil, "", first.KID)
-	step("two intervals after staging it signs", staged1.Add(2*KeyReloadInterval), first.KID, nil, first.KID, first.KID)
-	step("a second tick at the same time changes nothing", staged1.Add(2*KeyReloadInterval), "", nil, first.KID, first.KID)
+	step("one interval after staging the key is published and does not sign", staged1.Add(KeyReloadInterval), nil, "", first.KID)
+	step("an hour after staging it still does not sign", staged1.Add(time.Hour), nil, "", first.KID)
+	if got, err := keys.Promote(ctx, staged1.Add(2*KeyReloadInterval), first.KID); err != nil || !got.Changed {
+		t.Fatalf("Promote the first key = %+v, %v, want it promoted", got, err)
+	}
+	step("after its promotion it signs", staged1.Add(2*KeyReloadInterval), nil, first.KID, first.KID)
+	step("a second tick at the same time changes nothing", staged1.Add(2*KeyReloadInterval), nil, first.KID, first.KID)
 
 	second, err := keys.Stage(ctx, time.Now())
 	if err != nil {
@@ -158,13 +163,16 @@ func TestClientAssertionKeyLifecycle(t *testing.T) {
 		t.Fatalf("second key = %+v, want created beside the active key %s", second, first.KID)
 	}
 	staged2 := time.Now()
-	step("the second key is published while the first still signs", staged2.Add(KeyReloadInterval), "", nil, first.KID, first.KID, second.KID)
+	step("the second key is published while the first still signs", staged2.Add(time.Hour), nil, first.KID, first.KID, second.KID)
 	beforeDemotion := time.Now()
-	step("two intervals later the second key signs and the first stays published", staged2.Add(2*KeyReloadInterval), second.KID, nil, second.KID, first.KID, second.KID)
+	if got, err := keys.Promote(ctx, staged2.Add(2*KeyReloadInterval), second.KID); err != nil || got.PreviousKID != first.KID {
+		t.Fatalf("Promote the second key = %+v, %v, want it promoted over the first", got, err)
+	}
 	afterDemotion := time.Now()
-	step("the retiring key stays until every assertion it signed has expired", beforeDemotion.Add(caRetireAfter-time.Second), "", nil, second.KID, first.KID, second.KID)
-	step("then it leaves the document", afterDemotion.Add(caRetireAfter), "", []string{first.KID}, second.KID, second.KID)
-	step("retirement is not repeated", afterDemotion.Add(caRetireAfter+KeyReloadInterval), "", nil, second.KID, second.KID)
+	step("after its promotion the second key signs and the first stays published", afterDemotion, nil, second.KID, first.KID, second.KID)
+	step("the retiring key stays until every assertion it signed has expired", beforeDemotion.Add(caRetireAfter-time.Second), nil, second.KID, first.KID, second.KID)
+	step("then it leaves the document", afterDemotion.Add(caRetireAfter), []string{first.KID}, second.KID, second.KID)
+	step("retirement is not repeated", afterDemotion.Add(caRetireAfter+KeyReloadInterval), nil, second.KID, second.KID)
 
 	// A forced retirement of the signing key stops signing on this replica at
 	// once and on the peer at its next reload.
@@ -175,7 +183,7 @@ func TestClientAssertionKeyLifecycle(t *testing.T) {
 	if was, changed, err := peer.Retire(ctx, time.Now(), second.KID); err != nil || was != store.KeyRetired || changed {
 		t.Errorf("second Retire = %q, %v, %v, want retired, false", was, changed, err)
 	}
-	step("a retired signing key leaves nothing to sign with", time.Now(), "", nil, "")
+	step("a retired signing key leaves nothing to sign with", time.Now(), nil, "")
 	if _, _, err := keys.Retire(ctx, time.Now(), "no-such-kid"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("Retire of an unknown kid = %v, want ErrNotFound", err)
 	}
@@ -203,12 +211,7 @@ func TestClientAssertionDocumentIsPublicOnly(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
 	keys := testAssertionKeys(t, repo, testSealer(t))
-	if _, err := keys.Stage(ctx, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := keys.Advance(ctx, time.Now().Add(2*KeyReloadInterval+time.Second), caRetireAfter); err != nil {
-		t.Fatal(err)
-	}
+	stagedAndPromoted(t, keys)
 	if _, err := keys.Stage(ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -524,14 +527,8 @@ func TestSignAssertion(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
 	keys := testAssertionKeys(t, repo, testSealer(t))
-	staged, err := keys.Stage(ctx, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().Add(2*KeyReloadInterval + time.Second)
-	if _, err := keys.Advance(ctx, now, caRetireAfter); err != nil {
-		t.Fatal(err)
-	}
+	kid := stagedAndPromoted(t, keys)
+	now := time.Now()
 	const client, audience = "sam-sre-agent", "https://idp.example/realms/straza"
 
 	refused := []struct{ name, client, audience string }{
@@ -553,7 +550,7 @@ func TestSignAssertion(t *testing.T) {
 		t.Fatal(err)
 	}
 	hdr, _ := json.Marshal(msg.Signatures()[0].ProtectedHeaders())
-	if string(hdr) != `{"alg":"RS256","kid":"`+staged.KID+`","typ":"JWT"}` {
+	if string(hdr) != `{"alg":"RS256","kid":"`+kid+`","typ":"JWT"}` {
 		t.Errorf("header = %s, want RS256 with the kid and typ JWT", hdr)
 	}
 	raw, err := keys.JWKS(now)

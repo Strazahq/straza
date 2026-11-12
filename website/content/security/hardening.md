@@ -9,8 +9,8 @@ summary: >-
 pagetype: how-to
 weight: 13
 draft: false
-who: You, as the admin who runs the server
-where: A terminal that reaches strazad, with strazactl on an admin API token, and the server's config file
+who: Admin
+where: Terminal that reaches strazad, with strazactl on an admin API token, and the strazad config file
 steps: true
 tested:
   version: v1.1.0
@@ -282,7 +282,7 @@ The answer is two sentences. The first names the new key, `Staged a new session 
 Running the command again while a key is staged returns the same key, so a repeated command never piles up keys. Each run writes one `straza.audit.admin` record with the action `signing-keys.rotate` and the kid. A deployment with several replicas needs nothing more: the reload and the promotion run on every replica, and a replica that restarts loads the current key set from the store.
 
 
-The command names the purpose because a second key rotates the same way. `strazactl signing-keys rotate client_assertion` creates or rotates the key that signs agents' clients in at your identity provider, and its first answer gives the key document's address to register there as the JWKS URL. That key can sign in as any agent, so only a full administrator may run it, the role `straza-admin` or an admin API token with the scope `full`, and never from a session that a coding harness checked in. `strazactl signing-keys list` shows every key with its purpose and status, which is how you confirm a promotion or a retirement. When a client assertion key may have been copied, `strazactl signing-keys retire <kid>` takes it out of the key document on every replica within 30 seconds. Retiring the key that signs leaves nothing to sign with, so run the rotate command right after and expect about a minute until the new key signs. Your identity provider may still hold the retired key in its own cache, so clear that cache or remove the JWKS URL from the agents' clients there as well. Every create, rotate, promotion and retirement leaves one `straza.audit.admin` record with the purpose and the kid.
+The command names the purpose because a second key rotates almost the same way. `strazactl signing-keys rotate client_assertion` creates or rotates the key that signs agents' clients in at your identity provider, and its first answer gives the key document's address to register there as the JWKS URL. That key can sign in as any agent, so only a full administrator may run it, the role `straza-admin` or an admin API token with the scope `full`, and never from a session that a coding harness checked in. Unlike the session key, a staged client assertion key never promotes itself. If an Entra agent blueprint uses the key, upload its certificate there first, from `strazactl signing-keys certificate client_assertion <kid>`. Then make it the signing key with `strazactl signing-keys promote client_assertion <kid>`, at the earliest a minute after the rotate. `strazactl signing-keys list` shows every key with its purpose, its status and when its certificate expires, which is how you confirm a promotion or a retirement. When a client assertion key may have been copied, `strazactl signing-keys retire <kid>` takes it out of the key document on every replica within 30 seconds. Retiring the key that signs leaves nothing to sign with, so run the rotate command right after and promote the new key a minute later. Your identity provider may still hold the retired key in its own cache, so clear that cache or remove the JWKS URL from the agents' clients there as well, and remove its certificate from every Entra blueprint that holds it. Every create, rotate, promotion and retirement leaves one `straza.audit.admin` record with the purpose and the kid, and the promotion names the administrator who made it.
 
 ## Back up the keys that are also identities
 

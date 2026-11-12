@@ -10,11 +10,16 @@ export { AREAS };
 
 // ---- the page ----
 
-export type SettingsTab = "configuration" | "registry" | "tokens";
-export const TABS: { key: SettingsTab; label: string; area: "config" | "tokens" }[] = [
+// area "full" is a tab only a full administrator sees, because the server
+// takes its writes from one only. KEYS_TAB is its label, which the
+// Overview's door names too.
+export const KEYS_TAB = "Agent signing keys";
+export type SettingsTab = "configuration" | "registry" | "tokens" | "keys";
+export const TABS: { key: SettingsTab; label: string; area: "config" | "tokens" | "full" }[] = [
   { key: "configuration", label: "Configuration", area: "config" },
   { key: "registry", label: "Attestation registry", area: "config" },
   { key: "tokens", label: "API tokens", area: "tokens" },
+  { key: "keys", label: KEYS_TAB, area: "full" },
 ];
 export const hiddenTabsLine = (labels: string[]) => labels.join(" and ") + (labels.length === 1 ? " needs" : " need") + " the config area, which this session does not hold.";
 

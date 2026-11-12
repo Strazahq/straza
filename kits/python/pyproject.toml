@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "straza-agentkit"
-version = "0.3.0"
+version = "0.4.0"
 description = "Runtime governance for Python agents (LangChain, OpenAI Agents SDK, CrewAI, ...): every tool call is decided by the local straza binary before it runs."
 readme = "README.md"
 requires-python = ">=3.9"

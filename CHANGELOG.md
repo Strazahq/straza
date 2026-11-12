@@ -10,6 +10,124 @@ Straza numbers its binaries, its API and its wire formats.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-12
+
+Straza 2.2.0 lets an AI agent call an MCP server as its own Microsoft Entra agent identity, fixes
+enrollment and sign-in through Entra, lets the console write rules for MCP servers on people's own
+machines and for harness tools that Straza does not classify, and closes several security gaps.
+strazad migrates its database, so back up the store first.
+[Upgrade from 2.1.0 to 2.2.0](https://docs.straza.ai/guides/operate/backup-and-upgrade/#upgrade-from-210-to-220)
+walks the upgrade step by step.
+
+### Upgrade notes
+
+1. Back up the store, because migration 42 runs when strazad starts. To go back to 2.1.0, first run
+   `strazad migrate --to 41` with this version's binary. That drops every agent's Entra agent
+   identity.
+2. Check the scripts that call the admin API, because a request body with a field the route does
+   not take now gets a 400.
+3. Check every rule that uses `interpreters`, because `eval` now counts as an interpreter. A rule
+   that denies them now denies `eval "$(ssh-agent -s)"`, and one that sends them to the classifier
+   allows a harmless `eval`.
+4. Check every rule that sends shell commands to the classifier, because it now denies the Homebrew
+   install command.
+5. Give each audit sink that must not hold secrets a `subjects` list without `straza.audit.tool`, as
+   [Events](https://docs.straza.ai/reference/events/) shows, because tool inputs now reach it
+   unmasked.
+6. From this version on, upgrade strazad before strazactl, because a newer strazactl may send a
+   field an older strazad does not know.
+7. Expect a 401 during a rolling upgrade when an agent with an Entra agent identity reaches a new
+   replica. Its client then checks in again.
+8. After each `strazactl signing-keys rotate client_assertion`, run
+   `strazactl signing-keys promote client_assertion <kid>` with this version's strazactl, or the new
+   key never signs. Rotate only once every replica runs this version, because an older one promotes
+   a staged key by itself.
+9. Add `entraBlueprint` to the config only once every strazad replica runs this version, because an
+   older one refuses to start with it.
+
+### Added
+
+- An AI agent can call an MCP server that trusts Microsoft Entra as its own Entra agent identity,
+  without holding an Entra credential. The provider names the agent blueprint in `entraBlueprint`.
+- An AI agent's Entra agent identity is set over SCIM as `entraAgentId`, in the admin API as
+  `entra_agent_id` or with `strazactl users entra-agent-id set`. A change reaches every replica
+  within 330 seconds, and the console's agent page shows the identity.
+- Entra ID's SCIM provisioning can set an agent's Entra agent identity when it creates the agent.
+  Name the target attribute
+  `urn:ietf:params:scim:schemas:extension:straza:2.0:User:entraAgentId`, as
+  [Generic SCIM](https://docs.straza.ai/guides/connect-identity/generic-scim/) shows.
+- An AI agent's SCIM manager becomes its sponsor, though Straza does not check that the manager is
+  a person. Provision the manager first, or a PATCH naming it is refused.
+- A SCIM write that Straza refuses after accepting its token leaves a log warning and a
+  `straza.audit.admin` record with the action `scim.refused`.
+- The console's Settings has an Agent signing keys tab that rotates the client assertion key in the
+  order Entra needs: stage, upload the certificate, promote.
+- When a provider uses Entra, the console's Overview warns before the client assertion key's
+  certificate expires. It also warns when a staged key waits over a day.
+- The console writes rules for MCP servers on people's own machines and for harness tools that
+  Straza does not classify, and suggests calls denied in the last 24 hours.
+- Policies has a Denied by default view, and the record of a call that no rule decided offers
+  Write a rule for this call. The New policy wizard can create an application role.
+- A draft that adds an MCP server with one shared secret asks for that secret when you publish it,
+  instead of a later `strazactl apps secret set`.
+- The audit record of every harness tool keeps its input in `arguments`. straza-agentkit 0.4.0
+  sends the input of a tool Straza does not classify.
+- The new page
+  [What each lane stops](https://docs.straza.ai/evaluate/what-each-lane-stops/) says which lanes
+  are a security boundary and how to test each one.
+
+### Changed
+
+- A client assertion key no longer promotes itself after a rotation, so its certificate can reach
+  the Entra agent blueprint first. `strazactl signing-keys certificate client_assertion <kid>`
+  prints it.
+- The agent skill plugin is 0.6.44, and its classify example `classify-shell.yaml` sends every shell
+  command of a role to the classifier.
+- The standalone starter policy's deny reason now says it is only a sample rule. A server that
+  already holds the policy keeps its old reason.
+- `strazad --version` and `strazactl --version` name the command that prints the version, as
+  `straza --version` already did.
+
+### Fixed
+
+- A person can enroll a machine through Microsoft Entra. Install the straza client of this version
+  on that machine first.
+- A person whom Entra ID's SCIM provisioning created can sign in. Map Entra's `objectId` to
+  `externalId`, as [Entra ID login](https://docs.straza.ai/guides/connect-identity/entra-login/)
+  shows.
+- A SCIM PATCH ignores an attribute Straza does not map, so Entra's updates of a user's manager no
+  longer fail. A PATCH of a user's groups is refused and says to send the membership on the group.
+- A SCIM create or replace with a value of the wrong JSON type gets a 400 that names the attribute
+  and the fix in the attribute mapping.
+- The console's Audit screen no longer uses a full processor core, repeats rows, raises a false
+  "Audit chain broken" alert or calls a chain with a gap verified.
+- The console shows the tool names of a rule on harness tools, where it showed every call. An
+  Allowed policy no longer stores an approval sentence as its reason.
+- Policy simulate runs the classifier, so a command that a rule with `mode: classify` denies no
+  longer comes back as an allow.
+- A client's offline audit spool uploads parked files in order, so failed uploads no longer put a
+  machine's records out of order.
+
+### Security
+
+- Built with Go 1.26.11, which fixes GO-2026-6859, a race in net/http that could crash strazad.
+- The classifier denies a command substitution, with `$( )`, backticks or `<( )`, that downloads or
+  decodes text and runs it as code. `eval "$(ssh-agent -s)"` stays allowed.
+- A shell command that starts with `eval` counts as an interpreter, also from an older client, and
+  the classifier reads its argument as a program.
+- The admin API refuses a request with a field the route does not take, so a misspelled
+  `expiresIn` no longer mints a token that never expires.
+- A request to turn a policy set off whose body is not valid JSON gets a 400 instead of turning it
+  on.
+- A draft that allows tools of an MCP server on a person's own machine raises a risk, so
+  `admin.secondPerson` asks for a second person. An agent cannot add such a rule to a policy set
+  that binds it.
+- Under `admin.secondPerson`, a direct route that would publish such a rule answers 409 and asks
+  for a draft.
+- An approval of a harness tool that Straza does not classify is bound to the tool's arguments,
+  which the approver sees redacted.
+- The gateway refuses a call that was already in flight when its agent was disabled.
+
 ## [2.1.0] - 2026-11-06
 
 Straza 2.1.0 adds a tool that tells an agent what it may do, lets you pin a server's objects in the
@@ -367,7 +485,9 @@ The first public release.
 - Signed release archives for Linux, macOS and Windows, the container image
   `ghcr.io/strazahq/straza` and the Helm chart under `deploy/helm/straza`.
 
-[Unreleased]: https://github.com/strazahq/straza/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/strazahq/straza/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/strazahq/straza/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/strazahq/straza/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/strazahq/straza/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/strazahq/straza/compare/v1.1.2...v2.0.0
 [1.1.2]: https://github.com/strazahq/straza/compare/v1.1.1...v1.1.2

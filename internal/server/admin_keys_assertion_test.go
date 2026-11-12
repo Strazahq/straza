@@ -3,9 +3,12 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -62,13 +65,15 @@ func rawGet(t *testing.T, method, url string) (int, http.Header, []byte) {
 
 // TestClientAssertionKeyLifecycleOverTheAPI walks the client assertion key
 // through the admin routes and the janitor step on one node. It pins the
-// answers, the key document at every stage, one audit record per transition
-// with actor, purpose and kid, and that no answer, record or log line carries
+// answers, the key document at every stage, that only the promote route makes
+// a key sign, one audit record per transition with actor, purpose and kid,
+// the certificate route, and that no answer, record or log line carries
 // private key material.
 func TestClientAssertionKeyLifecycleOverTheAPI(t *testing.T) {
 	t.Parallel()
 	log, logs := captureLogger()
-	app, base := testAppPreRun(t, []func(*App){func(a *App) { a.log = log }})
+	clk := &edgeClock{t: time.Now()}
+	app, base := testAppPreRun(t, []func(*App){func(a *App) { a.log = log; a.assertionKeys.clock = clk.now }})
 	ctx := context.Background()
 	kim := seedIdentity(t, app)
 	grantAdmin(t, app, kim.ID)
@@ -144,13 +149,51 @@ func TestClientAssertionKeyLifecycleOverTheAPI(t *testing.T) {
 		t.Errorf("document = %q, want the staged key at once", kids)
 	}
 
+	type promotion struct {
+		KID, Status, Was string
+		PreviousKID      string `json:"previous_kid"`
+		EverySigns       int    `json:"every_replica_signs_in_seconds"`
+		PreviousLeaves   int    `json:"previous_key_leaves_document_in_seconds"`
+		Error            string `json:"error"`
+	}
+	promote := func(kid string, want int) promotion {
+		t.Helper()
+		var out promotion
+		if code := adminReq(t, "POST", base+"/v1/admin/signing-keys/client-assertion/"+kid+"/promote", tok, nil, &out); code != want {
+			t.Fatalf("promote %s = %d (%s), want %d", kid, code, out.Error, want)
+		}
+		raw, _ := json.Marshal(out)
+		answers.Write(raw)
+		return out
+	}
+
 	staged1 := time.Now()
 	app.clientAssertionKeyStep(ctx, staged1.Add(authn.KeyReloadInterval))
-	wantRecords("one interval after staging", "signing-keys.create "+first.KID+" kim")
-	app.clientAssertionKeyStep(ctx, staged1.Add(2*authn.KeyReloadInterval))
-	app.clientAssertionKeyStep(ctx, staged1.Add(2*authn.KeyReloadInterval))
+	app.clientAssertionKeyStep(ctx, staged1.Add(time.Hour))
+	wantRecords("an hour of janitor steps after staging", "signing-keys.create "+first.KID+" kim")
+	if keys, _ := app.store.SigningKeys().ListByPurpose(ctx, store.KeyPurposeClientAssertion); len(keys) != 1 || keys[0].Status != store.KeyStaged {
+		t.Fatalf("stored keys = %+v, want the one key still staged", keys)
+	}
+
+	clk.set(time.Now())
+	early := promote(first.KID, http.StatusConflict)
+	for _, want := range []string{first.KID, "every replica publishes it", "60 seconds after staging", "Run the command again in"} {
+		if !strings.Contains(early.Error, want) {
+			t.Errorf("early promote refusal %q does not say %q", early.Error, want)
+		}
+	}
+	clk.set(time.Now().Add(2 * authn.KeyReloadInterval))
+	if got := promote(first.KID, http.StatusOK); got != (promotion{KID: first.KID, Status: store.KeyActive, Was: store.KeyStaged, EverySigns: 30}) {
+		t.Errorf("promote = %+v, want the first key active from staged and no previous key", got)
+	}
+	if got := promote(first.KID, http.StatusOK); got.Was != store.KeyActive {
+		t.Errorf("a second promote = %+v, want was active", got)
+	}
 	wantRecords("after the promotion ran twice",
-		"signing-keys.create "+first.KID+" kim", "signing-keys.promote "+first.KID+" ")
+		"signing-keys.create "+first.KID+" kim", "signing-keys.promote "+first.KID+" kim")
+	if ev := lastAdminAction(t, app, "signing-keys.promote"); ev["actorId"] != kim.ID || ev["actorVia"] == nil {
+		t.Errorf("promote record = %v, want kim's actor fields", ev)
+	}
 
 	second := rotate()
 	if second.PreviousKID != first.KID || second.KID == first.KID {
@@ -159,42 +202,78 @@ func TestClientAssertionKeyLifecycleOverTheAPI(t *testing.T) {
 	if kids := docKIDs(); len(strings.Split(kids, ",")) != 2 {
 		t.Errorf("document = %q, want the active and the staged key", kids)
 	}
-	staged2 := time.Now()
-	app.clientAssertionKeyStep(ctx, staged2.Add(2*authn.KeyReloadInterval))
+	clk.set(time.Now().Add(2 * authn.KeyReloadInterval))
+	got := promote(second.KID, http.StatusOK)
+	if got.PreviousKID != first.KID || got.PreviousLeaves != int((app.assertionKeyRetireAfter()+authn.KeyReloadInterval).Seconds()) {
+		t.Errorf("promote = %+v, want the first key as the previous key and its departure time", got)
+	}
 	demoted := time.Now()
 	app.clientAssertionKeyStep(ctx, demoted.Add(app.assertionKeyRetireAfter()))
 	if kids := docKIDs(); kids != second.KID {
 		t.Errorf("document = %q, want only %s once the old key retired", kids, second.KID)
 	}
 	lifecycle := []string{
-		"signing-keys.create " + first.KID + " kim", "signing-keys.promote " + first.KID + " ",
-		"signing-keys.rotate " + second.KID + " kim", "signing-keys.promote " + second.KID + " ",
+		"signing-keys.create " + first.KID + " kim", "signing-keys.promote " + first.KID + " kim",
+		"signing-keys.rotate " + second.KID + " kim", "signing-keys.promote " + second.KID + " kim",
 		"signing-keys.retire " + first.KID + " ",
 	}
 	wantRecords("after the second key took over", lifecycle...)
+
+	// The certificate of the signing key holds the published public key.
+	req, _ := http.NewRequest("GET", base+"/v1/admin/signing-keys/client-assertion/"+second.KID+"/certificate", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	answers.Write(certPEM)
+	block, _ := pem.Decode(certPEM)
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/x-pem-file" || block == nil || block.Type != "CERTIFICATE" {
+		t.Fatalf("certificate = %d, %q, %s, want one PEM CERTIFICATE", resp.StatusCode, resp.Header.Get("Content-Type"), certPEM)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, docBody := rawGet(t, "GET", base+assertionJWKS)
+	if n := base64.RawURLEncoding.EncodeToString(cert.PublicKey.(*rsa.PublicKey).N.Bytes()); !bytes.Contains(docBody, []byte(`"n":"`+n+`"`)) {
+		t.Error("the certificate's modulus is not in the key document")
+	}
+	if cert.Subject.CommonName != "Straza client assertion "+second.KID {
+		t.Errorf("certificate subject = %q, want it to name %s", cert.Subject.CommonName, second.KID)
+	}
 
 	sessionKeys, err := app.store.SigningKeys().ListByPurpose(ctx, store.KeyPurposeSession)
 	if err != nil || len(sessionKeys) == 0 {
 		t.Fatal(err)
 	}
-	retires := []struct {
-		name, kid string
-		want      int
-		says      []string
+	refusals := []struct {
+		name, route string
+		want        int
+		says        []string
 	}{
-		{"an unknown kid", "no-such-kid", http.StatusNotFound, []string{"no-such-kid", "strazactl signing-keys list"}},
-		{"a session key", sessionKeys[0].KID, http.StatusConflict, []string{"session", "only a client assertion key", "strazactl signing-keys rotate session"}},
+		{"retire an unknown kid", "POST no-such-kid/retire", http.StatusNotFound, []string{"no-such-kid", "strazactl signing-keys list"}},
+		{"retire a session key", "POST " + sessionKeys[0].KID + "/retire", http.StatusConflict, []string{"session", "only a client assertion key", "strazactl signing-keys rotate session"}},
+		{"promote an unknown kid", "POST no-such-kid/promote", http.StatusNotFound, []string{"no-such-kid", "strazactl signing-keys list"}},
+		{"promote a session key", "POST " + sessionKeys[0].KID + "/promote", http.StatusConflict, []string{"session", "only a client assertion key is promoted by hand", "strazactl signing-keys rotate session"}},
+		{"promote a retired key", "POST " + first.KID + "/promote", http.StatusConflict, []string{first.KID, "is retired and cannot sign again", "strazactl signing-keys rotate client_assertion", "promote that one"}},
+		{"the certificate of an unknown kid", "GET no-such-kid/certificate", http.StatusNotFound, []string{"no-such-kid", "strazactl signing-keys list"}},
+		{"the certificate of a session key", "GET " + sessionKeys[0].KID + "/certificate", http.StatusConflict, []string{"session", "only a client assertion key has a certificate"}},
+		{"the certificate of a retired key", "GET " + first.KID + "/certificate", http.StatusConflict, []string{first.KID, "no longer serves its certificate", "Entra blueprint"}},
 	}
-	for _, tc := range retires {
+	for _, tc := range refusals {
 		var out struct {
 			Error string `json:"error"`
 		}
-		if code := adminReq(t, "POST", base+"/v1/admin/signing-keys/client-assertion/"+tc.kid+"/retire", tok, nil, &out); code != tc.want {
-			t.Errorf("retire %s = %d, want %d", tc.name, code, tc.want)
+		method, path, _ := strings.Cut(tc.route, " ")
+		if code := adminReq(t, method, base+"/v1/admin/signing-keys/client-assertion/"+path, tok, nil, &out); code != tc.want {
+			t.Errorf("%s = %d, want %d", tc.name, code, tc.want)
 		}
 		for _, want := range tc.says {
 			if !strings.Contains(out.Error, want) {
-				t.Errorf("retire %s: refusal %q does not say %q", tc.name, out.Error, want)
+				t.Errorf("%s: refusal %q does not say %q", tc.name, out.Error, want)
 			}
 		}
 	}
@@ -223,6 +302,7 @@ func TestClientAssertionKeyLifecycleOverTheAPI(t *testing.T) {
 		KID, Purpose, Status string
 		CreatedAt            string `json:"created_at"`
 		RotatedAt            string `json:"rotated_at"`
+		CertificateExpires   string `json:"certificate_expires_at"`
 	}
 	if code := adminReq(t, "GET", base+"/v1/admin/signing-keys", tok, nil, &listed); code != http.StatusOK {
 		t.Fatalf("list = %d", code)
@@ -232,6 +312,9 @@ func TestClientAssertionKeyLifecycleOverTheAPI(t *testing.T) {
 		byKID[k.KID] = k.Purpose + " " + k.Status
 		if k.CreatedAt == "" {
 			t.Errorf("listed key %s has no created_at", k.KID)
+		}
+		if k.CertificateExpires != "" {
+			t.Errorf("listed key %s, %s and %s, names a certificate expiry %s", k.KID, k.Purpose, k.Status, k.CertificateExpires)
 		}
 	}
 	if byKID[first.KID] != "client_assertion retired" || byKID[second.KID] != "client_assertion retired" || byKID[sessionKeys[0].KID] != "session active" {
@@ -344,9 +427,11 @@ func TestClientAssertionDocumentFailsClosed(t *testing.T) {
 
 // TestClientAssertionKeyTwoReplicas is the two-pods proof on Postgres: two
 // servers share one database and one KEK, both take the rotate call at the
-// same moment and both run the janitor step, and the deployment ends with one
-// key, one create record and one promote record. Each replica publishes the
-// key and a replica with another KEK refuses to boot.
+// same moment, both run the janitor step, which promotes nothing, and both
+// take the promote call at the same moment. The deployment ends with one
+// active key, one create record and one promote record with the
+// administrator as its actor. Each replica publishes the key and serves the
+// same certificate, and a replica with another KEK refuses to boot.
 func TestClientAssertionKeyTwoReplicas(t *testing.T) {
 	t.Parallel()
 	dsn := freshPostgresDSN(t)
@@ -355,8 +440,10 @@ func TestClientAssertionKeyTwoReplicas(t *testing.T) {
 		cfg.Store = config.Store{Driver: config.DriverPostgres, DSN: dsn}
 		cfg.Secrets.KEKFile = kek
 	}
-	podA, baseA := testApp(t, shared)
-	podB, baseB := testApp(t, shared)
+	clk := &edgeClock{t: time.Now()}
+	withClock := []func(*App){func(a *App) { a.assertionKeys.clock = clk.now }}
+	podA, baseA := testAppPreRun(t, withClock, shared)
+	podB, baseB := testAppPreRun(t, withClock, shared)
 	ctx := context.Background()
 	kim := seedIdentity(t, podA)
 	grantAdmin(t, podA, kim.ID)
@@ -393,21 +480,58 @@ func TestClientAssertionKeyTwoReplicas(t *testing.T) {
 		go func() { defer wg.Done(); podB.clientAssertionKeyStep(ctx, now) }()
 		wg.Wait()
 	}
+	clk.set(now)
+	for i := range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			base, tok := baseA, tokA
+			if i%2 == 1 {
+				base, tok = baseB, tokB
+			}
+			if code := adminReq(t, "POST", base+"/v1/admin/signing-keys/client-assertion/"+results[0].KID+"/promote", tok, nil, nil); code != http.StatusOK {
+				t.Errorf("promote %d = %d", i, code)
+			}
+		}()
+	}
+	wg.Wait()
+	if err := podB.assertionKeys.Reload(ctx, now); err != nil {
+		t.Fatal(err)
+	}
 	keys, err := podA.store.SigningKeys().ListByPurpose(ctx, store.KeyPurposeClientAssertion)
 	if err != nil || len(keys) != 1 || keys[0].Status != store.KeyActive {
 		t.Fatalf("stored keys = %+v (%v), want exactly one active key", len(keys), err)
 	}
 	var got []string
 	for _, ev := range keyAuditRecords(t, podA, store.KeyPurposeClientAssertion) {
-		got = append(got, ev["action"].(string))
+		actor, _ := ev["actor"].(string)
+		got = append(got, ev["action"].(string)+" "+actor)
 	}
-	if strings.Join(got, ",") != "signing-keys.create,signing-keys.promote" {
-		t.Errorf("audit records = %v, want one create and one promote for the whole deployment", got)
+	if strings.Join(got, ",") != "signing-keys.create kim,signing-keys.promote kim" {
+		t.Errorf("audit records = %v, want one create and one promote by kim for the whole deployment", got)
 	}
-	for name, base := range map[string]string{"pod A": baseA, "pod B": baseB} {
-		if _, _, body := rawGet(t, "GET", base+assertionJWKS); !bytes.Contains(body, []byte(keys[0].KID)) {
+	var certs [][]byte
+	for name, pod := range map[string]struct {
+		base, tok string
+	}{"pod A": {baseA, tokA}, "pod B": {baseB, tokB}} {
+		if _, _, body := rawGet(t, "GET", pod.base+assertionJWKS); !bytes.Contains(body, []byte(keys[0].KID)) {
 			t.Errorf("%s does not publish the key: %s", name, body)
 		}
+		req, _ := http.NewRequest("GET", pod.base+"/v1/admin/signing-keys/client-assertion/"+keys[0].KID+"/certificate", nil)
+		req.Header.Set("Authorization", "Bearer "+pod.tok)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s certificate = %d (%s)", name, resp.StatusCode, body)
+		}
+		certs = append(certs, body)
+	}
+	if !bytes.Equal(certs[0], certs[1]) {
+		t.Error("the two replicas serve different certificate bytes, so Entra would see two thumbprints")
 	}
 
 	dir := t.TempDir()

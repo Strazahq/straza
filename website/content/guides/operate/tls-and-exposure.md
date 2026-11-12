@@ -15,8 +15,8 @@ tested:
   except: the console row, not clicked
   date: 2026-10-06
 applies_to: both
-who: You, as the operator of the server
-where: The strazad config file and a terminal on the host
+who: Operator
+where: strazad config file and a terminal on the host
 steps: true
 keywords: tls listener exposure certificate approver pin plaintext
 ---

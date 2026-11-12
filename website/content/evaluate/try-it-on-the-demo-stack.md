@@ -3,8 +3,8 @@ title: Try it on the demo stack
 description: Run Straza with midPoint, Keycloak, AI agents and MCP servers on one machine, and see what the seeded stack does.
 pagetype: tutorial
 weight: 50
-who: You, as alice, the admin of the stack
-where: A terminal and a browser, on the machine that runs Docker or through SSH tunnels to it
+who: Admin, as alice
+where: Terminal and a browser, on the machine that runs Docker or through SSH tunnels to it
 steps: true
 modes: [console, cli]
 mode_default: console

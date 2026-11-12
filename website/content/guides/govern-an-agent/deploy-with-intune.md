@@ -15,8 +15,8 @@ tested:
   date: 2026-10-26
   except: every Intune step, which has not run on a tenant, a Windows machine or a Mac
 applies_to: both
-who: You, as the Intune administrator of the machines whose agents you govern
-where: A Windows machine for the packaging, and the Microsoft Intune admin center
+who: Intune administrator
+where: Windows machine and the Microsoft Intune admin center
 steps: true
 keywords: intune win32 app msi intunewin content prep tool windows fleet deploy system context detection rule supersedence straza service managed install macos pkg shell script settings catalog managed login items team identifier
 ---
@@ -90,7 +90,7 @@ Add the detection rule of the next step, then assign the app to your device grou
 On the Detection rules page, choose a custom detection script and upload the one below, saved as `detect.ps1`. Leave its two options at No: running as a 32-bit process and enforcing a signature check. Write the version from your MSI's file name in `$want`, such as `2.0.0` for `straza_2.0.0_windows_amd64.msi`.
 
 ```powershell
-$want = '2.1.0'
+$want = '2.2.0'
 $exe = 'C:\ProgramData\straza\bin\straza.exe'
 $svc = Get-Service straza-service -ErrorAction SilentlyContinue
 if ($svc.Status -ne 'Running' -or -not (Test-Path $exe)) { exit 1 }
@@ -126,7 +126,7 @@ In the Microsoft Intune admin center, open Apps, then All Apps, and create an ap
 | Field | Value |
 |---|---|
 | Ignore app version | No |
-| Included apps | One entry, with the bundle ID `ai.straza.straza` and the version of the pkg, such as `2.1.0` for `straza_2.1.0_darwin_universal.pkg`. Delete any other entry. |
+| Included apps | One entry, with the bundle ID `ai.straza.straza` and the version of the pkg, such as `2.2.0` for `straza_2.2.0_darwin_universal.pkg`. Delete any other entry. |
 
 The pkg installs no app bundle, so `ai.straza.straza` is the identifier of its package receipt. A post on Microsoft's Intune blog says that the agent reads package receipts too, and no tenant has shown yet that Intune reports this app as installed. With Ignore app version set to No, Intune installs a pkg whose version differs from the one on the Mac, which is how a later release reaches the fleet.
 

@@ -2,7 +2,7 @@
 title: strazactl users set-password
 description: Set a person's built-in-issuer password (rotation, or a credential for SCIM-born people)
 pagetype: reference
-weight: 111
+weight: 117
 draft: false
 sources:
   - cmd/strazactl

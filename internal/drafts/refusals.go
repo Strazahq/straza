@@ -145,7 +145,8 @@ func appRefusals(w World, it Item, apps map[string]App) []Finding {
 	case app.Agents == credentialClientCredentials && !p.ClientCredentials:
 		return []Finding{refusal(codeAppProvider, it.Object(), fmt.Sprintf(
 			"server %s sets credential.agents to client_credentials, and the provider %s has no clientCredentials settings. "+
-				"Add oauth.providers.%s.clientCredentials.assertionAudience to strazad's config, or set credential.agents to own, sponsor or shared.",
+				"Add oauth.providers.%s.clientCredentials to strazad's config, with assertionAudience for Keycloak or Okta, or with entraBlueprint for an Entra agent blueprint. "+
+				"Otherwise set credential.agents to own, sponsor or shared.",
 			it.Name, app.Provider, app.Provider), "")}
 	}
 	return nil

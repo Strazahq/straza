@@ -15,8 +15,8 @@ tested:
   except: the enterprise, Kubernetes and Windows steps, the WebPush key, the console, and the upgrade from 1.1.2 to 2.0.0, written from the code
   date: 2026-10-07
 applies_to: both
-who: You, as whoever is on call for the server
-where: A terminal on the strazad host, or your Postgres and Kubernetes tooling
+who: Whoever is on call for the server
+where: Terminal on the strazad host, or your Postgres and Kubernetes tooling
 steps: true
 keywords: backup upgrade migration migrate restore rollback vapid kek drill pg_dump pg_restore disaster recovery package remove purge decommission macos pkg uninstall major release 2.0.0 1.1.2 redirect re-enroll
 ---
@@ -116,6 +116,8 @@ The custom format is the one `pg_restore` reads in [Or restore an enterprise dat
 
 An upgrade is a restart on the new binary. At boot, before the line `store ready`, the server applies every embedded migration the store has not seen, so an upgrade needs no separate migration step. Take a backup first.
 
+To upgrade from 2.1.0 to 2.2.0, follow [Upgrade from 2.1.0 to 2.2.0](#upgrade-from-210-to-220), because that release migrates the database and the order of the steps matters.
+
 To upgrade from 1.1.2 to 2.0.0, follow [Upgrade from 1.1.2 to 2.0.0](#upgrade-from-112-to-200) first, because that release also changes every governed machine and the order of the steps matters.
 
 On the standalone host, download and verify the new release as [Install]({{< relref "guides/operate/install.md" >}}) describes. Then, from the directory that holds the new `strazad` and as the user that owns the installed one, stop the server, put the new binary in place of the old one and start it again.
@@ -172,6 +174,24 @@ strazactl audit verify
 
 
 In the console, the foot of the sidebar names the profile and the strazad build, and its tooltip adds the commit. The Overview card re-hashes the 25 newest records in your browser, and the Audit screen re-hashes every record it has loaded, starting with the newest 200. Only `strazactl audit verify` checks the whole chain.
+
+## Upgrade from 2.1.0 to 2.2.0 {#upgrade-from-210-to-220 .nostep}
+
+
+Straza 2.2.0 is a minor release that migrates the database, and from this release on strazad is upgraded before strazactl. Do the steps in this order.
+
+1. Take a backup, as [Back up a standalone server](#back-up-a-standalone-server) or [Or back up an enterprise deployment](#or-back-up-an-enterprise-deployment) shows. Migration 42 runs at the first start of strazad 2.2.0.
+2. Check the scripts that call the admin API. A request body with a field the route does not take now gets a 400 that names the field, where strazad used to drop the field.
+3. Review every policy rule that uses `interpreters`. A command that starts with `eval` now counts as an interpreter, so a rule that denies interpreters also denies `eval "$(ssh-agent -s)"`.
+4. Look for policy rules that send shell commands to the classifier. It now denies the Homebrew install command, which runs a download as the payload of `bash -c`.
+5. In the config that strazad 2.2.0 starts with, give each audit sink that must not hold secrets a `subjects` list without `straza.audit.tool`, as [Events]({{< relref "reference/events.md" >}}) shows. A tool's audit record now keeps the tool's input unmasked.
+6. Upgrade every strazad replica, as [Upgrade](#upgrade) shows. During a rolling upgrade a 2.2.0 replica answers 401 to an older replica's session token for an agent that holds an Entra agent identity, and the client checks in again by itself.
+7. Upgrade strazactl after strazad.
+8. Install the 2.2.0 `straza` client on each machine whose person enrolls through Microsoft Entra.
+
+Two things wait until every replica runs 2.2.0. Add `entraBlueprint` to the config only then, because an older replica refuses to start with it. Rotate the client assertion key only then, and after each `strazactl signing-keys rotate client_assertion` run `strazactl signing-keys promote client_assertion <kid>`, or the new key never signs.
+
+To go back to 2.1.0, run `strazad migrate --to 41` with the 2.2.0 binary first, as [Roll back](#roll-back) shows. That step drops every agent's Entra agent identity.
 
 ## Upgrade from 1.1.2 to 2.0.0 {#upgrade-from-112-to-200 .nostep}
 
@@ -294,21 +314,22 @@ A rollback has two ways:
 
 An older strazad refuses to start on a database a newer one migrated, and only the newer binary carries the step that undoes its own migration. The command therefore runs before the older binary starts. It cannot see other replicas, so stop every replica before you run it. Give it the same `--config`, `--profile`, `--data-dir` and `--store-dsn` that `strazad serve` runs with, from the same directory.
 
-The target is the newest migration of the release you return to. This release carries migrations 37 to 41, and each run of the command moves the database down one of them. Each step gives up what its migration added:
+The target is the newest migration of the release you return to. This release carries migrations 37 to 42, and each run of the command moves the database down one of them. Each step gives up what its migration added:
 
 | Step | What the older server no longer has |
 |---|---|
+| 42 to 41 | Every AI agent's Entra agent identity. Set each one again after the next upgrade. |
 | 41 to 40 | The commit of the client build recorded on each session. |
 | 40 to 39 | Every device enrolled with a key. The step writes a device revocation for each one and deletes its row, so each such machine installs the straza client of the release you return to and enrolls again. A device enrolled without a key keeps its row. |
 | 39 to 38 | Every covers line. Each role then reaches every object its tools reach on its server, so a role that covered some objects reaches all of them. Moving up again leaves each role on a server that pins an object type covering every object until you narrow it again. |
 | 38 to 37 | The object list of every server and the credential each listing used. Every other credential stays. |
 
 {{< fails >}}
-`this strazad has no migration 36. Its migrations run from 37 to 41, so name one of those`
+`this strazad has no migration 36. Its migrations run from 37 to 42, so name one of those`
 : This build cannot move the database below migration 37. For a release older than that, restore the backup you took before the upgrade.
 {{< /fails >}}
 
-The command refuses a target more than one step down before anything runs and names the step to run first. Run it once for each step, with `TARGET` set to 40, then 39, and so on down to the newest migration of the release you return to. On the standalone host, with the target in the shell variable `TARGET`:
+The command refuses a target more than one step down before anything runs and names the step to run first. Run it once for each step, with `TARGET` set to 41, then 40, and so on down to the newest migration of the release you return to. On the standalone host, with the target in the shell variable `TARGET`:
 
 {{< command terminal="Terminal" purpose="on the strazad host" >}}
 ```sh

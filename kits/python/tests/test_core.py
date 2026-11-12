@@ -7,6 +7,7 @@ binary is missing, and that capture calls never raise. The real-binary
 integration lane is the Go side's normalize tests + the conformance runner.
 """
 
+import datetime
 import json
 import os
 import subprocess
@@ -130,6 +131,46 @@ class KitTest(unittest.TestCase):
         (inv,) = self.invocations(events=False)
         self.assertEqual(inv["payload"]["tool_name"], "other")
         self.assertEqual(inv["payload"]["native_tool_name"], "refund_order")
+
+    def test_unclassified_tool_sends_its_arguments(self):
+        """A tool of kind other has no command, path or url to describe it,
+        so the kit sends the call's own arguments as tool_input. Straza
+        records them and an approval binds them."""
+        straza.check("other", tool_name="refund_order", args={"order": "A-1", "cents": 500})
+        (inv,) = self.invocations(events=False)
+        self.assertEqual(inv["payload"]["tool_input"], {"order": "A-1", "cents": 500})
+
+    def test_unclassified_tool_with_no_arguments_says_so(self):
+        """An empty object is the observed call with no arguments. It is not
+        the same as arguments the kit never saw, so it is sent."""
+        straza.check("other", tool_name="ping", args={})
+        straza.check("other", tool_name="ping")
+        observed, unseen = self.invocations(events=False)
+        self.assertEqual(observed["payload"]["tool_input"], {})
+        self.assertNotIn("tool_input", unseen["payload"])
+
+    def test_classified_tool_sends_no_arguments(self):
+        """A classified kind is described by its command, paths or url, and
+        its arguments can hold a file's content, so args is not sent."""
+        straza.check("file.write", paths=["/tmp/x"], tool_name="save", args={"path": "/tmp/x", "content": "body"})
+        (inv,) = self.invocations(events=False)
+        self.assertEqual(inv["payload"]["tool_input"], {"paths": ["/tmp/x"]})
+
+    def test_arguments_that_are_not_json_are_sent_as_text(self):
+        """A value JSON cannot carry is sent as its text, so the call is
+        still decided and recorded."""
+        straza.check("other", tool_name="at", args={"when": datetime.date(2026, 11, 10)})
+        (inv,) = self.invocations(events=False)
+        self.assertEqual(inv["payload"]["tool_input"], {"when": "2026-11-10"})
+
+    def test_guard_sends_the_arguments_of_an_unclassified_tool(self):
+        @straza.guard("other", name="refund_order", args_from=lambda order, cents=0: {"order": order, "cents": cents})
+        def refund(order, cents=0):
+            return order
+
+        self.assertEqual(refund("A-1", cents=500), "A-1")
+        (inv,) = self.invocations(events=False)
+        self.assertEqual(inv["payload"]["tool_input"], {"order": "A-1", "cents": 500})
 
     def test_guard_sends_its_name(self):
         @straza.guard("other", name="refund_order")

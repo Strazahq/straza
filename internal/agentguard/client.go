@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/agentguard/trace"
 	"github.com/strazahq/straza/internal/oidcflow"
 	"github.com/strazahq/straza/internal/policy"
@@ -209,12 +210,16 @@ type DecideResponse struct {
 // Decide asks the server PDP (serverCheck rules). agentType and agentID are
 // the delegate attribution of the call, sent beside the event for the
 // server's audit record and omitted when empty. The event's NativeTool rides
-// beside it too, because the event's JSON leaves it out.
-func (c *Client) Decide(ctx context.Context, sessionToken string, event policy.Event, agentType, agentID string) (DecideResponse, error) {
+// beside it too, because the event's JSON leaves it out, and so does input,
+// a classified tool's input for that record, when it is not nil.
+func (c *Client) Decide(ctx context.Context, sessionToken string, event policy.Event, agentType, agentID string, input *localapi.ToolInput) (DecideResponse, error) {
 	var out DecideResponse
 	body := map[string]any{"event": event}
 	if event.NativeTool != "" {
 		body["nativeTool"] = event.NativeTool
+	}
+	if input != nil {
+		body["toolInput"] = input
 	}
 	if agentType != "" {
 		body["agentType"] = agentType

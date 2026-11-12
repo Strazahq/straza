@@ -28,6 +28,7 @@ import { notify } from "@/lib/notify";
 import { routeByKey } from "@/lib/routes";
 import { readFailed, refused } from "@/lib/say";
 import { NONE, absTime } from "@/lib/words";
+import { useTimeZone } from "@/lib/timezone";
 import { cn, downloadText } from "@/lib/utils";
 
 // The Audit screen: the signed chain
@@ -83,6 +84,15 @@ async function checked(rows: AuditRow[], startPrev: string | null): Promise<numb
   const v = await verifyChain(rows, startPrev);
   return v.ok ? 0 : v.brokenSeq;
 }
+
+// sameRecord says two reads of one seq answer the same record with the same
+// names, so the row built for the first still holds. The hash covers the
+// record itself; the names are joined in by the server and may change.
+const sameRecord = (a: AuditRow, b: AuditRow) =>
+  a === b || (a.hash === b.hash && a.username === b.username && a.decidedByUsername === b.decidedByUsername);
+
+// sameRecords says two answers hold the same records in the same order.
+const sameRecords = (a: AuditRow[], b: AuditRow[]) => a.length === b.length && a.every((r, i) => r.seq === b[i].seq && sameRecord(r, b[i]));
 
 // oneType is the type parameter the server search takes when the lens
 // names exactly one prefix. A wider lens narrows in the browser instead,
@@ -295,7 +305,7 @@ export function Audit({ preset }: Props) {
   const [typed, setTyped] = React.useState(seed.q || seed.session || "");
   const [q, setQ] = React.useState(typed.trim());
   const [user, setUser] = React.useState<PickedUser | null>(seed.user ? { id: seed.user, username: seed.user } : null);
-  const [tail, setTail] = React.useState<Tail>(NO_TAIL);
+  const [tail, drawTail] = React.useState<Tail>(NO_TAIL);
   const [hits, setHits] = React.useState<Hits>(NO_HITS);
   const [open, setOpen] = React.useState<Record<number, boolean>>({});
   const [record, setRecord] = React.useState<Row | null>(null);
@@ -313,12 +323,23 @@ export function Audit({ preset }: Props) {
   const [entered, setEntered] = React.useState(0);
 
   const searching = !!(q || effect || user);
+  // tailRef is the tail itself, and the state only draws it. Every change is
+  // computed from the ref and written back at once, so a read that starts
+  // before React has drawn the last change still reads from where it ended.
   const tailRef = React.useRef(tail);
-  tailRef.current = tail;
+  const setTail = React.useCallback((next: Tail | ((t: Tail) => Tail)) => {
+    tailRef.current = typeof next === "function" ? next(tailRef.current) : next;
+    drawTail(tailRef.current);
+  }, []);
   const seenRef = React.useRef(seen);
   seenRef.current = seen;
   const pace = React.useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const reading = React.useRef(false);
+  // A read that finds nothing new changes no state, so the table is not
+  // drawn again every second. The time of the last successful read, which
+  // the unreachable banner quotes, lives here instead.
+  const tailReadAt = React.useRef<Date | null>(null);
+  const hitsReadAt = React.useRef<Date | null>(null);
 
   const fail = React.useCallback((e: unknown, subject: string, where: "tail" | "hits") => {
     const err = e as ApiError;
@@ -326,7 +347,7 @@ export function Audit({ preset }: Props) {
     const sentence = readFailed(subject, err);
     if (where === "tail") setTail((t) => ({ ...t, problem: sentence }));
     else setHits((h) => ({ ...h, problem: sentence }));
-  }, []);
+  }, [setTail]);
 
   // reveal moves the screen from the record it shows up to seq to. Paced,
   // it walks there in equal steps whose last one lands before the next
@@ -368,7 +389,8 @@ export function Audit({ preset }: Props) {
       } catch {
         // The head count falls back to the newest record this window holds.
       }
-      setTail({ rows, head, broken, lastRead: new Date(), problem: null });
+      tailReadAt.current = new Date();
+      setTail({ rows, head, broken, lastRead: tailReadAt.current, problem: null });
       reveal(rows.length ? rows[rows.length - 1].seq : 0, false);
     } catch (e) {
       fail(e, "The audit chain", "tail");
@@ -388,14 +410,17 @@ export function Audit({ preset }: Props) {
     try {
       const batch = await listAudit(query({ after: newest.seq, limit: TAIL_TICK }));
       const fresh = batch || [];
+      tailReadAt.current = new Date();
       if (!fresh.length) {
-        setTail((t) => ({ ...t, lastRead: new Date(), problem: null }));
+        if (cur.problem) setTail((t) => ({ ...t, problem: null }));
         return;
       }
       const broken = await checked(fresh, newest.hash || "");
+      // A Reload while this read was out may already hold some of it, so
+      // only the records past the newest one held are added.
       setTail((t) => ({
         ...t,
-        rows: t.rows.concat(fresh).slice(-TAIL_KEEP),
+        rows: t.rows.concat(fresh.filter((r) => !t.rows.length || r.seq > t.rows[t.rows.length - 1].seq)).slice(-TAIL_KEEP),
         head: Math.max(t.head, fresh[fresh.length - 1].seq),
         broken: t.broken || broken,
         lastRead: new Date(),
@@ -425,7 +450,12 @@ export function Audit({ preset }: Props) {
     const read = async () => {
       try {
         const batch = await listAudit(query({ order: "desc", limit: TAIL_WINDOW, q, effect, user: user?.username, type: oneType(lens) }));
-        if (alive) setHits({ rows: batch || [], lastRead: new Date(), problem: null });
+        if (!alive) return;
+        const rows = batch || [];
+        hitsReadAt.current = new Date();
+        // An answer that matches the one on screen keeps the same state, so
+        // the repeat read every three seconds draws nothing.
+        setHits((h) => (h.lastRead && !h.problem && sameRecords(h.rows, rows) ? h : { rows, lastRead: hitsReadAt.current, problem: null }));
       } catch (e) {
         if (alive) fail(e, "The search", "hits");
       }
@@ -459,17 +489,26 @@ export function Audit({ preset }: Props) {
 
   const loadOlder = async () => {
     const cur = tailRef.current;
-    if (older || !cur.rows.length) return;
+    if (older || !cur.rows.length || cur.rows[0].seq <= 1) return;
     setOlder(true);
     const oldest = cur.rows[0];
+    // The window ends right before the oldest record held and starts no
+    // earlier than seq 1, so it never holds a record already on screen.
+    const limit = Math.min(TAIL_WINDOW, oldest.seq - 1);
     try {
-      const batch = await listAudit(query({ after: Math.max(0, oldest.seq - TAIL_WINDOW - 1), limit: TAIL_WINDOW }));
+      const batch = await listAudit(query({ after: oldest.seq - 1 - limit, limit }));
       const rows = batch || [];
       let broken = await checked(rows, null);
       // The older window is contiguous with itself. Its join to the window
       // already held is the last hash against the oldest record's link.
       if (!broken && canHash && rows.length && oldest.prevHash && rows[rows.length - 1].hash !== oldest.prevHash) broken = oldest.seq;
-      setTail((t) => ({ ...t, rows: rows.concat(t.rows), broken: t.broken || broken, lastRead: new Date(), problem: null }));
+      tailReadAt.current = new Date();
+      // A tail read that trimmed the oldest records while this one was out
+      // would leave a gap, so the window joins only the record it was read
+      // against.
+      setTail((t) => (t.rows.length && t.rows[0].seq === oldest.seq
+        ? { ...t, rows: rows.concat(t.rows), broken: t.broken || broken, lastRead: tailReadAt.current, problem: null }
+        : t));
     } catch (e) {
       fail(e, "The older records", "tail");
     } finally {
@@ -496,20 +535,50 @@ export function Audit({ preset }: Props) {
     }
   };
 
-  const base = React.useMemo(() => (searching ? hits.rows : tail.rows.slice().reverse()).map(ceRow), [searching, hits.rows, tail.rows]);
+  // The table draws a row again only when its row object changes, so a
+  // record already on screen keeps the row built for it, and a fold head
+  // whose run did not move keeps its object too.
+  const built = React.useRef(new Map<number, { src: AuditRow; row: Row }>());
+  const heads = React.useRef(new Map<number, { base: Row | undefined; head: Row }>());
+  const base = React.useMemo(() => {
+    const next = new Map<number, { src: AuditRow; row: Row }>();
+    const out = (searching ? hits.rows : tail.rows.slice().reverse()).map((src) => {
+      const was = built.current.get(src.seq);
+      const row = was && sameRecord(was.src, src) ? was.row : ceRow(src);
+      next.set(src.seq, { src, row });
+      return row;
+    });
+    built.current = next;
+    return out;
+  }, [searching, hits.rows, tail.rows]);
   const shown = React.useMemo(() => base.filter((r) => typeMatches(r.type, lens)), [base, lens]);
   // The table holds back the tail records the reveal has not reached. The
   // counts of loaded records and the export read every loaded one.
-  const folded = React.useMemo(() => foldAdjacent(searching ? shown : shown.filter((r) => r.seq <= seen), open), [shown, open, searching, seen]);
+  const folded = React.useMemo(() => {
+    const next = new Map<number, { base: Row | undefined; head: Row }>();
+    const out = foldAdjacent(searching ? shown : shown.filter((r) => r.seq <= seen), open).map((r) => {
+      if (!r.foldN) return r;
+      const base = built.current.get(r.seq)?.row;
+      const was = heads.current.get(r.seq);
+      const head = was && was.base === base && was.head.foldN === r.foldN && was.head.foldOpen === r.foldOpen && was.head.foldEnd === r.foldEnd ? was.head : r;
+      next.set(r.seq, { base, head });
+      return head;
+    });
+    heads.current = next;
+    return out;
+  }, [shown, open, searching, seen]);
 
   // Every callback here only sets state, so the columns are rebuilt when
-  // the revoked set moves and at no other time.
+  // the revoked set or the time zone moves and at no other time. The zone
+  // is read by absTime inside the Time cell, so it is listed here to make a
+  // switch draw every row again.
+  const zone = useTimeZone();
   const columns = React.useMemo(() => columnsOf({
     onUser: (username) => setUser({ id: username, username }),
     onFold: (seq) => setOpen((o) => ({ ...o, [seq]: !o[seq] })),
     onRevoke: (row) => { setRefusal(null); setAsk(row); },
     revoked,
-  }), [revoked]);
+  }), [revoked, zone]);
 
   const status: { tone: "ok" | "unknown"; word: string; text: string; tip: string } | null = searching
     ? { tone: "unknown", word: SEARCH_WORD, text: searchLine(q, effect, user?.username || "", hits.rows.length >= TAIL_WINDOW), tip: SEARCH_TIP }
@@ -522,6 +591,7 @@ export function Audit({ preset }: Props) {
         : { tone: "ok", word: CHAIN_WORD, text: chainVerified(tail.rows.length, tail.head), tip: CHAIN_TIP };
   const problem = searching ? hits.problem : tail.problem;
   const lastRead = searching ? hits.lastRead : tail.lastRead;
+  const readAt = searching ? hitsReadAt.current : tailReadAt.current;
   const note = noteOf(lens);
   // rowLook is a row's edge, tint and enter transition. The open row keeps
   // the fill of the selected state, so it is not tinted.
@@ -555,7 +625,7 @@ export function Audit({ preset }: Props) {
             {chainBroken(tail.broken)}
           </div>
         )}
-        {problem && <FetchError subject={route.label} detail={problem} lastRead={lastRead} />}
+        {problem && <FetchError subject={route.label} detail={problem} lastRead={readAt} />}
         {status && <StatusLine tone={status.tone} word={status.word} text={status.text} tip={status.tip} />}
 
         <DataTable
@@ -569,6 +639,7 @@ export function Audit({ preset }: Props) {
           openKey={record ? String(record.seq) : null}
           widths={WIDTHS}
           rowClassName={rowLook}
+          stableRows
           filterBar={
             <>
               <Select value={lens} onValueChange={setLens}>
@@ -607,9 +678,11 @@ export function Audit({ preset }: Props) {
           emptyText={!lastRead ? (problem ? EMPTY_UNREAD : EMPTY_LOADING) : searching ? EMPTY_SEARCH : base.length ? EMPTY_LENS : EMPTY_CHAIN}
           foot={searching || !tail.lastRead ? undefined : (
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="outline" size="sm" onClick={() => void loadOlder()}>
-                {older && <Loader2Icon className="animate-spin" />} Load older
-              </Button>
+              {tail.rows.length > 0 && tail.rows[0].seq > 1 && (
+                <Button variant="outline" size="sm" onClick={() => void loadOlder()}>
+                  {older && <Loader2Icon className="animate-spin" />} Load older
+                </Button>
+              )}
               <span className={CAPS}>{loadedWords(tail.rows.length, tail.head)}</span>
             </div>
           )}

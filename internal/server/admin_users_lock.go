@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -49,7 +48,11 @@ func (a *App) handleUserLock(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 		Origin string `json:"origin"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
+	err = decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil || strings.TrimSpace(req.Reason) == "" {
 		apiError(w, http.StatusBadRequest, "reason is required")
 		return
 	}

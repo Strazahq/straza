@@ -73,6 +73,14 @@ func newRootCmd(loginPath string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// The version is printed by `strazactl version` only. The flag error for
+	// --version names that command so the operator is not left guessing.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		if err.Error() == "unknown flag: --version" {
+			return fmt.Errorf("unknown flag: --version. Run `strazactl version` to print the version")
+		}
+		return err
+	})
 	root.PersistentFlags().StringVar(&serverURL, "server", "",
 		"strazad base URL (overrides $STRAZA_SERVER)")
 

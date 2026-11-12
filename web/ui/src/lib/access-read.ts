@@ -74,3 +74,7 @@ export function mayWritePolicy(): boolean {
   const grants = snapshot()?.grants || "";
   return grants === "full" || grants.split(",").includes("policy:write");
 }
+
+// mayMakeRole says whether this session may make a role that belongs to no
+// server, which takes a full grant. Display only: the server re-checks.
+export const mayMakeRole = (): boolean => (snapshot()?.grants || "") === "full";

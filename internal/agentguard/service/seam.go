@@ -160,8 +160,9 @@ type credentials interface {
 	// A failure's text is the deny sentence.
 	Policy(ctx context.Context, s Session) (eng *policy.Engine, maxAge int64, snapshotID string, err error)
 	// Decide asks strazad's /v1/decide for s. A 401 bounces once through a
-	// renewal.
-	Decide(ctx context.Context, s Session, ev policy.Event, agentType, agentID string) (DecideOutcome, error)
+	// renewal. input is a classified tool's input for strazad's record, nil
+	// when the hook sent none.
+	Decide(ctx context.Context, s Session, ev policy.Event, agentType, agentID string, input *localapi.ToolInput) (DecideOutcome, error)
 	// Record appends one audit record of type ceType to c's spool, and the
 	// credential half drains it.
 	Record(c Caller, ceType string, data map[string]any) error

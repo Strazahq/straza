@@ -1,0 +1,16 @@
+{{- /* The roadmap board: {{< roadmap-board >}}. It writes an empty element
+whose data-board attribute holds the board field of the page's front matter
+as JSON, and assets/roadmap-board.js draws the board from it over the page's
+own tables. Without script the tables are the page. A stage names its ##
+heading by the heading's text, and the build fails when the page has no such
+heading, because the board would lose that column without a word. The
+attribute keeps the JSON out of the search index, which reads the text. */ -}}
+{{- $b := .Page.Params.board -}}
+{{- if not $b }}{{ errorf "%s: roadmap-board has no board field in the front matter to draw. Add board with its stages and lanes, as website/content/project/roadmap.md has." .Position }}{{ end -}}
+{{- $lines := split .Page.RawContent "\n" -}}
+{{- $stages := slice -}}
+{{- range $b.stages -}}
+  {{- if not (in $lines (printf "## %s" .heading)) }}{{ errorf "%s: board stage heading %q is not a ## heading of this page, so its column would stay empty. Write the heading's text exactly as the page has it." $.Position .heading }}{{ end -}}
+  {{- $stages = $stages | append (merge . (dict "id" (anchorize .heading))) -}}
+{{- end -}}
+<div class="rb" id="rb" data-board="{{ merge $b (dict "stages" $stages) | jsonify }}"></div>

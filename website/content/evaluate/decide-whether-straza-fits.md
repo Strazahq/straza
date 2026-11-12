@@ -14,6 +14,7 @@ keywords: evaluate decide pilot architect journey fit
 {{< stop page="evaluate/what-straza-is.md" >}}What Straza does, who it is for, and what it does not try to do.{{< /stop >}}
 {{< stop page="evaluate/how-it-works.md" >}}A diagram of every core noun, and a tool call traced on the agent's machine and at the gateway.{{< /stop >}}
 {{< stop page="evaluate/security-model.md" kind="Security" >}}What Straza enforces and where. An action that bypasses the hook, the gateway and `straza exec` is outside Straza's view.{{< /stop >}}
+{{< stop page="evaluate/what-each-lane-stops.md" kind="Security" >}}Which lanes are a security boundary, what counts as a finding, and how to test each lane in your pilot.{{< /stop >}}
 
 {{< stop page="security/known-limits.md" >}}A table of the known limits that matter for a fleet. If you manage Claude Code through a device management profile, server-managed settings or a Windows registry policy, read the row on its managed sources first. Claude Code uses only its highest managed source, so if any of those lacks Straza's hooks, Claude Code skips the hooks and gives no warning.{{< /stop >}}
 {{< stop page="evaluate/identity-and-your-iga.md" >}}Your identity provider checks sign-in, and your IGA, or an admin on standalone, owns people, agents and who holds which role. Straza owns what each role may do.{{< /stop >}}

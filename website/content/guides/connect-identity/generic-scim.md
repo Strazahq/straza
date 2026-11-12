@@ -4,8 +4,8 @@ description: Your SCIM 2.0 client holds a token for Straza, and you know each re
 summary: >-
   Straza accepts a strict subset of SCIM 2.0 from a client that holds an admin API token with
   the `scim` area. The client creates, updates and deactivates users. Roles are made in Straza
-  and reach the client as groups whose only writable fact is membership, and a request outside
-  the subset is refused with a SCIM error.
+  and reach the client as groups whose only writable fact is membership. An operation outside the
+  subset is refused, and an unmapped attribute is ignored.
 pagetype: how-to
 weight: 40
 draft: false
@@ -14,8 +14,8 @@ tested:
   platform: A Linux container against the demo stack, with the requests sent with curl
   date: 2026-09-28
 applies_to: both
-who: You, as the Straza admin, for the SCIM client you build or configure
-where: A terminal with strazactl and curl
+who: Straza admin
+where: Terminal with strazactl and curl
 steps: true
 modes: [console, cli]
 mode_default: cli
@@ -104,7 +104,7 @@ The base path is `/scim/v2`. The content type is `application/scim+json`, and pl
 `/ServiceProviderConfig`, `/Schemas` and `/ResourceTypes` answer GET only, and a POST to `/Bulk` answers `501`. Sorting, ETags and `.search` are outside the subset. The service provider document says the same in the protocol's own words: `patch` supported, `bulk`, `sort`, `etag` and `changePassword` unsupported, `filter` supported with `maxResults` 200.
 
 
-A user carries these attributes. The extension is `urn:straza:params:scim:schemas:extension:2.0:User`.
+A user carries these attributes. The extension is `urn:straza:params:scim:schemas:extension:2.0:User`. Straza also reads it on a write under a second name, which Microsoft Entra ID needs, as the end of this section shows.
 
 | Attribute | Where | Your client | Meaning |
 |---|---|---|---|
@@ -120,10 +120,21 @@ A user carries these attributes. The extension is `urn:straza:params:scim:schema
 | `sponsor` | extension | writes | the accountable person behind an AI agent |
 | `swarmId` | extension | writes | a fleet label policy can match |
 | `ephemeral` | extension | writes | a boolean |
+| `entraAgentId` | extension | writes | an AI agent only: the client id of the Entra agent identity it acts as at Entra, a GUID. A server that trusts Entra gets the agent's token as that identity, and a change applies at the agent's next check-in, which the strazad that took it asks for at the agent's next call, and within 330 seconds on every other replica |
 | `locked`, `lockReason`, `lockedAt`, `lockOrigin` | extension | reads | a lock placed in Straza |
 | `kind`, `origin` | extension | reads | what Straza recorded at birth, and how the account was born |
+| `manager` | enterprise extension | writes | an AI agent only: the person accountable for it, by Straza id or `userName`, which Straza stores as the agent's `sponsor`. Never read back |
 
-One deviation from plain SCIM keeps a classification in place. A `PUT` that leaves out `userType`, `agencyMode`, `sponsor`, `swarmId` or `ephemeral` keeps the stored value, so a client that maps only the core attributes never wipes it. Clear one with a `PATCH` `remove`. Membership is written through `/Groups` only.
+One deviation from plain SCIM keeps a classification in place. A `PUT` that leaves out `userType`, `agencyMode`, `sponsor`, `swarmId`, `ephemeral` or `entraAgentId` keeps the stored value, so a client that maps only the core attributes never wipes it. Clear one with a `PATCH` `remove`. Membership is written through `/Groups` only.
+
+Straza refuses an `entraAgentId` on a user that is not of type `agent`, and a value that is not a GUID, with `400` and scimType `invalidValue`. It refuses an id another user holds with `409` and scimType `uniqueness`, and the detail names that user. An agent that holds an id keeps its type until a `PATCH` `remove` clears the id.
+
+The `manager` sits in the SCIM enterprise User extension, `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User`, which most identity managers send already. When the user's `userType` is `agent` after the write, Straza looks the manager up as a Straza id, then as a `userName`, and stores the manager's `userName` as the sponsor. A `PATCH` that names a manager Straza does not know or cannot read answers `400` with scimType `invalidValue` and saves nothing. Straza saves a create or `PUT` with such a manager, keeps the user's sponsor as it was and logs one WARN line, `SCIM manager not applied`, that names the agent and the reason. Provision the manager before the agent. If the agent came first, send it again once the manager exists, and look for that line in strazad's log to find agents left without a sponsor. A `sponsor` in the same write wins over the manager. Removing the manager with a `PATCH` clears the sponsor, and a `PUT` without one keeps it. On a user of any other type, or with no type, Straza accepts the manager and does not store it. On 2026-11-10 Microsoft Entra ID sent the manager right after the create, as a `PATCH` with op `Add` on the URN-qualified path and the manager's Straza id as a plain string.
+
+
+Straza also reads its user extension on a write under a second name, `urn:ietf:params:scim:schemas:extension:straza:2.0:User`. A create, a `PUT` and a `PATCH` take the same attributes under it, with the same checks, and the `PUT` deviation above holds there too. A `PATCH` that names a lock attribute, `kind` or `origin` under the second name answers `400` with scimType `mutability`. When one write names an attribute under both names, Straza stores the value under its own name. It still checks the other value, and refuses the write with `400` and scimType `invalidValue` when it does not accept that value. No answer carries the second name. Every answer, `/Schemas` and `/ResourceTypes` carry Straza's own name only. Listing the second name in `schemas` does not mark a user as an AI agent.
+
+Microsoft Entra ID puts a custom attribute into its create only when the attribute's name has the form `urn:ietf:params:scim:schemas:extension:<name>:2.0:User:<attribute>`. Straza's own name does not have that form. On 2026-11-10 Entra therefore left `entraAgentId` under Straza's own name out of the create, and sent it one pass later in a `PATCH`. With Entra, map the link under the second name instead. In the provisioning app's **Attribute mapping**, add the target attribute `urn:ietf:params:scim:schemas:extension:straza:2.0:User:entraAgentId` with type String to the User attributes. Then map the agent user's `identityParentId`, the id of the Entra agent identity it belongs to, to that attribute. Map that name only, and do not map `urn:straza:params:scim:schemas:extension:2.0:User:entraAgentId` as well. Entra's create then carries the agent's Entra agent identity, and Straza stores it with the create. A tenant that already maps the `urn:straza:` name can delete that mapping, and nothing breaks while both mappings exist. Straza's answer shows the attribute under its own name only, so Entra may send the value again on a later pass. Straza answers such a repeat with `200`, changes no attribute and writes no audit record.
 
 ## Create, read and deactivate a user
 
@@ -249,8 +260,8 @@ Errors use the SCIM error schema, with `status` as a string and a `detail` sente
 | Status | `scimType` | When |
 |---|---|---|
 | `400` | `invalidFilter` | A filter other than one equality on `userName` or `externalId`. |
-| `400` | `invalidValue` | A create without `userName`, with the detail "userName is required", or a malformed PATCH. |
-| `400` | `mutability` | A write to `kind`, `origin`, a lock attribute, a group's `displayName` or the group extension. |
+| `400` | `invalidValue` | A create without `userName`, with the detail "userName is required", a value Straza does not accept for an attribute it maps, a PATCH that names an agent's manager Straza does not know, a malformed PATCH, or a PATCH on a group that names anything but `members`. A create or a PUT that holds a value of the wrong JSON type, such as a number where Straza expects a string, gets the same answer, and the detail names the attribute, the type Straza expects and the fix in the identity manager's attribute mapping. A PUT whose body is not JSON gets it too, with the detail "malformed JSON body". A user attribute Straza does not map is ignored, on a PATCH as on a create. |
+| `400` | `mutability` | A write to `kind`, `origin`, a lock attribute, a user's `groups`, a group's `displayName` or the group extension. |
 | `401` | none | No token, or one that is unknown, expired or revoked. |
 | `403` | none | A token whose scope lacks `scim:read` or `scim:write`. |
 | `404` | none | An unknown id. |
@@ -258,6 +269,9 @@ Errors use the SCIM error schema, with `status` as a string and a `detail` sente
 | `500` | none | Straza could not save a deactivation by PATCH, PUT or DELETE. The status, the revocation record and the event that tells the other servers are one write, so the user stays active and a resend deactivates it. When the write ended without a clear answer, Straza asks the database whether it was saved. A saved deactivation answers as any deactivation does, and only when the database cannot answer does the detail say Straza cannot tell whether it was saved. Either detail names the request id and says how long the server that answered keeps refusing the user. |
 | `501` | none | A POST or DELETE on `/Groups`, and a POST to `/Bulk`. |
 | `503` | none | Straza could not read the token from its database. The detail says to try again in a moment. A real token and a forged one get the same answer. |
+
+
+Straza keeps its own trace of every write it refuses. A POST, PUT, PATCH or DELETE that it answers with a 4xx or a 501, after it accepted the token, leaves one WARN line `SCIM write refused` in the strazad log and one `scim.refused` record on the audit trail. Both name the token, the route, the status, the detail your client got, and the user or role the write was about. When your client keeps no log of its own, as Entra ID Free keeps no provisioning logs, the refusal is still in Straza. A refused read, a `401` or `403` at the token check and a `5xx` failure leave neither.
 
 The detail of a refused filter names the form the server accepts:
 
@@ -309,6 +323,9 @@ The next request with that token answers `401` with the detail `admin API token 
 
 
 A token with `scim:write` can assign `straza-admin`, because Straza roles render as groups like every other role, and a members add on that group is an assignment. That makes a person an administrator. An AI agent that holds the role still gets no admin route, because only a person can use the admin API. The identity manager is meant to master every role, so this is deliberate. Give the token the protection of an admin credential, and let the approval your identity manager puts on those memberships be your guard.
+
+
+Whoever can change an agent's manager in your identity manager chooses the agent's sponsor in Straza. A sponsor who is a person can connect the agent to a server. The agent's calls can also run on the sponsor's own connection to a server, where the sponsor has allowed agents on it. Straza does not check that the manager is a person, so weigh who in your identity manager may change one.
 
 ## Next {.nostep}
 

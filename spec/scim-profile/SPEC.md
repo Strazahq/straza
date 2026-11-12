@@ -1,10 +1,63 @@
-# SCIM Profile, v1beta1 (revision 21)
+# SCIM Profile, v1beta1 (revision 24)
 
 Status: **beta**. The profile began as v1alpha1, and the move to beta
 changed no wire format. Conformance transcripts: `spec/conformance/scim/*.json`. The
 platform's SCIM server MUST satisfy every transcript; they double as request
 examples for the identity manager guides at
 https://docs.straza.ai/guides/connect-identity/.
+
+Revision 24 (2026-11-10, https://docs.straza.ai/guides/connect-identity/generic-scim/):
+on a write, Straza reads its User extension under a second name,
+`urn:ietf:params:scim:schemas:extension:straza:2.0:User`, beside its own
+(§3.6). The live-fire of revision 23 on that day showed why. Microsoft
+Entra ID puts a custom attribute into its create only when the
+attribute's name has this form, so `entraAgentId` under Straza's own
+name reached Straza one pass late, in a PATCH. Under the second name the
+attributes, the checks and the read-only half are those of §3.1 to §3.4.
+A write that names an attribute under both names stores the value under
+Straza's own name. Every answer and discovery carry Straza's own name
+only, as before. Additive: no attribute is removed or renamed, and the
+revision 23 transcripts replay unchanged. One answer changes. A revision
+23 server ignored everything under the second name. A write that carries
+content there which Straza refuses under its own name answered `2xx`, and
+now answers as it does under Straza's own name. That is the refusal of
+§3.1 to §3.4 for a value Straza does not accept and for a PATCH of the
+read-only half, and `400` for a POST or PUT whose object there holds a
+value of a JSON type Straza does not read, such as a number for a string.
+In the new `user-second-name` transcript, the body of the agent's create
+and the PATCH with both names are the ones Entra sent, with the tenant's
+values replaced. Its other steps are derived from the reference server.
+
+Revision 23 (2026-11-10, https://docs.straza.ai/guides/connect-identity/generic-scim/):
+two changes on Users, both from a capture of the requests Microsoft Entra
+ID's provisioning service sent on that day. First, a PATCH ignores an
+attribute Straza does not map, as a POST and a PUT always have (§3).
+Before, such a PATCH answered `400` scimType `invalidValue`, which refused
+the manager Entra sends for every user that has one. A mapped value is
+still checked, and the lock block, `kind`, `origin` and a user's `groups`
+answer `400` scimType `mutability`. A PATCH on a Group is unchanged (§4).
+Second, the `manager` of the SCIM enterprise User extension becomes the
+`sponsor` of a user of type `agent` (§3.5). Additive: a request the
+revision 22 server accepted is still accepted, and the revision 22
+transcripts replay unchanged. In the new `user-manager` transcript, the
+bodies of the agent's create and of the two PATCH requests after it are
+the ones Entra sent, with the tenant's values replaced. Its other steps
+are derived from the reference server. The capture also showed that
+Entra's create carries no `entraAgentId` (§3.4): Entra sends it in a
+PATCH on its next pass.
+
+Revision 22 (2026-11-08, https://docs.straza.ai/guides/connect-identity/midpoint/):
+the Straza User extension gains `entraAgentId`, read-write, the client id
+of the Entra agent identity an AI agent acts as at Entra (§3.4). Straza
+stores it as a lower-case GUID, accepts it on a user of type `agent`
+only, and refuses an id another live user holds with `409` scimType
+`uniqueness`. A value that is not a GUID, a user of another type, and a
+type change of an agent that holds an id answer `400` scimType
+`invalidValue`. A PUT that leaves it out keeps it, as §3.2 keeps every
+writable extension attribute. Additive: an identity manager that does not
+map it is unaffected, and the revision 21 transcripts replay unchanged.
+The new `user-entra-agent` transcript is derived from the reference
+server and not captured from a live wire.
 
 Revision 21 (2026-10-19, https://docs.straza.ai/guides/connect-identity/midpoint/):
 a role may cover only some objects of a server that pins an object type,
@@ -260,9 +313,10 @@ memberships instead of re-sending adds on every recompute (additive; §3/§4,
 transcript `user-groups`).
 
 Words MUST/SHOULD/MAY are RFC-2119. Straza implements a **strict, documented
-subset** of SCIM 2.0 (RFC 7642/7643/7644). Everything outside it is rejected
-loudly with a proper SCIM error (§6). The database is never the
-integration API; this endpoint is.
+subset** of SCIM 2.0 (RFC 7642/7643/7644). An operation or a resource
+outside it is rejected loudly with a proper SCIM error (§6). An attribute
+outside the Users mapping is ignored on a write (§3, revision 23). The
+database is never the integration API; this endpoint is.
 
 ## 1. Endpoints & operations
 
@@ -321,13 +375,32 @@ area (strazactl api-token create --scope scim:read,scim:write for an IdM)`).
 | `title` | `title` | CORE (RFC 7643 §4.1.1), revision 10: job title / human-readable function, for agents too ("Deploy bot"). Standard replace semantics like `displayName` (the §3.2 typology PUT deviation does NOT apply); omitted from responses when empty |
 | `emails[primary].value` (or first) | `email` | single value stored |
 | `active` | `status` | `false` ⇒ `disabled` + revocation cascade (rows carry `origin=scim`) + every per-user grant removed (events revision 24); `true` re-enables and lifts **scim-origin revocations only** (revision 4): a Straza-side lock (§3.1) survives, and while one does the user stays denied. The attempt lands on the audit chain as `user.lift.blocked`. Existing sessions STAY revoked, so the user re-enrolls |
-| `groups` | `role_assignments` (derived) | **read-only** (RFC 7643 §4.1.2): every User response renders the user's DIRECT assignments of exported roles as `{value: <role id>, display: <role name>, type: "direct", $ref}`; omitted (not empty) when there are none. Membership WRITES go through `/Groups` only, and `groups` is not in the accepted PATCH subset |
+| `groups` | `role_assignments` (derived) | **read-only** (RFC 7643 §4.1.2): every User response renders the user's DIRECT assignments of exported roles as `{value: <role id>, display: <role name>, type: "direct", $ref}`; omitted (not empty) when there are none. Membership WRITES go through `/Groups` only, and `groups` is not in the accepted PATCH subset: a PATCH that names it answers `400` scimType `mutability` (revision 23) |
 | `userType` | `user_type` | revision 5 (§3.2): the coarse identity family, vocabulary-enforced `human\|agent\|service`; the structured typology rides the Straza extension |
+| `manager` of the enterprise extension | `sponsor` | revision 23 (§3.5): the manager of a user of type `agent` becomes its sponsor; on any other user it is accepted and not stored. Write-only, never rendered |
 
 Users created here get `origin=scim`. `active` MUST accept boolean `true/
 false` and the string forms `"True"/"False"` (Azure AD compatibility).
 PATCH with no `path` and an object value applies the mapped keys it carries.
 Attribute names in `path` are case-insensitive.
+
+Since revision 23 a PATCH ignores an attribute Straza does not map, named
+by a path or as a key of an object value, as a POST and a PUT ignore it.
+An identity manager that maps more attributes than Straza stores is
+therefore not refused, and the mapped operations of the same PATCH are
+applied. Two things stay refused. A value Straza checks and does not
+accept, such as a `userType` outside its vocabulary, answers `400`
+scimType `invalidValue`. A read-only attribute answers `400` scimType
+`mutability`: the lock block (§3.1), `kind` and `origin` (§3.3) and
+`groups`.
+
+A mapped attribute is never ignored for the form of its path, `active`
+above all. A path that names a core attribute with the core User schema
+URN (RFC 7644 §3.10) is judged as the bare path, and that URN alone with
+an object value is judged as a PATCH with no `path`. The `name` object
+applies its `formatted`. The value of one filtered address, such as
+`emails[type eq "work"].value`, the form Microsoft documents for Entra,
+sets the one stored address, and its `remove` clears it.
 
 ### 3.1 Straza extension: the lock block (revision 4, read-only)
 
@@ -381,7 +454,7 @@ selfApproval-eligible, an engine invariant):
 |---|---|---|---|
 | `userType` | CORE (RFC 7643) | `human` \| `agent` \| `service` | policy match; console labels; `service` = technical accounts with no agency |
 | `agencyMode` | extension | `interactive` \| `supervised` \| `autonomous` | approval semantics (the autonomous clamp; supervised→sponsor routing is a named follow-up) |
-| `sponsor` | extension | username/opaque ref | accountable human: attribution + future push routing |
+| `sponsor` | extension, or the enterprise `manager` of an agent (§3.5) | username/opaque ref | accountable human: attribution + future push routing |
 | `swarmId` | extension | deployment-defined | fleet policy match; future fleet kill |
 | `ephemeral` | extension | boolean | future session-posture knobs; excluded from long-lived certification |
 
@@ -427,6 +500,155 @@ Rules:
 - The NHI signal also stays visible in `schemas`: every rendered `nhi` user
   carries the agentic URN there (§5). `kind` is the mappable-attribute form
   of the same fact.
+
+### 3.4 Entra agent identity (revision 22, read-write)
+
+An AI agent that calls a server behind Microsoft Entra acts there as an
+Entra agent identity. Entra assigns that identity's client id, so the
+identity manager masters the mapping on the agent's record:
+
+| Attribute | Where | Values | Consumer |
+|---|---|---|---|
+| `entraAgentId` | extension | a GUID, `8-4-4-4-12` hex digits | kept in the agent's session at check-in and shown by `straza__whoami` |
+
+Rules:
+
+- Read-write over POST, PUT and PATCH, on the bare and the URN-qualified
+  path, case-insensitive like §3.2. A whole-extension PATCH applies it
+  like the §3.2 keys, and a whole-extension `remove` clears it with them.
+- The value is trimmed and stored in lower case. Anything else, braces
+  included, answers `400` scimType `invalidValue` and is never stored.
+- Only a user of type `agent` holds one. A write that leaves a user of
+  another type, or an unclassified user, holding an id answers `400`
+  scimType `invalidValue`. An agent that holds an id keeps its type until a
+  PATCH `remove` clears the id.
+- No two live users hold the same id, because Entra would then record
+  both agents' calls as one identity. A write of an id another live user
+  holds answers `409` scimType `uniqueness`, and the detail names that
+  user. A create whose id is held by the deactivated row of the same
+  `userName` revives that row as §1 says.
+- The §3.2 PUT rule applies: a PUT that leaves it out or sends it empty
+  keeps the stored value. Clearing is a PATCH `remove`.
+- The request side never supplies it. Straza reads it from the record at
+  the agent's check-in. A write that changes it makes the agent check in
+  again at its next call to the server that took the write, and within
+  one session token lifetime on the other servers.
+- Microsoft Entra ID's create carries this attribute only under the
+  second name of the extension (§3.6, revision 24). Under Straza's own
+  name Entra leaves it out of the create and sends it in a PATCH on its
+  next pass, with op `Add` on the URN-qualified path, as the
+  `user-manager` transcript shows.
+
+### 3.5 The manager of an agent (revision 23, write-only)
+
+Most identity managers hold the person accountable for an agent as its
+manager, and send it in the SCIM enterprise User extension (RFC 7643
+§4.3). Straza reads that one attribute of the extension, on a write:
+
+| SCIM | Straza | Applies to |
+|---|---|---|
+| `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager` | `sponsor` (§3.2) | a user whose `userType` is `agent` after the write |
+
+Rules:
+
+- On POST and PUT the manager sits inside the enterprise extension
+  object, as the RFC 7643 object with a `value` or as a plain string. On
+  PATCH the path is `manager` or `manager.value`, bare or URN-qualified,
+  or the whole enterprise extension with an object value. Microsoft Entra
+  ID sends `{"op":"Add","path":"urn:…:enterprise:2.0:User:manager","value":"<id>"}`
+  in a PATCH right after the create.
+- The value names the manager by its Straza `id`, which RFC 7643 asks for
+  and Entra sends, or by its `userName`. Straza looks it up as an id
+  first, and stores the manager's `userName` as the sponsor.
+- In a PATCH, a manager Straza does not know answers `400` scimType
+  `invalidValue`, and nothing is saved. The break-glass account answers
+  as an unknown manager. A manager in a shape Straza does not read, such
+  as a number or an object without a `value`, answers the same on an
+  agent. A null, an empty object and an object with a null `value` name
+  no manager.
+- In a POST or a PUT, a manager Straza does not know or does not read
+  never refuses the write, because a revision 22 server accepted such a
+  write. The user is saved with the sponsor it had, which is none on a
+  POST, and strazad logs one warning, `SCIM manager not applied`, that
+  names the agent and the reason. The identity manager sets the sponsor
+  with its next PUT, or with a PATCH of the manager, once the manager is
+  provisioned. Until then the agent keeps the sponsor it had, and only
+  the warning says so. Provisioning the manager before the agent avoids
+  the gap.
+- A `sponsor` named in the same write wins over the manager.
+- A PATCH `remove` of the manager, or an add or replace with an empty
+  value, clears the sponsor. A POST or PUT without a manager, or with an
+  empty one, leaves the sponsor, as the §3.2 PUT rule leaves every
+  typology attribute.
+- On a user of another type, and on an unclassified user, the manager is
+  accepted and not stored, whatever its shape, and it is not looked up.
+  The type is judged
+  after the write, so one PATCH can set `userType` `agent` and the
+  manager in either order.
+- The manager is never rendered. The sponsor it set is rendered in the
+  Straza extension (§3.2).
+- Consequence to weigh: whoever can set an agent's manager in the
+  identity manager chooses its sponsor in Straza. A sponsor who is a
+  person can connect the agent to a server, and an agent's call can use
+  its sponsor's own connection to a server where the sponsor has allowed
+  agents on it. Straza does not check that the manager is a person.
+
+### 3.6 The second name of the extension (revision 24, write-only)
+
+Microsoft Entra ID asks that a custom attribute be named in the form
+`urn:ietf:params:scim:schemas:extension:<name>:2.0:User:<attribute>`, and
+puts only an attribute named so into its create. Straza therefore reads
+its User extension under two names on a write:
+
+| Name | Read on a write | Rendered |
+|---|---|---|
+| `urn:straza:params:scim:schemas:extension:2.0:User`, Straza's own | yes | yes |
+| `urn:ietf:params:scim:schemas:extension:straza:2.0:User`, the second name | yes | no |
+
+Rules:
+
+- The second name is read wherever Straza's own is read: as an object in
+  a POST or PUT document, as the prefix of a PATCH path, as a PATCH path
+  of its own with an object value or a `remove`, and as a key of the
+  object value of a PATCH with no `path`. It is case-insensitive.
+- The attributes and their checks are those of §3.2 and §3.4, and the
+  §3.2 PUT rule applies. A `sponsor` under the second name wins over the
+  manager of the same write (§3.5). An attribute Straza does not map is
+  ignored under the second name too (§3).
+- The read-only half stays read-only. A PATCH that names the lock block
+  (§3.1), `kind` or `origin` (§3.3) under the second name answers `400`
+  scimType `mutability`, in each PATCH form above, and nothing of that
+  PATCH is saved. A POST or PUT ignores those keys, as it does under
+  Straza's own name.
+- When one write names an attribute under both names, Straza stores the
+  value under its own name, whatever the order of the two. The bare
+  attribute name of §3.2 counts as Straza's own name here. A `remove`
+  under Straza's own name wins the same way, and a `remove` of the whole
+  extension counts for each of its writable attributes. An attribute
+  that only one of the two names carries is applied. In a POST or PUT an
+  empty value under Straza's own name counts as absent, as §3.2 says, so
+  the value under the second name is applied.
+- The form of the value under the second name is checked even when the
+  value under Straza's own name is the one stored: the vocabulary of
+  `agencyMode`, the boolean of `ephemeral` and the GUID of
+  `entraAgentId`. A value that fails it answers `400` scimType
+  `invalidValue`. The §3.4 rules on the user's type and on an id another
+  user holds judge the stored value only.
+- The second name is never rendered. Every User response carries the
+  extension under Straza's own name and lists that name alone in
+  `schemas`, and discovery lists that name alone (§3.1). An identity
+  manager that looks for the attribute under the second name in the
+  answer does not find it there, and may send the value again on a later
+  pass. Such a repeat answers `200` and changes no attribute.
+- The second name is not the agent mark of §5. A create that lists it in
+  `schemas` is not stored with `attrs.kind=nhi`, and a write need not
+  list it in `schemas` at all, as Entra's create does not.
+- For Microsoft Entra ID, name the target attribute
+  `urn:ietf:params:scim:schemas:extension:straza:2.0:User:entraAgentId`
+  and map that name only. Entra's create then carries the agent's Entra
+  identity, and Straza stores it with the create.
+
+Transcript `user-second-name`.
 
 ## 4. Groups ARE roles (revision 12)
 

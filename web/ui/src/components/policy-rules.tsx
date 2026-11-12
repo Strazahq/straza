@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { HEAD } from "@/components/data-table";
 import { WordBadge } from "@/components/users-table";
+import { ON_MACHINES, ON_MACHINES_TITLE } from "@/lib/harness-words";
 import type { Bucket, Lane, RuleView } from "@/lib/policy-model";
 import {
   ALL_RULES, BUCKET_WORD, EVERY_SERVER, EVERY_WORD, MARK, MCP_SERVER_TITLE, NO_REASON_YET, NO_RULE_MATCH, RESTATES_ACCESS,
@@ -28,6 +29,9 @@ type Props = {
   // openId is the rule whose sheet is open, or null.
   openId: string | null;
   onOpen: (id: string) => void;
+  // registered are the names of the registered MCP servers, or null while
+  // they are unread, and then no row says a server is on people's machines.
+  registered?: string[] | null;
 };
 
 const COLUMNS = ["where", "calls", "what", "reason", "rule"] as const;
@@ -39,7 +43,7 @@ const TONE: Record<Bucket, string> = { deny: "text-danger", hum: "text-warn", al
 // LANE_ORDER sorts the table by where the call goes: the MCP servers
 // first, then the local lanes in the order the enterprise profile meets
 // them.
-const LANE_ORDER: Record<Lane, number> = { mcp: 0, shell: 1, files: 2, net: 3, tools: 4, other: 5, all: 6 };
+const LANE_ORDER: Record<Lane, number> = { mcp: 0, shell: 1, files: 2, net: 3, harness: 4, tools: 5, other: 6, all: 7 };
 
 const CHIP = "inline-flex items-center rounded-md border border-border bg-background px-1.5 py-px font-mono text-[13px] whitespace-nowrap";
 
@@ -58,11 +62,21 @@ function hit(r: RuleView, q: string): boolean {
   return [r.id, r.reason, r.app || "", ...(r.names || [])].some((t) => t.toLowerCase().includes(q));
 }
 
+// onMachines says whether an MCP rule names a server that is not
+// registered, which a person's own harness runs.
+const onMachines = (rule: RuleView, registered?: string[] | null) =>
+  rule.lane === "mcp" && !!rule.app && !!registered && rule.app.split(", ").some((a) => a !== "straza" && !registered.includes(a));
+
 // Where is the first cell: the server an MCP rule matches in the accent,
 // and the lane's own word for every other rule.
-function Where({ rule }: { rule: RuleView }) {
+function Where({ rule, registered }: { rule: RuleView; registered?: string[] | null }) {
   if (rule.lane === "mcp") {
-    return <span className={cn(CHIP, "border-link/55 bg-accent-bg font-semibold text-foreground")} title={MCP_SERVER_TITLE}>{rule.app || EVERY_SERVER}</span>;
+    return (
+      <span className="flex flex-wrap items-center gap-1">
+        <span className={cn(CHIP, "border-link/55 bg-accent-bg font-semibold text-foreground")} title={MCP_SERVER_TITLE}>{rule.app || EVERY_SERVER}</span>
+        {onMachines(rule, registered) && <span className={cn(CHIP, "font-sans text-[12px] text-muted-foreground")} title={ON_MACHINES_TITLE} data-on-machines>{ON_MACHINES}</span>}
+      </span>
+    );
   }
   return <span className={cn(CHIP, "font-sans text-[12px] text-muted-foreground")}>{WHERE_WORD[rule.lane]}</span>;
 }
@@ -83,16 +97,16 @@ function Calls({ rule }: { rule: RuleView }) {
 // Reason reads the sentence the agent gets. A rule that allows an MCP call
 // carries none, because the outcome only restates the access the role
 // already has; a denial or an approval without one is a gap.
-function Reason({ rule }: { rule: RuleView }) {
+function Reason({ rule, registered }: { rule: RuleView; registered?: string[] | null }) {
   if (rule.reason) return <span className="block truncate text-text-2" title={rule.reason}>{rule.reason}</span>;
   if (rule.bucket === "allow") {
-    if (rule.lane !== "mcp") return null;
+    if (rule.lane !== "mcp" || onMachines(rule, registered)) return null;
     return <span className="text-muted-foreground">{RESTATES_ACCESS}</span>;
   }
   return <span className="text-danger">{NO_REASON_YET}</span>;
 }
 
-export function PolicyRules({ rules, changed, added, openId, onOpen }: Props) {
+export function PolicyRules({ rules, changed, added, openId, onOpen, registered }: Props) {
   const [filter, setFilter] = React.useState<Bucket | "all">("all");
   const [search, setSearch] = React.useState("");
 
@@ -168,13 +182,13 @@ export function PolicyRules({ rules, changed, added, openId, onOpen }: Props) {
                   onClick={() => onOpen(rule.id)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(rule.id); } }}
                 >
-                  <TableCell className="align-top"><Where rule={rule} /></TableCell>
+                  <TableCell className="align-top"><Where rule={rule} registered={registered} /></TableCell>
                   <TableCell className="overflow-hidden align-top whitespace-normal"><Calls rule={rule} /></TableCell>
                   <TableCell className="align-top whitespace-normal">
                     <span className={cn("font-semibold", TONE[rule.bucket])}>{BUCKET_WORD[rule.bucket]}</span>
                     {how !== "" && <span className="block text-[13px] leading-snug text-muted-foreground">{how}</span>}
                   </TableCell>
-                  <TableCell className="overflow-hidden align-top"><Reason rule={rule} /></TableCell>
+                  <TableCell className="overflow-hidden align-top"><Reason rule={rule} registered={registered} /></TableCell>
                   <TableCell className="overflow-hidden align-top">
                     <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                       <span className="block max-w-full truncate font-mono text-[13px] text-muted-foreground" title={rule.id + ": " + RULE_ID_TITLE}>{rule.id}</span>

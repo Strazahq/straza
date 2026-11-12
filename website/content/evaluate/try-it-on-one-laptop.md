@@ -8,7 +8,7 @@ weight: 70
 draft: false
 summary: >-
   You start the server on your computer, enroll that computer and connect Claude Code. The starter rule denies `rm -rf` at once. A rule you add holds `git push` until you approve it yourself in this browser. The agent's next try within 60 seconds then runs, and the approval covers only that try.
-who: You, as the admin, and later as alice
+who: Admin, and later alice
 where: Four terminals and a browser
 steps: true
 applies_to: standalone
@@ -161,7 +161,7 @@ claude
 
 {{< see >}}`installed Straza hooks for claude-code` with the settings path, then the banner `Straza governance active: alice` when Claude Code starts.{{< /see >}}
 
-Ask Claude Code to run `rm -rf /tmp/x`. The starter rule denies it, and Claude Code shows the reason, `Straza starter policy: recursive force-delete is denied.` A command that no rule names, such as `git status`, runs.
+Ask Claude Code to run `rm -rf /tmp/x`. The starter rule denies it, and Claude Code shows the reason, `Straza starter policy: this sample rule denies commands that start with rm -rf.` A command that no rule names, such as `git status`, runs.
 
 {{< details summary="The same calls without Claude Code" >}}
 Claude Code runs `straza hook` before each tool call and reads its answer. To watch that without Claude Code, send the same events by hand in Terminal 4. The hook only returns a decision.
@@ -173,8 +173,8 @@ printf '%s' '{"hook_event_name":"PreToolUse","session_id":"laptop-1","cwd":"/tmp
 
 ```text
 {"hookSpecificOutput":{"additionalContext":"Straza governs this session as \"alice\". Every tool call is checked against policy and recorded in the audit log. When a call is denied, tell the user what the reason says, then do what it says next: wait for a person's approval, change the call, or try once more later. A denial that says none of these is a policy decision, and the same call will be denied again. Do not try to reach the denied result another way.","hookEventName":"SessionStart"},"systemMessage":"🛡 Straza governance active: alice (straza-enroll-browser) @ http://127.0.0.1:18420 · policy c485b47b783a · attestation advisory"}
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet."}}
-Straza starter policy: recursive force-delete is denied. Delete files individually, or an admin can edit the standalone-starter PolicySet.
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Straza starter policy: this sample rule denies commands that start with rm -rf. Delete files individually, or an admin can edit the standalone-starter PolicySet."}}
+Straza starter policy: this sample rule denies commands that start with rm -rf. Delete files individually, or an admin can edit the standalone-starter PolicySet.
 exit 2
 ```
 

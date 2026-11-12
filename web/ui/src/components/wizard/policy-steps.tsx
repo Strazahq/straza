@@ -7,15 +7,20 @@ import { ApprovalChoice, Choice, SECONDS, spanOf } from "@/components/approval-c
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RadioGroup } from "@/components/ui/radio-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CAPS, CardGroup, HINT, OptionCard } from "@/components/wizard/parts";
+import { MachineTools, NewRoleName } from "@/components/wizard/harness-steps";
 import { SPONSOR, type Shape } from "@/lib/access-plan";
-import type { PreviewEntry, RoleRow, ValidateAnswer } from "@/lib/api";
-import { type Plain, type Who, buildRule, ruleView, slug } from "@/lib/policy-model";
+import type { DefaultDenials, PreviewEntry, RoleRow, ValidateAnswer } from "@/lib/api";
 import {
-  ADD_PICK, ALLOW_HELP, CALLS_Q, DENY_LEDE, DEPENDS_ON_ROLE, EVERYONE, EVERYONE_SERVERS, HOW_Q,
+  ALSO_CREATES, GROUP_MACHINES, GROUP_REGISTERED, HARNESS_HINT, MACHINE_SERVER_HINT, NOT_SEEN, SERVER_NAME, SERVER_NAME_HINT, THESE_TOOLS, WHO_NEW, WHOLE_MACHINE_SERVER,
+  alsoCreates, deniedLine, everyoneAllow, toolsOf, whoNewLine,
+} from "@/lib/harness-words";
+import { type NewLane, type Plain, type Who, buildRule, ruleView, slug } from "@/lib/policy-model";
+import {
+  ADD_PICK, ALLOW_HELP, CALLS_Q, DENY_LEDE, DENY_Q, DEPENDS_ON_ROLE, EVERYONE, EVERYONE_SERVERS, HOW_Q,
   INTENT, LANE_LABEL, LINE_NUMBERS, NAME_BAD, NAME_FREE, NAME_HINT, NAME_TAKEN,
   NET_LINE, NO_TOOLS, NOT_REACHED_TODAY, OR_PICK, PATHS_EXAMPLE, PATHS_Q, PATTERNS_EXAMPLE, PATTERNS_Q, PICK_ALL_TITLE, REASON, REASON_HINT,
   RECORDING_NOTE, REVIEW_FACT, REVIEW_NAME, ROLE_CAP, ROLE_SEARCH_FROM, RUNS_TODAY, SELECTED_ROLE, SERVER, SERVERS_NARROWED_HELP, STORED_AS, SUBJECT_ROLES,
@@ -35,7 +40,10 @@ import { holders } from "@/lib/words";
 export type Intent = "approve" | "deny" | "allow";
 
 // Lane is the governed surface the rule matches.
-export type Lane = "mcp" | "shell" | "files" | "net";
+export type Lane = NewLane;
+// UNSEEN is the server choice that asks for a name: a server on a person's
+// machine that no denied call has named yet. No server can carry the name.
+const UNSEEN = "*";
 
 export type Unit = "seconds" | "minutes" | "hours" | "days";
 
@@ -53,6 +61,9 @@ export type Draft = {
   // role is the application role the policy names, null for Everyone and
   // undefined while the Who step is unanswered.
   role: string | null | undefined;
+  // makeRole says the policy makes the role it names, an application role
+  // that belongs to no server.
+  makeRole: boolean;
   lane: Lane;
   app: string;
   tools: string[];
@@ -77,6 +88,7 @@ export type Draft = {
 export const EMPTY_DRAFT: Draft = {
   intent: "approve",
   role: undefined,
+  makeRole: false,
   lane: "mcp",
   app: "",
   tools: [],
@@ -99,6 +111,7 @@ export const EMPTY_DRAFT: Draft = {
 // list means every one on the lane.
 export function pickedNames(d: Draft): string[] {
   if (d.lane === "mcp") return d.wholeServer ? [] : d.tools;
+  if (d.lane === "harness") return d.tools;
   if (d.lane === "shell") return d.patterns;
   if (d.lane === "files") return d.paths;
   return [];
@@ -137,12 +150,13 @@ export function reasonDefault(d: Draft): string {
   const view = viewOf(d);
   const subject = subjectWords(view);
   const one = singular(view);
+  if (d.intent === "allow") return "";
   return d.intent === "deny" ? reasonDeny(subject, one) : reasonApprove(subject, one);
 }
 
 // RESERVED are the names the Policies address already uses, so a policy
 // may not take them.
-const RESERVED = ["new", "by-role"];
+const RESERVED = ["new", "by-role", "denied"];
 
 // nameProblem says why a name cannot be stored: taken by a policy or by
 // the address, or outside the server's grammar.
@@ -253,26 +267,40 @@ type WhoProps = {
   problem: string | null;
   serversOf: (role: string) => string[];
   onRole: (role: string | null | undefined) => void;
+  // newRole is the name offered for a role the policy makes, or null when
+  // this session may not make one. taken are the names roles carry.
+  newRole: string | null;
+  taken: string[];
+  onNewRole: (name: string) => void;
 };
 
 // WhoStep asks whose sessions the policy governs: everyone, or one
 // application role.
-export function WhoStep({ draft, roles, problem, serversOf, onRole }: WhoProps) {
+export function WhoStep({ draft, roles, problem, serversOf, onRole, newRole, taken, onNewRole }: WhoProps) {
   const [needle, setNeedle] = React.useState("");
   const q = needle.trim().toLowerCase();
   const matched = roles.filter((r) => !q || r.name.toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q));
   const shown = matched.slice(0, ROLE_CAP);
   const selectedHidden = draft.role && !shown.some((r) => r.name === draft.role);
-  const which = draft.role === undefined ? "" : draft.role === null ? "everyone" : "role";
+  const which = draft.makeRole ? "new" : draft.role === undefined ? "" : draft.role === null ? "everyone" : "role";
+  const subject = subjectWords(viewOf(draft));
+  const what = draft.lane === "mcp" && draft.app ? draft.app : THESE_TOOLS;
+  const pick = (v: string) => {
+    if (v === "new") onNewRole(newRole || "");
+    else onRole(v === "everyone" ? null : roles.length ? roles[0].name : "");
+  };
 
   return (
     <div className="flex flex-col gap-4" data-step="who">
       <h2 className={H2}>{WHO_Q}</h2>
       {problem && <FetchError subject={SUBJECT_ROLES} detail={problem} />}
-      <RadioGroup value={which} onValueChange={(v) => onRole(v === "everyone" ? null : roles.length ? roles[0].name : "")} className="max-w-[900px] gap-2.5">
+      <RadioGroup value={which} onValueChange={pick} className="max-w-[900px] gap-2.5">
         <Choice id="who-everyone" value="everyone" label={WHO_EVERYONE} line={WHO_EVERYONE_LINE} />
         <Choice id="who-role" value="role" label={WHO_ROLE} line={<>{WHO_ROLE_LINE} <HelpTip label={WHO_ROLE} text={WHO_ROLE_HELP} /></>} />
+        {newRole !== null && <Choice id="who-new" value="new" label={WHO_NEW} line={whoNewLine(what)} />}
       </RadioGroup>
+      {which === "everyone" && draft.intent === "allow" && <p className="max-w-[80ch] text-sm text-warn" data-everyone-allow>{everyoneAllow(subject)}</p>}
+      {which === "new" && <NewRoleName name={draft.role || ""} taken={taken} onName={onNewRole} />}
 
       {which === "role" && (
         <div className="flex flex-col gap-2.5">
@@ -318,13 +346,31 @@ type CallsProps = {
   // preview is what the server says each tool does today, by tool name.
   preview: Record<string, PreviewEntry>;
   reaches: (tool: string) => boolean;
+  // registered are the names of every registered server, and denials the
+  // calls no rule covers, which name the servers and tools people asked
+  // for on their own machines.
+  registered: string[];
+  denials: DefaultDenials | null;
   onChange: (patch: Partial<Draft>) => void;
 };
 
 // CallsStep asks which calls the rule matches: the lane first, then the
 // server and its tools, or the patterns and paths of a local lane.
-export function CallsStep({ draft, servers, totalServers, tools, preview, reaches, onChange }: CallsProps) {
-  const lanes: Lane[] = ["mcp", "shell", "files", "net"];
+export function CallsStep({ draft, servers, totalServers, tools, preview, reaches, registered, denials, onChange }: CallsProps) {
+  const lanes: Lane[] = ["mcp", "shell", "files", "net", "harness"];
+  const machines = denials ? denials.servers.filter((s) => !registered.includes(s.server)) : [];
+  const onMachine = draft.app !== "" && !registered.includes(draft.app);
+  const [named, setNamed] = React.useState(false);
+  // The names of an MCP server's tools and of harness tools share one
+  // answer, so a move to or from the harness lane starts it empty.
+  const pickLane = (l: Lane) => {
+    if (l === draft.lane) return;
+    onChange(l === "harness" || draft.lane === "harness" ? { lane: l, tools: [], app: "", wholeServer: false } : { lane: l });
+  };
+  const pickServer = (v: string) => {
+    setNamed(v === UNSEEN);
+    onChange({ app: v === UNSEEN ? "" : v, tools: [], wholeServer: false });
+  };
   const narrowed = draft.role != null && servers.length < totalServers;
   const picked = draft.tools;
   const allShown = tools.length > 0 && tools.every((t) => picked.includes(t));
@@ -341,7 +387,7 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
             aria-pressed={draft.lane === l}
             data-lane={l}
             className={cn("h-8", draft.lane === l && "border-link bg-accent-bg text-foreground")}
-            onClick={() => onChange({ lane: l })}
+            onClick={() => pickLane(l)}
           >
             {LANE_LABEL[l]}
           </Button>
@@ -351,13 +397,22 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
       {draft.lane === "mcp" && (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={draft.app} onValueChange={(v) => onChange({ app: v, tools: [] })}>
+            <Select value={named ? UNSEEN : draft.app} onValueChange={pickServer}>
               <SelectTrigger aria-label={SERVER} className="h-9 gap-1.5">
                 <span className="text-muted-foreground">{SERVER}</span>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {servers.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                <SelectGroup>
+                  <SelectLabel>{GROUP_REGISTERED}</SelectLabel>
+                  {servers.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectGroup>
+                <SelectGroup data-machines>
+                  <SelectLabel>{GROUP_MACHINES}</SelectLabel>
+                  {machines.map((s) => <SelectItem key={s.server} value={s.server} title={deniedLine(s.count, s.lastTime)}>{s.server}</SelectItem>)}
+                  {onMachine && !named && !machines.some((s) => s.server === draft.app) && <SelectItem value={draft.app}>{draft.app}</SelectItem>}
+                  <SelectItem value={UNSEEN}>{NOT_SEEN}</SelectItem>
+                </SelectGroup>
               </SelectContent>
             </Select>
             {draft.role === null && <span className="text-[13px] text-muted-foreground">{EVERYONE_SERVERS}</span>}
@@ -369,17 +424,27 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
             )}
           </div>
 
+          {named && (
+            <div className="flex max-w-[560px] flex-col gap-1">
+              <Input aria-label={SERVER_NAME} value={draft.app} spellCheck={false} className="font-mono" onChange={(e) => onChange({ app: e.target.value.trim(), tools: [], wholeServer: false })} />
+              <span className={HINT}>{SERVER_NAME_HINT}</span>
+            </div>
+          )}
+          {onMachine && <p className="max-w-[80ch] text-[13px] text-muted-foreground" data-machine-server>{MACHINE_SERVER_HINT}</p>}
+
           <div className="flex flex-wrap items-center gap-2">
             <Switch id="whole-server" checked={draft.wholeServer} onCheckedChange={(v) => onChange({ wholeServer: v })} />
             <label htmlFor="whole-server" className="text-sm text-foreground">{WHOLE_SERVER}</label>
             {!draft.wholeServer && <>
               <span className="text-[13px] text-muted-foreground">{OR_PICK}</span>
-              <Chips names={picked} onRemove={(t) => onChange({ tools: picked.filter((x) => x !== t) })} />
+              {!onMachine && <Chips names={picked} onRemove={(t) => onChange({ tools: picked.filter((x) => x !== t) })} />}
             </>}
-            <span className="text-[13px] text-muted-foreground" data-picked-count>{draft.wholeServer ? WHOLE_SERVER_LINE : pickedCount(picked.length, tools.length)}</span>
+            {(draft.wholeServer || !onMachine) && <span className="text-[13px] text-muted-foreground" data-picked-count>{draft.wholeServer ? WHOLE_SERVER_LINE : pickedCount(picked.length, tools.length)}</span>}
           </div>
+          {onMachine && draft.wholeServer && <p className="max-w-[80ch] text-sm text-warn" data-whole-machine>{WHOLE_MACHINE_SERVER}</p>}
+          {onMachine && <MachineTools lane="mcp" denied={toolsOf(denials, draft.app)} picked={picked} whole={draft.wholeServer} onPick={(next) => onChange({ tools: next })} />}
 
-          <div className="max-w-[760px] overflow-x-auto rounded-md border border-border bg-card">
+          {!onMachine && <div className="max-w-[760px] overflow-x-auto rounded-md border border-border bg-card">
             <Table className="table-fixed">
               <colgroup><col style={{ width: "44px" }} /><col style={{ width: "220px" }} /><col /></colgroup>
               <TableHeader>
@@ -425,10 +490,16 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
                 })}
               </TableBody>
             </Table>
-          </div>
+          </div>}
         </>
       )}
 
+      {draft.lane === "harness" && (
+        <>
+          <p className="max-w-[80ch] text-sm text-text-2">{HARNESS_HINT}</p>
+          <MachineTools lane="harness" denied={toolsOf(denials, null)} picked={picked} onPick={(next) => onChange({ tools: next })} />
+        </>
+      )}
       {draft.lane === "shell" && <ChipInput label={PATTERNS_Q} hint={PATTERNS_EXAMPLE} names={draft.patterns} onChange={(patterns) => onChange({ patterns })} />}
       {draft.lane === "files" && <ChipInput label={PATHS_Q} hint={PATHS_EXAMPLE} names={draft.paths} onChange={(paths) => onChange({ paths })} />}
       {draft.lane === "net" && <p className="max-w-[80ch] text-sm text-text-2">{NET_LINE}</p>}
@@ -479,7 +550,7 @@ export function HowStep({ draft, approvers, onChange }: HowProps) {
   if (draft.intent === "deny") {
     return (
       <div className="flex flex-col gap-4" data-step="how">
-        <h2 className={H2}>{HOW_Q}</h2>
+        <h2 className={H2}>{DENY_Q}</h2>
         <p className="max-w-[80ch] text-sm text-text-2">{DENY_LEDE(subjectOpening(view))}</p>
         {field}
       </div>
@@ -541,7 +612,8 @@ export function ReviewStep({ draft, taken, exists, people, yaml, verdict, nameBo
     facts.push([REVIEW_FACT.who, whoWords(draft.who)]);
     facts.push([REVIEW_FACT.how, draft.how === "hold" ? holdWords(secondsOf(draft.hold)) : ticketWords(secondsOf(draft.ticket), secondsOf(draft.grant))]);
   }
-  facts.push([REVIEW_FACT.reason, <span key="reason" className="font-mono text-[13px]">{draft.reason}</span>]);
+  if (draft.makeRole && draft.role) facts.push([ALSO_CREATES, alsoCreates(draft.role)]);
+  if (draft.intent !== "allow") facts.push([REVIEW_FACT.reason, <span key="reason" className="font-mono text-[13px]">{draft.reason}</span>]);
 
   return (
     <div className="flex flex-col gap-4" data-step="review">

@@ -168,7 +168,7 @@ func TestSignInRequest(t *testing.T) {
 	want := map[string]string{
 		"response_type": "code", "client_id": "straza", "scope": "openid profile",
 		"nonce": "jkt.nonce-part-0123456789ab", "code_challenge_method": "S256",
-		"prompt": "login", "max_age": "0",
+		"prompt": "login", "max_age": "600",
 	}
 	for k, v := range want {
 		if q.Get(k) != v {

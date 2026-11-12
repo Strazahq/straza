@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
@@ -31,16 +32,31 @@ func (e *DisabledUserError) Error() string {
 	return fmt.Sprintf("authn: user %s is disabled", e.User.Username)
 }
 
+// LinkMismatchError is VerifyLogin's refusal of an IdP-verified identity
+// whose preferred_username names a local user that is linked to another
+// external identity. User is that row, which is left as it was, so the
+// caller can name the person in its refusal and its login failure record.
+type LinkMismatchError struct{ User store.User }
+
+func (e *LinkMismatchError) Error() string {
+	return fmt.Sprintf("authn: username %q is bound to another identity", e.User.Username)
+}
+
 // ExternalVerifier validates ID tokens minted by an external OIDC IdP
 // (Keycloak, Okta, Entra, …) and maps their claims onto local users.
 //
-// Mapping order: external_id == sub, then username == preferred_username.
-// A matched user without an external_id gets it backfilled (account
-// linking). With JIT enabled a missing user is created.
+// Mapping order: external_id == oid when the issuer is an Entra tenant and
+// the token carries oid, then external_id == sub, then username ==
+// preferred_username. A user matched by username without an external_id
+// gets the oid backfilled, or the sub where no oid is read (account
+// linking). With JIT enabled a missing user is created with the same value.
 type ExternalVerifier struct {
 	verifier *oidc.IDTokenVerifier
 	users    store.UserRepo
 	jit      bool
+	// linkOnOID says the issuer is an Entra tenant, whose oid claim links
+	// accounts (entraIssuer).
+	linkOnOID bool
 
 	// BootstrapUsername is the one identity provisioned despite JIT being
 	// off (the first-admin bootstrap, `oidc.bootstrapAdmin`). The verifier
@@ -76,7 +92,7 @@ func NewExternalVerifier(ctx context.Context, issuerURL, discoveryURL, clientID 
 		ClientID:             clientID,
 		SupportedSigningAlgs: []string{oidc.RS256, oidc.ES256, oidc.EdDSA},
 	})
-	return &ExternalVerifier{verifier: verifier, users: users, jit: jit}, nil
+	return &ExternalVerifier{verifier: verifier, users: users, jit: jit, linkOnOID: entraIssuer(issuerURL)}, nil
 }
 
 // discoverAt fetches the discovery document at discoveryURL and builds the
@@ -143,7 +159,11 @@ func (v *ExternalVerifier) VerifyLoginFacts(ctx context.Context, rawIDToken stri
 		return store.User{}, LoginFacts{}, fmt.Errorf("authn: external id token rejected: %w", err)
 	}
 
-	u, err := v.mapUser(ctx, idToken.Subject, claims)
+	var oid string
+	if v.linkOnOID {
+		oid = entraOID(idToken)
+	}
+	u, err := v.mapUser(ctx, idToken.Subject, oid, claims)
 	if err != nil {
 		return store.User{}, LoginFacts{}, err
 	}
@@ -158,15 +178,27 @@ func (v *ExternalVerifier) protects(username string) bool {
 	return v.ProtectedUsername != "" && username == v.ProtectedUsername
 }
 
-func (v *ExternalVerifier) mapUser(ctx context.Context, sub string, claims externalClaims) (store.User, error) {
-	if u, err := v.users.GetByExternalID(ctx, sub); err == nil {
+func (v *ExternalVerifier) mapUser(ctx context.Context, sub, oid string, claims externalClaims) (store.User, error) {
+	// keys are the external ids that find a linked account, in this order,
+	// and keys[0] is the one a new link stores. An account linked by sub
+	// before oid was read keeps matching and is not rewritten.
+	keys := []string{sub}
+	if oid != "" {
+		keys = []string{oid, sub}
+	}
+	for _, key := range keys {
+		u, err := v.users.GetByExternalID(ctx, key)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return store.User{}, err
+		}
 		// A protected row that already carries this link is refused as well.
 		if v.protects(u.Username) {
 			return store.User{}, ErrProtectedAccount
 		}
 		return u, nil
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return store.User{}, err
 	}
 
 	// Fallback matches link the account by backfilling external_id.
@@ -191,14 +223,14 @@ func (v *ExternalVerifier) mapUser(ctx context.Context, sub string, claims exter
 			return store.User{}, ErrProtectedAccount
 		}
 		if u.ExternalID == "" {
-			u.ExternalID = sub
+			u.ExternalID = keys[0]
 			if u, err = v.users.Update(ctx, u); err != nil {
 				return store.User{}, fmt.Errorf("authn: link account: %w", err)
 			}
-		} else if u.ExternalID != sub {
-			// Same username, different upstream subject: refuse rather than
+		} else if !slices.Contains(keys, u.ExternalID) {
+			// Same username, different upstream identity: refuse rather than
 			// hijack the existing account.
-			return store.User{}, fmt.Errorf("authn: username %q is bound to another identity", u.Username)
+			return store.User{}, &LinkMismatchError{User: u}
 		}
 		return u, nil
 	}
@@ -215,7 +247,7 @@ func (v *ExternalVerifier) mapUser(ctx context.Context, sub string, claims exter
 		return store.User{}, ErrProtectedAccount
 	}
 	u, err := v.users.Create(ctx, store.User{
-		Username: username, Email: claims.Email, ExternalID: sub, Origin: store.OriginLocal,
+		Username: username, Email: claims.Email, ExternalID: keys[0], Origin: store.OriginLocal,
 	})
 	if err != nil {
 		return store.User{}, fmt.Errorf("authn: jit provision: %w", err)

@@ -76,8 +76,16 @@ func (p *ccProvider) asked() string {
 	return strings.Join(p.clients, ",")
 }
 
-// installCCApp installs an oauth server whose agents use client credentials.
+// installCCApp installs an oauth server whose agents use client credentials
+// at the keycloak provider.
 func installCCApp(t *testing.T, app *App, up *gatewayUpstream, name string) store.App {
+	t.Helper()
+	return installCCAppOn(t, app, up, name, "keycloak")
+}
+
+// installCCAppOn installs an oauth server whose agents use client
+// credentials at the named provider.
+func installCCAppOn(t *testing.T, app *App, up *gatewayUpstream, name, provider string) store.App {
 	t.Helper()
 	mf, err := managerParse(t, fmt.Sprintf(`
 apiVersion: straza.dev/v1beta1
@@ -91,9 +99,9 @@ straza:
   credential:
     kind: oauth
     agents: client_credentials
-    oauth: {provider: keycloak}
+    oauth: {provider: %s}
     inject: {as: header, name: Authorization, template: "Bearer {{secret}}"}
-`, name, name, up.URL))
+`, name, name, up.URL, provider))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,17 +177,17 @@ func TestGatewayClientCredentialsLane(t *testing.T) {
 	}
 
 	const open = "agent joe could not get a ccapp token. "
-	noKey := open + "This Straza deployment has no client assertion key that signs: none was created yet, or the last one was retired. An administrator runs strazactl signing-keys rotate client_assertion, and agents can call about a minute later."
+	noKey := open + "This Straza deployment has no client assertion key that signs: none was created yet, or the last one was retired. An administrator runs strazactl signing-keys rotate client_assertion, then strazactl signing-keys promote client_assertion with the new key's id, and the agent calls again."
 	if raw := call(joeTok); !strings.Contains(raw, noKey) {
 		t.Fatalf("joe before any key = %s", raw)
 	}
 	denied(joe, noKey)
 
-	now := time.Now()
-	if _, err := app.assertionKeys.Stage(ctx, now); err != nil {
+	key, err := app.assertionKeys.Stage(ctx, time.Now())
+	if err != nil {
 		t.Fatal(err)
 	}
-	staged := open + "The client assertion key was created moments ago and starts signing within a minute. Call again then."
+	staged := open + "The client assertion key " + key.KID + " is staged and signs nothing until an administrator promotes it with strazactl signing-keys promote client_assertion " + key.KID + ", then the agent calls again."
 	if raw := call(joeTok); !strings.Contains(raw, staged) {
 		t.Fatalf("joe on a staged key = %s", raw)
 	}
@@ -187,8 +195,8 @@ func TestGatewayClientCredentialsLane(t *testing.T) {
 	if got := idp.asked(); got != "" {
 		t.Fatalf("the provider was asked for %q before any key signed", got)
 	}
-	if step, err := app.assertionKeys.Advance(ctx, time.Now().Add(2*authn.KeyReloadInterval), time.Minute); err != nil || step.Promoted == "" {
-		t.Fatalf("Advance = %+v, %v, want the staged key promoted", step, err)
+	if got, err := app.assertionKeys.Promote(ctx, time.Now().Add(2*authn.KeyReloadInterval), key.KID); err != nil || !got.Changed {
+		t.Fatalf("Promote = %+v, %v, want the staged key promoted", got, err)
 	}
 
 	// The first call fetches and the second is served from memory, and
@@ -296,7 +304,7 @@ func TestInstallRefusesClientCredentialsWithoutTheBlock(t *testing.T) {
 	body := ccManifest("https://mcp.example/mcp")
 	var refused map[string]string
 	code := rawReq(t, "POST", base+"/v1/admin/apps", root, "application/yaml", []byte(body), &refused)
-	const want = "server echoapp sets credential.agents to client_credentials, and the provider keycloak has no clientCredentials settings. Add oauth.providers.keycloak.clientCredentials.assertionAudience to strazad's config, or set credential.agents to own, sponsor or shared."
+	const want = "server echoapp sets credential.agents to client_credentials, and the provider keycloak has no clientCredentials settings. Add oauth.providers.keycloak.clientCredentials to strazad's config, with assertionAudience for Keycloak or Okta, or with entraBlueprint for an Entra agent blueprint. Otherwise set credential.agents to own, sponsor or shared."
 	if code < 400 || !strings.Contains(refused["error"], want) {
 		t.Fatalf("install = %d %v, want a refusal with %q", code, refused, want)
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/strazahq/straza/internal/agentguard"
+	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/agentguard/trace"
 	"github.com/strazahq/straza/internal/policy"
 )
@@ -16,8 +17,9 @@ import (
 // verified nothing beyond the token, as after a restart, so the session is
 // renewed once, through a refresh that keeps the session id and its
 // pending approval exemptions, or a re-acquire when the token itself is
-// refused, and the decide is asked again.
-func (s *credStore) Decide(ctx context.Context, ses Session, ev policy.Event, agentType, agentID string) (DecideOutcome, error) {
+// refused, and the decide is asked again. input rides beside the event on
+// both asks.
+func (s *credStore) Decide(ctx context.Context, ses Session, ev policy.Event, agentType, agentID string, input *localapi.ToolInput) (DecideOutcome, error) {
 	a, hs, err := s.held(ses)
 	if err != nil {
 		return DecideOutcome{}, err
@@ -33,7 +35,7 @@ func (s *credStore) Decide(ctx context.Context, ses Session, ev policy.Event, ag
 	}
 	var out DecideOutcome
 	dctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	out.Answer, err = api.Decide(dctx, a.tokenOf(hs), ev, agentType, agentID)
+	out.Answer, err = api.Decide(dctx, a.tokenOf(hs), ev, agentType, agentID, input)
 	cancel()
 	var refuse *agentguard.StatusError
 	if err != nil && errors.As(err, &refuse) && refuse.Status == http.StatusUnauthorized {
@@ -42,7 +44,7 @@ func (s *credStore) Decide(ctx context.Context, ses Session, ev policy.Event, ag
 			err = berr
 		} else {
 			rctx, rcancel := context.WithTimeout(ctx, 2*time.Second)
-			out.Answer, err = api.Decide(rctx, a.tokenOf(hs), ev, agentType, agentID)
+			out.Answer, err = api.Decide(rctx, a.tokenOf(hs), ev, agentType, agentID, input)
 			rcancel()
 		}
 	}

@@ -42,11 +42,15 @@ def fetch(url: str) -> str: ...
 # MCP-style calls:
 straza.check("other", app="midpoint", tool_name="search_users")
 
-# A tool of your own, named so policy can allow, hold or deny it by name:
-straza.check("other", tool_name="refund_order")
+# A tool of your own, named so policy can allow, hold or deny it by name.
+# args are the call's own arguments: the audit record keeps them and an
+# approval binds them. {} is a call with no arguments, and leaving args
+# out means they were not seen. Any kind but "other" ignores args.
+straza.check("other", tool_name="refund_order", args={"order": "A-1"})
 
-@straza.guard("other", name="refund_order")
-def refund(order_id: int) -> str: ...
+@straza.guard("other", name="refund_order",
+              args_from=lambda order: {"order": order})
+def refund(order: str) -> str: ...
 
 # Conversation capture (recorded only when policy enables it; never raises):
 straza.submit_prompt(user_text)
@@ -63,7 +67,8 @@ Each extra pulls only its framework; the core stays dependency-free. A
 policy sees `shell.exec`/`file.write`/… instead of `other`; args are
 extracted by convention (`command`; `path`/`file_path`/`paths`; `url`).
 The glue also sends each tool's own name, so a tool left out of the
-`tool_map` reaches policy as `other` with its name, and an admin allows,
+`tool_map` reaches policy as `other` with its name and its whole
+arguments as `args`, and an admin allows,
 holds or denies it by name with a rule of `tools: [other]` and
 `toolNames`, with no change to your code and no Straza release.
 MCP-style tools do NOT belong in a `tool_map`. Point the framework's MCP

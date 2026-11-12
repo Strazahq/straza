@@ -2,7 +2,7 @@
 title: strazactl sinks replay
 description: Re-deliver a sink's parked events to its receiver, oldest first
 pagetype: reference
-weight: 93
+weight: 95
 draft: false
 sources:
   - cmd/strazactl

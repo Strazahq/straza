@@ -14,8 +14,8 @@ tested:
   platform: A throwaway standalone server in an Alpine 3.20 container on Linux, built from an uncommitted working tree, with the person omar enrolled through a straza service started with STRAZA_HOME in a home directory of his own, for doctor and straza logs, and strazad stopped for the failure case. mara's deny record was read back after the kill-switch runbook's disable on 2026-10-06 at v1.1.0-117-g106081a8, and the log settings were checked then by booting with bad values and with debug on. The enterprise boot lines were read with docker logs from the demo stack, which runs v1.1.0-104-g07d2df0e
   date: 2026-10-21
 applies_to: both
-who: You, as the operator, and the person at the agent's machine
-where: A terminal on the agent's machine, and the strazad log
+who: Operator, and the person at the agent's machine
+where: Terminal on the agent's machine, and the strazad log
 steps: true
 keywords: doctor logs correlation id debug
 ---
@@ -212,9 +212,9 @@ This is a deny record for the person `mara`, whom the [Kill-switch runbook]({{< 
 ```
 
 
-A deny record carries the session, the user, the harness, the event kind, the tool and the exact shell command or MCP tool name. It also carries the effect, the rule and PolicySet that decided, the reason the agent saw, and the snapshot id the decision ran against. A gateway record adds the MCP call arguments, capped at 8 KiB with a truncation flag.
+A deny record carries the session, the user, the harness, the event kind, the tool and the exact shell command or MCP tool name. It also carries the effect, the rule and PolicySet that decided, the reason the agent saw, and the snapshot id the decision ran against. A gateway record adds the MCP call arguments, capped at 8 KiB with a truncation flag. A tool record adds the tool's input the same way.
 
-Neither the log nor these records carry a prompt or a model reply. Recorded conversation turns exist only when a PolicySet turns recording on, and they land as their own event types. A sink receives them only when you name those types in its subject list, because the default subject set leaves them out.
+Neither the log nor these records carry a person's prompt or a model reply. A tool record does carry the tool's input, and for a spawned subagent that input is the prompt the agent wrote for it. Recorded conversation turns exist only when a PolicySet turns recording on, and they land as their own event types. A sink receives them only when you name those types in its subject list, because the default subject set leaves them out.
 
 Upstream credentials never enter either surface. Sink and bus URLs are redacted before they are printed, and secrets stay in the credential store.
 

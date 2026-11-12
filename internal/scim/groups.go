@@ -182,6 +182,7 @@ func (s *Server) roleByID(w http.ResponseWriter, r *http.Request) (store.Role, b
 		writeError(w, http.StatusInternalServerError, "", "lookup failed")
 		return store.Role{}, false
 	}
+	noteRole(w, role.Name)
 	return role, true
 }
 

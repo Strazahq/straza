@@ -76,7 +76,7 @@ Every 15 seconds Straza marks each request past its window as expired, which the
 ## What one approval covers
 
 
-An approval covers a single call. It is tied to the session, the rule and a fingerprint of the call, so another command, another session or a second run needs a new approval. For a tool of an MCP server the fingerprint covers the tool and its exact arguments. A rule can loosen that to the tool alone, for a harmless tool whose arguments change on every call. A ticket's grant follows the requester instead of the session. Every phase leaves an [audit]({{< relref "concepts/evidence.md" >}}) record: the request, the decision with who made it and where, and each call that used it.
+An approval covers a single call. It is tied to the session, the rule and a fingerprint of the call, so another command, another session or a second run needs a new approval. For a tool of an MCP server the fingerprint covers the tool and its exact arguments. A rule can loosen that to the tool alone, for a harmless tool whose arguments change on every call. For a harness tool Straza does not classify, the fingerprint covers the tool's name and its exact arguments, and that loosening does not reach it. The person who decides sees those arguments on the request, redacted and bounded like an MCP call's. A ticket's grant follows the requester instead of the session. Every phase leaves an [audit]({{< relref "concepts/evidence.md" >}}) record: the request, the decision with who made it and where, and each call that used it.
 
 ## Confirm: the requester decides
 

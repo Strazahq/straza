@@ -49,6 +49,11 @@ type User struct {
 	Display  string `json:"display"`
 	Status   string `json:"status"`
 	Origin   string `json:"origin"`
+	// UserType is human, agent or service, and empty on an unclassified user.
+	UserType string `json:"user_type,omitempty"`
+	// EntraAgentID is the Entra agent identity an agent acts as at Entra,
+	// empty when it holds none.
+	EntraAgentID string `json:"entra_agent_id,omitempty"`
 }
 
 // Role is the admin API role representation.
@@ -129,13 +134,15 @@ func (c *Client) RotateSigningKey(ctx context.Context) (SigningKeyRotation, erro
 }
 
 // SigningKey is one row of the signing key list: public facts only, the
-// server returns no key material on any route.
+// server returns no key material on any route. CertificateExpiresAt is set
+// for a client assertion key that is not retired.
 type SigningKey struct {
-	KID       string `json:"kid"`
-	Purpose   string `json:"purpose"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"created_at"`
-	RotatedAt string `json:"rotated_at"`
+	KID                  string `json:"kid"`
+	Purpose              string `json:"purpose"`
+	Status               string `json:"status"`
+	CreatedAt            string `json:"created_at"`
+	RotatedAt            string `json:"rotated_at"`
+	CertificateExpiresAt string `json:"certificate_expires_at"`
 }
 
 // SigningKeys lists every signing key with its purpose and status.
@@ -153,7 +160,8 @@ type ClientAssertionRotation struct {
 }
 
 // RotateClientAssertionKey stages a new client assertion key, which the
-// server publishes at once and promotes on its own schedule.
+// server publishes at once and which signs only after
+// PromoteClientAssertionKey.
 func (c *Client) RotateClientAssertionKey(ctx context.Context) (ClientAssertionRotation, error) {
 	var out ClientAssertionRotation
 	return out, c.Do(ctx, http.MethodPost, "/v1/admin/signing-keys/client-assertion/rotate", nil, &out)
@@ -174,6 +182,31 @@ type SigningKeyRetirement struct {
 func (c *Client) RetireClientAssertionKey(ctx context.Context, kid string) (SigningKeyRetirement, error) {
 	var out SigningKeyRetirement
 	return out, c.Do(ctx, http.MethodPost, "/v1/admin/signing-keys/client-assertion/"+url.PathEscape(kid)+"/retire", nil, &out)
+}
+
+// ClientAssertionPromotion is the answer to promoting a client assertion
+// key. Was is the status the key held before the call, and PreviousKID is
+// empty when no key signed before or nothing changed.
+type ClientAssertionPromotion struct {
+	KID                                string `json:"kid"`
+	Status                             string `json:"status"`
+	Was                                string `json:"was"`
+	EveryReplicaSignsInSeconds         int    `json:"every_replica_signs_in_seconds"`
+	PreviousKID                        string `json:"previous_kid"`
+	PreviousKeyLeavesDocumentInSeconds int    `json:"previous_key_leaves_document_in_seconds"`
+}
+
+// PromoteClientAssertionKey makes the staged client assertion key kid the
+// signing key.
+func (c *Client) PromoteClientAssertionKey(ctx context.Context, kid string) (ClientAssertionPromotion, error) {
+	var out ClientAssertionPromotion
+	return out, c.Do(ctx, http.MethodPost, "/v1/admin/signing-keys/client-assertion/"+url.PathEscape(kid)+"/promote", nil, &out)
+}
+
+// ClientAssertionCertificate returns the PEM certificate of the client
+// assertion key kid.
+func (c *Client) ClientAssertionCertificate(ctx context.Context, kid string) ([]byte, error) {
+	return c.DoBytes(ctx, http.MethodGet, "/v1/admin/signing-keys/client-assertion/"+url.PathEscape(kid)+"/certificate")
 }
 
 // PolicySet is the admin API PolicySet representation. Since openapi

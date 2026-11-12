@@ -44,13 +44,13 @@ Every binary in a release is reachable from `checksums.txt`, and that one file i
 The identity pattern pins the repository `Strazahq/straza`, its release workflow `.github/workflows/release.yml` and a version tag. It spells the organization `Strazahq` as GitHub writes it into the certificate, and the match is case-sensitive, so a pattern in lowercase fails. A certificate from another repository, another workflow or a branch does not match. The container image verifies with the same identity:
 
 ```sh
-cosign verify ghcr.io/strazahq/straza:2.1.0 \
+cosign verify ghcr.io/strazahq/straza:2.2.0 \
   --certificate-identity-regexp '^https://github\.com/Strazahq/straza/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 
-The cosign commands on this page were run against the published release 1.1.2, with 1.1.2 where the image command now names 2.1.0: they verified the checksums file and the container image, and a check that expected the identity of another tag failed as it should. `make verify-release` rebuilt all 18 binaries of the published release 2.0.1 and each matched its published checksum. Releases from 1.1.2 and earlier carry the archives only, and the packages, the MSI and the pkg come from 2.0.0. Keyless signing records every signature in the public Rekor transparency log together with the repository identity, which is intended for an open source project and means a signature can be audited later. A key-based fallback exists for a signing outage, and it is never automated, because a long-lived private key whose compromise forges releases is worse than a delayed release.
+The cosign commands on this page were run against the published release 1.1.2, with 1.1.2 where the image command now names 2.2.0: they verified the checksums file and the container image, and a check that expected the identity of another tag failed as it should. `make verify-release` rebuilt all 18 binaries of the published release 2.0.1 and each matched its published checksum. Releases from 1.1.2 and earlier carry the archives only, and the packages, the MSI and the pkg come from 2.0.0. Keyless signing records every signature in the public Rekor transparency log together with the repository identity, which is intended for an open source project and means a signature can be audited later. A key-based fallback exists for a signing outage, and it is never automated, because a long-lived private key whose compromise forges releases is worse than a delayed release.
 
 ### The macOS pkg
 

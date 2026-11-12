@@ -1,22 +1,24 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PolicyPage } from "./policy-page";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
-  ApiError, type AuditRow, type PolicyDoc, type RoleRow, activatePolicy, applyPolicy, deactivatePolicy, deletePolicy, validatePolicy,
-  eventSupport, getPolicy, listApps, listAudit, listPolicies, listRoles, listSessions, listUsers, simulate,
+  ApiError, type AuditRow, type DefaultDenials, type PolicyDoc, type RoleRow, activatePolicy, applyPolicy, deactivatePolicy, deletePolicy, validatePolicy,
+  eventSupport, getPolicy, listApps, listAudit, listDefaultDenials, listPolicies, listRoles, listSessions, listUsers, simulate,
 } from "@/lib/api";
 import { checkDraft, createDraft, listDrafts, publishDraft } from "@/lib/drafts-api";
 import { take } from "@/lib/handoff";
+import { ASKED_FOR, GROUP_MACHINES, HARNESS_HINT, MACHINE_SERVER_HINT, NOT_SEEN, SERVER_NAME } from "@/lib/harness-words";
 import { navigate, setLeaveGuard } from "@/lib/router";
 import { SAVE_PUBLISH } from "@/lib/save-words";
 import { downloadText } from "@/lib/utils";
 import {
   ADD_RULE, APPLY_TO_PAGE, BUCKET_WORD, CHECK_RULE, CLOSE_SHEET, DELETE, DELETE_LIVE_TITLE, DISCARD, DRAFT, EVERYONE, FACT, LEAVE, LEAVE_TITLE,
-  LIVE, MENU, MISSING_TITLE, MORE, NEED, NOT_PARSED_PAGE, NO_DECISIONS, ON_BODY, OPEN_IN_AUDIT, PUBLISH_DRAFT_NOTE, REASON,
+  LIVE, MENU, MISSING_TITLE, MORE, NEED, NOT_PARSED_PAGE, NO_DECISIONS, ON_BODY, OPEN_IN_AUDIT, PICK_SERVER, PUBLISH_DRAFT_NOTE, REASON,
   EDITED, RULE_ID, SAVE, STAY, TURN_OFF, TURN_ON, WHERE_CHOICE, onTitle, openRule, stillNeeded,
 } from "@/lib/policy-words";
 import { SUMMARY, VERDICT } from "@/test/drafts-fixture";
@@ -116,6 +118,7 @@ vi.mock("@/lib/api", async (orig) => ({
   deletePolicy: vi.fn(),
   validatePolicy: vi.fn(),
   listAudit: vi.fn(),
+  listDefaultDenials: vi.fn(),
   listPolicies: vi.fn(),
   listSessions: vi.fn(),
   listUsers: vi.fn(),
@@ -169,6 +172,7 @@ beforeEach(() => {
   vi.mocked(deletePolicy).mockResolvedValue({ status: "deleted" });
   vi.mocked(validatePolicy).mockResolvedValue({ ok: true });
   vi.mocked(listAudit).mockResolvedValue(records);
+  vi.mocked(listDefaultDenials).mockResolvedValue({ since: "2026-11-10T10:00:00Z", servers: [], tools: [] });
   vi.mocked(listPolicies).mockResolvedValue({ items: [] });
   vi.mocked(listSessions).mockResolvedValue({ items: [], next_cursor: "" });
   vi.mocked(listUsers).mockResolvedValue({ items: [], next_cursor: "" });
@@ -320,6 +324,64 @@ describe("adding a rule from the sheet", () => {
     expect(line.getAttribute("data-mark")).toBe("new");
     expect(line.textContent).toContain("Straza: no outbound fetch from this role");
     expect(document.querySelector("[data-rule-sheet]")).toBeNull();
+  });
+
+  // The calls no rule covers: one server a harness runs itself, two harness
+  // tools, and one harness tool the harness sent no name for.
+  const denials: DefaultDenials = {
+    since: "2026-11-10T10:00:00Z",
+    servers: [{
+      server: "claude-in-chrome", harnesses: ["claude-code"], count: 7, lastSeq: 9001, lastTime: "2026-11-11T09:30:00Z",
+      tools: ["navigate", "form_input"].map((name) => ({ name, harnesses: ["claude-code"], count: 3, lastSeq: 9001, lastTime: "2026-11-11T09:30:00Z" })),
+    }],
+    tools: ["LSP", "NotebookEdit", ""].map((name) => ({ name, harnesses: ["claude-code"], count: 2, lastSeq: 9002, lastTime: "2026-11-11T09:40:00Z" })),
+  };
+  const asked = () => Array.from(sheet().querySelectorAll("[data-asked] button")).map((b) => b.textContent);
+
+  it("writes a harness tool rule from a tool people asked for", async () => {
+    vi.mocked(listDefaultDenials).mockResolvedValue(denials);
+    const view = mount();
+    await openNew();
+    await userEvent.click(within(sheet()).getByRole("radio", { name: WHERE_CHOICE.harness }));
+    expect(within(sheet()).getByText(HARNESS_HINT)).toBeTruthy();
+    await userEvent.click(within(sheet()).getByRole("button", { name: BUCKET_WORD.allow }));
+    await waitFor(() => expect(asked()).toEqual(["LSP", "NotebookEdit"]));
+    expect(within(sheet()).getByText(ASKED_FOR)).toBeTruthy();
+    await userEvent.click(within(sheet().querySelector("[data-asked]") as HTMLElement).getByRole("button", { name: "LSP" }));
+    expect(asked()).toEqual(["NotebookEdit"]);
+    await waitFor(() => expect((within(sheet()).getByLabelText(RULE_ID) as HTMLInputElement).value).toBe("allow-lsp"));
+    expect(sheet().querySelector("[data-still-needed]")).toBeNull();
+    await userEvent.click(within(sheet()).getByRole("button", { name: APPLY_TO_PAGE }));
+
+    await waitFor(() => expect(bar()).toBeTruthy());
+    expect(row("allow-lsp").getAttribute("data-mark")).toBe("new");
+    view.rerender(<TooltipProvider><PolicyPage name="dev-guardrails" tab="yaml" /></TooltipProvider>);
+    const editor = await screen.findByRole("textbox");
+    const rules = parse((editor as HTMLTextAreaElement).value).spec.rules as { id: string }[];
+    expect(rules.find((r) => r.id === "allow-lsp")).toEqual({ id: "allow-lsp", tools: ["other"], toolNames: { allow: ["LSP"] }, effect: "allow" });
+  });
+
+  it("offers the servers on people's machines, and a name for a server not seen yet", async () => {
+    vi.mocked(listDefaultDenials).mockResolvedValue(denials);
+    mount();
+    await openNew();
+    await userEvent.click(within(sheet()).getByRole("radio", { name: WHERE_CHOICE.mcp }));
+    await userEvent.click(within(sheet()).getByRole("combobox", { name: PICK_SERVER }));
+    const machines = await screen.findByRole("group", { name: GROUP_MACHINES });
+    expect(within(machines).getAllByRole("option").map((o) => o.textContent)).toEqual(["claude-in-chrome", NOT_SEEN]);
+    await userEvent.click(within(machines).getByRole("option", { name: "claude-in-chrome" }));
+    await waitFor(() => expect((sheet().querySelector("[data-machine-server]") as HTMLElement).textContent).toBe(MACHINE_SERVER_HINT));
+    expect(within(sheet()).queryByRole("textbox", { name: SERVER_NAME })).toBeNull();
+    await userEvent.click(within(sheet()).getByRole("button", { name: BUCKET_WORD.allow }));
+    await waitFor(() => expect(asked()).toEqual(["navigate", "form_input"]));
+
+    await userEvent.click(within(sheet()).getByRole("combobox", { name: PICK_SERVER }));
+    await userEvent.click(await screen.findByRole("option", { name: NOT_SEEN }));
+    const name = await within(sheet()).findByRole("textbox", { name: SERVER_NAME });
+    expect(sheet().querySelector("[data-machine-server]")).toBeNull();
+    await userEvent.type(name, "figma-desktop");
+    expect((name as HTMLInputElement).value).toBe("figma-desktop");
+    expect((sheet().querySelector("[data-machine-server]") as HTMLElement).textContent).toBe(MACHINE_SERVER_HINT);
   });
 });
 

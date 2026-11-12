@@ -59,6 +59,21 @@ client's `jti` is 32 hex characters. This refusal ships as a fix without
 a major release. The proof schema and the examples are
 unchanged, because the schema describes one proof without its lane.
 
+Revision (2026-11-09): additive. An AI agent's session token carries `eai`,
+the client id of the Entra agent identity that its check-in read from the
+agent's record, when the record holds one. A server that caches a session's
+subject serves it only for a token whose `eai` equals the identity the
+cached subject holds, and treats any other token as it treats one whose
+`rol` differs: it answers 401 and the client checks in again. A change of
+the identity therefore reaches every server once the agent holds a token
+from a check-in that began after it, within one token lifetime and the
+allowed clock skew. A verifier MUST refuse a token
+whose `eai` is present and is not a non-empty string. Tokens without `eai`
+are unchanged. A server of an older revision ignores the claim, and a server
+of this revision answers 401 to an older server's token for an agent that
+holds an identity, so the client checks in again. `examples/session-token/`
+holds three valid and three invalid tokens.
+
 Straza session tokens are EdDSA (ed25519) JWTs, TTL **300 s**, verified
 locally against the JWKS at `/.well-known/straza/jwks.json` (invariant:
 self-validating tokens + push revocation; verifiers never call home per
@@ -77,7 +92,13 @@ request; see https://docs.straza.ai/security/security-model/).
 | `rol` | hex sha256/128 over the sorted resolved role ids |
 | `snp` | active policy snapshot id (content hash) |
 | `cnf` | `{"jkt": "<thumbprint>"}`, present only on a key-bound token: the RFC 7638 SHA-256 thumbprint of the Ed25519 key whose DPoP proof must come with every use. Absent on a bearer token. A verifier MUST refuse a token whose `cnf` is not an object with a non-empty string `jkt` |
+| `eai` | The client id of the Entra agent identity that the check-in read from an AI agent's record, present only when the record holds one. A server serves a cached subject only for a token whose `eai` equals the identity that subject holds. A verifier MUST refuse a token whose `eai` is present and is not a non-empty string, and MUST NOT read such a claim as absent |
 | `jti`, `iat`, `exp` | standard |
+
+`examples/session-token/` holds three valid and three invalid session tokens
+signed at a fixed time with keys from fixed seeds. Each file names its
+verifier's issuer and the public key that verifies it, and an invalid file
+states the rule it breaks.
 
 ## Built-in ID tokens
 

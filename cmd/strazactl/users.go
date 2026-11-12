@@ -216,5 +216,91 @@ func usersCmd(client func() *ctl.Client) *cobra.Command {
 		},
 	})
 	users.AddCommand(nhiKey)
+	users.AddCommand(entraAgentIDCmd(client))
 	return users
+}
+
+// entraAgentIDCmd is strazactl users entra-agent-id: set, unset and show
+// the Entra agent identity an AI agent acts as at Entra.
+func entraAgentIDCmd(client func() *ctl.Client) *cobra.Command {
+	entra := &cobra.Command{
+		Use:   "entra-agent-id",
+		Short: "Manage the Entra agent identity an AI agent acts as at Entra",
+		Long: "An AI agent that calls a server behind Microsoft Entra acts there as an Entra agent identity. " +
+			"Its client id is a GUID that Entra assigns, so Straza keeps it on the agent's record. " +
+			"An identity manager can write it over SCIM as entraAgentId instead.",
+	}
+	set := func(cmd *cobra.Command, username, clientID string) (ctl.User, error) {
+		u, err := client().UserByUsername(cmd.Context(), username)
+		if err != nil {
+			return ctl.User{}, err
+		}
+		return client().SetEntraAgentID(cmd.Context(), u.ID, clientID)
+	}
+	entra.AddCommand(&cobra.Command{
+		Use:   "set <username> <client id>",
+		Short: "Set the client id of the Entra agent identity the agent acts as",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			u, err := set(cmd, args[0], args[1])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s now acts at Entra as the agent identity %s.\n", u.Username, u.EntraAgentID)
+			return nil
+		},
+	})
+	entra.AddCommand(&cobra.Command{
+		Use:   "unset <username>",
+		Short: "Clear the agent's Entra agent identity",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			u, err := set(cmd, args[0], "")
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s no longer has an Entra agent identity.\n", u.Username)
+			return nil
+		},
+	})
+	entra.AddCommand(&cobra.Command{
+		Use:   "show <username>",
+		Short: "Show the Entra agent identity the agent acts as",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			u, err := client().UserByUsername(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if u.EntraAgentID == "" && u.UserType != "agent" {
+				fmt.Fprintf(cmd.OutOrStdout(), entraNotAgentShown, u.Username, userTypePhrase(u.UserType))
+				return nil
+			}
+			if u.EntraAgentID == "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s has no Entra agent identity. Set one with strazactl users entra-agent-id set %s <client id>.\n", u.Username, u.Username)
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s acts at Entra as the agent identity %s.\n", u.Username, u.EntraAgentID)
+			return nil
+		},
+	})
+	return entra
+}
+
+// entraNotAgentShown is what show prints for a user that holds no Entra
+// agent identity and is not an agent, so strazad would refuse a set.
+const entraNotAgentShown = "%[1]s has no Entra agent identity and cannot hold one, because %[1]s is %[2]s and Straza gets Entra tokens for agents only. " +
+	"If %[1]s is an agent, set its type to agent first, from the identity manager with userType agent or over the admin API with user_type agent, " +
+	"then run strazactl users entra-agent-id set %[1]s <client id>.\n"
+
+// userTypePhrase names the user_type of a user that is not an agent in a
+// sentence about the user.
+func userTypePhrase(userType string) string {
+	switch userType {
+	case "human":
+		return "a person"
+	case "service":
+		return "a service account"
+	}
+	return "unclassified, with no user type,"
 }

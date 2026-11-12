@@ -8,13 +8,15 @@ import { ShellSteps } from "@/components/what-ran-shell";
 import { COPIED, COPY_REFUSED } from "@/lib/audit-words";
 import { notify } from "@/lib/notify";
 import { cutOf, hiddenChars } from "@/lib/shell-read";
-import { ARGS_NONE, CUT_TAIL, FILE_NOTE, HIDDEN_TAIL, RAW, READABLE, WHAT_RAN, WRAP_LINES, copyLabel, cutBody, cutHead, fileVerb, hiddenHead, rawCount } from "@/lib/what-ran-words";
+import { ARGS_NONE, CUT_TAIL, FILE_NOTE, HIDDEN_TAIL, INPUT_CUT_BODY, INPUT_CUT_HEAD, RAW, READABLE, WHAT_RAN, WRAP_LINES, copyLabel, cutBody, cutHead, fileVerb, hiddenHead, rawCount } from "@/lib/what-ran-words";
 
 // The What ran section of the audit record sheet: the call a decision
 // record holds, in a Readable view that lays it out and a Raw view that is
-// the record's own text. A shell command reads as its commands, a gateway
-// call as its arguments, a file tool as its paths. The Raw view is the
-// evidence; the Readable view only lays the same text out.
+// the record's own text. A shell command reads as its commands, and a
+// gateway call or a harness tool whose record holds its input as its
+// arguments. A file tool whose record holds no input reads as its paths.
+// The Raw view is the evidence; the Readable view only lays the same text
+// out.
 
 type View = "readable" | "raw";
 const VIEW_KEY = "straza.audit.view";
@@ -64,8 +66,9 @@ function cutOfCommand(data: Record<string, unknown>, command: string): Cut | nul
 }
 
 // Notices are the facts both views share: hidden characters in the text,
-// and a text the record cut.
-function Notices({ text, cut }: { text: string; cut: Cut | null }) {
+// and a text the record cut. input says the text is a tool's input and not
+// a command.
+function Notices({ text, cut, input }: { text: string; cut: Cut | null; input: boolean }) {
   const hidden = hiddenChars(text);
   if (!hidden.length && !cut) return null;
   const kinds = new Map<string, number[]>();
@@ -74,7 +77,7 @@ function Notices({ text, cut }: { text: string; cut: Cut | null }) {
     <div className="flex flex-col gap-2">
       {hidden.length > 0 && (
         <div className="flex flex-col gap-1 rounded-md border border-warn/45 px-3 py-2 text-[13px] text-text-2" data-notice="hidden">
-          <span className="font-semibold text-warn">{hiddenHead(hidden.length)}</span>
+          <span className="font-semibold text-warn">{hiddenHead(hidden.length, input)}</span>
           <span>
             {[...kinds].map(([k, lines], n) => (
               <React.Fragment key={k}>{n > 0 && ", "}<span className="font-mono text-[12.5px]">{k}</span>{" on line " + [...new Set(lines)].join(", ")}</React.Fragment>
@@ -85,8 +88,8 @@ function Notices({ text, cut }: { text: string; cut: Cut | null }) {
       )}
       {cut && (
         <div className="flex flex-col gap-1 rounded-md border border-border px-3 py-2 text-[13px] text-text-2" data-notice="cut">
-          <span className="font-semibold text-foreground">{cutHead(cut.kept.length)}</span>
-          <span>{cutBody(cut.bytes)}<span className="font-mono text-[12.5px] break-all">{cut.sha256}</span>{CUT_TAIL}</span>
+          <span className="font-semibold text-foreground">{input ? INPUT_CUT_HEAD : cutHead(cut.kept.length)}</span>
+          <span>{input ? INPUT_CUT_BODY : cutBody(cut.bytes)}<span className="font-mono text-[12.5px] break-all">{cut.sha256}</span>{input ? "." : CUT_TAIL}</span>
         </div>
       )}
     </div>
@@ -123,7 +126,7 @@ function jsonObject(text: string): Record<string, unknown> | null {
 }
 
 // WhatRan renders the section for the record's data, or nothing for a
-// record that holds no command, gateway call or paths.
+// record that holds no command, gateway call, input or paths.
 export function WhatRan({ data }: { data: Record<string, unknown> }) {
   const [view, setView] = useView();
   const tool = String(data.tool || "");
@@ -133,7 +136,10 @@ export function WhatRan({ data }: { data: Record<string, unknown> }) {
   const args = typeof data.arguments === "string" ? data.arguments : "";
   const paths = Array.isArray(data.paths) ? data.paths.map(String) : [];
   const workspace = String(data.workspace || "");
-  const kind = command ? "command" : call ? "arguments" : paths.length ? "paths" : null;
+  const native = String(data.nativeTool || "");
+  // A spawn's record carries its subagent type as the command, so only a
+  // shell's command, or a command with no input beside it, reads as one.
+  const kind = command && (tool === "shell.exec" || !args) ? "command" : call || args ? "arguments" : paths.length ? "paths" : null;
   if (!kind) return null;
 
   const parsed = kind === "arguments" ? jsonObject(args) : null;
@@ -145,7 +151,8 @@ export function WhatRan({ data }: { data: Record<string, unknown> }) {
     if (!clipboard) return;
     void clipboard.writeText(copyText).then(() => notify.ok(COPIED), () => notify.failed(COPY_REFUSED));
   };
-  const cut = kind === "command" ? cutOfCommand(data, command) : null;
+  const argsCut = data.argumentsTruncated === true && typeof data.argumentsHash === "string" ? { kept: args, bytes: 0, sha256: data.argumentsHash.replace(/^sha256:/, "") } : null;
+  const cut = kind === "command" ? cutOfCommand(data, command) : kind === "arguments" ? argsCut : null;
 
   let readable: React.ReactNode;
   if (kind === "command") readable = <ShellSteps src={cut ? cut.kept : command} cut={!!cut} />;
@@ -171,11 +178,11 @@ export function WhatRan({ data }: { data: Record<string, unknown> }) {
             <TabsTrigger value="raw">{RAW}</TabsTrigger>
           </TabsList>
           <span className="text-[13px] text-muted-foreground" data-what-ran-meta>
-            <span className="font-mono text-text-2">{kind === "arguments" ? call : tool}</span>
+            <span className="font-mono text-text-2">{kind === "arguments" && call ? call : native ? tool + " " + native : tool}</span>
             {workspace && <>{" in "}<span className="font-mono text-text-2 [overflow-wrap:anywhere]">{workspace}</span></>}
           </span>
         </div>
-        <Notices text={kind === "arguments" ? args : command} cut={cut} />
+        <Notices text={kind === "arguments" ? args : command} cut={cut} input={kind === "arguments"} />
         <TabsContent value="readable" className="min-w-0">{readable}</TabsContent>
         <TabsContent value="raw" className="min-w-0">{kind === "arguments" && !args ? <p className="text-[13px] text-muted-foreground">{ARGS_NONE}</p> : <RawBox text={raw} />}</TabsContent>
       </Tabs>

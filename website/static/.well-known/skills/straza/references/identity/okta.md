@@ -47,6 +47,7 @@ Turn Push Groups on, and later link groups rather than create them. Group Push i
 | `title` | `title` | |
 | `email` | `emails[0].value` | the primary email is stored |
 | status | `active` | boolean or the strings `"True"` and `"False"` |
+| the agent's manager | `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager` | on a user whose `userType` is `agent`, the manager becomes its sponsor. Send the manager's `userName` in Straza, and provision the manager first |
 
 Attributes outside this set are ignored on write, so a richer Okta profile does no harm.
 

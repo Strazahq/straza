@@ -22,6 +22,9 @@ import {
   sinkLine,
   waitingLine,
 } from "@/lib/config-words";
+import type { SigningKeyRow } from "@/lib/keys-api";
+import { certExpiredLine, certExpiringLine, stagedWaitingLine } from "@/lib/keys-words";
+import { KEYS_TAB } from "@/lib/settings-words";
 import { notify } from "@/lib/notify";
 import type { RouteKey } from "@/lib/routes";
 import { refused } from "@/lib/say";
@@ -39,7 +42,28 @@ const DOT: Record<string, string> = { danger: "bg-danger", warn: "bg-warn", ok: 
 // sink's "since" clause takes.
 const clockOf = (iso: string | undefined) => (iso ? absTime(iso).slice(11, 16) : "");
 
-type Item = { key: string; tone: "warn" | "danger"; text: string; to?: RouteKey; sink?: string };
+type Item = { key: string; tone: "warn" | "danger"; text: string; to?: RouteKey; rest?: string[]; label?: string; sink?: string };
+
+const DAY_MS = 86_400_000;
+const KEYS_DOOR = { to: "settings" as RouteKey, rest: ["keys"], label: KEYS_TAB };
+
+// keyItems are the signing key lines: the active key's certificate that
+// expired, or expires within 30 days, and a key staged over a day ago that
+// nobody promoted. An expired certificate is the danger tone, because
+// every Entra token fails until a rotation. Only Entra uses the
+// certificate, so its lines need entra.
+function keyItems(keys: SigningKeyRow[] | null | undefined, entra: boolean): { danger: Item[]; warn: Item[] } {
+  const out = { danger: [] as Item[], warn: [] as Item[] };
+  const now = Date.now();
+  for (const k of keys || []) {
+    const ends = entra && k.certificate_expires_at ? Date.parse(k.certificate_expires_at) - now : NaN;
+    if (k.status === "active" && ends <= 0) out.danger.push({ key: "cert:" + k.kid, tone: "danger", text: certExpiredLine(k.kid, k.certificate_expires_at as string), ...KEYS_DOOR });
+    else if (k.status === "active" && ends <= 30 * DAY_MS) out.warn.push({ key: "cert:" + k.kid, tone: "warn", text: certExpiringLine(k.kid, Math.ceil(ends / DAY_MS), k.certificate_expires_at as string), ...KEYS_DOOR });
+    const waited = now - Date.parse(k.created_at);
+    if (k.status === "staged" && waited > DAY_MS) out.warn.push({ key: "staged:" + k.kid, tone: "warn", text: stagedWaitingLine(k.kid, Math.floor(waited / DAY_MS)), ...KEYS_DOOR });
+  }
+  return out;
+}
 
 // Waiting is the drafts that wait for review, from one page of the list:
 // how many, whether the page was full, and the oldest one's proposer and
@@ -55,6 +79,12 @@ type Props = {
   // drafts is null when the list did not answer or this seat may not read
   // it, and its line is dropped then.
   drafts?: Waiting | null;
+  // keys is the client assertion key list, null when this seat does not
+  // read it or the read failed, and its lines are dropped then.
+  keys?: SigningKeyRow[] | null;
+  // entra is false when the providers say none uses Entra, which drops the
+  // certificate lines. It is true when that is not known.
+  entra?: boolean;
   push: OverviewAnswer["push"];
   sinks: SinkRow[] | null;
   relaxed: ConfigRow[];
@@ -64,15 +94,19 @@ type Props = {
 };
 
 // attentionItems is the list in the order a person should read it: the
-// broken chain first, then servers, waiting calls, waiting drafts, the push
-// lane, parked events, and the relaxed settings last.
-export function attentionItems({ chain, apps, approvals, drafts, push, sinks, relaxed }: Props): Item[] {
+// broken chain first, then servers and signing keys, danger before warn,
+// waiting calls, waiting drafts, the push lane, parked events, and the
+// relaxed settings last.
+export function attentionItems({ chain, apps, approvals, drafts, keys, entra = true, push, sinks, relaxed }: Props): Item[] {
   const items: Item[] = [];
   if (chain.word === "broken") items.push({ key: "chain", tone: "danger", text: chainBrokenLine(chain.seq), to: "audit" });
   const failed = (apps || []).filter((a) => a.status === "failed").map((a) => a.name);
   if (failed.length) items.push({ key: "failed", tone: "danger", text: failedLine(failed.length, failed), to: "servers" });
+  const keyLines = keyItems(keys, entra);
+  items.push(...keyLines.danger);
   const degraded = (apps || []).filter((a) => a.status === "degraded").map((a) => a.name);
   if (degraded.length) items.push({ key: "degraded", tone: "warn", text: degradedLine(degraded.length, degraded), to: "servers" });
+  items.push(...keyLines.warn);
   if (approvals && approvals.length) {
     const oldest = oldestPending(approvals);
     items.push({ key: "waiting", tone: "warn", text: waitingLine(approvals.length, oldest || undefined, oldest ? relTimeText(oldest.createdAt) : ""), to: "approvals" });
@@ -150,7 +184,7 @@ export function Attention(props: Props) {
           <div key={i.key} data-attention={i.key} className="flex flex-wrap items-center gap-2.5 border-b border-border px-3.5 py-2.5 text-sm text-foreground last:border-b-0">
             <span className={cn("size-2 shrink-0 rounded-full", DOT[i.tone])} aria-hidden="true" />
             <span className="min-w-0 flex-1">{i.text}</span>
-            {i.sink ? <Replay name={i.sink} /> : i.to ? <Door to={i.to} className="ml-auto" /> : null}
+            {i.sink ? <Replay name={i.sink} /> : i.to ? <Door to={i.to} rest={i.rest} label={i.label} className="ml-auto" /> : null}
           </div>
         ))
       )}

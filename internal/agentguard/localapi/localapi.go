@@ -118,6 +118,20 @@ type DecideRequest struct {
 	// service puts it on the event it decides and forwards, because the
 	// event's JSON leaves it out (policy.Event.NativeTool).
 	NativeTool string `json:"native_tool,omitempty"`
+	// ToolInput is the input of a classified local tool, nil when the
+	// harness sent none. It rides beside the event for the audit record
+	// alone: no rule reads it and no approval key binds it.
+	ToolInput *ToolInput `json:"tool_input,omitempty"`
+}
+
+// ToolInput is what an audit record keeps of a classified local tool's
+// input. Text is the harness's tool input as JSON, whole when it fits the
+// record's bound and with its longest strings shortened when it does not.
+// Hash is "sha256:" and the hex SHA-256 of the whole text, set only when
+// Text was shortened.
+type ToolInput struct {
+	Text string `json:"text"`
+	Hash string `json:"hash,omitempty"`
 }
 
 // Journal is what the hook's decision journal records about one decision:

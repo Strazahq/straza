@@ -38,9 +38,11 @@ func (a *App) resolveApproveHook(ctx context.Context, claims authn.Claims, sub p
 	// Preview the concrete call now (the one moment the hook payload is in
 	// hand): shell commands preview via the redacted command path, forwarded
 	// mcp args via the same bounded preview the gateway lane uses, a
-	// draft_submit as its digest; the knob-off case returns empties.
+	// draft_submit as its digest, and an unclassified tool's forwarded args
+	// the same way, since the key binds them; the knob-off case returns
+	// empties.
 	prev := a.commandArgsPreview(ev.Command)
-	if ev.Tool == policy.ToolMCPCall && ev.Args != nil {
+	if (ev.Tool == policy.ToolMCPCall || ev.Tool == policy.ToolOther) && ev.Args != nil {
 		prev = a.callPreview(ev.App, ev.ToolName, ev.Args)
 	}
 	// Ticket class takes a different lane: never block, cash a grant that

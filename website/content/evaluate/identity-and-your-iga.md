@@ -72,10 +72,10 @@ Next, mint the token for your IGA and connect it, and from then on your IGA deci
 
 {{< details summary="How a sign-in finds its user" >}}
 
-Straza first looks for a user with the token's subject, but no user carries it yet unless your IGA sent it as `externalId`. When none does, Straza matches the token's `preferred_username` to the `userName` your IGA sent and records the subject on that user. A user bound to another subject is refused. That stops a second account at the provider with the same name from taking it over. An account named break-glass at the identity provider is refused on every sign-in, because the name belongs to the local emergency admin.
+Straza first looks for a user with the token's subject, but no user carries it yet unless your IGA sent it as `externalId`. When none does, Straza matches the token's `preferred_username` to the `userName` your IGA sent and records the subject on that user. A user bound to another subject is refused, and the refusal and its audit record name the user. That stops a second account at the provider with the same name from taking it over. An account named break-glass at the identity provider is refused on every sign-in, because the name belongs to the local emergency admin.
 
 
-Entra ID's own SCIM provisioning sends an `externalId` that never equals the token's subject, so the [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}) guide has you provision people without it.
+When strazad's issuer is one Entra ID tenant's v2.0 issuer, Straza looks for the person's object ID, the token's `oid`, before the subject, and records the object ID when it links a user. Entra's own SCIM provisioning sends `mailNickname` as `externalId` by default, so set it to send the object ID instead, as the [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}) guide shows.
 {{< /details >}}
 
 {{< details summary="What protects the break-glass admin" >}}

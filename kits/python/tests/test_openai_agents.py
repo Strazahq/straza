@@ -111,7 +111,7 @@ class GuardrailTest(StubEnv, unittest.TestCase):
         first, second = self.invocations()
         self.assertEqual(first["payload"]["tool_name"], "other")
         self.assertEqual(first["payload"]["native_tool_name"], "frobnicate")
-        self.assertNotIn("tool_input", first["payload"])  # no conventional args extracted
+        self.assertEqual(first["payload"]["tool_input"], {"x": 1})  # an unclassified tool sends its own arguments
         self.assertEqual(second["payload"]["tool_name"], "task.spawn")
         self.assertEqual(second["payload"]["native_tool_name"], "spawn_worker")
 

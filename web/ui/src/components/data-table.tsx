@@ -1,6 +1,7 @@
 import * as React from "react";
 import {
   type ColumnDef,
+  type Row as TRow,
   type SortingState,
   type VisibilityState,
   flexRender,
@@ -120,11 +121,59 @@ type Props<T> = {
   hiddenByDefault?: string[];
   foot?: React.ReactNode;
   rowClassName?: (row: T) => string;
+  // stableRows says every cell draws from its record and the columns alone,
+  // so a row is drawn again only when its record, its look, the open row or
+  // the columns change. A list whose cells read the clock leaves it unset,
+  // because the timer that redraws the whole table keeps those times fresh.
+  stableRows?: boolean;
 };
+
+// LineProps are what one row draws from. row is the table's handle on the
+// record and is rebuilt on every render, so sameLine compares the record.
+type LineProps<T> = {
+  row: TRow<T>;
+  original: T;
+  name: string;
+  dataAttr: string;
+  open: boolean;
+  look: string;
+  canOpen: boolean;
+  cols: ColumnDef<T>[];
+  visible: string;
+  labels: Record<string, string>;
+  onOpen: React.RefObject<((row: T) => void) | undefined>;
+};
+
+// Line is one record's row: a door a click or Enter opens, and its cells.
+function Line<T>({ row, original, name, dataAttr, open, look, canOpen, labels, onOpen }: LineProps<T>) {
+  const attrs: Record<string, string> = { [dataAttr]: name };
+  return (
+    <TableRow
+      {...attrs}
+      tabIndex={canOpen ? 0 : undefined}
+      role={canOpen ? "button" : undefined}
+      aria-label={canOpen ? "Open " + name : undefined}
+      data-open={open ? "true" : undefined}
+      className={cn("text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50", canOpen && "cursor-pointer", open && "bg-accent-bg", look)}
+      onClick={() => onOpen.current?.(original)}
+      onKeyDown={(e) => { if (onOpen.current && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen.current(original); } }}
+    >
+      {row.getVisibleCells().map((cell) => (
+        <TableCell key={cell.id} data-column={cell.column.id} data-label={labels[cell.column.id] || cell.column.id} className="align-top">{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+      ))}
+    </TableRow>
+  );
+}
+
+const sameLine = <T,>(a: LineProps<T>, b: LineProps<T>) =>
+  a.original === b.original && a.cols === b.cols && a.visible === b.visible && a.labels === b.labels && a.name === b.name &&
+  a.dataAttr === b.dataAttr && a.open === b.open && a.look === b.look && a.canOpen === b.canOpen;
+
+const StableLine = React.memo(Line, sameLine) as typeof Line;
 
 // DataTable renders one list. Rows are buttons named "Open <rowName>" so a
 // click or Enter opens the row; a checkbox click never does.
-export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr, onOpen, openKey, filterBar, count, emptyText, globalFilter = "", serverSort, defaultSort, selection, groups, widths, hiddenByDefault = [], foot, rowClassName }: Props<T>) {
+export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr, onOpen, openKey, filterBar, count, emptyText, globalFilter = "", serverSort, defaultSort, selection, groups, widths, hiddenByDefault = [], foot, rowClassName, stableRows }: Props<T>) {
   const [sorting, setSorting] = React.useState<SortingState>(() => (serverSort ? (serverSort.state ? [serverSort.state] : []) : defaultSort || []));
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(() => Object.fromEntries(hiddenByDefault.map((id) => [id, false])));
 
@@ -202,6 +251,12 @@ export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr,
   });
 
   const shown = table.getRowModel().rows;
+  const visible = table.getVisibleLeafColumns().map((c) => c.id).join(",");
+  const Each = stableRows ? StableLine : Line;
+  // openRef hands a row the newest onOpen, so a row the table skips still
+  // opens through what the caller passed last.
+  const openRef = React.useRef(onOpen);
+  openRef.current = onOpen;
 
   return (
     <div className="flex flex-col gap-3" data-data-table>
@@ -253,7 +308,6 @@ export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr,
             {shown.map((row, i) => {
               const key = rowKey(row.original);
               const name = rowName(row.original);
-              const attrs: Record<string, string> = { [dataAttr]: name };
               // A group header opens each run of rows that share a key, and
               // a folded group shows its header alone.
               const g = groups ? groups.key(row.original) : null;
@@ -272,21 +326,20 @@ export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr,
               ) : null;
               if (groups && g !== null && groups.collapsed.has(g)) return head;
               const line = (
-                <TableRow
+                <Each
                   key={key}
-                  {...attrs}
-                  tabIndex={onOpen ? 0 : undefined}
-                  role={onOpen ? "button" : undefined}
-                  aria-label={onOpen ? "Open " + name : undefined}
-                  data-open={openKey === key ? "true" : undefined}
-                  className={cn("text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50", onOpen && "cursor-pointer", openKey === key && "bg-accent-bg", rowClassName && rowClassName(row.original))}
-                  onClick={() => onOpen && onOpen(row.original)}
-                  onKeyDown={(e) => { if (onOpen && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(row.original); } }}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} data-column={cell.column.id} data-label={labels[cell.column.id] || cell.column.id} className="align-top">{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
-                  ))}
-                </TableRow>
+                  row={row}
+                  original={row.original}
+                  name={name}
+                  dataAttr={dataAttr}
+                  open={openKey === key}
+                  look={rowClassName ? rowClassName(row.original) : ""}
+                  canOpen={!!onOpen}
+                  cols={cols}
+                  visible={visible}
+                  labels={labels}
+                  onOpen={openRef}
+                />
               );
               return head ? <React.Fragment key={"run:" + key}>{head}{line}</React.Fragment> : line;
             })}

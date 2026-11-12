@@ -2,6 +2,7 @@ import * as React from "react";
 import { Loader2Icon, PlayIcon } from "lucide-react";
 import { PolicyTest } from "@/components/policy-test";
 import { SaveNoteLine, useDraftSave } from "@/components/use-draft-save";
+import type { SaveItem } from "@/lib/draft-save";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
@@ -39,6 +40,9 @@ export type PublishProps = {
   roles: string[];
   // probe is the call the strip reads before and after.
   probe?: { event: SimulateRequest["event"]; user?: string; label: string };
+  // extra are the items published with the set in the same draft, such as
+  // the role a new policy makes.
+  extra?: SaveItem[];
   onDone: (result: { name: string; snapshot?: string }) => void;
 };
 
@@ -138,7 +142,7 @@ async function blastOf(roles: string[]): Promise<Blast> {
 
 // Body is the dialog's content. It mounts on every open, so the strip is
 // read fresh each time and no answer lingers from the last one.
-function Body({ name, text, baseText, wasLive, turnOn, roles, probe, onOpenChange, onDone }: Omit<PublishProps, "open">) {
+function Body({ name, text, baseText, wasLive, turnOn, roles, probe, extra, onOpenChange, onDone }: Omit<PublishProps, "open">) {
   const [answer, setAnswer] = React.useState<{ now?: Decision; after?: Decision } | null>(null);
   const [rows, setRows] = React.useState<PolicySetRow[] | null>(null);
   const [blast, setBlast] = React.useState<Blast | null>(null);
@@ -170,7 +174,7 @@ function Body({ name, text, baseText, wasLive, turnOn, roles, probe, onOpenChang
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // publish sends the text as the set's one item, on or kept off.
-  const publish = () => void save.saveAndPublish([{ kind: "PolicySet", name, op: on ? "put" : "off", doc: text }]);
+  const publish = () => void save.saveAndPublish([...(extra || []), { kind: "PolicySet", name, op: on ? "put" : "off", doc: text }]);
 
   // now counts the live sets beside this one, plus the version of this set
   // that runs when the publish replaces one, so the before column is what

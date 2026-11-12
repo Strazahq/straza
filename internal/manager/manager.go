@@ -60,14 +60,17 @@ type UserCredential struct {
 
 // ClientTokenRequest names whose client token is wanted. ClientID is the
 // username of the verified session, because it becomes the client the
-// provider authenticates, and no other input may fill it.
+// provider authenticates, and no other input may fill it. EntraAgentID is
+// the Entra agent identity the session's check-in read from the agent's
+// record, which an Entra provider issues the token to, under the same rule.
 type ClientTokenRequest struct {
-	Provider string // the provider name of the server's manifest
-	Server   string // the server's name, for the sentences
-	ServerID string
-	UserID   string
-	ClientID string
-	Session  string
+	Provider     string // the provider name of the server's manifest
+	Server       string // the server's name, for the sentences
+	ServerID     string
+	UserID       string
+	ClientID     string
+	EntraAgentID string
+	Session      string
 }
 
 // ClientTokens gets the upstream token of an agent's own client at the
@@ -97,6 +100,7 @@ type Caller struct {
 	Sponsor      string // the sponsor's username, for the deny text
 	SponsorID    string // the sponsor's user id, empty when none
 	Session      string // the verified session id
+	EntraAgentID string // the Entra agent identity check-in read, empty when none
 }
 
 // Resolved is the credential a call runs on and where it came from. Owner
@@ -201,7 +205,8 @@ func (m *Manager) CheckProvider(mf Manifest) error {
 			return nil
 		}
 		return errors.New(fmt.Sprintf("server %s sets credential.agents to client_credentials, and the provider %s has no clientCredentials settings. "+
-			"Add oauth.providers.%s.clientCredentials.assertionAudience to strazad's config, or set credential.agents to own, sponsor or shared",
+			"Add oauth.providers.%s.clientCredentials to strazad's config, with assertionAudience for Keycloak or Okta, or with entraBlueprint for an Entra agent blueprint. "+
+			"Otherwise set credential.agents to own, sponsor or shared",
 			mf.Metadata.Name, name, name) + ".")
 	}
 	msg := fmt.Sprintf("credential.oauth.provider %q is not configured on this server. Add oauth.providers.%s to the strazad config", name, name)
@@ -1061,8 +1066,9 @@ func (m *Manager) ProbeWith(ctx context.Context, appName string, secret *Secret)
 
 // clientCredential resolves an agent's call onto the token of its own client
 // at the server's provider. The client id is the username of the verified
-// session and nothing else, because whoever chooses it chooses the identity
-// the upstream sees. The secret id is stable per server and agent, so the
+// session and the Entra agent identity is the one its check-in read, and
+// nothing else, because whoever chooses them chooses the identity the
+// upstream sees. The secret id is stable per server and agent, so the
 // upstream session pool closes the old session when the token is renewed.
 func (m *Manager) clientCredential(ctx context.Context, inst *instance, c Caller) (Resolved, error) {
 	if m.opts.ClientTokens == nil {
@@ -1070,7 +1076,7 @@ func (m *Manager) clientCredential(ctx context.Context, inst *instance, c Caller
 	}
 	token, err := m.opts.ClientTokens.Token(ctx, ClientTokenRequest{
 		Provider: oauthProviderOf(inst.manifest), Server: inst.app.Name, ServerID: inst.app.ID,
-		UserID: c.UserID, ClientID: c.User, Session: c.Session,
+		UserID: c.UserID, ClientID: c.User, EntraAgentID: c.EntraAgentID, Session: c.Session,
 	})
 	if err != nil {
 		return Resolved{}, err

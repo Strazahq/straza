@@ -299,8 +299,10 @@ type Event struct {
 	// payload, the hook lane forwards the harness tool_input. nil = the args
 	// were NOT observed (old client, argless hook dialect); the approval
 	// fingerprint then honestly degrades to tool scope; "{}" = the observed
-	// no-argument call. The evaluator ignores it (matchers never read it in
-	// v1beta1); only the approval fingerprint consumes it, off the fast path.
+	// no-argument call. An unclassified tool's event carries its tool_input
+	// here too. The evaluator ignores it (matchers never read it in
+	// v1beta1); only the approval fingerprint and the audit record consume
+	// it, off the fast path.
 	// YAML-excluded: decision fixtures don't express it, JSON fixtures can.
 	Args json.RawMessage `json:"args,omitempty" yaml:"-"`
 	// Interpreter tags shell.exec events that invoke a known interpreter

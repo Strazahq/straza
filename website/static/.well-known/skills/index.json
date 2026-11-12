@@ -11,7 +11,7 @@
         "references/examples/app-oci.yaml",
         "references/examples/app-remote.yaml",
         "references/examples/capture-conversation.yaml",
-        "references/examples/classify-interpreters.yaml",
+        "references/examples/classify-shell.yaml",
         "references/examples/deny-with-reason.yaml",
         "references/examples/hold-for-approver.yaml",
         "references/examples/mcp-tool-gate.yaml",

@@ -21,7 +21,7 @@
     },
     "app": { "type": "string", "description": "mcp.call: Straza app name" },
     "toolName": { "type": "string", "description": "mcp.call: upstream tool; other: the harness-native tool name (revision 2026-10-30), at most 128 bytes with no control or format character" },
-    "args": { "type": "object", "description": "mcp.call: the tools/call arguments verbatim (harness tool_input), forwarded for the server-side approval fingerprint (policyset revision 7, binding: call). ABSENT means the args were not observed, so the fingerprint covers tool identity only; an empty object is the observed no-argument call. Never used for matching in v1beta1." },
+    "args": { "type": "object", "description": "mcp.call: the tools/call arguments verbatim (harness tool_input), forwarded for the server-side approval fingerprint (policyset revision 7, binding: call). ABSENT means the args were not observed, so the fingerprint covers tool identity only; an empty object is the observed no-argument call. other (revision 2026-11-10): the harness tool_input of an unclassified tool, verbatim, which the fingerprint binds and the audit record keeps. Never used for matching in v1beta1." },
     "command": { "type": "string", "description": "shell.exec: raw command line" },
     "argv": { "type": "array", "items": { "type": "string" } },
     "interpreter": { "type": "string", "description": "shell.exec: detected interpreter basename (python3, bash, …); absent when the command invokes no known interpreter" },

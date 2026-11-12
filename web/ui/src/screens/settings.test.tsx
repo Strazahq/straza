@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Settings } from "./settings";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, type ApiTokenRow, type AttestationHashRow, listApiTokens, listAttestationHashes } from "@/lib/api";
 import { DRAFT_TITLE } from "@/lib/config-words";
+import { type SigningKeyRow, listSigningKeys } from "@/lib/keys-api";
+import { CREATE_KEY, ROTATE_KEY, hiddenKeysTabLine } from "@/lib/keys-words";
 import { navigate, pathFor } from "@/lib/router";
 import { adminAreas } from "@/lib/session";
 import { NEW_TOKEN, TABS, hiddenTabsLine, hiddenTokensTabLine } from "@/lib/settings-words";
@@ -23,11 +25,20 @@ const tokens: ApiTokenRow[] = [
   { id: "t2", name: "siem-reader", scope: "audit:read", created: "2026-09-01T14:40:00Z" },
 ];
 
+// One active client assertion key, one retired, and a session key the tab
+// leaves out, so the count is the one live client assertion key.
+const keys: SigningKeyRow[] = [
+  { kid: "6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", purpose: "client_assertion", status: "active", created_at: "2026-09-21T09:14:00Z", certificate_expires_at: "2028-09-20T09:14:00Z" },
+  { kid: "1b7d0a93-2c44-4e18-8f0b-5a6e7d9c3b21", purpose: "client_assertion", status: "retired", created_at: "2026-09-02T11:40:00Z" },
+  { kid: "s-1", purpose: "session", status: "active", created_at: "2026-09-01T00:00:00Z" },
+];
+
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
   listAttestationHashes: vi.fn(),
   listApiTokens: vi.fn(),
 }));
+vi.mock("@/lib/keys-api", async (orig) => ({ ...(await orig<typeof import("@/lib/keys-api")>()), listSigningKeys: vi.fn() }));
 vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/session")>()), adminAreas: vi.fn() }));
 
@@ -40,6 +51,9 @@ vi.mock("@/components/settings-registry", () => ({ RegistryTab: () => <div data-
 vi.mock("@/components/settings-tokens", () => ({
   TokensTab: ({ mintRequest }: { mintRequest: number }) => <div data-tab="tokens" data-mint-request={mintRequest} />,
 }));
+vi.mock("@/components/settings-keys", () => ({
+  KeysTab: ({ rotateRequest }: { rotateRequest: number }) => <div data-tab="keys" data-rotate-request={rotateRequest} />,
+}));
 
 const mount = (tab?: string) => render(<TooltipProvider><Settings tab={tab} /></TooltipProvider>);
 const tabNames = () => screen.getAllByRole("tab").map((t) => (t.textContent || "").replace(/\s+/g, " ").trim());
@@ -50,13 +64,14 @@ describe("the Settings page", () => {
   beforeEach(() => {
     vi.mocked(listAttestationHashes).mockResolvedValue(hashes);
     vi.mocked(listApiTokens).mockResolvedValue(tokens);
+    vi.mocked(listSigningKeys).mockReset().mockResolvedValue(keys);
     vi.mocked(adminAreas).mockReturnValue(null);
     vi.mocked(navigate).mockClear();
   });
 
-  it("opens on Configuration when the address names no tab, and counts the other two", async () => {
+  it("opens on Configuration when the address names no tab, and counts the other three", async () => {
     mount();
-    await waitFor(() => expect(tabNames()).toEqual([TABS[0].label, TABS[1].label + " 3", TABS[2].label + " 2"]));
+    await waitFor(() => expect(tabNames()).toEqual([TABS[0].label, TABS[1].label + " 3", TABS[2].label + " 2", TABS[3].label + " 1"]));
     expect(panel("configuration")).toBeTruthy();
     expect(panel("registry")).toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeTruthy();
@@ -104,27 +119,44 @@ describe("the Settings page", () => {
   it("shows a delegated seat only the tabs its grants cover, and names the rest", async () => {
     vi.mocked(adminAreas).mockReturnValue({ tokens: true });
     mount();
-    await screen.findByRole("tab", { name: /API tokens/ });
-    expect(tabNames()).toEqual([TABS[2].label + " 2"]);
+    await waitFor(() => expect(tabNames()).toEqual([TABS[2].label + " 2"]));
     expect(panel("tokens")).toBeTruthy();
-    expect((document.querySelector("[data-hidden-tabs]") as HTMLElement).textContent).toBe(hiddenTabsLine([TABS[0].label, TABS[1].label]));
-    // The seat may not read the registry, so the page never asks for it.
+    expect((document.querySelector("[data-hidden-tabs]") as HTMLElement).textContent).toBe(hiddenTabsLine([TABS[0].label, TABS[1].label]) + " " + hiddenKeysTabLine(TABS[3].label));
+    // The seat may not read the registry or the keys, so the page never
+    // asks for them.
     expect(listAttestationHashes).not.toHaveBeenCalled();
+    expect(listSigningKeys).not.toHaveBeenCalled();
   });
 
   it("names the tokens tab when the seat holds config alone", async () => {
     vi.mocked(adminAreas).mockReturnValue({ config: true });
     mount();
-    await screen.findByRole("tab", { name: /Configuration/ });
-    expect(tabNames()).toEqual([TABS[0].label, TABS[1].label + " 3"]);
-    expect((document.querySelector("[data-hidden-tabs]") as HTMLElement).textContent).toBe(hiddenTokensTabLine(TABS[2].label));
+    await waitFor(() => expect(tabNames()).toEqual([TABS[0].label, TABS[1].label + " 3"]));
+    expect((document.querySelector("[data-hidden-tabs]") as HTMLElement).textContent).toBe(hiddenTokensTabLine(TABS[2].label) + " " + hiddenKeysTabLine(TABS[3].label));
     expect(listApiTokens).not.toHaveBeenCalled();
   });
 
   it("leaves a count off the label when its read fails, and keeps the page", async () => {
     vi.mocked(listAttestationHashes).mockRejectedValue(new ApiError("HTTP 503", 503));
     mount();
-    await waitFor(() => expect(tabNames()).toEqual([TABS[0].label, TABS[1].label, TABS[2].label + " 2"]));
+    await waitFor(() => expect(tabNames()).toEqual([TABS[0].label, TABS[1].label, TABS[2].label + " 2", TABS[3].label + " 1"]));
     expect(panel("configuration")).toBeTruthy();
+  });
+
+  it("gives the keys tab Rotate key, Create key when there is no key, and nothing while a rotation runs", async () => {
+    mount("keys");
+    const rotate = await screen.findByRole("button", { name: new RegExp(ROTATE_KEY) });
+    expect(panel("keys")?.getAttribute("data-rotate-request")).toBe("0");
+    await userEvent.click(rotate);
+    await waitFor(() => expect(panel("keys")?.getAttribute("data-rotate-request")).toBe("1"));
+
+    vi.mocked(listSigningKeys).mockResolvedValue([keys[1]]);
+    const none = mount("keys");
+    await waitFor(() => expect(within(none.container).getByRole("button", { name: new RegExp(CREATE_KEY) })).toBeTruthy());
+
+    vi.mocked(listSigningKeys).mockResolvedValue([keys[0], { ...keys[0], kid: "3a9e41c2-58d0-4f7b-b1e6-7c2d90a4f513", status: "staged" }]);
+    const staged = mount("keys");
+    await waitFor(() => expect(within(staged.container).getByRole("tab", { name: new RegExp(TABS[3].label + " 2") })).toBeTruthy());
+    expect(within(staged.container).queryByRole("button", { name: new RegExp(ROTATE_KEY + "|" + CREATE_KEY) })).toBeNull();
   });
 });

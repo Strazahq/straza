@@ -24,8 +24,9 @@ func (a *App) verifyLogin(r *http.Request, rawIDToken string) (store.User, error
 // audience it verified for, which a person's key enrollment judges. A lock
 // leaves the status active, so the denylist is asked too. A disabled user, a
 // locked user, a built-in token stamped for a key the user no longer has
-// registered, and an external identity that names the break-glass account
-// come back as a *loginRefusal. A failed read of the registered key comes
+// registered, an external identity that names the break-glass account, and
+// one whose username names an account linked to another identity come back
+// as a *loginRefusal. A failed read of the registered key comes
 // back as the store's error, which the callers answer as an outage.
 func (a *App) verifyLoginFacts(r *http.Request, rawIDToken string) (store.User, signInFacts, error) {
 	none := signInFacts{}
@@ -77,6 +78,10 @@ func (a *App) verifyLoginFacts(r *http.Request, rawIDToken string) (store.User, 
 		if errors.As(err, &disabled) {
 			return store.User{}, none, disabledRefusal(disabled.User)
 		}
+		var mismatch *authn.LinkMismatchError
+		if errors.As(err, &mismatch) {
+			return store.User{}, none, linkMismatchRefusal(mismatch.User)
+		}
 		lastErr = err
 	}
 	return store.User{}, none, fmt.Errorf("id token not accepted: %w", lastErr)
@@ -115,6 +120,19 @@ func lockedRefusal(u store.User) *loginRefusal {
 	return &loginRefusal{
 		user: u.Username, userID: u.ID, reason: "user is locked",
 		sentence: fmt.Sprintf("the user %s is locked, so this sign-in is refused. An administrator lifts the lock with strazactl users unlock %s.", u.Username, u.Username),
+	}
+}
+
+// linkMismatchRefusal is the refusal of an external identity whose username
+// names a user linked to another identity at the identity provider. It
+// answers 401, the status this refusal had before it named the user.
+func linkMismatchRefusal(u store.User) *loginRefusal {
+	return &loginRefusal{
+		user: u.Username, userID: u.ID, reason: "the account is linked to another identity at the identity provider",
+		sentence: "the account " + u.Username + " in Straza is linked to another identity at your identity provider, so this sign-in is refused. " +
+			"Your identity manager must set the account's externalId to your id at the identity provider, which on Entra's global service is your object ID, " +
+			"or clear it, so that your next sign-in links the account. Ask your administrator to correct it.",
+		status: http.StatusUnauthorized,
 	}
 }
 

@@ -16,8 +16,8 @@ tested:
   date: 2026-09-28
 applies_to: both
 keywords: approve hold approver timeout confirm
-who: You as the admin, and lena as the approver
-where: The console or a terminal with strazactl, and the agent's machine for the call
+who: Admin, and lena as the approver
+where: Console or strazactl, and the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: console
@@ -76,7 +76,7 @@ The New policy wizard writes this rule whole, one question per step:
 2. Under Who decides, pick **An approver role** and `release-approvers`. Under How, pick **A hold, up to** and set 5 minutes. Type the reason under Reason the agent reads, then press **Next**.
 3. On Review, name the set `kubectl-apply-hold` and press **Save and publish**, then **Publish**.
 
-{{< shot name="policy-new-how" caption="The How step, with `release-approvers` deciding and a hold of up to 5 minutes." >}}
+{{< shot name="policy-new-how" caption="The Who decides step, with `release-approvers` deciding and a hold of up to 5 minutes." >}}
 
 The wizard stores the set at priority 150, names the rule itself, and leaves the retry window at its default of 60 seconds. Later records name that rule where this page shows `hold-kubectl-apply`.
 {{< /console >}}

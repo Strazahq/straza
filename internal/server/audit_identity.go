@@ -5,14 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"net/http"
 
 	"github.com/strazahq/straza/internal/approval"
+	"github.com/strazahq/straza/internal/scim"
 	"github.com/strazahq/straza/internal/store"
 )
 
 // Identity audit actions: one straza.audit.admin record per identity setup
-// write that succeeds (spec/events revision 40), and one per request the
-// admin enroll-token route refuses (revision 56). Each name lives here once.
+// write that succeeds (spec/events revision 40), one per request the admin
+// enroll-token route refuses (revision 56), and one per SCIM write Straza
+// refuses (revision 63). Each name lives here once.
 const (
 	actionUserCreate         = "user.create"
 	actionUserUpdate         = "user.update"
@@ -21,6 +24,7 @@ const (
 	actionApproverEnroll     = "approver.enroll"
 	actionNHIKeySet          = "nhi-key.set"
 	actionNHIKeyRemoved      = "nhi-key.removed"
+	actionSCIMRefused        = "scim.refused"
 )
 
 // enrollTokenRefusedReason is the reason of every enroll-token.refused
@@ -73,6 +77,7 @@ func userChanges(before, after store.User, passwordSet bool) []string {
 		{"sponsor", before.Sponsor != after.Sponsor},
 		{"swarm_id", before.SwarmID != after.SwarmID},
 		{"ephemeral", before.Ephemeral != after.Ephemeral},
+		{"entra_agent_id", before.EntraAgentID != after.EntraAgentID},
 	} {
 		if f.differs {
 			changed = append(changed, f.path)
@@ -153,4 +158,37 @@ func nhiKeyFingerprint(publicKeyB64 string) string {
 	}
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// scimWriteRefused is the SCIM WriteRefused seam. It writes one WARN line
+// and one scim.refused record for a write the SCIM server refused: the
+// route, the status, the scimType, the detail the client was told as the
+// reason, the id the route names, and the user or role the write was about,
+// under the admin API token that acted. user rides only for a user Straza
+// holds. A write whose context has ended writes neither, because
+// scimHandler holds its answer back and records the 503 it answers instead.
+func (a *App) scimWriteRefused(r *http.Request, ref scim.Refusal) {
+	ctx := r.Context()
+	if ctx.Err() != nil {
+		return
+	}
+	route := routeLabel(r)
+	data := map[string]any{"action": actionSCIMRefused, "route": route, "httpStatus": ref.Status, "reason": ref.Detail}
+	attrs := []any{"status", ref.Status, "route", route}
+	if act, ok := actorFrom(ctx); ok && act.Name != "" {
+		attrs = append(attrs, "actor", act.Name)
+	}
+	for _, f := range []struct{ key, val string }{
+		{"scimType", ref.SCIMType}, {"target", ref.Target}, {"username", ref.Username}, {"role", ref.Role},
+	} {
+		if f.val != "" {
+			data[f.key] = f.val
+			attrs = append(attrs, f.key, f.val)
+		}
+	}
+	if ref.Target != "" && ref.Username != "" {
+		data["user"] = ref.Target
+	}
+	a.reqlog(ctx).Warn("SCIM write refused", append(attrs, "reason", ref.Detail)...)
+	a.emitIdentityAudit(ctx, data)
 }

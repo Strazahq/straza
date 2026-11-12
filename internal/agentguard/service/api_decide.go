@@ -177,7 +177,7 @@ func (a *api) escalate(ctx context.Context, s Session, req localapi.DecideReques
 func (a *api) online(ctx context.Context, s Session, req localapi.DecideRequest, local policy.Decision, j *localapi.Journal, action, tail string) (policy.Decision, bool) {
 	octx, cancel := context.WithTimeout(ctx, onlineBudget)
 	defer cancel()
-	out, err := a.creds.Decide(octx, s, req.Event, req.AgentType, req.AgentID)
+	out, err := a.creds.Decide(octx, s, req.Event, req.AgentType, req.AgentID, req.ToolInput)
 	j.Status, j.Correlation = out.Status, out.Correlation
 	if err != nil {
 		j.FailClosed = true
@@ -309,10 +309,17 @@ func onlineDenyReason(err error, action, tail string) string {
 // snapshot the engine was built from. It carries the event and that
 // snapshot, because an audit line that cannot say what was attempted is not
 // evidence (spec/events section 2). It keeps at most toolTextMax of the
-// command and of the paths, with the hash of what it cut.
+// command and of the paths, with the hash of what it cut. It names the
+// harness's own tool behind a classified kind, and it keeps the call's
+// input as arguments: the event's args of an mcp.call or an unclassified
+// tool, and the input the hook sent beside a classified tool's event, at
+// most agentguard.ArgumentsMax of it. A call the harness routes through
+// the Straza gateway keeps none, because the gateway's own record holds
+// its arguments and masks a draft, and neither does a call of the
+// gateway's drafting tools under any other server name.
 func toolRecord(s Session, snapshot string, req localapi.DecideRequest, d policy.Decision) map[string]any {
 	ev := req.Event
-	command, cut, hash := capText(ev.Command)
+	command, cut, hash := capText(ev.Command, toolTextMax)
 	data := map[string]any{
 		"session":  s.ID,
 		"harness":  harnessLabel(req.Harness),
@@ -332,6 +339,15 @@ func toolRecord(s Session, snapshot string, req localapi.DecideRequest, d policy
 	if ev.ToolName != "" {
 		data["toolName"] = ev.ToolName
 	}
+	if ev.NativeTool != "" {
+		data["nativeTool"] = ev.NativeTool
+	}
+	if args, hash, ok := callInput(req); ok {
+		data["arguments"] = args
+		if hash != "" {
+			data["argumentsTruncated"], data["argumentsHash"] = true, hash
+		}
+	}
 	if len(ev.Paths) > 0 {
 		paths, cut, hash := capPaths(ev.Paths)
 		data["paths"] = paths
@@ -346,15 +362,43 @@ func toolRecord(s Session, snapshot string, req localapi.DecideRequest, d policy
 	return data
 }
 
-// capText keeps at most toolTextMax bytes of s, cut on a character
-// boundary, and reports whether it cut and the hash of the whole of s.
-func capText(s string) (kept string, cut bool, hash string) {
-	if len(s) <= toolTextMax {
+// callInput answers what a tool record keeps of req's input as
+// agentguard.CutArguments shortens it, the hash of the whole text when it
+// was shortened, and whether req carries an input the record keeps. An
+// input the hook shortened keeps the hook's hash when that is a SHA-256,
+// and one longer than the hook sends is shortened again under the hash of
+// what arrived.
+func callInput(req localapi.DecideRequest) (args, hash string, ok bool) {
+	switch {
+	case req.GatewayProxied || agentguard.HoldsDraft(req.Event.ToolName):
+		return "", "", false
+	case req.Event.Args != nil:
+		args = string(req.Event.Args)
+	case req.ToolInput != nil:
+		args = req.ToolInput.Text
+		if digest, tagged := strings.CutPrefix(req.ToolInput.Hash, "sha256:"); tagged && len(digest) == 2*sha256.Size {
+			if _, err := hex.DecodeString(digest); err == nil {
+				hash = req.ToolInput.Hash
+			}
+		}
+	default:
+		return "", "", false
+	}
+	if kept, whole := agentguard.CutArguments([]byte(args)); whole != "" {
+		args, hash = kept, whole
+	}
+	return args, hash, true
+}
+
+// capText keeps at most limit bytes of s, cut on a character boundary, and
+// reports whether it cut and the hash of the whole of s.
+func capText(s string, limit int) (kept string, cut bool, hash string) {
+	if len(s) <= limit {
 		return s, false, ""
 	}
 	h := sha256.New()
 	writeString(h, s)
-	return cutUTF8(s, toolTextMax), true, "sha256:" + hex.EncodeToString(h.Sum(nil))
+	return cutUTF8(s, limit), true, "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
 // capPaths keeps paths in order while they fit in toolTextMax bytes,

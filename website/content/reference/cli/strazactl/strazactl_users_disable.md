@@ -2,7 +2,7 @@
 title: strazactl users disable
 description: Disable a user (status disabled, every session revoked, lifted by `strazactl users enable`)
 pagetype: reference
-weight: 104
+weight: 106
 draft: false
 sources:
   - cmd/strazactl

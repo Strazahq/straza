@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
-import { addRule, buildRule, docProblems, docText, moveRule, newPolicyDoc, openDoc, posturesOf, readSet, removeRule, ruleView, rulesOf, setApprove, setCapture, setClass, setMatchRoles, setNames, setPosture, setReason, slug, uniqueId } from "./policy-model";
+import { addRule, buildRule, docProblems, docText, laneOf, moveRule, newPolicyDoc, openDoc, posturesOf, proposeRuleId, readSet, removeRule, ruleView, rulesOf, setApprove, setCapture, setClass, setMatchRoles, setNames, setPosture, setReason, slug, uniqueId } from "./policy-model";
 import { countTitle, durationWords, foldSummary, outcomeWords, sentence, subjectWords, whatChanges } from "./policy-words";
 
 const repo = (rel: string) => fileURLToPath(new URL("../../../../" + rel, import.meta.url));
@@ -300,7 +300,96 @@ describe("a new policy", () => {
   });
 });
 
+describe("a rule for harness tools", () => {
+  // HARNESS is a set with a harness allow, a harness denial that names two
+  // tools, and a harness denial that names none yet.
+  const HARNESS = `apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: harness-tools
+spec:
+  rules:
+    - id: allow-lsp
+      tools: [other]
+      toolNames:
+        allow: [LSP]
+      effect: allow
+    - id: deny-notebooks
+      tools: [other]
+      toolNames:
+        deny: [NotebookEdit, NotebookRead]
+      effect: deny
+      reason: "Straza: notebooks are refused"
+    - id: deny-harness
+      tools: [other]
+      effect: deny
+      reason: "Straza: no harness tools"
+`;
+  const byId = (doc: ReturnType<typeof openDoc>, id: string) => rulesOf(doc).find((r) => r.id === id);
+
+  it.each([
+    ["the kind other alone", ["other"], "harness"],
+    ["a subagent spawn", ["task.spawn"], "other"],
+    ["the kind other beside a subagent spawn", ["other", "task.spawn"], "other"],
+  ])("reads %s on the lane it governs", (_, tools, lane) => {
+    expect(laneOf({ id: "r", tools, effect: "deny" })).toBe(lane);
+  });
+
+  it("reads the names from either side of toolNames, and none where the rule names no tool", () => {
+    const doc = openDoc(HARNESS);
+    const cases: [string, string[] | null, string][] = [
+      ["allow-lsp", ["LSP"], "toolNames.allow"],
+      ["deny-notebooks", ["NotebookEdit", "NotebookRead"], "toolNames.deny"],
+      ["deny-harness", null, "toolNames"],
+    ];
+    for (const [id, names, key] of cases) {
+      const view = byId(doc, id);
+      expect(view && [view.lane, view.names, view.namesKey, view.app], id).toEqual(["harness", names, key, null]);
+    }
+  });
+
+  it("adds a name and removes one under the key the rule uses", () => {
+    const doc = openDoc(HARNESS);
+    setNames(doc, "allow-lsp", ["LSP", "WebSearch"]);
+    expect(byId(doc, "allow-lsp")?.names).toEqual(["LSP", "WebSearch"]);
+    setNames(doc, "deny-notebooks", ["NotebookRead"]);
+    const view = byId(doc, "deny-notebooks");
+    expect(view && [view.names, view.namesKey]).toEqual([["NotebookRead"], "toolNames.deny"]);
+  });
+
+  it("writes the deny side on a denial that names no tool yet", () => {
+    const doc = openDoc(HARNESS);
+    setNames(doc, "deny-harness", ["LSP"]);
+    const view = byId(doc, "deny-harness");
+    expect(view && [view.lane, view.names, view.namesKey]).toEqual(["harness", ["LSP"], "toolNames.deny"]);
+    expect(docText(doc)).toContain("    - id: deny-harness\n      tools: [other]\n      toolNames:\n        deny: [LSP]\n      effect: deny");
+  });
+
+  it.each([
+    ["an allow", "allow" as const, { toolNames: { allow: ["LSP"] }, effect: "allow" }],
+    ["a denial", "deny" as const, { toolNames: { deny: ["LSP"] }, effect: "deny", reason: "Straza: no" }],
+    ["a hold", "hold" as const, { toolNames: { allow: ["LSP"] }, effect: "allow", mode: "approve", approve: { deciders: ["sponsor"], timeoutSeconds: 120 }, reason: "Straza: no" }],
+  ])("builds %s on the kind other, with the names and no server", (_, posture, rest) => {
+    const reason = posture === "allow" ? undefined : "Straza: no";
+    expect(buildRule({ id: "r", lane: "harness", posture, names: ["LSP"], timeoutSeconds: 120, reason })).toEqual({ id: "r", tools: ["other"], ...rest });
+  });
+
+  it("names a new rule after its verb and its first tool, with no lane word", () => {
+    expect(proposeRuleId("allow", "harness", null, ["LSP"], [])).toBe("allow-lsp");
+  });
+});
+
 describe("words", () => {
+  it.each([
+    ["one name", ["LSP"], "allow" as const, "the harness tool LSP", "The harness tool LSP is allowed."],
+    ["two names", ["LSP", "NotebookEdit"], "deny" as const, "the harness tools LSP and NotebookEdit", "The harness tools LSP and NotebookEdit are denied."],
+    ["no name", [], "hold" as const, "every harness tool", "Every harness tool needs approval by the person behind the agent within 2 minutes."],
+  ])("names a harness rule with %s", (_, names, posture, subject, said) => {
+    const view = ruleView(buildRule({ id: "r", lane: "harness", posture, names, timeoutSeconds: 120 }), 0);
+    expect(subjectWords(view)).toBe(subject);
+    expect(sentence(view)).toBe(said);
+  });
+
   it("says windows in natural units", () => {
     expect([90, 120, 600, 3600, 7200, 86400, 172800].map(durationWords)).toEqual(["90 seconds", "2 minutes", "10 minutes", "an hour", "2 hours", "a day", "2 days"]);
   });

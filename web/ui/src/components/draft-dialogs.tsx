@@ -75,7 +75,7 @@ function DiscardBody({ draft, onOpenChange, onDiscarded }: Omit<DiscardProps, "o
         <DialogDescription className="text-sm leading-relaxed text-text-2">{server ? discardUnlinks(server) : DISCARD_BODY}</DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="discard-reason" className="text-sm font-medium text-foreground">{REASON_LABEL}</label>
+        <label htmlFor="discard-reason" className="text-sm font-semibold text-foreground">{REASON_LABEL}</label>
         <Textarea id="discard-reason" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
         <span className="text-[13px] text-muted-foreground">{REASON_HINT}</span>
       </div>

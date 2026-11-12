@@ -7,9 +7,12 @@ import (
 
 // interpreterNames is the recognized interpreter set (spec/hook-profile,
 // `interpreter` attribute). Version-suffixed pythons (python3.12) are
-// matched by prefix; everything else is exact on the basename.
+// matched by prefix; everything else is exact on the basename. eval is the
+// shell builtin: it runs its arguments as code, so it hides a payload from
+// a command pattern the way `bash -c` does.
 var interpreterNames = map[string]bool{
 	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true,
+	"eval":   true,
 	"python": true, "python2": true, "python3": true,
 	"node": true, "nodejs": true, "deno": true, "bun": true,
 	"ruby": true, "perl": true, "php": true,

@@ -2,7 +2,7 @@
 title: strazactl spec validate
 description: Validate documents against the embedded v1beta1 spec validators
 pagetype: reference
-weight: 96
+weight: 98
 draft: false
 sources:
   - cmd/strazactl

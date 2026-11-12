@@ -12,7 +12,7 @@ import (
 
 type userRepo struct{ s *sqlStore }
 
-const userCols = "id, external_id, username, email, display, title, status, origin, password_hash, attrs, user_type, agency_mode, sponsor, swarm_id, ephemeral, created_at, updated_at, deleted_at"
+const userCols = "id, external_id, username, email, display, title, status, origin, password_hash, attrs, user_type, agency_mode, sponsor, swarm_id, ephemeral, entra_agent_id, created_at, updated_at, deleted_at"
 
 // scanner abstracts *sql.Row and *sql.Rows.
 type scanner interface{ Scan(dest ...any) error }
@@ -23,7 +23,7 @@ func scanUser(row scanner) (User, error) {
 	var da scanTimePtr
 	if err := row.Scan(&u.ID, &u.ExternalID, &u.Username, &u.Email, &u.Display, &u.Title,
 		&u.Status, &u.Origin, &u.PasswordHash, &u.Attrs,
-		&u.UserType, &u.AgencyMode, &u.Sponsor, &u.SwarmID, &u.Ephemeral, &ca, &ua, &da); err != nil {
+		&u.UserType, &u.AgencyMode, &u.Sponsor, &u.SwarmID, &u.Ephemeral, &u.EntraAgentID, &ca, &ua, &da); err != nil {
 		return User{}, scanErr(err)
 	}
 	u.CreatedAt, u.UpdatedAt, u.DeletedAt = ca.t, ua.t, da.t
@@ -44,11 +44,11 @@ func (r userRepo) Create(ctx context.Context, u User) (User, error) {
 	if u.Attrs == "" {
 		u.Attrs = "{}"
 	}
-	_, err := r.s.exec(ctx, `INSERT INTO users (id, external_id, username, email, display, title, status, origin, password_hash, attrs, user_type, agency_mode, sponsor, swarm_id, ephemeral, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+	_, err := r.s.exec(ctx, `INSERT INTO users (id, external_id, username, email, display, title, status, origin, password_hash, attrs, user_type, agency_mode, sponsor, swarm_id, ephemeral, entra_agent_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
 		u.ID, u.ExternalID, u.Username, u.Email, u.Display, u.Title, u.Status, u.Origin,
 		u.PasswordHash, u.Attrs, u.UserType, u.AgencyMode, u.Sponsor, u.SwarmID, u.Ephemeral,
-		r.s.tArg(u.CreatedAt), r.s.tArg(u.UpdatedAt))
+		u.EntraAgentID, r.s.tArg(u.CreatedAt), r.s.tArg(u.UpdatedAt))
 	if err != nil {
 		return User{}, err
 	}
@@ -93,6 +93,16 @@ func (r userRepo) GetByExternalID(ctx context.Context, externalID string) (User,
 	}
 	return scanUser(r.s.queryRow(ctx,
 		`SELECT `+userCols+` FROM users WHERE external_id = $1 AND deleted_at IS NULL`, externalID))
+}
+
+// GetByEntraAgentID answers the live user that holds the Entra agent id,
+// which the caller passes normalized. An empty id is ErrNotFound.
+func (r userRepo) GetByEntraAgentID(ctx context.Context, id string) (User, error) {
+	if id == "" {
+		return User{}, ErrNotFound
+	}
+	return scanUser(r.s.queryRow(ctx,
+		`SELECT `+userCols+` FROM users WHERE entra_agent_id = $1 AND deleted_at IS NULL`, id))
 }
 
 func (r userRepo) GetByIDs(ctx context.Context, ids []string) ([]User, error) {
@@ -272,10 +282,10 @@ func (r userRepo) Update(ctx context.Context, u User) (User, error) {
 	}
 	err := mustAffect(r.s.exec(ctx, `UPDATE users SET external_id = $1, username = $2, email = $3,
 		display = $4, title = $5, status = $6, password_hash = $7, attrs = $8,
-		user_type = $9, agency_mode = $10, sponsor = $11, swarm_id = $12, ephemeral = $13, updated_at = $14
-		WHERE id = $15 AND deleted_at IS NULL`,
+		user_type = $9, agency_mode = $10, sponsor = $11, swarm_id = $12, ephemeral = $13, entra_agent_id = $14, updated_at = $15
+		WHERE id = $16 AND deleted_at IS NULL`,
 		u.ExternalID, u.Username, u.Email, u.Display, u.Title, u.Status, u.PasswordHash,
-		u.Attrs, u.UserType, u.AgencyMode, u.Sponsor, u.SwarmID, u.Ephemeral,
+		u.Attrs, u.UserType, u.AgencyMode, u.Sponsor, u.SwarmID, u.Ephemeral, u.EntraAgentID,
 		r.s.tArg(u.UpdatedAt), u.ID))
 	if err != nil {
 		return User{}, err
@@ -288,6 +298,7 @@ func (r userRepo) Update(ctx context.Context, u User) (User, error) {
 type UserFields struct {
 	Email, Display, Title, Status, PasswordHash *string
 	UserType, AgencyMode, Sponsor, SwarmID      *string
+	EntraAgentID                                *string
 	Ephemeral                                   *bool
 }
 
@@ -303,7 +314,7 @@ func ChangedUserFields(read, want User) UserFields {
 		{&f.Title, &read.Title, &want.Title}, {&f.Status, &read.Status, &want.Status},
 		{&f.PasswordHash, &read.PasswordHash, &want.PasswordHash}, {&f.UserType, &read.UserType, &want.UserType},
 		{&f.AgencyMode, &read.AgencyMode, &want.AgencyMode}, {&f.Sponsor, &read.Sponsor, &want.Sponsor},
-		{&f.SwarmID, &read.SwarmID, &want.SwarmID},
+		{&f.SwarmID, &read.SwarmID, &want.SwarmID}, {&f.EntraAgentID, &read.EntraAgentID, &want.EntraAgentID},
 	} {
 		if *c.was != *c.now {
 			*c.dst = c.now
@@ -346,7 +357,7 @@ func (r userRepo) UpdateFields(ctx context.Context, id string, f UserFields, rev
 	}{
 		{"email", f.Email}, {"display", f.Display}, {"title", f.Title}, {"status", f.Status},
 		{"password_hash", f.PasswordHash}, {"user_type", f.UserType}, {"agency_mode", f.AgencyMode},
-		{"sponsor", f.Sponsor}, {"swarm_id", f.SwarmID},
+		{"sponsor", f.Sponsor}, {"swarm_id", f.SwarmID}, {"entra_agent_id", f.EntraAgentID},
 	} {
 		if c.v != nil {
 			set = append(set, c.col+" = "+ph(*c.v))

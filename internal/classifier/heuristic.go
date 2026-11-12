@@ -16,7 +16,8 @@ import (
 	"github.com/strazahq/straza/internal/policy"
 )
 
-// maxNest bounds inline-eval recursion: one level, matching the design rule
+// maxNest bounds recursion into an inline-eval payload or the inner command of
+// a substitution: one level, matching the design rule
 // "recurse ONE level into the payload" (a payload that itself wraps an
 // interpreter, e.g. `bash -c "python3 -c '…'"`). Deeper nesting is rare and
 // re-parsing it faithfully is unreliable; we stop rather than guess.
@@ -46,8 +47,9 @@ func (h *heuristic) Classify(ctx context.Context, ev policy.Event) (policy.Class
 }
 
 // analyze runs the signal battery over one command string (with optional
-// pre-split argv). It is the recursion point: an inline-eval payload is fed
-// back through analyze at depth+1 so nested pipe-to-shell / encoded / eval
+// pre-split argv). It is the recursion point: an inline-eval payload and the
+// inner command of each substitution are fed back through analyze at depth+1
+// so nested pipe-to-shell / encoded / eval
 // shapes are seen structurally, not just as substrings.
 func (h *heuristic) analyze(cmd string, argv []string, depth int) (string, bool) {
 	// Pipeline shapes (pipe-to-shell, decode-then-exec) need the raw string
@@ -58,6 +60,51 @@ func (h *heuristic) analyze(cmd string, argv []string, depth int) (string, bool)
 	}
 	if reason, deny := pipelineSignal(pcmd); deny {
 		return reason, true
+	}
+	// eval, source and . are no interpreter family, and neither is a command
+	// such as echo that holds a substitution, so the substitution checks run
+	// here, before the no-family return below.
+	cmds := simpleCommands(pcmd)
+	if reason, deny := substSignal(cmds); deny {
+		return reason, true
+	}
+	if depth < maxNest {
+		for _, c := range cmds {
+			var code map[string]bool // built once per command, on first need
+			for _, s := range c.substs {
+				inner := s.inner
+				// cat reading a quoted heredoc yields the body as text. That
+				// text is commands only where it lands in a code position, and
+				// there it is the body, not cat, that runs.
+				if body, ok := catBody(inner); ok {
+					if code == nil {
+						code = map[string]bool{}
+						for _, in := range codeSubsts(c) {
+							code[in] = true
+						}
+					}
+					if !code[inner] {
+						continue
+					}
+					inner = body
+				}
+				if reason, deny := h.analyze(inner, nil, depth+1); deny {
+					return "nested-eval: " + reason, true
+				}
+			}
+		}
+	}
+	// eval runs its arguments as a shell program, the same as bash -c. It is
+	// read in addition to the interpreter path below, never in its place.
+	if payload, ok := evalProgram(cmds); ok {
+		if reason, deny := scanPayloadSignals(payload); deny {
+			return reason, true
+		}
+		if depth < maxNest {
+			if reason, deny := h.analyze(payload, nil, depth+1); deny {
+				return "nested-eval: " + reason, true
+			}
+		}
 	}
 
 	// Inline-eval: an interpreter carrying its program on the command line.

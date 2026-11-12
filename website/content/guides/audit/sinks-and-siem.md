@@ -8,8 +8,8 @@ summary: >-
   receiver drop duplicates.
 pagetype: how-to
 weight: 10
-who: You, as the operator who owns the evidence
-where: The config file and a terminal
+who: Operator
+where: Config file and a terminal
 draft: false
 aliases:
   - /guides/operate/sinks-and-siem/
@@ -22,7 +22,7 @@ keywords: sink siem audit export elasticsearch webhook dead-letter replay
 ---
 
 
-Forward the audit record to a SIEM or a file, and confirm that nothing was lost on the way. It is for the operator who owns the evidence, and two of its checks need `jq`. A sink is a durable consumer on the event stream that posts each event to a webhook or appends it to a file, and because the consumer keeps its position on the server, an outage at the receiver delays events without dropping them. A sink with no subject list receives every audit and control event except recorded prompts and replies, so adding a sink never ships conversation content off the box by accident. Delivery is at least once, and a receiver that refuses an event for good sees it parked in a dead-letter lane you can replay.
+Forward the audit record to a SIEM or a file, and confirm that nothing was lost on the way. It is for the operator who owns the evidence, and two of its checks need `jq`. A sink is a durable consumer on the event stream that posts each event to a webhook or appends it to a file, and because the consumer keeps its position on the server, an outage at the receiver delays events without dropping them. A sink with no subject list receives every audit and control event except recorded prompts and replies, so adding a sink never ships conversation content off the box by accident. Tool records are not conversation content, but each holds what its tool was given, up to 8 KiB. That includes file text an agent writes and the prompt it gives a subagent. Give a sink a `subjects` list without `straza.audit.tool` to keep that text out of it. Delivery is at least once, and a receiver that refuses an event for good sees it parked in a dead-letter lane you can replay.
 
 ## Add a sink to the config file
 

@@ -35,7 +35,10 @@ func (a *App) handleAppBindingCreate(w http.ResponseWriter, r *http.Request) {
 		Tools  []string      `json:"tools"`
 		Covers *drafts.Scope `json:"covers"`
 	}
-	err = json.NewDecoder(r.Body).Decode(&req)
+	err = decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
 	if refusedCovers(w, err) {
 		return
 	}

@@ -8,8 +8,8 @@ summary: >-
   open.
 pagetype: how-to
 weight: 40
-who: You, as the admin who runs strazad
-where: The strazad configuration, the console and a shell on the phone's network
+who: Admin
+where: strazad config file, the console, and a shell on the phone's network
 steps: true
 modes: [console, cli]
 mode_default: console

@@ -38,9 +38,12 @@ type Claims struct {
 	RolesHash   string // deterministic hash of the sorted resolved role ids
 	Snapshot    string // active policy snapshot id
 	CNF         string // cnf.jkt: the thumbprint of the key the token is bound to, "" for a bearer token
-	JTI         string // set by Mint
-	IssuedAt    time.Time
-	Expiry      time.Time
+	// EntraAgentID is eai, the Entra agent identity the check-in read from
+	// the agent's record, "" when the user holds none.
+	EntraAgentID string
+	JTI          string // set by Mint
+	IssuedAt     time.Time
+	Expiry       time.Time
 }
 
 // RolesHash returns the canonical `rol` claim value: sha256 over the sorted
@@ -103,6 +106,9 @@ func (s *TokenService) Mint(c Claims) (string, Claims, error) {
 	if c.CNF != "" {
 		b = b.Claim("cnf", map[string]string{"jkt": c.CNF})
 	}
+	if c.EntraAgentID != "" {
+		b = b.Claim("eai", c.EntraAgentID)
+	}
 	tok, err := b.Build()
 	if err != nil {
 		return "", Claims{}, fmt.Errorf("authn: build token: %w", err)
@@ -119,10 +125,15 @@ func (s *TokenService) Mint(c Claims) (string, Claims, error) {
 }
 
 // Verify parses and validates a session token: EdDSA signature against a
-// known non-retired key, issuer match, exp/iat with 30 s skew, and a typ
-// other than GrantType. It does NOT consult revocation state; that is the
-// caller's denylist check.
+// known non-retired key, issuer match, exp/iat with 30 s skew, a typ other
+// than GrantType, and a well-formed cnf and eai when present. It does NOT
+// consult revocation state; that is the caller's denylist check.
 func (s *TokenService) Verify(raw string) (Claims, error) {
+	return s.verifyAt(raw, time.Now())
+}
+
+// verifyAt is Verify at the time now, for the example replay.
+func (s *TokenService) verifyAt(raw string, now time.Time) (Claims, error) {
 	s.mu.RLock()
 	set := s.verify
 	s.mu.RUnlock()
@@ -131,6 +142,7 @@ func (s *TokenService) Verify(raw string) (Claims, error) {
 		jwt.WithKeySet(set),
 		jwt.WithIssuer(s.issuer),
 		jwt.WithAcceptableSkew(30*time.Second),
+		jwt.WithClock(jwt.ClockFunc(func() time.Time { return now })),
 	)
 	if err != nil {
 		return Claims{}, fmt.Errorf("authn: token rejected: %w", err)
@@ -170,6 +182,13 @@ func (s *TokenService) Verify(raw string) (Claims, error) {
 			return Claims{}, fmt.Errorf("authn: token rejected: claim cnf carries no jkt thumbprint")
 		}
 		c.CNF = jkt
+	}
+	// A malformed eai must not read as absent, or it would match a cached
+	// subject that holds no Entra agent identity.
+	if tok.Has("eai") {
+		if err := tok.Get("eai", &c.EntraAgentID); err != nil || c.EntraAgentID == "" {
+			return Claims{}, fmt.Errorf("authn: token rejected: claim eai is not a non-empty string")
+		}
 	}
 	return c, nil
 }
@@ -469,87 +488,6 @@ func (s *TokenService) VerifyApproverToken(raw string) (ApproverClaims, error) {
 	}
 	if c.Subject == "" || c.Device == "" {
 		return ApproverClaims{}, fmt.Errorf("authn: approver token rejected: incomplete claims")
-	}
-	return c, nil
-}
-
-// ConnectClaims is the verified content of an OAuth connect state.
-type ConnectClaims struct {
-	Subject string // user id that initiated the connect
-	App     string // app id the grant will be bound to
-	JTI     string
-}
-
-// ConnectStateTTL bounds how long a started connect flow stays redeemable:
-// long enough for a human to authorize in a browser, short enough that a
-// state lifted from history/logs goes stale fast.
-const ConnectStateTTL = 10 * time.Minute
-
-// MintConnectState issues the OAuth `state` parameter for a per-user connect
-// flow: a purpose-scoped token ("use":"connect") binding the
-// initiating user to one app. Signed with the rotating keys, it verifies on
-// any pod; the provider callback needs no server-side pending state
-// (stateless control plane across replicas). It opens exactly one door,
-// /v1/connect/callback, and carries no session claim or audience.
-func (s *TokenService) MintConnectState(userID, appID string) (string, error) {
-	return s.mintConnectStateTTL(userID, appID, ConnectStateTTL)
-}
-
-func (s *TokenService) mintConnectStateTTL(userID, appID string, ttl time.Duration) (string, error) {
-	iat := time.Now().UTC().Truncate(time.Second)
-	tok, err := jwt.NewBuilder().
-		Issuer(s.issuer).
-		Subject(userID).
-		JwtID(uuid.NewString()).
-		IssuedAt(iat).
-		Expiration(iat.Add(ttl)).
-		Claim("use", "connect").
-		Claim("app", appID).
-		Build()
-	if err != nil {
-		return "", fmt.Errorf("authn: build connect state: %w", err)
-	}
-	s.mu.RLock()
-	key := s.active
-	s.mu.RUnlock()
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.EdDSA(), key))
-	if err != nil {
-		return "", fmt.Errorf("authn: sign connect state: %w", err)
-	}
-	return string(signed), nil
-}
-
-// VerifyConnectState validates a connect state: signature, issuer, expiry,
-// and the "use":"connect" purpose claim; no other credential may pass.
-func (s *TokenService) VerifyConnectState(raw string) (ConnectClaims, error) {
-	s.mu.RLock()
-	set := s.verify
-	s.mu.RUnlock()
-	tok, err := jwt.Parse([]byte(raw),
-		jwt.WithKeySet(set),
-		jwt.WithIssuer(s.issuer),
-		jwt.WithAcceptableSkew(30*time.Second),
-	)
-	if err != nil {
-		return ConnectClaims{}, fmt.Errorf("authn: connect state rejected: %w", err)
-	}
-	var use string
-	if tok.Has("use") {
-		_ = tok.Get("use", &use)
-	}
-	if use != "connect" {
-		return ConnectClaims{}, fmt.Errorf("authn: connect state rejected: not a connect state")
-	}
-	var c ConnectClaims
-	c.Subject, _ = tok.Subject()
-	c.JTI, _ = tok.JwtID()
-	if tok.Has("app") {
-		if err := tok.Get("app", &c.App); err != nil {
-			return ConnectClaims{}, fmt.Errorf("authn: connect app claim: %w", err)
-		}
-	}
-	if c.Subject == "" || c.App == "" {
-		return ConnectClaims{}, fmt.Errorf("authn: connect state rejected: incomplete claims")
 	}
 	return c, nil
 }

@@ -90,13 +90,14 @@ func isUseLine(line, key string) bool {
 
 // checkCommands finds every strazactl, straza and strazad invocation in a
 // Markdown file (shell fences and inline code) or a shell script and checks
-// its verb path and flags against the reference pages.
+// its verb path and flags against the reference pages. A finding quotes the
+// command and says how to fix it.
 func checkCommands(rel string, data []byte, script bool, idx cliIndex) []finding {
 	var out []finding
 	check := func(line int, text string) {
 		for _, seg := range segments(text) {
 			if msg := checkSegment(seg, idx); msg != "" {
-				out = append(out, finding{rel, line, msg})
+				out = append(out, finding{rel, line, fmt.Sprintf("%s, in %q. Fix the command, or run make docs-gen to regenerate the CLI pages if the verb or flag is new.", msg, strings.Join(seg, " "))})
 			}
 		}
 	}
@@ -216,7 +217,8 @@ func segments(text string) [][]string {
 // checkSegment returns a finding message for one command, or "" when the
 // segment is not a Straza command or is consistent with its reference page.
 // A word after a group that runs no command of its own must name a verb of
-// that group, since the group has no operand for it to be.
+// that group, since the group has no operand for it to be. The words after a
+// -- separator belong to the command it runs, so their flags are not checked.
 func checkSegment(tokens []string, idx cliIndex) string {
 	for len(tokens) > 0 && (assign.MatchString(tokens[0]) || tokens[0] == "sudo" || tokens[0] == "env") {
 		tokens = tokens[1:]
@@ -247,6 +249,8 @@ func checkSegment(tokens []string, idx cliIndex) string {
 	}
 	for _, t := range tokens[1:] {
 		switch {
+		case t == "--":
+			return ""
 		case strings.HasPrefix(t, "--") && len(t) > 2:
 			name := strings.TrimPrefix(t, "--")
 			if k := strings.IndexByte(name, '='); k >= 0 {

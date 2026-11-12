@@ -2,12 +2,16 @@ package agentguard
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/strazahq/straza/internal/agentguard/localapi"
 	"github.com/strazahq/straza/internal/policy"
@@ -560,5 +564,150 @@ func TestHarnessName(t *testing.T) {
 		if got := harnessName(localapi.Harness{Name: tt.name, Version: tt.version}); got != tt.want {
 			t.Errorf("harnessName(%q, %q) = %q, want %q", tt.name, tt.version, got, tt.want)
 		}
+	}
+}
+
+// TestNormalizeForwardsToolInput pins where the harness's tool input
+// travels, in every dialect. An mcp.call and an unclassified tool carry it
+// on the event as args, which the approval key binds. A classified local
+// tool carries it beside the event for the audit record alone, because a
+// key that bound it would no longer match the ticket a described command
+// opened. An absent input stays absent on both, so the server can tell a
+// call it did not observe from a call with no arguments, and a number keeps
+// its literal.
+func TestNormalizeForwardsToolInput(t *testing.T) {
+	adapters := loadTestAdapters(t)
+	cases := []struct {
+		name, harness, payload string
+		tool                   string
+		args                   string // "" means the event carries none
+		input                  string // "" means none travels beside the event
+	}{
+		{"claude-code language server query", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"LSP","tool_input":{"operation":"goToDefinition","filePath":"/w/main.go","line":12,"character":7}}`,
+			policy.ToolOther, `{"character":7,"filePath":"/w/main.go","line":12,"operation":"goToDefinition"}`, ""},
+		{"codex unclassified", "codex",
+			`{"hook_event_name":"PreToolUse","tool_name":"future_tool","tool_input":{"target":"db"}}`,
+			policy.ToolOther, `{"target":"db"}`, ""},
+		{"gemini unclassified", "gemini",
+			`{"hook_event_name":"BeforeTool","tool_name":"future_tool","tool_input":{"target":"db"}}`,
+			policy.ToolOther, `{"target":"db"}`, ""},
+		{"kit unclassified keeps a large integer", "python-sdk",
+			`{"hook_event_name":"PreToolUse","tool_name":"other","native_tool_name":"refund_order","tool_input":{"order":"A-1","cents":9007199254740993}}`,
+			policy.ToolOther, `{"cents":9007199254740993,"order":"A-1"}`, ""},
+		{"an observed call with no arguments", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"FutureTool","tool_input":{}}`,
+			policy.ToolOther, `{}`, ""},
+		{"an input that was not sent", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"FutureTool"}`,
+			policy.ToolOther, "", ""},
+		{"an input that is not an object", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"FutureTool","tool_input":"text"}`,
+			policy.ToolOther, "", ""},
+		{"mcp call still forwards", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"mcp__claude-in-chrome__navigate","tool_input":{"url":"https://example.com"}}`,
+			policy.ToolMCPCall, `{"url":"https://example.com"}`, ""},
+		{"a shell command's input travels beside the event", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls","description":"list"}}`,
+			policy.ToolShellExec, "", `{"command":"ls","description":"list"}`},
+		{"a written file's content travels beside the event", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/w/a.txt","content":"secret body"}}`,
+			policy.ToolFileWrite, "", `{"content":"secret body","file_path":"/w/a.txt"}`},
+		{"a skill call names its skill", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"deploy"}}`,
+			policy.ToolFileRead, "", `{"skill":"deploy"}`},
+		{"a spawn keeps its prompt", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"description":"sweep","prompt":"Find every caller."}}`,
+			policy.ToolTaskSpawn, "", `{"description":"sweep","prompt":"Find every caller."}`},
+		{"codex classified", "codex",
+			`{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/w/a.txt","content":"body"}}`,
+			policy.ToolFileWrite, "", `{"content":"body","file_path":"/w/a.txt"}`},
+		{"gemini classified", "gemini",
+			`{"hook_event_name":"BeforeTool","tool_name":"run_shell_command","tool_input":{"command":"ls"}}`,
+			policy.ToolShellExec, "", `{"command":"ls"}`},
+		{"kit classified keeps a large integer", "python-sdk",
+			`{"hook_event_name":"PreToolUse","tool_name":"shell.exec","tool_input":{"command":"ls","timeout":9007199254740993}}`,
+			policy.ToolShellExec, "", `{"command":"ls","timeout":9007199254740993}`},
+		{"a classified call with no arguments", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"ListAgents","tool_input":{}}`,
+			policy.ToolTaskSpawn, "", `{}`},
+		{"a classified input that was not sent", "claude-code",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash"}`,
+			policy.ToolShellExec, "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			payload, err := ParsePayload([]byte(c.payload))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Normalize(adapters[c.harness], payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Event.Tool != c.tool || string(got.Event.Args) != c.args {
+				t.Errorf("got tool %q args %s, want %q %s", got.Event.Tool, got.Event.Args, c.tool, c.args)
+			}
+			if c.args == "" && got.Event.Args != nil {
+				t.Errorf("args = %q, want nil for an input that was not observed", got.Event.Args)
+			}
+			if (got.ToolInput != nil) != (c.input != "") {
+				t.Fatalf("input beside the event = %+v, want %q", got.ToolInput, c.input)
+			}
+			if c.input != "" && *got.ToolInput != (localapi.ToolInput{Text: c.input}) {
+				t.Errorf("input beside the event = %+v, want the whole text %s and no hash", *got.ToolInput, c.input)
+			}
+		})
+	}
+}
+
+// TestNormalizeCutsLongToolInput pins the bound on the input that travels
+// beside a classified tool's event: at most ArgumentsMax bytes, shortened
+// the way CutArguments shortens a record's arguments, so a long value never
+// costs the record a short one, with the hash of the whole text only when
+// it was shortened. The cut happens in the hook, so a written file of any
+// size still fits the decide request the service and strazad accept.
+func TestNormalizeCutsLongToolInput(t *testing.T) {
+	a := loadTestAdapters(t)["claude-code"]
+	fixed := len(`{"content":"","file_path":"/w/a"}`)
+	for _, c := range []struct {
+		name, content string
+		cut           bool
+	}{
+		{"an input at the bound stays whole", strings.Repeat("a", ArgumentsMax-fixed), false},
+		{"an input one byte past the bound is shortened", strings.Repeat("a", ArgumentsMax-fixed+1), true},
+		{"a cut never splits a character", strings.Repeat("é", ArgumentsMax), true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := Normalize(a, map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Write",
+				"tool_input": map[string]any{"file_path": "/w/a", "content": c.content}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			whole := `{"content":"` + c.content + `","file_path":"/w/a"}`
+			sum := sha256.Sum256([]byte(whole))
+			in := got.ToolInput
+			if in == nil || len(in.Text) > ArgumentsMax {
+				t.Fatalf("input = %+v, want at most %d bytes of the %d sent", in, ArgumentsMax, len(whole))
+			}
+			if !c.cut && (in.Text != whole || in.Hash != "") {
+				t.Errorf("kept %d of %d bytes with hash %q, want the whole text and no hash", len(in.Text), len(whole), in.Hash)
+			}
+			var kept struct {
+				Content string `json:"content"`
+				Path    string `json:"file_path"`
+			}
+			if err := json.Unmarshal([]byte(in.Text), &kept); err != nil || kept.Path != "/w/a" || !utf8.ValidString(kept.Content) {
+				t.Fatalf("the kept text decodes with path %q (%v), want JSON that still names /w/a", kept.Path, err)
+			}
+			prefix, marked := strings.CutSuffix(kept.Content, fmt.Sprintf("... (%d bytes)", len(c.content)))
+			if c.cut && (!marked || !strings.HasPrefix(c.content, prefix) || len(in.Text) < ArgumentsMax-3 || in.Hash != "sha256:"+hex.EncodeToString(sum[:])) {
+				t.Errorf("kept %d bytes with hash %q and content ending %q, want a prefix with its whole length, a text at the bound and the whole text's hash",
+					len(in.Text), in.Hash, kept.Content[max(0, len(kept.Content)-24):])
+			}
+			if got.Event.Args != nil {
+				t.Errorf("args = %d bytes, want none on a classified tool's event", len(got.Event.Args))
+			}
+		})
 	}
 }

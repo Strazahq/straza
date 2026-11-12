@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DraftPage } from "./draft-page";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ApiError, type DraftDetail, type DraftPublished } from "@/lib/api";
+import { ApiError, type DraftDetail, type DraftFinding, type DraftPublished, listApps, recheckApp, setSecret } from "@/lib/api";
 import { contactDraftServer, discardDraft, getDraft, publishDraft, rebaseDraft, revertDraft } from "@/lib/drafts-api";
 import {
   CHECK_AGAIN,
@@ -21,6 +21,8 @@ import {
   PUBLISH_OPEN,
   REFUSED_BAR,
   SAYS_AGENT_HELP,
+  SECRET_CHECKS_LINE,
+  SECRET_LINE,
   STALE_TITLE,
   UNDO,
   WAITS_WHOLE,
@@ -58,6 +60,7 @@ vi.mock("@/lib/drafts-api", async (orig) => ({
   contactDraftServer: vi.fn(),
   publishDraft: vi.fn(),
 }));
+vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), listApps: vi.fn(), setSecret: vi.fn(), recheckApp: vi.fn() }));
 vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/session")>()), snapshot: vi.fn() }));
 vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 
@@ -298,6 +301,56 @@ describe("the review page", () => {
     expect(screen.getByText(NEXT_TITLE)).toBeTruthy();
     expect(screen.getByText("Each person runs straza connect github.")).toBeTruthy();
     expect(band()).toBeNull();
+  });
+
+  const SECRET_WARN: DraftFinding = {
+    code: "ready.secret-missing", class: "warning", object: "App/github", key: "k-sec",
+    sentence: "github needs a static secret and none is stored yet, so every call fails until one is.", fix: "After publishing, run strazactl apps secret set github.",
+  };
+
+  it("says on the server's card and under Checks that whoever publishes enters the missing secret in the dialog", async () => {
+    vi.mocked(getDraft).mockResolvedValue(detailWith({ verdict: { warnings: [SECRET_WARN] } }));
+    mount();
+    await title();
+    const card = document.querySelector('[data-item="App/github"]') as HTMLElement;
+    const facts = [...card.querySelectorAll("[data-fact]")].map((f) => f.getAttribute("data-fact"));
+    expect(facts.slice(facts.indexOf("Sent as"), facts.indexOf("Sent as") + 2)).toEqual(["Sent as", "Secret"]);
+    expect(card.querySelector("[data-secret-row]")?.textContent).toBe(SECRET_LINE);
+    expect(card.querySelector("[data-secret-row]")?.className).toContain("text-warn");
+    expect(document.querySelector('[data-item="App/demo-tools"] [data-secret-row]')).toBeNull();
+    const line = document.querySelector('[data-finding="ready.secret-missing"]') as HTMLElement;
+    expect(line.textContent).toBe(SECRET_WARN.sentence + SECRET_CHECKS_LINE);
+    expect(document.querySelector("[data-checks]")?.textContent).not.toContain(SECRET_WARN.fix);
+  });
+
+  it("keeps the dialog open past the publish, then names the server with its check's status and drops the Next line the stored secret answers", async () => {
+    const answer: DraftPublished = {
+      draft: { ...DETAIL.draft, state: "published", decided_at: "2026-09-24T10:51:00Z", decided_by: ALICE, snapshot: "3be0a1ff00" },
+      snapshot: "3be0a1ff00",
+      servers: [{ name: "github", change: "created", status: "pending" }],
+      next: [SECRET_WARN.fix as string, "After publishing, run strazactl apps secret set github --role readers.", "Each person runs straza connect github."],
+    };
+    vi.mocked(getDraft).mockResolvedValueOnce(detailWith({ verdict: { risks: [], warnings: [SECRET_WARN] } })).mockResolvedValue({ ...DETAIL, draft: answer.draft });
+    vi.mocked(publishDraft).mockResolvedValue(answer);
+    const row = { id: "app-github", name: "github", runtime: "remote", status: "running", tools: ["get_me"], reached_by: [] };
+    vi.mocked(listApps).mockResolvedValue([row]);
+    vi.mocked(setSecret).mockResolvedValue({ id: "c1", scope: "app", role: "", fingerprint: "a1c4" });
+    vi.mocked(recheckApp).mockResolvedValue(row);
+    mount();
+    await title();
+    await userEvent.click(within(band() as HTMLElement).getByRole("button", { name: PUBLISH_OPEN }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Secret of github"), "s3cret");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish and store the secret" }));
+    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("heading").textContent).toBe("Draft 41 is live."));
+    expect(setSecret).toHaveBeenCalledWith("app-github", "s3cret");
+    const proof = document.querySelector("[data-published]") as HTMLElement;
+    await waitFor(() => expect(proof.textContent).toContain(serverLine("github", "created", "running")));
+    const next = document.querySelector("[data-next]") as HTMLElement;
+    expect([...next.querySelectorAll("p")].map((p) => p.textContent)).toEqual(["After publishing, run strazactl apps secret set github --role readers.", "Each person runs straza connect github."]);
+    await userEvent.click(within(document.querySelector('[data-slot="dialog-footer"]') as HTMLElement).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.querySelector("[data-next]")?.textContent).not.toContain(SECRET_WARN.fix);
   });
 
   // publishNow opens the page on an open draft, publishes it through the

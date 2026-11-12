@@ -97,8 +97,7 @@ func TestStrazaBornFactsReadOnly(t *testing.T) {
 	}
 	for _, tc := range refusals {
 		u := store.User{Username: "kim", Origin: store.OriginSCIM}
-		active := true
-		err := applyUserOp(&u, &active, tc.op)
+		err := applyUserOp(&u, &userPatch{active: true}, tc.op)
 		var me mutabilityError
 		if !errors.As(err, &me) {
 			t.Errorf("%s: err = %v, want mutabilityError", tc.name, err)

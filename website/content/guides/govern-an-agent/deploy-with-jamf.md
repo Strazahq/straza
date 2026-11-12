@@ -15,8 +15,8 @@ tested:
   date: 2026-10-26
   except: every Jamf Pro step, which has not run on a Jamf Pro instance or a Mac it manages
 applies_to: both
-who: You, as the Jamf Pro administrator of the Macs whose agents you govern
-where: Jamf Pro, and a Mac or a Linux machine for the download and its check
+who: Jamf Pro administrator
+where: Jamf Pro, and a terminal on a Mac or a Linux machine
 steps: true
 keywords: jamf jamf pro policy package script parameter configuration profile managed login items team identifier macos mac pkg fleet deploy straza service managed install uninstall
 ---

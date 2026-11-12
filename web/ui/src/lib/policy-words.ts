@@ -3,7 +3,7 @@
 // wizard and the publish dialog. Every surface sentence is short; the
 // sentence that explains a thing sits behind its help icon (HelpTip) or in
 // its dialog, never as prose on a table or a sheet.
-import type { Bucket, Lane, Posture, Postures, RuleView, SetView, Who } from "./policy-model";
+import type { Bucket, Lane, NewLane, Posture, Postures, RuleView, SetView, Who } from "./policy-model";
 
 // ---- shared ----
 
@@ -44,9 +44,9 @@ export const BUCKET_HELP: Record<Bucket, string> = {
   allow: "Rules that put a local tool on the allowed list, or name MCP tools explicitly. MCP tools run by role access whether or not a rule names them.",
 };
 
-export const LANE_WORD: Record<Lane, string> = { mcp: "mcp", shell: "shell", files: "files", net: "net", other: "other", tools: "tools", all: "every lane" };
-export const LANE_LABEL: Record<"mcp" | "shell" | "files" | "net", string> = { mcp: "MCP tool", shell: "Shell command", files: "File path", net: "Network" };
-export const EVERY_WORD: Record<Lane, string> = { mcp: "every tool", shell: "every command", files: "every path", net: "every fetch", other: "every call", tools: "every tool", all: "every call" };
+export const LANE_WORD: Record<Lane, string> = { mcp: "mcp", shell: "shell", files: "files", net: "net", harness: "harness tool", other: "other", tools: "tools", all: "every lane" };
+export const LANE_LABEL: Record<NewLane, string> = { mcp: "MCP tool", shell: "Shell command", files: "File path", net: "Network", harness: "Harness tool" };
+export const EVERY_WORD: Record<Lane, string> = { mcp: "every tool", shell: "every command", files: "every path", net: "every fetch", harness: "every harness tool", other: "every call", tools: "every tool", all: "every call" };
 
 // humSplit words the needs-approval bucket: 3 holds, 2 day-scale tickets,
 // 1 checked before it runs.
@@ -245,6 +245,7 @@ export function subjectWords(r: RuleView): string {
   if (r.lane === "shell") return r.names ? "shell commands matching " + orList(r.names) : "every shell command";
   if (r.lane === "files") return r.names ? "files under " + orList(r.names) : "every file";
   if (r.lane === "net") return "every network fetch";
+  if (r.lane === "harness") return r.names ? (r.names.length === 1 ? "the harness tool " : "the harness tools ") + list(r.names) : "every harness tool";
   if (r.lane === "tools") return list(r.names || []);
   return "every call";
 }
@@ -353,21 +354,23 @@ export const TEST_MISSING_WHAT = "Pick the tool, or type the command or the path
 
 export const WIZ_TITLE = "New policy";
 export const WIZ_LEDE = "One question per step. Nothing is stored until you publish or save a draft.";
-export const STEPS = { what: "What should happen", who: "Who", calls: "Which calls", how: "How", review: "Review" };
+export const STEPS = { what: "What should happen", who: "Applies to", calls: "Which calls", how: "Who decides", review: "Review" };
+// STEP_REASON names the fourth step of a denial, which asks for its reason.
+export const STEP_REASON = "Reason";
 export const WHAT_Q = "What should happen?";
 export const INTENT = {
   approve: { title: BUCKET_WORD.hum, line: "A person says yes before the call runs. The most common choice." },
   deny: { title: BUCKET_WORD.deny, line: "The call is denied, with a reason the agent and the person both read." },
-  allow: { title: BUCKET_WORD.allow, line: "A local tool the profile denies by default runs: shell, files, network. MCP tools run by role access, so they need no allow." },
+  allow: { title: BUCKET_WORD.allow, line: "A tool the deployment denies by default runs at once: shell, files, network, a harness tool, or an MCP server on a person's own machine. A registered server's tools run by role access and need no allow." },
 };
-export const ALLOW_HELP = "Under the enterprise profile a local tool no rule allows is denied, so shell, file and network access for a role starts with an allow. An MCP tool is different: it runs when a role has access to it, and a policy only denies or gates it.";
+export const ALLOW_HELP = "Under the enterprise profile a local tool no rule allows is denied, so shell, file and network access for a role starts with an allow. So does a harness tool Straza does not classify, and on every profile the tools of an MCP server on a person's own machine. A registered server's tool is different: it runs when a role has access to it, and a policy only denies or gates it.";
 export const RECORDING_NOTE = "Recording is not a policy kind: it is a property of a policy, set on its page.";
 export const WRITE_YAML = "Write YAML instead";
-export const WHO_Q = "Who?";
+export const WHO_Q = "Who does this policy apply to?";
 export const WHO_EVERYONE = "Everyone";
-export const WHO_EVERYONE_LINE = "every session, the home of organisation-wide rules";
+export const WHO_EVERYONE_LINE = "Every person and agent, whatever roles they hold.";
 export const WHO_ROLE = "A role";
-export const WHO_ROLE_LINE = "the policy names an application role, the kind that carries tool access";
+export const WHO_ROLE_LINE = "Only the people and agents who hold one application role.";
 export const WHO_ROLE_HELP = "An application role reaches one server, and a session holds every role its roles compose, so naming the role governs everyone who reaches that server through it, whichever business role gave it to them. Business, approver and Straza roles are not offered: a business role would govern one assignment path only, an approver role decides and never acts, and a Straza role governs Straza itself and never matches sessions.";
 export const searchRoles = (n: number) => "Search " + plural(n, "application role", "application roles");
 export const roleCount = (shown: number, total: number) => shown + " of " + total;
@@ -380,7 +383,7 @@ export const CALLS_Q = "Which calls?";
 export const SERVER = "Server";
 export const serversNarrowed = (role: string, reached: number, total: number) => role + " reaches " + reached + " of " + plural(total, "server", "servers") + "; the others are not offered because a rule for them could never fire.";
 export const SERVERS_NARROWED_HELP = "A rule for a server the role cannot reach is dead: the gateway needs both the access row and the policy. A role reaches a server when it is made on that server, and Edit access on its page changes which tools it reaches there.";
-export const EVERYONE_SERVERS = "Everyone: every server is offered, the home of organisation-wide rules, denials on unreachable servers included.";
+export const EVERYONE_SERVERS = "Everyone: every server is offered, the home of organization-wide rules, denials on unreachable servers included.";
 export const WHOLE_SERVER = "Whole server";
 export const WHOLE_SERVER_LINE = "All tools, including tools added later.";
 export const OR_PICK = "or pick tools:";
@@ -396,7 +399,8 @@ export const PATHS_Q = "Paths";
 export const PATHS_EXAMPLE = "for example **/.env* or **/id_rsa*";
 export const NET_LINE = "Every network fetch: the rule matches the lane, not a host.";
 export const CALLS_MISSING = "Pick at least one tool, or name a pattern or a path.";
-export const HOW_Q = "How?";
+export const HOW_Q = "Who decides, and for how long?";
+export const DENY_Q = "What reason does the agent read?";
 export const howLede = (subject: string) => subject + " will need approval. Say who decides, and for how long.";
 export const DENY_LEDE = (subject: string) => subject + " will be denied. Say why, in the words the agent reads.";
 export const REVIEW_NAME = "Name";
@@ -618,7 +622,7 @@ export const PRIORITY_LINE = "A denial always wins. Priority only picks which ru
 
 // The table.
 export const RULE_COLUMN = { where: "Call type", calls: "Calls", what: "What happens", reason: REASON, rule: "Rule" };
-export const WHERE_WORD: Record<Lane, string> = { mcp: "MCP server", shell: "shell", files: "files", net: "network", other: "other", tools: "local tools", all: "every call" };
+export const WHERE_WORD: Record<Lane, string> = { mcp: "MCP server", shell: "shell", files: "files", net: "network", harness: "harness tool", other: "other", tools: "local tools", all: "every call" };
 export const RULES_SEARCH = "Search tools, patterns, reasons and ids";
 export const rulesMatch = (shown: number, total: number) => shown + " of " + plural(total, "rule", "rules") + " match";
 export const NO_RULE_MATCH = "No rule matches here.";
@@ -656,7 +660,7 @@ export const REASON_UNUSED = "Not read while the rule allows. It stays in the te
 export const allowRemoves = (n: number) => "This removes the only denial for " + (n === 1 ? "this call" : "these " + n + " calls") + ".";
 export const CLOSE_SHEET = "Close";
 export const WHERE_Q = "Where does the call go?";
-export const WHERE_CHOICE: Record<"mcp" | "shell" | "files" | "net", string> = LANE_LABEL;
+export const WHERE_CHOICE: Record<NewLane, string> = LANE_LABEL;
 export const PICK_SERVER = "Pick the server";
 export const CONSEQUENCE_HOLD = CONSEQUENCE.hum;
 export const CONSEQUENCE_TICKET = "The call is denied now and raises a request. After a person grants it, the same call, retried within the grant window, runs once.";

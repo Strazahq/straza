@@ -2,15 +2,18 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FetchError } from "@/components/error-state";
 import { RuleEditor } from "@/components/policy-rule-editor";
 import { CAPS, HINT } from "@/components/wizard/parts";
-import { type ApiError, type AppRow, type EventSupport, type RoleRow, listApps } from "@/lib/api";
+import { type ApiError, type AppRow, type DefaultDenials, type EventSupport, type RoleRow, listApps, listDefaultDenials } from "@/lib/api";
 import {
-  type Bucket, type Doc, type Plain, type Posture, type RuleView,
-  buildRule, newPolicyDoc, proposeRuleId, ruleGaps, rulesOf,
+  ASKED_FOR, GROUP_MACHINES, GROUP_REGISTERED, HARNESS_HINT, MACHINE_SERVER_HINT, NOT_SEEN, SERVER_NAME, SERVER_NAME_HINT, deniedLine, toolsOf,
+} from "@/lib/harness-words";
+import {
+  type Bucket, type Doc, type NewLane, type Plain, type Posture, type RuleView,
+  buildRule, newPolicyDoc, proposeRuleId, ruleGaps, rulesOf, setNames,
 } from "@/lib/policy-model";
 import {
   APPLY_TO_PAGE, BUCKET_WORD, CANCEL, CHECK_RULE, CLOSE_SHEET, CONFIRM_RULE, NEED, NEW_RULE_ID, NEW_RULE_LEDE, NEW_RULE_TITLE,
@@ -28,14 +31,15 @@ import { cn } from "@/lib/utils";
 // NEW_SHEET is the open value the page passes for the new rule.
 export const NEW_SHEET = "new";
 
-// Lane4 are the lanes a new rule can be written for, the ones the model
-// builds a rule on.
-type Lane4 = "mcp" | "shell" | "files" | "net";
 // NewPosture is what a new rule can do; the other two postures are written
 // by hand in the text.
 type NewPosture = "deny" | "allow" | "hold" | "ticket";
 
-const LANES: Lane4[] = ["mcp", "shell", "files", "net"];
+const LANES: NewLane[] = ["mcp", "shell", "files", "net", "harness"];
+// UNSEEN is the server choice that asks for a name: a server on a person's
+// machine that no denied call has named yet. No server can carry the name.
+const UNSEEN = "*";
+const CHIP = "inline-flex items-center rounded-md border border-border bg-background px-1.5 py-px font-mono text-[13px] hover:bg-accent";
 const BUCKETS: Bucket[] = ["deny", "hum", "allow"];
 const SEG = "inline-flex h-8 items-center border-r border-border px-3.5 text-[13px] text-text-2 last:border-r-0 hover:bg-accent focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
@@ -117,8 +121,12 @@ type NewProps = {
 // document. Nothing reaches the page until the apply button, which stays
 // out of reach while the rule is missing an answer.
 function NewRule({ rules, events, roles, onAdd, onClose }: NewProps) {
-  const [lane, setLane] = React.useState<Lane4 | null>(null);
+  const [lane, setLane] = React.useState<NewLane | null>(null);
   const [app, setApp] = React.useState("");
+  // named says the server is typed by hand, and denials are the calls no
+  // rule covers, which name the servers and tools people asked for.
+  const [named, setNamed] = React.useState(false);
+  const [denials, setDenials] = React.useState<DefaultDenials | null>(null);
   const [picked, setPicked] = React.useState<NewPosture | null>(null);
   const [scratch, setScratch] = React.useState<Doc | null>(null);
   const [typed, setTyped] = React.useState<string | null>(null);
@@ -133,6 +141,7 @@ function NewRule({ rules, events, roles, onAdd, onClose }: NewProps) {
       const err = e as ApiError;
       if (err.status !== 401) setAppsProblem(readFailed(SUBJECT_SERVERS, err));
     });
+    listDefaultDenials().then(setDenials, () => setDenials(null));
   }, []);
 
   const view = scratch ? rulesOf(scratch)[0] || null : null;
@@ -149,7 +158,7 @@ function NewRule({ rules, events, roles, onAdd, onClose }: NewProps) {
   // build makes the scratch document the editor works on, carrying every
   // answer the rule already holds. A change of lane drops the calls, since
   // a command pattern is not a tool name.
-  const build = (next: { lane: Lane4; app: string; posture: NewPosture }) => {
+  const build = (next: { lane: NewLane; app: string; posture: NewPosture }) => {
     const keep = view && next.lane === lane ? view : null;
     setScratch(newPolicyDoc({
       name: SCRATCH,
@@ -168,7 +177,7 @@ function NewRule({ rules, events, roles, onAdd, onClose }: NewProps) {
     }));
   };
 
-  const pickLane = (next: Lane4) => {
+  const pickLane = (next: NewLane) => {
     setLane(next);
     if (posture) build({ lane: next, app, posture });
   };
@@ -195,6 +204,18 @@ function NewRule({ rules, events, roles, onAdd, onClose }: NewProps) {
     onAdd(id, { ...view.raw, id });
   };
 
+  // A server on a person's machine is one the registry does not hold. The
+  // denied calls name the ones people asked for, and the tools they asked
+  // for there, which one click adds to the rule.
+  const registered = (apps || []).map((a) => a.name);
+  const machines = denials ? denials.servers.filter((s) => !registered.includes(s.server)) : [];
+  const onMachine = lane === "mcp" && app !== "" && apps !== null && !registered.includes(app);
+  const asked = (lane === "harness" ? toolsOf(denials, null) : onMachine ? toolsOf(denials, app) : []).filter((t) => !names.includes(t.name));
+  const pickServer = (v: string) => {
+    setNamed(v === UNSEEN);
+    pickApp(v === UNSEEN ? "" : v);
+  };
+
   return (
     <>
       <SheetHeader className="border-b border-border">
@@ -205,7 +226,7 @@ function NewRule({ rules, events, roles, onAdd, onClose }: NewProps) {
       <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-4 py-4">
         <div className="flex flex-col gap-2">
           <span className={CAPS}>{WHERE_Q}</span>
-          <RadioGroup value={lane || ""} onValueChange={(v) => pickLane(v as Lane4)} className="gap-2.5" data-where={lane || ""}>
+          <RadioGroup value={lane || ""} onValueChange={(v) => pickLane(v as NewLane)} className="gap-2.5" data-where={lane || ""}>
             {LANES.map((l) => (
               <div key={l} className="flex items-center gap-2.5">
                 <RadioGroupItem value={l} id={"where-" + l} aria-label={WHERE_CHOICE[l]} />
@@ -213,6 +234,7 @@ function NewRule({ rules, events, roles, onAdd, onClose }: NewProps) {
               </div>
             ))}
           </RadioGroup>
+          {lane === "harness" && <span className={HINT}>{HARNESS_HINT}</span>}
         </div>
 
         {lane === "mcp" && (
@@ -222,13 +244,28 @@ function NewRule({ rules, events, roles, onAdd, onClose }: NewProps) {
             {appsProblem
               ? <Input aria-label={PICK_SERVER} value={app} spellCheck={false} className="h-8 max-w-[320px] font-mono" onChange={(e) => pickApp(e.target.value)} />
               : (
-                <Select value={app} onValueChange={pickApp}>
+                <Select value={named ? UNSEEN : app} onValueChange={pickServer}>
                   <SelectTrigger aria-label={PICK_SERVER} className="h-8 w-72"><SelectValue placeholder={PICK_SERVER} /></SelectTrigger>
                   <SelectContent>
-                    {(apps || []).map((a) => <SelectItem key={a.id} value={a.name}>{a.name}</SelectItem>)}
+                    <SelectGroup>
+                      <SelectLabel>{GROUP_REGISTERED}</SelectLabel>
+                      {(apps || []).map((a) => <SelectItem key={a.id} value={a.name}>{a.name}</SelectItem>)}
+                    </SelectGroup>
+                    <SelectGroup data-machines>
+                      <SelectLabel>{GROUP_MACHINES}</SelectLabel>
+                      {machines.map((s) => <SelectItem key={s.server} value={s.server} title={deniedLine(s.count, s.lastTime)}>{s.server}</SelectItem>)}
+                      <SelectItem value={UNSEEN}>{NOT_SEEN}</SelectItem>
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               )}
+            {named && (
+              <>
+                <Input aria-label={SERVER_NAME} value={app} spellCheck={false} className="h-8 max-w-[320px] font-mono" onChange={(e) => pickApp(e.target.value.trim())} />
+                <span className={HINT}>{SERVER_NAME_HINT}</span>
+              </>
+            )}
+            {onMachine && <span className={HINT} data-machine-server>{MACHINE_SERVER_HINT}</span>}
           </div>
         )}
 
@@ -253,6 +290,18 @@ function NewRule({ rules, events, roles, onAdd, onClose }: NewProps) {
 
         {scratch && view && (
           <>
+            {asked.length > 0 && (
+              <div className="flex flex-col gap-1.5" data-asked>
+                <span className={CAPS}>{ASKED_FOR}</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {asked.map((t) => (
+                    <button key={t.name} type="button" className={CHIP} title={deniedLine(t.count, t.lastTime)} onClick={() => editScratch(view.id, (doc) => setNames(doc, view.id, [...names, t.name]))}>
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <RuleEditor doc={scratch} rule={view} events={events} roles={roles} onEdit={editScratch} />
             <div className="flex flex-col gap-1.5">
               <label htmlFor="new-rule-id" className={CAPS}>{RULE_ID}</label>

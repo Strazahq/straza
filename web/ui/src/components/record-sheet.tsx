@@ -5,10 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Facts } from "@/components/sheet-parts";
+import { type PolicyDoor, openNewPolicy } from "@/components/policies-by-role";
 import { PolicyTest, type PolicyTestPrefill } from "@/components/policy-test";
 import { EngineFields } from "@/components/why-card";
 import { WhatRan } from "@/components/what-ran";
 import { COPIED, COPY_REFUSED, NOT_REHASHED, REHASHED, SENTINEL, type Row, objectLabel, objectNote, objectOf, parseCE, sevTone, shortType, whyOf } from "@/lib/audit-words";
+import { mayWritePolicy } from "@/lib/access-read";
+import { WRITE_RULE_FOR_CALL } from "@/lib/harness-words";
 import { TEST_THIS_CALL } from "@/lib/policy-words";
 import { notify } from "@/lib/notify";
 import { absTime, NONE } from "@/lib/words";
@@ -103,6 +106,19 @@ function pretty(raw: string): string {
   }
 }
 
+// ruleDoor is the call of a record that no rule decided and only a rule
+// can let run: a tool of an MCP server the harness runs itself, which the
+// hook denies, or a harness tool Straza does not classify. It answers what
+// the New policy wizard needs to open on that call, and null for any other
+// record.
+function ruleDoor(ce: ReturnType<typeof parseCE>): PolicyDoor | null {
+  const d = (ce && ce.data) || {};
+  const name = String(d.toolName || "");
+  if (!ce || ce.type !== "straza.audit.tool" || d.effect !== "deny" || d.ruleId || !name) return null;
+  if (d.tool === "mcp.call" && d.app) return { lane: "mcp", app: String(d.app), tools: [name] };
+  return d.tool === "other" ? { lane: "harness", tools: [name] } : null;
+}
+
 type Props = {
   row: Row;
   open: boolean;
@@ -121,6 +137,7 @@ export function RecordSheet({ row, open, onOpenChange, onRevoke, revoked, verifi
   const why = whyOf(ce);
   const obj = objectOf(ce);
   const prefill = testPrefill(row, ce);
+  const door = ruleDoor(ce);
   const [testing, setTesting] = React.useState(false);
   const tone = sevTone(row.severity);
   const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
@@ -201,6 +218,7 @@ export function RecordSheet({ row, open, onOpenChange, onRevoke, revoked, verifi
 
         <SheetFooter className="flex-row items-center border-t border-border">
           {prefill && <Button variant="outline" size="sm" onClick={() => setTesting(true)}>{TEST_THIS_CALL}</Button>}
+          {door && mayWritePolicy() && <Button variant="outline" size="sm" onClick={() => openNewPolicy(door)} data-write-rule>{WRITE_RULE_FOR_CALL}</Button>}
           {clipboard && <Button variant="ghost" size="sm" onClick={copy}>Copy as JSON</Button>}
           <Button variant="outline" size="sm" className="ml-auto" onClick={() => onOpenChange(false)}>Close</Button>
         </SheetFooter>

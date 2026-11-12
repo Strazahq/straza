@@ -4,8 +4,7 @@ import { navigate } from "@/lib/router";
 import { NOBODY_REACHES_LINE, SAME_AS_COMMANDS, createRoleFor, nobodyReaches } from "@/lib/server-words";
 import { newRoleCommand } from "@/lib/server-roles-words";
 import type { HealthRead } from "@/lib/words";
-import { cn } from "@/lib/utils";
-import { CAPS, Code, Fold, Landed, type Problem, ProblemBlock, type Row } from "./parts";
+import { CAPS, Code, Fold, HealthBox, Landed, type Problem, ProblemBlock, type Row } from "./parts";
 
 // agentSnippet is the agent-side check with a real tool name: the three
 // JSON-RPC lines a harness sends through the gateway.
@@ -16,12 +15,6 @@ export const agentSnippet = (app: string, tool: string) => [
   "  '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"" + app + "__" + tool + "\",\"arguments\":{\"message\":\"hello through the gateway\"}}}' \\",
   "  | straza mcp --harness claude-code",
 ].join("\n");
-
-const TONE: Record<HealthRead["tone"], { box: string; lead: string }> = {
-  ok: { box: "border-ok/40 bg-ok-bg", lead: "text-ok" },
-  warn: { box: "border-warn/40 bg-warn-bg", lead: "text-warn" },
-  danger: { box: "border-danger/40 bg-danger-bg", lead: "text-danger" },
-};
 
 type Props = { rows: Row[]; read: HealthRead | null; name: string; tools: string[]; problem: Problem | null };
 
@@ -39,11 +32,7 @@ export function CheckStep({ rows, read, name, tools, problem }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <Landed rows={rows} />
-      {read && (
-        <div className={cn("rounded-md border px-3 py-2.5 text-sm text-foreground", TONE[read.tone].box)} data-health={read.kind}>
-          <b className={cn("font-semibold", TONE[read.tone].lead)}>{read.lead}</b>{" " + read.text}
-        </div>
-      )}
+      {read && <HealthBox read={read} />}
       <ProblemBlock problem={problem} />
       {read && read.kind === "running" && (
         <>

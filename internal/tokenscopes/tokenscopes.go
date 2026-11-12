@@ -134,6 +134,9 @@ var AdminRouteArea = map[string]string{
 	"POST /v1/admin/policies/{name}/activate": "policy",
 	"POST /v1/admin/policies/validate":        "policy",
 	"POST /v1/admin/policies/simulate":        "policy",
+	// The tools no rule covers, read from decision records without their
+	// callers or arguments, which stay in the audit area.
+	"GET /v1/admin/default-denials": "policy",
 
 	// identity: users, groups, roles, assignments, packs, devices, locks.
 	"GET /v1/admin/users":                                      "identity",
@@ -181,7 +184,8 @@ var AdminRouteArea = map[string]string{
 	"GET /v1/admin/transcripts":              "transcripts",
 	"GET /v1/admin/transcripts/search":       "transcripts",
 
-	// audit: decision/admin event history (content-free rows).
+	// audit: decision/admin event history. Its rows hold no conversation
+	// text, and a tool record holds the tool's input.
 	"GET /v1/admin/audit": "audit",
 
 	// changes: its own grant so a pull connector is exactly
@@ -265,6 +269,8 @@ var AdminRouteArea = map[string]string{
 	// The client assertion key routes pass root only (requireFullAdmin), so
 	// no grant reaches them. They are listed for the parity test, under the
 	// root-equivalent area in case a later change swaps the wrapper.
-	"POST /v1/admin/signing-keys/client-assertion/rotate":       "tokens",
-	"POST /v1/admin/signing-keys/client-assertion/{kid}/retire": "tokens",
+	"POST /v1/admin/signing-keys/client-assertion/rotate":           "tokens",
+	"POST /v1/admin/signing-keys/client-assertion/{kid}/retire":     "tokens",
+	"POST /v1/admin/signing-keys/client-assertion/{kid}/promote":    "tokens",
+	"GET /v1/admin/signing-keys/client-assertion/{kid}/certificate": "tokens",
 }

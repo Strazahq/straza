@@ -1,20 +1,28 @@
 {{ define "main" }}
-<div class="dbody">
+{{- /* outline: false in the front matter drops the "On this page" fold and
+rail, for a page that draws its own outline, such as the roadmap board's
+stage bar. The norail class gives the column the rail's width. */}}
+{{- $outline := ne .Params.outline false }}
+<div class="dbody{{ if not $outline }} norail{{ end }}">
 {{ partial "lnav.html" . }}
 <main id="main" class="main" tabindex="-1">
 <div class="prose">
 {{ partial "page-head.html" . }}
+{{- if $outline }}
 <details class="fold toc-fold">
   <summary>On this page</summary>
   <div class="in">{{ .TableOfContents }}</div>
 </details>
+{{- end }}
 {{ partial "page-content.html" . }}
 {{ partial "walk-record.html" . }}
 </div>
 </main>
+{{- if $outline }}
 <aside class="rail" aria-labelledby="rail-title">
   <h2 class="rail-title" id="rail-title">On this page</h2>
   <nav id="toc-list" aria-labelledby="rail-title"></nav>
 </aside>
+{{- end }}
 </div>
 {{ end }}

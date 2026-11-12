@@ -2,7 +2,7 @@
 title: strazactl transcripts search
 description: 'Find who said what: substring scan and/or exact-value match'
 pagetype: reference
-weight: 99
+weight: 101
 draft: false
 sources:
   - cmd/strazactl

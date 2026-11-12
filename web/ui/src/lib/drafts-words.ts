@@ -108,7 +108,7 @@ export const revisionWord = (n: number) => "revision " + n;
 export const expiresWord = (day: string) => "expires " + day;
 export const DETAILS = "Details";
 export const revisionLine = (n: number, who: string, door: string, at: string, mechanical: boolean) =>
-  "rev " + n + " by " + who + " in " + doorWords(door) + " at " + at + (mechanical ? ", checked again against live state" : "");
+  "revision " + n + " by " + who + " in " + doorWords(door) + " at " + at + (mechanical ? ", checked again against live state" : "");
 export const checkedLine = (at: string, version: string) => at + (version ? ", against live policy " + version : "");
 export const expiresLine = (at: string) => at + ", unless someone revises it first";
 export const undoesLine = (id: string) => "draft " + id;
@@ -316,7 +316,7 @@ export const nowAfter = (before: string, after: string) => "Now: " + bare(before
 // the lines of its kind typed once.
 export function ackWords(b: ConfirmBlock): string {
   const n = b.lines.length;
-  if (b.blocked) return "Only someone who can read what this line names can confirm it, so ask an admin who can read it to publish this draft.";
+  if (b.blocked) return "Only someone who may read what this line names can confirm it, so ask an admin who may read it to publish this draft.";
   if (b.kind === "tick") return n === 1 ? "Tick it when you publish: republishing the old state undoes it." : "One tick confirms the " + n + " lines of this kind when you publish: republishing the old state undoes them.";
   if (b.kind === "count") return "Type " + b.expect + " when you publish, once for the " + n + " lines of this kind: republishing the old state cannot undo them.";
   if (b.lines.some((f) => f.code === AGENT_LOOSEN_CODE)) return "Type " + b.expect + " when you publish to accept it.";
@@ -475,6 +475,77 @@ export const PUBLISH = "Publish";
 export const CANCEL = "Cancel";
 export const NOT_PUBLISHED = "Nothing was published.";
 export const publishedToast = (id: string) => "Draft " + id + " is live.";
+
+// The secret of a server with one shared secret and none stored: its row on
+// the server's card, its line under Checks, and the section of the publish
+// dialog that asks for it and stores it once the publish lands.
+export const SECRET_ROW = "Secret";
+export const SECRET_LINE = "None is stored yet. Whoever publishes this draft enters it in the publish dialog.";
+export const SECRET_CHECKS_LINE = "Whoever publishes this draft enters it in the publish dialog.";
+export const secretsHead = (n: number) => (n === 1 ? "Secret" : "Secrets");
+export const secretsLead = (names: string[]) =>
+  names.length === 1
+    ? names[0] + " has no secret yet, and every call to it fails until one is stored. Enter it here, and Straza stores it right after the publish."
+    : list(names) + " have no secret yet, and every call to them fails until one is stored. Enter each here, and Straza stores them right after the publish.";
+export const secretLabel = (name: string) => "Secret of " + name;
+// secretHint names the agent that wrote the draft, which never sees the
+// secret, and leaves it out of a draft only people wrote.
+export const secretHint = (agent: string | null) =>
+  "Straza stores it encrypted. It is never shown again and never returned by any read." + (agent ? " " + agent + ", the agent that wrote this draft, never sees it." : "");
+export const ADD_LATER = "Add it later";
+export const laterLine = (name: string) => name + " goes live with no secret, and every call to it fails until one is stored. The page after the publish says how to store it.";
+export const enterOr = (name: string) => "Enter the secret of " + name + ", or tick Add it later.";
+// publishGo is the dialog's button: Publish alone when no secret is stored.
+export const publishGo = (n: number) => (n === 0 ? PUBLISH : n === 1 ? "Publish and store the secret" : "Publish and store " + n + " secrets");
+// notSent says a refused publish sent none of the n values typed, which the
+// dialog dropped.
+export const notSent = (n: number) =>
+  n === 1
+    ? "The secret you entered was not sent anywhere, because nothing was published. The field is empty again."
+    : "The secrets you entered were not sent anywhere, because nothing was published. The fields are empty again.";
+export const publishingTitle = (id: string) => "Publishing draft " + id;
+export const storeRow = (name: string) => "Store the secret of " + name;
+export const notStored = (name: string) => "The secret of " + name + " was not stored.";
+export const notStoredText = (id: string, name: string, reason: string) =>
+  "Draft " + id + " is published and stays published, so " + name + " is live with no secret, and every call to it fails until one is stored. The reason Straza gave: \"" + bare(reason) + "\". Enter the secret again below. Nothing is published again.";
+export const maybeStored = (name: string) => "The secret of " + name + " may not be stored.";
+export const maybeText = (id: string, name: string) =>
+  "Draft " + id + " is published and stays published. strazad is unreachable, so the secret may or may not be stored. Check the secret on the page of " + name + " before you enter it again.";
+export const retryHint = (name: string) => name + " is live. Storing the secret runs the check under it, and nothing is published again.";
+export const againHint = (name: string) => name + " is live. Storing the secret again replaces the sealed value, then the check runs under it.";
+export const storedNotPassed = (name: string) => "The secret of " + name + " is stored, and the check that ran under it did not pass.";
+export const CLOSE = "Close";
+
+// The listing credential of a server that pins an object type, which only
+// Straza's own listing call carries. pin is the type, its plural and the
+// tool that lists them.
+type Pin = { type: string; plural: string; tool: string };
+export const SECRET_LINE_BOTH = "Neither its secret nor its listing credential is stored yet. Whoever publishes this draft enters both in the publish dialog.";
+export const leadBoth = (name: string, pin: Pin) =>
+  name + " has no secret and no listing credential yet, so every call to it fails and Straza cannot list its " + pin.plural + ". Enter both here, and Straza stores them right after the publish.";
+export const leadListing = (name: string, pin: Pin) =>
+  name + " has no listing credential yet, so Straza cannot list its " + pin.plural + ". Enter it here, and Straza stores it right after the publish.";
+export const listingLabel = (name: string) => "Listing credential of " + name;
+export const listingHint = (name: string, pin: Pin, agent: string | null) =>
+  "Only Straza's own listing of the " + pin.plural + " of " + name + " carries it, when Straza calls " + pin.tool + ". Calls by people and agents never carry it. Straza stores it encrypted and never shows it again." +
+  (agent ? " " + agent + ", the agent that wrote this draft, never sees it." : "");
+export const laterListing = (name: string, pin: Pin) =>
+  name + " goes live with no listing credential, so Straza cannot list its " + pin.plural + ", and only roles on every " + pin.type + " can use its " + pin.type + " tools until it has one. Set one later under Server authentication on the Overview of " + name + ".";
+export const enterListingOr = (name: string) => "Enter the listing credential of " + name + ", or tick Add it later.";
+export const GO_LISTING = "Publish and store the listing credential";
+export const storeListingRow = (name: string) => "Store the listing credential of " + name;
+export const listsSoon = (name: string, pin: Pin) => "Straza lists the " + pin.plural + " of " + name + " within about 30 seconds.";
+export const listingNotStored = (name: string) => "The listing credential of " + name + " was not stored.";
+// listingNotStoredText says the server's calls work when its secret is
+// stored, which a server whose secret this dialog did not store may not.
+export const listingNotStoredText = (id: string, name: string, pin: Pin, secretStored: boolean, reason: string) =>
+  "Draft " + id + " is published and stays published" + (secretStored ? ", and the secret of " + name + " is stored, so its calls work" : "") + ". Straza cannot list its " + pin.plural + ", and only roles on every " + pin.type + " can use its " + pin.type +
+  " tools until it has one. The reason Straza gave: \"" + bare(reason) + "\". Enter it again below. Nothing is published again.";
+export const listingMaybeStored = (name: string) => "The listing credential of " + name + " may not be stored.";
+export const listingMaybeText = (id: string, name: string) =>
+  "Draft " + id + " is published and stays published. strazad is unreachable, so the listing credential may or may not be stored. Check Server authentication on the Overview of " + name + " before you enter it again.";
+export const listingRetryHint = (name: string) => name + " is live. Storing the listing credential starts a listing at once, and nothing is published again.";
+export const STORE_LISTING = "Store the listing credential";
 
 // After publishing.
 const clientWords = (client: string | undefined) => (client === "console" ? "the console" : client || "a client Straza did not name");

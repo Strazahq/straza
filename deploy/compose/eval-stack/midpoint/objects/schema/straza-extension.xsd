@@ -11,7 +11,8 @@
                                 scim-profile revision 11 mirrored from the SCIM
                                 extension `kind` on the single account projection),
                  strazaSponsor / strazaSwarmId (typology outbound sources),
-                 strazaExternalId (pinned IdP subject for NHI login binding)
+                 strazaExternalId (pinned IdP subject for NHI login binding),
+                 strazaEntraAgentId (the Entra agent identity an agent acts as)
 -->
 
 <!--
@@ -102,6 +103,14 @@
                     <xsd:appinfo>
                         <a:displayName>Straza swarm id</a:displayName>
                         <a:help>Fleet membership for agent identities. Outbound-mapped to the Straza SCIM extension attribute `swarmId`; PolicySets match it (spec/policyset revision 9 match.identity) and the future fleet kill will act on it. Unset = not in a fleet.</a:help>
+                    </xsd:appinfo>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="strazaEntraAgentId" type="xsd:string" minOccurs="0" maxOccurs="1">
+                <xsd:annotation>
+                    <xsd:appinfo>
+                        <a:displayName>Straza Entra agent id</a:displayName>
+                        <a:help>For an AI agent only: the client id of the Entra agent identity the agent acts as at Entra, a GUID copied from the Entra admin centre. Outbound-mapped in lower case to the Straza SCIM extension attribute `entraAgentId` (scim-profile revision 22). Straza refuses it on a person, a value that is not a GUID, and an id another agent holds. Unset = the agent has no Entra agent identity.</a:help>
                     </xsd:appinfo>
                 </xsd:annotation>
             </xsd:element>

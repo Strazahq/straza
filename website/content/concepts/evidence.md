@@ -21,7 +21,7 @@ An auditor can answer these questions about a decision from its record alone:
 | The question | What the record holds |
 |---|---|
 | Who acted | The user, the session and the coding tool or MCP client it came from |
-| What was asked | The tool and the command, or the MCP server, its tool and the arguments as sent |
+| What was asked | The tool and the command, or the MCP server, its tool and the arguments as sent. The record of every harness tool carries the tool's input as sent, cut at 8 KiB: the file text of a write, the prompt of a spawned agent, the arguments of a tool Straza does not classify. A classified tool also carries the harness's own name of it, such as `Skill` behind a file read |
 | What was decided | The effect and the reason the agent read |
 | By which rule | The rule's id and the name of the [policy]({{< relref "concepts/policy-model.md" >}}) set it belongs to |
 | Under which policy | The id of the signed snapshot the decision was made under |
@@ -51,7 +51,7 @@ The chain proves that no record was edited or removed in place. It does not by i
 
 Sinks forward records to another system. A webhook sink sends each record, or a batch of them, as an HTTP request that it signs when you give it a secret. A file sink appends records and syncs the file before it counts them as delivered. Delivery is at least once, so a receiver must drop duplicates by the record's id. An outage delays delivery. A delivery the receiver refuses is parked and can be replayed. Watch delivery failures, because a configured sink alone does not prove that every record arrived.
 
-A sink with no filter receives every record except conversation text. Sending transcripts off the box needs an explicit setting in that sink's configuration. [Sinks and SIEM]({{< relref "guides/audit/sinks-and-siem.md" >}}) covers the setup.
+A sink with no filter receives every record except conversation text. Tool records are among them, and a tool record holds what the tool was given, which can be file text or the prompt an agent wrote for a subagent. Sending transcripts off the box needs an explicit setting in that sink's configuration. [Sinks and SIEM]({{< relref "guides/audit/sinks-and-siem.md" >}}) covers the setup.
 
 ## What an auditor can prove
 
@@ -68,7 +68,7 @@ An action that never reached Straza, such as a command on a machine without the 
 ## Conversations and the sentinel
 
 
-Straza records the text of a conversation only when a policy set that matches the session turns recording on, and the session is told. The chain keeps only the hash and the size of each turn. The text goes to a separate store that deletes it after 30 days by default. [Record a conversation]({{< relref "guides/write-policy/capture.md" >}}) shows how to turn recording on.
+Straza records the text of a conversation only when a policy set that matches the session turns recording on, and the session is told. The chain keeps only the hash and the size of each turn. The text goes to a separate store that deletes it after 30 days by default. [Record a conversation]({{< relref "guides/write-policy/capture.md" >}}) shows how to turn recording on. The input of a tool call is not conversation text. The call's record keeps up to 8 KiB of it whether or not recording is on.
 
 
 After the fact, the audit sentinel reads the records and judges whole sessions, such as a burst of denies. Its verdicts are written to the same chain. It is off by default and never blocks or revokes anything. When it fails, it fails open and raises an alarm, as [The sentinel]({{< relref "guides/audit/sentinel.md" >}}) explains.

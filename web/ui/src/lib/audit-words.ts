@@ -73,20 +73,24 @@ export const objectLabel = (o: ObjectFact) => o.type.charAt(0).toUpperCase() + o
 export const objectNote = (o: ObjectFact) =>
   [o.id ? "id " + o.id : "not in the " + o.type + " list", o.sha256 ? "cut at 512 bytes, SHA-256 " + o.sha256.slice(0, 12) + "…" : ""].filter(Boolean).join(", ");
 
-// ceWhat is the exact thing that happened (command, target paths, upstream
-// tool, the object it named and its arguments), never displaced by the
-// reason. A capture record reads as a reference row, size, mode and hash,
+// ceWhat is the exact thing that happened (the harness's own name of a
+// classified tool, command, target paths, upstream tool, the object it
+// named and its arguments), never displaced by the reason. The arguments
+// stay in the sheet when a command or a path already says what the call
+// did. A capture record reads as a reference row, size, mode and hash,
 // never the text, even an old record that still carries data.content on the
 // chain.
 export function ceWhat(ce: CE | null): string {
   if (!ce) return "(unreadable record)";
   const d = ce.data || {};
   const bits: string[] = [];
+  if (d.nativeTool) bits.push(String(d.nativeTool));
   if (d.command) bits.push(String(d.command));
-  if (Array.isArray(d.paths) && d.paths.length) bits.push(d.paths.map(String).join(" "));
+  const paths = Array.isArray(d.paths) ? d.paths.map(String).join(" ") : "";
+  if (paths) bits.push(paths);
   const obj = objectOf(ce);
   if (d.toolName) bits.push((d.app ? String(d.app) + "." : "") + String(d.toolName) + (obj ? " on " + obj.value : ""));
-  if (d.arguments) bits.push(String(d.arguments).slice(0, 160));
+  if (d.arguments && !d.command && !paths) bits.push(String(d.arguments).slice(0, 160));
   if (d.contentHash || d.content) {
     const bytes = d.contentBytes != null ? Number(d.contentBytes) : d.content != null ? String(d.content).length : null;
     const hash = d.contentHash ? String(d.contentHash).replace(/^sha256:/, "").slice(0, 12) + "…" : "unhashed";
@@ -336,6 +340,7 @@ const ACTION_LABEL: Record<string, string> = {
   "approver-device-revoked": "Revoked an approver phone or browser",
   "enroll-token.create": "Started enrolling an approver phone or browser", "approver.enroll": "Enrolled an approver phone or browser",
   "enroll-token.refused": "Refused enrolling an approver phone or browser for someone",
+  "scim.refused": "Refused an identity manager's SCIM write",
   "approver.revoke": "Revoked an approver phone or browser with its user",
   "revocation.session": "Revoked a session", "revocation.sessions": "Revoked sessions", "revocation.user": "Revoked a user's access",
   "revocation.device": "Revoked a machine", "revocation.lift": "Lifted a user's revocation",

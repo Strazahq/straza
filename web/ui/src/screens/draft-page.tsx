@@ -13,7 +13,7 @@ import { FetchError, RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { PageHead } from "@/components/page-head";
 import { Button } from "@/components/ui/button";
-import type { ApiError, DraftConflict, DraftDetail, DraftPublished } from "@/lib/api";
+import type { ApiError, AppRow, DraftConflict, DraftDetail, DraftPublished } from "@/lib/api";
 import { UNVERIFIED } from "@/lib/approval-words";
 import { chipNotes, isNewRole, loosenings, roleToolsOf } from "@/lib/drafts-access";
 import { conflictsOf, contactDraftServer, getDraft, rebaseDraft, revertDraft } from "@/lib/drafts-api";
@@ -117,6 +117,10 @@ export function DraftPage({ id }: { id: string }) {
   const [undoing, setUndoing] = React.useState(false);
   const [undoProblem, setUndoProblem] = React.useState<string | null>(null);
   const [details, setDetails] = React.useState(false);
+  // checked holds each server the publish dialog stored a value of and
+  // checked: the server as its check read it, and the Next line its stored
+  // secret answers.
+  const [checked, setChecked] = React.useState<Record<string, { app: AppRow; answered: string | null }>>({});
   const checksRef = React.useRef<HTMLElement>(null);
 
   // load reads the draft, whose verdict the server computes on the read
@@ -163,6 +167,11 @@ export function DraftPage({ id }: { id: string }) {
   const proposer = d.authors[0];
   const stale = (v.refused || []).filter((f) => f.code === STALE_CODE);
   const shownAnswer = answer && answer.draft.id === d.id ? answer : null;
+  // The strip names a server the dialog checked with that check's status,
+  // and Next leaves out the line a secret stored in the dialog answers,
+  // matched by the fix text of the same draft's warning.
+  const answeredLines = Object.values(checked).map((c) => c.answered);
+  const nextLines = shownAnswer ? shownAnswer.next.filter((n) => !answeredLines.includes(n)) : [];
   const server = unlinked(d);
 
   const setDetail = (next: DraftDetail) => setState((s) => (s.kind === "ready" ? { ...s, detail: next } : s));
@@ -258,7 +267,10 @@ export function DraftPage({ id }: { id: string }) {
           <div role="status" className={PROOF} data-published>
             <b className="text-lg font-semibold text-foreground">{publishedLine(d.decided_by?.username || "", at, d.decided_by?.client, d.id)}</b>
             <span>{(d.snapshot ? liveSince(at, d.snapshot.slice(0, 8)) : liveSinceNoVersion(at)) + " " + REEVALUATE}</span>
-            {shownAnswer && shownAnswer.servers.map((s) => <span key={s.name} data-server={s.name}>{serverLine(s.name, s.change, s.status, s.detail)}</span>)}
+            {shownAnswer && shownAnswer.servers.map((s) => {
+              const c = checked[s.name];
+              return <span key={s.name} data-server={s.name}>{serverLine(s.name, s.change, c ? c.app.status : s.status, c ? c.app.detail : s.detail)}</span>;
+            })}
             <span className="mt-1 flex items-center gap-1.5">
               <Button variant="outline" size="sm" onClick={() => void undo()} disabled={undoing}>{undoing ? <Loader2Icon className="animate-spin" /> : <Undo2Icon />}{UNDO}</Button>
               <HelpTip label={UNDO} text={UNDO_HELP} />
@@ -266,10 +278,10 @@ export function DraftPage({ id }: { id: string }) {
             {undoProblem && <RefusedError subject={UNDO_SUBJECT} message={undoProblem} />}
           </div>
         )}
-        {shownAnswer && shownAnswer.next.length > 0 && (
+        {nextLines.length > 0 && (
           <div className="flex flex-col gap-1 rounded-md border border-border bg-card px-3.5 py-2.5 text-sm text-text-2" data-next>
             <h3 className="m-0 text-sm font-semibold text-foreground">{NEXT_TITLE}</h3>
-            {shownAnswer.next.map((n) => <p key={n} className="m-0">{n}</p>)}
+            {nextLines.map((n) => <p key={n} className="m-0">{n}</p>)}
           </div>
         )}
         {(d.state === "discarded" || d.state === "expired") && (
@@ -336,19 +348,22 @@ export function DraftPage({ id }: { id: string }) {
         </section>
       </div>
 
-      {open && detail.may_publish && (
+      {((open && detail.may_publish) || publishing) && (
+        // The dialog stays past the publish while it stores and checks the
+        // values it was given, until the person closes it.
         <DraftPublish
           draft={d}
           verdict={v}
           open={publishing}
           onOpenChange={setPublishing}
-          onPublished={(a) => {
-            setPublishing(false);
+          onPublished={(a, stays) => {
+            if (!stays) setPublishing(false);
             setAnswer(a);
             setState((s) => (s.kind === "ready" ? { ...s, detail: { ...s.detail, draft: a.draft }, fromPublish: true } : s));
             void load();
           }}
           onVerdict={(next) => setDetail({ ...detail, verdict: next })}
+          onChecked={(name, app, answered) => setChecked((c) => ({ ...c, [name]: { app, answered: answered || (c[name] ? c[name].answered : null) } }))}
         />
       )}
       <DiscardDialog draft={d} open={discarding} onOpenChange={setDiscarding} onDiscarded={() => { setDiscarding(false); void load(); }} />

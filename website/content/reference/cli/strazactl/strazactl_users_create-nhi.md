@@ -2,7 +2,7 @@
 title: strazactl users create-nhi
 description: Provision an AI agent or a service account (headless, no password, key-based)
 pagetype: reference
-weight: 103
+weight: 105
 draft: false
 sources:
   - cmd/strazactl

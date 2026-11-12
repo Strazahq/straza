@@ -16,8 +16,8 @@ tested:
   date: 2026-09-28
 applies_to: both
 keywords: mcp server app manifest register wizard
-who: You, as the admin
-where: The console, or a terminal with strazactl
+who: Admin
+where: Console or strazactl
 steps: true
 modes: [console, cli]
 mode_default: console

@@ -3,10 +3,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Policies } from "./policies";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ApiError, type BindingRow, type PoliciesAnswer, type PolicySetRow, type RoleRow, listBindings, listPolicies, listRoles } from "@/lib/api";
+import { ApiError, type BindingRow, type PoliciesAnswer, type PolicySetRow, type RoleRow, listBindings, listDefaultDenials, listPolicies, listRoles } from "@/lib/api";
 import { take } from "@/lib/handoff";
+import { DENIED_NONE, DENIED_VIEW } from "@/lib/harness-words";
 import { navigate } from "@/lib/router";
-import { CATEGORY, DRAFT, EDITED, EVERYONE, FILTER, LANE_FILTER, LIST_FOOT, LIVE, NOT_PARSED, NOT_PARSED_TITLE, NO_MATCH, OUTSIDE_FOOT, REC, REC_VERBATIM, SEARCH, SUBJECT_ROLES, VIEW, countWords } from "@/lib/policy-words";
+import { CATEGORY, DRAFT, EDITED, EVERYONE, FILTER, LANE_FILTER, LIST_FOOT, LIVE, NOT_PARSED, NOT_PARSED_TITLE, NO_MATCH, OUTSIDE_FOOT, REC, REC_VERBATIM, SEARCH, SUBJECT_ROLES, VIEW, VIEW_LABEL, countWords } from "@/lib/policy-words";
 import { readFailed } from "@/lib/say";
 
 // The six fixture policies, in the shapes the list envelope answers,
@@ -61,10 +62,11 @@ vi.mock("@/lib/api", async (orig) => ({
   listPolicies: vi.fn(),
   listRoles: vi.fn(),
   listBindings: vi.fn(),
+  listDefaultDenials: vi.fn(),
 }));
 vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 
-const mount = (view?: "sets" | "roles") => render(<TooltipProvider><Policies view={view} /></TooltipProvider>);
+const mount = (view?: "sets" | "roles" | "denied") => render(<TooltipProvider><Policies view={view} /></TooltipProvider>);
 
 const section = (key: string) => document.querySelector('[data-category="' + key + '"]') as HTMLElement;
 const rowsOf = (key: string) => Array.from(section(key).querySelectorAll("[data-policy]")).map((r) => r.getAttribute("data-policy"));
@@ -84,6 +86,7 @@ describe("the Policies list", () => {
     vi.mocked(listPolicies).mockResolvedValue(answer);
     vi.mocked(listRoles).mockResolvedValue(roles);
     vi.mocked(listBindings).mockResolvedValue(bindings);
+    vi.mocked(listDefaultDenials).mockResolvedValue({ since: "2026-11-10T10:00:00Z", servers: [], tools: [] });
     vi.mocked(navigate).mockClear();
     take("policies-new");
   });
@@ -182,6 +185,24 @@ describe("the Policies list", () => {
     await screen.findByRole("button", { name: "Open dev-guardrails" });
     await userEvent.click(screen.getByRole("button", { name: VIEW.roles }));
     expect(navigate).toHaveBeenCalledWith("policies", ["by-role"]);
+  });
+
+  it("navigates to the calls denied by default from the view control's third button", async () => {
+    mount();
+    await screen.findByRole("button", { name: "Open dev-guardrails" });
+    const views = within(screen.getByRole("group", { name: VIEW_LABEL })).getAllByRole("button").map((b) => b.textContent);
+    expect(views).toEqual([VIEW.sets, VIEW.roles, DENIED_VIEW]);
+    await userEvent.click(screen.getByRole("button", { name: DENIED_VIEW }));
+    expect(navigate).toHaveBeenCalledWith("policies", ["denied"]);
+  });
+
+  it("shows the calls denied by default in their own view, with no row count", async () => {
+    mount("denied");
+    await waitFor(() => expect(document.querySelector("[data-denied-view]")).toBeTruthy());
+    expect(screen.getByRole("button", { name: DENIED_VIEW }).getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector("[data-row-count]")).toBeNull();
+    expect(document.querySelector("[data-category]")).toBeNull();
+    await waitFor(() => expect(screen.getByText(DENIED_NONE)).toBeTruthy());
   });
 
   it("drops the filters By role has no use for and counts the roles instead", async () => {

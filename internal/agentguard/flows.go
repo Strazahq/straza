@@ -34,7 +34,7 @@ func (d serviceDecider) Decide(n Normalized) policy.Decision {
 	tl := d.store.Trace()
 	req := localapi.DecideRequest{
 		Harness:     windowOf(n),
-		NativeEvent: n.NativeEvent, Event: n.Event, NativeTool: n.NativeTool,
+		NativeEvent: n.NativeEvent, Event: n.Event, NativeTool: n.NativeTool, ToolInput: n.ToolInput,
 		AgentType: n.AgentType, AgentID: n.AgentID,
 		GatewayProxied: n.GatewayProxied,
 	}

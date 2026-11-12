@@ -102,7 +102,7 @@ func TestCheckProvider(t *testing.T) {
 	}{
 		{name: "client credentials with the block passes", providers: []string{"keycloak"}, withBlock: []string{"keycloak"}, mf: agentClients("keycloak")},
 		{name: "client credentials without the block", providers: []string{"keycloak", "okta"}, withBlock: []string{"okta"}, mf: agentClients("keycloak"),
-			wantErr: "server midpoint sets credential.agents to client_credentials, and the provider keycloak has no clientCredentials settings. Add oauth.providers.keycloak.clientCredentials.assertionAudience to strazad's config, or set credential.agents to own, sponsor or shared."},
+			wantErr: "server midpoint sets credential.agents to client_credentials, and the provider keycloak has no clientCredentials settings. Add oauth.providers.keycloak.clientCredentials to strazad's config, with assertionAudience for Keycloak or Okta, or with entraBlueprint for an Entra agent blueprint. Otherwise set credential.agents to own, sponsor or shared."},
 		{name: "client credentials against an unknown provider", providers: []string{"keycloak"}, withBlock: []string{"keycloak"}, mf: agentClients("okta"),
 			wantErr: `credential.oauth.provider "okta" is not configured on this server. Add oauth.providers.okta to the strazad config, or pick one of: keycloak.`},
 		{name: "another agents value needs no block", providers: []string{"keycloak"}, mf: oauth("keycloak")},

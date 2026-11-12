@@ -49,6 +49,13 @@ type ClientCredentials struct {
 	// assertion. There is no default: Keycloak wants its realm issuer URL
 	// and Okta its token endpoint URL.
 	AssertionAudience string `yaml:"assertionAudience"`
+	// EntraBlueprint is the client id of a Microsoft Entra agent identity
+	// blueprint that holds the certificate of Straza's client assertion key.
+	// Set, it switches the provider to the Entra agent identity exchange: the
+	// blueprint gets an exchange token for the agent's Entra agent identity,
+	// which then gets its own token. It excludes AssertionAudience, because
+	// Entra takes the token endpoint as the audience.
+	EntraBlueprint string `yaml:"entraBlueprint"`
 	// Scopes are asked for with the grant. Empty asks for the client's
 	// default scopes at the provider.
 	Scopes []string `yaml:"scopes"`
@@ -93,26 +100,30 @@ func (o OAuthConnect) validate() error {
 		if err := checkEndpointURL("oauth.providers."+name+".tokenUrl", p.TokenURL, true, ""); err != nil {
 			return err
 		}
-		if err := p.ClientCredentials.validate("oauth.providers." + name + ".clientCredentials"); err != nil {
+		if err := p.ClientCredentials.validate("oauth.providers."+name+".clientCredentials", p.TokenURL); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// validate checks the block when it is set. A scope is an RFC 6749 section
+// validate checks the block when it is set, against the provider's token
+// endpoint, which an Entra blueprint uses. A scope is an RFC 6749 section
 // 3.3 scope-token, so it holds no space, quote or backslash.
-func (c *ClientCredentials) validate(field string) error {
+func (c *ClientCredentials) validate(field, tokenURL string) error {
 	if c == nil {
 		return nil
 	}
-	if c.AssertionAudience == "" {
-		return fmt.Errorf("%s: assertionAudience is required. Write the audience this provider wants in a client assertion: Keycloak takes its realm issuer URL and Okta its token endpoint URL", field)
+	if c.AssertionAudience == "" && c.EntraBlueprint == "" {
+		return fmt.Errorf("%s: assertionAudience is required. Write the audience this provider wants in a client assertion: Keycloak takes its realm issuer URL and Okta its token endpoint URL. For an Entra agent blueprint, write entraBlueprint instead", field)
 	}
 	for _, scope := range c.Scopes {
 		if scope == "" || strings.ContainsFunc(scope, func(r rune) bool { return r <= ' ' || r > '~' || r == '"' || r == '\\' }) {
 			return fmt.Errorf("%s: scope %q holds a character a scope cannot carry. Write one scope per list entry", field, scope)
 		}
+	}
+	if c.EntraBlueprint != "" {
+		return c.validateEntra(field, tokenURL)
 	}
 	return nil
 }

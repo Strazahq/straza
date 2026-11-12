@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PolicyRules } from "./policy-rules";
+import { ON_MACHINES } from "@/lib/harness-words";
 import { openDoc, rulesOf } from "@/lib/policy-model";
 import { BUCKET_WORD, EVERY_WORD, MARK, NO_REASON_YET, NO_RULE_MATCH, RESTATES_ACCESS, RULES_SEARCH, WHERE_WORD, howLine, openRule, rulesMatch } from "@/lib/policy-words";
 
@@ -150,5 +151,56 @@ describe("the rules table", () => {
     mount({ openId: "no-rm-rf" });
     expect(row("no-rm-rf").getAttribute("data-rule-open")).toBe("no-rm-rf");
     expect(row("whole-server").getAttribute("data-rule-open")).toBeNull();
+  });
+});
+
+// A set with the rules for tools on a person's own machine: a harness tool
+// rule, and an allow for an MCP server that a harness runs itself.
+const machineText = `apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: machine-tools
+spec:
+  rules:
+    - id: allow-lsp
+      tools: [other]
+      toolNames:
+        allow: [LSP, NotebookEdit]
+      effect: allow
+    - id: allow-claude-in-chrome
+      tools: [mcp.call]
+      apps: [claude-in-chrome]
+      toolNames:
+        allow: [navigate]
+      effect: allow
+`;
+
+describe("the rules for tools on people's machines", () => {
+  const machineRules = rulesOf(openDoc(machineText));
+  const chip = (id: string) => row(id).querySelector("[data-on-machines]") as HTMLElement | null;
+
+  it("says a harness tool rule's lane and names its tools", () => {
+    mount({ rules: machineRules, registered: ["demo-tools"] });
+    const c = cells("allow-lsp");
+    expect(c[0]).toBe(WHERE_WORD.harness);
+    expect(c[1]).toBe("LSPNotebookEdit");
+  });
+
+  it("marks an MCP rule whose server is not registered, and says no role access is restated", () => {
+    mount({ rules: machineRules, registered: ["demo-tools"] });
+    expect(chip("allow-claude-in-chrome")?.textContent).toBe(ON_MACHINES);
+    expect(cells("allow-claude-in-chrome")[0]).toBe("claude-in-chrome" + ON_MACHINES);
+    expect(cells("allow-claude-in-chrome")[3]).toBe("");
+    expect(row("allow-claude-in-chrome").textContent).not.toContain(RESTATES_ACCESS);
+  });
+
+  it.each([
+    ["the server is registered", ["demo-tools", "claude-in-chrome"]],
+    ["the servers are unread", null],
+  ])("marks no MCP rule when %s", (_, registered) => {
+    mount({ rules: machineRules, registered });
+    expect(chip("allow-claude-in-chrome")).toBeNull();
+    expect(cells("allow-claude-in-chrome")[0]).toBe("claude-in-chrome");
+    expect(cells("allow-claude-in-chrome")[3]).toBe(RESTATES_ACCESS);
   });
 });

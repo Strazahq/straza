@@ -8,15 +8,20 @@ import { FetchError, RefusedError } from "@/components/error-state";
 import { PageHead } from "@/components/page-head";
 import { PolicyPublish } from "@/components/policy-publish";
 import { SaveNoteLine, useDraftSave } from "@/components/use-draft-save";
+import { newRoleProblem } from "@/components/wizard/harness-steps";
 import { type Draft, type Intent, type Lane, type Verdict, CallsStep, EMPTY_DRAFT, HowStep, ReviewStep, WhatStep, WhoStep, nameProblem, pickedNames, reasonDefault, ruleIdOf, ruleOf, viewOf } from "@/components/wizard/policy-steps";
 import { StepStrip } from "@/components/wizard/step-strip";
 import {
-  type ApiError, type AppRow, type BindingRow, type PoliciesAnswer, type PolicySetRow, type PreviewEntry, type RoleRow, type SimulateRequest, type ToolRow,
-  applyPolicy, catalogPreview, getPolicy, listApps, listBindings, listPolicies, listRoles, listTools, listUsers, query, validatePolicy,
+  type ApiError, type AppRow, type BindingRow, type DefaultDenials, type PoliciesAnswer, type PolicySetRow, type PreviewEntry, type RoleRow, type SimulateRequest, type ToolRow,
+  applyPolicy, catalogPreview, getPolicy, listApps, listBindings, listDefaultDenials, listPolicies, listRoles, listTools, listUsers, query, validatePolicy,
 } from "@/lib/api";
+import { mayMakeRole } from "@/lib/access-read";
+import type { SaveItem } from "@/lib/draft-save";
+import { NEW_ROLE_MISSING, doorNote, newRoleDescription, newRoleName } from "@/lib/harness-words";
+import { roleFile } from "@/lib/role-draft";
 import { addRule, docText, newPolicyDoc, openDoc, readSet, ruleView, rulesOf, uniqueId } from "@/lib/policy-model";
 import {
-  BACK, CALLS_MISSING, CANCEL, EDITOR_LABEL, LEAVE, LEAVE_BODY, LEAVE_TITLE, NAME_BAD, NAME_TAKEN, NEXT, STAY, STEPS,
+  BACK, CALLS_MISSING, CANCEL, EDITOR_LABEL, LEAVE, LEAVE_BODY, LEAVE_TITLE, NAME_BAD, NAME_TAKEN, NEXT, STAY, STEP_REASON, STEPS,
   SUBJECT_POLICIES, SUBJECT_ROLES, SUBJECT_SERVERS, WHO_MISSING, WIZ_LEDE, WIZ_TITLE, WRITE_YAML_LEDE, WRITE_YAML_START, WRITE_YAML_TITLE,
   probeCall, savedToast, sentence, subjectWords, suggestedName,
 } from "@/lib/policy-words";
@@ -46,8 +51,11 @@ const HOLDERS = 3;
 type StepKey = "what" | "who" | "calls" | "how" | "review";
 
 // Door is what the list and the By role view hand over: the role and the
-// intent already chosen, and the lane when the Lane filter named one.
-type Door = { role?: string | null; intent?: Intent; lane?: string };
+// intent already chosen, and the lane when the Lane filter named one. A
+// door from a denied call names the server and the tools that were asked
+// for, which answers Which calls.
+type Door = { role?: string | null; intent?: Intent; lane?: string; app?: string; tools?: string[] };
+const DOOR_LANES = ["mcp", "shell", "files", "net", "harness"];
 
 const settled = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === "fulfilled" ? r.value : null);
 
@@ -61,6 +69,10 @@ export function NewPolicy() {
   const [bindings, setBindings] = React.useState<BindingRow[]>([]);
   const [catalogProblem, setCatalogProblem] = React.useState<string | null>(null);
   const [sets, setSets] = React.useState<PolicySetRow[]>([]);
+  // denials are the calls no rule covers, and fromDoor says a door from
+  // one of them answered Which calls.
+  const [denials, setDenials] = React.useState<DefaultDenials | null>(null);
+  const [fromDoor, setFromDoor] = React.useState(false);
   const [setsProblem, setSetsProblem] = React.useState<string | null>(null);
   const [preview, setPreview] = React.useState<Record<string, Record<string, PreviewEntry>>>({});
   const [people, setPeople] = React.useState<string[] | null>(null);
@@ -87,18 +99,23 @@ export function NewPolicy() {
   React.useEffect(() => {
     const door = take<Door>("policies-new");
     if (!door) return;
-    const lane = door.lane as Lane | undefined;
+    // The Lane filter of By role says other where the wizard says harness.
+    const lane = (door.lane === "other" ? "harness" : door.lane) as Lane | undefined;
     setDraft((d) => ({
       ...d,
       intent: door.intent || d.intent,
       role: door.role === undefined ? d.role : door.role,
-      lane: lane && ["mcp", "shell", "files", "net"].includes(lane) ? lane : d.lane,
+      lane: lane && DOOR_LANES.includes(lane) ? lane : d.lane,
+      app: door.app || d.app,
+      tools: door.tools || d.tools,
     }));
+    setFromDoor(!!door.tools && door.tools.length > 0);
     setStep(door.intent && door.role !== undefined ? "calls" : door.intent ? "who" : "what");
   }, []);
 
   React.useEffect(() => {
     let alive = true;
+    listDefaultDenials().then((d) => { if (alive) setDenials(d); }, () => undefined);
     void Promise.allSettled([listRoles(), listApps(), listTools(), listBindings(), listPolicies(query({ limit: 0 }))]).then(
       ([rolesR, appsR, toolsR, bindingsR, setsR]) => {
         if (!alive) return;
@@ -123,7 +140,9 @@ export function NewPolicy() {
     () => ({
       ...draft,
       reason: draft.reasonTyped ? draft.reason : reasonDefault(draft),
-      name: draft.nameTyped ? draft.name : suggestedName(draft.role === null ? null : draft.role || null, draft.intent),
+      // A policy that makes its role takes the name every door gives a
+      // role's own set.
+      name: draft.nameTyped ? draft.name : draft.makeRole && draft.role ? draft.role + "-access" : suggestedName(draft.role === null ? null : draft.role || null, draft.intent),
     }),
     [draft],
   );
@@ -261,6 +280,7 @@ export function NewPolicy() {
   const next = () => {
     // An empty role name means the role option was chosen and no card
     // picked, which is as unanswered as choosing nothing.
+    if (step === "who" && draft.makeRole && newRoleProblem(draft.role || "", allRoles.map((r) => r.name))) { setMiss(NEW_ROLE_MISSING); focusMissing(); return; }
     if (step === "who" && (draft.role === undefined || draft.role === "")) { setMiss(WHO_MISSING); focusMissing(); return; }
     if (step === "calls" && !hasCalls) { setMiss(CALLS_MISSING); focusMissing(); return; }
     setMiss(null);
@@ -285,7 +305,7 @@ export function NewPolicy() {
   // set is stored before a publish.
   const saveTo = async (name: string, doc: string, save: typeof reviewSave, refuse: (s: string | null) => void, busy: (b: boolean) => void) => {
     const row = sets.find((r) => r.name === name);
-    if (!row) { await save.saveDraft([{ kind: "PolicySet", name, op: "put", doc }]); return; }
+    if (!row) { await save.saveDraft([...roleItems, { kind: "PolicySet", name, op: "put", doc }]); return; }
     refuse(null);
     busy(true);
     try {
@@ -299,6 +319,13 @@ export function NewPolicy() {
       busy(false);
     }
   };
+
+  // roleItems is the role the policy makes, stored in the same draft so
+  // that the set never names a role that does not exist.
+  const onMachine = draft.lane === "mcp" && draft.app !== "" && !appNames.includes(draft.app);
+  const roleItems: SaveItem[] = draft.makeRole && draft.role
+    ? [{ kind: "Role", name: draft.role, op: "put", doc: roleFile({ name: draft.role, kind: "application", description: newRoleDescription(onMachine ? draft.app : ""), implies: [] }, null) }]
+    : [];
 
   const saveDraft = async () => {
     if (saving || reviewSave.busy || nameBlocked()) return;
@@ -319,7 +346,8 @@ export function NewPolicy() {
   // first tool the rule names, made by a holder of the role.
   const probeUser = people && people.length ? people[0] : "";
   const probe: { event: SimulateRequest["event"]; user?: string; label: string } | undefined = React.useMemo(() => {
-    if (!probeUser) return undefined;
+    // The strip reads no harness tool: the test call names four call types.
+    if (!probeUser || draft.lane === "harness") return undefined;
     const one = { ...filled, wholeServer: false, tools: filled.tools.slice(0, 1), patterns: filled.patterns.slice(0, 1), paths: filled.paths.slice(0, 1) };
     const tool = draft.lane === "mcp" ? one.tools[0] || toolNames[0] || "" : "";
     if (draft.lane === "mcp" && (!tool || !draft.app)) return undefined;
@@ -341,7 +369,21 @@ export function NewPolicy() {
   if (step === "what") {
     inner = <WhatStep intent={draft.intent} onIntent={(intent) => change({ intent })} onWriteYAML={() => setYamlOpen(true)} />;
   } else if (step === "who") {
-    inner = <WhoStep draft={draft} roles={roles} problem={rolesProblem} serversOf={reached} onRole={(role) => { setMiss(null); change({ role, app: "", tools: [] }); }} />;
+    // A server on a person's machine and a harness tool are offered
+    // whatever Who says, so answering Who again keeps them.
+    const keep = draft.lane === "harness" || onMachine;
+    inner = (
+      <WhoStep
+        draft={draft}
+        roles={roles}
+        problem={rolesProblem}
+        serversOf={reached}
+        onRole={(role) => { setMiss(null); change(keep ? { role, makeRole: false } : { role, makeRole: false, app: "", tools: [] }); }}
+        newRole={mayMakeRole() ? newRoleName(onMachine ? draft.app : "") : null}
+        taken={allRoles.map((r) => r.name)}
+        onNewRole={(name) => { setMiss(null); change(keep ? { role: name, makeRole: true } : { role: name, makeRole: true, app: "", tools: [] }); }}
+      />
+    );
   } else if (step === "calls") {
     inner = (
       <CallsStep
@@ -351,7 +393,9 @@ export function NewPolicy() {
         tools={toolNames}
         preview={preview[previewKey] || {}}
         reaches={reaches}
-        onChange={(patch) => { setMiss(null); change(patch); }}
+        registered={appNames}
+        denials={denials}
+        onChange={(patch) => { setMiss(null); setFromDoor(false); change(patch); }}
       />
     );
   } else if (step === "how") {
@@ -381,7 +425,8 @@ export function NewPolicy() {
         actions={<Button variant="ghost" onClick={leave}>{CANCEL}</Button>}
       />
       <div className="flex flex-1 flex-col gap-5 px-6 pt-5 pb-6">
-        <StepStrip labels={steps.map((s) => STEPS[s])} at={at} />
+        <StepStrip labels={steps.map((s) => (s === "how" && draft.intent === "deny" ? STEP_REASON : STEPS[s]))} at={at} />
+        {fromDoor && step !== "review" && <p className="max-w-[90ch] rounded-md border border-link/40 bg-accent-bg px-3 py-2 text-sm text-text-2" data-door-note>{doorNote(draft.lane === "mcp" ? draft.app : "", draft.tools)}</p>}
         {setsProblem && <FetchError subject={SUBJECT_POLICIES} detail={setsProblem} />}
         {catalogProblem && step === "calls" && <FetchError subject={SUBJECT_SERVERS} detail={catalogProblem} />}
         <div ref={body}>{inner}</div>
@@ -410,6 +455,7 @@ export function NewPolicy() {
         wasLive={!!intoRow && intoRow.status === "active"}
         roles={draft.into ? (intoRow && intoRow.summary && intoRow.summary.matchRoles) || [] : draft.role ? [draft.role] : []}
         probe={probe}
+        extra={roleItems}
         onDone={(result) => {
           put("policies-proof", { name: result.name, snapshot: result.snapshot, at: new Date().toISOString() });
           navigate("policies", [result.name]);

@@ -15,8 +15,8 @@ tested:
   date: 2026-10-06
   except: assigning, composing and binding in the console, set up with strazactl instead, and saving from the New role wizard
 applies_to: both
-who: You, as an admin
-where: The console in a browser
+who: Admin
+where: Console
 steps: true
 keywords: console roles role page access edit access compose holders assign areas knowledge packs new role delete
 ---
@@ -126,7 +126,7 @@ The wizard asks one thing per step. For an application role the steps are **Kind
 
 {{< fails >}}
 `No MCP server is running with tools. Install and start one first: an access row can only name tools the server serves.`
-: The wizard makes an application role on a server only. Add the server first, as [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md" >}}) shows. An application role with no server, which policy rules match by name, comes from `strazactl roles create <name> --kind application`.
+: The wizard makes an application role on a server only. Add the server first, as [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md" >}}) shows. An application role with no server, which policy rules match by name, comes from `strazactl roles create <name> --kind application`. A full administrator can also make one with its policy, as **A new role** in the New policy wizard of [Policies]({{< relref "guides/console/policies.md#build-a-policy-with-the-wizard" >}}).
 
 `Straza roles are not made here.`
 : The product makes `straza-admin` and the enroll roles. A delegated admin role comes from `strazactl roles create <name> --kind straza` and its line under `admin.roleAreas`.

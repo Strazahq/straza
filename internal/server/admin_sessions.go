@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -438,7 +437,11 @@ func (a *App) handleSessionsBulkRevoke(w http.ResponseWriter, r *http.Request) {
 		User     string   `json:"user"`
 		Reason   string   `json:"reason"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	err := decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil {
 		apiError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}

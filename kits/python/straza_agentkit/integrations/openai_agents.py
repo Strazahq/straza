@@ -137,7 +137,8 @@ def _parse_arguments(raw: Any) -> tuple[dict, str]:
 def _check_kwargs(canonical: str, args: Mapping[str, Any]) -> dict:
     """Extract the conventional policy-relevant fields for a canonical tool:
     command for shell.exec; path/file_path/paths for file.*; url for net.fetch.
-    Everything else is decided on the tool kind alone."""
+    Every other kind has none, and a tool of kind other sends its whole
+    arguments through ``check()``'s ``args``."""
     kw: dict[str, Any] = {}
     if canonical == "shell.exec":
         cmd = args.get("command")
@@ -202,7 +203,7 @@ def straza_tool_guardrail(
                 message=f"Straza: tool call blocked - {err}; failing closed",
                 output_info=info,
             )
-        decision = straza.check(canonical, tool_name=tool_name or None, **_check_kwargs(canonical, args))
+        decision = straza.check(canonical, tool_name=tool_name or None, args=args, **_check_kwargs(canonical, args))
         info["allowed"] = decision.allowed
         if decision.allowed:
             return agents_sdk.ToolGuardrailFunctionOutput.allow(output_info=info)

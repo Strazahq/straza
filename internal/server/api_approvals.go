@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -290,7 +289,11 @@ func (a *App) decideApproval(w http.ResponseWriter, r *http.Request, userID, ver
 	if r.Body != nil {
 		// A bad body is a client bug worth naming, not something to swallow
 		// into a reason-less decide.
-		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		err := decodeAdmin(io.LimitReader(r.Body, 4096), &body)
+		if refusedUnknownField(w, err) {
+			return
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
 			apiError(w, http.StatusBadRequest, "body must be JSON: {\"reason\": \"...\"}")
 			return
 		}

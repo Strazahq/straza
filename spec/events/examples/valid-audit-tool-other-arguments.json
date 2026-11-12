@@ -1,0 +1,24 @@
+{
+  "specversion": "1.0",
+  "id": "019a6f20-6c11-7d02-9a44-000000000301",
+  "type": "straza.audit.tool",
+  "source": "straza",
+  "time": "2026-11-10T16:20:05.311Z",
+  "data": {
+    "session": "0197fa3d-1111-7abc-9def-000000000001",
+    "user": "0197fa3c-0000-7abc-9def-000000000009",
+    "harness": "claude-code/2.1.305",
+    "event": "tool.pre",
+    "tool": "other",
+    "app": "",
+    "toolName": "LSP",
+    "arguments": "{\"character\":7,\"filePath\":\"/work/proj/main.go\",\"line\":12,\"operation\":\"goToDefinition\"}",
+    "command": "",
+    "workspace": "/work/proj",
+    "effect": "allow",
+    "ruleId": "allow-lsp",
+    "setName": "harness-tools",
+    "reason": "",
+    "snapshot": "sha256:44f0be1c"
+  }
+}

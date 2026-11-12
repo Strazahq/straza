@@ -112,6 +112,18 @@ func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, c
 	}
 	target, gate, decision, callArgs, rec := v.target, v.gate, v.decision, v.args, v.rec
 
+	// gatewayAuth checked the denylist before the body was read, which can
+	// take minutes, so a disable, lock or revoke since then bites here,
+	// before a native tool runs, a token is fetched or the server is called.
+	// The call's one record is the deny, and the answer is gatewayAuth's.
+	if a.denylist.blocked(claims) {
+		msg := a.denylist.revokedMsg(claims, revokedSessionMsg, revokedIdentityMsg)
+		rec.decision = refusedDecision(decision, msg)
+		a.auditMCP(r.Context(), rec)
+		apiError(w, http.StatusForbidden, msg)
+		return
+	}
+
 	// Built-in `straza` app: the gateway originates these tools instead of
 	// proxying upstream. Governed identically above (visibility + PDP + approve
 	// gate); dispatched on r.Context() so approval_await can hold its own bounded
@@ -141,11 +153,13 @@ func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, c
 	// in-memory, but for an agent's client token that is not in memory yet,
 	// which the provider is asked for within that lane's own limit. Every
 	// field of the caller comes from the verified session and none from the
-	// request.
+	// request. The Entra agent id is the token's eai claim, which gatewayAuth
+	// matched with the cached subject that sub came from, so the call runs as
+	// the identity it was decided for even if that subject is dropped now.
 	resolved, err := a.manager.Credential(r.Context(), target.app, manager.Caller{
 		UserID: claims.Subject, User: sub.User, Roles: sub.Roles, GrantingRole: target.role,
 		Agent: sub.UserType == store.UserTypeAgent, Sponsor: sub.Sponsor, SponsorID: sub.SponsorID,
-		Session: claims.Session,
+		Session: claims.Session, EntraAgentID: claims.EntraAgentID,
 	})
 	if err == nil && resolved.Source == manager.SourceSponsor && a.denylist.userBlocked(resolved.Owner) {
 		// A lock leaves the sponsor's status active, and the cached subject

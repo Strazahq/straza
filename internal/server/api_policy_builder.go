@@ -1,7 +1,7 @@
 package server
 
 import (
-	"encoding/json"
+	"context"
 	"io"
 	"net/http"
 	"time"
@@ -124,7 +124,11 @@ type simulateRequest struct {
 
 func (a *App) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 	var req simulateRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxPolicyBody)).Decode(&req); err != nil {
+	err := decodeAdmin(io.LimitReader(r.Body, maxPolicyBody), &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil {
 		apiError(w, http.StatusBadRequest, "malformed request")
 		return
 	}
@@ -189,7 +193,7 @@ func (a *App) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 	if refused != nil {
 		out["active"] = *refused
 	} else {
-		out["active"] = a.snapshots.Current().Engine.Evaluate(req.Event, sub)
+		out["active"] = a.classified(r.Context(), req.Event, a.snapshots.Current().Engine.Evaluate(req.Event, sub))
 	}
 
 	if req.Draft != "" {
@@ -224,8 +228,21 @@ func (a *App) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 		if refused != nil {
 			out["draft"] = *refused
 		} else {
-			out["draft"] = eng.Evaluate(req.Event, sub)
+			out["draft"] = a.classified(r.Context(), req.Event, eng.Evaluate(req.Event, sub))
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// classified answers d as the hook and gateway lanes act on it: an allow
+// that carries Classify goes through resolveClassify, the function both
+// lanes call, and loses the flag, because the answer then holds the
+// classifier's verdict. Every other decision comes back unchanged.
+func (a *App) classified(ctx context.Context, ev policy.Event, d policy.Decision) policy.Decision {
+	if d.Effect != policy.EffectAllow || !d.Classify {
+		return d
+	}
+	d = a.resolveClassify(ctx, "simulate", ev, d)
+	d.Classify = false
+	return d
 }

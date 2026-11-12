@@ -16,8 +16,8 @@ tested:
   date: 2026-10-06
 applies_to: both
 keywords: catalog role access binding visibility
-who: You, as the admin
-where: The console or a terminal with strazactl, and the agent's machine for one check
+who: Admin
+where: Console or strazactl, and the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: console

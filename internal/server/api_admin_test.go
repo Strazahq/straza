@@ -139,6 +139,13 @@ func TestStandaloneStarterPolicy(t *testing.T) {
 		if reason, _ := dec["reason"].(string); !strings.Contains(reason, "starter policy") {
 			t.Errorf("deny reason not actionable: %v", dec)
 		}
+		// The full sentence is pinned so a copy edit of the seed shows up here
+		// and in the docs that quote it.
+		const wantReason = "Straza starter policy: this sample rule denies commands that start with rm -rf. " +
+			"Delete files individually, or an admin can edit the standalone-starter PolicySet."
+		if dec["reason"] != wantReason {
+			t.Errorf("starter deny reason = %q, want %q", dec["reason"], wantReason)
+		}
 		// Ordinary work is untouched (standalone allow default).
 		if _, dec := decide(t, base, tok, map[string]any{
 			"kind": "tool.pre", "tool": "shell.exec", "command": "git status",

@@ -118,7 +118,7 @@ func TestCheckRefusals(t *testing.T) {
 			[]string{`app.provider App/github credential.oauth.provider "auth0" is not configured on this server. Add oauth.providers.auth0 to the strazad config, or pick one of: entra, okta.`}},
 		{"client credentials on a provider without them", []Item{appPut("github")}, map[string]App{"github": remote("entra", "client_credentials")},
 			[]string{"app.provider App/github server github sets credential.agents to client_credentials, and the provider entra has no clientCredentials settings. " +
-				"Add oauth.providers.entra.clientCredentials.assertionAudience to strazad's config, or set credential.agents to own, sponsor or shared."}},
+				"Add oauth.providers.entra.clientCredentials to strazad's config, with assertionAudience for Keycloak or Okta, or with entraBlueprint for an Entra agent blueprint. Otherwise set credential.agents to own, sponsor or shared."}},
 		{"client credentials on a provider with them", []Item{appPut("github")}, map[string]App{"github": remote("okta", "client_credentials")}, nil},
 		{"an App whose facts were not read fails closed", []Item{appPut("github")}, nil,
 			[]string{"app.parse App/github Straza did not read the manifest of github, so it cannot check the draft."}},

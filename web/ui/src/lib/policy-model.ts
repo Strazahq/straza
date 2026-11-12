@@ -7,10 +7,13 @@ import { Document, Pair, YAMLMap, YAMLSeq, isMap, isScalar, isSeq, parseDocument
 
 export type Posture = "deny" | "hold" | "ticket" | "confirm" | "check" | "allow";
 export type Bucket = "deny" | "hum" | "allow";
-// Lane is the governed surface a rule matches: one of the four lanes, other
-// for task.spawn and the like, tools when a rule names tools across lanes,
-// all when it names no tool and no matcher (it governs every lane).
-export type Lane = "mcp" | "shell" | "files" | "net" | "other" | "tools" | "all";
+// Lane is the governed surface a rule matches: one of the four lanes,
+// harness for a rule on the kind other alone, which names harness tools,
+// other for task.spawn and the like, tools when a rule names tools across
+// lanes, all when it names no tool and no matcher (it governs every lane).
+export type Lane = "mcp" | "shell" | "files" | "net" | "harness" | "other" | "tools" | "all";
+// NewLane is a lane a new rule can be written for.
+export type NewLane = "mcp" | "shell" | "files" | "net" | "harness";
 export type Plain = Record<string, unknown>;
 export type Doc = Document.Parsed;
 
@@ -75,8 +78,8 @@ export const TOOL_WORD: Record<string, string> = {
   "shell.exec": "shell", "file.read": "file read", "file.write": "file write", "file.edit": "file edit", "net.fetch": "network fetch", "mcp.call": "MCP calls", "task.spawn": "subagents", other: "other tools",
 };
 // LANE_TOOLS is the tools key a lane's wizard writes.
-export const LANE_TOOLS: Record<"mcp" | "shell" | "files" | "net", string[]> = {
-  mcp: ["mcp.call"], shell: ["shell.exec"], files: ["file.write", "file.edit"], net: ["net.fetch"],
+export const LANE_TOOLS: Record<NewLane, string[]> = {
+  mcp: ["mcp.call"], shell: ["shell.exec"], files: ["file.write", "file.edit"], net: ["net.fetch"], harness: ["other"],
 };
 
 const RULE_KEYS = ["id", "events", "tools", "apps", "toolNames", "command", "paths", "effect", "mode", "approve", "reason"];
@@ -103,6 +106,7 @@ export function postureOf(rule: Plain): Posture {
 // and a rule with neither governs every lane.
 export function laneOf(rule: Plain): Lane {
   const tools = strings(rule.tools);
+  if (tools.length === 1 && tools[0] === "other") return "harness";
   if (tools.length) {
     const lanes = new Set(tools.map((t) => LANE_OF_TOOL[t] || "other"));
     return lanes.size === 1 ? [...lanes][0] : "tools";
@@ -120,7 +124,7 @@ export function namesOf(rule: Plain, lane: Lane): { names: string[] | null; key:
     if (strings(map[second]).length) return { names: strings(map[second]), key: prefix + "." + second };
     return { names: null, key: prefix };
   };
-  if (lane === "mcp") return pick(asPlain(rule.toolNames), "toolNames", "allow", "deny");
+  if (lane === "mcp" || lane === "harness") return pick(asPlain(rule.toolNames), "toolNames", "allow", "deny");
   if (lane === "shell") return pick(asPlain(rule.command), "command", "allowPatterns", "denyPatterns");
   if (lane === "files") return pick(asPlain(rule.paths), "paths", "allow", "deny");
   if (lane === "tools") return { names: strings(rule.tools).map((t) => TOOL_WORD[t] || t), key: "tools" };
@@ -364,7 +368,7 @@ export function setNames(doc: Doc, id: string, names: string[] | null) {
   const view = ruleView(asPlain(rule.toJSON()), 0);
   const [outer, inner] = view.namesKey.split(".");
   if (view.lane === "tools" || view.lane === "all" || view.lane === "net" || view.lane === "other") throw new Error("this rule matches by tool, not by name");
-  const defaults: Record<string, string> = { toolNames: "allow", command: view.posture === "deny" ? "denyPatterns" : "allowPatterns", paths: view.posture === "deny" ? "deny" : "allow" };
+  const defaults: Record<string, string> = { toolNames: view.lane === "harness" && view.posture === "deny" ? "deny" : "allow", command: view.posture === "deny" ? "denyPatterns" : "allowPatterns", paths: view.posture === "deny" ? "deny" : "allow" };
   const key = inner || defaults[outer];
   if (!names || names.length === 0) {
     const map = rule.get(outer, true);
@@ -466,7 +470,7 @@ export function uniqueId(base: string, taken: string[]): string {
 
 export type NewRule = {
   id: string;
-  lane: "mcp" | "shell" | "files" | "net";
+  lane: NewLane;
   posture: "deny" | "allow" | "hold" | "ticket";
   app?: string;
   // names are the tools, patterns or paths; empty means every one.
@@ -486,6 +490,8 @@ export function buildRule(r: NewRule): Plain {
   if (r.lane === "mcp") {
     if (r.app) out.apps = [r.app];
     if (names) out.toolNames = r.posture === "deny" ? { deny: names } : { allow: names };
+  } else if (r.lane === "harness" && names) {
+    out.toolNames = r.posture === "deny" ? { deny: names } : { allow: names };
   } else if (r.lane === "shell" && names) {
     out.command = r.posture === "deny" ? { denyPatterns: names } : { allowPatterns: names };
   } else if (r.lane === "files" && names) {
@@ -582,7 +588,7 @@ export function splitRule(doc: Doc, id: string, name: string, newId: string) {
 // the ids taken: approve-demo-tools-get-env, deny-shell-rm-rf.
 export function proposeRuleId(posture: "deny" | "allow" | "hold" | "ticket", lane: Lane, app: string | null, names: string[], taken: string[]): string {
   const verb = posture === "deny" ? "deny" : posture === "allow" ? "allow" : "approve";
-  const where = lane === "mcp" ? (app || "mcp") : lane;
+  const where = lane === "mcp" ? (app || "mcp") : lane === "harness" ? "" : lane;
   const first = names.length ? names[0] : "";
   return uniqueId(slug([verb, where, first].filter(Boolean).join("-")) || verb, taken);
 }

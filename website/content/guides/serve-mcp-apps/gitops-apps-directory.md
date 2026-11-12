@@ -16,8 +16,8 @@ tested:
   date: 2026-09-28
 applies_to: both
 keywords: gitops apps directory manifest
-who: You, as the operator who owns the files, and a person who publishes
-where: A terminal and your repository, and the console to publish
+who: Operator, and a person who publishes
+where: Terminal, your repository, and the console
 steps: true
 modes: [console, cli]
 mode_default: cli

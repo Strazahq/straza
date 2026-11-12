@@ -1,11 +1,11 @@
 ---
 title: Settings
-description: You read every configuration value with the key that sets it, compose a config change to paste into your deployment, keep the attestation registry, and mint and revoke admin API tokens.
+description: You read every configuration value with the key that sets it, compose a config change to paste into your deployment, keep the attestation registry, mint and revoke admin API tokens, and rotate the client assertion key.
 summary: >-
   Settings shows every configuration value with the key that sets it and changes none of them:
-  its sheet composes a change for you to deploy. It keeps the attestation registry, the hook
-  hashes a managed install is checked against, and it mints and revokes admin API tokens, each
-  shown once and stored as a hash.
+  its sheet composes a change for you to deploy. It keeps the attestation registry, mints and
+  revokes admin API tokens, and rotates the key agents sign in with, in the order that keeps
+  Entra working.
 pagetype: how-to
 weight: 40
 draft: false
@@ -15,14 +15,14 @@ tested:
   date: 2026-10-06
   except: minting a token and retiring a hash, which were not done
 applies_to: both
-who: You, as an admin
-where: The console in a browser
+who: Admin
+where: Console
 steps: true
 keywords: console settings configuration config change fragment attestation registry hook hash api token mint revoke scopes
 ---
 
 
-Settings has three tabs: **Configuration**, **Attestation registry** and **API tokens**. The first two need the `config` area and the third needs the `tokens` area, and a tab your session cannot open is named in a line at the top instead. Your configuration itself lives in the config file, the environment or the chart, never in a browser, and this page shows what that means for each tab.
+Settings has four tabs: **Configuration**, **Attestation registry**, **API tokens** and **Agent signing keys**. The first two need the `config` area, the third needs the `tokens` area, and **Agent signing keys** needs a full administrator. A tab your session cannot open is named in a line at the top instead. Your configuration itself lives in the config file, the environment or the chart, never in a browser, and this page shows what that means for each tab.
 
 ## Before you start {.nostep}
 
@@ -102,6 +102,25 @@ The scopes then show as the one string that `strazactl api-token create --scope`
 {{< clicks "Settings" "API tokens" "Revoke" "Revoke token" >}}
 
 The question names what the caller loses, such as `Whatever signs in as idm-scim loses the SCIM plane within seconds.` Revocation reaches every strazad replica as an event. A call in flight finishes, and the next one is refused with the reason, so mint the replacement first when that caller matters.
+
+## Rotate the client assertion key
+
+
+{{< clicks "Settings" "Agent signing keys" "Rotate key" "Create new key" >}}
+
+The client assertion key signs the sign-ins of agents that use client credentials at Keycloak, Okta or Microsoft Entra. Keycloak and Okta read a new key from Straza's key address by themselves. Entra takes only a certificate uploaded to the agent blueprint, so the certificate and every Entra step show only when a provider in the config names a blueprint under `clientCredentials.entraBlueprint`. The tab lists the live keys with their status, `staged`, `active` or `retiring`, the time each was created and, with Entra, the date its certificate ends. Retired keys fold under one line.
+
+**Rotate key** stages a new key, and a panel then walks the rotation in the order that keeps Entra working:
+
+1. The new key is published and signs nothing yet. The active key keeps signing.
+2. With Entra, **Download certificate** saves the key's certificate as a `.pem` file, and an Agent ID Administrator uploads it under Credentials, Certificates of the blueprint the panel names by its client id. The panel shows the certificate's SHA-1 thumbprint the way Entra lists it, so the upload can be checked against Entra's row.
+3. **Promote** turns on a minute after staging, once every replica publishes the key. With Entra, it asks you to confirm that the blueprint lists the thumbprint, because Entra refuses every agent until the blueprint holds the certificate.
+
+After the promote, the previous key retires by itself within 2 minutes. With Entra, the panel then reminds you to remove the old certificate from the blueprint, because Entra accepts it until you do, and to link each agent to its Entra agent identity. With no key yet, the head button reads **Create key** and the same panel follows.
+
+**Retire** on a row is for a key that may have been copied. Retiring the active key stops every agent sign-in at Keycloak, Okta and Entra until you rotate and promote a new key. [Keys, certificates and tokens]({{< relref "security/keys-certificates-and-tokens.md" >}}) explains the key and its certificate.
+
+{{< only form="cli" >}}`strazactl signing-keys rotate client_assertion`, `strazactl signing-keys certificate client_assertion <kid>` and `strazactl signing-keys promote client_assertion <kid>` run the same three steps.{{< /only >}}
 
 ## Next {.nostep}
 

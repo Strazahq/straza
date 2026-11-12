@@ -15,8 +15,8 @@ tested:
   except: the kubectl commands, the load balancer, more than one replica, the database outage and the console sentence
   date: 2026-10-06
 applies_to: enterprise
-who: You, as the operator who outgrew one host
-where: The shared config of every replica, and a terminal with kubectl or docker
+who: Operator
+where: Shared config of every replica, and a terminal with kubectl or docker
 steps: true
 keywords: enterprise replicas postgres nats kek stateless
 ---

@@ -15,8 +15,8 @@ tested:
   date: 2026-09-28
   except: the midPoint browser console, whose labels and lists were read over REST and not opened
 applies_to: both
-who: You, as the admin of Straza and of midPoint
-where: A terminal with strazactl and curl, and your midPoint
+who: midPoint admin and Straza admin
+where: Terminal with strazactl and curl, and your midPoint
 steps: true
 modes: [console, cli]
 mode_default: cli
@@ -120,7 +120,7 @@ The objects live under `deploy/compose/eval-stack/midpoint/objects/`. Import the
 The resource presents the token on `/scim/v2` for users and role membership. It presents the same token on the admin API to read MCP servers and the change feed. Roles reach midPoint as SCIM groups and never cross the admin API.
 
 
-The resource's account object type maps these items. `agencyMode`, `sponsor`, `swarmId`, `kind` and `origin` sit in the Straza user extension, `urn:straza:params:scim:schemas:extension:2.0:User`.
+The resource's account object type maps these items. `agencyMode`, `sponsor`, `swarmId`, `entraAgentId`, `kind` and `origin` sit in the Straza user extension, `urn:straza:params:scim:schemas:extension:2.0:User`.
 
 | midPoint item | SCIM attribute | Note |
 |---|---|---|
@@ -132,6 +132,7 @@ The resource's account object type maps these items. `agencyMode`, `sponsor`, `s
 | extension `strazaAgencyMode` | `agencyMode` | `autonomous`, `supervised` or `interactive` |
 | extension `strazaSponsor` | `sponsor` | the person behind the agent |
 | extension `strazaSwarmId` | `swarmId` | a fleet label policy can match |
+| extension `strazaEntraAgentId` | `entraAgentId` | an AI agent only: the client id of the Entra agent identity it acts as at Entra, sent in lower case. A server that trusts Entra gets the agent's token as that identity |
 | extension `strazaExternalId` | `externalId` | an agent's subject at your identity provider, sent only when the item is set |
 | extension `strazaPersona` | `kind` | read back from Straza, `human` or `nhi` |
 | extension `strazaOrigin` | `origin` | read back from Straza, `local` or `scim` |

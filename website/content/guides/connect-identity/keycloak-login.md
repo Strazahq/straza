@@ -15,8 +15,8 @@ tested:
   date: 2026-09-28
   except: the browser sign-in of straza enroll and of the console, written from the code and not walked
 applies_to: enterprise
-who: You, as the Keycloak admin and the Straza admin
-where: The Keycloak admin console, strazad's configuration file, and a terminal with strazactl
+who: Keycloak admin and Straza admin
+where: Keycloak admin console, strazad config file, and a terminal with strazactl
 steps: true
 modes: [console, cli]
 mode_default: cli
@@ -101,7 +101,7 @@ A fresh enterprise deployment has no administrator. `oidc.bootstrapAdmin` names 
 strazad maps a verified ID token to a local account in this order:
 
 1. The token's `sub` is matched against the account's `externalId`.
-2. If nothing matches, `preferred_username` is matched against the account's `userName`. A match fills in `externalId` with this `sub`, which links the account once. A username already bound to a different subject is refused with "username ... is bound to another identity" and is never taken over.
+2. If nothing matches, `preferred_username` is matched against the account's `userName`. A match fills in `externalId` with this `sub`, which links the account once. A username already bound to a different subject is refused with a sentence that says the account "is linked to another identity at your identity provider", and is never taken over.
 3. If nothing matches and JIT is off, the login is refused.
 
 Keep Keycloak usernames equal to the `userName` your identity manager provisions, and midPoint keeps them equal when it masters both sides. If your identity manager sends `externalId`, it must be the Keycloak subject. Otherwise leave it out, and the first login links the account.

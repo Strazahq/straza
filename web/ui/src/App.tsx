@@ -114,6 +114,7 @@ function Shell({ user, grants, location, onSignOut }: ShellProps) {
   else if (route.key === "roles" && rest[0]) screen = <RolePage id={rest[0]} tab={rest[1]} />;
   else if (route.key === "roles") screen = <Roles />;
   else if (route.key === "policies" && rest[0] === "by-role") screen = <Policies view="roles" />;
+  else if (route.key === "policies" && rest[0] === "denied") screen = <Policies view="denied" />;
   else if (route.key === "policies" && rest[0] === "new") screen = <NewPolicy />;
   else if (route.key === "policies" && rest[0]) screen = <PolicyPage name={rest[0]} tab={rest[1]} />;
   else if (route.key === "policies") screen = <Policies view="sets" />;

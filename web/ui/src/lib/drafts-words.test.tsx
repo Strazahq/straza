@@ -85,7 +85,7 @@ describe("the sentences of the page", () => {
     ["a typed line", [HOST_RISK], "Type api.githubcopilot.com when you publish: republishing the old state cannot undo it."],
     ["a group of typed lines", [grouped("a", "a.example"), grouped("b", "b.example"), grouped("c", "c.example")], "Type 3 when you publish, once for the 3 lines of this kind: republishing the old state cannot undo them."],
     ["an agent's loosening", [{ ...HOST_RISK, key: "k-l", code: "agent.guardrail", object: "PolicySet/desk-gate", typed: "desk-gate" }], "Type desk-gate when you publish to accept it."],
-    ["a typed line cut for the reader", [CUT_RISK], "Only someone who can read what this line names can confirm it, so ask an admin who can read it to publish this draft."],
+    ["a typed line cut for the reader", [CUT_RISK], "Only someone who may read what this line names can confirm it, so ask an admin who may read it to publish this draft."],
   ];
   it.each(acks)("words how %s is confirmed", (_name, risks, want) => {
     expect(ackWords(confirmBlocks(risks)[0])).toBe(want);
@@ -152,7 +152,7 @@ describe("the sentences of the page", () => {
   it("words the other lines built from values", () => {
     expect(needLine("App/github", "the scope apps:write or the role straza-global-mcp-admin.")).toBe("The server github needs the scope apps:write or the role straza-global-mcp-admin.");
     expect(checkedLine("2026-10-30 06:44:03 UTC", "1188e760")).toBe("2026-10-30 06:44:03 UTC, against live policy 1188e760");
-    expect(revisionLine(3, "alice", "console", "10:49", true)).toBe("rev 3 by alice in the console at 10:49, checked again against live state");
+    expect(revisionLine(3, "alice", "console", "10:49", true)).toBe("revision 3 by alice in the console at 10:49, checked again against live state");
     expect(outcomeFoot("needs-approval", "a hold, up to 10 minutes, decided by sec-approvers")).toBe("needs approval: a hold, up to 10 minutes, decided by sec-approvers.");
     expect(groupLine("demo-tools-readers", "", ["sam-sre-agent"], 1, "", [], ["1 tool"])).toBe("demo-tools-readers · held by sam-sre-agent · loses 1 tool");
     expect(groupLine("demo-tools-readers", "demo-tools", undefined, 3, "", ["2 tools"], [])).toBe("demo-tools-readers on demo-tools · 3 people · gains 2 tools");

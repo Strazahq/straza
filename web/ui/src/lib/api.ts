@@ -217,7 +217,7 @@ export type RoleRow = {
   tools?: string[];
 };
 
-export type ProviderRow = { name: string; scopes?: string[]; redirect_uri?: string };
+export type ProviderRow = { name: string; scopes?: string[]; redirect_uri?: string; entra_blueprint?: string };
 
 // AuditRow is one chain record as GET /v1/admin/audit returns it: ce is the
 // CloudEvent as a JSON string, parsed by the reader that needs it, and the
@@ -358,6 +358,14 @@ export const catalogPreview = (role: string, app?: string, assume?: string[]) =>
 // listAudit takes the query string as the caller builds it (q, type, order,
 // after, limit), since the readers differ in what they filter on.
 export const listAudit = (query: string) => get<AuditRow[]>("/v1/admin/audit?" + query);
+// DeniedTool is one tool that was denied because no rule covers it, and
+// DefaultDenials lists them: the tools of each MCP server Straza has not
+// registered, and the harness tools Straza does not classify. A harness
+// tool the harness sent no name for has an empty name.
+export type DeniedTool = { name: string; harnesses: string[]; count: number; lastSeq: number; lastTime: string };
+export type DeniedServer = { server: string; harnesses: string[]; count: number; lastSeq: number; lastTime: string; tools: DeniedTool[] };
+export type DefaultDenials = { since: string; truncated?: boolean; servers: DeniedServer[]; tools: DeniedTool[] };
+export const listDefaultDenials = () => get<DefaultDenials>("/v1/admin/default-denials");
 export const listChanges = (types: string, limit: number) => get<{ changes: ChangeRow[] }>("/v1/admin/changes?types=" + enc(types) + "&limit=" + limit);
 export const simulate = (body: SimulateRequest) => post<SimulateAnswer>("/v1/admin/policies/simulate", body);
 // DecisionBucket is one hour of the decisions block: how many calls the
@@ -453,6 +461,9 @@ export type UserRow = {
   sponsor?: string;
   swarm_id?: string;
   ephemeral?: boolean;
+  // entra_agent_id is the client id of the Entra agent identity an agent
+  // is linked to.
+  entra_agent_id?: string;
   created_at: string;
   updated_at: string;
   effective_roles: string[];

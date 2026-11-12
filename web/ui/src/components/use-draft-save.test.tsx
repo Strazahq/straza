@@ -28,7 +28,7 @@ type Stub = DraftPublishProps & { title?: string; warnings?: boolean; quiet?: bo
 const stub = vi.hoisted(() => ({ refusal: null as unknown }));
 vi.mock("@/components/draft-publish", () => ({
   DraftPublish: (p: Stub) => p.open ? (
-    <div role="dialog" data-stub-publish={p.draft.id} data-title={p.title} data-warnings={String(!!p.warnings)} data-quiet={String(!!p.quiet)} data-risks={p.verdict.risks.length}>
+    <div role="dialog" data-stub-publish={p.draft.id} data-title={p.title} data-warnings={String(!!p.warnings)} data-quiet={String(!!p.quiet)} data-risks={p.verdict.risks.length} data-secrets={String(!!p.onChecked)}>
       <button type="button" onClick={() => p.onPublished({ draft: { ...p.draft, state: "published" }, snapshot: "3be0a1", servers: [], next: [] })}>Publish</button>
       <button type="button" onClick={() => p.onRefused?.(stub.refusal as ApiError)}>Refused</button>
       <button type="button" onClick={() => p.onOpenChange(false)}>Cancel</button>
@@ -178,6 +178,9 @@ describe("Save and publish", () => {
       expect(d.getAttribute("data-title")).toBe("Publish this change to demo-tools?");
       expect(d.getAttribute("data-warnings")).toBe("true");
       expect(d.getAttribute("data-quiet")).toBe("true");
+      // The Add MCP server wizard asks for the secret in a step of its own,
+      // so the editors' dialog never draws the Secrets section.
+      expect(d.getAttribute("data-secrets")).toBe("false");
       expect(publishDraft).not.toHaveBeenCalled();
       await click("Publish");
       await waitFor(() => expect(onPublished).toHaveBeenCalled());

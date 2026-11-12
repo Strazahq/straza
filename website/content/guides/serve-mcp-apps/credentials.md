@@ -16,8 +16,8 @@ tested:
   date: 2026-10-06
 applies_to: both
 keywords: credential secret injection upstream fingerprint
-who: You, as the admin of the server
-where: The console or a terminal with strazactl, and the agent's machine for the last check
+who: Admin
+where: Console or strazactl, and the agent's machine
 steps: true
 modes: [console, cli]
 mode_default: console

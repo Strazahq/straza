@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -103,7 +102,11 @@ func (a *App) handleAttestationHashesList(w http.ResponseWriter, r *http.Request
 
 func (a *App) handleAttestationHashCreate(w http.ResponseWriter, r *http.Request) {
 	var req attestationHashPayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Artifact == "" {
+	err := decodeAdmin(r.Body, &req)
+	if refusedUnknownField(w, err) {
+		return
+	}
+	if err != nil || req.Artifact == "" {
 		apiError(w, http.StatusBadRequest, "artifact is required")
 		return
 	}

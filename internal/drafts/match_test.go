@@ -109,29 +109,36 @@ func TestRulePredicates(t *testing.T) {
 		{"a confirmation", policy.Rule{Events: pre, Tools: shell, Effect: policy.EffectAllow, Mode: policy.ModeConfirm}, true, true, true},
 		{"a classifier", policy.Rule{Events: pre, Tools: shell, Effect: policy.EffectAllow, Mode: policy.ModeClassify}, true, true, true},
 		{"an approval of every tool where local tools are allowed", policy.Rule{Events: pre, Effect: policy.EffectAllow, Mode: policy.ModeApprove}, true, true, true},
+		{"an approval of a registered server's tools", policy.Rule{Events: pre, Apps: []string{"github"}, Effect: policy.EffectAllow, Mode: policy.ModeApprove}, true, true, true},
+		{"an approval of the tools of a server that is not registered", policy.Rule{Events: pre, Apps: []string{"claude-in-chrome"}, Effect: policy.EffectAllow, Mode: policy.ModeApprove},
+			true, true, false},
 		{"a require alone", policy.Rule{Events: pre, Require: &policy.Require{Attestation: "managed"}}, true, false, true},
 		{"a require with an allow", policy.Rule{Events: pre, Effect: policy.EffectAllow, Require: &policy.Require{DeviceCert: true}}, true, true, false},
 		{"a rule for the permission prompt only", policy.Rule{Events: []string{policy.EventPermissionRequest}, Effect: policy.EffectDeny}, true, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := [3]bool{isGate(tc.rule), canAllow(tc.rule), tightens(tc.rule, policy.EffectAllow)}; got != [3]bool{tc.gate, tc.allows, tc.tightens} {
+			registered := map[string]App{"github": {}}
+			if got := [3]bool{isGate(tc.rule), canAllow(tc.rule), tightens(tc.rule, policy.EffectAllow, registered)}; got != [3]bool{tc.gate, tc.allows, tc.tightens} {
 				t.Errorf("gate, allows, tightens = %v, want %v", got, [3]bool{tc.gate, tc.allows, tc.tightens})
 			}
 		})
 	}
 }
 
-// TestOpensDefault pins which gates turn a call the deployment denies by
-// default into a held or checked one: a local tool while localToolDefault
-// is deny, on an event that waits for the decision. A gate on mcp.call
-// never does, because the gateway enforces MCP calls where the access row
-// grants the tool.
+// TestOpensDefault pins which gates turn a call that is denied by default
+// into a held or checked one, on an event that waits for the decision: a
+// local tool while localToolDefault is deny, and on every profile the tool
+// of an MCP server the rule names that is not registered. A gate on a
+// registered server never does, because the gateway enforces its calls
+// where the access row grants the tool. A gate that names no server opens
+// every such server only when no person decides its call.
 func TestOpensDefault(t *testing.T) {
 	t.Parallel()
-	rule := func(mode, effect string, events, tools []string) policy.Rule {
-		return policy.Rule{ID: "r", Events: events, Tools: tools, Mode: mode, Effect: effect}
+	rule := func(mode, effect string, events, tools []string, apps ...string) policy.Rule {
+		return policy.Rule{ID: "r", Events: events, Tools: tools, Apps: apps, Mode: mode, Effect: effect}
 	}
+	registered := map[string]App{"github": {}}
 	pre, post, ask := []string{policy.EventToolPre}, []string{policy.EventToolPost}, []string{policy.EventPermissionRequest}
 	mcp, shell := []string{policy.ToolMCPCall}, []string{policy.ToolShellExec}
 	cases := []struct {
@@ -141,20 +148,29 @@ func TestOpensDefault(t *testing.T) {
 		want  bool
 		kinds []string
 	}{
-		{"an approval of an MCP tool", rule(policy.ModeApprove, policy.EffectAllow, pre, mcp), policy.EffectAllow, false, nil},
-		{"an approval of an MCP tool where local tools are denied", rule(policy.ModeApprove, policy.EffectAllow, pre, mcp), policy.EffectDeny, false, nil},
+		{"an approval of a registered server's tool", rule(policy.ModeApprove, policy.EffectAllow, pre, mcp, "github"), policy.EffectAllow, false, nil},
+		{"an approval of a registered server's tool where local tools are denied", rule(policy.ModeApprove, policy.EffectAllow, pre, mcp, "github"), policy.EffectDeny, false, nil},
+		{"an approval of the built-in server's tool", rule(policy.ModeApprove, policy.EffectAllow, pre, mcp, nativeApp), policy.EffectDeny, false, nil},
+		{"an approval of a tool of a server that is not registered", rule(policy.ModeApprove, policy.EffectAllow, pre, mcp, "claude-in-chrome"), policy.EffectAllow, true, nil},
+		{"an approval of an MCP tool that names no server", rule(policy.ModeApprove, policy.EffectAllow, pre, mcp), policy.EffectAllow, false, nil},
+		{"a confirmation of an MCP tool that names no server", rule(policy.ModeConfirm, policy.EffectAllow, ask, mcp), policy.EffectAllow, false, nil},
+		{"a server check of an MCP tool that names no server, which no person decides", rule(policy.ModeServerCheck, policy.EffectAllow, pre, mcp), policy.EffectAllow, true, nil},
+		{"a classifier of an MCP tool that names no server, which no person decides", rule(policy.ModeClassify, policy.EffectAllow, pre, mcp), policy.EffectAllow, true, nil},
+		{"a server check of a registered server's tool", rule(policy.ModeServerCheck, policy.EffectAllow, pre, mcp, "github"), policy.EffectAllow, false, nil},
+		{"an approval of such a server's tool after the call", rule(policy.ModeApprove, policy.EffectAllow, post, mcp, "claude-in-chrome"), policy.EffectAllow, false, nil},
+		{"an approval that denies on such a server", rule(policy.ModeApprove, policy.EffectDeny, pre, mcp, "claude-in-chrome"), policy.EffectAllow, false, nil},
 		{"an approval of a local tool the deployment allows", rule(policy.ModeApprove, policy.EffectAllow, pre, shell), policy.EffectAllow, false, nil},
 		{"an approval of a local tool the deployment denies", rule(policy.ModeApprove, policy.EffectAllow, pre, shell), policy.EffectDeny, true, shell},
 		{"a permission prompt of a local tool the deployment denies", rule(policy.ModeConfirm, policy.EffectAllow, ask, shell), policy.EffectDeny, true, shell},
 		{"an approval after the call", rule(policy.ModeApprove, policy.EffectAllow, post, shell), policy.EffectDeny, false, shell},
-		{"a server check of every tool where local tools are allowed", rule(policy.ModeServerCheck, policy.EffectAllow, pre, nil), policy.EffectAllow, false, nil},
+		{"a server check of every tool, which reaches a server that is not registered", rule(policy.ModeServerCheck, policy.EffectAllow, pre, nil), policy.EffectAllow, true, nil},
 		{"a classifier of every tool where local tools are denied", rule(policy.ModeClassify, policy.EffectAllow, pre, nil), policy.EffectDeny, true, localTools},
 		{"a deny of an MCP tool", rule("", policy.EffectDeny, pre, mcp), policy.EffectAllow, false, nil},
 		{"an approval that denies", rule(policy.ModeApprove, policy.EffectDeny, pre, shell), policy.EffectDeny, false, shell},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := opensDefault(tc.rule, tc.local); got != tc.want {
+			if got := opensDefault(tc.rule, tc.local, registered); got != tc.want {
 				t.Errorf("opensDefault = %v, want %v", got, tc.want)
 			}
 			if got := deniedKinds(tc.rule, tc.local); !reflect.DeepEqual(got, tc.kinds) && len(got)+len(tc.kinds) > 0 {

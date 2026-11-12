@@ -36,6 +36,14 @@ func rootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// The version is printed by `strazad version` only. The flag error for
+	// --version names that command so the operator is not left guessing.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		if err.Error() == "unknown flag: --version" {
+			return fmt.Errorf("unknown flag: --version. Run `strazad version` to print the version")
+		}
+		return err
+	})
 	root.AddCommand(serveCmd(), versionCmd(), migrateCmd())
 	root.AddCommand(devCommands...)
 	return root

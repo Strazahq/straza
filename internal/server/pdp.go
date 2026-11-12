@@ -2,14 +2,18 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/strazahq/straza/internal/agentguard"
 	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/policy"
@@ -28,6 +32,19 @@ type DecideRequest struct {
 	// NativeTool is the harness's own name of a classified local tool, which
 	// a rule that names harness tools reads (spec/policyset revision 26).
 	NativeTool string `json:"nativeTool,omitempty"`
+	// ToolInput is the input of a classified local tool as the client cut
+	// it for the audit record (spec/events revision 65). No rule reads it
+	// and no approval key binds it.
+	ToolInput *ToolInput `json:"toolInput,omitempty"`
+}
+
+// ToolInput is what a client sends of a classified local tool's input for
+// the audit record: Text, the tool input as JSON, shortened to the record's
+// bound, and Hash, "sha256:" and the hex SHA-256 of the whole text, only
+// when Text was shortened.
+type ToolInput struct {
+	Text string `json:"text"`
+	Hash string `json:"hash,omitempty"`
 }
 
 // DecideResponse is the decision returned to the caller.
@@ -186,8 +203,8 @@ func tagInterpreter(ev *policy.Event) {
 // allow (mode: classify). Fail closed, same posture as the
 // straza classify lane: a missing backend, an error, or a blown deadline
 // is a deny with the firing rule preserved; a not-allowed verdict denies
-// with the classifier's reason. lane names the PEP lane, hook or gateway,
-// for the fail-closed log record and counter.
+// with the classifier's reason. lane names the caller, hook, gateway or
+// simulate, for the fail-closed log record and counter.
 func (a *App) resolveClassify(ctx context.Context, lane string, ev policy.Event, local policy.Decision) policy.Decision {
 	unavailable := policy.Decision{
 		Effect: policy.EffectDeny, RuleID: local.RuleID, SetName: local.SetName,
@@ -246,6 +263,15 @@ func (a *App) auditDecision(ctx context.Context, claims authn.Claims, req Decide
 	if len(ev.Paths) > 0 {
 		data["paths"] = ev.Paths
 	}
+	if ev.NativeTool != "" {
+		data["nativeTool"] = ev.NativeTool
+	}
+	if args, hash, ok := decideInput(req); ok {
+		data["arguments"] = args
+		if hash != "" {
+			data["argumentsTruncated"], data["argumentsHash"] = true, hash
+		}
+	}
 	if ev.Workspace != "" {
 		data["workspace"] = ev.Workspace
 	}
@@ -273,6 +299,39 @@ func (a *App) auditDecision(ctx context.Context, claims authn.Claims, req Decide
 		return false
 	}
 	return true
+}
+
+// decideInput answers what the record of req keeps of the call's input as
+// agentguard.CutArguments shortens it, the hash of the whole text when it
+// was shortened, and whether req carries an input the record keeps. The
+// event's args of an mcp.call or an unclassified tool come first, then the
+// input a client sent beside a classified tool's event, whose hash counts
+// only when it is a SHA-256. A text over the bound is shortened here under
+// the hash of what arrived. An mcp.call that names the built-in straza
+// server keeps none, and neither does a call of the gateway's drafting
+// tools under any server name: only the gateway serves them, and its own
+// record masks a draft.
+func decideInput(req DecideRequest) (args, hash string, ok bool) {
+	ev := req.Event
+	switch {
+	case ev.Tool == policy.ToolMCPCall && ev.App == nativeAppName, agentguard.HoldsDraft(ev.ToolName):
+		return "", "", false
+	case ev.Args != nil:
+		args = string(ev.Args)
+	case req.ToolInput != nil:
+		args = req.ToolInput.Text
+		if digest, tagged := strings.CutPrefix(req.ToolInput.Hash, "sha256:"); tagged && len(digest) == 2*sha256.Size {
+			if _, err := hex.DecodeString(digest); err == nil {
+				hash = req.ToolInput.Hash
+			}
+		}
+	default:
+		return "", "", false
+	}
+	if kept, whole := agentguard.CutArguments([]byte(args)); whole != "" {
+		args, hash = kept, whole
+	}
+	return args, hash, true
 }
 
 // bearerToken returns the token of r's Authorization header under the

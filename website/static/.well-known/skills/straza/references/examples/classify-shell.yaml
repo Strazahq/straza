@@ -1,0 +1,17 @@
+# Send every shell command of the dev-tools role through the built-in classifier before it runs.
+# Both profiles. The rule has no interpreters condition on purpose: that condition matches only a command that starts with an interpreter such as bash or python3, so a download piped into sh starts with the fetcher and would never reach the classifier.
+apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata:
+  name: classify-shell
+  description: Send every shell command through the built-in classifier before it runs
+spec:
+  priority: 10
+  match:
+    roles: [dev-tools]
+  rules:
+    - id: classify-shell
+      events: [tool.pre]
+      tools: [shell.exec]
+      effect: allow
+      mode: classify
