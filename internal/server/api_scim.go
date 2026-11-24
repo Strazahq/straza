@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/identity"
 	"github.com/strazahq/straza/internal/manager"
 	"github.com/strazahq/straza/internal/policy"
@@ -100,7 +101,9 @@ func (a *App) scimServer() *scim.Server {
 			action := actionRolesAssign
 			if ch.Action == scim.MembershipUnassign {
 				action = actionRolesUnassign
+				a.holdingChanged(ctx, ch.UserID)
 			}
+			a.pushRolesNudge(ch.UserID)
 			a.auditAssignment(ctx, action, store.RoleAssignment{
 				ID: ch.AssignmentID, SubjectKind: store.SubjectUser, SubjectID: ch.UserID,
 				RoleID: ch.RoleID, Origin: ch.Origin,
@@ -117,10 +120,25 @@ func (a *App) scimServer() *scim.Server {
 			}
 		},
 		WriteRefused:      a.scimWriteRefused,
+		EntraOwns:         a.entraOwns,
 		ProtectedUsername: BreakGlassUsername,
 		RoleProjection:    a.groupRoleProjection,
 		Log:               a.log,
 	})
+}
+
+// entraOwns reports whether Microsoft Entra owns users of kind, a
+// store.UserKind word: the identity.entra section is on and its read list
+// names the kind, people for a person and agentUsers or agentIdentities for
+// an agent. Entra never owns a service. SCIM and the admin API then leave
+// such users to Entra.
+func (a *App) entraOwns(kind string) bool {
+	reads := map[string][]string{
+		store.UserKindPerson: {config.EntraReadPeople},
+		store.UserKindAgent:  {config.EntraReadAgentUsers, config.EntraReadAgentIdentities},
+	}[kind]
+	e := a.cfg.Identity.Entra
+	return e.Enabled() && slices.ContainsFunc(reads, func(r string) bool { return slices.Contains(e.Read, r) })
 }
 
 // The SCIM error details of a deactivation the store did not take, each
@@ -146,11 +164,19 @@ const (
 // then this server refuses the user, because the identity manager asked for
 // that and this server can do it without the database.
 func (a *App) scimDeactivate(ctx context.Context, userID, reason string) (store.User, error) {
-	disabled := store.UserDisabled
-	revoke, err := a.userRevocation(ctx, userID, reason, store.RevocationOriginSCIM)
+	return a.deactivateUser(ctx, userID, reason, store.RevocationOriginSCIM)
+}
+
+// deactivateUser disables the user for the identity source origin, scim or
+// entra, as scimDeactivate describes. The status write also removes the
+// user's local password, so an admin's later enable does not bring the old
+// password back.
+func (a *App) deactivateUser(ctx context.Context, userID, reason, origin string) (store.User, error) {
+	disabled, noPassword := store.UserDisabled, ""
+	revoke, err := a.userRevocation(ctx, userID, reason, origin)
 	var u store.User
 	if err == nil {
-		u, err = a.updateUserFields(ctx, userID, store.UserFields{Status: &disabled}, revoke)
+		u, err = a.updateUserFields(ctx, userID, store.UserFields{Status: &disabled, PasswordHash: &noPassword}, revoke)
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		return store.User{}, err
@@ -159,7 +185,7 @@ func (a *App) scimDeactivate(ctx context.Context, userID, reason string) (store.
 		a.denylist.revokeUser(userID)
 		return store.User{}, err
 	}
-	a.userRevokedCtx(ctx, userID, reason, store.RevocationOriginSCIM)
+	a.userRevokedCtx(ctx, userID, reason, origin)
 	// The status committed, and a resend finds the user disabled and runs
 	// none of this again, so the removal runs on afterCommit's context. The
 	// request's end does not stop it, and a store that stops answering still
@@ -479,8 +505,8 @@ func scimCovers(server, typ string, scope *store.ObjectScope, current map[string
 // future stream replay. It touches no session row and no device row: the
 // sessions the kill revoked stay revoked, and the device enrollment survives,
 // so the next check-in from that device opens a new session without a new
-// enrollment. Reserved for explicit Straza actions (admin enable, unlock);
-// the SCIM lane uses liftUserSCIMCtx.
+// enrollment. Reserved for unlock; an admin enable, the SCIM lane and the
+// Entra sync use liftUserOf.
 func (a *App) allowUserCtx(ctx context.Context, userID string) {
 	if err := a.store.Revocations().Delete(ctx, store.RevokeUser, userID); err != nil {
 		a.log.Error("reactivation: revocation delete failed", "user", userID, "err", err)
@@ -501,14 +527,24 @@ func (a *App) allowUserCtx(ctx context.Context, userID string) {
 // survives, enforcement is unchanged everywhere and the attempt is recorded
 // on the audit chain instead.
 func (a *App) liftUserSCIMCtx(ctx context.Context, userID string) {
-	if err := a.store.Revocations().DeleteByOrigin(ctx, store.RevokeUser, userID, store.RevocationOriginSCIM); err != nil {
-		a.log.Error("scim lift: revocation delete failed", "user", userID, "err", err)
-		return // unknown state: keep the user denied (fail closed)
+	_, _ = a.liftUserOf(ctx, userID, store.RevocationOriginSCIM, store.RevocationOriginSCIM)
+}
+
+// liftUserOf lifts the user's revocations of the origins in lift, as
+// liftUserSCIMCtx describes, for the authority by that the lift event and
+// the record name. It answers the rows that survive, and the error that
+// left the rows unknown. Either keeps the user denied.
+func (a *App) liftUserOf(ctx context.Context, userID, by string, lift ...string) ([]store.Revocation, error) {
+	for _, o := range lift {
+		if err := a.store.Revocations().DeleteByOrigin(ctx, store.RevokeUser, userID, o); err != nil {
+			a.reqlog(ctx).Error("lift: revocation delete failed", "user", userID, "origin", o, "err", err)
+			return nil, err // unknown state: keep the user denied (fail closed)
+		}
 	}
 	remaining, err := a.store.Revocations().ListByTarget(ctx, store.RevokeUser, userID)
 	if err != nil {
-		a.log.Error("scim lift: revocation list failed", "user", userID, "err", err)
-		return // unknown state: keep the user denied (fail closed)
+		a.reqlog(ctx).Error("lift: revocation list failed", "user", userID, "origin", by, "err", err)
+		return nil, err // unknown state: keep the user denied (fail closed)
 	}
 	if len(remaining) > 0 {
 		held := make([]string, 0, len(remaining))
@@ -516,15 +552,16 @@ func (a *App) liftUserSCIMCtx(ctx context.Context, userID string) {
 			held = append(held, rv.Origin)
 		}
 		a.emitEventCtx(ctx, "straza.audit.identity", map[string]any{
-			"action": "user.lift.blocked", "user": userID, "origin": "scim", "heldBy": held,
+			"action": "user.lift.blocked", "user": userID, "origin": by, "heldBy": held,
 		})
-		return
+		return remaining, nil
 	}
 	a.denylist.allowUser(userID)
-	a.emitEventCtx(ctx, "straza.revocation.lift", map[string]any{"user": userID, "origin": "scim"})
+	a.emitEventCtx(ctx, "straza.revocation.lift", map[string]any{"user": userID, "origin": by})
 	a.emitEventCtx(ctx, "straza.audit.identity", map[string]any{
-		"action": "user.reactivated", "user": userID, "origin": "scim",
+		"action": "user.reactivated", "user": userID, "origin": by,
 	})
+	return nil, nil
 }
 
 // pushRevocation fires the low-latency, target-scoped client push. It

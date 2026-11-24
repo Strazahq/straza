@@ -1,6 +1,6 @@
 {
   "name": "straza",
-  "description": "One skill for operating Straza, the control plane between your identity manager and your AI agents: the five-minute setup, policy with the validator in the loop, identity-manager roles to Straza roles, and evidence from the audit chain.",
+  "description": "One skill for operating Straza, the control plane between your IGA and your AI agents: the five-minute setup, policy with the validator in the loop, IGA roles to Straza roles, and evidence from the audit chain.",
   "owner": {
     "name": "Straza"
   },
@@ -12,7 +12,7 @@
         "url": "https://github.com/strazahq/straza.git",
         "path": "plugins"
       },
-      "description": "One skill for operating Straza, the control plane between your identity manager and your AI agents: the five-minute setup, policy with the validator in the loop, identity-manager roles to Straza roles, and evidence from the audit chain."
+      "description": "One skill for operating Straza, the control plane between your IGA and your AI agents: the five-minute setup, policy with the validator in the loop, IGA roles to Straza roles, and evidence from the audit chain."
     }
   ]
 }

@@ -48,10 +48,7 @@ func (a *App) handlePolicyValidate(w http.ResponseWriter, r *http.Request) {
 	if !a.byNameGate(w, r, doc) {
 		return
 	}
-	// The set compiles as at activation, so a Rego module activation would
-	// refuse is refused here, in the compiler's words.
-	if _, err := policy.NewEngine([]policy.Document{doc}, policy.EffectAllow); err != nil {
-		apiError(w, http.StatusBadRequest, err.Error())
+	if !compileGate(w, doc) {
 		return
 	}
 	// One computation for validate AND the list summary (api_policy.go):
@@ -86,6 +83,17 @@ func (a *App) handlePolicyValidate(w http.ResponseWriter, r *http.Request) {
 		out["advisories"] = adv
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// compileGate reports whether doc compiles on its own, as validate and
+// activate both check, and refuses it otherwise with 400 in the compiler's
+// words, such as a Rego module that calls a refused built-in.
+func compileGate(w http.ResponseWriter, doc policy.Document) bool {
+	if _, err := policy.NewEngine([]policy.Document{doc}, policy.EffectAllow); err != nil {
+		apiError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
 }
 
 // hasAccess reports whether any of the roles holds a binding on app whose
@@ -141,6 +149,7 @@ func (a *App) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 		User: req.Subject.User, Roles: req.Subject.Roles,
 		Attestation: req.Subject.Attestation,
 	}
+	var refusedUser string
 	if req.Subject.User != "" && len(req.Subject.Roles) == 0 {
 		u, err := a.store.Users().GetByID(r.Context(), req.Subject.User)
 		if err != nil {
@@ -161,6 +170,7 @@ func (a *App) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 		// Typology rides the user lane too (revision 9): a simulation must
 		// hit identity-scoped sets exactly like the live checkin subject.
 		sub.UserType, sub.AgencyMode, sub.SwarmID = u.UserType, u.AgencyMode, u.SwarmID
+		_, refusedUser = a.userRefusal(u)
 	}
 	if len(sub.Roles) == 0 && sub.User == "" {
 		apiError(w, http.StatusBadRequest, "subject.user or subject.roles is required")
@@ -179,7 +189,11 @@ func (a *App) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 	// at the gateway: its refusal is the answer, and no engine runs.
 	var refused *policy.Decision
 	out := map[string]any{"subject": sub, "snapshot": a.snapshots.Current().ID}
-	if req.Event.Tool == policy.ToolMCPCall {
+	if refusedUser != "" {
+		// The gateway refuses a disabled or revoked user's calls before
+		// the object gate and the engine, so neither runs here either.
+		refused = &policy.Decision{Effect: policy.EffectDeny, Reason: refusedUser}
+	} else if req.Event.Tool == policy.ToolMCPCall {
 		if oc, ok := a.checkObject(sub.Roles, req.Event.App, req.Event.ToolName, req.Event.Args); ok {
 			sim := oc.sim()
 			if sim.Refusal != "" {

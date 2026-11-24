@@ -41,7 +41,7 @@ func TestPendingReasonsNameApprovalsPage(t *testing.T) {
 	surfaces := "the self-service page (" + base + "/self-service/), the console, or an enrolled phone"
 	// A confirm record is the requester's own, so only a device that signs
 	// decides it and the console is left out.
-	confirmSurfaces := "their enrolled phone, or the self-service page under This browser (" + base + "/self-service/)"
+	confirmSurfaces := "the requester's enrolled phone, or Requests on the self-service page (" + base + "/self-service/) in a browser set up to approve"
 
 	holdDecision := func(rule string, confirm bool) policy.Decision {
 		return policy.Decision{

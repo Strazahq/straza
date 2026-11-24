@@ -147,6 +147,14 @@ func (u sponsorRaceUsers) Update(ctx context.Context, row store.User) (store.Use
 	return u.UserRepo.Update(ctx, row)
 }
 
+func (u sponsorRaceUsers) UpdateRenaming(ctx context.Context, row store.User) (store.User, []string, error) {
+	if _, _, err := u.UserRepo.UpdateRenaming(ctx, row); err != nil {
+		return store.User{}, nil, err
+	}
+	row.Sponsor = "another-writer"
+	return u.UserRepo.UpdateRenaming(ctx, row)
+}
+
 // titleWrites are a PATCH and a PUT that change only the title of a user
 // seedSCIMUser stored, with active set to the given value.
 func titleWrites(active string) []struct {

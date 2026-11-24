@@ -43,15 +43,21 @@ func TestCheckRefusalsOnlyStopsAfterTheRefusals(t *testing.T) {
 }
 
 // TestCheckRefusedDraftGetsNoWhoGains pins that a refusal from who gains,
-// agent.own-reach, ends the check with no table and no risks.
+// agent.own-reach on a direct route, ends the check with no table and no
+// risks, and that the same draft, reviewed, is not refused and reads its
+// table beside the agent.own-reach risk.
 func TestCheckRefusedDraftGetsNoWhoGains(t *testing.T) {
 	t.Parallel()
 	w := gainWorld()
 	d := agentDraftOf(w, gainRole("dev", "    kind: application\n    bindings:\n        - app: github\n          tools: ['*']\n"),
 		gainRole("engineering", "    kind: business\n    implies: [dev, jira-tickets]\n"),
 		gainRole("jira-tickets", "    kind: application\n    server: jira\n    bindings:\n        - app: jira\n          tools: [create_issue]\n"))
-	v := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow})
+	v := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow, Direct: true})
 	if !slices.Contains(codesOf(v.Refused), codeAgentOwnReach) || len(v.Gains) != 0 || len(v.Risks) != 0 || len(v.Warnings) != 0 {
-		t.Errorf("refused %q, gains %d, risks %q, warnings %q", codesOf(v.Refused), len(v.Gains), codesOf(v.Risks), codesOf(v.Warnings))
+		t.Errorf("on a direct route: refused %q, gains %d, risks %q, warnings %q", codesOf(v.Refused), len(v.Gains), codesOf(v.Risks), codesOf(v.Warnings))
+	}
+	v = Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow})
+	if len(v.Refused) != 0 || !slices.Contains(codesOf(v.Risks), codeAgentOwnReach) || len(v.Gains) == 0 {
+		t.Errorf("a reviewed draft: refused %q, gains %d, risks %q", codesOf(v.Refused), len(v.Gains), codesOf(v.Risks))
 	}
 }

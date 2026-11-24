@@ -1,0 +1,11 @@
+{
+ "error": {
+  "code": "Authorization_RequestDenied",
+  "innerError": {
+   "client-request-id": "dddddddd-4444-4444-8444-dddddddddddd",
+   "date": "2026-11-16T19:34:09",
+   "request-id": "dddddddd-4444-4444-8444-dddddddddddd"
+  },
+  "message": "Insufficient privileges to complete the operation."
+ }
+}

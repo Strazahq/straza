@@ -323,7 +323,7 @@ func TestOwnRequestRefusedOnTheConsoleRoute(t *testing.T) {
 	if code := adminReq(t, "POST", base+"/v1/admin/approvals/"+own.ID+"/approve", tok, nil, &out); code != http.StatusForbidden {
 		t.Fatalf("own request on the console route = %d, want 403", code)
 	}
-	for _, want := range []string{"your own request", "This browser", "/self-service/", "approval.unsignedOwnDecisions"} {
+	for _, want := range []string{"your own request", "under Requests on the self-service page", "/self-service/", "set up to approve", "approval.unsignedOwnDecisions"} {
 		if !strings.Contains(out.Error, want) {
 			t.Errorf("refusal %q does not name %q", out.Error, want)
 		}

@@ -150,7 +150,11 @@ func (f *fakeStrazad) refresh(w http.ResponseWriter, r *http.Request, token stri
 	ses, ok := f.sessions[token]
 	refuse := f.refreshRefuse
 	f.refreshes++
+	hold := f.refreshHold
 	f.mu.Unlock()
+	if hold != nil {
+		<-hold
+	}
 	if refuse != "" {
 		f.fail(w, http.StatusForbidden, refuse)
 		return
@@ -177,6 +181,16 @@ func (f *fakeStrazad) refresh(w http.ResponseWriter, r *http.Request, token stri
 }
 
 func (f *fakeStrazad) nhi(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	refuse := f.idTokenRefuse > 0
+	if refuse {
+		f.idTokenRefuse--
+	}
+	f.mu.Unlock()
+	if refuse {
+		f.fail(w, http.StatusUnauthorized, "the ID token was not accepted")
+		return
+	}
 	claims, thumb, stale, reason := f.proof(r, "", 0)
 	switch {
 	case stale:

@@ -27,7 +27,7 @@ func TestCheckinCarriesClientVersion(t *testing.T) {
 	ctx := context.Background()
 	calls := map[string]func() error{
 		"id token": func() error {
-			_, err := c.Checkin(ctx, "idt", "", "claude-code", "2.1.0", Attestation{})
+			_, err := c.Checkin(ctx, "idt", "", "claude-code", "2.1.0", Attestation{}, "", "")
 			return err
 		},
 		"refresh": func() error {

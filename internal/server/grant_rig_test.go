@@ -331,7 +331,7 @@ func bootGrantApp(t *testing.T, clock *ghClock, o grantRigOpts) (*App, string, *
 	app.gateway.notify.SetDelay(0)
 	base := "http://" + app.Addr()
 	app.cfg.Server.PublicURL = base
-	if app.tokens, err = authn.NewTokenService(ctx, app.store.SigningKeys(), base, 0); err != nil {
+	if app.tokens, err = authn.NewTokenService(ctx, app.store.SigningKeys(), app.kek, base, 0); err != nil {
 		cancel()
 		t.Fatal(err)
 	}

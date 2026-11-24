@@ -88,7 +88,7 @@ curl -s -u elastic:strazasiem http://127.0.0.1:9200/straza-events/_count
 Elasticsearch answers a JSON object whose `count` is the number of audit and revocation events delivered so far, and it grows with every decision.
 
 
-While Elasticsearch is down, strazad parks the events it cannot post, and the console's **Overview** says so under **Needs attention**, with a button that replays them, **Replay elastic** on this stack. Start Elasticsearch again with the same files, then replay.
+While Elasticsearch is down, strazad parks the events it cannot post, and the console's **Overview** says so under **Needs attention**, with a **Replay** button on the line of the sink, elastic on this stack. Start Elasticsearch again with the same files, then replay.
 
 ## What runs
 
@@ -115,14 +115,14 @@ docs-publish               python:3.13-alpine                                   
 elasticsearch              docker.elastic.co/elasticsearch/elasticsearch:8.14.3                                                                 Exited (137) 13 hours ago
 eval-seed                  alpine:3.20                                                                                                          Exited (0) 35 hours ago
 kc-connector-build         maven:3.9-eclipse-temurin-17                                                                                         Exited (0) 2 weeks ago
-keycloak                   quay.io/keycloak/keycloak:26.0                                                                                       Up 7 hours (healthy)        8443/tcp, 9000/tcp, 127.0.0.1:8480->8080/tcp
+keycloak                   quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3             Up 16 minutes (healthy)     127.0.0.1:8480->8080/tcp
 kibana                     docker.elastic.co/kibana/kibana:8.14.3                                                                               Exited (0) 11 days ago
 kibana-setup               docker.elastic.co/elasticsearch/elasticsearch:8.14.3                                                                 Exited (0) 2 weeks ago
 landing                    nginx:1.27-alpine                                                                                                    Up 7 hours                  127.0.0.1:8400->80/tcp
 mcp-midpoint-http          ghcr.io/strazahq/midpoint-mcp-server:0.6.0@sha256:0b24ff42bb60eeb78a756f5db8b24e25a3cfc7887517cf8151e9c4e957194a00   Up 7 hours
-midpoint                   evolveum/midpoint:4.10.3-alpine                                                                                      Up 7 hours (healthy)        127.0.0.1:8087->8080/tcp
+midpoint                   evolveum/midpoint:4.10.5-alpine@sha256:8c1cbce9a4257bb2442dd916fe95c078c229c8061529977972b65c067f5a2461              Up 15 minutes (healthy)     127.0.0.1:8087->8080/tcp
 midpoint-db                postgres:16-alpine                                                                                                   Up 7 hours                  5432/tcp
-midpoint-init              evolveum/midpoint:4.10.3-alpine                                                                                      Exited (0) 2 weeks ago
+midpoint-init              evolveum/midpoint:4.10.5-alpine@sha256:8c1cbce9a4257bb2442dd916fe95c078c229c8061529977972b65c067f5a2461              Exited (0) 15 minutes ago
 midpoint-partition-guard   postgres:16-alpine                                                                                                   Exited (0) 2 weeks ago
 nats                       nats:2                                                                                                               Up 7 hours                  4222/tcp, 6222/tcp, 8222/tcp
 objects-demo               straza-eval-objects-demo                                                                                             Up 12 hours                 3002/tcp
@@ -144,7 +144,7 @@ The long-running services form these groups:
 
 | Group | Services |
 |---|---|
-| Identity | `keycloak`, Keycloak 26 in dev mode, which imports the realm `straza` at boot. `midpoint`, midPoint 4.10.3, with its own `midpoint-db`. |
+| Identity | `keycloak`, Keycloak 26.8.2 in dev mode, which imports the realm `straza` at boot. `midpoint`, midPoint 4.10.5, with its own `midpoint-db`. |
 | Straza | `strazad` in the enterprise profile with the console embedded, `straza-db` and `nats`. NATS publishes no port, because the agents' services get the kill-switch push over strazad's own `/v1/push` route. |
 | The governed side | `demo-tools`, `views-demo`, `objects-demo` and `mcp-midpoint-http`, the MCP servers that only the gateway reaches. midPoint's server runs every call as the person signed in, and `adaptive-pg-mcp` joins them with the pg profile. `landing` is the nginx behind the landing page and the docs under `/docs/`. |
 | Agents | `agent-sam`, the always-on autonomous agent, with `agent-sam-service` beside it. With the demo overlay, `straza-harness`, a pinned Claude Code that you drive with `docker exec`, with `straza-harness-service` beside it, and `demo`, the chat face on 127.0.0.1:8477. |
@@ -156,7 +156,7 @@ Each of the two service containers runs `straza service`, the Straza background 
 
 Everything listed as `Exited (0)` is a one-shot job that ran to completion while its dependents waited on it. A failed job therefore stops the boot instead of leaving a half-built stack.
 
-- The init jobs fix volume ownership, create the midPoint schema and pre-create the shadow partitions that midPoint 4.10.3 otherwise creates in the wrong order.
+- The init jobs fix volume ownership, create the midPoint schema and pre-create the shadow partitions, because midPoint 4.10.3 created them in the wrong order on a fresh boot.
 - The connector jobs check the vendored Straza connector jar against its pinned checksum and build the Keycloak connector from source. A Straza jar that does not match the pin stops the boot.
 - `docs-build` and `docs-publish` render these docs, comment-free, on every `up`.
 - `siem-setup` and `kibana-setup` prepare the ingest pipeline and the dashboards.
@@ -207,7 +207,7 @@ Sponsorship is the accountability edge. alice sponsors joe and sam, so when eith
 | heidi | external contractor | no roles | none |
 | mcp-service | technical account of the midPoint MCP server | two scoped midPoint roles, no superuser | midPoint REST only, password in the seed objects |
 | seed-bootstrap | transient local admin the seeder drives on a first boot | admin while seeding, then demoted, locked and disabled | password in the realm import and the seeder, unused after seeding |
-| break-glass | local emergency admin that strazad creates on every store | standing admin | printed once in the strazad log at first boot, used only on the emergency sign-in |
+| break-glass | local emergency admin that strazad creates on every store | standing admin | none on a new stack until an admin sets one or `strazad break-glass set-password` prints one, used only on the emergency sign-in |
 
 
 Every login in the stack is public by design, which is the reason the hardened shape binds every port to loopback. alice signs in to the console through Keycloak as `alice` / `alice`, and `strazactl` runs on an admin API token that she mints there. The landing page's Accounts table lists the logins of alice, ivan, carol, dave and joe beside those of the midPoint, Keycloak and Kibana administrators. Committed files of the stack hold the mcp-service and seed-bootstrap passwords too, and operating the stack never needs them.
@@ -341,7 +341,7 @@ The last check is `agent-sam` reporting `(healthy)` in the listing of [What runs
 | The same sentence again, with a new reference, after an approval | The grant was used once already, or its hour passed | Approve the new ticket, then run the same command again |
 | `Straza: this user is disabled, so Straza refuses this request. Ask your IGA owner or a Straza administrator to enable the user. Refusing to run.` from `straza exec` | The agent is disabled in midPoint, and Straza refuses its session | Enable the agent in midPoint |
 | `eval-seed` reads `Exited (1)` | The seeder hit a `FATAL` step | Read its log from the end, fix the cause it names, then run `up eval-seed` on the same files |
-| **Needs attention** on Overview says a sink holds parked events | The sink's target, Elasticsearch here, did not answer | Start Elasticsearch with the same files, then press **Replay elastic** |
+| **Needs attention** on Overview says an audit sink holds undelivered events | The sink's target, Elasticsearch here, did not answer | Start Elasticsearch with the same files, then press **Replay** on its line |
 
 ## An agent with a login
 

@@ -76,6 +76,10 @@ func build(ctx context.Context, cfg config.Config, log *slog.Logger, st store.St
 	if err := a.buildStore(ctx, cfg, log, st); err != nil {
 		return fail(err)
 	}
+	// The KEK loads before the signing keys, whose seeds are sealed under it.
+	if a.kek, err = loadKEK(ctx, cfg, log, st); err != nil {
+		return fail(err)
+	}
 	if err := a.buildIdentity(ctx, cfg, log, st); err != nil {
 		return fail(err)
 	}
@@ -168,7 +172,7 @@ func (a *App) buildStore(ctx context.Context, cfg config.Config, log *slog.Logge
 // buildIdentity wires the token and DPoP proof services, the role resolver,
 // the persistent project identity and the optional external OIDC verifier.
 func (a *App) buildIdentity(ctx context.Context, cfg config.Config, log *slog.Logger, st store.Store) error {
-	tokens, err := authn.NewTokenService(ctx, st.SigningKeys(), cfg.Server.PublicURL, authn.DefaultTokenTTL)
+	tokens, err := authn.NewTokenService(ctx, st.SigningKeys(), a.kek, cfg.Server.PublicURL, authn.DefaultTokenTTL)
 	if err != nil {
 		return err
 	}
@@ -190,8 +194,8 @@ func (a *App) buildIdentity(ctx context.Context, cfg config.Config, log *slog.Lo
 		if err != nil {
 			return err
 		}
-		external.BootstrapUsername = cfg.OIDC.BootstrapAdmin
-		external.ProtectedUsername = BreakGlassUsername
+		external.BootstrapUsername, external.ProtectedUsername = cfg.OIDC.BootstrapAdmin, BreakGlassUsername
+		external.Relinked = a.signInRelinked
 		a.external = external
 		log.Info("external OIDC configured", "issuer", cfg.OIDC.Issuer, "discoveryUrl", cfg.OIDC.DiscoveryURL,
 			"jit", cfg.OIDC.JITProvision, "bootstrapAdmin", cfg.OIDC.BootstrapAdmin != "")
@@ -232,7 +236,7 @@ func (a *App) buildBus(ctx context.Context, cfg config.Config, log *slog.Logger)
 // buildPolicySnapshots loads the snapshot signing keys and the policy snapshot
 // service, then loads the current snapshot.
 func (a *App) buildPolicySnapshots(ctx context.Context, cfg config.Config, log *slog.Logger, st store.Store) error {
-	snapKeys, err := authn.NewSnapshotKeys(ctx, st.SigningKeys())
+	snapKeys, err := authn.NewSnapshotKeys(ctx, st.SigningKeys(), a.kek)
 	if err != nil {
 		return err
 	}
@@ -406,19 +410,14 @@ func (a *App) rebuildDenylist(ctx context.Context, st store.Store) error {
 	return nil
 }
 
-// buildSecrets loads the KEK, the secrets broker and the per-user OAuth
-// connect plumbing (providers, exchange client, grant refresher).
+// buildSecrets loads the client assertion keys, the secrets broker and the
+// per-user OAuth connect plumbing (providers, exchange client, grant refresher).
 func (a *App) buildSecrets(ctx context.Context, cfg config.Config, log *slog.Logger, st store.Store) error {
-	provider, err := secrets.LoadOrCreateKEK(cfg.KEKFile())
-	if err != nil {
+	var err error
+	if a.assertionKeys.ClientAssertionKeys, err = authn.NewClientAssertionKeys(ctx, st.SigningKeys(), a.kek, time.Now()); err != nil {
 		return err
 	}
-	// The client assertion key is sealed under the same KEK as the stored
-	// credentials, so a replica with another KEK refuses to boot here.
-	if a.assertionKeys.ClientAssertionKeys, err = authn.NewClientAssertionKeys(ctx, st.SigningKeys(), provider, time.Now()); err != nil {
-		return err
-	}
-	a.broker = secrets.NewBroker(st, provider)
+	a.broker = secrets.NewBroker(st, a.kek)
 	if err := a.broker.Refresh(ctx); err != nil {
 		return err
 	}
@@ -490,7 +489,7 @@ func (a *App) buildConvergence(log *slog.Logger, bus *events.Bus) {
 		OnSubscribe: a.converge,
 		OnPolicy:    a.converge,
 		OnApps:      a.converge,
-		OnIdentity:  func(context.Context) error { a.resolver.Bump(); return nil },
+		OnIdentity:  a.identityHeard,
 	}, log)
 }
 

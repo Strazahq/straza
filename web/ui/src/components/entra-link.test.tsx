@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { EntraLink } from "./entra-link";
 import type { UserRow } from "@/lib/api";
 import { entraBlueprints } from "@/lib/keys-api";
-import { ENTRA_SECTION, LINKED_BY_ADMIN, LINKED_BY_IDM, LINK_BY_IDM, NOT_LINKED, NO_TYPE, OWNER_IDM, OWNER_STRAZA, linkByAdmin } from "@/lib/keys-words";
+import { ENTRA_SECTION, LINKED_BY_ADMIN, LINKED_BY_IDM, LINK_BY_IDM, NOT_LINKED, NO_TYPE, OWNER_ENTRA, OWNER_IDM, OWNER_STRAZA, linkByAdmin } from "@/lib/keys-words";
 import { adminAreas } from "@/lib/session";
 
 vi.mock("@/lib/keys-api", async (orig) => ({ ...(await orig<typeof import("@/lib/keys-api")>()), entraBlueprints: vi.fn() }));
@@ -35,6 +35,15 @@ describe("an agent's Entra link", () => {
     expect(link()).toBe(id);
     expect(screen.getByText(how)).toBeTruthy();
     if (id === "none") expect(screen.getByText(NOT_LINKED)).toBeTruthy();
+  });
+
+  it("says Entra owns the link of an agent from Entra, with no line on how it is written", async () => {
+    render(<EntraLink user={agent({ origin: "entra", entra_agent_id: "d3d3d3d3-0000-4000-8000-000000000003" })} />);
+    await waitFor(() => expect(entraBlueprints).toHaveBeenCalled());
+    expect(owner()).toBe(OWNER_ENTRA);
+    expect(link()).toBe("d3d3d3d3-0000-4000-8000-000000000003");
+    expect(document.querySelector("[data-section] p")).toBeNull();
+    for (const how of [LINKED_BY_ADMIN, LINKED_BY_IDM, LINK_BY_IDM]) expect(screen.queryByText(how)).toBeNull();
   });
 
   it("offers no link on a record that has no type agent, because the server refuses one", async () => {

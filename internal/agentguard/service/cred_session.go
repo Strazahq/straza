@@ -41,7 +41,8 @@ type sessKey struct{ name, id string }
 // zero for a session it resumed. lock serializes the renewals of the
 // session, and pushMu guards its push stream.
 type heldSession struct {
-	lock ctxLock
+	lock     ctxLock
+	renewals renewCount
 
 	s       Session
 	token   string
@@ -60,6 +61,11 @@ type heldSession struct {
 // re-acquires it and a 403 revokes it. A revoked window is refused without
 // start and checked in again with it.
 func (s *credStore) Session(ctx context.Context, c Caller, h localapi.Harness, start bool) (Session, error) {
+	return s.session(ctx, c, h, start, "")
+}
+
+// session is Session with folder, which a start that checks in keeps.
+func (s *credStore) session(ctx context.Context, c Caller, h localapi.Harness, start bool, folder string) (Session, error) {
 	a := s.account(c.UID)
 	if _, _, err := a.ready(); err != nil {
 		return Session{}, err
@@ -86,7 +92,7 @@ func (s *credStore) Session(ctx context.Context, c Caller, h localapi.Harness, s
 			}
 		}
 	}
-	return s.start(ctx, a, h)
+	return s.start(ctx, a, h, a.startFolder(hs, folder))
 }
 
 // find returns the held session of h: the window h.Session names, or for an
@@ -187,25 +193,26 @@ func (s *credStore) underKey(ctx context.Context, a *account, run func(ctx conte
 	}
 }
 
-// checkin checks in once for h through a's enrollment: the key lane for a
-// person, the agent's lane for an agent. The caller holds a.keyLock.
-func (s *credStore) checkin(ctx context.Context, a *account, h localapi.Harness) (enrollment, agentguard.CheckinResponse, error) {
+// checkin checks in once for h through a's enrollment, with folder and the
+// service's host: the key lane for a person, the agent's lane for an
+// agent. The caller holds a.keyLock.
+func (s *credStore) checkin(ctx context.Context, a *account, h localapi.Harness, folder string) (enrollment, agentguard.CheckinResponse, error) {
 	rec, _, err := a.ready()
 	if err != nil {
 		return rec, agentguard.CheckinResponse{}, err
 	}
 	if rec.Kind == localapi.KindAgent {
-		resp, err := s.agentCheckin(ctx, a, rec, h)
+		resp, err := s.agentCheckin(ctx, a, rec, h, folder)
 		return rec, resp, err
 	}
-	resp, err := s.keyCheckin(ctx, a, h)
+	resp, err := s.keyCheckin(ctx, a, h, folder)
 	return rec, resp, err
 }
 
-// start checks in a new session for h, or reuses the live one another
-// start made while this one waited for the key. A new window past
+// start checks in a new session for h in folder, or reuses the live one
+// another start made while this one waited for the key. A new window past
 // maxWindows is refused before the check-in.
-func (s *credStore) start(ctx context.Context, a *account, h localapi.Harness) (Session, error) {
+func (s *credStore) start(ctx context.Context, a *account, h localapi.Harness, folder string) (Session, error) {
 	return s.underKey(ctx, a, func(rctx context.Context, release func()) (Session, error) {
 		if hs := a.find(h); hs != nil && a.revocation(hs) == "" {
 			if ses := a.copyOf(hs); s.now().Before(ses.ExpiresAt) {
@@ -217,12 +224,12 @@ func (s *credStore) start(ctx context.Context, a *account, h localapi.Harness) (
 			release()
 			return Session{}, err
 		}
-		rec, resp, err := s.checkin(rctx, a, h)
+		rec, resp, err := s.checkin(rctx, a, h, folder)
 		if err != nil {
 			release()
 			return Session{}, checkinRefusal(rec.ServerURL, err)
 		}
-		hs := s.holdStart(a, rec, h, resp)
+		hs := s.holdStart(a, rec, h, folder, resp)
 		release()
 		return s.finishStart(rctx, a, hs, resp), nil
 	})
@@ -280,17 +287,17 @@ func (a *account) mintedWithin(hs *heldSession, now time.Time, d time.Duration) 
 	return !hs.minted.IsZero() && now.Sub(hs.minted) < d
 }
 
-// holdStart holds the session a check-in for h minted, before the key lock
-// is released, so a start queued behind this one reuses it. It pins the
-// snapshot the account holds, or the reported one until finishStart has
-// fetched it. A new window carries the account's outstanding policy
-// refusal, so a new session never extends one.
-func (s *credStore) holdStart(a *account, rec enrollment, h localapi.Harness, resp agentguard.CheckinResponse) *heldSession {
+// holdStart holds the session a check-in for h in folder minted, before
+// the key lock is released, so a start queued behind this one reuses it.
+// It pins the snapshot the account holds, or the reported one until
+// finishStart has fetched it. A new window carries the account's
+// outstanding policy refusal, so a new session never extends one.
+func (s *credStore) holdStart(a *account, rec enrollment, h localapi.Harness, folder string, resp agentguard.CheckinResponse) *heldSession {
 	now := s.now()
 	ses := Session{
 		UID: a.uid, Harness: h, ServerURL: rec.ServerURL, ID: resp.SessionID, User: resp.User,
 		Attestation: resp.Attestation, IssuedAt: now, ExpiresAt: now.Add(time.Duration(resp.ExpiresIn) * time.Second),
-		Packs: packsOf(resp.Packs), SnapshotID: resp.SnapshotID, StartText: resp.StartText,
+		SnapshotID: resp.SnapshotID, StartText: resp.StartText, Folder: folder,
 	}
 	if held := a.heldID(); held != "" {
 		ses.SnapshotID = held
@@ -376,14 +383,14 @@ func (s *credStore) recordRenewal(a *account, hs *heldSession, class RenewalClas
 // with a margin for the request's own time.
 const refreshRefusedAfter = time.Minute
 
-// renewNow refreshes hs. When the server refuses its token with 401 the
+// refreshOrReacquire refreshes hs. When the server refuses its token with 401 the
 // enrollment may still be good, so it re-acquires the window once through
 // the enrollment (D30) and reports that it did. A token past
 // refreshRefusedAfter is not sent, and the window re-acquires at once. That
 // re-acquire followed no refusal, so one that got no answer is not
 // reported, and classes as a refresh that got none. It returns the
 // refresh's error, or the re-acquire's. The caller holds hs.lock.
-func (s *credStore) renewNow(ctx context.Context, a *account, hs *heldSession) (bool, error) {
+func (s *credStore) refreshOrReacquire(ctx context.Context, a *account, hs *heldSession) (bool, error) {
 	_, api, err := a.ready()
 	if err != nil {
 		return false, err
@@ -411,14 +418,15 @@ func (s *credStore) renewNow(ctx context.Context, a *account, hs *heldSession) (
 
 // reacquire starts a new server session for hs's window through the
 // enrollment, the lane a session start uses, after strazad refused the
-// token refused. A re-acquire another renewal finished while this one
-// waited for the key is kept.
+// token refused. It checks in with the folder hs keeps. A re-acquire
+// another renewal finished while this one waited for the key is kept.
 func (s *credStore) reacquire(ctx context.Context, a *account, hs *heldSession, refused string) error {
 	_, err := s.underKey(ctx, a, func(rctx context.Context, release func()) (Session, error) {
 		if tok := a.tokenOf(hs); tok != "" && tok != refused {
 			return Session{}, nil
 		}
-		_, resp, err := s.checkin(rctx, a, a.copyOf(hs).Harness)
+		cur := a.copyOf(hs)
+		_, resp, err := s.checkin(rctx, a, cur.Harness, cur.Folder)
 		if err != nil {
 			release()
 			return Session{}, err
@@ -470,7 +478,7 @@ func (s *credStore) holdReacquire(a *account, hs *heldSession, resp agentguard.C
 	hs.s.ID, hs.s.Attestation, hs.s.IssuedAt = resp.SessionID, resp.Attestation, now
 	hs.s.ExpiresAt = now.Add(time.Duration(resp.ExpiresIn) * time.Second)
 	adoptIdentity(&hs.s, resp)
-	hs.s.Packs, hs.s.StartText = packsOf(resp.Packs), resp.StartText
+	hs.s.StartText = resp.StartText
 	return held
 }
 
@@ -503,15 +511,6 @@ func adoptIdentity(ses *Session, resp agentguard.CheckinResponse) {
 	}
 	ses.Roles = resp.Roles
 	ses.UserType, ses.AgencyMode, ses.SwarmID = resp.UserType, resp.AgencyMode, resp.SwarmID
-}
-
-// packsOf converts the knowledge packs of a check-in.
-func packsOf(in []agentguard.PackPayload) []localapi.Pack {
-	var out []localapi.Pack
-	for _, p := range in {
-		out = append(out, localapi.Pack{Name: p.Name, Version: p.Version, Content: p.Content, Checksum: p.Checksum})
-	}
-	return out
 }
 
 // unanswered reports whether err says a renewal got no answer from

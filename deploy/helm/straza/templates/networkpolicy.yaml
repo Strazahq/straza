@@ -47,3 +47,26 @@ spec:
             matchLabels: {{- include "straza.selectorLabels" . | nindent 14 }}
       ports: [{ protocol: TCP, port: 5432 }]
 {{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.demoTools.enabled }}
+---
+# The demo MCP server answers any caller without a credential. Without a
+# policy any pod in the cluster can call its tools past the gateway, so this
+# one admits only the strazad pods, on the MCP port. A CNI that does not
+# enforce NetworkPolicy accepts the object and silently ignores it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "straza.fullname" . }}-demo-tools
+  labels: {{- include "straza.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "straza.name" . }}-demo-tools
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "straza.selectorLabels" . | nindent 14 }}
+      ports: [{ protocol: TCP, port: 3001 }]
+{{- end }}

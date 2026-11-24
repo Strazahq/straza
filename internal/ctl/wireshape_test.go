@@ -331,6 +331,18 @@ func TestAdminWrapperWireShapes(t *testing.T) {
 			method: http.MethodGet, uri: "/v1/admin/sessions/ses%20one/transcript",
 		},
 		{
+			// A row with the owner's kind, sponsor and waiting count still
+			// decodes into the table's type, which shows none of the three.
+			name: "Sessions",
+			respond: `[{"id":"s1","user_id":"u1","username":"bot","user_kind":"agent","sponsor":"kim","waiting":2,` +
+				`"harness":"claude-code/2.1.0","attestation":"advisory","status":"active"}]`,
+			call: func() (bool, error) {
+				rows, err := c.Sessions(ctx, "active")
+				return len(rows) == 1 && rows[0].ID == "s1" && rows[0].Username == "bot" && rows[0].Status == "active", err
+			},
+			method: http.MethodGet, uri: "/v1/admin/sessions?status=active",
+		},
+		{
 			// url.Values.Encode sorts keys; the query order below is canonical.
 			name:    "SearchTranscripts",
 			respond: `[{"kind":"prompt","content":"AKIA…","username":"bob"}]`,

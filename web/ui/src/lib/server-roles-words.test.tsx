@@ -3,7 +3,6 @@ import type { AppRow } from "./api";
 import {
   certifiedHint,
   cliCreateRole,
-  countLine,
   emptyBody,
   foldName,
   frozenTools,
@@ -46,20 +45,18 @@ describe("the sentences of a held role", () => {
   it("counts one holder and many the same way in both refusals", () => {
     expect(frozenTools("demo-tools-readers", 1)).toBe("The role demo-tools-readers has 1 holder. Its tools change only by the global admin or by a new role.");
     expect(heldDelete("demo-tools-readers", 3)).toBe("The role demo-tools-readers has 3 holders. The identity manager removes them first, then delete it.");
-    expect(certifiedHint(1)).toBe("1 holder was certified on the current list. Widening it changes what they were certified for.");
-    expect(certifiedHint(2)).toBe("2 holders were certified on the current list. Widening it changes what they were certified for.");
+    expect(certifiedHint(1)).toBe("Widening it changes what its holder was reviewed for.");
+    expect(certifiedHint(2)).toBe("Widening it changes what its 2 holders were reviewed for.");
   });
 
   it("says what holding freezes, once per standing, and who assigns a role nobody holds", () => {
     expect(heldRule(false)).toBe("A held role keeps its tools and cannot be deleted until the identity manager removes the holders.");
     expect(heldRule(true)).toBe("A held role keeps its tools for its server admin and cannot be deleted until the identity manager removes the holders.");
-    expect(unheldLine("demo-tools-readers")).toBe("Nobody holds it yet. Your IGA assigns it as AR:demo-tools-readers, within a sync cycle.");
+    expect(unheldLine("demo-tools-readers")).toBe("No holders. Assign AR:demo-tools-readers in your identity manager.");
   });
 
-  it("counts the roles of the server and names the prefix in the empty state", () => {
-    expect(countLine(1)).toBe("1 role of this server");
-    expect(countLine(4)).toBe("4 roles of this server");
-    expect(emptyBody("demo-tools")).toContain("is named demo-tools- and a word of yours");
+  it("names the server in the empty state", () => {
+    expect(emptyBody("demo-tools")).toBe("A role made here reaches only demo-tools. Your identity manager assigns it.");
   });
 });
 
@@ -68,9 +65,9 @@ describe("the live preview of a new role", () => {
   // stored name and the name an IGA imports, BR: for a business role and
   // AR: for every other kind.
   const kinds: [string, string, string][] = [
-    ["application", "demo-tools-readers", "Application role, stored as demo-tools-readers. An IGA imports it as AR:demo-tools-readers."],
-    ["business", "analysts", "Business role, stored as analysts. An IGA imports it as BR:analysts."],
-    ["approver", "pay-approvers", "Approver role, stored as pay-approvers. An IGA imports it as AR:pay-approvers."],
+    ["application", "demo-tools-readers", "Application role, stored as demo-tools-readers. Your identity manager imports it as AR:demo-tools-readers."],
+    ["business", "analysts", "Business role, stored as analysts. Your identity manager imports it as BR:analysts."],
+    ["approver", "pay-approvers", "Approver role, stored as pay-approvers. Your identity manager imports it as AR:pay-approvers."],
   ];
   it.each(kinds)("reads the name line of a %s role", (kind, name, want) => {
     const p = previewParts(kind, name);
@@ -121,6 +118,6 @@ describe("the check that keeps a server's prefix for that server", () => {
   });
 
   it("says where the role belongs and what to do", () => {
-    expect(serverPrefixRefusal("demo-tools")).toBe("Role names beginning with demo-tools- belong to the server demo-tools. Create it on that server's page so it becomes server-owned.");
+    expect(serverPrefixRefusal("demo-tools")).toBe("Names beginning with demo-tools- belong to demo-tools. Pick another name, or make an application role for demo-tools.");
   });
 });

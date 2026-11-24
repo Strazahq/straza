@@ -1,64 +1,62 @@
 import { HEAD } from "@/components/data-table";
 import { HelpTip } from "@/components/help-tip";
-import { RoleChip } from "@/components/status-badge";
+import { KindTile } from "@/components/kind-icon";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { WordBadge } from "@/components/users-table";
+import { Chip, Pill } from "@/components/chip";
+import { RecChip, RoleTag } from "@/components/policy-facts";
 import type { PolicySetRow } from "@/lib/api";
 import { type Bucket, posturesOf } from "@/lib/policy-model";
-import { ALSO_OUTSIDE, ALSO_OUTSIDE_TITLE, APPLIES_HELP, BUCKET_HELP, COLUMN, DRAFT, DRAFT_TITLE, EDITED, EDITED_TITLE, EVERYONE, LIVE, LIVE_TITLE, NOT_PARSED, NOT_PARSED_TITLE, REC, REC_MASKED, REC_VERBATIM, STATUS_HELP, countTitle } from "@/lib/policy-words";
+import { ALSO_OUTSIDE, ALSO_OUTSIDE_TITLE, APPLIES_HELP, BUCKET_HELP, COLUMN, DRAFT, DRAFT_TITLE, EDITED, EDITED_TITLE, EVERYONE, LIVE, LIVE_TITLE, NOT_PARSED, NOT_PARSED_TITLE, STATUS_HELP, countTitle } from "@/lib/policy-words";
 import { cn } from "@/lib/utils";
-import { agoWord } from "@/lib/settings-words";
-import { absTime } from "@/lib/words";
+import { absTime, agoWord } from "@/lib/words";
 
 // One category of the Policies list. For
 // everyone, For roles and Outside roles render this one column skeleton, so
 // the Policy, Status and count edges line up down the whole page and a
 // column the Columns menu hides leaves every table at once.
 
-// WIDTHS fixes the layout. Every category renders the same colgroup.
-export const WIDTHS: Record<string, string> = { policy: "25%", status: "10%", applies: "16%", deny: "10%", hum: "16%", allow: "10%", updated: "13%" };
+// WIDTHS fixes the layout. Every category renders the same colgroup. At the
+// table's 1000 px floor Status keeps room for its widest chip, draft waits.
+// The names take what the three count columns do not need: a count is a
+// few digits under a header with its help icon.
+export const WIDTHS: Record<string, string> = { policy: "28%", status: "12%", applies: "21%", deny: "8%", hum: "13%", allow: "9%", updated: "9%" };
 
 // HIDEABLE are the columns the Columns menu offers. Policy is never
 // hidden: it is the identifier the row is opened by.
 export const HIDEABLE = ["status", "applies", "deny", "hum", "allow", "updated"] as const;
 export type Hideable = (typeof HIDEABLE)[number];
 
-// TONE paints a count: a denial in the danger hue, an allow in the ok hue,
-// an approval gate in the plain text colour, and a zero muted.
-const TONE: Record<Bucket, string> = { deny: "text-danger", hum: "text-foreground", allow: "text-ok" };
+// TONE paints a count: a denial in the danger hue, an approval gate in the
+// warn hue, an allow in the ok hue, and a zero muted.
+const TONE: Record<Bucket, string> = { deny: "text-danger", hum: "text-warn", allow: "text-ok" };
 
 // NotReadable is the cell of a set whose stored text no longer parses, so
 // its shape is unknown and a count would be a guess.
 function NotReadable() {
-  return <span className="text-[13px] italic text-muted-foreground" title={NOT_PARSED_TITLE}>{NOT_PARSED}</span>;
+  return <span className="text-caption italic text-muted-foreground" title={NOT_PARSED_TITLE}>{NOT_PARSED}</span>;
 }
 
 // PolicyStatus reads the row's state: live, off, or live with a draft that
 // edits it.
 function PolicyStatus({ row }: { row: PolicySetRow }) {
-  if (row.status !== "active") return <WordBadge word={DRAFT} tone="plain" title={DRAFT_TITLE} attr="data-policy-status" />;
-  if (row.drift) return <WordBadge word={EDITED} tone="warn" title={EDITED_TITLE} attr="data-policy-status" />;
-  return <WordBadge word={LIVE} tone="ok" title={LIVE_TITLE} attr="data-policy-status" />;
-}
-
-// RecChip is the recording tag, the one orange badge of the area: recording
-// is privacy-significant, so it is never a quiet word.
-export function RecChip({ capture }: { capture: string }) {
-  return <WordBadge word={REC} tone="warn" title={capture === "redact" ? REC_MASKED : REC_VERBATIM} mono attr="data-rec" />;
+  if (row.status !== "active") return <Chip tone="plain" title={DRAFT_TITLE} data-policy-status={DRAFT}>{DRAFT}</Chip>;
+  if (row.drift) return <Chip tone="warn" title={EDITED_TITLE} data-policy-status={EDITED}>{EDITED}</Chip>;
+  return <Chip tone="ok" title={LIVE_TITLE} data-policy-status={LIVE}>{LIVE}</Chip>;
 }
 
 // AppliesCell names the roles the policy matches, or Everyone when it names
 // none. A policy that also names users or identity carries the word for
-// that after its chips.
+// that after its tags. The tags wrap inside the cell, and a long name is
+// cut short inside its tag.
 function AppliesCell({ row }: { row: PolicySetRow }) {
   if (!row.summary) return <NotReadable />;
   const roles = row.summary.matchRoles || [];
   const other = row.summary.matchOther;
-  if (roles.length === 0 && !other) return <WordBadge word={EVERYONE} tone="plain" attr="data-applies" />;
+  if (roles.length === 0 && !other) return <Pill data-applies={EVERYONE}>{EVERYONE}</Pill>;
   return (
-    <span className="inline-flex min-w-0 items-center whitespace-nowrap" data-applies={roles.join(",")}>
-      {roles.map((r) => <RoleChip key={r} name={r} />)}
-      {other && <span className="text-[13px] text-muted-foreground" title={ALSO_OUTSIDE_TITLE}>{ALSO_OUTSIDE}</span>}
+    <span className="flex min-w-0 flex-wrap items-center gap-1" data-applies={roles.join(",")}>
+      {roles.map((r) => <RoleTag key={r} name={r} />)}
+      {other && <span className="text-caption text-muted-foreground" title={ALSO_OUTSIDE_TITLE}>{ALSO_OUTSIDE}</span>}
     </span>
   );
 }
@@ -125,21 +123,26 @@ export function PoliciesTable({ rows, hidden, onOpen }: Props) {
               role="button"
               tabIndex={0}
               aria-label={"Open " + row.name}
-              className="cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="cursor-pointer text-dense focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               onClick={() => onOpen(row)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(row); } }}
             >
               <TableCell>
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate font-mono font-semibold text-foreground">{row.name}</span>
-                  {row.summary?.capture && <RecChip capture={row.summary.capture} />}
+                  <KindTile kind="policy-set" />
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-mono font-semibold text-foreground" title={row.name}>{row.name}</span>
+                      {row.summary?.capture && <RecChip capture={row.summary.capture} />}
+                    </div>
+                    {row.summary?.description && (
+                      <div className="truncate text-caption text-muted-foreground" title={row.summary.description}>{row.summary.description}</div>
+                    )}
+                  </div>
                 </div>
-                {row.summary?.description && (
-                  <div className="truncate text-[13px] text-muted-foreground" title={row.summary.description}>{row.summary.description}</div>
-                )}
               </TableCell>
               {shown("status") && <TableCell><PolicyStatus row={row} /></TableCell>}
-              {shown("applies") && <TableCell className="overflow-hidden"><AppliesCell row={row} /></TableCell>}
+              {shown("applies") && <TableCell className="overflow-hidden whitespace-normal"><AppliesCell row={row} /></TableCell>}
               {shown("deny") && <TableCell className={right}><CountCell row={row} bucket="deny" /></TableCell>}
               {shown("hum") && <TableCell className={right}><CountCell row={row} bucket="hum" /></TableCell>}
               {shown("allow") && <TableCell className={right}><CountCell row={row} bucket="allow" /></TableCell>}

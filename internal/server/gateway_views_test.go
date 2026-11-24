@@ -79,8 +79,13 @@ func TestGatewayServerViews(t *testing.T) {
 					t.Errorf("show _meta = %v, want the upstream's verbatim", m["_meta"])
 				}
 			}
-			if _, _, raw := mcpCall(t, base, tok, "tools/list", nil); strings.Contains(string(raw), "_meta") {
-				t.Errorf("combined list carries _meta with views on: %s", raw)
+			_, list, raw = mcpCall(t, base, tok, "tools/list", nil)
+			for _, tl := range resultOf(t, list, raw)["tools"].([]any) {
+				m := tl.(map[string]any)
+				want := map[string]any{"viewapp__show": map[string]any{"x/kept": "yes"}}[m["name"].(string)]
+				if !reflect.DeepEqual(m["_meta"], want) {
+					t.Errorf("combined %s _meta = %v, want %v, with no view link while views are on", m["name"], m["_meta"], want)
+				}
 			}
 
 			_, res, raw := mcpServerCall(t, base, "viewapp", tok, "resources/list", nil)

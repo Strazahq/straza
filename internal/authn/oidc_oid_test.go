@@ -49,10 +49,11 @@ func (p *splitIDP) signAs(t *testing.T, iss, sub string, extra map[string]any) s
 
 // TestExternalVerifierLinksOnOID pins how an ID token finds its account when
 // the issuer is an Entra tenant: by oid, then by sub, then by username, where
-// a new link stores the oid. Another issuer's oid claim is never read, a
-// claim that is not a string or is named oid in another case is no oid, and
-// an account linked to another identity is refused with a *LinkMismatchError
-// that names it and leaves it as it was.
+// a new link stores the oid and a link by sub is rewritten to the oid.
+// Another issuer's oid claim is never read, a claim that is not a string or
+// is named oid in another case is no oid, and an account linked to another
+// identity is refused with a *LinkMismatchError that names it and leaves it
+// as it was.
 func TestExternalVerifierLinksOnOID(t *testing.T) {
 	oid := map[string]any{"oid": labOID}
 	cases := []struct {
@@ -70,11 +71,20 @@ func TestExternalVerifierLinksOnOID(t *testing.T) {
 		// *LinkMismatchError that names rows[0].
 		wantErr  error
 		mismatch bool
+		// relinked says the sign-in rewrote a link by sub to the oid, which
+		// the verifier reports once.
+		relinked bool
 	}{
 		{name: "the oid matches an externalId", issuer: entraLabIssuer, claims: oid,
 			rows: []store.User{{Username: "ada-renamed", ExternalID: labOID}}, want: 0, wantExt: labOID},
-		{name: "an account linked by sub keeps matching", issuer: entraLabIssuer, claims: oid,
+		{name: "an account linked by sub is relinked to the oid", issuer: entraLabIssuer, claims: oid,
+			rows: []store.User{{Username: "ada-renamed", ExternalID: labSub}}, want: 0, wantExt: labOID, relinked: true},
+		{name: "an account linked by sub keeps its link when the token has no oid", issuer: entraLabIssuer,
 			rows: []store.User{{Username: labUser, ExternalID: labSub}}, want: 0, wantExt: labSub},
+		{name: "another issuer never relinks an account linked by sub", issuer: splitCanonical, claims: oid,
+			rows: []store.User{{Username: labUser, ExternalID: labSub}}, want: 0, wantExt: labSub},
+		{name: "the break-glass account linked by sub is refused and not relinked", issuer: entraLabIssuer, claims: oid,
+			rows: []store.User{{Username: "break-glass", ExternalID: labSub}}, protect: "break-glass", wantErr: ErrProtectedAccount},
 		{name: "the oid is asked before the sub", issuer: entraLabIssuer, claims: oid,
 			rows: []store.User{{Username: "by-oid", ExternalID: labOID}, {Username: "by-sub", ExternalID: labSub}}, want: 0, wantExt: labOID},
 		{name: "an account with no externalId links by username and stores the oid", issuer: entraLabIssuer, claims: oid,
@@ -116,6 +126,8 @@ func TestExternalVerifierLinksOnOID(t *testing.T) {
 				t.Fatal(err)
 			}
 			v.ProtectedUsername = tc.protect
+			var relinks []string
+			v.Relinked = func(_ context.Context, u store.User) { relinks = append(relinks, u.ID+"="+u.ExternalID) }
 
 			got, err := v.VerifyLogin(ctx, idp.signAs(t, tc.issuer, labSub, tc.claims))
 			unchanged := func(skip int) {
@@ -146,6 +158,9 @@ func TestExternalVerifierLinksOnOID(t *testing.T) {
 					t.Fatalf("VerifyLogin = %v, want %v", err, tc.wantErr)
 				}
 				unchanged(-1)
+				if len(relinks) != 0 {
+					t.Errorf("a refused sign-in reported the relinks %v", relinks)
+				}
 				if all, _ := users.List(ctx); len(all) != len(before) {
 					t.Errorf("accounts = %d after a refused sign-in, want %d", len(all), len(before))
 				}
@@ -169,6 +184,12 @@ func TestExternalVerifierLinksOnOID(t *testing.T) {
 				t.Errorf("externalId after the sign-in = %q, want %q", stored.ExternalID, tc.wantExt)
 			}
 			unchanged(tc.want)
+			switch {
+			case tc.relinked && (len(relinks) != 1 || relinks[0] != got.ID+"="+labOID):
+				t.Errorf("relinks reported = %v, want one for %s with the oid", relinks, got.ID)
+			case !tc.relinked && len(relinks) != 0:
+				t.Errorf("relinks reported = %v, want none", relinks)
+			}
 		})
 	}
 }

@@ -13,7 +13,7 @@ import (
 // (spec/policyset revision 15, openapi 0.73.0): kind "approver" round-trips
 // on the access plane, the kind is fixed at create (no approver<->access
 // PATCH flips; business<->application still flip), and an approver role
-// can bind neither tools nor packs and can neither imply nor be implied.
+// cannot bind tools and can neither imply nor be implied.
 func TestApproverKindWireAndGuards(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -77,14 +77,6 @@ func TestApproverKindWireAndGuards(t *testing.T) {
 	if code := adminReq(t, "POST", base+"/v1/admin/apps/"+demoApp.ID+"/bindings", tok,
 		map[string]any{"role": "sec-approvers", "tools": []string{"echo"}}, &out); code != http.StatusBadRequest {
 		t.Errorf("tool binding onto approver role = %d (%v), want 400", code, out)
-	}
-	pack, err := app.store.Packs().Create(ctx, store.KnowledgePack{Name: "p", Version: "1", Content: "c", Checksum: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code := adminReq(t, "POST", base+"/v1/admin/packs/"+pack.ID+"/bindings", tok,
-		map[string]string{"role_id": created.ID}, &out); code != http.StatusBadRequest {
-		t.Errorf("pack binding onto approver role = %d (%v), want 400", code, out)
 	}
 	if code := adminReq(t, "POST", base+"/v1/admin/roles/"+dev.ID+"/implications", tok,
 		map[string]string{"implies_role_id": created.ID}, &out); code != http.StatusBadRequest {

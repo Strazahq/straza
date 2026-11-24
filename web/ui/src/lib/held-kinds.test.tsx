@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PreviewEntry } from "./api";
 import { heldKinds, heldSets } from "./held-kinds";
-import { heldTitle, policySummary } from "./role-words";
+import { type PolicyCounts, SPONSOR_POOL, heldTitle, policySummary } from "./role-words";
 
 // The seeded role's own set: get-sum held for 2 minutes by the person
 // behind the agent, get-env on a day-scale ticket an approver role grants.
@@ -57,37 +57,50 @@ describe("hold or ticket on a reading surface", () => {
     expect(heldSets(null)).toEqual([]);
   });
 
-  // Each case is a preview, the set texts read, and the Policy cell's words.
-  const cases: [string, Record<string, PreviewEntry>, Record<string, string | null>, string][] = [
-    ["says hold and ticket once the set is read", PREVIEW, { [SET]: OWN }, "2 allowed · 1 hold · 1 ticket (" + SET + ")"],
-    ["counts needs approval while the set is not read", PREVIEW, {}, "2 allowed · 2 need approval (" + SET + ")"],
-    ["counts needs approval when the set could not be read", PREVIEW, { [SET]: null }, "2 allowed · 2 need approval (" + SET + ")"],
+  // Each case is a preview, the set texts read, and the Policy cell's
+  // counts with the hovers of its needs approval and denied chips.
+  const cases: [string, Record<string, PreviewEntry>, Record<string, string | null>, PolicyCounts][] = [
+    ["says hold and ticket once the set is read", PREVIEW, { [SET]: OWN }, { approval: 2, denied: 0, allowed: 2, approvalTitle: "1 hold and 1 ticket, by " + SET, deniedTitle: "" }],
+    ["counts needs approval while the set is not read", PREVIEW, {}, { approval: 2, denied: 0, allowed: 2, approvalTitle: "by " + SET, deniedTitle: "" }],
+    ["counts needs approval when the set could not be read", PREVIEW, { [SET]: null }, { approval: 2, denied: 0, allowed: 2, approvalTitle: "by " + SET, deniedTitle: "" }],
     [
       "counts a rule it cannot find as needs approval, beside the one it can",
       { ...PREVIEW, "get-env": entry("get-env", "approve_gated", "written-elsewhere") },
       { [SET]: OWN },
-      "2 allowed · 1 hold · 1 needs approval (" + SET + ")",
+      { approval: 2, denied: 0, allowed: 2, approvalTitle: "1 hold and 1 needs approval, by " + SET, deniedTitle: "" },
     ],
     [
-      "keeps a denied tool apart with its own set",
+      "keeps a denied tool apart with its own policy",
       { ...PREVIEW, echo: entry("echo", "hidden_policy", "no-echo", "agent-guardrails") },
       { [SET]: OWN },
-      "1 allowed · 1 hold · 1 ticket (" + SET + ") · 1 denied (agent-guardrails)",
+      { approval: 2, denied: 1, allowed: 1, approvalTitle: "1 hold and 1 ticket, by " + SET, deniedTitle: "by agent-guardrails" },
     ],
-    ["classifies nothing from a set that does not parse", PREVIEW, { [SET]: "spec: [unclosed" }, "2 allowed · 2 need approval (" + SET + ")"],
+    ["classifies nothing from a set that does not parse", PREVIEW, { [SET]: "spec: [unclosed" }, { approval: 2, denied: 0, allowed: 2, approvalTitle: "by " + SET, deniedTitle: "" }],
   ];
-  it.each(cases)("%s", (_case, preview, texts, words) => {
-    expect(policySummary(preview, heldKinds(preview, texts))).toBe(words);
+  it.each(cases)("%s", (_case, preview, texts, counts) => {
+    expect(policySummary(preview, heldKinds(preview, texts))).toEqual(counts);
   });
 
-  it("puts each held tool's window and who decides on the hover", () => {
+  // Each case is a preview that gives the cell no counts, and its word.
+  const words: [string, Record<string, PreviewEntry> | null | undefined, string][] = [
+    ["says reading while the preview is out", undefined, "reading"],
+    ["says the preview could not be read", null, "could not be read"],
+    ["says the server is not running", { echo: entry("echo", "not_running") }, "the server is not running"],
+    ["says no tool is known when the preview names none it counts", { echo: entry("echo", "matcher_miss") }, "no tool is known yet"],
+  ];
+  it.each(words)("%s", (_case, preview, word) => {
+    expect(policySummary(preview)).toBe(word);
+  });
+
+  it("puts each held tool's window and who decides on the needs approval chip's hover", () => {
     const kinds = heldKinds(PREVIEW, { [SET]: OWN });
     expect(kinds["get-sum"]).toEqual({ pool: "sponsor", how: "hold", hold: 120, ticket: 86400, grant: 3600 });
-    expect(heldTitle(policySummary(PREVIEW, kinds), kinds)).toBe(
+    const counts = policySummary(PREVIEW, kinds) as PolicyCounts;
+    expect(heldTitle(counts.approvalTitle, kinds)).toBe(
       [
-        "2 allowed · 1 hold · 1 ticket (" + SET + ")",
-        "get-env: ticket within a day, then an hour to run, the approver role sec-approvers",
-        "get-sum: hold, up to 2 minutes, the person behind the agent",
+        "1 hold and 1 ticket, by " + SET,
+        "get-env: ticket within a day, then an hour to run, decided by the approver role sec-approvers",
+        "get-sum: hold, up to 2 minutes, decided by " + SPONSOR_POOL,
       ].join("\n"),
     );
   });

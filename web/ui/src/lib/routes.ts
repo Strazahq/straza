@@ -6,15 +6,15 @@
 import {
   CircleCheckIcon,
   FileCheckIcon,
-  FilePenLineIcon,
+  FilePenIcon,
   GaugeIcon,
-  KeyRoundIcon,
   type LucideIcon,
   MessagesSquareIcon,
   ScrollTextIcon,
   ServerIcon,
   SettingsIcon,
   ShieldIcon,
+  SquareTerminalIcon,
   UsersIcon,
 } from "lucide-react";
 
@@ -32,18 +32,18 @@ export type Route = {
 
 export const ROUTES: Route[] = [
   { key: "overview", label: "Overview", icon: GaugeIcon, path: "overview", areas: ["config"], built: true, description: "Deployment health, access and recent activity." },
-  { key: "sessions", label: "Sessions", icon: KeyRoundIcon, path: "sessions", areas: ["sessions"], built: true, description: "Active and past sessions, their owners and revocation status." },
-  { key: "audit", label: "Audit", icon: ScrollTextIcon, path: "audit", areas: ["audit"], built: true, description: "Inspect recorded decisions and changes, and verify audit integrity." },
-  { key: "transcripts", label: "Transcripts", icon: MessagesSquareIcon, path: "transcripts", areas: ["transcripts"], built: true, description: "Review recorded prompts and replies, and search captured content." },
-  { key: "users", label: "Users", icon: UsersIcon, path: "users", areas: ["identity"], built: true, description: "People and agents, their identity source and assigned roles." },
-  { key: "roles", label: "Roles", icon: ShieldIcon, path: "roles", areas: ["identity"], built: true, description: "Review role access, assignments and related policies." },
-  { key: "servers", label: "MCP servers", icon: ServerIcon, path: "servers", areas: ["apps"], built: true, description: "Manage server connections, credentials, tools and role access." },
-  { key: "policies", label: "Policies", icon: FileCheckIcon, path: "policies", areas: ["policy"], built: true, description: "Manage policy rules, the versions that are live, and the sets that are off." },
-  { key: "approvals", label: "Approvals", icon: CircleCheckIcon, path: "approvals", areas: ["approvals"], built: true, description: "Review pending requests and past approval decisions." },
+  { key: "sessions", label: "Sessions", icon: SquareTerminalIcon, path: "sessions", areas: ["sessions"], built: true, description: "" },
+  { key: "audit", label: "Audit", icon: ScrollTextIcon, path: "audit", areas: ["audit"], built: true, description: "Every recorded decision and change." },
+  { key: "transcripts", label: "Transcripts", icon: MessagesSquareIcon, path: "transcripts", areas: ["transcripts"], built: true, description: "Recorded prompts and replies." },
+  { key: "users", label: "Users", icon: UsersIcon, path: "users", areas: ["identity"], built: true, description: "" },
+  { key: "roles", label: "Roles", icon: ShieldIcon, path: "roles", areas: ["identity"], built: true, description: "" },
+  { key: "servers", label: "MCP servers", icon: ServerIcon, path: "servers", areas: ["apps"], built: true, description: "" },
+  { key: "policies", label: "Policies", icon: FileCheckIcon, path: "policies", areas: ["policy"], built: true, description: "The policy rules that decide every call: what is denied, what needs approval and what is allowed." },
+  { key: "approvals", label: "Approvals", icon: CircleCheckIcon, path: "approvals", areas: ["approvals"], built: true, description: "" },
   // Drafts opens to the grants that may draft: the drafts area, and the
   // areas whose objects a draft changes.
-  { key: "drafts", label: "Drafts", icon: FilePenLineIcon, path: "drafts", areas: ["drafts", "apps", "identity", "policy"], built: true, description: "Changes to servers, roles, access and policy sets wait here until a person publishes them." },
-  { key: "settings", label: "Settings", icon: SettingsIcon, path: "settings", areas: ["config", "tokens"], built: true, description: "Deployment configuration, admin API tokens and agent signing keys." },
+  { key: "drafts", label: "Drafts", icon: FilePenIcon, path: "drafts", areas: ["drafts", "apps", "identity", "policy"], built: true, description: "Changes to servers, roles, access and policies wait here until a person publishes them." },
+  { key: "settings", label: "Settings", icon: SettingsIcon, path: "settings", areas: ["config", "tokens"], built: true, description: "" },
 ];
 
 // landing is the first built area in table order, the page the base path
@@ -84,6 +84,10 @@ export const serversBadgeTitle = (n: number) => "This account administers " + (n
 // draftsBadgeTitle is the hover of the number beside Drafts: the open
 // drafts this session may read, "200+" past one page.
 export const draftsBadgeTitle = (label: string) => label + (label === "1" ? " draft waits" : " drafts wait") + " for review.";
+
+// approvalsBadgeTitle is the hover of the number beside Approvals: the
+// requests that wait.
+export const approvalsBadgeTitle = (n: number) => (n === 1 ? "1 request waits" : n + " requests wait") + " for a decision.";
 
 export const NAV_GROUPS: { label: string; keys: RouteKey[] }[] = [
   { label: "Workspace", keys: ["overview"] },

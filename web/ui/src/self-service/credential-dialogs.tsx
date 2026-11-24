@@ -16,11 +16,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { DANGER_FILL } from "@/components/ui/button";
 import { RefusedError } from "@/components/error-state";
 import { type ApiError, connectDelete } from "@/lib/api";
-import { refused } from "@/lib/say";
 import { type CredentialRow, keyOf, thingOf } from "./credential-rows";
 import * as W from "./credential-words";
+import { failedWhy } from "./words";
 
 // Ask is the confirm on screen: which row, and which of the three the
 // person pressed.
@@ -34,11 +35,11 @@ type Props = {
 };
 
 // wordsOf is the title, the one sentence of consequence, the button and the
-// subject an error block names, for each of the three confirms.
+// heading of an error block, for each of the three confirms.
 function wordsOf(ask: Ask) {
   const { row, kind } = ask;
   if (kind === "disconnect") {
-    return { title: W.disconnectTitle(row.app), body: W.disconnectBody(row.app, row.who), action: W.DISCONNECT, subject: W.SUBJECT_DISCONNECT };
+    return { title: W.disconnectTitle(row.app), body: W.disconnectBody(row.app), action: W.DISCONNECT, heading: W.NOT_DISCONNECTED };
   }
   if (kind === "leftover") {
     const token = thingOf(row) === "token";
@@ -46,10 +47,10 @@ function wordsOf(ask: Ask) {
       title: W.leftoverTitle(row.app, thingOf(row)),
       body: W.leftoverBody(row.app, row.who),
       action: token ? W.REMOVE_TOKEN : W.REMOVE_SIGN_IN,
-      subject: token ? W.SUBJECT_REMOVE : W.SUBJECT_REMOVE_SIGN_IN,
+      heading: token ? W.TOKEN_NOT_REMOVED : W.SIGN_IN_NOT_REMOVED,
     };
   }
-  return { title: W.removeTokenTitle(row.app, row.who), body: W.removeTokenBody(row.app, row.who), action: W.REMOVE_TOKEN, subject: W.SUBJECT_REMOVE };
+  return { title: W.removeTokenTitle(row.app, row.who), body: W.removeTokenBody(row.app, row.who, row.agents), action: W.REMOVE_TOKEN, heading: W.TOKEN_NOT_REMOVED };
 }
 
 // ConfirmDialog asks before it destroys, then sends the one DELETE.
@@ -69,7 +70,7 @@ export function ConfirmDialog({ ask, onClose, onDone }: Props) {
       // A 401 ends the login session in the api module, and the page
       // redraws as signed out, so the dialog adds nothing.
       const err = e as ApiError;
-      if (err.status !== 401) setRefusal(refused(err));
+      if (err.status !== 401) setRefusal(failedWhy(err));
     } finally {
       setBusy(false);
     }
@@ -85,11 +86,11 @@ export function ConfirmDialog({ ask, onClose, onDone }: Props) {
           <AlertDialogTitle>{said ? said.title : ""}</AlertDialogTitle>
           <AlertDialogDescription>{said ? said.body : ""}</AlertDialogDescription>
         </AlertDialogHeader>
-        {refusal && said && <RefusedError subject={said.subject} message={refusal} />}
+        {refusal && said && <RefusedError subject="" heading={said.heading} message={refusal} />}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{W.CANCEL}</AlertDialogCancel>
           <AlertDialogAction
-            className="bg-danger text-white hover:bg-danger/90"
+            className={DANGER_FILL}
             aria-busy={busy || undefined}
             onClick={(e) => { e.preventDefault(); void run(); }}
           >

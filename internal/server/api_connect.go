@@ -134,7 +134,9 @@ func (a *App) refuseMachineWrite(w http.ResponseWriter, r *http.Request, c conne
 
 // refuseConnection answers 403 with msg and records one connection.refused
 // event with the user whose connection the request named, the server and
-// reason, stamped with the caller as connectCaller.stamp does.
+// reason, stamped with the caller as connectCaller.stamp does. That event
+// is not on the audit chain, so an admin API token's refusal also writes
+// its admin.refused record through the refusal watch.
 func (a *App) refuseConnection(w http.ResponseWriter, r *http.Request, c connectCaller, target store.User, app, reason, msg string) {
 	a.emitEvent(r, "straza.identity.updated", c.stamp(map[string]any{
 		"action": "connection.refused", "user": target.ID, "app": app, "reason": reason,

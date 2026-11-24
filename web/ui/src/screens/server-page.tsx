@@ -1,31 +1,35 @@
 import * as React from "react";
 import { DownloadIcon, Loader2Icon, LockIcon, RefreshCwIcon, ServerOffIcon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/empty-state";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
-import { ToneBadge } from "@/components/overview-parts";
+import { Chip, OutcomeChip, Pill, Tag } from "@/components/chip";
+import { KIND_ICON, KindTile } from "@/components/kind-icon";
 import { PageHead } from "@/components/page-head";
+import { RoleKindTag } from "@/components/role-kind";
 import { ServerActivity } from "@/components/server-activity";
 import type { ChangeWhich } from "@/components/server-change-sheet";
 import { ObjectsReadContext, useObjectsRead } from "@/components/server-listing";
 import { ServerOverview } from "@/components/server-overview";
 import { SetupCard } from "@/components/server-setup";
 import { ServerRolesTab } from "@/components/server-roles-tab";
-import { NoRole, RoleChip, StatusBadge } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
 import { TestACall } from "@/components/test-a-call";
 import { SaveNoteLine, useDraftSave } from "@/components/use-draft-save";
 import { type ApiError, type AppRow, type BindingRow, type PreviewEntry, type RoleRow, type ToolRow, appLogs, catalogPreview, disableApp, enableApp, getConfig, listApps, listAudit, listBindings, listRoles, listTools, recheckApp } from "@/lib/api";
+import { OUTCOME_WORD, type Outcome } from "@/lib/chip-words";
 import { manifestYAML } from "@/lib/manifest";
 import {
-  BANNER, FROM_SUMMARY, LAST_CALL_NOT_READABLE, NOT_CHECKED_YET, NO_DESCRIPTION, NO_ROLE_ACCESS, POLICY_NOT_READABLE, REACH_NOT_READABLE, ROLE_ACCESS_NOT_READABLE, SINCE_NOT_RECORDED,
-  fileParts, lockedServerTitle, sinceWhile, toolsWhile,
+  BANNER, FROM_SUMMARY, LAST_CALL_NOT_READABLE, LAST_CALL_UNREAD, NOT_CHECKED_YET, NO_MANIFEST_LINE, NO_ROLE_ACCESS, POLICY_NOT_READABLE, REACH_NOT_READABLE, REMOVE_DELETES, REMOVE_NO_ROLE, REMOVE_RULES_STAY,
+  ROLE_ACCESS_NOT_READABLE, SINCE_NOT_RECORDED, fileParts, lockedServerTitle, sinceWhile, toolsWhile,
+  didNotRun,
 } from "@/lib/server-words";
 import { navigate } from "@/lib/router";
+import { routeByKey } from "@/lib/routes";
 import { REMOVE_OPEN, SAVE_DRAFT, removeTitle, removedToast } from "@/lib/save-words";
 import { TAB_ROLES, TOOLS_TAB_LINE } from "@/lib/server-roles-words";
 import { adminAreas } from "@/lib/session";
@@ -45,8 +49,9 @@ type Props = { id: string; tab?: string };
 const TABS = ["overview", "tools", "objects", "roles", "activity", "manifest"] as const;
 type Tab = (typeof TABS)[number];
 
-const CAPS = "text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground";
-const CODE = "rounded bg-muted px-1 font-mono text-[13px] text-foreground";
+const route = routeByKey("servers");
+const CAPS = "text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground";
+const CODE = "rounded-md bg-muted px-1 font-mono text-caption text-foreground";
 
 
 type LastCall = { kind: "none" } | { kind: "unread" } | { kind: "closed" } | { kind: "call"; user: string; tool: string; t: string; verdict: string };
@@ -55,12 +60,14 @@ type State = { kind: "loading" } | { kind: "missing" } | { kind: "locked"; messa
 type Problem = { subject: string; unreachable: boolean; sentence: string };
 type Busy = "recheck" | "pause" | "enable" | null;
 
-// Run is one outcome in a tool's Policy cell: the word on the chip and the
-// muted line under it. RUN_TONE is the trust hue of the three outcomes a
-// policy decides and of a preview that could not be read. Any other word,
-// a server that is not running or a role without access, is a plain chip.
-type Run = { word: string; line: string };
-const RUN_TONE: Record<string, string> = { allowed: "ok", "needs approval": "warn", denied: "danger", unknown: "unknown" };
+// Run is one outcome in a tool's Policy cell: the word on the chip, the
+// policies that decide it as tags under it, and the roles it holds for
+// when the reaching roles do not share one outcome. RUN_OUTCOME reads the
+// word back as its outcome, for the outcome chip. A preview that could not
+// be read keeps its own hue, and a server that is not running is a plain
+// chip.
+type Run = { word: string; sets: string[]; roles: string[] };
+const RUN_OUTCOME: Record<string, Outcome> = { [OUTCOME_WORD.allowed]: "allowed", [OUTCOME_WORD.approval]: "approval", [OUTCOME_WORD.denied]: "denied", [OUTCOME_WORD.none]: "none" };
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -87,14 +94,15 @@ function lastCallOf(rows: { ce: string; username?: string }[], name: string): La
 
 function lastCallWords(last: LastCall): string {
   if (last.kind === "call") return "Last call: " + last.user + " called " + last.tool + " " + relTimeText(last.t) + ", " + last.verdict + ".";
-  if (last.kind === "unread") return "Last call: not read, the audit chain did not answer.";
+  if (last.kind === "unread") return LAST_CALL_UNREAD;
   if (last.kind === "closed") return LAST_CALL_NOT_READABLE;
   return "Last call: none recorded.";
 }
 
 // Banner is the status in words only: the badge, the state, the tool count
-// or the reason, since when, the last check, who reaches it, the last call.
-function Banner({ app, reach, last, reachReadable }: { app: AppRow; reach: string[]; last: LastCall; reachReadable: boolean }) {
+// or the reason, since when, the last check, who reaches it as tags with
+// their kind's icon, the last call.
+function Banner({ app, reach, roles, last, reachReadable }: { app: AppRow; reach: string[]; roles: RoleRow[]; last: LastCall; reachReadable: boolean }) {
   const status = app.status || "unknown";
   // A running or degraded server is answered from its live instance, which
   // omits an empty tool list. Any other status is answered from the stored
@@ -104,12 +112,12 @@ function Banner({ app, reach, last, reachReadable }: { app: AppRow; reach: strin
   const since = app.status_since ? absTime(app.status_since) : live ? SINCE_NOT_RECORDED : sinceWhile(status);
   return (
     <section className="server-status" data-server-status={status} aria-label={BANNER.title}>
-      <header><h2>{BANNER.title}</h2><StatusBadge status={status} />{app.paused && <Badge variant="outline" className="text-warn">{BANNER.paused}</Badge>}</header>
+      <header><h2>{BANNER.title}</h2><StatusBadge status={status} />{app.paused && <Chip tone="warn">{BANNER.paused}</Chip>}</header>
       <dl>
         <div><dt>{BANNER.tools}</dt><dd>{tools}</dd></div>
         <div><dt>{BANNER.checked}</dt><dd title={app.last_probe_at ? absTime(app.last_probe_at) : undefined}>{app.last_probe_at ? relTimeText(app.last_probe_at) : NOT_CHECKED_YET}</dd></div>
         <div><dt>{status === "running" ? BANNER.runningSince : BANNER.statusSince}</dt><dd>{since}</dd></div>
-        <div><dt>{BANNER.access}</dt><dd>{reach.length ? reach.join(", ") + (!reachReadable ? FROM_SUMMARY : "") : !reachReadable ? ROLE_ACCESS_NOT_READABLE : NO_ROLE_ACCESS}</dd></div>
+        <div><dt>{BANNER.access}</dt><dd>{reach.length ? <>{reach.map((r) => <RoleKindTag key={r} name={r} role={roles.find((x) => x.name === r)} />)}{!reachReadable ? FROM_SUMMARY : ""}</> : !reachReadable ? ROLE_ACCESS_NOT_READABLE : NO_ROLE_ACCESS}</dd></div>
         <div className="server-last-call"><dt>{BANNER.lastCall}</dt><dd>{lastCallWords(last).replace(/^Last call: /, "")}</dd></div>
       </dl>
       {status !== "running" && app.detail && <details className="server-diagnostics" open={status === "failed"}><summary>{BANNER.diagnostics}</summary><p>{probeWords(app.detail, app.url)}</p></details>}
@@ -122,7 +130,7 @@ function Banner({ app, reach, last, reachReadable }: { app: AppRow; reach: strin
 // ToolsTab answers who can call each exposed tool. Which tools are exposed
 // is a manifest setting, so the tab carries the same door as the Settings
 // card, onChange, and none for a server the console cannot change.
-function ToolsTab({ app, tools, bindings, reachReadable, policyReadable, globalAdmin, onChange }: { app: AppRow; tools: ToolRow[]; bindings: BindingRow[]; reachReadable: boolean; policyReadable: boolean; globalAdmin: boolean; onChange: (() => void) | null }) {
+function ToolsTab({ app, tools, bindings, roles, reachReadable, policyReadable, globalAdmin, onChange }: { app: AppRow; tools: ToolRow[]; bindings: BindingRow[]; roles: RoleRow[]; reachReadable: boolean; policyReadable: boolean; globalAdmin: boolean; onChange: (() => void) | null }) {
   // No previews are asked for when the Policy column is not readable: the
   // preview is a read of the whole apps area, refused as the tool list was.
   const reach = policyReadable ? bindings.filter((b) => b.app === app.name).map((b) => b.role).filter((r, i, xs) => xs.indexOf(r) === i).sort() : [];
@@ -148,13 +156,14 @@ function ToolsTab({ app, tools, bindings, reachReadable, policyReadable, globalA
   const names = known.length ? known : (app.tools || []).map((n) => ({ id: n, app: app.name, app_id: app.id, name: n, description: "" }));
   const status = app.status || "unknown";
   // howItRuns answers a plain sentence where no outcome can be said, else
-  // the outcomes of the reaching roles folded by word. The line of an
-  // outcome names the policy sets that decide it, then the roles it holds
-  // for when the reaching roles do not share one outcome.
+  // the outcomes of the reaching roles folded by word. A tool no role
+  // reaches has the outcome no access. Under an outcome stand the policy
+  // sets that decide it, then the roles it holds for when the reaching
+  // roles do not share one outcome.
   const howItRuns = (tool: string): string | Run[] => {
-    if (!policyReadable) return "not readable with this account";
+    if (!policyReadable) return "not readable";
     const rs = reachedBy(bindings, app.name, tool);
-    if (!rs.length) return "does not exist for any session";
+    if (!rs.length) return [{ word: OUTCOME_WORD.none, sets: [], roles: [] }];
     const folded: { word: string; sets: string[]; roles: string[] }[] = [];
     for (const r of rs) {
       const p = previews[r];
@@ -168,7 +177,7 @@ function ToolsTab({ app, tools, bindings, reachReadable, policyReadable, globalA
       run.roles.push(r);
       if (set && !run.sets.includes(set)) run.sets.push(set);
     }
-    return folded.map((f) => ({ word: f.word, line: [f.sets.join(", "), folded.length > 1 ? "for " + f.roles.join(", ") : ""].filter(Boolean).join(" ") }));
+    return folded.map((f) => ({ word: f.word, sets: f.sets, roles: folded.length > 1 ? f.roles : [] }));
   };
   const offered = app.offered?.length;
   const exposedWords = offered === undefined ? "" : offered === names.length ? "Every tool the server lists is exposed." : names.length + " of the " + offered + " tools the server lists are exposed.";
@@ -176,9 +185,9 @@ function ToolsTab({ app, tools, bindings, reachReadable, policyReadable, globalA
     <div>
       {(exposedWords || onChange || !globalAdmin) && (
         <div className="mb-3 flex flex-wrap items-center gap-2" data-tools-head>
-          <p className="min-w-0 flex-1 text-[13px] text-muted-foreground">{exposedWords}</p>
-          {!globalAdmin && <span className="text-[13px] text-muted-foreground" data-roles-door>{TOOLS_TAB_LINE}</span>}
-          {onChange && <Button variant="outline" size="sm" aria-label="Change the exposed tools" onClick={onChange}>Change the exposed tools</Button>}
+          <p className="min-w-0 flex-1 text-caption text-muted-foreground">{exposedWords}</p>
+          {!globalAdmin && <span className="text-caption text-muted-foreground" data-roles-door>{TOOLS_TAB_LINE}</span>}
+          {onChange && <Button variant="outline" size="sm" onClick={onChange}>Change tools</Button>}
         </div>
       )}
       <div className="overflow-x-auto rounded-md border border-border">
@@ -203,17 +212,24 @@ function ToolsTab({ app, tools, bindings, reachReadable, policyReadable, globalA
               const rs = reachedBy(bindings, app.name, t.name);
               const how = howItRuns(t.name);
               return (
-                <TableRow key={t.name} className="text-sm">
+                <TableRow key={t.name} className="text-dense">
                   <TableCell className="align-top font-mono text-foreground">{t.name}</TableCell>
-                  <TableCell className="whitespace-normal align-top text-text-2">{t.description || <span className="text-muted-foreground">The server gave no description.</span>}</TableCell>
-                  <TableCell className="align-top">{!reachReadable ? <span className="text-muted-foreground">not readable</span> : rs.length ? rs.map((r) => <RoleChip key={r} name={r} />) : <NoRole text="no role" />}</TableCell>
+                  <TableCell className="whitespace-normal align-top text-text-2">{t.description}</TableCell>
+                  <TableCell className="align-top">{!reachReadable ? <span className="text-muted-foreground">not readable</span> : rs.length ? <span className="flex flex-wrap gap-y-1" data-reached-by>{rs.map((r) => <RoleKindTag key={r} name={r} role={roles.find((x) => x.name === r)} />)}</span> : <Pill>no role</Pill>}</TableCell>
                   <TableCell className="whitespace-normal align-top text-text-2">
                     {typeof how === "string" ? how : (
                       <div className="flex flex-col items-start gap-1">
                         {how.map((run) => (
                           <React.Fragment key={run.word}>
-                            <ToneBadge tone={RUN_TONE[run.word] || "plain"} word={run.word} />
-                            {run.line && <span className="font-mono text-[13px] leading-snug text-muted-foreground" data-policy-sets>{run.line}</span>}
+                            {RUN_OUTCOME[run.word]
+                              ? <OutcomeChip outcome={RUN_OUTCOME[run.word]} />
+                              : <Chip tone={run.word === "unknown" ? "unknown" : "plain"}>{run.word}</Chip>}
+                            {(run.sets.length > 0 || run.roles.length > 0) && (
+                              <span className="flex flex-wrap items-center gap-1 text-caption leading-snug text-muted-foreground" data-policy-sets>
+                                {run.sets.map((s) => <Tag key={s} icon={KIND_ICON["policy-set"]}>{s}</Tag>)}
+                                {run.roles.length > 0 && <span className="font-mono">{"for " + run.roles.join(", ")}</span>}
+                              </span>
+                            )}
                           </React.Fragment>
                         ))}
                       </div>
@@ -225,7 +241,7 @@ function ToolsTab({ app, tools, bindings, reachReadable, policyReadable, globalA
           </TableBody>
         </Table>
       </div>
-      <p className="mt-1.5 text-[13px] text-muted-foreground" data-reach-note>{!reachReadable ? REACH_NOT_READABLE : !policyReadable ? POLICY_NOT_READABLE : 'This table answers "who can call X". Nothing is reachable until a role has access to it. Policies add the gates.'}</p>
+      {(!reachReadable || !policyReadable) && <p className="mt-1.5 text-caption text-muted-foreground" data-reach-note>{!reachReadable ? REACH_NOT_READABLE : POLICY_NOT_READABLE}</p>}
     </div>
   );
 }
@@ -240,21 +256,21 @@ function ManifestTab({ app }: { app: AppRow }) {
   return (
     <section>
       <div className="mb-1.5 flex items-center gap-2">
-        <span className={CAPS}>the manifest as installed (app.yaml)</span>
+        <span className={CAPS}>app.yaml</span>
       </div>
       {yaml ? (
-        <pre className="m-0 overflow-x-auto rounded-md border border-border bg-card px-4 py-3 font-mono text-[13px] leading-relaxed text-text-2">{yaml}</pre>
+        <pre className="m-0 overflow-x-auto rounded-md border border-border bg-card px-4 py-3 font-mono text-caption leading-relaxed text-text-2">{yaml}</pre>
       ) : (
-        <p className="rounded-md border border-border bg-card px-4 py-3 text-sm text-text-2">
-          {"The console cannot read a stored manifest for this server. The file you installed, or the apps directory, holds it; the runtime is " + app.runtime + (app.version ? ", version " + app.version : "") + "."}
+        <p className="rounded-md border border-border bg-card px-4 py-3 text-dense text-text-2">
+          {NO_MANIFEST_LINE}
         </p>
       )}
       {file && yaml ? (
-        <p className="mt-1.5 text-[13px] text-muted-foreground" data-change-path>{"To change it, use the Change buttons on Overview, or edit " + file.base + (file.dir ? " in " + file.dir : "") + ", which proposes a draft a person publishes."}</p>
+        <p className="mt-1.5 text-caption text-muted-foreground" data-change-path>{"Change it on Overview, or edit " + file.base + (file.dir ? " in " + file.dir : "") + " to propose a draft."}</p>
       ) : yaml ? (
-        <p className="mt-1.5 text-[13px] text-muted-foreground" data-change-path>{"To change it, use the Change buttons on Overview. "}<code className={CODE}>{"strazactl apps install -f " + app.name + ".yaml"}</code>{" does the same from a file you keep."}</p>
+        <p className="mt-1.5 text-caption text-muted-foreground" data-change-path>{"To change it, use the Change buttons on Overview. "}<code className={CODE}>{"strazactl apps install -f " + app.name + ".yaml"}</code>{" does the same from a file you keep."}</p>
       ) : (
-        <p className="mt-1.5 text-[13px] text-muted-foreground" data-change-path>{"To change it, edit the file you installed and run "}<code className={CODE}>{"strazactl apps install -f " + app.name + ".yaml"}</code>{"."}</p>
+        <p className="mt-1.5 text-caption text-muted-foreground" data-change-path>{"To change it, edit the file you installed and run "}<code className={CODE}>{"strazactl apps install -f " + app.name + ".yaml"}</code>{"."}</p>
       )}
     </section>
   );
@@ -299,6 +315,7 @@ export function ServerPage({ id, tab }: Props) {
   const [testOpen, setTestOpen] = React.useState(false);
   const [sheet, setSheet] = React.useState<ChangeWhich | null>(null);
   const [upstreamTimeout, setUpstreamTimeout] = React.useState<number | null>(null);
+  const [remoteRps, setRemoteRps] = React.useState<number | null>(null);
   const [, tick] = React.useState(0);
   const current: Tab = (TABS as readonly string[]).includes(tab || "") ? (tab as Tab) : "overview";
 
@@ -333,7 +350,7 @@ export function ServerPage({ id, tab }: Props) {
       const err = e as ApiError;
       if (err.status === 401) return;
       const message = err.unreachable
-        ? "The server could not be read because strazad did not answer. Check that it is running, then reload."
+        ? "The server could not be read because Straza did not answer. Check that it is running, then reload."
         : "The server could not be read: " + err.message + ". Reload to try again.";
       setState((s) => (s.kind === "ready" ? { ...s, problem: message } : { kind: "error", message }));
     }
@@ -345,14 +362,14 @@ export function ServerPage({ id, tab }: Props) {
   React.useEffect(() => {
     if (tab === "credential") navigate("servers", [id, "overview"], true);
   }, [id, tab]);
-  // The server-wide per-call timeout names the default a manifest without
-  // its own falls back to. A config the session may not read leaves it
-  // unnamed rather than failing the page.
+  // The server-wide per-call timeout and the remote rate limit name the
+  // defaults a manifest without its own falls back to. A config the session
+  // may not read leaves them unnamed rather than failing the page.
   React.useEffect(() => {
     let alive = true;
     getConfig().then(
-      (c) => { if (alive) setUpstreamTimeout(c?.apps?.upstream_timeout_seconds || null); },
-      () => { /* the cards say "the server-wide default" without a number */ },
+      (c) => { if (alive) { setUpstreamTimeout(c?.apps?.upstream_timeout_seconds || null); setRemoteRps(c?.apps?.default_remote_rps || null); } },
+      () => { /* the cards name both defaults without a number */ },
     );
     return () => { alive = false; };
   }, []);
@@ -369,14 +386,16 @@ export function ServerPage({ id, tab }: Props) {
   }, []);
 
   // refuse words a write the server refused or that never reached it, for
-  // the block above the tabs and the toast that stays until closed.
+  // the block above the tabs and the toast that stays until closed. The
+  // block heads an unreachable sentence with didNotRun, and the toast
+  // carries that heading itself.
   const refuse = (subject: string, err: ApiError) => {
     if (err.status === 401) return;
-    const sentence = err.unreachable ? subject + " did not reach strazad. Check the connection, then try again."
-      : err.status === 404 ? subject + " refused: the server no longer knows this MCP server. Reload the list."
+    const sentence = err.unreachable ? "Straza did not answer. Check the connection, then try again."
+      : err.status === 404 ? subject + " refused: Straza no longer knows this MCP server. Reload the list."
         : subject + " refused: " + err.message.replace(/\.$/, "") + ".";
     setProblem({ subject, unreachable: err.unreachable, sentence });
-    notify.failed(sentence);
+    notify.failed(err.unreachable ? didNotRun(subject) + " " + sentence : sentence);
   };
 
   // A recheck answer carries the probe fields but not reached_by, so only
@@ -420,11 +439,11 @@ export function ServerPage({ id, tab }: Props) {
   const remover = useDraftSave({ name, title: removeTitle(name), toast: removedToast(name), onPublished: () => navigate("servers") });
   const removal = [{ kind: "App" as const, name, op: "remove" as const, doc: "" }];
 
-  if (state.kind === "loading") return <PageHead label="MCP servers" title="MCP server" description="Reading the server from strazad." />;
+  if (state.kind === "loading") return <PageHead label={id} crumbs={[{ label: route.label, to: "servers" }]} title="MCP server" description="Reading the server from Straza." />;
   if (state.kind === "error") {
     return (
       <>
-        <PageHead label="MCP servers" title="MCP server" description="The server could not be read." />
+        <PageHead label={id} crumbs={[{ label: route.label, to: "servers" }]} title="MCP server" description="" />
         <div className="flex flex-col items-start gap-3 px-6 py-5">
           <FetchError subject="MCP server" detail={state.message} />
           <Button variant="outline" size="sm" onClick={() => void load()}>Reload</Button>
@@ -435,7 +454,7 @@ export function ServerPage({ id, tab }: Props) {
   if (state.kind === "locked") {
     return (
       <>
-        <PageHead label="MCP servers" title={id} description="A server this account does not administer." />
+        <PageHead label={id} crumbs={[{ label: route.label, to: "servers" }]} title={id} description="" />
         <EmptyState icon={LockIcon} title={lockedServerTitle(id)} action={<Button variant="outline" onClick={() => navigate("servers")}>Open MCP servers</Button>}>
           {cap(state.message.replace(/\.?$/, "."))}
         </EmptyState>
@@ -445,9 +464,9 @@ export function ServerPage({ id, tab }: Props) {
   if (state.kind === "missing") {
     return (
       <>
-        <PageHead label="MCP servers" title="Not found" description="The address names a server that is not in the list." />
+        <PageHead label={id} crumbs={[{ label: route.label, to: "servers" }]} title="Not found" description="" />
         <EmptyState icon={ServerOffIcon} title="No server has this id." action={<Button variant="outline" onClick={() => navigate("servers")}>Open MCP servers</Button>}>
-          {"The list strazad answered has no row with the id " + id + ": it was removed, or the address is stale."}
+          {"It was removed, or the link is old."}
         </EmptyState>
       </>
     );
@@ -515,29 +534,35 @@ export function ServerPage({ id, tab }: Props) {
   return (
     <>
       <div className="contents [&_h1]:font-mono">
-        <PageHead label="MCP servers" title={app.name} description={app.manifest?.metadata?.description || NO_DESCRIPTION} actions={actions} />
+        <PageHead
+          label={app.name}
+          crumbs={[{ label: route.label, to: "servers" }]}
+          tile={<KindTile kind="server" size="lg" />}
+          description={app.manifest?.metadata?.description || ""}
+          actions={actions}
+        />
       </div>
       <div className="flex flex-col gap-4 px-6 py-5">
         {state.problem && <FetchError subject="MCP server" detail={state.problem} lastRead={state.lastRead} />}
-        <Banner app={app} reach={reach} last={last} reachReadable={state.data.bindingsRead} />
+        <Banner app={app} reach={reach} roles={state.data.roles} last={last} reachReadable={state.data.bindingsRead} />
         {remover.note && <SaveNoteLine note={remover.note} />}
         {problem && (problem.unreachable
-          ? <FetchError subject={problem.subject} detail={problem.sentence} />
+          ? <FetchError subject={problem.subject} heading={didNotRun(problem.subject)} detail={problem.sentence} />
           : <RefusedError subject={problem.subject} message={cap(problem.sentence.slice(problem.subject.length + " refused: ".length))} />)}
         <ObjectsReadContext.Provider value={objects}>
         <Tabs value={shown} onValueChange={(v) => navigate("servers", [id, v], true)}>
           <div className="flex items-center border-b border-border">
             <TabsList variant="line">
               <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="tools">Tools <span className="font-mono text-xs text-muted-foreground">{names.length}</span></TabsTrigger>
-              {pinned && <TabsTrigger value="objects">{cap(pinned.plural || pinned.type + "s")}{objectCount !== null && <> <span className="font-mono text-xs text-muted-foreground">{objectCount}</span></>}</TabsTrigger>}
-              <TabsTrigger value="roles">{TAB_ROLES} <span className="font-mono text-xs text-muted-foreground">{ownedRoles.length}</span></TabsTrigger>
+              <TabsTrigger value="tools">Tools <span className="font-mono text-caption leading-4 text-muted-foreground">{names.length}</span></TabsTrigger>
+              {pinned && <TabsTrigger value="objects">{cap(pinned.plural || pinned.type + "s")}{objectCount !== null && <> <span className="font-mono text-caption leading-4 text-muted-foreground">{objectCount}</span></>}</TabsTrigger>}
+              <TabsTrigger value="roles">{TAB_ROLES} <span className="font-mono text-caption leading-4 text-muted-foreground">{ownedRoles.length}</span></TabsTrigger>
               <TabsTrigger value="activity">Activity</TabsTrigger>
               <TabsTrigger value="manifest">Manifest</TabsTrigger>
             </TabsList>
           </div>
-          <TabsContent value="overview"><SetupCard app={app} read={objects} toolCount={names.length} onPublished={() => void load()} /><ServerOverview app={app} upstreamTimeout={upstreamTimeout} onInspectAccess={() => navigate("servers", [id, "tools"], true)} onTest={canTest ? () => setTestOpen(true) : undefined} onChange={setSheet} onRefused={(err) => refuse("Secret", err)} /></TabsContent>
-          <TabsContent value="tools"><ToolsTab app={app} tools={tools} bindings={bindings} reachReadable={state.data.bindingsRead} policyReadable={state.data.bindingsRead && state.data.toolsRead} globalAdmin={globalAdmin} onChange={!app.manifest ? null : () => setSheet("settings")} /></TabsContent>
+          <TabsContent value="overview"><SetupCard app={app} read={objects} toolCount={names.length} onPublished={() => void load()} /><ServerOverview app={app} upstreamTimeout={upstreamTimeout} remoteRps={remoteRps} onInspectAccess={() => navigate("servers", [id, "tools"], true)} onTest={canTest ? () => setTestOpen(true) : undefined} onChange={setSheet} onRefused={(err) => refuse("Secret", err)} /></TabsContent>
+          <TabsContent value="tools"><ToolsTab app={app} tools={tools} bindings={bindings} roles={state.data.roles} reachReadable={state.data.bindingsRead} policyReadable={state.data.bindingsRead && state.data.toolsRead} globalAdmin={globalAdmin} onChange={!app.manifest ? null : () => setSheet("settings")} /></TabsContent>
           {pinned && <TabsContent value="objects"><React.Suspense fallback={null}><ServerObjects app={app} roles={state.data.roles} /></React.Suspense></TabsContent>}
           <TabsContent value="roles"><ServerRolesTab app={app} roles={ownedRoles} tools={tools} bindings={state.data.bindingsRead ? bindings : null} globalAdmin={globalAdmin} onChanged={() => void load()} /></TabsContent>
           <TabsContent value="activity"><ServerActivity app={app} /></TabsContent>
@@ -550,7 +575,7 @@ export function ServerPage({ id, tab }: Props) {
 
       {sheet && (
         <React.Suspense fallback={null}>
-          <ChangeSheet app={app} which={sheet} tools={names} upstreamTimeout={upstreamTimeout} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void load(); }} />
+          <ChangeSheet app={app} which={sheet} tools={names} upstreamTimeout={upstreamTimeout} remoteRps={remoteRps} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void load(); }} />
         </React.Suspense>
       )}
 
@@ -558,7 +583,7 @@ export function ServerPage({ id, tab }: Props) {
         <AlertDialogContent className="sm:max-w-[560px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{"Pause " + app.name + "?"}</AlertDialogTitle>
-            <AlertDialogDescription>An admin pause stops live traffic: its tools leave every session's list and every call to it is denied until you enable it again. Its process is stopped; a remote server is left running on its own host.</AlertDialogDescription>
+            <AlertDialogDescription>Its tools leave every session's list and calls are denied until you enable it. Straza stops its process. A remote server keeps running on its own host.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -572,17 +597,16 @@ export function ServerPage({ id, tab }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>{"Remove " + app.name + "?"}</AlertDialogTitle>
             <AlertDialogDescription>
-              {"The server leaves the list. "}
               {reach.length
-                ? <>{"Its access rows for "}<b className="font-semibold text-foreground">{reach.join(", ")}</b>{" and its stored secrets are deleted, and sessions calling its tools find them gone."}</>
-                : "No role has access to it; its stored secrets are deleted."}
-              {" Rules naming it in policies stay and gate nothing until a server with this name is installed again."}
+                ? <>{"Its access rows for "}<b className="font-semibold text-foreground">{reach.join(", ")}</b>{REMOVE_DELETES}</>
+                : REMOVE_NO_ROLE}
+              {REMOVE_RULES_STAY}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <Button variant="outline" onClick={() => { setAsk(null); void remover.saveDraft(removal); }}>{SAVE_DRAFT}</Button>
-            <AlertDialogAction className="bg-danger text-white hover:bg-danger/90" onClick={() => void remover.saveAndPublish(removal)}>{REMOVE_OPEN}</AlertDialogAction>
+            <AlertDialogAction className={DANGER_FILL} onClick={() => void remover.saveAndPublish(removal)}>{REMOVE_OPEN}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

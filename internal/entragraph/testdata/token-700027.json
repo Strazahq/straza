@@ -1,0 +1,9 @@
+{
+  "error": "invalid_client",
+  "error_description": "AADSTS700027: The certificate with identifier used to sign the client assertion is not registered on application. [Reason - The key was not found., Please visit the Azure Portal, Graph Explorer or directly use MS Graph to see configured keys for app Id 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'.] Trace ID: dddddddd-4444-4444-8444-dddddddddddd Correlation ID: eeeeeeee-5555-4555-8555-eeeeeeeeeeee Timestamp: 2026-11-07 17:41:00Z",
+  "error_codes": [700027],
+  "timestamp": "2026-11-07 17:41:00Z",
+  "trace_id": "dddddddd-4444-4444-8444-dddddddddddd",
+  "correlation_id": "eeeeeeee-5555-4555-8555-eeeeeeeeeeee",
+  "error_uri": "https://login.microsoftonline.com/error?code=700027"
+}

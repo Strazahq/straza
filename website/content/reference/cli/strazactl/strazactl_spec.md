@@ -2,7 +2,7 @@
 title: strazactl spec
 description: Work with the Straza spec artifacts
 pagetype: reference
-weight: 96
+weight: 90
 draft: false
 sources:
   - cmd/strazactl

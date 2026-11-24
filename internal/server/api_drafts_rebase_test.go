@@ -357,8 +357,7 @@ func TestStaleFixNamesCheckAgainOnEveryDoor(t *testing.T) {
 	f := newDraftsFixture(t, nil)
 	ctx := context.Background()
 	rob := seedAgent(t, f.app, "rob", "kim", DraftConfigRole)
-	const fix = "Check the draft again with Check again on the console under Drafts. " +
-		"Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."
+	const fix = "Check the draft again with Check again on the console under Drafts."
 	byAPI := f.create(t, f.root, draftApp("github", githubURL, "Words of the api door.")).Draft.ID
 	byConsole := f.create(t, f.console, draftApp("github", githubURL, "Words of the console.")).Draft.ID
 	byBot := f.agentDraft(t, rob, draftApp("jira", "https://jira.example/mcp", "Words of the agent."))

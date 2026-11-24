@@ -1,0 +1,7 @@
+{
+  "id_token": "${ID_TOKEN}",
+  "harness": { "name": "claude-code", "version": "2.1.0" },
+  "attestation": { "managed": false, "hashes": {} },
+  "host": "build-box-7",
+  "folder": "~/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/a-folder-name-of-thirty-two-byte/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}

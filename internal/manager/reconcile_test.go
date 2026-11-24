@@ -20,7 +20,7 @@ import (
 // whoami calls the tagged server through a manager and answers the tag of the
 // upstream it reached.
 func whoami(ctx context.Context, m *Manager) (string, error) {
-	res, err := m.Call(ctx, "tagged", "whoami", nil, nil, nil)
+	res, err := m.Call(ctx, "ses-1", "", "tagged", "whoami", nil, nil, nil)
 	if err != nil {
 		return "", err
 	}
@@ -271,7 +271,9 @@ func TestConvergeLeavesServingInstancesAlone(t *testing.T) {
 		}
 	}()
 	wg.Wait()
-	if instanceOf(b, "tagged") != inst || up.sessions.Load() != before {
+	// The calls run for one Straza session, which opens one upstream session
+	// of its own beside the app-level one.
+	if instanceOf(b, "tagged") != inst || up.sessions.Load() != before+1 {
 		t.Error("the reconciles replaced an instance whose row did not change")
 	}
 }
@@ -336,7 +338,7 @@ func TestConvergeStartsAServerWhoseSecretArrived(t *testing.T) {
 			waitStatus(t, b, "parked", StatusRunning)
 			// A reply that holds the injected secret is withheld, so the
 			// withheld reply is what shows that the server on b reads it.
-			res, err := b.Call(ctx, "parked", "env", mustJSON(t, map[string]string{"name": "TOKEN"}), secret, nil)
+			res, err := b.Call(ctx, "ses-1", "", "parked", "env", mustJSON(t, map[string]string{"name": "TOKEN"}), secret, nil)
 			if !errors.Is(err, ErrCredentialEcho) {
 				t.Errorf("the server on b answers TOKEN with %v, %v, want the withheld echo of the secret set through a", res, err)
 			}

@@ -168,10 +168,12 @@ func (p *publishTx) dropPause(ctx context.Context, name string) error {
 
 // putRoleRow writes a role put's row: a new role with its owner resolved
 // by name, kind straza stored as kind business on the control plane as the
-// create route stores it, or a changed description. The kind and name of a
-// live role never change. An implied put writes nothing here, because its
-// change is the effect of the removal that implies it, and it names the
-// roles that go which it implied.
+// create route stores it, or a live role's description and updated_at.
+// Every put that reaches a live role changes it, in its description, its
+// access row or its edges, so updated_at moves with each. The kind and name
+// of a live role never change. An implied put moves updated_at alone,
+// because its change is the effect of the removal that implies it, and it
+// names the roles that go which it implied.
 func (p *publishTx) putRoleRow(ctx context.Context, i int) error {
 	it, lo, out := p.plan.Items[i], &p.live[i], p.outcomes[i]
 	if it.Ref.Kind != kindRole || it.Op != opPut {
@@ -184,14 +186,12 @@ func (p *publishTx) putRoleRow(ctx context.Context, i int) error {
 				out.ImpliesRemoved = append(out.ImpliesRemoved, name)
 			}
 		}
-		return nil
+		res, err := p.tx.ExecContext(ctx, p.r.s.q(`UPDATE roles SET updated_at = $1 WHERE id = $2`), p.r.s.tArg(p.at), lo.role.ID)
+		return p.affectOne(res, err, it.Ref)
 	}
 	want := it.Role.Role
 	if lo.role != nil {
 		out.ID = lo.role.ID
-		if lo.role.Description == want.Description {
-			return nil
-		}
 		res, err := p.tx.ExecContext(ctx, p.r.s.q(`UPDATE roles SET description = $1, updated_at = $2 WHERE id = $3`),
 			want.Description, p.r.s.tArg(p.at), lo.role.ID)
 		return p.affectOne(res, err, it.Ref)

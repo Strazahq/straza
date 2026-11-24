@@ -173,15 +173,19 @@ func (c *check) hostRisks(name string, live App, had bool, next App) []Finding {
 			oldHost, kind+" "+host))
 	}
 	if wasRemote && host == oldHost && schemeOf(live.URL) == "https" && schemeOf(next.URL) == "http" {
-		what := "every call travels"
+		what := "Every call travels"
 		if kind := credentialSent(next); kind != "" {
-			what = credentialWords(name, kind) + " and every call travel"
+			what = "Every call and " + credentialWords(name, kind) + " travel"
 		}
-		out = append(out, risk(codePlainHTTP, object, host, fmt.Sprintf("%s will be reached at %s over plain http, where it used https, so %s unencrypted.", name, host, what),
+		out = append(out, risk(codePlainHTTP, object, host, fmt.Sprintf("%s will be reached over plain http at %s, not https. %s unencrypted.", name, host, what),
 			"https://"+host+pathWords(live.URL), "http://"+host+pathWords(next.URL)))
 	}
 	if phrase, class := unusualHost(host); host != oldHost && class != "" {
-		out = append(out, risk(codeUnusualHost, object, host, fmt.Sprintf("%s is reached at %s, %s, where Straza's own requests reach what they should not.%s", name, host, phrase, dialNote(class)), "", host+" "+class))
+		sentence := fmt.Sprintf("%s is reached at %s, %s that Straza's own requests should not reach.", name, host, phrase)
+		if class == "punycode" {
+			sentence = fmt.Sprintf("%s is reached at %s, %s.", name, host, phrase)
+		}
+		out = append(out, risk(codeUnusualHost, object, host, sentence+dialNote(class), "", host+" "+class))
 	}
 	switch {
 	case host != oldHost && !c.hostInUse(host):
@@ -394,7 +398,7 @@ func sharedRisks(name string, live, next App) []Finding {
 	}
 	if (live.Credential == CredentialToken || live.Credential == CredentialOAuth) && next.Credential == credentialStatic {
 		out = append(out, risk(codeSharedAccount, object, "", fmt.Sprintf(
-			"Calls to %s will use one shared account instead of each person's own sign-in, so %s sees one identity.", name, name), live.Credential, "shared"))
+			"Calls to %s will use one shared account instead of each person's own sign-in.", name), live.Credential, "shared"))
 	}
 	return out
 }

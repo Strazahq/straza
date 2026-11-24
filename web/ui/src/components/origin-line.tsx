@@ -73,7 +73,7 @@ export function OriginLine({ object, name, file, differs }: Props) {
 
   const doors = [fileDraft, others[0]].filter((d): d is DraftSummary => !!d);
   return (
-    <div className="flex flex-col items-start gap-1 rounded-md border border-border bg-card px-3 py-2.5 text-sm leading-relaxed text-text-2" data-origin>
+    <div className="flex flex-col items-start gap-1 rounded-md border border-border bg-card px-3 py-2.5 text-dense leading-relaxed text-text-2" data-origin>
       <p className="m-0 max-w-[75ch]"><b className="font-semibold text-foreground">{head}</b></p>
       {lines.map((l) => <p key={l} className="m-0 max-w-[75ch]">{l}</p>)}
       {doors.length > 0 && (

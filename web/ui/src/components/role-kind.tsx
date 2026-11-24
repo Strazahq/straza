@@ -1,30 +1,28 @@
-import { BriefcaseIcon, IdCardIcon, type LucideIcon, ServerCogIcon, ServerIcon, ShieldCogIcon, UserCheckIcon } from "lucide-react";
-import { WordBadge } from "@/components/users-table";
+import { Pill, Tag } from "@/components/chip";
+import { KIND_ICON } from "@/components/kind-icon";
 import type { RoleRow } from "@/lib/api";
+import type { Kind as IconKind } from "@/lib/chip-words";
 import { KIND_WORD, type Kind, MCP_ADMIN, kindOf } from "@/lib/role-words";
 import { cn } from "@/lib/utils";
 
-// The kind marks of the Roles area: one glyph and one tone per kind,
-// defined here and nowhere else, so
-// the list, the role page badge, the wizard cards and the palette agree and
-// a later change lands everywhere at once.
+// The kind marks of the Roles area: one glyph per kind, defined here and
+// nowhere else, so the list, the role page badge, the wizard cards and the
+// palette agree and a later change lands everywhere at once.
 
 // Mark is a role's kind, or one of the two MCP admin readings of the straza
 // kind: the role a server names as its admin role, and the product's
 // global one.
 export type Mark = Kind | "server-admin" | "global-admin";
 
-// MarkTone is the badge tone a mark paints in: the two kinds that carry
-// tools are told apart by hue, the rest stay muted.
-export type MarkTone = "accent" | "teal" | "plain";
-
-export const MARKS: Record<Mark, { icon: LucideIcon; tone: MarkTone }> = {
-  application: { icon: IdCardIcon, tone: "accent" },
-  business: { icon: BriefcaseIcon, tone: "teal" },
-  approver: { icon: UserCheckIcon, tone: "plain" },
-  straza: { icon: ShieldCogIcon, tone: "plain" },
-  "server-admin": { icon: ServerIcon, tone: "plain" },
-  "global-admin": { icon: ServerCogIcon, tone: "plain" },
+// MARKS names the kind whose icon each mark draws. Both MCP admin readings
+// draw the server admin role's icon.
+export const MARKS: Record<Mark, IconKind> = {
+  application: "role-application",
+  business: "role-business",
+  approver: "role-approver",
+  straza: "role-straza",
+  "server-admin": "role-server-admin",
+  "global-admin": "role-server-admin",
 };
 
 // Marked is what markOf needs of a role: the kind, and the name when the
@@ -44,19 +42,28 @@ export function markOf(role: Marked, administers?: string[] | null): Mark {
   return kind;
 }
 
-const GLYPH_TONE: Record<MarkTone, string> = { accent: "text-link", teal: "text-teal", plain: "text-muted-foreground" };
-
-// KindGlyph draws a mark's glyph, hidden from assistive technology: the
-// kind stays a word beside it wherever the glyph appears.
+// KindGlyph draws a mark's glyph in the muted colour, hidden from assistive
+// technology: the kind stays a word beside it wherever the glyph appears.
+// Teal marks an AI agent and nothing else, so no role kind has a hue.
 export function KindGlyph({ mark, className }: { mark: Mark; className?: string }) {
-  const Icon = MARKS[mark].icon;
-  return <Icon aria-hidden="true" data-kind-glyph={mark} className={cn("size-4 shrink-0", GLYPH_TONE[MARKS[mark].tone], className)} />;
+  const Icon = KIND_ICON[MARKS[mark]];
+  return <Icon aria-hidden="true" data-kind-glyph={mark} className={cn("size-4 shrink-0 text-muted-foreground", className)} />;
 }
 
-// RoleKindBadge names a role's kind, with its glyph inside. The list has no
-// Kind column, since the category is the kind; the role's page, the
-// Composes rows and the wizard's review carry it.
+// RoleKindBadge names a role's kind as a fact, a round pill with its glyph
+// inside. The role's page and the wizard's review carry it.
 export function RoleKindBadge({ role, administers }: { role: Marked; administers?: string[] | null }) {
-  const mark = markOf(role, administers);
-  return <WordBadge word={KIND_WORD[kindOf(role)]} tone={MARKS[mark].tone} attr="data-kind" lead={<KindGlyph mark={mark} />} />;
+  const word = KIND_WORD[kindOf(role)];
+  return <Pill data-kind={word}><KindGlyph mark={markOf(role, administers)} className="size-3.5" />{word}</Pill>;
+}
+
+// RoleKindTag names a role in a cell or a line with its kind's icon. A role
+// the page holds no row for keeps a plain tag, since its kind is not known
+// there. A name wider than its place is cut short, whole on hover.
+export function RoleKindTag({ name, role, administers }: { name: string; role?: Marked | null; administers?: string[] | null }) {
+  return (
+    <Tag icon={role ? KIND_ICON[MARKS[markOf(role, administers)]] : undefined} title={name} className="mr-1 max-w-full" data-role-kind-tag={name}>
+      <span className="min-w-0 truncate">{name}</span>
+    </Tag>
+  );
 }

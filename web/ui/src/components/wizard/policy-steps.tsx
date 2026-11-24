@@ -1,36 +1,41 @@
 import * as React from "react";
-import { XIcon } from "lucide-react";
+import { CheckIcon, XIcon } from "lucide-react";
 import { HEAD } from "@/components/data-table";
 import { FetchError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { ApprovalChoice, Choice, SECONDS, spanOf } from "@/components/approval-choice";
+import { OutcomeChip, Pill, Tag, ToolChip } from "@/components/chip";
+import { KIND_ICON } from "@/components/kind-icon";
+import { Segmented } from "@/components/segmented";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RadioGroup } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CAPS, CardGroup, HINT, OptionCard } from "@/components/wizard/parts";
+import { CAPS, CardGroup, HINT, OptionCard, ReviewFacts } from "@/components/wizard/parts";
 import { MachineTools, NewRoleName } from "@/components/wizard/harness-steps";
+import { YamlFold } from "@/components/yaml-fold";
 import { SPONSOR, type Shape } from "@/lib/access-plan";
 import type { DefaultDenials, PreviewEntry, RoleRow, ValidateAnswer } from "@/lib/api";
+import type { Outcome } from "@/lib/chip-words";
 import {
   ALSO_CREATES, GROUP_MACHINES, GROUP_REGISTERED, HARNESS_HINT, MACHINE_SERVER_HINT, NOT_SEEN, SERVER_NAME, SERVER_NAME_HINT, THESE_TOOLS, WHO_NEW, WHOLE_MACHINE_SERVER,
   alsoCreates, deniedLine, everyoneAllow, toolsOf, whoNewLine,
 } from "@/lib/harness-words";
-import { type NewLane, type Plain, type Who, buildRule, ruleView, slug } from "@/lib/policy-model";
+import { type NewLane, type Plain, type RuleView, type Who, buildRule, ruleView, slug } from "@/lib/policy-model";
 import {
-  ADD_PICK, ALLOW_HELP, CALLS_Q, DENY_LEDE, DENY_Q, DEPENDS_ON_ROLE, EVERYONE, EVERYONE_SERVERS, HOW_Q,
-  INTENT, LANE_LABEL, LINE_NUMBERS, NAME_BAD, NAME_FREE, NAME_HINT, NAME_TAKEN,
-  NET_LINE, NO_TOOLS, NOT_REACHED_TODAY, OR_PICK, PATHS_EXAMPLE, PATHS_Q, PATTERNS_EXAMPLE, PATTERNS_Q, PICK_ALL_TITLE, REASON, REASON_HINT,
-  RECORDING_NOTE, REVIEW_FACT, REVIEW_NAME, ROLE_CAP, ROLE_SEARCH_FROM, RUNS_TODAY, SELECTED_ROLE, SERVER, SERVERS_NARROWED_HELP, STORED_AS, SUBJECT_ROLES,
-  TOOL_COLUMN, VALID_NOW, VALID_REVIEW_HELP, WHAT_Q, WHO_EVERYONE, WHO_EVERYONE_LINE, WHO_Q, WHO_ROLE,
-  WHO_ROLE_HELP, WHO_ROLE_LINE, WHOLE_SERVER, WHOLE_SERVER_LINE, WRITE_NEW_INSTEAD, WRITE_YAML, addToExisting,
-  advisoryLine, alreadyToday, existingSet, holdWords, holdersToday, howLede, pickedCount, reachLine, reasonApprove, reasonDeny, removePick,
-  roleCount, searchRoles, sentence, serversNarrowed, singular, subjectOpening, subjectWords, ticketWords, validWords, whoWords,
+  ADD_PICK, ALLOW_HELP, CALLS_Q, DENY_LEDE, DENY_Q, DEPENDS_ON_ROLE, EVERYONE, EVERYONE_SERVERS, EVERY_WORD, HOW_Q,
+  INTENT, LANE_LABEL, NAME_BAD, NAME_FREE, NAME_HINT, NAME_TAKEN,
+  NET_LINE, NO_TOOLS, NOT_REACHED_TODAY, OR_PICK, PATHS_EXAMPLE, PATHS_Q, PATTERNS_EXAMPLE, PATTERNS_Q, PICK_ALL_TITLE, PRIORITY_HELP, REASON, REASON_HINT,
+  REASON_HINT_DENY, REVIEW_FACT, REVIEW_NAME, ROLE_CAP, ROLE_SEARCH_FROM, RUNS_TODAY, SELECTED_ROLE, SERVER, SERVERS_NARROWED_HELP, STORED_AS, SUBJECT_ROLES,
+  TOOL_COLUMN, VALID_REVIEW_HELP, WHAT_Q, WHO_EVERYONE, WHO_EVERYONE_LINE, WHO_Q, WHO_ROLE,
+  WHO_ROLE_HELP, WHO_ROLE_LINE, WHO_SPONSOR, WHO_TEAM, WHOLE_SERVER, WHOLE_SERVER_LINE, WRITE_NEW_INSTEAD, WRITE_YAML, addToExisting,
+  advisoryLine, alreadyToday, existingSet, howLede, pickedCount, reachLine, reasonApprove, reasonDeny, removePick,
+  roleCount, searchRoles, sentence, serversNarrowed, singular, subjectOpening, subjectWords, ticketFact, validPills, waitWords,
 } from "@/lib/policy-words";
 import { cn } from "@/lib/utils";
-import { holders } from "@/lib/words";
+import { holders as holderWords } from "@/lib/words";
 
 // The step bodies of the New policy wizard. The screen holds the draft,
 // runs the reads and owns the footer;
@@ -181,7 +186,7 @@ export function todayWords(role: string | null, reached: boolean, entry: Preview
 // Verdict is the server's reading of the document on the Review step.
 export type Verdict = { ok: ValidateAnswer } | { bad: string };
 
-const H2 = "text-base font-semibold text-foreground";
+const H2 = "text-body leading-6 font-semibold text-foreground";
 const CARDS = "max-w-[900px] grid-cols-[repeat(auto-fit,minmax(260px,1fr))]";
 
 // Chips are the picked names, each one removable.
@@ -189,7 +194,7 @@ function Chips({ names, onRemove }: { names: string[]; onRemove: (name: string) 
   return (
     <>
       {names.map((n) => (
-        <span key={n} data-pick={n} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-px font-mono text-[13px] text-foreground">
+        <span key={n} data-pick={n} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-px font-mono text-caption text-foreground">
           {n}
           <button type="button" aria-label={removePick(n)} className="text-muted-foreground hover:text-foreground" onClick={() => onRemove(n)}>
             <XIcon className="size-3" aria-hidden="true" />
@@ -217,7 +222,6 @@ function ChipInput({ label, hint, names, onChange }: { label: string; hint: stri
         <Input
           aria-label={label}
           value={text}
-          placeholder={hint}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
           className="max-w-xs font-mono"
@@ -252,8 +256,7 @@ export function WhatStep({ intent, onIntent, onWriteYAML }: { intent: Intent; on
           </OptionCard>
         ))}
       </CardGroup>
-      <p className="flex max-w-[80ch] flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
-        {RECORDING_NOTE}
+      <p className="flex max-w-[80ch] flex-wrap items-center gap-1.5 text-caption text-muted-foreground">
         <Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={onWriteYAML}>{WRITE_YAML}</Button>
       </p>
     </div>
@@ -299,7 +302,7 @@ export function WhoStep({ draft, roles, problem, serversOf, onRole, newRole, tak
         <Choice id="who-role" value="role" label={WHO_ROLE} line={<>{WHO_ROLE_LINE} <HelpTip label={WHO_ROLE} text={WHO_ROLE_HELP} /></>} />
         {newRole !== null && <Choice id="who-new" value="new" label={WHO_NEW} line={whoNewLine(what)} />}
       </RadioGroup>
-      {which === "everyone" && draft.intent === "allow" && <p className="max-w-[80ch] text-sm text-warn" data-everyone-allow>{everyoneAllow(subject)}</p>}
+      {which === "everyone" && draft.intent === "allow" && <p className="max-w-[80ch] text-dense text-warn" data-everyone-allow>{everyoneAllow(subject)}</p>}
       {which === "new" && <NewRoleName name={draft.role || ""} taken={taken} onName={onNewRole} />}
 
       {which === "role" && (
@@ -313,7 +316,7 @@ export function WhoStep({ draft, roles, problem, serversOf, onRole, newRole, tak
                 placeholder={searchRoles(roles.length)}
                 className="h-9 max-w-xs"
               />
-              <span className="text-[13px] text-muted-foreground" data-role-count>{roleCount(shown.length, roles.length)}</span>
+              <span className="text-caption text-muted-foreground" data-role-count>{roleCount(shown.length, roles.length)}</span>
             </div>
           )}
           <CardGroup label={WHO_ROLE} value={draft.role || ""} onPick={onRole} className={CARDS}>
@@ -323,13 +326,13 @@ export function WhoStep({ draft, roles, problem, serversOf, onRole, newRole, tak
                 value={r.name}
                 label={r.name}
                 name={r.name}
-                tag={holders(r.holder_count || 0)}
+                tag={holderWords(r.holder_count || 0)}
                 on={draft.role === r.name}
                 line={(r.description ? r.description + " " : "") + reachLine(serversOf(r.name))}
               />
             ))}
           </CardGroup>
-          {selectedHidden && <p className="text-sm text-text-2" data-selected-role>{SELECTED_ROLE} <strong className="font-semibold text-foreground">{draft.role}</strong></p>}
+          {selectedHidden && <p className="text-dense text-text-2" data-selected-role>{SELECTED_ROLE} <strong className="font-semibold text-foreground">{draft.role}</strong></p>}
         </div>
       )}
     </div>
@@ -378,21 +381,7 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
   return (
     <div className="flex flex-col gap-4" data-step="calls">
       <h2 className={H2}>{CALLS_Q}</h2>
-      <div role="group" aria-label={CALLS_Q} className="flex flex-wrap items-center gap-1.5">
-        {lanes.map((l) => (
-          <Button
-            key={l}
-            variant="outline"
-            size="sm"
-            aria-pressed={draft.lane === l}
-            data-lane={l}
-            className={cn("h-8", draft.lane === l && "border-link bg-accent-bg text-foreground")}
-            onClick={() => pickLane(l)}
-          >
-            {LANE_LABEL[l]}
-          </Button>
-        ))}
-      </div>
+      <Segmented label={CALLS_Q} value={draft.lane} onChange={pickLane} options={lanes.map((l) => ({ value: l, label: LANE_LABEL[l], "data-lane": l }))} />
 
       {draft.lane === "mcp" && (
         <>
@@ -415,9 +404,9 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
                 </SelectGroup>
               </SelectContent>
             </Select>
-            {draft.role === null && <span className="text-[13px] text-muted-foreground">{EVERYONE_SERVERS}</span>}
+            {draft.role === null && <span className="text-caption text-muted-foreground">{EVERYONE_SERVERS}</span>}
             {narrowed && (
-              <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground" data-narrowed>
+              <span className="flex items-center gap-1.5 text-caption text-muted-foreground" data-narrowed>
                 {serversNarrowed(draft.role as string, servers.length, totalServers)}
                 <HelpTip label={SERVER} text={SERVERS_NARROWED_HELP} />
               </span>
@@ -430,18 +419,18 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
               <span className={HINT}>{SERVER_NAME_HINT}</span>
             </div>
           )}
-          {onMachine && <p className="max-w-[80ch] text-[13px] text-muted-foreground" data-machine-server>{MACHINE_SERVER_HINT}</p>}
+          {onMachine && <p className="max-w-[80ch] text-caption text-muted-foreground" data-machine-server>{MACHINE_SERVER_HINT}</p>}
 
           <div className="flex flex-wrap items-center gap-2">
             <Switch id="whole-server" checked={draft.wholeServer} onCheckedChange={(v) => onChange({ wholeServer: v })} />
-            <label htmlFor="whole-server" className="text-sm text-foreground">{WHOLE_SERVER}</label>
+            <label htmlFor="whole-server" className="text-dense text-foreground">{WHOLE_SERVER}</label>
             {!draft.wholeServer && <>
-              <span className="text-[13px] text-muted-foreground">{OR_PICK}</span>
+              <span className="text-caption text-muted-foreground">{OR_PICK}</span>
               {!onMachine && <Chips names={picked} onRemove={(t) => onChange({ tools: picked.filter((x) => x !== t) })} />}
             </>}
-            {(draft.wholeServer || !onMachine) && <span className="text-[13px] text-muted-foreground" data-picked-count>{draft.wholeServer ? WHOLE_SERVER_LINE : pickedCount(picked.length, tools.length)}</span>}
+            {(draft.wholeServer || !onMachine) && <span className="text-caption text-muted-foreground" data-picked-count>{draft.wholeServer ? WHOLE_SERVER_LINE : pickedCount(picked.length, tools.length)}</span>}
           </div>
-          {onMachine && draft.wholeServer && <p className="max-w-[80ch] text-sm text-warn" data-whole-machine>{WHOLE_MACHINE_SERVER}</p>}
+          {onMachine && draft.wholeServer && <p className="max-w-[80ch] text-dense text-warn" data-whole-machine>{WHOLE_MACHINE_SERVER}</p>}
           {onMachine && <MachineTools lane="mcp" denied={toolsOf(denials, draft.app)} picked={picked} whole={draft.wholeServer} onPick={(next) => onChange({ tools: next })} />}
 
           {!onMachine && <div className="max-w-[760px] overflow-x-auto rounded-md border border-border bg-card">
@@ -462,17 +451,17 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
                     />
                   </TableHead>
                   <TableHead className="h-10"><span className={HEAD}>{TOOL_COLUMN.tool}</span></TableHead>
-                  <TableHead className="h-10"><span className={HEAD}>{TOOL_COLUMN.today + " " + (draft.role === null ? EVERYONE : draft.role || "")}</span></TableHead>
+                  <TableHead className="h-10 py-2 whitespace-normal [overflow-wrap:anywhere]" data-today-head><span className={HEAD}>{TOOL_COLUMN.today + " " + (draft.role === null ? EVERYONE : draft.role || "")}</span></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {tools.length === 0 && (
-                  <TableRow><TableCell colSpan={3} className="text-sm text-muted-foreground">{NO_TOOLS}</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={3} className="text-dense text-muted-foreground">{NO_TOOLS}</TableCell></TableRow>
                 )}
                 {tools.map((t) => {
                   const today = todayWords(draft.role === null ? null : draft.role || "", reaches(t), preview[t]);
                   return (
-                    <TableRow key={t} data-tool={t} className="text-sm">
+                    <TableRow key={t} data-tool={t} className="text-dense">
                       <TableCell className="px-2">
                         <input
                           type="checkbox"
@@ -483,8 +472,8 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
                           className="size-4 accent-primary"
                         />
                       </TableCell>
-                      <TableCell className="truncate font-mono text-[13px] text-foreground">{t}</TableCell>
-                      <TableCell className={cn("whitespace-normal text-[13px]", today.muted ? "text-muted-foreground" : "text-text-2")} data-today={t}>{today.text}</TableCell>
+                      <TableCell className="truncate font-mono text-caption text-foreground">{t}</TableCell>
+                      <TableCell className={cn("whitespace-normal text-caption", today.muted ? "text-muted-foreground" : "text-text-2")} data-today={t}>{today.text}</TableCell>
                     </TableRow>
                   );
                 })}
@@ -496,13 +485,13 @@ export function CallsStep({ draft, servers, totalServers, tools, preview, reache
 
       {draft.lane === "harness" && (
         <>
-          <p className="max-w-[80ch] text-sm text-text-2">{HARNESS_HINT}</p>
+          <p className="max-w-[80ch] text-dense text-text-2">{HARNESS_HINT}</p>
           <MachineTools lane="harness" denied={toolsOf(denials, null)} picked={picked} onPick={(next) => onChange({ tools: next })} />
         </>
       )}
       {draft.lane === "shell" && <ChipInput label={PATTERNS_Q} hint={PATTERNS_EXAMPLE} names={draft.patterns} onChange={(patterns) => onChange({ patterns })} />}
       {draft.lane === "files" && <ChipInput label={PATHS_Q} hint={PATHS_EXAMPLE} names={draft.paths} onChange={(paths) => onChange({ paths })} />}
-      {draft.lane === "net" && <p className="max-w-[80ch] text-sm text-text-2">{NET_LINE}</p>}
+      {draft.lane === "net" && <p className="max-w-[80ch] text-dense text-text-2">{NET_LINE}</p>}
     </div>
   );
 }
@@ -541,9 +530,9 @@ export function HowStep({ draft, approvers, onChange }: HowProps) {
         value={draft.reason}
         aria-label={REASON}
         onChange={(e) => onChange({ reason: e.target.value, reasonTyped: true })}
-        className="font-mono text-[13px]"
+        className="font-mono text-caption"
       />
-      <span className={HINT}>{REASON_HINT}</span>
+      <span className={HINT}>{draft.intent === "deny" ? REASON_HINT_DENY : REASON_HINT}</span>
     </div>
   );
 
@@ -551,7 +540,7 @@ export function HowStep({ draft, approvers, onChange }: HowProps) {
     return (
       <div className="flex flex-col gap-4" data-step="how">
         <h2 className={H2}>{DENY_Q}</h2>
-        <p className="max-w-[80ch] text-sm text-text-2">{DENY_LEDE(subjectOpening(view))}</p>
+        <p className="max-w-[80ch] text-dense text-text-2">{DENY_LEDE(subjectOpening(view))}</p>
         {field}
       </div>
     );
@@ -561,7 +550,7 @@ export function HowStep({ draft, approvers, onChange }: HowProps) {
     <div className="flex flex-col gap-5" data-step="how">
       <div className="flex flex-col gap-1">
         <h2 className={H2}>{HOW_Q}</h2>
-        <p className="max-w-[80ch] text-sm text-text-2">{howLede(subjectOpening(view))}</p>
+        <p className="max-w-[80ch] text-dense text-text-2">{howLede(subjectOpening(view))}</p>
       </div>
 
       <div className="max-w-[900px]">
@@ -581,9 +570,14 @@ type ReviewProps = {
   // exists is the live set that already matches exactly this role, offered
   // as the home for the rules.
   exists: string | null;
-  // people are up to two holders of the role today; null when the read
-  // failed, and the fact then names the role alone.
-  people: string[] | null;
+  // holders is how many hold the role today, from the role list; null when
+  // the count is not known, and the fact then names the role alone.
+  holders: number | null;
+  // onMachine says the rule's MCP server runs on a person's machine.
+  onMachine: boolean;
+  // priority is the policy's number as the server's check answered it,
+  // else as the document writes it; null while the document is not read.
+  priority: number | null;
   yaml: string;
   verdict: Verdict | null;
   nameBox: React.RefObject<HTMLInputElement | null>;
@@ -591,29 +585,61 @@ type ReviewProps = {
   onInto: (set: string) => void;
 };
 
+const OUTCOME_OF: Record<Intent, Outcome> = { approve: "approval", deny: "denied", allow: "allowed" };
+// WRAP lets a long name in a fact's tag break inside it, so a narrow window
+// never scrolls sideways.
+const WRAP = "max-w-full whitespace-normal [overflow-wrap:anywhere]";
+
+// callsFact names the calls the rule matches. On the MCP lane the server
+// leads as a tag, then the tools it names or every tool; any other lane
+// reads as the review's subject words.
+function callsFact(draft: Draft, view: RuleView, onMachine: boolean): React.ReactNode {
+  if (draft.lane !== "mcp" || !draft.app) return subjectWords(view);
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <Tag className={WRAP} icon={KIND_ICON[onMachine ? "local-server" : "server"]}>{draft.app}</Tag>
+      {view.names ? view.names.map((n) => <ToolChip key={n}>{n}</ToolChip>) : EVERY_WORD.mcp}
+    </span>
+  );
+}
+
 // ReviewStep asks the name once, offers an existing set as the home for
-// the rules, and shows the document beside what it will do.
-export function ReviewStep({ draft, taken, exists, people, yaml, verdict, nameBox, onName, onInto }: ReviewProps) {
+// the rules, and says what the policy will do: the sentence, the facts,
+// the server's verdict, and the document under a closed fold.
+export function ReviewStep({ draft, taken, exists, holders, onMachine, priority, yaml, verdict, nameBox, onName, onInto }: ReviewProps) {
   const view = viewOf(draft);
   const problem = nameProblem(draft.name, taken);
-  const lines = yaml.split("\n");
 
   const facts: [string, React.ReactNode][] = [
     [
       REVIEW_FACT.applies,
-      <span key="applies" className="flex flex-wrap items-center gap-1.5">
-        <span className="rounded-md border border-border bg-background px-1.5 py-px font-mono text-[13px] text-foreground">{draft.role === null ? EVERYONE : draft.role}</span>
-        {draft.role != null && people && <span className="text-[13px] text-muted-foreground">{holdersToday(people)}</span>}
-      </span>,
+      draft.role == null ? EVERYONE : (
+        <span key="applies" className="flex flex-wrap items-center gap-1.5">
+          <Tag className={WRAP} icon={KIND_ICON["role-application"]}>{draft.role}</Tag>
+          {holders !== null && <span className="text-caption text-muted-foreground" data-holders>{holderWords(holders)}</span>}
+        </span>
+      ),
     ],
-    [draft.intent === "approve" ? REVIEW_FACT.waits : draft.intent === "deny" ? REVIEW_FACT.refused : REVIEW_FACT.allowed, subjectWords(view)],
+    [REVIEW_FACT.calls, callsFact(draft, view, onMachine)],
+    [REVIEW_FACT.outcome, <OutcomeChip key="outcome" outcome={OUTCOME_OF[draft.intent]} />],
   ];
   if (draft.intent === "approve") {
-    facts.push([REVIEW_FACT.who, whoWords(draft.who)]);
-    facts.push([REVIEW_FACT.how, draft.how === "hold" ? holdWords(secondsOf(draft.hold)) : ticketWords(secondsOf(draft.ticket), secondsOf(draft.grant))]);
+    facts.push([
+      REVIEW_FACT.who,
+      draft.who.roles.length ? (
+        <span key="who" className="flex flex-wrap items-center gap-1.5">
+          {WHO_TEAM}
+          {draft.who.roles.map((r) => <Tag key={r} className={WRAP} icon={KIND_ICON["role-approver"]}>{r}</Tag>)}
+        </span>
+      ) : WHO_SPONSOR,
+    ]);
+    facts.push([REVIEW_FACT.how, draft.how === "hold" ? waitWords(secondsOf(draft.hold)) : ticketFact(secondsOf(draft.ticket), secondsOf(draft.grant))]);
   }
   if (draft.makeRole && draft.role) facts.push([ALSO_CREATES, alsoCreates(draft.role)]);
-  if (draft.intent !== "allow") facts.push([REVIEW_FACT.reason, <span key="reason" className="font-mono text-[13px]">{draft.reason}</span>]);
+  if (draft.intent !== "allow") facts.push([REVIEW_FACT.reason, <span key="reason" className="font-mono text-caption">{draft.reason}</span>]);
+  if (priority !== null) {
+    facts.push([REVIEW_FACT.order, <span key="order" className="flex items-center gap-1.5">{priority}<HelpTip label={REVIEW_FACT.order} text={PRIORITY_HELP} /></span>]);
+  }
 
   return (
     <div className="flex flex-col gap-4" data-step="review">
@@ -627,61 +653,44 @@ export function ReviewStep({ draft, taken, exists, people, yaml, verdict, nameBo
           onChange={(e) => onName(e.target.value)}
           className="font-mono"
         />
-        <span className={cn("text-[13px]", problem ? "text-danger" : "text-ok")} data-name-state={problem || "free"}>
+        <span className={cn("text-caption", problem ? "text-danger" : "text-ok")} data-name-state={problem || "free"}>
           {problem === "taken" ? NAME_TAKEN : problem === "bad" ? NAME_BAD : NAME_FREE}
         </span>
         <span className={HINT}>{NAME_HINT}</span>
       </div>
 
       {exists && draft.role && (
-        <div className="flex max-w-[900px] flex-wrap items-center gap-3 rounded-md border border-link/40 bg-accent-bg px-3 py-2 text-sm text-text-2" data-existing={exists}>
+        <div className="flex max-w-[900px] flex-wrap items-center gap-3 rounded-md border border-link/40 bg-accent-bg px-3 py-2 text-dense text-text-2" data-existing={exists}>
           <span>{existingSet(exists, draft.role)}</span>
-          <Button variant="outline" size="sm" className="ml-auto" onClick={() => onInto(draft.into ? "" : exists)}>
+          {/* The label names a policy, so it wraps on a narrow window. */}
+          <Button variant="outline" size="sm" className="ml-auto h-auto min-h-8 max-w-full py-1 text-left whitespace-normal" onClick={() => onInto(draft.into ? "" : exists)}>
             {draft.into ? WRITE_NEW_INSTEAD : addToExisting(exists)}
           </Button>
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[2fr_3fr]">
-        <div className="flex flex-col gap-3">
-          <h2 className={H2}>{sentence(view)}</h2>
-          <dl className="grid grid-cols-[130px_1fr] gap-x-3 gap-y-1.5 text-sm" data-review-facts>
-            {facts.map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-muted-foreground">{k}</dt>
-                <dd className="min-w-0 break-words text-foreground">{v}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
+      <h2 className="text-section leading-7 font-semibold text-foreground [overflow-wrap:anywhere]">{sentence(view)}</h2>
+      <ReviewFacts rows={facts} />
 
-        <div className="flex min-w-0 flex-col gap-2">
-          <span className={CAPS}>{STORED_AS}</span>
-          <div className="grid max-h-[420px] grid-cols-[44px_1fr] overflow-auto rounded-md border border-border bg-background font-mono text-[13px] leading-[1.5]">
-            <pre className="m-0 select-none whitespace-pre border-r border-border py-2.5 pr-2 text-right text-muted-foreground" aria-label={LINE_NUMBERS}>
-              {lines.map((_, i) => <span key={i} className="block">{i + 1}</span>)}
-            </pre>
-            <pre className="m-0 min-w-0 overflow-x-auto px-3 py-2.5 text-text-2" data-policy-yaml>{yaml}</pre>
+      {verdict && "ok" in verdict && (
+        <div className="flex flex-col gap-1.5">
+          <div role="status" className="flex items-center gap-2 rounded-md border border-ok/40 bg-ok-bg px-3 py-2.5 text-dense text-foreground" data-verdict="ok">
+            <CheckIcon aria-hidden="true" className="size-4 shrink-0 text-ok" />
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">{validPills(verdict.ok).map((p) => <Pill key={p}>{p}</Pill>)}</span>
+            <HelpTip label={STORED_AS} text={VALID_REVIEW_HELP} />
           </div>
-
-          {verdict && "ok" in verdict && (
-            <div className="flex flex-col gap-1.5">
-              <div role="status" className="flex items-center gap-1.5 rounded-md border border-ok/40 bg-ok-bg px-3 py-2 text-sm text-text-2" data-verdict="ok">
-                {validWords(verdict.ok, VALID_NOW)}
-                <HelpTip label={STORED_AS} text={VALID_REVIEW_HELP} />
-              </div>
-              {(verdict.ok.advisories || []).map((a, i) => (
-                <div key={i} className="rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-[13px] leading-relaxed text-text-2" data-advisory={a.code}>
-                  {advisoryLine(a.rule, a.text)}
-                </div>
-              ))}
+          {(verdict.ok.advisories || []).map((a, i) => (
+            <div key={i} className="rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-caption leading-relaxed text-text-2" data-advisory={a.code}>
+              {advisoryLine(a.rule, a.text)}
             </div>
-          )}
-          {verdict && "bad" in verdict && (
-            <div role="alert" className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm leading-relaxed text-text-2" data-verdict="bad">{verdict.bad}</div>
-          )}
+          ))}
         </div>
-      </div>
+      )}
+      {verdict && "bad" in verdict && (
+        <div role="alert" className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-dense leading-relaxed text-text-2" data-verdict="bad">{verdict.bad}</div>
+      )}
+
+      <YamlFold note={STORED_AS} text={yaml} data-policy-yaml />
     </div>
   );
 }

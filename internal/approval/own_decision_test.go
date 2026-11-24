@@ -13,7 +13,7 @@ import (
 // their own request can be decided instead of answering "internal error".
 func TestDecideErrorTextOwnDecision(t *testing.T) {
 	got := decideErrorText(ErrUnsignedOwnDecision)
-	for _, want := range []string{"your own request", "enrolled phone", "This browser"} {
+	for _, want := range []string{"your own request", "enrolled phone", "under Requests on the self-service page", "set up to approve"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("decideErrorText = %q, want it to name %q", got, want)
 		}

@@ -6,7 +6,9 @@
 package localapi
 
 import (
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/strazahq/straza/internal/policy"
 )
@@ -76,14 +78,34 @@ type Refusal struct {
 // live one of the same window.
 type SessionRequest struct {
 	Harness Harness `json:"harness"`
+	// Folder is the folder the window started in, with the person's home
+	// directory at its start written as ~, empty when the thin client does
+	// not know it or is older. Only a start that checks in keeps it.
+	Folder string `json:"folder,omitempty"`
 }
 
-// Pack is one knowledge pack delivered at session start.
-type Pack struct {
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	Content  string `json:"content"`
-	Checksum string `json:"checksum"`
+// FolderMax is the most bytes of a folder a session start and a check-in
+// carry, the server's bound on the check-in's folder.
+const FolderMax = 1024
+
+// CleanFolder returns folder as a session start and a check-in carry it:
+// empty when it holds a NUL character or is not valid UTF-8, which the
+// server refuses, and otherwise cut from the front to at most FolderMax
+// bytes on a rune boundary, because the end of a path says the most. The
+// thin client applies it after it writes the home directory as ~, and the
+// service applies it again, since any local process can call it.
+func CleanFolder(folder string) string {
+	if strings.ContainsRune(folder, 0) || !utf8.ValidString(folder) {
+		return ""
+	}
+	if len(folder) <= FolderMax {
+		return folder
+	}
+	cut := len(folder) - FolderMax
+	for !utf8.RuneStart(folder[cut]) {
+		cut++
+	}
+	return folder[cut:]
 }
 
 // SessionAnswer is the governed session as the harness banner shows it. It
@@ -96,7 +118,6 @@ type SessionAnswer struct {
 	SnapshotID  string                  `json:"snapshot_id"`
 	ServerURL   string                  `json:"server_url"`
 	Capture     policy.CaptureDirective `json:"capture"`
-	Packs       []Pack                  `json:"packs,omitempty"`
 	Reused      bool                    `json:"reused,omitempty"`
 	// StartText is the governance paragraph strazad wrote at check-in, nil
 	// when the server or the service is older and sent none.

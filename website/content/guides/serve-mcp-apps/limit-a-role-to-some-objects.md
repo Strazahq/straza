@@ -49,7 +49,7 @@ ghapp is a remote server that reads a bearer token, and Straza sends `GHAPP_MCP_
 {{< console >}}
 {{< clicks "MCP servers" "Add MCP server" >}}
 
-On Server, type `ghapp`, pick **A server you run, over HTTP** and enter ghapp's address. The Credential step comes next: pick **One shared secret for this server**, type the value of `GHAPP_MCP_GATEWAY_SECRET`, and leave the way it is sent on `A bearer token in Authorization`. Press **Save and publish** on Review. [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md" >}}) walks each step of the wizard.
+On Server, enter ghapp's address, and the name fills in as `ghapp`. Where the step offers ways to reach a server, **A server you run, over HTTP** is the one picked. The Credential step comes next: pick **One shared secret**, type the value of `GHAPP_MCP_GATEWAY_SECRET`, and leave the way it is sent on `A bearer token in Authorization`. Press **Save and publish** on Review. [Add a server]({{< relref "guides/serve-mcp-apps/add-a-server.md" >}}) walks each step of the wizard.
 {{< /console >}}
 
 {{< cli >}}
@@ -109,11 +109,11 @@ Pinning saves a copy of ghapp's marks in its manifest. It goes through a draft, 
 
 {{< clicks "MCP servers" "ghapp" "Overview" "Pin repos" >}}
 
-While ghapp's tools name repositories and nothing is pinned, Overview opens with a card that reads `ghapp's tools work on repos. Pin them so roles can pick repos and Straza can list them.` Its first step, `Pin repos. You see what gets pinned before anything changes.`, carries the button **Pin repos**. Its second step waits for the first.
+While ghapp's tools name repositories and nothing is pinned, Overview opens with a card that reads `ghapp's tools work on repos. Pin them so roles can pick repos and Straza can list them.` Its first step, `Pin repos.`, carries the button **Pin repos**. Its second step waits for the first.
 
-The dialog `Pin repos on ghapp?` says what pinning does: `Straza will check every call against the repos the caller's role covers. Nobody's access changes when you pin: roles made before keep every repo.` Under it, **Object type** reads `repo (repos)`, **Read from** reads `the repo argument, on 14 of 15 tools`, and **Listed by** reads `repo_list, which reaches every repo`. The line `All of it comes from ghapp's own tool marks.` carries a help icon that says what happens when ghapp changes a mark later.
+The dialog `Pin repos on ghapp?` says what pinning does: `Straza will check every call against the repos the caller's role covers. Nobody's access changes when you pin: roles made before keep every repo.` Under it, **Object type** reads `repo`, **Read from** reads `the repo argument, on 14 of 15 tools`, and **Listed by** reads `repo_list, which reaches every repo`. A help icon under them says what happens when ghapp changes a mark later.
 
-Press **Save draft** to open the draft's page before anything goes live, or **Pin and publish** to make the draft and publish it in one step, as **Save and publish** does in the other editors. Either way the draft is checked and recorded. A draft with nothing to read publishes at once, with the toast `Repos are pinned on ghapp.`, and a warning, such as the one below, opens the publish dialog first. The draft is titled `Change server ghapp`. Its card shows the pinned type and the tool marks, now and after publishing, and ends `No other field changes.` After **Save draft**, publish it with **Publish…** in the band `Before you publish`.
+Press **Save draft** to open the draft's page before anything goes live, or **Pin and publish** to make the draft and publish it in one step, as **Save and publish** does in the other editors. Either way the draft is checked and recorded. A draft with nothing to read publishes at once, with the toast `Repos are pinned on ghapp.`, and a warning, such as the one below, opens the publish dialog first. The draft is titled `Change server ghapp`. Its card shows the pinned type and the tool marks, each as the value now, an arrow and the value after publishing, and ends `No other field changes.` After **Save draft**, publish it with **Publish…** in the band at the top of the draft's page.
 
 {{< fails >}}
 `ghapp is not running, so Straza cannot read its tool marks. Start it, then draft again.`
@@ -228,7 +228,7 @@ Straza lists ghapp's repositories itself, in the background, so that a role can 
 
 After the pin, the card's second step reads `Give Straza the listing credential, a second token that ghapp accepts for repo_list only.` **Set it** opens the field on the row **Listing credential** of the Server authentication card, under the server's own secret. Until then the row reads `Not set.` with **Set one**, and its help icon says what the credential is for.
 
-ghapp on this page already runs with its listing token, so paste that value into the box after `or paste` and press **Store**. The line under the field reads `Put the same value in ghapp's config, where it accepts the token for repo_list. Straza stores it sealed, never sends it on an agent's call, and never shows it again.` Once it is stored, the toast says `The listing credential for ghapp is stored. Straza is listing its repos now.`, the row reads `Stored, sealed` with **Set it again** and **Remove**, and with the value's fingerprint until you leave the page, and the card on Overview goes.
+ghapp on this page already runs with its listing token, so paste that value into the box after `or paste` and press **Store**. The line under the field reads `Put the same value in ghapp's config. Straza never sends it on an agent's call or shows it again.` Once it is stored, the toast says `The listing credential for ghapp is stored. Straza is listing its repos now.`, the row reads `Stored` with **Set it again** and **Remove**, and with the value's fingerprint until you leave the page, and the card on Overview goes.
 
 For a server whose config holds no value yet, press **Generate** instead. It fills the box with a random value, shown in clear with **Copy** and the line `Put this value in ghapp's config and restart ghapp, then press Store.` Press **Store** only after ghapp runs with the value as `GHAPP_MCP_LISTING_TOKEN`, because storing starts a listing that fails until ghapp holds it. If a listing failed anyway, **List again** on the Repos tab asks for another.
 {{< /console >}}
@@ -257,7 +257,7 @@ Straza lists ghapp's repositories within about 15 seconds of the store. A listin
 {{< console >}}
 {{< clicks "MCP servers" "ghapp" "Repos" >}}
 
-The tab carries ghapp's plural and appears once the type is pinned. Its strip reads `ghapp lists its repos with repo_list.` and then the last listing with its count. Each repository is one row with the columns Repo, team, Covered by and In open drafts, and the help icon beside its name gives its id. Until a role covers it, a row reads `no role` and `No agent reaches it.` under Covered by. In open drafts names each open draft you may read that would add a role to the repository or drop one, such as `Draft 41 adds ghapp-write-payments`.
+The tab carries ghapp's plural and appears once the type is pinned. Its strip reads `ghapp lists its repos with repo_list.` and then the last listing with its count. Each repository is one row with the columns Repo, team, Covered by and In open drafts, and the help icon beside its name gives its id. Until a role covers it, a row reads `no role` under Covered by. In open drafts names each open draft you may read that would add a role to the repository or drop one, such as `Draft 41 adds ghapp-write-payments`.
 {{< /console >}}
 
 
@@ -291,14 +291,14 @@ In the demo organization, `ghapp-straza-test/pay-api` and `ghapp-straza-test/pay
 
 {{< clicks "Roles" "New role" "Application role" >}}
 
-On `Kind, server and name`, pick ghapp, type `write-payments` after its name and press **Next**. On Access, pick `Only the tools you tick` under **Which tools** and tick `issue_comment`, `issue_create`, `pr_comment`, `pr_create` and `pr_merge`. Under the tools, **On which repos** says `ghapp says 14 of its tools work on one repo. Pick which repos this role reaches with them.` It offers two cards:
+On `Kind, server and name`, pick ghapp, type `write-payments` after its name and press **Next: Access**. On Access, pick `Only the tools you tick` under **Which tools** and tick `issue_comment`, `issue_create`, `pr_comment`, `pr_create` and `pr_merge`. Under the tools, **On which repos** says `ghapp says 14 of its tools work on one repo. Pick which repos this role reaches with them.` It offers two cards:
 
 | Card | Its line |
 |---|---|
 | Every repo | `All`, today's count, then `today, and every repo ghapp lists later.` |
 | These repos | `Pick from ghapp's list. A repo added later stays out until you add it.` |
 
-Pick **These repos** and tick `ghapp-straza-test/pay-api` and `ghapp-straza-test/pay-web` in the list, which `Filter repos` narrows. With **These repos** picked, `repo_list` cannot be ticked and reads `repo_list cannot be in a role on some repos: nothing keeps it to them. Make a role on every repo for it.` The fold `How it is stored` shows the access row as a role file holds it. Press **Next**, read Review, and press **Save and publish**.
+Pick **These repos** and tick `ghapp-straza-test/pay-api` and `ghapp-straza-test/pay-web` in the list, which `Filter repos` narrows. With **These repos** picked, `repo_list` cannot be ticked and reads `repo_list cannot be in a role on some repos: nothing keeps it to them. Make a role on every repo for it.` The fold **View as YAML**, with the note `How it is stored`, shows the access row as a role file holds it. Press **Next: Review**, read Review, and press **Save and publish**.
 
 Make `ghapp-read` the same way, with `branch_list`, `file_get`, `issue_get`, `issue_list`, `pr_get`, `pr_list`, `repo_get`, `search_code` and `search_issues`, and **Every repo**.
 
@@ -469,7 +469,7 @@ AR:ghapp-read HTTP 204
 AR:ghapp-write-payments HTTP 204
 ```
 
-`AGENT_OID` is the agent in your midPoint. midPoint imports a new Straza role at its next role LiveSync, which runs every 10 seconds on the demo stack, so the loop waits up to 180 seconds for each imported role to appear before it assigns it. The agent holds both roles from its next check-in.
+`AGENT_OID` is the agent in your midPoint. midPoint imports a new Straza role at its next role LiveSync, which runs every 10 seconds on the demo stack, so the loop waits up to 180 seconds for each imported role to appear before it assigns it. A running session of the agent gets each role within seconds, or at its next check-in without a connected push stream.
 
 
 The column Covers shows each role's `strazaCovers`, the same values SCIM gave above. Read them from midPoint's REST interface:
@@ -519,7 +519,7 @@ That sentence names only repositories the agent's own roles cover, at most ten. 
 
 {{< console >}}
 
-{{< clicks "Audit" "deny" >}}
+{{< clicks "Audit" "Denied" >}}
 
 The newest row reads `ghapp.pr_create on ghapp-straza-test/site` under **Action**, followed by the call's arguments, with the agent's sentence under **Reason**. Select it. The sheet has a row named Repo with the value and its id in ghapp's list.
 {{< /console >}}

@@ -75,11 +75,11 @@ nats:
   storage: 5Gi
   url: "" # e.g. nats://straza-nats:4222
 
-# Default-on NetworkPolicies for the bundled NATS and Postgres: narrows
-# their ingress from "anything in the cluster" to the strazad pods only.
-# Needs a CNI that enforces NetworkPolicy (stock k3s does; flannel-only
-# clusters silently ignore the objects). Bring-your-own backends are
-# unaffected: no policy renders for them.
+# Default-on NetworkPolicies for the bundled NATS and Postgres and for the
+# demo MCP server of demoTools: each narrows ingress from "anything in the
+# cluster" to the strazad pods only. Needs a CNI that enforces NetworkPolicy
+# (stock k3s does; flannel-only clusters silently ignore the objects).
+# Bring-your-own backends are unaffected: no policy renders for them.
 networkPolicy:
   enabled: true
 
@@ -125,12 +125,14 @@ oidc:
   # issuer accept. Set 1024 to 65535 for a provider that matches it exactly.
   loopbackPort: 0
 
-# Key-encryption key for the built-in secret store. Reference a secret
-# holding a 32-byte key at data key "kek"; it is mounted at
-# /etc/straza/secret.key and wired via STRAZA_SECRETS_KEK_FILE so every
-# replica decrypts the same secrets. If empty, each pod generates its own
-# ephemeral KEK in its emptyDir (NOT for production: secrets do not survive
-# a pod restart and replicas cannot read each other's).
+# Key-encryption key that seals the signing keys and every stored secret.
+# Reference a secret holding a 32-byte key at data key "kek"; it is mounted
+# at /etc/straza/secret.key and wired via STRAZA_SECRETS_KEK_FILE so every
+# replica opens the same keys. The enterprise profile requires it and the
+# chart refuses to render without it, because a key a pod made for itself is
+# lost at the next restart and strazad then cannot open its signing keys.
+# The standalone profile may leave it empty: the pod's key and its sqlite
+# store sit in one emptyDir and are lost together.
 secrets:
   kekExistingSecret: ""
 
@@ -283,9 +285,9 @@ ingress:
 
 # Demo MCP upstream: the eval stack's "demo-tools", i.e. the MCP protocol
 # reference server (upstream package "server-everything"), so a fresh
-# install has something to register, police, and approve against. Its
-# container publishes no ingress and gets no route: the ONLY road to it is
-# strazad's governed /mcp gateway (no ungoverned surfaces).
+# install has something to register, police, and approve against. It gets
+# no ingress or route. Only strazad pods reach it, while networkPolicy.enabled
+# is on and the CNI enforces policies. Otherwise any pod in the cluster can.
 # Off by default: a demo upstream has no business in a real deployment, and
 # the container npx-fetches its package at every pod start.
 # Register it declaratively with apps.manifests above, runtime.remote.url:

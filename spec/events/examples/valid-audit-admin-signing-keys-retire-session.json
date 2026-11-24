@@ -1,0 +1,12 @@
+{
+  "specversion": "1.0",
+  "id": "019b4d7a-9c2e-7d1f-a0b3-2c3d4e5f6a03",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-12-23T10:15:42.250Z",
+  "data": {
+    "action": "signing-keys.retire",
+    "purpose": "session",
+    "kid": "3d2b7c1e-8a44-4f0b-b1d6-5e9f0a7c2b31"
+  }
+}

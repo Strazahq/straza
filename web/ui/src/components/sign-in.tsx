@@ -17,8 +17,8 @@ import type { SignedOutReason } from "@/lib/use-session";
 
 type Phase = "idle" | "leaving" | "finishing" | "authorized" | "stopped";
 
-const UNCONFIRMED = "Signed out in this browser, but the server did not confirm the revoke: the session expires on its own within minutes, or sign back in and revoke it from Sessions.";
-const PROVIDER_MAY_REMEMBER = " Your identity provider may still have you signed in, so on a shared computer sign out there too.";
+const UNCONFIRMED = "Signed out here, but Straza did not confirm the revoke. The session expires within minutes. To end it now, sign in and revoke it under Sessions.";
+const PROVIDER_MAY_REMEMBER = " Your identity provider may still have you signed in. On a shared computer, sign out there too.";
 
 // noticeFor words why the last session ended, or null on a fresh tab.
 function noticeFor(reason: SignedOutReason, returnTo: string): string | null {
@@ -26,11 +26,11 @@ function noticeFor(reason: SignedOutReason, returnTo: string): string | null {
     case "lost":
       return "Your session ended: " + reason.detail + ". Sign in again and you return to " + returnTo + ".";
     case "signed-out":
-      return "Signed out. The session was revoked on the server." + PROVIDER_MAY_REMEMBER;
+      return "Signed out. Straza revoked the session." + PROVIDER_MAY_REMEMBER;
     case "unconfirmed":
       return UNCONFIRMED;
     case "unreachable":
-      return "strazad is unreachable, state unknown. Sign in once it is back.";
+      return "Straza did not answer. Sign in once it is back.";
     default:
       return null;
   }
@@ -39,14 +39,14 @@ function noticeFor(reason: SignedOutReason, returnTo: string): string | null {
 // whereLine says where Sign in sends the person: undefined while discovery
 // is out, "" for the server's own page, else the provider's host.
 function whereLine(host: string | undefined): string {
-  if (host === undefined) return "You sign in at your identity provider and come back to this page.";
-  if (host === "") return "You sign in on this server's own sign-in page and come back to this page.";
-  return "You sign in at your identity provider, " + host + ", and come back to this page.";
+  if (host === undefined) return "You sign in at your identity provider.";
+  if (host === "") return "You sign in on Straza's own page.";
+  return "You sign in at " + host + ".";
 }
 
 function Waiting({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 text-[13px] text-muted-foreground" role="status">
+    <div className="flex items-center gap-2 text-caption text-muted-foreground" role="status">
       <LoaderCircleIcon className="size-[13px] animate-spin text-link" aria-hidden="true" />
       {children}
     </div>
@@ -121,38 +121,41 @@ export function SignIn({ reason, returnTo, onAuthed }: { reason: SignedOutReason
       await beginSignIn({ emergency, back: window.location.pathname });
     } catch (e) {
       setProblem(e instanceof ApiError && e.unreachable
-        ? "strazad is unreachable, state unknown. Check the server, then press Sign in again."
+        ? "Straza did not answer. Check that it is running, then press Sign in again."
         : e instanceof Error ? e.message : String(e));
       setPhase("stopped");
     }
   };
 
   const idle = phase === "idle" || phase === "stopped";
-  const line = "self-stretch border-l-[3px] py-2 pl-3 text-[13px] leading-relaxed text-muted-foreground";
+  const line = "self-stretch border-l-[3px] py-2 pl-3 text-caption leading-relaxed text-muted-foreground";
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="flex w-[380px] max-w-full flex-col items-center gap-4 rounded-md border border-border bg-card p-8" data-sign-in-card>
-        <div className="flex items-center gap-2 text-xl font-semibold text-foreground">
-          <StrazaMark className="size-6 shrink-0" />
+        <div className="flex items-center gap-2 text-title leading-7 font-semibold text-foreground">
+          <StrazaMark full className="size-10 shrink-0" />
           Straza
         </div>
-        <div className="text-[13px] uppercase tracking-[.06em] text-muted-foreground">admin console</div>
+        <div className="text-caption uppercase tracking-[.06em] text-muted-foreground">admin console</div>
 
         {notice && phase === "idle" && (reason.kind === "lost" || reason.kind === "unreachable"
-          ? <p className="text-center text-[13px] leading-relaxed text-warn">{notice}</p>
+          ? <p className="text-center text-caption leading-relaxed text-warn">{notice}</p>
           : <p className={line + " border-border"}>{notice}</p>)}
 
         {idle && (
           <>
             {problem && <p className={line + " border-unknown"}>{problem}</p>}
-            <p className="text-center text-sm leading-relaxed text-text-2">{whereLine(host)}</p>
+            <p className="text-center text-dense leading-relaxed text-text-2">{whereLine(host)}</p>
             <Button className="w-full" onClick={() => void start()}>Sign in</Button>
-            <p className="text-center text-[13px] leading-relaxed text-muted-foreground">
-              Admin roles only. Anyone else lands on the self-service page, still signed in.
+            <p className="text-center text-caption leading-relaxed text-muted-foreground">
+              Admin roles only. Others land on the self-service page.
             </p>
-            <Button variant="link" size="sm" className="text-[13px] text-muted-foreground" onClick={() => void start(true)} title="For the break-glass admin when the identity provider cannot sign you in. The server's own sign-in page accepts that one account.">
-              Emergency sign-in
-            </Button>
+            {/* With no identity provider, Sign in already opens Straza's own page, where the emergency sign-in goes too. */}
+            {host !== "" && (
+              <Button variant="link" size="sm" className="text-caption text-muted-foreground" onClick={() => void start(true)} title="For the break-glass admin when the identity provider is down.">
+                Emergency sign-in
+              </Button>
+            )}
           </>
         )}
 
@@ -160,7 +163,7 @@ export function SignIn({ reason, returnTo, onAuthed }: { reason: SignedOutReason
         {phase === "finishing" && <Waiting>Signing you in</Waiting>}
 
         {phase === "authorized" && (
-          <div className="flex items-center gap-2 text-[15px] font-semibold text-ok">
+          <div className="flex items-center gap-2 text-body font-semibold text-ok">
             <CheckIcon className="size-[18px]" aria-hidden="true" /> Authorized, loading the console
           </div>
         )}

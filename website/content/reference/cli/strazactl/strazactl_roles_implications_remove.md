@@ -2,7 +2,7 @@
 title: strazactl roles implications remove
 description: Stop composing one role into another (holding the first no longer holds the second)
 pagetype: reference
-weight: 80
+weight: 74
 draft: false
 sources:
   - cmd/strazactl

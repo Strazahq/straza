@@ -1,59 +1,74 @@
 ---
 title: What Straza is
-description: What Straza does, where it decides, who it is for, and what it does not try to do.
+description: What Straza does, shown on one agent, where it decides, what you run and what it is not.
 pagetype: explanation
 weight: 15
 draft: false
 summary: >-
-  Straza decides each action an AI agent takes against the roles that your IGA, or an admin on
-  standalone, assigns, and records every decision. The same server binary runs on a laptop and
-  on a fleet. Straza sees only the actions that pass through its hook, its gateway or
-  `straza exec`.
-keywords: what is straza overview runtime governance AI agents IGA roles hook gateway exec standalone enterprise open source license non-goals
+  Straza is open source runtime governance for AI agents. It checks each action of an agent
+  before it runs, against the roles that your IGA, Entra ID or an admin assigns. It allows the
+  action, denies it with a reason or holds it for a person, and records the decision.
+keywords: what is straza overview runtime governance AI agents IGA roles hook gateway exec standalone enterprise open source license example demo sam
 ---
 
-
-Straza is open source runtime governance for AI agents. Your IGA, or an admin on the standalone profile, says who [people and agents]({{< relref "concepts/identities.md" >}}) are and which [roles]({{< relref "concepts/roles-and-access.md" >}}) they hold. Straza decides each tool call that passes through it against those roles, on the agent's machine and at the gateway in front of your MCP servers. A rule can [ask a person first]({{< relref "concepts/approvals-model.md" >}}). Every decision becomes an [audit record]({{< relref "concepts/evidence.md" >}}).
-
-## The problem it answers
+## What it looks like
 
 
-An agent runs with the shell, the files and the credentials of the person or the workload behind it, and a model can be talked into using them. A control inside the model's own process cannot stop that, because that process is the thing under attack. Straza decides each action outside the model, against a signed [policy]({{< relref "concepts/policy-model.md" >}}), and refuses to act when it cannot tell what the current state is. It keeps the [credentials]({{< relref "concepts/credentials.md" >}}) of your MCP servers out of the agent's reach.
+sam is an AI [agent]({{< relref "concepts/identities.md" >}}) with an identity of its own. It runs in a container on the demo stack, a Docker Compose project with Straza, midPoint and Keycloak that you can start yourself. A coding tool on a developer's laptop is governed the same way, under the developer's identity.
+
+midPoint, the IGA of that stack, created sam, assigned it the [role]({{< relref "concepts/roles-and-access.md" >}}) `operator` and named alice as its sponsor, the person who answers for it. A [policy]({{< relref "concepts/policy-model.md" >}}) in Straza says what sam's roles may run.
+
+| sam runs | Straza answers |
+|---|---|
+| `ls` | The command runs. A rule allows sam's shell. |
+| `rm -rf build/` | `Straza: destructive command denied by the agent guardrails` |
+| `./deploy prod` | `Straza: approval ticket … is pending. A person decides within 24 hours`, and the message says where. alice [approves]({{< relref "concepts/approvals-model.md" >}}) in the console, and the next run of the deploy goes through, once. |
+| `ls`, after midPoint disabled sam | `Straza: this user is disabled, so Straza refuses this request.` |
+
+The last answer took no change in Straza. An administrator disabled sam in midPoint, and Straza revoked sam's sessions. On the recorded run that took under two seconds.
+
+Each of the four answers is a record on the [audit chain]({{< relref "concepts/evidence.md" >}}). [Try it on the demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) runs the same commands on your machine.
 
 ## Where Straza decides
 
 
-Straza decides at these enforcement points, and each one sees a different kind of action:
+Straza checks an action in one of three places, and these docs call each place a lane. Two words first: strazad is Straza's server, and an MCP server is a connector that gives an agent tools, for example for GitHub or a ticket system.
 
-- The hook runs on the agent's machine. Claude Code, Codex CLI and Gemini CLI call it before each local tool runs, such as a shell command or a file write, and the Straza service on that machine decides. A plain tool loop gets the same decision through the Python kit.
-- The gateway sits in front of your [MCP servers]({{< relref "concepts/mcp-apps-and-the-gateway.md" >}}). Any MCP client can reach the servers registered behind it without code on the agent's side, and strazad decides each call there.
-- `straza exec` covers a process with no hook. It decides the command it is given before that command runs. It does not decide what that command starts.
+| Lane | Can an agent get around it |
+|---|---|
+| The hook, on the agent's machine. Claude Code, Codex CLI and Gemini CLI call it before each tool runs: a shell command, a file write, a call to an MCP server that is not behind the gateway. The [Python kit]({{< relref "guides/govern-an-agent/python-agents.md" >}}) gives your own agent loop the same check. | No on a managed install, where only root or an administrator can change the hook. Yes where a user installed the hook, which is for trying Straza, and by default an enterprise server gives such an install no session. |
+| The gateway, in strazad. Each call to an [MCP server]({{< relref "concepts/mcp-apps-and-the-gateway.md" >}}) that you registered in Straza goes through it, and an agent sees only the tools its roles grant. | No, as long as the MCP server's [credential]({{< relref "concepts/credentials.md" >}}) lives only in Straza. The gateway adds it to an allowed call, and the agent never holds it. |
+| `straza exec`, for an agent that is none of the coding tools above. It checks the command it is given. | No inside the [sandbox image]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}), where it decides each program outside a short allowlist. Yes on any other machine, where nothing makes an agent use it. |
 
+[The security model]({{< relref "evaluate/security-model.md" >}}) says what Straza trusts, and [What each lane stops]({{< relref "evaluate/what-each-lane-stops.md" >}}) says how to test each lane.
 
-An action that bypasses all of them is outside Straza's view. The gateway enforces a boundary in front of a server that the agent cannot call directly, because the decision and the server's credential stay with strazad. A hook installed for the user is advisory, and an agent that can run any command can skip it, as [The security model]({{< relref "evaluate/security-model.md" >}}) explains. [How it works]({{< relref "evaluate/how-it-works.md" >}}) traces a call through the hook and through the gateway.
-
-## Who Straza is for
-
-
-Straza is for a company that runs AI agents against real systems and wants each agent's actions to follow the roles the company already governs. Its server, strazad, is one static binary with an enterprise and a standalone profile.
-
-The enterprise profile is the one a company runs. It runs on Postgres and scales out on Kubernetes with the Helm chart. Your identity provider checks sign-in, and your IGA sends people, agents, [sponsors]({{< relref "concepts/identities.md" >}}) and role membership over SCIM 2.0.
-
-The standalone profile runs on one host, with SQLite and an event bus inside the process. strazad signs people in itself, and an admin assigns roles and sponsors. It is how you try Straza on a laptop, and it also suits a developer or a small team.
+## What you run
 
 
-Neither profile ties you to a vendor. Sign-in is standard OIDC, with guides for Entra ID, Okta and Keycloak. Provisioning is standard SCIM 2.0, and the guides cover midPoint, Okta and any other SCIM client. Roles are made in Straza, and your IGA, or an admin on standalone, assigns them. [Identity and your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}) says which system checks what.
+strazad is one static binary with two profiles. Enterprise is for a company. Standalone is for one person, a small team or a trial.
+
+| | Enterprise | Standalone |
+|---|---|---|
+| Database | Postgres | SQLite |
+| Deployment | Kubernetes with the Helm chart | One host, with nothing else to install |
+| Sign-in | Your identity provider over OIDC, with guides for Entra ID, Okta and Keycloak | strazad's own sign-in |
+| Role assignment | Your IGA over SCIM 2.0, for example midPoint or Okta. Entra ID over Microsoft Graph. An admin. | Usually an admin |
+| A local action that no rule covers | Denied | Allowed |
+
+On each machine where an agent works you install the `straza` client. It brings the hook for the coding tool and a background service that holds the person's key and decides each call. Admins work in the console that strazad serves, or with the CLI `strazactl`.
+
+Roles are made in Straza, and the systems above assign them. [Identity and your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}) says which system checks what, and [Standalone and enterprise]({{< relref "reference/standalone-and-enterprise.md" >}}) lists every difference.
 
 
-Straza is open source. Its core is under AGPL-3.0-only, and the code you build against, such as the specifications and the agent kits, is under Apache-2.0.
+Straza is open source. The core is under AGPL-3.0-only. The code you build against, such as the specifications and the agent kits, is under Apache-2.0.
 
-## What Straza does not try to do
+## What Straza is not
 
 
-- Straza does not replace your IGA. On enterprise, joiners, movers and leavers stay in your IGA, and Straza applies the roles your IGA assigns.
-- Straza does not proxy model traffic, so prompts and completions stay on the stack you already run unless a policy turns on conversation recording at the hook. Every decision is deterministic policy evaluation, and no AI model takes part in it.
-- A model's own computation is outside Straza's view. An interpreter can compute anything inside its process without a decision. A script an agent writes and then runs is decided only as the interpreter call that starts it.
-- Root on a machine controls every process on it, including the hook. An agent with sudo or administrator rights on a managed machine is outside the threat model.
-- Straza does not certify compliance. It enforces decisions and produces evidence you can map to a control. Whether that meets a regulation is your assessment, made with the people who answer for it.
+- Straza does not replace your IGA. Joiners, movers and leavers stay there or in Entra ID, and Straza applies the roles they assign.
+- Straza does not sit between an agent and its model. It reads prompts and replies only when a policy turns on conversation recording at the hook.
+- No AI model takes part in a decision. Policy decides, and where a rule asks for it, a person does.
+- Straza decides the command that starts a program and not what the program then computes.
+- Straza does not certify compliance. It enforces decisions and gives you the records to map to a control.
 
 {{< next "evaluate/how-it-works.md" >}}

@@ -312,7 +312,8 @@ func TestCreateDraftStoresRevisionOneWithItsCheck(t *testing.T) {
 		t.Errorf("Role/dev is stamped %q %q, want the live fingerprint %q and the live document", it.Base, it.BaseOp, fp)
 	}
 	v := a.Verdict
-	counts, _ := json.Marshal(map[string]int{"refused": len(v.Refused), "risks": len(v.Risks), "warnings": len(v.Warnings), "unchecked": len(v.Unchecked)})
+	counts, _ := json.Marshal(map[string]int{"refused": len(v.Refused), "risks": len(v.Risks), "warnings": len(v.Warnings), "unchecked": len(v.Unchecked),
+		"passed": len(v.Passed)})
 	if row.CheckedRevision != 1 || row.CheckCounts != string(counts) || row.CheckedAt == nil {
 		t.Errorf("stored check = revision %d counts %s, want revision 1 and %s", row.CheckedRevision, row.CheckCounts, counts)
 	}

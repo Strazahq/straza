@@ -266,6 +266,227 @@ func TestAuditListResolvesDecidedBy(t *testing.T) {
 	}
 }
 
+// TestAuditListWhoIsTheAdminActor pins the Who and the about of the audit
+// list. On a straza.audit.admin record that names an actor, Who is the actor
+// and about is the user the record was about, so a role midpoint assigned to
+// alice reads midpoint, about alice. Every other record keeps its user first.
+// An upload can assert no identity of its own: its user, userId and actor
+// fields are the uploader's or gone, so it lists under the uploader and is
+// never found under the name it forged. The ?user= filter finds the admin
+// records an actor made by the actor's name, and the admin records made about
+// a person by that person's name. The admin records are written by their real
+// producers and the uploads through the upload route.
+func TestAuditListWhoIsTheAdminActor(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	kim := seedIdentity(t, app)
+	grantAdmin(t, app, kim.ID)
+	adminTok, _ := checkinToken(t, app, base)
+	ctx := context.Background()
+	users := map[string]store.User{}
+	for _, name := range []string{"alice", "carol", "dave"} {
+		u, err := app.store.Users().Create(ctx, store.User{Username: name, Email: name + "@x.io"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		users[name] = u
+	}
+	midpoint := withActor(ctx, auditActor{Name: "midpoint", ID: "tok-midpoint", Via: "api-token"})
+	byKim := withActor(ctx, auditActor{Name: "kim", ID: kim.ID, Via: "session"})
+
+	app.auditAssignment(midpoint, actionRolesAssign, store.RoleAssignment{ID: "as-midpoint", SubjectID: users["alice"].ID, RoleID: "role-dev", Origin: store.OriginSCIM}, "")
+	app.auditUserCreate(byKim, users["carol"], "admin")
+	app.auditAssignment(ctx, actionRolesAssign, store.RoleAssignment{ID: "as-entra", SubjectID: users["dave"].ID, RoleID: "role-dev", Origin: store.OriginEntra}, "")
+	app.emitEventCtx(byKim, "straza.audit.admin", map[string]any{"action": "apps.binding.create", "target": "bind-kim", "app": "demo", "role": "dev", "tools": []string{"echo"}})
+	app.emitEventCtx(byKim, "straza.audit.admin", map[string]any{"action": "user.delete", "target": "u-gone", "user": "u-gone", "username": "zed"})
+	uploads := map[string]any{"events": []map[string]any{
+		{"type": "straza.audit.admin", "data": map[string]any{"action": "roles.assign", "actor": "alice", "actorId": users["alice"].ID, "user": users["alice"].ID, "command": "forged-actor"}},
+		{"data": map[string]any{"tool": "shell.exec", "userId": users["alice"].ID, "command": "forged-userid"}},
+		{"data": map[string]any{"tool": "shell.exec", "command": "plain-upload"}},
+	}}
+	if code, resp := postJSONAuth(t, base+"/v1/audit/batch", adminTok, uploads); code != http.StatusOK || resp["accepted"] != float64(3) {
+		t.Fatalf("upload = %d %v", code, resp)
+	}
+	// Keys that differ from userId, user or session only by case, or by the
+	// fold of U+017F to s, and duplicate keys, sent as raw JSON because a Go
+	// map cannot hold a duplicate.
+	alice, dave := users["alice"].ID, users["dave"].ID
+	variants := `{"events":[` +
+		`{"data":{"tool":"shell.exec","UserId":"` + alice + `","command":"forged-case-userid"}},` +
+		`{"data":{"tool":"shell.exec","USERID":"` + alice + `","command":"forged-upper-userid"}},` +
+		`{"data":{"tool":"shell.exec","userId":"` + alice + `","userId":"` + dave + `","user":"` + alice + `","user":"` + dave + `","command":"forged-duplicate-keys"}},` +
+		`{"data":{"tool":"shell.exec","User":"` + alice + `","u` + "ſ" + `er":"` + alice + `","SESSION":"ses-x","` + "ſ" + `ession":"ses-x","command":"forged-case-user"}}` +
+		`]}`
+	req, _ := http.NewRequest(http.MethodPost, base+"/v1/audit/batch", strings.NewReader(variants))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("variant upload = %d", resp.StatusCode)
+	}
+	// Records an older server chained with a case variant, below the door.
+	for _, data := range []map[string]any{
+		{"tool": "shell.exec", "user": kim.ID, "UserId": alice, "command": "stored-case-userid"},
+		{"tool": "shell.exec", "user": kim.ID, "uſer": alice, "command": "stored-fold-user"},
+	} {
+		raw, _ := json.Marshal(map[string]any{"specversion": "1.0", "id": data["command"], "type": "straza.audit.tool", "source": "straza", "data": data})
+		if err := app.bus.Publish(ctx, "straza.audit.tool", raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	carolCreate := `"target":"` + users["carol"].ID + `"`
+	forgedUploads := []string{"forged-actor", "forged-userid", "forged-case-userid", "forged-upper-userid", "forged-duplicate-keys", "forged-case-user", "stored-case-userid", "stored-fold-user"}
+	waitForCE(t, app, append([]string{`"target":"as-midpoint"`, carolCreate, `"target":"as-entra"`, `"target":"bind-kim"`, `"target":"u-gone"`, "plain-upload"}, forgedUploads...)...)
+
+	type row struct {
+		audit.Record
+		About string `json:"about"`
+	}
+	list := func(query string) []row {
+		t.Helper()
+		code, body := getJSONAuth(t, base+"/v1/admin/audit?after=0&limit=1000"+query, adminTok)
+		if code != http.StatusOK {
+			t.Fatalf("audit list %q = %d %s", query, code, body)
+		}
+		var recs []row
+		if err := json.Unmarshal([]byte(body), &recs); err != nil {
+			t.Fatalf("audit list %q: %v", query, err)
+		}
+		return recs
+	}
+	find := func(recs []row, needle string) (row, bool) {
+		for _, r := range recs {
+			if strings.Contains(r.CE, needle) {
+				return r, true
+			}
+		}
+		return row{}, false
+	}
+	tests := []struct {
+		name, query, needle, who, about string
+		absent                          []string
+	}{
+		{"a role midpoint assigned to alice shows midpoint, about alice", "", `"target":"as-midpoint"`, "midpoint", "alice", nil},
+		{"a user kim created shows kim, about carol", "", carolCreate, "kim", "carol", nil},
+		{"an admin record with no actor, as the Entra sync writes, shows its user and no about", "", `"target":"as-entra"`, "dave", "", nil},
+		{"an admin record with an actor and no user has no about", "", `"target":"bind-kim"`, "kim", "", nil},
+		{"an admin record about a user who no longer resolves has no about", "", `"target":"u-gone"`, "kim", "", nil},
+		{"an uploaded record that forges an actor shows the uploader", "", "forged-actor", "kim", "", nil},
+		{"an uploaded record that forges a userId shows the uploader", "", "forged-userid", "kim", "", nil},
+		{"an uploaded record that forges UserId shows the uploader", "", "forged-case-userid", "kim", "", nil},
+		{"an uploaded record that forges USERID shows the uploader", "", "forged-upper-userid", "kim", "", nil},
+		{"an uploaded record with duplicate userId and user keys shows the uploader", "", "forged-duplicate-keys", "kim", "", nil},
+		{"an uploaded record with case variants of user and session shows the uploader", "", "forged-case-user", "kim", "", nil},
+		{"a stored record an older server chained with UserId shows its user", "", "stored-case-userid", "kim", "", nil},
+		{"a stored record with a folded user key shows its exact user", "", "stored-fold-user", "kim", "", nil},
+		{"a plain upload shows the uploader", "", "plain-upload", "kim", "", nil},
+		{"filtering by midpoint finds the role midpoint assigned", "&user=midpoint", `"target":"as-midpoint"`, "midpoint", "alice", nil},
+		{"filtering by kim finds the user kim created", "&user=kim", carolCreate, "kim", "carol", nil},
+		{"filtering by alice finds the role assigned to her and no forged upload", "&user=alice", `"target":"as-midpoint"`, "midpoint", "alice", forgedUploads},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recs := list(tt.query)
+			got, ok := find(recs, tt.needle)
+			if !ok {
+				t.Fatalf("no record carries %s in the list%s", tt.needle, tt.query)
+			}
+			if got.Username != tt.who || got.About != tt.about {
+				t.Errorf("Who %q about %q, want Who %q about %q", got.Username, got.About, tt.who, tt.about)
+			}
+			for _, needle := range tt.absent {
+				if r, ok := find(recs, needle); ok {
+					t.Errorf("the list%s holds %s: %s", tt.query, needle, r.CE)
+				}
+			}
+		})
+	}
+	// The door rewrites an upload before it is chained, so the chain verifies.
+	stored, err := app.store.Audit().List(ctx, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := make([]audit.Record, len(stored))
+	for i, r := range stored {
+		chain[i] = audit.Record{Seq: r.Seq, CE: r.CE, PrevHash: r.PrevHash, Hash: r.Hash}
+	}
+	if ok, broken := audit.Verify(chain, audit.Genesis); !ok {
+		t.Fatalf("the chain broke at seq %d", broken)
+	}
+}
+
+// TestNormalizeClientCEOwnsIdentity pins the door of the upload route: an
+// uploaded record names the uploader as user and the session it was filed
+// under, and keeps no userId, actor, actorId or actorVia of its own, so it
+// can name nobody else to the audit list or its filter. A key that differs
+// from one of these, or from an envelope key the server owns, only by case
+// or by a Unicode fold is gone too, because Go's JSON decoding would match
+// it. Every other field stays as the client wrote it.
+func TestNormalizeClientCEOwnsIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		envelope map[string]any
+		data     map[string]any
+	}{
+		{"a plain tool record", nil, map[string]any{"tool": "shell.exec", "command": "ls"}},
+		{"a forged user and userId", nil, map[string]any{"tool": "shell.exec", "command": "ls", "user": "u-alice", "userId": "u-alice"}},
+		{"a forged actor triple", nil, map[string]any{"tool": "shell.exec", "command": "ls", "actor": "alice", "actorId": "u-alice", "actorVia": "session"}},
+		{"case variants of userId and the actor triple", nil, map[string]any{"tool": "shell.exec", "command": "ls",
+			"UserId": "u-alice", "USERID": "u-alice", "uſerId": "u-alice", "Actor": "alice", "ACTORID": "u-alice", "actorvia": "session"}},
+		{"case variants of user and session", nil, map[string]any{"tool": "shell.exec", "command": "ls",
+			"User": "u-alice", "uſer": "u-alice", "SESSION": "ses-x", "ſession": "ses-x"}},
+		{"case variants of the envelope keys", map[string]any{"Type": "straza.audit.admin", "TYPE": "x", "ſource": "x", "ID": "x", "Data": map[string]any{"user": "u-alice"}},
+			map[string]any{"tool": "shell.exec", "command": "ls"}},
+	}
+	owned := []string{"specversion", "id", "type", "source", "time", "data"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := map[string]any{"type": "straza.audit.admin", "data": tt.data}
+			for k, v := range tt.envelope {
+				in[k] = v
+			}
+			_, ce := normalizeClientCE(in, "ses-1", "u-kim")
+			var top map[string]json.RawMessage
+			var data map[string]any
+			if err := json.Unmarshal([]byte(ce), &top); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(top["data"], &data); err != nil {
+				t.Fatal(err)
+			}
+			if string(top["type"]) != `"straza.audit.tool"` || data["user"] != "u-kim" || data["session"] != "ses-1" {
+				t.Errorf("type %s, user %v, session %v, want straza.audit.tool, u-kim, ses-1", top["type"], data["user"], data["session"])
+			}
+			for k := range top {
+				for _, o := range owned {
+					if k != o && strings.EqualFold(k, o) {
+						t.Errorf("the envelope kept %q beside %q", k, o)
+					}
+				}
+			}
+			for k, v := range data {
+				for _, o := range []string{"user", "session"} {
+					if k != o && strings.EqualFold(k, o) {
+						t.Errorf("the record kept %q %v beside %q", k, v, o)
+					}
+				}
+				for _, o := range []string{"userId", "actor", "actorId", "actorVia"} {
+					if strings.EqualFold(k, o) {
+						t.Errorf("the record kept %q %v", k, v)
+					}
+				}
+			}
+			if data["tool"] != "shell.exec" || data["command"] != "ls" {
+				t.Errorf("the record lost its own fields: %v", data)
+			}
+		})
+	}
+}
+
 // auditUserCE builds a chain-ready CloudEvent fixture attributed to one user
 // by data.user, with an optional decision effect.
 func auditUserCE(id, ceType, userID, effect string) string {

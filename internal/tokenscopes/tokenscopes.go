@@ -160,6 +160,9 @@ var AdminRouteArea = map[string]string{
 	"GET /v1/admin/roles/{id}/implications":                    "identity",
 	"POST /v1/admin/roles/{id}/implications":                   "identity",
 	"DELETE /v1/admin/roles/{id}/implications/{implicationId}": "identity",
+	"GET /v1/admin/entra":                                      "identity",
+	"POST /v1/admin/roles/{id}/entra-group/release":            "identity",
+	"POST /v1/admin/roles/{id}/entra-group/recreate":           "identity",
 	"GET /v1/admin/assignments":                                "identity",
 	"POST /v1/admin/assignments":                               "identity",
 	"DELETE /v1/admin/assignments/{id}":                        "identity",
@@ -173,6 +176,7 @@ var AdminRouteArea = map[string]string{
 	// signing key lives here too: rotating it is the same plane as ending
 	// sessions, and it grants nothing.
 	"GET /v1/admin/sessions":              "sessions",
+	"GET /v1/admin/sessions/{id}":         "sessions",
 	"POST /v1/admin/sessions/{id}/revoke": "sessions",
 	"POST /v1/admin/sessions/revoke":      "sessions",
 	"POST /v1/admin/signing-keys/rotate":  "sessions",

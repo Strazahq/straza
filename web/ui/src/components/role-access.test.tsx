@@ -131,6 +131,9 @@ const openEdit = async (app: string) => {
   await waitFor(() => expect(sheet.querySelector("[data-access-editor]")).toBeTruthy());
   return sheet;
 };
+// chips reads the Policy cell of one row: each outcome chip as its
+// outcome, its words and its hover.
+const chips = (app: string) => [...accessRow(app).querySelectorAll("[data-policy-cell] [data-outcome]")].map((c) => [c.getAttribute("data-outcome"), c.textContent, c.getAttribute("title")]);
 const toolRow = (tool: string) => document.querySelector('[data-tool="' + tool + '"]') as HTMLElement;
 const card = (name: string) => screen.getByRole("radio", { name });
 
@@ -171,8 +174,20 @@ describe("the Access tab of a role", () => {
     expect(cells("demo-tools")[1]).toBe("every tool (3), and tools added later");
     expect(within(accessRow("demo-tools")).getAllByRole("cell")[1].getAttribute("title")).toBe("stored as *: every tool, including ones added later");
     expect(cells("midpoint")[1]).toBe("every tool (1)");
-    await waitFor(() => expect(cells("demo-tools")[2]).toBe("1 allowed · 1 needs approval (dev-guardrails) · 1 denied (dev-guardrails)"));
+    await waitFor(() => expect(chips("demo-tools")).toEqual([
+      ["approval", "1 needs approval", "by dev-guardrails"],
+      ["denied", "1 denied", "by dev-guardrails"],
+      ["allowed", "1 allowed", null],
+    ]));
     expect(cells("midpoint")[2]).toBe("could not be read");
+  });
+
+  it("leads each row with the server's tile and keeps the table on a floor that holds the widest chip", async () => {
+    render(<Mounted />);
+    expect(within(accessRow("demo-tools")).getAllByRole("cell")[0].querySelector('[data-kind-icon="server"]')).toBeTruthy();
+    expect(cells("demo-tools")[0]).toBe("demo-tools");
+    expect((accessRow("demo-tools").closest("table") as HTMLElement).className).toContain("min-w-[640px]");
+    await waitFor(() => expect(chips("demo-tools")).toHaveLength(3));
   });
 
   it("says hold or ticket in the Policy cell, reading each set once", async () => {
@@ -193,16 +208,19 @@ describe("the Access tab of a role", () => {
       };
     });
     render(<Mounted />);
-    await waitFor(() => expect(cells("demo-tools")[2]).toBe("1 hold · 1 ticket (dev-tools-access, dev-guardrails) · 1 denied (dev-guardrails)"));
-    const cell = accessRow("demo-tools").querySelector("[data-policy-cell]") as HTMLElement;
-    expect(cell.getAttribute("title")).toContain("get-sum: hold, up to 2 minutes, the person behind the agent");
-    expect(cell.getAttribute("title")).toContain("list-files: ticket within a day, then an hour to run, the approver role sec-approvers");
+    await waitFor(() => expect(chips("demo-tools").map((c) => c[1])).toEqual(["2 needs approval", "1 denied"]));
+    await waitFor(() => expect(chips("demo-tools")[0][2]).toBe([
+      "1 hold and 1 ticket, by dev-tools-access and dev-guardrails",
+      "get-sum: hold, up to 2 minutes, decided by the agent's sponsor",
+      "list-files: ticket within a day, then an hour to run, decided by the approver role sec-approvers",
+    ].join("\n")));
+    expect(chips("demo-tools")[1]).toEqual(["denied", "1 denied", "by dev-guardrails"]);
     expect(vi.mocked(getPolicy).mock.calls.map((c) => c[0]).sort()).toEqual(["dev-guardrails", "dev-tools-access"]);
   });
 
   // Each case is a role with no row, and the line its empty tab reads.
   const empty: [string, RoleRow, string][] = [
-    ["says a role that belongs to no server reaches none, and where a role for a server is made", role, "This role reaches no MCP server and is matched by policy rules only. A role for a server is made in New role or on the server's page."],
+    ["says a role that belongs to no server reaches none, and where a role for a server is made", role, "This role reaches no MCP server."],
     ["says a role its server owns has no tool of it yet, and how to pick them", filesReaders, "No tool of files yet. Edit access to pick the tools this role reaches."],
   ];
   it.each(empty)("%s", (_case, who, line) => {
@@ -227,7 +245,7 @@ describe("the Access tab of a role", () => {
     expect((document.querySelector('[data-fixed="list-files"]') as HTMLElement).textContent).toBe("needs approval (dev-guardrails)");
     expect((document.querySelector('[data-fixed="get-env"]') as HTMLElement).textContent).toBe("denied (dev-guardrails)");
     expect(within(sheet).getByRole("button", { name: "Help: list-files" })).toBeTruthy();
-    expect(within(toolRow("get-sum")).getByRole("radio", { name: "allow" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(toolRow("get-sum")).getByRole("radio", { name: "Allowed" }).getAttribute("aria-checked")).toBe("true");
   });
 
   it("says nothing changed when a save would write neither a row nor a rule", async () => {
@@ -242,10 +260,10 @@ describe("the Access tab of a role", () => {
   it("publishes a new rule written into the role's own set in place, keeping its rule, as a draft of its own", async () => {
     render(<Mounted />);
     const sheet = await openEdit("demo-tools");
-    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "require approval" }));
-    expect((document.querySelector("[data-save-note]") as HTMLElement).textContent).toBe("The tools stay as they are, and saving changes only the rules.");
-    await userEvent.click(within(sheet).getByRole("button", { name: "The 2 rules this writes, in dev-tools-access" }));
-    const fold = (sheet.querySelector("pre") as HTMLElement).textContent || "";
+    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "Needs approval" }));
+    expect((document.querySelector("[data-save-note]") as HTMLElement).textContent).toBe("Only the policy rules change.");
+    expect(sheet.querySelector("[data-yaml-fold] summary")?.textContent).toBe("View as YAMLThe 2 policy rules this writes, in dev-tools-access");
+    const fold = (sheet.querySelector("[data-rules-yaml]") as HTMLElement).textContent || "";
     expect(fold).toContain("- id: demo-tools-get-env-deny");
     expect(fold).toContain('reason: "Straza: get-sum on demo-tools needs approval, set in the console"');
     await userEvent.click(within(sheet).getByRole("button", { name: "Save and publish" }));
@@ -267,7 +285,7 @@ describe("the Access tab of a role", () => {
   it("asks before Cancel drops a change nobody saved, and closes on the answer", async () => {
     render(<Mounted />);
     const sheet = await openEdit("demo-tools");
-    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "require approval" }));
+    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "Needs approval" }));
     await userEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
     let ask = await screen.findByRole("alertdialog");
     expect(within(ask).getByRole("heading", { name: "Close without saving?" })).toBeTruthy();
@@ -276,7 +294,7 @@ describe("the Access tab of a role", () => {
     expect(screen.getByRole("dialog")).toBe(sheet);
     await userEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
     ask = await screen.findByRole("alertdialog");
-    await userEvent.click(within(ask).getByRole("button", { name: "Close and drop the changes" }));
+    await userEvent.click(within(ask).getByRole("button", { name: "Discard changes" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(checkDraft).not.toHaveBeenCalled();
   });
@@ -284,7 +302,7 @@ describe("the Access tab of a role", () => {
   it("adds the change to the working draft with Save draft and opens it", async () => {
     render(<Mounted />);
     const sheet = await openEdit("demo-tools");
-    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "require approval" }));
+    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "Needs approval" }));
     await userEvent.click(within(sheet).getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("drafts", ["39"]));
     expect(createDraft).toHaveBeenCalledWith({ items: sentItems(), working: true });
@@ -296,7 +314,7 @@ describe("the Access tab of a role", () => {
     vi.mocked(createDraft).mockResolvedValue({ draft: draftOf("50", []), verdict: VERDICT });
     render(<Mounted />);
     const sheet = await openEdit("demo-tools");
-    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "require approval" }));
+    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "Needs approval" }));
     await userEvent.click(within(sheet).getByRole("button", { name: "Save and publish" }));
     const dialog = await waitFor(() => document.querySelector("[data-stub-publish]") as HTMLElement);
     expect(dialog.getAttribute("data-title")).toBe("Publish this change to dev-tools?");
@@ -314,8 +332,8 @@ describe("the Access tab of a role", () => {
     });
     render(<Mounted />);
     const sheet = await openEdit("demo-tools");
-    expect(within(toolRow("get-env")).getByRole("radio", { name: "deny" }).getAttribute("aria-checked")).toBe("true");
-    await userEvent.click(within(toolRow("get-env")).getByRole("radio", { name: "allow" }));
+    expect(within(toolRow("get-env")).getByRole("radio", { name: "Denied" }).getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(within(toolRow("get-env")).getByRole("radio", { name: "Allowed" }));
     expect(document.querySelector("[data-save-note]")).toBeNull();
     return sheet;
   };
@@ -325,7 +343,7 @@ describe("the Access tab of a role", () => {
     await userEvent.click(within(sheet).getByRole("button", { name: "Save and publish" }));
     let ask = await screen.findByRole("alertdialog");
     expect(within(ask).getByRole("heading", { name: "Remove dev-tools-access with this change?" })).toBeTruthy();
-    expect(ask.textContent).toContain("No rule is left in it, so publishing this change removes it, and calls dev-tools makes to demo-tools then run with no approval or deny from it.");
+    expect(ask.textContent).toContain("No rule is left in it, so publishing removes it. Calls from holders of dev-tools to demo-tools then get no approval or deny from it.");
     await userEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(checkDraft).not.toHaveBeenCalled();
@@ -343,7 +361,7 @@ describe("the Access tab of a role", () => {
     const sheet = await allowEnv();
     await userEvent.click(within(sheet).getByRole("button", { name: "Save draft" }));
     const ask = await screen.findByRole("alertdialog");
-    expect(ask.textContent).toContain("No rule is left in it, so your draft removes it when the draft is published, and calls dev-tools makes to demo-tools then run with no approval or deny from it. Until then it stays as it is.");
+    expect(ask.textContent).toContain("No rule is left in it, so your draft removes it when the draft is published. Calls from holders of dev-tools to demo-tools then get no approval or deny from it.");
     await userEvent.click(within(ask).getByRole("button", { name: "Remove it" }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("drafts", ["39"]));
     expect(createDraft).toHaveBeenCalledWith({ items: [{ kind: "PolicySet", name: "dev-tools-access", op: "remove", doc: "" }], working: true });
@@ -358,7 +376,7 @@ describe("the Access tab of a role", () => {
     render(<Mounted />);
     const sheet = await openEdit("demo-tools");
     await waitFor(() => expect((sheet.querySelector("[data-saved-edit]") as HTMLElement).textContent).toBe(SAVED_EDIT));
-    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "require approval" }));
+    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "Needs approval" }));
     await userEvent.click(within(sheet).getByRole("button", { name: "Save and publish" }));
     await waitFor(() => expect(document.querySelector('[data-save-note="refused"]')).toBeTruthy());
     expect((document.querySelector('[data-save-note="refused"]') as HTMLElement).textContent).toBe("Nothing was saved." + SAVED_EDIT);
@@ -369,7 +387,7 @@ describe("the Access tab of a role", () => {
     render(<Mounted />);
     const sheet = await openEdit("demo-tools");
     expect(sheet.querySelector("[data-saved-edit]")).toBeNull();
-    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "require approval" }));
+    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "Needs approval" }));
     drift();
     await userEvent.click(within(sheet).getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(document.querySelector('[data-save-note="refused"]')).toBeTruthy());
@@ -381,13 +399,13 @@ describe("the Access tab of a role", () => {
     sess.grants = "apps:read,apps:write";
     render(<Mounted />);
     const sheet = await openEdit("demo-tools");
-    expect((sheet.querySelector("[data-read-only]") as HTMLElement).textContent).toBe("You may change which tools dev-tools reaches. Only an administrator who may publish policies changes what a call does, so the Policy column is read-only for you.");
+    expect((sheet.querySelector("[data-read-only]") as HTMLElement).textContent).toBe("You may change which tools dev-tools reaches. The Policy column needs the right to publish policies.");
     expect((sheet.querySelector('[data-policy-word="get-sum"]') as HTMLElement).textContent).toBe("allowed");
     await userEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await openEdit("midpoint");
     const dark = await screen.findByRole("dialog");
-    expect((dark.querySelector("[data-read-only]") as HTMLElement).textContent).toBe("You may change which tools dev-tools reaches, but your session cannot read the other policies that decide its calls, so the Policy column cannot say what a call does. An administrator who may read policies sees them under Policies.");
+    expect((dark.querySelector("[data-read-only]") as HTMLElement).textContent).toBe("You may change which tools dev-tools reaches. Your session cannot read the other policies that decide its calls, so the Policy column cannot say what a call does.");
     expect(within(dark).queryByRole("radiogroup", { name: "On a call" })).toBeNull();
     expect((dark.querySelector('[data-policy-word="read-user"]') as HTMLElement).textContent).toBe("not readable here");
     await userEvent.click(within(dark).getByRole("checkbox", { name: "tool read-user" }));
@@ -403,7 +421,7 @@ describe("the Access tab of a role", () => {
     await userEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const dark = await openEdit("midpoint");
-    expect((dark.querySelector("[data-others-unread]") as HTMLElement).textContent).toBe("Other policies could not be read, so the rows show only this role's own rules, and a rule in another policy may still hold or deny a tool.");
+    expect((dark.querySelector("[data-others-unread]") as HTMLElement).textContent).toBe("Other policies could not be read, so the rows show only this role's own policy rules. A policy rule in another policy may still deny a tool or make it need approval. Reload to read them again.");
   });
 
   // Each case is whether the session is the global admin, and whether the
@@ -428,7 +446,7 @@ describe("the Access tab of a role", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByRole("heading", { name: "Remove access to demo-tools?" })).toBeTruthy();
     expect(dialog.textContent).toContain("dev-tools loses every tool of demo-tools in every live session.");
-    expect((document.querySelector("[data-stale-rules]") as HTMLElement).textContent).toBe(" Rules in dev-tools's own policy still name demo-tools: demo-tools-get-env-deny. They stay and gate nothing until access is given again.");
+    expect((document.querySelector("[data-stale-rules]") as HTMLElement).textContent).toBe(" Policy rules in dev-tools's own policy still name demo-tools: demo-tools-get-env-deny. They stay and decide nothing until access is given again.");
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove access" }));
     await waitFor(() => expect(removeBinding).toHaveBeenCalledWith("b-1"));
     expect(notify.ok).toHaveBeenCalledWith("dev-tools no longer reaches demo-tools.");
@@ -441,7 +459,7 @@ describe("the Access tab of a role", () => {
     await userEvent.click(within(accessRow("demo-tools")).getByRole("button", { name: "Remove access" }));
     const dialog = await screen.findByRole("alertdialog");
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove access" }));
-    await waitFor(() => expect(dialog.textContent).toContain("The server refused it: no access row with that id. Fix what it names, then try again."));
+    await waitFor(() => expect(dialog.textContent).toContain("Removing the old access row refused: no access row with that id. Fix what it names, then try again."));
     expect(changed).not.toHaveBeenCalled();
   });
 
@@ -478,7 +496,7 @@ describe("the Access tab of a role", () => {
     expect(vi.mocked(notify.undo).mock.calls[0][0]).toBe("files-readers reaches files now.");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.querySelector("[data-first-call]")).toBeTruthy());
-    expect((document.querySelector("[data-first-call]") as HTMLElement).textContent).toContain("First call to files since this access row: none yet, watching the audit log for 5 minutes.");
+    expect((document.querySelector("[data-first-call]") as HTMLElement).textContent).toContain("Watching the audit chain for the first call to files, up to 5 minutes.");
   });
 
   it("asks for a tool before it writes an empty grant", async () => {
@@ -530,7 +548,7 @@ describe("the Access tab of a role", () => {
     [
       "the role's live export, unanswered",
       () => vi.mocked(exportRole).mockRejectedValue(new ApiError("unreachable", 0, true)),
-      "Nothing was saved.The live document of dev-tools could not be read because strazad did not answer. Check that it is running, then reload.",
+      "Nothing was saved.The live document of dev-tools could not be read because Straza did not answer. Check that it is running, then reload.",
     ],
     [
       "the role's own set, which matches another role",
@@ -544,7 +562,7 @@ describe("the Access tab of a role", () => {
     const sheet = await openEdit("demo-tools");
     await userEvent.click(within(sheet).getByRole("radio", { name: "Only the tools you tick" }));
     await userEvent.click(within(sheet).getByRole("checkbox", { name: "tool get-sum" }));
-    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "require approval" }));
+    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "Needs approval" }));
     await userEvent.click(within(sheet).getByRole("button", { name: "Save and publish" }));
     await waitFor(() => expect(saveNote()).not.toBeNull());
     expect(saveNote()!.textContent).toBe(words);
@@ -556,6 +574,6 @@ describe("the Access tab of a role", () => {
     render(<Mounted />);
     await openEdit("demo-tools");
     await waitFor(() => expect(document.querySelector("[data-working-holds]")).toBeTruthy());
-    expect((document.querySelector("[data-working-holds]") as HTMLElement).textContent).toBe("Your draft 39 already changes dev-tools. Saving a draft here replaces that change with this one, made on the live version.");
+    expect((document.querySelector("[data-working-holds]") as HTMLElement).textContent).toBe("Your draft 39 already changes dev-tools. Save draft replaces that change.");
   });
 });

@@ -2,7 +2,7 @@
 title: strazactl users entra-agent-id show
 description: Show the Entra agent identity the agent acts as
 pagetype: reference
-weight: 110
+weight: 104
 draft: false
 sources:
   - cmd/strazactl

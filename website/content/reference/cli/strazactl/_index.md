@@ -46,7 +46,6 @@ their help. A retired verb exits 2 and names what replaced it.
 * [strazactl devices](/reference/cli/strazactl/strazactl_devices/): Inspect and revoke a user's enrolled devices
 * [strazactl disconnect](/reference/cli/strazactl/strazactl_disconnect/): Remove a user's connection to a server
 * [strazactl drafts](/reference/cli/strazactl/strazactl_drafts/): Check, store and review drafts of changes to MCP servers, roles, access rows and policy sets
-* [strazactl packs](/reference/cli/strazactl/strazactl_packs/): Manage knowledge packs
 * [strazactl policy](/reference/cli/strazactl/strazactl_policy/): Validate and manage PolicySets
 * [strazactl roles](/reference/cli/strazactl/strazactl_roles/): Manage roles
 * [strazactl sessions](/reference/cli/strazactl/strazactl_sessions/): Inspect and revoke sessions

@@ -380,7 +380,7 @@ func TestCredRenewalClasses(t *testing.T) {
 }
 
 // TestCredRefreshAdoptsIdentity pins that a start stores the identity the
-// server resolved, its type and its packs, that a refresh adopts roles the
+// server resolved and its type, that a refresh adopts roles the
 // server resolved again, and that a reply with no roles at all changes
 // nothing, because clearing roles would widen access.
 func TestCredRefreshAdoptsIdentity(t *testing.T) {
@@ -391,11 +391,11 @@ func TestCredRefreshAdoptsIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(ses.Roles, []string{"dev"}) || ses.UserType != "person" || len(ses.Packs) != 1 || ses.Packs[0].Name != "golang-style" {
-		t.Fatalf("start: roles %v type %q packs %+v", ses.Roles, ses.UserType, ses.Packs)
+	if !slices.Equal(ses.Roles, []string{"dev"}) || ses.UserType != "person" {
+		t.Fatalf("start: roles %v type %q", ses.Roles, ses.UserType)
 	}
-	if again, err := r.start(alice, "w1"); err != nil || !again.Reused || len(again.Packs) != 1 {
-		t.Fatalf("a resumed window lost its packs: %+v, %v", again, err)
+	if again, err := r.start(alice, "w1"); err != nil || !again.Reused {
+		t.Fatalf("a resumed window was not reused: %+v, %v", again, err)
 	}
 	r.srv.with(func() { r.srv.roles, r.srv.userType = []string{"dev", "ops"}, "agent" })
 	got := r.renewNow(t, ses)
@@ -405,6 +405,28 @@ func TestCredRefreshAdoptsIdentity(t *testing.T) {
 	r.srv.with(func() { r.srv.noRoles = true })
 	if kept := r.renewNow(t, ses); !slices.Equal(kept.Roles, []string{"dev", "ops"}) || kept.UserType != "agent" {
 		t.Fatalf("an identity-less refresh changed the identity: roles %v type %q", kept.Roles, kept.UserType)
+	}
+}
+
+// TestCredStartIgnoresKnowledgePacks pins that a session starts whatever
+// the check-in answer carries in knowledge_packs: one pack from a server
+// before packs were removed, an empty list, null, or no property at all.
+func TestCredStartIgnoresKnowledgePacks(t *testing.T) {
+	for _, tc := range []struct{ name, packs string }{
+		{"one pack from an older server", ""},
+		{"an empty list", "[]"},
+		{"null", "null"},
+		{"no property", "absent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newCredRig(t)
+			r.enroll(alice)
+			r.srv.with(func() { r.srv.packs = tc.packs })
+			ses, err := r.start(alice, "w1")
+			if err != nil || ses.ID == "" || !slices.Equal(ses.Roles, []string{"dev"}) {
+				t.Fatalf("start = %+v, %v, want a session with the role dev", ses, err)
+			}
+		})
 	}
 }
 

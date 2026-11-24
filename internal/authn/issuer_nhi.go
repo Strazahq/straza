@@ -27,10 +27,11 @@ import (
 // cache) within a ≤5-minute window.
 
 // NHIKeyLookup resolves a client_credentials client_id (the NHI username)
-// to the local user and its registered assertion key. The callback owns ALL
-// identity policy: it must fail unless the user exists, is active, is
-// kind=nhi, and has a registered key; the issuer treats every error as
-// failed client authentication (one error code, no NHI enumeration).
+// to the local user and its registered assertion key. The callback owns the
+// identity policy: it must fail unless the user exists, is kind=nhi, and
+// has a registered key; the issuer treats every error as failed client
+// authentication (one error code, no NHI enumeration). It returns a user
+// that is not active with its key, and the issuer refuses that user.
 type NHIKeyLookup func(ctx context.Context, clientID string) (store.User, ed25519.PublicKey, error)
 
 const (
@@ -60,6 +61,11 @@ func assertionKeyRefused(username, server string) string {
 		"Have an admin register the public key it prints, with `strazactl users nhi-key set` or in the console. " +
 		"Then run `straza enroll --server " + server + " --headless`"
 }
+
+// nhiDisabledDesc is the error_description a disabled agent reads once it
+// proved its key. The Straza prefix tells the client that the sentence is
+// complete and is shown as it is.
+const nhiDisabledDesc = "Straza: this agent is disabled on the server. Ask a Straza admin to enable it, then start the session again."
 
 // nhiGrantOutcome fires the matching observer hook once per judged grant.
 func (i *Issuer) nhiGrantOutcome(userID, username, reason string, r *http.Request) {
@@ -91,9 +97,21 @@ func (i *Issuer) handleClientCredentials(w http.ResponseWriter, r *http.Request)
 	}
 
 	u, pub, err := i.NHIKeys(r.Context(), clientID)
-	if err != nil || u.Status != store.UserActive || len(pub) != ed25519.PublicKeySize {
+	if err != nil || len(pub) != ed25519.PublicKeySize {
 		i.nhiGrantOutcome("", "", "unknown or ineligible client", r)
 		oauthError(w, "invalid_client", "client authentication failed")
+		return
+	}
+	if u.Status != store.UserActive {
+		// The record names the user either way. The answer says disabled
+		// only to a caller that proves the registered key, so a stranger
+		// reads the same sentence as for a client that does not exist.
+		i.nhiGrantOutcome(u.ID, u.Username, "user is disabled", r)
+		desc := "client authentication failed"
+		if _, _, err := verifyClientAssertion(assertion, pub, clientID, i.baseURL); err == nil {
+			desc = nhiDisabledDesc
+		}
+		oauthError(w, "invalid_client", desc)
 		return
 	}
 	jti, exp, err := verifyClientAssertion(assertion, pub, clientID, i.baseURL)

@@ -13,8 +13,8 @@ outline: false
 # tables. A feature no lane lists shows in a lane named Other.
 board:
   stages:
-    - heading: New in 2.2.0
-      label: "2.2.0"
+    - heading: New in 2.3.0
+      label: "2.3.0"
       note: this release
     - heading: December 2026
       label: December 2026
@@ -31,10 +31,9 @@ board:
     - id: identity
       label: Identity
       items:
-        - Microsoft Entra Agent ID
-        - The agent's Entra identity on its record
-        - Sign in through Microsoft Entra
-        - Signing keys in the console
+        - Sync with Microsoft Entra
+        - Accounts that follow Entra
+        - Encrypted signing keys
         - Passkeys
     - id: approvals
       label: Approvals and devices
@@ -50,11 +49,13 @@ board:
     - id: gateway
       label: Gateway and MCP
       items:
+        - Rate limits for remote MCP servers
         - MCP server from an OpenAPI file
         - MCP revision 2026-07-28
         - MCP prompts and resources
         - Signed app manifests
         - Egress allowlist per MCP server
+        - MCP sign-in on the gateway
         - A2A
     - id: analytics
       label: Analytics
@@ -69,6 +70,7 @@ board:
         - Git for Codex CLI and Gemini CLI
         - Agents inside WSL2
         - Cursor
+        - Your own Claude Code managed settings
     - id: policy
       label: Policy
       items:
@@ -97,15 +99,15 @@ Only confirmed work carries a month, and only for the next two months. A month i
 
 {{< roadmap-board >}}
 
-## New in 2.2.0
+## New in 2.3.0
 
 
 | Feature | What you get |
 |---|---|
-| Microsoft Entra Agent ID | An AI agent acts as its own Entra agent identity at an MCP server. Straza gets the agent that identity's token through its agent blueprint, so the server sees the agent and not a shared account. |
-| The agent's Entra identity on its record | An agent's record names the Entra agent identity it acts as. SCIM, the admin API and `strazactl` write it, and the console shows it. |
-| Sign in through Microsoft Entra | A person enrolls a machine with their Entra account. |
-| Signing keys in the console | An administrator promotes the key Straza signs client assertions with, and each key carries a certificate for Entra. |
+| Sync with Microsoft Entra | Straza syncs with Microsoft Entra ID directly over Microsoft Graph. strazad creates one group in Entra for each role, and a person or an agent you add to that group gets the role. |
+| Accounts that follow Entra | Straza creates, disables and enables the people and agents of those groups as Entra says, so a tenant that lives in Entra needs no midPoint. |
+| Encrypted signing keys | The session and snapshot signing keys are encrypted in the database with `secret.key`, so a copy of the database alone cannot mint a session token or sign policy. |
+| Rate limits for remote MCP servers | A session gets at most 20 calls a second to a remote MCP server, and one user's sessions together get five times a server's rate. A value in the server's manifest still wins. |
 
 ## December 2026
 
@@ -149,6 +151,8 @@ These items are accepted and have no month yet. Each gets one when it is confirm
 | Microsoft Teams approvals | A person decides a held call in Teams, as they can in Slack today. | <span class="chip idea">planned</span> |
 | Agents inside WSL2 | An agent a person starts inside WSL2 is governed by the Straza service on Windows, as an agent on Windows itself is. | <span class="chip idea">planned</span> |
 | Cursor | Cursor joins Claude Code, Codex CLI and Gemini CLI under the harness hooks. | <span class="chip idea">planned</span> |
+| Your own Claude Code managed settings | The managed settings your organisation sets for Claude Code are merged with the ones Straza writes, so adding your own keeps the machine governed. | <span class="chip idea">planned</span> |
+| MCP sign-in on the gateway | An MCP client connects to the gateway with its address and a sign-in in the browser, so a hosted chat or a machine without the Straza client can use governed MCP servers. It is off unless you turn it on, and the Straza client stays the default. | <span class="chip idea">planned</span> |
 | A2A | Straza decides and records calls between agents over the A2A protocol, as it does tool calls. | <span class="chip idea">planned</span> |
 | AI agents as approvers | A rule can name an AI agent as a decider of a held call. It is off unless a policy turns it on, and the record names the agent that decided. | <span class="chip idea">planned</span> |
 | AI classifier | A rule can send a call to a model you run, which answers allow or deny with a reason. It is off unless a policy turns it on, and the built-in check with no model stays the default. | <span class="chip idea">planned</span> |

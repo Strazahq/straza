@@ -96,6 +96,18 @@ describe("what a door reads before the editor opens", () => {
     expect(retires({ ...read, taken: ["kept-by-hand"] }, withChoice(read.initial, "get-env", "allow"), "demo-tools", NAMES, "readers")).toBe(false);
   });
 
+  // Each case is the deny of the own set and whether allowing get-env
+  // retires the set. A save keeps a name the server does not list, so the
+  // set keeps a rule.
+  const kept: [string, string, boolean][] = [
+    ["every name listed", OWN, true],
+    ["a name the server does not list", OWN.replace("deny: [get-env]", "deny: [get-env, gone-tool]"), false],
+  ];
+  it.each(kept)("says a save retires the set only when no name is kept: %s", (_name, text, want) => {
+    const read = accessRead("readers", "demo-tools", NAMES, row, text, PREVIEW);
+    expect(retires(read, withChoice(read.initial, "get-env", "allow"), "demo-tools", NAMES, "readers")).toBe(want);
+  });
+
   // Each case is a session's admin grants and whether it may change what
   // a call does.
   const grants: [string, boolean][] = [

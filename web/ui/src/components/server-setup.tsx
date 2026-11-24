@@ -17,7 +17,7 @@ import { SAVE_DRAFT, heldLine, keptLine, publishThis, savedToDraft, waitsLine } 
 import { WRITE_UNCONFIRMED } from "@/lib/say";
 import {
   CANCEL, PIN_FACT, PIN_FOOT_LABEL, PIN_PUBLISH, SET_IT,
-  listedBy, listingStep, pinBody, pinButton, pinFoot, pinFootHelp, pinStep, pinTitle, pinnedStep, pinnedToast, readFrom, setupLead, typeFact,
+  listedBy, listingStep, pinBody, pinButton, pinFootHelp, pinStep, pinTitle, pinnedStep, pinnedToast, readFrom, setupLead, typeFact,
 } from "@/lib/server-setup-words";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 // objects draft strazad builds from the marks: Save draft opens it, Pin
 // and publish publishes it the way the editors' Save and publish does.
 
-const CODE = "rounded bg-muted px-1 font-mono text-[13px] text-foreground";
+const CODE = "rounded-md bg-muted px-1 font-mono text-caption text-foreground";
 
 // argumentOf answers the argument every marked tool reads the object from,
 // "" when they read different ones, and how many tools read one.
@@ -40,8 +40,8 @@ function argumentOf(block: ObjectsBlock): { arg: string; n: number } {
 // and its button while it is the step to take.
 function Step({ n, done, waits, text, action }: { n: number; done: boolean; waits: boolean; text: string; action?: React.ReactNode }) {
   return (
-    <li className={cn("flex items-center gap-2.5 rounded-md border border-border bg-card px-3 py-2 text-sm", waits && "opacity-65")} data-step={n} data-done={done || undefined} data-waits={waits || undefined}>
-      <span className={cn("inline-flex size-[22px] shrink-0 items-center justify-center rounded-full border text-xs", done ? "border-ok bg-ok-bg text-ok" : "border-border text-muted-foreground")} aria-hidden="true">
+    <li className={cn("flex items-center gap-2.5 rounded-md border border-border bg-card px-3 py-2 text-dense", waits && "opacity-65")} data-step={n} data-done={done || undefined} data-waits={waits || undefined}>
+      <span className={cn("inline-flex size-[22px] shrink-0 items-center justify-center rounded-full border text-caption leading-4", done ? "border-ok bg-ok-bg text-ok" : "border-border text-muted-foreground")} aria-hidden="true">
         {done ? <CheckIcon className="size-3" /> : n}
       </span>
       <span className={cn("min-w-0 flex-1", done ? "text-muted-foreground" : "text-text-2")}>{text}</span>
@@ -76,7 +76,7 @@ export function SetupCard({ app, read, toolCount, onPublished }: CardProps) {
   };
   return (
     <section className="mb-4 flex max-w-[900px] flex-col gap-2.5 rounded-md border border-link/40 bg-accent-bg px-4 py-3" data-setup-card>
-      <p className="m-0 text-[15px] font-semibold text-foreground">{setupLead(app.name, of.w)}</p>
+      <p className="m-0 text-body font-semibold text-foreground">{setupLead(app.name, of.w)}</p>
       <ol className="m-0 flex list-none flex-col gap-2 p-0">
         <Step n={1} done={pinned} waits={false} text={pinned ? pinnedStep(of.w) : pinStep(of.w)} action={!pinned && <Button size="sm" onClick={() => setPinOpen(true)}>{pinButton(of.w)}</Button>} />
         {takes && <Step n={2} done={false} waits={!pinned} text={listingStep(app.name, of.lister, !pinned)} action={pinned && <Button size="sm" onClick={setIt}>{SET_IT}</Button>} />}
@@ -182,7 +182,7 @@ function PinDialog({ app, declared, toolCount, open, onOpenChange, onPublished }
         <AlertDialogContent className="sm:max-w-[600px]" data-pin-dialog>
           <AlertDialogHeader>
             <AlertDialogTitle>{pinTitle(app.name, w)}</AlertDialogTitle>
-            <AlertDialogDescription className="text-sm leading-relaxed text-text-2">{pinBody(w)}</AlertDialogDescription>
+            <AlertDialogDescription className="text-dense leading-relaxed text-text-2">{pinBody(w)}</AlertDialogDescription>
           </AlertDialogHeader>
           {said ? <SaveNoteLine note={said} /> : (
             <>
@@ -193,8 +193,7 @@ function PinDialog({ app, declared, toolCount, open, onOpenChange, onPublished }
                 { label: PIN_FACT.list, body: <><code className={CODE}>{declared.list.tool}</code>{listedBy(w)}</> },
               ]} />
               </div>
-              <p className="m-0 flex items-center gap-1.5 text-[13px] text-muted-foreground" data-pin-foot>
-                {pinFoot(app.name)}
+              <p className="m-0 flex items-center gap-1.5 text-caption text-muted-foreground" data-pin-foot>
                 <HelpTip label={PIN_FOOT_LABEL} text={pinFootHelp(app.name, w)} />
               </p>
             </>

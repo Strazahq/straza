@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -9,7 +10,40 @@ import (
 
 	"github.com/strazahq/straza/internal/manager"
 	"github.com/strazahq/straza/internal/policy"
+	"github.com/strazahq/straza/internal/store"
 )
+
+// The words a catalog preview's refused member carries in the user lane,
+// and the deny reasons policy simulate answers for the same user.
+const (
+	// refusedDisabled says the gateway refuses every call of the user
+	// because the user's status is not active.
+	refusedDisabled = "disabled"
+	// refusedRevoked says the gateway refuses every call of the user
+	// because the user is active but on the denylist, by a lock or a kill.
+	refusedRevoked = "revoked"
+	// refusedDisabledReason is the reason of simulate's deny for a user
+	// whose status is not active.
+	refusedDisabledReason = "Straza refuses every call of this user, because the user is disabled. Enable the user first."
+	// refusedRevokedReason is the reason of simulate's deny for an active
+	// user on the denylist.
+	refusedRevokedReason = "Straza refuses every call of this user, because the user is revoked. Lift the revocation first."
+)
+
+// userRefusal answers why the gateway refuses every call of u before any
+// policy runs, as the preview's refused word and simulate's deny reason,
+// and two empty strings when u's calls reach policy. A user who is not
+// active reads disabled whatever the denylist holds. The denylist keys a
+// user by id, as a disable and a lock put the user there.
+func (a *App) userRefusal(u store.User) (word, reason string) {
+	switch {
+	case u.Status != store.UserActive:
+		return refusedDisabled, refusedDisabledReason
+	case a.denylist.userBlocked(u.ID):
+		return refusedRevoked, refusedRevokedReason
+	}
+	return "", ""
+}
 
 // Catalog-preview status taxonomy (GET /v1/admin/catalog/preview). Each entry
 // is what a subject would see for one (app, tool), or one app-level row when
@@ -68,6 +102,14 @@ type catalogPreviewResponse struct {
 	Subject previewSubject `json:"subject"`
 	Entries []previewEntry `json:"entries"`
 	Notes   []string       `json:"notes,omitempty"`
+	// Machine lists the servers on a person's machine that the subject's
+	// policies name. Absent when they name none.
+	Machine []previewMachine `json:"machine,omitempty"`
+	// Refused says, in the user lane only, why the gateway refuses every
+	// call of the user before any policy runs: disabled or revoked. Absent
+	// when the user's calls reach policy. Entries still say what the
+	// user's roles give.
+	Refused string `json:"refused,omitempty"`
 }
 
 // handleCatalogPreview answers "what would this subject see, and why" over the
@@ -109,6 +151,7 @@ func (a *App) handleCatalogPreview(w http.ResponseWriter, r *http.Request) {
 
 	var sub policy.Subject
 	var notes []string
+	var refused string
 	if userParam != "" {
 		u, err := a.store.Users().GetByUsername(r.Context(), userParam)
 		if err != nil {
@@ -128,6 +171,7 @@ func (a *App) handleCatalogPreview(w http.ResponseWriter, r *http.Request) {
 			User: u.Username, Roles: roleNames,
 			UserType: u.UserType, AgencyMode: u.AgencyMode, SwarmID: u.SwarmID,
 		}
+		refused, _ = a.userRefusal(u)
 	} else {
 		var err error
 		if sub, notes, err = a.roleLaneSubject(r.Context(), roleParams); err != nil {
@@ -136,6 +180,11 @@ func (a *App) handleCatalogPreview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	machine, err := a.previewMachineServers(r.Context(), sub, appFilter)
+	if err != nil {
+		a.fail(w, r, http.StatusInternalServerError, "Straza could not read the registered MCP servers, so it cannot say which servers are on a person's machine. Try again, and read the strazad log if it keeps failing.", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, catalogPreviewResponse{
 		Subject: previewSubject{
 			User:  sub.User,
@@ -143,7 +192,84 @@ func (a *App) handleCatalogPreview(w http.ResponseWriter, r *http.Request) {
 		},
 		Entries: a.previewEntries(sub, appFilter, assume),
 		Notes:   notes,
+		Machine: machine,
+		Refused: refused,
 	})
+}
+
+// previewMachine is one MCP server on a person's machine: a server that
+// the policy rules applying to the subject name and Straza has not
+// registered, so a harness reaches it by itself and only the hook decides
+// its calls. Tools holds one row per tool name those rules list whole, with
+// the outcome the engine gives it. Open says the rules reach further tools
+// of the server, which the rows do not hold. Policies are the policies
+// whose rules name the server.
+type previewMachine struct {
+	App      string         `json:"app"`
+	Tools    []previewEntry `json:"tools"`
+	Open     bool           `json:"open,omitempty"`
+	Policies []string       `json:"policies"`
+}
+
+// previewMachineServers answers the servers on a person's machine for sub,
+// sorted by name: the servers the active policies name for sub that Straza
+// has not registered. A registered server is one with a row in the store,
+// running or not, a live instance, an access row, or Straza's own. Each
+// listed tool is probed the way the hook decides it, without the granted
+// fact, because no access row admits a tool of a server Straza does not
+// serve. The engine alone decides: the list only says which names to ask
+// it for. Admin plane: the store read is allowed here.
+func (a *App) previewMachineServers(ctx context.Context, sub policy.Subject, appFilter string) ([]previewMachine, error) {
+	registered := map[string]bool{builtinApp: true}
+	rows, err := a.store.Apps().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		registered[row.Name] = true
+	}
+	for _, view := range a.manager.Views() {
+		registered[view.Name] = true
+	}
+	bindings, _ := a.gateway.bindings.Load().([]gwBinding)
+	for _, b := range bindings {
+		registered[b.App] = true
+	}
+	// The engine bounds the names it lists, so it is told which servers the
+	// answer keeps and spends nothing on the others.
+	keep := func(app string) bool { return !registered[app] && (appFilter == "" || app == appFilter) }
+	eng := a.snapshots.Current().Engine
+	var out []previewMachine
+	for _, na := range eng.NamedApps(sub, keep) {
+		m := previewMachine{App: na.App, Tools: make([]previewEntry, 0, len(na.Tools)), Open: na.Open, Policies: na.Policies}
+		for _, tool := range na.Tools {
+			d := eng.Evaluate(policy.Event{Kind: policy.EventToolPre, Tool: policy.ToolMCPCall, App: na.App, ToolName: tool}, sub)
+			m.Tools = append(m.Tools, previewMachineEntry(na.App, tool, d))
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// previewMachineEntry words the engine's decision on one tool of a server
+// on a person's machine, in the statuses a registered server's tool has.
+func previewMachineEntry(app, tool string, d policy.Decision) previewEntry {
+	e := previewEntry{App: app, Tool: tool, Reason: d.Reason, RuleID: d.RuleID, SetName: d.SetName, Default: d.Default}
+	switch {
+	case d.Effect != policy.EffectAllow:
+		e.Status = previewHiddenPolicy
+		e.Hint = hintMachineDenied(d)
+		if e.Reason == "" {
+			e.Reason = e.Hint
+		}
+	case d.Approve != nil:
+		e.Status = previewApproveGated
+		e.Hint = hintMachineApproval(d)
+	default:
+		e.Status = previewVisible
+		e.Hint = hintMachineAllowed(d)
+	}
+	return e
 }
 
 // previewEntries computes the status taxonomy for a subject over the live

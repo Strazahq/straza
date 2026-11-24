@@ -168,7 +168,7 @@ Straza checks objects only in its MCP gateway, and its harness hooks never run t
 - Until a person publishes a new pin, a tool is refused to roles on some objects when its live mark is now stricter than its pinned reach, names another type or no longer parses, or when its live input schema no longer lists the pinned argument as a required top-level string. Roles on every object keep calling it. Removing a mark leaves the pinned reach as it was.
 - A tool you add without a mark reads as `all` until a person names its reach.
 - Straza reads only the name and the arguments of an agent's `tools/call`, so `_meta` an agent sends never reaches your server, and `ai.straza/object-id` always comes from Straza.
-- Your marks are not secret. The combined `/mcp` endpoint drops tool `_meta`, but a server's own endpoint, `/mcp/` followed by its name, serves your tools' `_meta` as you sent it.
+- Your marks are not secret. The combined `/mcp` endpoint and a server's own endpoint, `/mcp/` followed by its name, both serve your tools' `_meta` with your marks as you sent them.
 - An operator can turn every listing off with `apps.objects.enabled: false`. A tool that names an object then answers only roles on every object, so turning it off never widens access.
 
 ## A server that also serves git {#git}

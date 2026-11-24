@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
-import { BASE } from "@/lib/router";
+import { listApprovals, listUsers } from "@/lib/api";
+import { BASE, navigate } from "@/lib/router";
 import { ROUTES } from "@/lib/routes";
 
 // The session, the grants and the sign-in card are modules of their own,
@@ -13,6 +14,7 @@ const stub = vi.hoisted(() => ({
   servers: 0,
   waiting: "",
   working: [] as { id: string; items: unknown[] }[],
+  pending: [] as unknown[],
   signOut: vi.fn(),
 }));
 
@@ -35,6 +37,7 @@ vi.mock("@/lib/api", () => ({
   listUsers: vi.fn(async () => ({ items: [], next_cursor: "" })),
   listRoles: vi.fn(async () => []),
   listPolicies: vi.fn(async () => ({ items: [] })),
+  listApprovals: vi.fn(async () => ({ approvals: stub.pending })),
   query: () => "",
 }));
 
@@ -43,12 +46,24 @@ vi.mock("@/lib/api", () => ({
 vi.mock("@/screens/sessions", () => ({
   Sessions: () => <h1 tabIndex={-1}>Sessions</h1>,
 }));
+vi.mock("@/screens/session-page", () => ({
+  SessionPage: ({ id }: { id: string }) => <h1 tabIndex={-1}>{"Session " + id}</h1>,
+}));
 vi.mock("@/screens/overview", () => ({
   Overview: () => <h1 tabIndex={-1}>Overview</h1>,
 }));
-vi.mock("@/screens/settings", () => ({
-  Settings: ({ tab }: { tab?: string }) => <h1 tabIndex={-1}>{"Settings" + (tab ? " " + tab : "")}</h1>,
-}));
+// mounts counts how often the Settings stand-in mounts, to tell a tab change
+// that keeps the screen from one that builds it again.
+const mounts = vi.hoisted(() => ({ settings: 0, user: 0 }));
+vi.mock("@/screens/settings", async () => {
+  const React = await import("react");
+  return {
+    Settings: ({ tab }: { tab?: string }) => {
+      React.useEffect(() => { mounts.settings++; }, []);
+      return <h1 tabIndex={-1}>{"Settings" + (tab ? " " + tab : "")}</h1>;
+    },
+  };
+});
 vi.mock("@/screens/drafts", () => ({
   Drafts: ({ tab }: { tab?: string }) => <h1 tabIndex={-1}>{"Drafts" + (tab ? " " + tab : "")}</h1>,
 }));
@@ -77,8 +92,17 @@ vi.mock("@/screens/transcripts", () => ({
   Transcripts: ({ session }: { session?: string }) => <h1 tabIndex={-1}>{"Transcripts" + (session ? " of " + session : "")}</h1>,
 }));
 vi.mock("@/screens/users", () => ({
-  Users: ({ openID }: { openID?: string }) => <h1 tabIndex={-1}>{"Users" + (openID ? " opening " + openID : "")}</h1>,
+  Users: () => <h1 tabIndex={-1}>Users</h1>,
 }));
+vi.mock("@/screens/user-page", async () => {
+  const React = await import("react");
+  return {
+    UserPage: ({ id, tab }: { id: string; tab?: string }) => {
+      React.useEffect(() => { mounts.user++; }, []);
+      return <h1 tabIndex={-1}>{"User " + id + (tab ? " " + tab : "")}</h1>;
+    },
+  };
+});
 vi.mock("@/screens/server-page", () => ({
   ServerPage: ({ id, tab }: { id: string; tab?: string }) => <h1 tabIndex={-1}>{"page of " + id + " on " + (tab || "overview")}</h1>,
 }));
@@ -109,6 +133,8 @@ describe("the console shell", () => {
     stub.servers = 0;
     stub.waiting = "";
     stub.working = [];
+    stub.pending = [];
+    vi.mocked(listApprovals).mockClear();
   });
 
   it("lands a server admin on MCP servers from the base, beside the Drafts their standing may write", async () => {
@@ -166,6 +192,66 @@ describe("the console shell", () => {
     expect((await screen.findByRole("heading", { level: 1, name: "Approvals requests apr-1" })).textContent).toBe("Approvals requests apr-1");
   });
 
+  it("keeps a screen mounted across its tabs and builds it again for another object", async () => {
+    at(BASE + "settings/tokens");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Settings tokens" });
+    const before = mounts.settings;
+    act(() => navigate("settings", ["keys"], true));
+    await screen.findByRole("heading", { level: 1, name: "Settings keys" });
+    expect(mounts.settings).toBe(before);
+    act(() => navigate("drafts", ["41"]));
+    await screen.findByRole("heading", { level: 1, name: "Draft 41" });
+    act(() => navigate("drafts", ["42"]));
+    await screen.findByRole("heading", { level: 1, name: "Draft 42" });
+  });
+
+  it("opens the Users list from its address and a user's page from users/<id>", async () => {
+    at(BASE + "users");
+    render(<App />);
+    expect((await screen.findByRole("heading", { level: 1, name: "Users" })).textContent).toBe("Users");
+    at(BASE + "users/u-alice");
+    render(<App />);
+    expect((await screen.findByRole("heading", { level: 1, name: "User u-alice" })).textContent).toBe("User u-alice");
+  });
+
+  it("opens the Sessions list from its address and a session's page from sessions/<id>", async () => {
+    at(BASE + "sessions");
+    render(<App />);
+    expect((await screen.findByRole("heading", { level: 1, name: "Sessions" })).textContent).toBe("Sessions");
+    act(() => navigate("sessions", ["01a1da3d-934c-7be8-bd1a-92e51c045044"]));
+    expect((await screen.findByRole("heading", { level: 1, name: /^Session / })).textContent).toBe("Session 01a1da3d-934c-7be8-bd1a-92e51c045044");
+    act(() => navigate("sessions"));
+    await screen.findByRole("heading", { level: 1, name: "Sessions" });
+  });
+
+  it("keeps a user's page mounted across its tabs and builds it again for another user", async () => {
+    at(BASE + "users/u-alice");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "User u-alice" });
+    const before = mounts.user;
+    act(() => navigate("users", ["u-alice", "sessions"], true));
+    await screen.findByRole("heading", { level: 1, name: "User u-alice sessions" });
+    act(() => navigate("users", ["u-alice", "details"], true));
+    await screen.findByRole("heading", { level: 1, name: "User u-alice details" });
+    expect(mounts.user).toBe(before);
+    act(() => navigate("users", ["u-bob"]));
+    await screen.findByRole("heading", { level: 1, name: "User u-bob" });
+    expect(mounts.user).toBe(before + 1);
+  });
+
+  it("opens a user's page from the palette", async () => {
+    vi.mocked(listUsers).mockResolvedValueOnce({ items: [{ id: "u-alice", username: "alice", status: "active", origin: "local", kind: "human", created_at: "", updated_at: "", effective_roles: [], locks: [], sponsored_count: 0 }], next_cursor: "" });
+    at(BASE + "servers");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "MCP servers" });
+    await userEvent.keyboard("{Control>}k{/Control}");
+    await userEvent.type(await screen.findByPlaceholderText("Find a page, server, user, role or policy"), "ali");
+    await userEvent.click(await screen.findByRole("option", { name: /alice/ }));
+    expect(window.location.pathname).toBe(BASE + "users/u-alice");
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("User u-alice");
+  });
+
   it("opens the Drafts queue on its tab and a draft's review page from its address", async () => {
     at(BASE + "drafts");
     render(<App />);
@@ -192,6 +278,37 @@ describe("the console shell", () => {
     expect(badge.getAttribute("title")).toBe("2 drafts wait for review.");
   });
 
+  it("counts the requests that wait beside Approvals, and says so on hover", async () => {
+    stub.pending = [{ id: "apr-1" }, { id: "apr-2" }, { id: "apr-3" }];
+    at(BASE + "overview");
+    render(<App />);
+    const badge = await waitFor(() => {
+      const b = document.querySelector("[data-approvals-badge]") as HTMLElement | null;
+      if (!b) throw new Error("no badge yet");
+      return b;
+    });
+    expect(badge.textContent).toBe("3");
+    expect(badge.getAttribute("title")).toBe("3 requests wait for a decision.");
+    expect(vi.mocked(listApprovals)).toHaveBeenCalledWith("pending");
+  });
+
+  it("draws no count beside Approvals when no request waits", async () => {
+    at(BASE + "overview");
+    render(<App />);
+    await waitFor(() => expect(vi.mocked(listApprovals)).toHaveBeenCalled());
+    expect(document.querySelector("[data-approvals-badge]")).toBeNull();
+    expect(screen.getByRole("link", { name: "Approvals" }).textContent).toBe("Approvals");
+  });
+
+  it("reads no approvals for a session that does not see the Approvals area", async () => {
+    stub.state = { kind: "signed-in", user: "carol", grants: "audit:read", expiresAt: Date.now() + 300000 };
+    stub.areas = { audit: true };
+    at(BASE + "audit");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Audit" });
+    expect(vi.mocked(listApprovals)).not.toHaveBeenCalled();
+  });
+
   it("shows the person's working draft in the header, read beside the waiting count", async () => {
     stub.working = [{ id: "39", items: [{ kind: "App", name: "demo-tools", op: "put" }, { kind: "Role", name: "r", op: "put" }] }];
     at(BASE + "overview");
@@ -204,8 +321,7 @@ describe("the console shell", () => {
     render(<App />);
     expect(navLinks()).toHaveLength(ROUTES.length);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Page not found");
-    expect(screen.getByText("There is no page at this address.")).toBeTruthy();
-    expect(screen.getByText("Nothing in the console answers to " + BASE + "nowhere. Check the address, or start from Overview.")).toBeTruthy();
+    expect(screen.getByText("No page at " + BASE + "nowhere")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open Overview" }).getAttribute("href")).toBe(BASE + "overview");
     expect(document.title).toBe("Straza · Page not found");
   });
@@ -217,7 +333,7 @@ describe("the console shell", () => {
     render(<App />);
     expect(navLinks()).toEqual(["Audit"]);
     expect(screen.getByText("Users is not available to this account.")).toBeTruthy();
-    expect(screen.getByText("This account's admin scopes cover audit:read, which does not reach Users. Ask for a wider role, or use strazactl.")).toBeTruthy();
+    expect(screen.getByText("Your role does not include Users. Ask an administrator for a role that does.")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Open Audit" }));
     expect(window.location.pathname).toBe(BASE + "audit");
     expect((await screen.findByRole("heading", { level: 1, name: "Audit" })).textContent).toBe("Audit");

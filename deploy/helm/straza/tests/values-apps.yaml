@@ -5,6 +5,8 @@ oidc:
   issuer: https://idp.example.com/realms/prod
 postgres:
   passwordSecret: straza-db-password
+secrets:
+  kekExistingSecret: straza-kek
 apps:
   manifests:
     demo-tools.yaml: |

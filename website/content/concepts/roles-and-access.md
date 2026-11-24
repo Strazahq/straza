@@ -7,8 +7,8 @@ draft: false
 summary: >-
   A role says what its holders may do. All roles are made in Straza. An application role grants
   tools on one MCP server, a business role groups application roles, an approver role may
-  decide held calls, and a Straza role carries rights in Straza itself. Your IGA, or an admin
-  on standalone, decides who holds each role.
+  decide held calls, and a Straza role carries rights in Straza itself. Your IGA, a role group in
+  Entra or an admin decides who holds each role.
 noun: role
 keywords: role roles access application business approver straza assignment scim group catalog
 ---
@@ -59,10 +59,13 @@ Every change to a role, including its access row and the roles it composes, is a
 On enterprise, your IGA assigns roles. Each role appears there as a SCIM group, and membership of that group is the assignment. The group also carries a read-only view of what the role grants: its server, its tools, the policies that name it and the objects it covers. A certifier who reviews a business role therefore sees the reach of the roles it composes on the business role itself. On standalone there is no IGA, and an admin assigns roles in the console or the CLI.
 
 
-Roles do not depend on the identity provider that checks sign-in. They work the same when people sign in with Entra ID, Okta or Keycloak, because role membership comes from your IGA over SCIM, or from an admin on standalone.
+Straza can also write one security group into Microsoft Entra ID for each role, and a member of that group then holds the role. When Straza takes people from Entra, it creates a member who has no Straza user yet. That assignment stands beside one your IGA or an admin wrote, so a removal in one never ends what the other granted. [Role groups in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}) sets it up.
 
 
-A new assignment reaches a running session when it next checks in, as [Machines and sessions]({{< relref "concepts/machines-and-sessions.md" >}}) explains. The gateway then tells the agent's client that its tool list changed, and the client fetches the list again without a restart. Before any agent starts, an admin can preview what a role or a person would see, with a reason for each tool. [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) shows how to give a role its access and read that preview.
+Roles do not depend on the identity provider that checks sign-in. They work the same when people sign in with Entra ID, Okta or Keycloak, because role membership comes from your IGA over SCIM, from the role's group in Entra, or from an admin on standalone.
+
+
+A new assignment reaches a running session within seconds. A session without a connected push stream waits for its next check-in, as [Machines and sessions]({{< relref "concepts/machines-and-sessions.md" >}}) explains. The gateway then tells the agent's client that its tool list changed, and the client fetches the list again without a restart. Before any agent starts, an admin can preview what a role or a person would see, with a reason for each tool. [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) shows how to give a role its access and read that preview.
 
 {{< details summary="What an expert asks about roles" >}}
 
@@ -76,9 +79,6 @@ Policy selects sessions by application role only. The check of a policy set refu
 
 
 Deleting a role ends every assignment of it and removes its access row. It also turns off each live policy set that matched that role alone, because such a set would match nobody. Straza refuses the delete while a live policy set names the role as an approver. It never deletes a role whose name starts with straza-, so to take such a role from a holder, remove the assignment.
-
-
-A role can also carry a [knowledge pack]({{< relref "guides/govern-an-agent/knowledge-packs.md" >}}), text that every session of the role starts with.
 {{< /details >}}
 
 {{< next "concepts/objects.md" >}}

@@ -36,13 +36,9 @@ func TestAdminRoutesRefuseUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	packs, err := f.app.store.Packs().List(ctx)
-	if err != nil || len(packs) == 0 {
-		t.Fatalf("packs = %v, %v", packs, err)
-	}
 	reader, reviewers := mustRole(t, f.app, "reader"), mustRole(t, f.app, "draft-reviewers")
 	ids := strings.NewReplacer("{reader}", reader.ID, "{reviewers}", reviewers.ID, "{erin}", erin.ID, "{bot}", bot.ID,
-		"{pack}", packs[0].ID, "{draft}", f.create(t, f.root, draftRole("zz-helpers", "Helpers.")).Draft.ID)
+		"{draft}", f.create(t, f.root, draftRole("zz-helpers", "Helpers.")).Draft.ID)
 	docs := []string{draftRole("zz-helpers", "Helpers, again.")}
 	key := base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
 
@@ -72,8 +68,6 @@ func TestAdminRoutesRefuseUnknownFields(t *testing.T) {
 		{http.MethodPut, "/v1/admin/users/{bot}/nhi-key", map[string]any{"public_key": key}},
 		{http.MethodPost, "/v1/admin/attestation-hashes", map[string]any{"artifact": "hooks.claude-code", "harness": "claude-code", "hash": "sha256:abcdef"}},
 		{http.MethodPost, "/v1/admin/sessions/revoke", map[string]any{"user": "erin"}},
-		{http.MethodPost, "/v1/admin/packs", map[string]any{"name": "zz-pack", "version": "1", "content": "Use gofmt."}},
-		{http.MethodPost, "/v1/admin/packs/{pack}/bindings", map[string]any{"role_id": reader.ID}},
 		{http.MethodPost, "/v1/admin/drafts", map[string]any{"documents": docs}},
 		{http.MethodPost, "/v1/admin/drafts/check", map[string]any{"documents": docs}},
 		{http.MethodPut, "/v1/admin/drafts/{draft}", map[string]any{"revision": 1, "documents": docs}},

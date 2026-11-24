@@ -1,10 +1,14 @@
 import * as React from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { DANGER_FILL } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AccessEditor } from "@/components/access-editor";
+import { Tag } from "@/components/chip";
+import { KIND_ICON } from "@/components/kind-icon";
 import { type Built, RoleSaves, liveExport } from "@/components/role-saves";
 import { Field, HINT } from "@/components/wizard/parts";
+import { YamlFold } from "@/components/yaml-fold";
 import { coversKey, coversOf, pinnedOf, uncovered } from "@/lib/access-covers";
 import { fileCommands, missingCovers } from "@/lib/access-object-words";
 import { type Plan, emptyPlan, grantMatchers, sameRules } from "@/lib/access-plan";
@@ -15,11 +19,10 @@ import { heldSets } from "@/lib/held-kinds";
 import { nounsOf } from "@/lib/object-words";
 import { accessItems, newRoleItems, readOwnSet, roleFile } from "@/lib/role-draft";
 import { CANCEL, NAME_MISSING, NOTHING_CHANGED, PICK_ANOTHER, PICK_A_TOOL, READING_POLICY, UNCHANGED_TOOLS, accessSetName, accessToast, isGlob, liveRole, nameTaken, roleFileName } from "@/lib/role-words";
-import { NOTHING_SAVED, REMOVE_SET, removeSetBody, removeSetTitle, savedEdit } from "@/lib/save-words";
+import { NOTHING_SAVED, REMOVE_SET, ROLE_FILE_NOTE, removeSetBody, removeSetTitle, savedEdit } from "@/lib/save-words";
 import {
   ADD_LEDE,
   DESCRIPTION,
-  DESCRIPTION_HINT,
   EDIT_LEDE,
   NAME,
   NAME_SUFFIX,
@@ -42,8 +45,7 @@ import { cn } from "@/lib/utils";
 // document and its own set go live together in one
 // draft or not at all.
 
-const CODE = "rounded bg-muted px-1 font-mono text-[13px] text-foreground";
-const DESTRUCTIVE = "bg-danger text-white hover:bg-danger/90";
+const CODE = "rounded-md bg-muted px-1 font-mono text-caption text-foreground";
 
 export type AddRoleSheetProps = {
   app: AppRow;
@@ -209,18 +211,18 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
     <Sheet open={open} onOpenChange={(o) => { if (!o) close(); }}>
       <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" data-add-role={app.name}>
         <SheetHeader className="border-b border-border pr-12">
-          <SheetTitle className="text-lg leading-snug">{editing && role ? editTitle(role.name) : addTitle(app.name)}</SheetTitle>
+          <SheetTitle className="text-section leading-snug">{editing && role ? editTitle(role.name) : addTitle(app.name)}</SheetTitle>
           <SheetDescription>{editing ? EDIT_LEDE : ADD_LEDE}</SheetDescription>
         </SheetHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
-          {saved && <p role="alert" className="m-0 max-w-[75ch] text-[13px] text-danger" data-saved-edit>{savedEdit(accessSetName(name))}</p>}
+          {saved && <p role="alert" className="m-0 max-w-[75ch] text-caption text-danger" data-saved-edit>{savedEdit(accessSetName(name))}</p>}
           <Field id="ar-suffix" label={NAME} error={miss === "name" ? NAME_MISSING : miss === "taken" ? PICK_ANOTHER : undefined}>
             {editing ? (
-              <p className="m-0 font-mono text-sm text-foreground" data-role-name>{name}</p>
+              <p className="m-0" data-role-name><Tag icon={KIND_ICON["role-application"]}>{name}</Tag></p>
             ) : (
               <div className="flex max-w-[420px] items-center rounded-md border border-border bg-background">
-                <span className="pl-2.5 font-mono text-[13px] whitespace-nowrap text-muted-foreground">{rolePrefix(app.name)}</span>
+                <span className="pl-2.5 font-mono text-caption whitespace-nowrap text-muted-foreground">{rolePrefix(app.name)}</span>
                 <Input
                   id="ar-suffix"
                   ref={suffixRef}
@@ -233,22 +235,27 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
                 />
               </div>
             )}
-            {taken && <p className="m-0 max-w-[75ch] text-[13px] leading-snug text-danger" data-name-check="error">{nameTaken(name)}</p>}
+            {taken && <p className="m-0 max-w-[75ch] text-caption leading-snug text-danger" data-name-check="error">{nameTaken(name)}</p>}
             <p className={cn(HINT, "m-0")} data-name-preview>
               {preview.lead}<span className={CODE}>{preview.stored}</span>{preview.mid}<span className={CODE}>{preview.iga}</span>{preview.end}
-              <br />
-              {pinned ? (
-                <span className="block font-mono text-xs whitespace-pre-wrap" data-role-file>
-                  {fileCommands(roleFile({ name, kind: "application", description: description.trim(), implies: [] }, { role: { name }, app, tools, plan }), roleFileName(name))}
-                </span>
-              ) : (
-                <span className="font-mono text-xs">{cliCreateRole(name, app.name, matchers)}</span>
+              {!pinned && (
+                <>
+                  <br />
+                  <span className="font-mono text-caption leading-4">{cliCreateRole(name, app.name, matchers)}</span>
+                </>
               )}
             </p>
+            {pinned && (
+              <YamlFold
+                note={ROLE_FILE_NOTE}
+                text={fileCommands(roleFile({ name, kind: "application", description: description.trim(), implies: [] }, { role: { name }, app, tools, plan }), roleFileName(name))}
+                data-role-file
+              />
+            )}
           </Field>
 
           {!editing && (
-            <Field id="ar-description" label={DESCRIPTION} hint={DESCRIPTION_HINT}>
+            <Field id="ar-description" label={DESCRIPTION}>
               <Input id="ar-description" value={description} onChange={(e) => setDescription(e.target.value)} className="w-[420px] max-w-full" />
             </Field>
           )}
@@ -272,12 +279,12 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
               unnamed={unnamed}
             />
           ) : (
-            <p role="status" className="m-0 text-[13px] text-muted-foreground" data-reading>{READING_POLICY}</p>
+            <p role="status" className="m-0 text-caption text-muted-foreground" data-reading>{READING_POLICY}</p>
           )}
           {note ? (
-            <p role="status" className="m-0 text-[13px] text-danger" data-save-note>{note}</p>
+            <p role="status" className="m-0 text-caption text-danger" data-save-note>{note}</p>
           ) : sameRow && read && !sameCalls && !retiring ? (
-            <p role="status" className="m-0 text-[13px] text-muted-foreground" data-save-note>{UNCHANGED_TOOLS}</p>
+            <p role="status" className="m-0 text-caption text-muted-foreground" data-save-note>{UNCHANGED_TOOLS}</p>
           ) : null}
         </div>
 
@@ -296,7 +303,7 @@ export function AddRoleSheet({ app, tools, role, roles, binding, globalAdmin, op
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>{CANCEL}</AlertDialogCancel>
-                    <AlertDialogAction className={DESTRUCTIVE} onClick={confirm}>{REMOVE_SET}</AlertDialogAction>
+                    <AlertDialogAction className={DANGER_FILL} onClick={confirm}>{REMOVE_SET}</AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>

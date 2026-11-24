@@ -187,7 +187,7 @@ When a Gemini CLI release adds a tool that this Straza client does not know yet,
 
 {{< details summary="Write the rule in the console" >}}
 
-In Policies, the **Denied by default** view lists the tool when a call to it was denied in the last 24 hours. **Write a rule** on its row opens **New policy** with **Harness tool** and the tool's name answered under **Which calls**, and the wizard writes the same rule, as [Policies]({{< relref "guides/console/policies.md#read-the-policy-list" >}}) shows.
+In Policies, the **Denied by default** view lists the tool when a call to it was denied in the last 24 hours. **Write a policy rule** on its row opens **New policy** with **Harness tool** and the tool's name answered under **Which calls**, and the wizard writes the same rule, as [Policies]({{< relref "guides/console/policies.md#read-the-policy-list" >}}) shows.
 {{< /details >}}
 
 ## Next {.nostep}
@@ -195,4 +195,4 @@ In Policies, the **Denied by default** view lists the tool when a call to it was
 
 - [Write your first deny]({{< relref "guides/write-policy/first-deny.md" >}}) turns one dangerous command into a deny with your own reason.
 - [What the agent reads back]({{< relref "guides/govern-an-agent/what-the-agent-reads-back.md" >}}) lists every answer the model can get from Straza.
-- For work where an advisory hook is not enough, route the agent's tool calls through the gateway, as [Any MCP client]({{< relref "guides/govern-an-agent/any-mcp-client.md" >}}) shows, or run it in the sandbox image of [Hookless processes]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}). [The trust model]({{< relref "evaluate/security-model.md" >}}) explains why those two hold at a boundary.
+- To keep a credential out of an agent's reach, put its server behind the gateway, as [Any MCP client]({{< relref "guides/govern-an-agent/any-mcp-client.md" >}}) shows. For an agent whose harness has no hook, use the sandbox image of [Hookless processes]({{< relref "guides/govern-an-agent/hookless-processes.md" >}}). [The trust model]({{< relref "evaluate/security-model.md" >}}) says what each of them holds against.

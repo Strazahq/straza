@@ -95,7 +95,7 @@ note: validate refuses only the roles the product reserves, whose names start wi
 
 {{< shot name="policy-yaml" caption="The sheet that **Write YAML instead** opens, shown here with another policy set in it, and **Save draft** at its foot." >}}
 
-Paste the document into the sheet before **Save draft**. The console stores it as your draft, `Add policy set local-tools-guardrails`, and opens the draft's page with the server's checks. **Publish…** there opens the dialog that publishes it. The New policy wizard writes one outcome per run and a shell rule there needs a pattern, so a set like this one, an allow with no pattern beside a deny, goes in through the YAML door.
+Paste the document into the sheet before **Save draft**. The console stores it as your draft, `Add policy local-tools-guardrails`, and opens the draft's page with the server's checks. **Publish…** there opens the dialog that publishes it. The New policy wizard writes one outcome per run and a shell rule there needs a pattern, so a set like this one, an allow with no pattern beside a deny, goes in through the YAML door.
 {{< /console >}}
 
 
@@ -186,9 +186,9 @@ exit 0
 `straza service` spools the record of each decision and starts an upload at once, so both decisions land in the audit log as soon as that upload completes.
 
 {{< console >}}
-{{< clicks "Users" "dana" "open" >}}
+{{< clicks "Users" "dana" "Audit chain of dana" >}}
 
-The link **open** follows `Audit trail:` at the foot of dana's sheet, and it opens Audit filtered to dana. A row opens the record with its rule, its reason and the chain check.
+The link **Audit chain of dana** sits at the foot of the **Access** tab of dana's page, and it opens Audit filtered to dana. A row opens the record with its rule, its reason and the chain check.
 
 {{< shot name="audit-deny" caption="A deny record, here alice's on a standalone server: the rule, its reason and what ran." >}}
 {{< /console >}}
@@ -260,9 +260,9 @@ spec:
 {{< console >}}
 The New policy wizard writes this rule whole:
 
-{{< clicks "Policies" "New policy" "Denied" "Next" "A role" "scout-tools-readers" "Next" "MCP tool" >}}
+{{< clicks "Policies" "New policy" "Denied" "Next: Applies to" "A role" "scout-tools-readers" "Next: Which calls" "MCP tool" >}}
 
-Pick `scout-tools` under Server and tick `get-env`. On the next step, type the reason under `Reason the agent reads`, then name the set on Review and press **Save and publish**, then **Publish**.
+Pick `scout-tools` under Server and tick `get-env`. On the next step, type the reason under `Reason the agent reads`, then name the policy on Review and press **Save and publish**, then **Publish**.
 {{< /console >}}
 
 {{< cli >}}

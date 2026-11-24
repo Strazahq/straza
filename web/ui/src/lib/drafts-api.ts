@@ -29,6 +29,9 @@ const at = (id: string, verb = "") => "/v1/admin/drafts/" + enc(id) + (verb ? "/
 // object, source, working, policy_edit, limit and cursor as the caller
 // builds them.
 export const listDrafts = (q: string) => request<Page<DraftSummary>>("GET", "/v1/admin/drafts?" + q);
+// publishedFor reads one page of the published drafts that hold an item for
+// one Kind/Name object, newest id first.
+export const publishedFor = (object: string) => listDrafts("state=published&object=" + enc(object) + "&limit=200");
 export const getDraft = (id: string) => request<DraftDetail>("GET", at(id));
 export const createDraft = (body: DraftBody) => request<DraftAnswer>("POST", "/v1/admin/drafts", body);
 // checkDraft runs the verdict over documents and stores nothing.

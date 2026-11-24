@@ -201,8 +201,8 @@ governance:
 
 Two bounds the binary fixes shape such a scenario. The session token lives
 300 s and the identity's service refreshes it when a call needs it inside
-its last 120 s, so a refresh lands about three minutes after the session
-start. The admin token
+its last 120 s, so a refresh lands about three minutes after the token was
+minted, at the session start or at the last renewal a push started. The admin token
 the steps act with is the ten-minute login token; a `server: {action: start}`
 step signs the admin in again, so a scenario that runs longer than that
 restarts the server somewhere inside the ten minutes or ends before them.
@@ -231,8 +231,8 @@ Actions:
 
 | Action | Fields | `want` |
 |---|---|---|
-| `admin` | `method`, `path`, `body` (an object sent as JSON, or `yaml:` a string sent as `application/yaml`, which PolicySets and app manifests use), sent with the operator's login token from the device flow, or with the login token of the person named under `as: <identity>` | `status`, optional `body: {<json path>: <value>}` where a `null` value asserts the path is absent, which is how a scenario says a list has exactly so many items, and optional `bodyContains: <substring>` of the raw answer |
-| `scim` | `method`, `path`, `body`, sent with the IdM API token the runner minted with the SCIM grants | `status`, optional `body` and `bodyContains` as above |
+| `admin` | `method`, `path`, `body` (an object sent as JSON, or `yaml:` a string sent as `application/yaml`, which PolicySets and app manifests use), sent with the operator's login token from the device flow, or with the login token of the person named under `as: <identity>` | `status`, optional `body: {<json path>: <value>}` where a `null` value asserts the path is absent, which is how a scenario says a list has exactly so many items, optional `bodyAfter: {<json path>: <time>}` where the path must hold an RFC 3339 time later than the given one, such as a value an earlier step saved, compared as times and not as text, and optional `bodyContains: <substring>` of the raw answer |
+| `scim` | `method`, `path`, `body`, sent with the IdM API token the runner minted with the SCIM grants | `status`, optional `body`, `bodyAfter` and `bodyContains` as above |
 | `enroll` | `as: <identity>`, and for a human an optional `signIn: code` or `browser`, `code` when absent, the lane the person signs in by as described under Scenario files | none; an enrolment that does not complete fails the step |
 | `approver` | `as: <human identity>` and `action`. `action: enroll` takes `token`, an enroll token that an earlier `admin` step minted as that person with `POST /v1/approvals/self/enroll-token` and saved. The runner makes a P-256 key for the run and enrolls it as a browser, the way the self-service page does. `action: decide` takes `request`, `verdict: approve` or `deny` and an optional `reason`. The runner fetches the single-use challenge, signs the decision with the enrolled key and posts it. A decide takes no `within`, because a repeat after a success answers 409 | `status`, optional `body` and `bodyContains` as above. An enroll answers 201. A decide answers 200 with `state`, and the record's decider, channel and words are read with an `admin` step |
 | `server` | `action: stop` or `start`; stops or restarts `strazad` on the same port and data directory | none |
@@ -312,29 +312,30 @@ published budget is reported so the number is known.
 | `kill-switch-hook` | the same, to the first refused hook decision with the session's push stream connected | p99 under 2 s |
 | `policy-gateway` | PolicySet activation to the first gateway call decided by it | none published |
 | `policy-hook` | PolicySet activation to the first hook decision made under the new snapshot, push stream connected | none published |
-| `catalog-unbind` | binding removal or role removal to the tool disappearing from the identity's gateway list | none published; no push carries a role removal, so it lands at the session's next renewal, up to about 180 s after its token was minted |
+| `catalog-unbind` | binding removal or role removal to the tool disappearing from the identity's gateway list | none published; the role push carries a role removal to a session whose push stream is connected, and a session without one learns it at its next renewal, up to about 180 s after its token was minted |
 | `approval-retry` | admin approval to the retried call being allowed | none published |
 | `policy-pulse` | PolicySet activation to the first hook decision made under it, on a session busy with decisions; the push stream carries the change too and no step can hold it down, so the timer measures whichever of the push and the snapshot pulse arrives first | none published; the design bound for the pulse alone is at most one call plus `snapshotLagSeconds`, 30 s by default |
-| `refresh-adopt` | a role assignment to the first hook decision made with the role, which the session learns only at its refresh inside the token's last 120 s | none published; the design puts it between 180 s and 300 s after the session start |
-| `reacquire-adopt` | a second role assignment to the first hook decision made with it after the janitor closed the session, which the session learns when its refused refresh falls back once to a check-in through the identity's key | none published |
+| `role-push` | a role assignment to the first hook decision made with the role, which the session learns when the push stream's `roles` event makes the service renew at once | none published; the push lands within about a second |
+| `reacquire-adopt` | a second role assignment, made after the janitor closed the session, to the first hook decision made with it: the push makes the service renew, the server refuses the refresh of the closed session, and the service re-acquires once through the identity's key | none published |
 | `grace-exhausted` | the server stop to the first hook deny past the token's expiry plus the offline grace bound | none published; the bound is the configured `offlineGraceTTL` past expiry |
 | `ticket-expiry` | a ticket raised on a five second window to its record reading expired | none published; the sweep runs every 15 s, so the design puts it under 20 s |
 
 A session learns about a change on three clocks, all published. A
-revocation and a policy activation arrive on the push stream that the
-identity's service holds for every session it starts, and the runner waits
-for that stream after every allowed `session.start` of a canonical event, so
-the kill-switch and policy timers measure the pushed path. A policy
-change also arrives through the snapshot pulse, at most once per
+revocation, a policy activation and a role change arrive on the push stream
+that the identity's service holds for every session it starts, and the
+runner waits for that stream after every allowed `session.start` of a
+canonical event, so the kill-switch, policy and `role-push` timers measure
+the pushed path. A policy and a role change make the service renew the
+session at once, and roles are resolved on the server at that renewal. A
+policy change also arrives through the snapshot pulse, at most once per
 `snapshotLagSeconds` after a decision, so a busy session is at most one
 call plus 30 s behind the active policy even while its push stream is
 down. An idle one learns it at its first call back when that call renews
-the session, and otherwise from the call after it. An identity change,
-such as a role, arrives only with a check-in: the refresh inside the last
-120 s of the session token's life, a re-acquire, or a session start,
-because roles are resolved on the server at check-in and the pulse carries
-only the snapshot. The clock scenario times a policy change under
-`policy-pulse` and a role under `refresh-adopt`. No step holds the push
+the session, and otherwise from the call after it. A role change missed by
+the push arrives only with a check-in: the refresh inside the last 120 s of
+the session token's life, a re-acquire, or a session start, because the
+pulse carries only the snapshot. The clock scenario times a policy change
+under `policy-pulse` and a role under `role-push`. No step holds the push
 stream down, so `policy-pulse` cannot tell the pulse from the push. It
 fails only when both are missing.
 
@@ -346,10 +347,14 @@ live in the service's session logic and in the server, not in the payload
 shape the other groups prove on every dialect. It runs about eight
 minutes and proves, in one run: a policy change reaches a busy session
 within one call plus the pulse lag, through the push or the snapshot pulse;
-a role given after the session started reaches
-it only at the refresh inside the token's last 120 s; the janitor closes
+a role given after the session started reaches it within seconds through
+the push; the service refreshes the token at the first call inside its last
+120 s and not before, which the session's `last_seen` shows, because only a
+renewal moves it and nothing is pushed to the session while its token runs
+down; the janitor closes
 every session at its lifetime with a chained record; a refused refresh
-falls back once to a check-in through the identity's key, and a second role
+falls back once to a check-in through the identity's key, at the next
+decision and when a role push starts the refresh, and the second role
 arrives with that check-in; a stopped server leaves the hook deciding
 locally through the grace window and denying past it with the published
 wording; the sign-in deadline counts from the enrollment, so a person who

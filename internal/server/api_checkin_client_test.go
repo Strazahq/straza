@@ -221,6 +221,8 @@ func TestCheckinRefusesNULCharacter(t *testing.T) {
 		{"client commit", "client.commit", nulStepStraza, func(b map[string]any) { text(b, "client")["commit"] = "abc\x00def0" }},
 		{"attestation hash", "attestation.hashes", nulStepStraza, func(b map[string]any) { hashes(b)["self"] = "sha256:\x00" }},
 		{"attestation artifact", "attestation.hashes", nulStepStraza, func(b map[string]any) { hashes(b)["self\x00"] = "sha256:x" }},
+		{"host", "host", nulStepStraza, func(b map[string]any) { b["host"] = "build\x00box" }},
+		{"folder", "folder", nulStepStraza, func(b map[string]any) { b["folder"] = "~/src\x00" }},
 	}
 	for _, lane := range lanes {
 		t.Run(lane.name, func(t *testing.T) {

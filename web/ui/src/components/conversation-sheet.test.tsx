@@ -72,7 +72,7 @@ describe("the conversation sheet", () => {
     const boxes = [...document.querySelectorAll("[data-turn='" + kind + "']")];
     expect(boxes).toHaveLength(3);
     for (const box of boxes) {
-      for (const cls of [side, fill, "border-border", "text-base"]) expect(box.className).toContain(cls);
+      for (const cls of [side, fill, "border-border", "text-body"]) expect(box.className).toContain(cls);
       expect(box.className).not.toMatch(/shadow|--ok|--accent/);
     }
   });
@@ -83,7 +83,7 @@ describe("the conversation sheet", () => {
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Session")).toBeTruthy();
     expect(within(dialog).getByText(SHORT)).toBeTruthy();
-    const mode = within(dialog).getAllByText("recorded with secrets masked");
+    const mode = within(dialog).getAllByText("secrets masked");
     expect(mode).toHaveLength(1);
     expect(mode[0].getAttribute("data-tone")).toBe("ok");
     expect(within(dialog).getByText("joe-java-developer-agent. 6 turns on 2026-09-12 from 10:20:04 to 10:45:00.")).toBeTruthy();
@@ -121,7 +121,7 @@ describe("the conversation sheet", () => {
     expect(lines.slice(0, 6)).toEqual([
       "Session " + SESSION,
       "User: joe-java-developer-agent",
-      "Recorded with secrets masked. 6 turns from 2026-09-12 10:20:04 UTC to 2026-09-12 10:45:00 UTC.",
+      "Secrets masked. 6 turns from 2026-09-12 10:20:04 UTC to 2026-09-12 10:45:00 UTC.",
       "",
       "[2026-09-12 10:20:04 UTC] joe-java-developer-agent:",
       "Deploy the billing service to staging and tail its logs until the health check passes.",
@@ -146,7 +146,7 @@ describe("the conversation sheet", () => {
   it("marks a verbatim conversation in the accent tone", async () => {
     vi.mocked(sessionTranscript).mockResolvedValue({ ...transcript, turns: transcript.turns.map((t) => ({ ...t, mode: "verbatim" })) });
     mount();
-    const mode = await screen.findByText("recorded word for word");
+    const mode = await screen.findByText("word for word");
     expect(mode.getAttribute("data-tone")).toBe("accent");
   });
 
@@ -155,7 +155,7 @@ describe("the conversation sheet", () => {
     await screen.findByText("(body unavailable)");
     const missing = document.querySelector("[data-body-missing]") as HTMLElement;
     expect(missing.textContent).toBe(
-      "The body of this turn should be in the body store and was not found. This is an integrity finding; the hash witness on the audit chain still stands. Hash " + HASH,
+      "The text of this turn is missing from the message store. Its hash on the audit chain proves the loss. Check the store and its retention. Hash " + HASH,
     );
     expect(missing.className).toContain("text-danger");
     expect(screen.getByText("Truncated. Full content hash sha256:aa04")).toBeTruthy();
@@ -173,16 +173,17 @@ describe("the conversation sheet", () => {
     mount();
     expect(await screen.findByText("No recorded turns: recording is off for this session's policy, or nothing was said.")).toBeTruthy();
     expect(turns()).toEqual([]);
-    expect(screen.queryByText("recorded with secrets masked")).toBeNull();
+    expect(screen.queryByText("secrets masked")).toBeNull();
   });
 
   it("keeps a failed transcript read inside the sheet", async () => {
     vi.mocked(sessionTranscript).mockRejectedValue(Object.assign(new Error("unreachable"), { status: 0, unreachable: true }));
     mount();
     const block = await screen.findByRole("status");
-    expect(block.textContent).toContain("Conversation: unreachable, state unknown.");
-    expect(block.textContent).toContain("The recorded turns of this session could not be read because strazad did not answer. Check that it is running, then reload.");
-    expect(screen.getByText("The recorded turns could not be read.")).toBeTruthy();
+    expect(block.textContent).not.toContain("Conversation could not be read.");
+    expect(block.textContent).toContain("The recorded turns could not be read because Straza did not answer. Check that it is running, then reload.");
+    // The why is said once, in the block, and not again in the description.
+    expect(screen.getAllByText(/The recorded turns could not be read/)).toHaveLength(1);
   });
 
   it("opens the session and the audit trail from the footer, and closes", async () => {
@@ -192,10 +193,10 @@ describe("the conversation sheet", () => {
     mount({ onOpenSession, onOpenAudit, onOpenChange });
     await screen.findByText(/Deploy the billing service/);
     const footer = document.querySelector("[data-slot=sheet-footer]") as HTMLElement;
-    expect(footer.textContent).toContain("Session: open · Audit trail: open");
-    await userEvent.click(within(footer).getByRole("button", { name: "Open this session" }));
+    expect(footer.textContent).toContain("Open session · Open in Audit");
+    await userEvent.click(within(footer).getByRole("button", { name: "Open session" }));
     expect(onOpenSession).toHaveBeenCalledWith(SESSION);
-    await userEvent.click(within(footer).getByRole("button", { name: "Open the audit trail of this session" }));
+    await userEvent.click(within(footer).getByRole("button", { name: "Open in Audit" }));
     expect(onOpenAudit).toHaveBeenCalledWith(SESSION);
     await userEvent.click(within(footer).getByRole("button", { name: "Close" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);

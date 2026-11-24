@@ -2,7 +2,7 @@
 title: strazactl signing-keys
 description: List, rotate, promote and retire signing keys, and print a client assertion key's certificate
 pagetype: reference
-weight: 87
+weight: 81
 draft: false
 sources:
   - cmd/strazactl

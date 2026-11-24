@@ -141,6 +141,7 @@ spec:
 	tok, sid := gatewaySession(t, base, "kim")
 	args := map[string]any{"text": []string{strings.Repeat("<", 64<<10)}}
 	const head = "Straza checked the arguments against schapp__echo's input schema before asking for approval, and they do not match: "
+	const reason = "Straza checked the arguments against schapp__echo's input schema before asking for approval, and they do not match. Fix the arguments and call the tool again."
 
 	rows := []struct {
 		name, tool string
@@ -154,8 +155,8 @@ spec:
 		}},
 		{"a call approval_request describes", "straza__approval_request",
 			map[string]any{"action": map[string]any{"tool": "mcp.call", "app": "schapp", "tool_name": "echo", "args": args}},
-			func(text string) func(map[string]any) bool {
-				return func(d map[string]any) bool { return d["toolName"] == "approval_request" && d["reason"] == text }
+			func(string) func(map[string]any) bool {
+				return func(d map[string]any) bool { return d["toolName"] == "approval_request" && d["reason"] == reason }
 			}},
 	}
 	for _, row := range rows {
@@ -166,8 +167,8 @@ spec:
 			}
 			sel := row.sel(text)
 			rec := awaitMCPRecords(t, app, 1, sel)[0]
-			if rec["effect"] != "deny" || rec["reason"] != text || rec["session"] != sid {
-				t.Errorf("record = effect %v, session %v, want a deny in %s whose reason is the answer", rec["effect"], rec["session"], sid)
+			if rec["effect"] != "deny" || rec["reason"] != reason || rec["session"] != sid {
+				t.Errorf("record = effect %v, session %v, want a deny in %s whose reason leaves the detail out", rec["effect"], rec["session"], sid)
 			}
 			boundedRecord(t, app, sel, 8<<10)
 		})

@@ -118,8 +118,8 @@ This table records what the docs and the tests ran on, and it makes no promise o
 | Go, for a build from source | 1.26.11 | `go.mod` requires Go 1.26 and names go1.26.11 as its toolchain, which the go command fetches when the installed one is older. The builds and runs on this page used 1.26.9. |
 | PostgreSQL | 16.13 | The demo stack's database for the enterprise profile. The chart's bundled Postgres uses the `postgres:16` image. |
 | NATS | 2.14.3 | The demo stack's event bus. The chart's bundled NATS uses the `nats:2` image. |
-| Keycloak | 26.0.8 | The demo stack's OIDC login provider. |
-| midPoint | 4.10.3 | The demo stack's identity manager, connected over SCIM. |
+| Keycloak | 26.8.2 | The demo stack's OIDC login provider. |
+| midPoint | 4.10.5 | The demo stack's identity manager, connected over SCIM. |
 | Elasticsearch and Kibana | 8.14.3 | The demo stack's SIEM overlay. |
 | Docker Engine and Docker Compose | Engine 29.4.0, Compose 5.1.3 | The demo stack and the runs on this page. |
 | kind, kubectl and Kubernetes | kind 0.33.0, kubectl 1.37.0, node image v1.37.0 | The chart walk on a kind cluster on 2026-09-19. |

@@ -52,7 +52,7 @@ func TestTakeoverAcrossRolesLoosens(t *testing.T) {
 		want []string
 	}{
 		{"a looser shell gate", setPut("a-fast", fast), []string{"policy.guardrail-changed PolicySet/a-fast (tick) Rule fast-shell of a-fast will gate shell.exec in place of rule hold-shell of dev-access, " +
-			"with a ticket good for 1 day, decided by the person behind the agent where today it is a hold, up to 90 seconds, decided by sec-approvers. | " +
+			"with a ticket good for 1 day, decided by the agent's sponsor where today it is a hold, up to 90 seconds, decided by sec-approvers. | " +
 			refOf(t, devAccess+holdShell, "hold-shell") + " | " + refOf(t, fast, "fast-shell")}},
 		{"a push its requester may approve", setPut("a-self", self), []string{"policy.guardrail-changed PolicySet/a-self (typed a-self) Rule self-push of a-self will gate mcp.call in place of rule hold-push of dev-access, " +
 			"with a hold, up to 90 seconds, decided by sec-approvers or the requester where today it is a hold, up to 2 minutes, decided by sec-approvers. | " +
@@ -76,13 +76,18 @@ func TestTakeoverBehindAPatternGate(t *testing.T) {
 	g3 := strings.Replace(gainSet("g3", "{ roles: [dev] }", "    - id: all-by-sponsor\n      tools: [shell.exec]\n      mode: approve\n      effect: allow\n"+
 		"      approve: { deciders: [sponsor], class: ticket }\n"), "priority: 10", "priority: 15", 1)
 	agent := Check(w, agentDraftOf(w, setPut("g3", g3)), CheckInput{Proposer: ciBot, Now: checkNow})
-	want := []string{"agent.guardrail PolicySet/g3 g3 applies to you, and this draft adds or widens rule all-by-sponsor. An agent's draft may not change what binds the agent."}
-	if got := findingLines(agent.Refused); !reflect.DeepEqual(got, want) {
-		t.Errorf("agent: refused\n got %q\nwant %q", got, want)
+	want := []string{guardLoosened("g3", "adds or widens rule all-by-sponsor")}
+	if got := only(riskLines(agent.Risks), codeAgentGuardrail); len(agent.Refused) > 0 || !reflect.DeepEqual(got, want) {
+		t.Errorf("agent: refused %q, agent.guardrail risks\n got %q\nwant %q", findingLines(agent.Refused), got, want)
+	}
+	direct := Check(w, agentDraftOf(w, setPut("g3", g3)), CheckInput{Proposer: ciBot, Now: checkNow, Direct: true})
+	want = []string{guardRefusal("g3", "adds or widens rule all-by-sponsor")}
+	if got := findingLines(direct.Refused); !reflect.DeepEqual(got, want) {
+		t.Errorf("agent on a direct route: refused\n got %q\nwant %q", got, want)
 	}
 	person := Check(w, stamped(w, setPut("g3", g3)), erin)
 	want = []string{"policy.guardrail-changed PolicySet/g3 (tick) Rule all-by-sponsor of g3 will gate shell.exec in place of rule hold-shell of dev-access, " +
-		"with a ticket good for 1 day, decided by the person behind the agent where today it is a hold, up to 90 seconds, decided by sec-approvers. | " +
+		"with a ticket good for 1 day, decided by the agent's sponsor where today it is a hold, up to 90 seconds, decided by sec-approvers. | " +
 		refOf(t, devAccess+holdShell, "hold-shell") + " | " + refOf(t, g3, "all-by-sponsor")}
 	if got := guardLines(person); !reflect.DeepEqual(got, want) {
 		t.Errorf("person:\n got %q\nwant %q", got, want)
@@ -319,7 +324,7 @@ func TestTakeovers(t *testing.T) {
 	loose := gainSet("loose", "{ roles: [dev] }", fastRule)
 	line := func(object, x, xSet, xText, y, ySet, yText string) []string {
 		return []string{"policy.guardrail-changed PolicySet/" + object + " (tick) Rule " + x + " of " + xSet + " will gate mcp.call in place of rule " + y + " of " + ySet +
-			", with a ticket good for 1 day, decided by the person behind the agent where today it is a hold, up to 90 seconds, decided by sec-approvers. | " +
+			", with a ticket good for 1 day, decided by the agent's sponsor where today it is a hold, up to 90 seconds, decided by sec-approvers. | " +
 			refOf(t, yText, y) + " | " + refOf(t, xText, x)}
 	}
 	both := gainSet("both", "{ roles: [dev] }", strictRule+fastRule)
@@ -357,7 +362,7 @@ func TestTakeovers(t *testing.T) {
 }
 
 // fastZ is a live set at priority 20 that matches readers and holds
-// shell.exec on a ticket the person behind the agent decides, looser than
+// shell.exec on a ticket the agent's sponsor decides, looser than
 // dev-access's hold-shell, which it outranks.
 var fastZ = strings.Replace(gainSet("z-fast", "{ roles: [readers] }", fastShell), "priority: 10", "priority: 20", 1)
 
@@ -365,19 +370,28 @@ var fastZ = strings.Replace(gainSet("z-fast", "{ roles: [readers] }", fastShell)
 // set whose looser approval outranks a stricter live gate takes the gate
 // over for the role's holders. No set changes, so the set-level pass sees
 // nothing: the closure pass reads it for a person, and the agent's own
-// subject refuses it.
+// subject raises it for a person to accept, which a direct route refuses.
 func TestTakeoverThroughARoleChange(t *testing.T) {
 	t.Parallel()
 	w := withSet(shellWorld(), "z-fast", fastZ)
 	implies := gainRole("engineering", "    kind: business\n    implies: [dev, readers]\n")
+	took := "lets its rule fast-shell take over from the stricter rule hold-shell of dev-access"
 	agent := Check(w, agentDraftOf(w, implies), CheckInput{Proposer: ciBot, Now: checkNow})
-	want := []string{"agent.guardrail PolicySet/z-fast z-fast applies to you, and this draft lets its rule fast-shell take over from the stricter rule hold-shell of dev-access. " +
+	want := []string{guardLoosened("z-fast", took)}
+	if got := only(riskLines(agent.Risks), codeAgentGuardrail); len(agent.Refused) > 0 || !reflect.DeepEqual(got, want) {
+		t.Errorf("agent: refused %q, agent.guardrail risks\n got %q\nwant %q", findingLines(agent.Refused), got, want)
+	}
+	direct := Check(w, agentDraftOf(w, implies), CheckInput{Proposer: ciBot, Now: checkNow, Direct: true})
+	want = []string{"agent.guardrail PolicySet/z-fast z-fast applies to you, and this draft lets its rule fast-shell take over from the stricter rule hold-shell of dev-access. " +
 		"An agent's draft may not change what binds the agent."}
-	if got := findingLines(agent.Refused); !reflect.DeepEqual(got, want) {
-		t.Errorf("agent: refused\n got %q\nwant %q", got, want)
+	if got := findingLines(direct.Refused); !reflect.DeepEqual(got, want) {
+		t.Errorf("agent on a direct route: refused\n got %q\nwant %q", got, want)
+	}
+	if fix := "Leave z-fast and your roles as they are. A person can change them."; len(direct.Refused) != 1 || direct.Refused[0].Fix != fix {
+		t.Errorf("agent on a direct route: fix of %+v, want %q", direct.Refused, fix)
 	}
 	want = []string{"policy.guardrail-changed PolicySet/z-fast (tick) Rule fast-shell of z-fast will gate shell.exec in place of rule hold-shell of dev-access for holders of engineering, " +
-		"who will also hold readers, with a ticket good for 1 day, decided by the person behind the agent where today it is a hold, up to 90 seconds, decided by sec-approvers. | " +
+		"who will also hold readers, with a ticket good for 1 day, decided by the agent's sponsor where today it is a hold, up to 90 seconds, decided by sec-approvers. | " +
 		refOf(t, devAccess+holdShell, "hold-shell") + " | " + refOf(t, fastZ, "fast-shell") + " for engineering"}
 	if got := guardLines(Check(w, stamped(w, implies), erin)); !reflect.DeepEqual(got, want) {
 		t.Errorf("person:\n got %q\nwant %q", got, want)

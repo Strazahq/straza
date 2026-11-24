@@ -179,11 +179,14 @@ func (s *credStore) stream(ctx context.Context, a *account, hs *heldSession, id,
 		case "revocation":
 			s.revoke(a, hs, id, "kill-switch push from the server")
 			return pushRevoked, true
-		case "policy":
+		case "policy", "roles":
+			// Neither event carries anything this service trusts. Each
+			// says that the server now answers a renewal differently.
+			seen := hs.renewals.started.Load()
 			go func() {
 				pctx, pcancel := context.WithTimeout(s.ctx, requestTimeout)
 				defer pcancel()
-				s.renew(pctx, a, hs, true)
+				s.renewAfter(pctx, a, hs, seen)
 			}()
 		}
 		event = ""

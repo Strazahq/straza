@@ -2,7 +2,7 @@
 title: strazad migrate
 description: Move the database schema to one migration version
 pagetype: reference
-weight: 2
+weight: 4
 draft: false
 sources:
   - cmd/strazad
@@ -20,7 +20,9 @@ they hold.
 
 A rollback to an older strazad release runs this command with the newer
 binary first, since only the newer binary has the steps that undo its own
-migrations, and then starts the older binary on the same database.
+migrations, and then starts the older binary on the same database. The step
+to migration 46 also stores the signing keys the way the older releases read
+them, unsealed, for which it needs the secret.key of this database.
 
 Stop every strazad replica first. The command cannot see other replicas,
 and a replica that keeps serving writes to the tables the move changes.

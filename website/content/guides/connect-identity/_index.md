@@ -11,6 +11,7 @@ keywords: identity scim idm iga provisioning
 - [Okta]({{< relref "guides/connect-identity/okta.md" >}}) provisions people and their role membership from Okta over SCIM.
 - [Keycloak login]({{< relref "guides/connect-identity/keycloak-login.md" >}}) makes Keycloak the login provider, so people sign in with their own identity and Straza never holds a password.
 - [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}) makes Microsoft Entra ID the login provider, with the app registration and the claim the browser sign-in needs.
+- [Role groups in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}) writes a security group into Entra for each role, gives the role to the group's members and takes the people themselves from Entra.
 - [Okta login]({{< relref "guides/connect-identity/okta-login.md" >}}) makes Okta the login provider, with a native app and the fixed port its redirect needs.
 - [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md" >}}) connects any SCIM 2.0 client with the profile the server accepts.
 - [AI agents as identities]({{< relref "guides/connect-identity/nhi-provisioning.md" >}}) provisions an AI agent from your identity manager, registers the key it signs in with, and retires it again.

@@ -584,6 +584,21 @@ func TestContactReadsToolsWithNoCredential(t *testing.T) {
 	}
 }
 
+// TestContactLeavesOutANullTool pins that a null beside the tools of a
+// contacted server's list is left out and the contact still answers.
+func TestContactLeavesOutANullTool(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(&fakeMCP{pages: [][]map[string]any{{nil, tool("get_me", "Read the user.", true), nil}}})
+	t.Cleanup(srv.Close)
+	got, fault := testDialer(nil, nil, 3*time.Second).contact(context.Background(), "http://127.0.0.1:"+hostPort(t, srv)+"/mcp")
+	if fault != nil {
+		t.Fatalf("fault = %+v", fault)
+	}
+	if want := []contactedTool{{Name: "get_me", Description: "Read the user.", ReadOnly: true}}; fmt.Sprint(got.tools) != fmt.Sprint(want) {
+		t.Errorf("tools = %+v, want %+v", got.tools, want)
+	}
+}
+
 // contactFixture is the drafts fixture with an upstream the contact route
 // reaches through the test dialer, and the person mia, who holds
 // straza-global-mcp-admin.

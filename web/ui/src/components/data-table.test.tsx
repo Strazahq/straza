@@ -94,6 +94,21 @@ const list = (rows: Fruit[], stable: boolean, openKey: string | null = null, onO
 );
 
 describe("the stable rows of the data table", () => {
+  it("keeps a floor under a fixed layout, so the column without a width keeps room", () => {
+    const table = (minWidth?: string | ((shown: string[]) => string)) => {
+      const { container, unmount } = render(
+        <DataTable<Fruit> rows={FRUIT} columns={columns} labels={{ name: "Name", colour: "Colour", kind: "Kind" }} rowKey={(f) => f.id} rowName={(f) => f.id} dataAttr="data-fruit" emptyText="No fruit." widths={{ name: "120px", kind: "90px" }} minWidth={minWidth} />,
+      );
+      const width = (container.querySelector("table") as HTMLElement).style.minWidth;
+      unmount();
+      return width;
+    };
+    expect(table("410px")).toBe("410px");
+    expect(table()).toBe("");
+    // A function answers the floor for the columns that are shown.
+    expect(table((shown) => shown.length * 100 + "px")).toBe("300px");
+  });
+
   it("draws only the row that joins when stableRows is set", () => {
     const { rerender } = render(list(FRUIT, true));
     drawn.clear();

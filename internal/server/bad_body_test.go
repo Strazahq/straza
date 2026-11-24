@@ -25,8 +25,6 @@ func TestCreateRoutesWordABadBody(t *testing.T) {
 		{"token name as a number", a.handleAPITokenCreate, `{"name":7}`, "The request body is not valid JSON for an API token: "},
 		{"token cut short", a.handleAPITokenCreate, `{"name":`, "The request body is not valid JSON for an API token: "},
 		{"token without a name", a.handleAPITokenCreate, `{"scope":"audit:read","expires_in":3600}`, "name is required"},
-		{"pack cut short", a.handlePacksCreate, `{"name":`, "The request body is not valid JSON for a pack: "},
-		{"pack without a name", a.handlePacksCreate, `{}`, "name is required"},
 		{"role cut short", a.handleRolesCreate, `{"name":`, "The request body is not valid JSON for a role: "},
 		{"role without a name", a.handleRolesCreate, `{}`, "name is required"},
 	}

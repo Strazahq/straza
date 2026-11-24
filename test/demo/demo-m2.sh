@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # make demo-m2: reproduces the M2 milestone demo with the real binaries.
 # a central policy blocks `rm -rf` inside a (simulated) Claude Code session,
-# with a reason; the decision is audited; a role-bound knowledge pack appears
-# in the session context (the M2 milestone contract).
+# with a reason, and the decision is audited.
 #
 # The full end-to-end flow is also asserted as a Go test
 # (internal/agentguard/e2e_test.go, TestM2Demo); this script is the
@@ -45,8 +44,7 @@ authoritative demo. Manual steps from here:
      strazactl policy activate finance-tools
   3. straza enroll --server http://127.0.0.1:8420   (browser sign-in; --use-device-code with no display)
   4. straza install           (writes Claude Code hooks)
-  5. In Claude Code: a `rm -rf` Bash call is blocked with the policy reason;
-     the role-bound knowledge pack appears in the session context.
+  5. In Claude Code: a `rm -rf` Bash call is blocked with the policy reason.
   6. strazactl audit verify       (the block is in the tamper-evident chain)
 
 NOTE

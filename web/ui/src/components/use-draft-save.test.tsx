@@ -76,7 +76,7 @@ describe("Save draft", () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("drafts", ["39"]));
     expect(checkDraft).toHaveBeenCalledWith({ items: ITEMS });
     expect(createDraft).toHaveBeenCalledWith({ items: ITEMS, working: true });
-    expect(notify.ok).toHaveBeenCalledWith("Saved to your draft 39. Nothing changes until you publish it under Drafts.");
+    expect(notify.ok).toHaveBeenCalledWith("Saved to your draft 39.");
   });
 
   it("revises the working draft again on a second save, never through the update route", async () => {
@@ -137,7 +137,7 @@ describe("Save draft", () => {
     vi.mocked(checkDraft).mockRejectedValueOnce(new ApiError("unreachable", 0, true));
     await click("Save draft");
     await waitFor(() => expect(note()!.getAttribute("data-save-note")).toBe("unreachable"));
-    expect(note()!.textContent).toBe("The check could not finish because the server did not respond. Nothing was stored. Check your connection, then try again.");
+    expect(note()!.textContent).toBe("The check could not finish because Straza did not answer. Nothing was stored. Check your connection, then try again.");
   });
 });
 
@@ -164,7 +164,7 @@ describe("Save and publish", () => {
     onUndo();
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("drafts", ["51"]));
     expect(revertDraft).toHaveBeenCalledWith("50", "");
-    expect(notify.ok).toHaveBeenCalledWith("Draft 51 takes back draft 50. Review it, then publish it.");
+    expect(notify.ok).toHaveBeenCalledWith("Draft 51 takes back draft 50.");
   });
 
   it("opens the one dialog for a risk or a warning, and publishes nothing before it", async () => {
@@ -197,7 +197,7 @@ describe("Save and publish", () => {
     await screen.findByRole("dialog");
     await click("Cancel");
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(note()!.textContent).toBe("Draft 53 holds this change. It waits under Drafts until someone who may publish it does.Open draft 53");
+    expect(note()!.textContent).toBe("Draft 53 holds this change, under Drafts.Open draft 53");
     await click("Save and publish");
     await screen.findByRole("dialog");
     expect(createDraft).toHaveBeenCalledTimes(1);
@@ -314,7 +314,7 @@ describe("Save and publish", () => {
     expect(updateDraft).not.toHaveBeenCalled();
     await click("Cancel");
     await waitFor(() => expect(note()).not.toBeNull());
-    expect(note()!.textContent).toBe("Draft 59 holds this change. It waits under Drafts until someone who may publish it does." + STILL + "Open draft 59");
+    expect(note()!.textContent).toBe("Draft 59 holds this change, under Drafts." + STILL + "Open draft 59");
   });
 
   it("says the earlier draft still holds its change after a publish that went at once", async () => {
@@ -398,7 +398,7 @@ describe("Save and publish", () => {
     mount();
     await click("Save and publish");
     await waitFor(() => expect(note()!.getAttribute("data-save-note")).toBe("unreachable"));
-    expect(note()!.textContent).toBe("The server did not respond. The change may have been saved. Reload to check before trying again.");
+    expect(note()!.textContent).toBe("Straza did not answer. The change may have been saved. Reload to check before trying again.");
   });
 });
 

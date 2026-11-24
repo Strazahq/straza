@@ -5,12 +5,13 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { HelpTip } from "@/components/help-tip";
-import { WordBadge } from "@/components/users-table";
+import { Chip, Pill, Tag } from "@/components/chip";
+import { KIND_ICON } from "@/components/kind-icon";
 import type { RoleRow } from "@/lib/api";
 import { type Doc, type SetView, setCapture, setMatchRoles, setPriority } from "@/lib/policy-model";
 import {
-  APPLIES_FACT_HELP, APPLY_TO_PAGE, CANCEL, CHANGE_APPLIES, CHANGE_PRIORITY, CHANGE_RECORDING, EVERYONE, EVERYONE_MEANS,
-  FACT, NO_RECORDING, NOTHING_TICKED, PRIORITY_HELP, PRIORITY_LINE, REC, REC_MASKED, REC_VERBATIM, RECORDING_CHOICE,
+  APPLIES_FACT_HELP, APPLY_TO_PAGE, CANCEL, CHANGE_APPLIES, CHANGE_PRIORITY, CHANGE_RECORDING, EVERYONE,
+  FACT, NO_RECORDING, NOTHING_TICKED, PRIORITY_HELP, REC, REC_MASKED, REC_VERBATIM, RECORDING_CHOICE,
   RECORDING_FACT_HELP, TOUCHED, recWord,
 } from "@/lib/policy-words";
 import { holders } from "@/lib/words";
@@ -30,37 +31,47 @@ type Props = {
   onEdit: (touched: string, fn: (doc: Doc) => void) => void;
 };
 
+// RoleTag names one role a policy matches. Policies name application
+// roles, so the tag carries that kind's icon. A name wider than its cell is
+// cut short inside the tag, whole on hover.
+export function RoleTag({ name }: { name: string }) {
+  return (
+    <Tag icon={KIND_ICON["role-application"]} title={name} className="max-w-full" data-applies={name}>
+      <span className="min-w-0 truncate">{name}</span>
+    </Tag>
+  );
+}
+
 // RoleChips names who the policy applies to: its roles, or Everyone when
 // it names none.
 export function RoleChips({ roles }: { roles: string[] }) {
-  if (roles.length === 0) return <WordBadge word={EVERYONE} tone="plain" attr="data-applies" />;
+  if (roles.length === 0) return <Pill data-applies={EVERYONE}>{EVERYONE}</Pill>;
   return (
     <>
-      {roles.map((r) => <WordBadge key={r} word={r} tone="plain" mono attr="data-applies" />)}
+      {roles.map((r) => <RoleTag key={r} name={r} />)}
     </>
   );
 }
 
 // RecChip is the one orange tag of the console: this policy records the
 // conversations of every session it matches.
-export function RecChip({ capture }: { capture: "verbatim" | "redact" | null }) {
+export function RecChip({ capture }: { capture: string | null }) {
   if (!capture) return null;
-  return <WordBadge word={REC} tone="warn" mono title={capture === "redact" ? REC_MASKED : REC_VERBATIM} attr="data-rec" />;
+  return <Chip tone="warn" title={capture === "redact" ? REC_MASKED : REC_VERBATIM} data-rec={REC}>{REC}</Chip>;
 }
 
 export function PolicyFacts({ view, roles, onEdit }: Props) {
   const [open, setOpen] = React.useState<Fact | null>(null);
-  const cell = (key: Fact, label: string, help: string | null, value: React.ReactNode, note?: string) => (
+  const cell = (key: Fact, label: string, help: string | null, value: React.ReactNode) => (
     <div className="flex min-w-0 flex-1 flex-col gap-1 border-r border-border px-3.5 py-2.5 last:border-r-0" data-fact={key}>
-      <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-[.06em] text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground">
         {label}
         {help && <HelpTip label={label} text={help} />}
       </span>
-      <span className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="flex min-w-0 flex-wrap items-center gap-2 text-dense">
         {value}
-        <Button variant="link" size="sm" className="h-auto p-0 text-[13px]" onClick={() => setOpen(key)}>{FACT.change}</Button>
+        <Button variant="link" size="sm" className="h-auto p-0 text-caption" onClick={() => setOpen(key)}>{FACT.change}</Button>
       </span>
-      {note && <p className="text-[13px] leading-relaxed text-muted-foreground">{note}</p>}
     </div>
   );
 
@@ -71,7 +82,7 @@ export function PolicyFacts({ view, roles, onEdit }: Props) {
         {cell("recording", FACT.recording, RECORDING_FACT_HELP, view.capture
           ? <><RecChip capture={view.capture} /><span className="text-text-2">{recWord(view.capture)}</span></>
           : <span className="text-muted-foreground">{NO_RECORDING}</span>)}
-        {cell("priority", FACT.priority, null, <b className="font-mono font-semibold text-foreground">{view.priority}</b>, PRIORITY_LINE)}
+        {cell("priority", FACT.priority, null, <Pill>{view.priority}</Pill>)}
       </div>
 
       <Sheet open={open !== null} onOpenChange={(o) => { if (!o) setOpen(null); }}>
@@ -122,7 +133,7 @@ function FactBody({ which, view, roles, onEdit, onClose }: BodyProps) {
   return (
     <>
       <SheetHeader className="border-b border-border pr-12">
-        <SheetTitle className="text-lg leading-snug">{TITLE[which]}</SheetTitle>
+        <SheetTitle className="text-section leading-snug">{TITLE[which]}</SheetTitle>
         <SheetDescription>{LEDE[which]}</SheetDescription>
       </SheetHeader>
 
@@ -130,7 +141,7 @@ function FactBody({ which, view, roles, onEdit, onClose }: BodyProps) {
         {which === "applies" && (
           <>
             <div className="flex flex-col gap-1.5">
-              <label className="flex items-center gap-2.5 rounded-md border border-border px-3 py-2 text-sm">
+              <label className="flex items-center gap-2.5 rounded-md border border-border px-3 py-2 text-dense">
                 <input
                   type="checkbox"
                   aria-label={EVERYONE}
@@ -141,7 +152,7 @@ function FactBody({ which, view, roles, onEdit, onClose }: BodyProps) {
                 <span className="text-foreground">{EVERYONE}</span>
               </label>
               {offered.map((name) => (
-                <label key={name} className="flex items-center gap-2.5 rounded-md border border-border px-3 py-2 text-sm">
+                <label key={name} className="flex items-center gap-2.5 rounded-md border border-border px-3 py-2 text-dense">
                   <input
                     type="checkbox"
                     aria-label={name}
@@ -153,21 +164,21 @@ function FactBody({ which, view, roles, onEdit, onClose }: BodyProps) {
                     }}
                   />
                   <span className="font-mono text-foreground">{name}</span>
-                  <span className="ml-auto text-[13px] text-muted-foreground">{holders(holderCount[name] || 0)}</span>
+                  <span className="ml-auto text-caption text-muted-foreground">{holders(holderCount[name] || 0)}</span>
                 </label>
               ))}
             </div>
-            <p className="flex flex-wrap items-center gap-2 text-[13px] leading-relaxed text-muted-foreground" data-applies-state>
-              {everyone && <><WordBadge word={EVERYONE} tone="plain" />{EVERYONE_MEANS}</>}
+            <p className="flex flex-wrap items-center gap-2 text-caption leading-relaxed text-muted-foreground" data-applies-state>
+              {everyone && <Pill>{EVERYONE}</Pill>}
             </p>
-            {nothing && <p className="text-[13px] leading-relaxed text-danger" data-nothing-ticked>{NOTHING_TICKED}</p>}
+            {nothing && <p className="text-caption leading-relaxed text-danger" data-nothing-ticked>{NOTHING_TICKED}</p>}
           </>
         )}
 
         {which === "recording" && (
           <RadioGroup value={mode} onValueChange={setMode} className="gap-2.5">
             {([["off", RECORDING_CHOICE.off], ["verbatim", RECORDING_CHOICE.verbatim], ["redact", RECORDING_CHOICE.masked]] as const).map(([value, label]) => (
-              <div key={value} className="flex items-center gap-2.5 text-sm">
+              <div key={value} className="flex items-center gap-2.5 text-dense">
                 <RadioGroupItem value={value} id={"recording-" + value} />
                 <Label htmlFor={"recording-" + value} className="font-normal">{label}</Label>
               </div>

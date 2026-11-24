@@ -1,15 +1,15 @@
 import * as React from "react";
 import { CheckIcon, ChevronRightIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Chip, Pill } from "@/components/chip";
 import { Facts } from "@/components/sheet-parts";
 import { type PolicyDoor, openNewPolicy } from "@/components/policies-by-role";
 import { PolicyTest, type PolicyTestPrefill } from "@/components/policy-test";
 import { EngineFields } from "@/components/why-card";
 import { WhatRan } from "@/components/what-ran";
-import { COPIED, COPY_REFUSED, NOT_REHASHED, REHASHED, SENTINEL, type Row, objectLabel, objectNote, objectOf, parseCE, sevTone, shortType, whyOf } from "@/lib/audit-words";
+import { COPIED, COPY_REFUSED, NOT_REHASHED, REHASHED, SENTINEL, type Row, objectLabel, objectNote, objectOf, parseCE, recordFacts, rowLabel, sevTone, shortType, typeWord, whyOf } from "@/lib/audit-words";
 import { mayWritePolicy } from "@/lib/access-read";
 import { WRITE_RULE_FOR_CALL } from "@/lib/harness-words";
 import { TEST_THIS_CALL } from "@/lib/policy-words";
@@ -37,29 +37,12 @@ export const TONE_TEXT: Record<Tone | "plain", string> = {
   plain: "text-muted-foreground",
 };
 
-const TONE_FILL: Record<Tone, string> = {
-  ok: "bg-ok-bg text-ok border-ok/40",
-  warn: "bg-warn-bg text-warn border-warn/40",
-  danger: "bg-danger-bg text-danger border-danger/40",
-  unknown: "bg-unknown-bg text-unknown border-unknown/40",
-};
-
 const TONE_STRIP: Record<Tone, string> = {
   ok: "border-ok/40 bg-ok-bg",
   warn: "border-warn/40 bg-warn-bg",
   danger: "border-danger/40 bg-danger-bg",
   unknown: "border-unknown/40 bg-unknown-bg",
 };
-
-// ToneBadge is one word of this screen's own vocabulary, a severity or a
-// state, in its trust hue. The server statuses keep StatusBadge.
-export function ToneBadge({ tone, className, children }: { tone: Tone; className?: string; children: React.ReactNode }) {
-  return (
-    <Badge variant="outline" data-tone={tone} className={cn("rounded-md px-2 font-mono text-[13px] font-normal", TONE_FILL[tone], className)}>
-      {children}
-    </Badge>
-  );
-}
 
 // idPrefix shortens a session id to the length an operator reads, and says
 // "none" where a record carries no session.
@@ -136,6 +119,7 @@ export function RecordSheet({ row, open, onOpenChange, onRevoke, revoked, verifi
   const ce = parseCE(row.raw);
   const why = whyOf(ce);
   const obj = objectOf(ce);
+  const facts = recordFacts(ce, row.about);
   const prefill = testPrefill(row, ce);
   const door = ruleDoor(ce);
   const [testing, setTesting] = React.useState(false);
@@ -153,9 +137,9 @@ export function RecordSheet({ row, open, onOpenChange, onRevoke, revoked, verifi
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full gap-0 overflow-y-auto p-0 sm:max-w-2xl" data-record-sheet={row.seq}>
         <SheetHeader className="border-b border-border">
-          <SheetTitle className="flex flex-wrap items-baseline gap-2 text-base">
+          <SheetTitle className="flex flex-wrap items-baseline gap-2 text-body leading-6">
             {"Record " + row.seq}{" "}
-            <span className="font-mono text-[13px] font-normal text-muted-foreground">{shortType(row.type)}</span>
+            <span className="font-mono text-caption font-normal text-muted-foreground">{typeWord(shortType(row.type))}</span>
           </SheetTitle>
           <SheetDescription>
             {(row.user || NONE) + ", " + absTime(row.time) + ", session "}
@@ -165,39 +149,52 @@ export function RecordSheet({ row, open, onOpenChange, onRevoke, revoked, verifi
 
         <div className="flex flex-col gap-5 p-4">
           {row.sentinel && (
-            <div className={cn("flex flex-wrap items-center gap-2 rounded-md border px-3 py-2.5 text-sm", TONE_STRIP[tone])} data-sentinel-strip>
-              <ToneBadge tone={tone}>{row.severity}</ToneBadge>
+            <div className={cn("flex flex-wrap items-center gap-2 rounded-md border px-3 py-2.5 text-dense", TONE_STRIP[tone])} data-sentinel-strip>
+              <Chip tone={tone}>{row.severity}</Chip>
               <b className="font-mono font-semibold text-foreground">{row.detector}</b>
-              <span className="font-mono text-[13px] text-muted-foreground">{idPrefix(row.session)}</span>
+              <span className="font-mono text-caption text-muted-foreground">{idPrefix(row.session)}</span>
               <span className="text-text-2">{SENTINEL}</span>
               {row.severity === "critical" && (revoked
-                ? <ToneBadge tone="danger" className="ml-auto">session revoked</ToneBadge>
+                ? <Chip tone="danger" className="ml-auto">session revoked</Chip>
                 : onRevoke && <Button variant="outline" size="sm" className="ml-auto border-danger/40 text-danger hover:bg-danger-bg" onClick={() => onRevoke(row)}>Revoke session</Button>)}
             </div>
           )}
 
           {why && (
             <div className="rounded-md border border-border bg-card p-4" data-why data-tone={why.tone}>
-              <div className={cn("flex items-center gap-2 text-lg leading-tight font-semibold", TONE_TEXT[why.tone])} data-outcome>
+              <div className={cn("flex items-center gap-2 text-section leading-tight font-semibold", TONE_TEXT[why.tone])} data-outcome>
                 <span className="size-2.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
                 {why.outcome}
               </div>
               {obj && (
                 <div className="mt-2">
-                  <Facts rows={[[objectLabel(obj), <><span className="font-mono [overflow-wrap:anywhere]">{obj.value}</span>{" "}<span className="text-[13px] text-muted-foreground">{objectNote(obj)}</span></>]]} />
+                  <Facts rows={[[objectLabel(obj), <><span className="font-mono [overflow-wrap:anywhere]">{obj.value}</span>{" "}<span className="text-caption text-muted-foreground">{objectNote(obj)}</span></>]]} />
                 </div>
               )}
-              <p className="mt-2 text-sm leading-relaxed text-text-2">{why.basis}</p>
-              <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{why.context}</p>
+              <p className="mt-2 text-dense leading-relaxed text-text-2">{why.basis}</p>
+              {why.context && <p className="mt-1 text-caption leading-relaxed text-muted-foreground">{why.context}</p>}
               <EngineFields line={why.wire} />
+            </div>
+          )}
+
+          {/* Every other record, an admin change or a revocation among them, leads with what happened, its facts and its reason. */}
+          {ce && !why && !row.sentinel && (
+            <div className="rounded-md border border-border bg-card p-4" data-record-card>
+              <div className="text-section leading-tight font-semibold text-foreground" data-record-label>{rowLabel(row)}</div>
+              {facts.length > 0 && (
+                <div className="mt-2">
+                  <Facts rows={facts.map(([label, values]) => [label, <span className="flex flex-wrap gap-1.5">{values.map((v) => <Pill key={v} className="max-w-full whitespace-normal [overflow-wrap:anywhere]">{v}</Pill>)}</span>])} />
+                </div>
+              )}
+              {row.reason && <p className="mt-2 text-dense leading-relaxed text-text-2" data-record-reason>{row.reason}</p>}
             </div>
           )}
 
           {!row.sentinel && ce?.data && <WhatRan data={ce.data} />}
 
           {/* The chain check is one quiet line: only a check this browser ran wears the verified hue, on its mark and its words. */}
-          <section className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-3 text-[13px]" data-section="Chain">
-            <h3 className="text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground">Chain</h3>
+          <section className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-3 text-caption" data-section="Chain">
+            <h3 className="text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground">Chain</h3>
             <span className="font-mono break-all text-text-2" title={row.hash || undefined} data-hash>{row.hash ? row.hash.slice(0, 16) + "…" : NONE}</span>
             {clipboard && row.hash && <Button variant="ghost" size="sm" className="h-7 px-2" onClick={copyHash}>Copy hash</Button>}
             {verified
@@ -206,12 +203,12 @@ export function RecordSheet({ row, open, onOpenChange, onRevoke, revoked, verifi
           </section>
 
           <Collapsible data-section="The record as stored">
-            <CollapsibleTrigger className="group inline-flex items-center gap-1 rounded-sm text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
+            <CollapsibleTrigger className="group inline-flex items-center gap-1 rounded-md text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
               <ChevronRightIcon className="size-3.5 transition-transform group-data-[state=open]:rotate-90" aria-hidden="true" />
               The record as stored
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <pre className="mt-2 max-h-[40vh] overflow-auto rounded-md border border-border bg-card p-3 font-mono text-[13px] leading-relaxed break-all whitespace-pre-wrap">{pretty(row.raw)}</pre>
+              <pre className="mt-2 max-h-[40vh] overflow-auto rounded-md border border-border bg-card p-3 font-mono text-caption leading-relaxed break-all whitespace-pre-wrap">{pretty(row.raw)}</pre>
             </CollapsibleContent>
           </Collapsible>
         </div>

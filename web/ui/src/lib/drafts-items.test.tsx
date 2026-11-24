@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { DraftCoverage } from "./api";
 import { chipNotes, roleHolders } from "./drafts-access";
 import { itemFacts } from "./drafts-items";
-import { COVERAGE, COVERS_DETAIL, DETAIL, PUBLISHED_DETAIL, VERDICT, detailWith, trackerRole } from "@/test/drafts-fixture";
+import { NOT_READABLE_DOC, ON_LINE } from "./drafts-words";
+import { COVERAGE, COVERS_DETAIL, DETAIL, PUBLISHED_DETAIL, VERDICT, detailWith, readersSet, trackerRole } from "@/test/drafts-fixture";
 
-// What the row of In this draft and the card head say about each item:
-// the kind in full, the server that owns a role, who holds it, the
-// outcomes of a policy set, the summary chips of a changed role and one
-// line of what publishing does, from the fixture's eight items.
+// What the row of In this draft says about each item, the table the page
+// shows where In short builds no row: the kind in full, the server that
+// owns a role, who holds it, the outcomes of a policy set, the summary
+// chips of a changed role and one line of what publishing does, from the
+// fixture's eight items. The card head reads its change, owner and live
+// link from the same facts.
 
 const facts = (d = DETAIL) => Object.fromEntries(d.draft.items.map((it) => [it.kind + "/" + it.name, itemFacts(d, it)]));
 
@@ -18,8 +21,8 @@ describe("the facts of each item", () => {
     ["App/demo-tools", "MCP server", "", "changed", "Changes rate limit."],
     ["Role/github-readers", "Application role", "github", "new", "Reaches 2 tools of github."],
     ["Role/demo-tools-readers", "Application role", "demo-tools", "changed", ""],
-    ["PolicySet/github-writers-access", "Policy set", "", "new", "1 rule new."],
-    ["PolicySet/demo-tools-readers-access", "Policy set", "", "changed", "1 rule edited and 1 rule removed."],
+    ["PolicySet/github-writers-access", "Policy", "", "new", "1 new policy rule."],
+    ["PolicySet/demo-tools-readers-access", "Policy", "", "changed", "1 edited policy rule and 1 removed."],
     ["App/old-tools", "MCP server", "", "removed", "Publishing removes it with everything live that belongs to it."],
     ["Role/secret-role", "Role", "", "changed", DETAIL.draft.items[7].withheld as string],
   ];
@@ -38,6 +41,16 @@ describe("the facts of each item", () => {
 
   it("links an object that is live now, and never one the reader may not read", () => {
     expect(Object.entries(f).filter(([, x]) => x.live).map(([o]) => o)).toEqual(["App/demo-tools", "Role/demo-tools-readers", "PolicySet/demo-tools-readers-access", "App/old-tools"]);
+  });
+
+  it("says a changed set's document does not read, and counts no policy rule as removed", () => {
+    const d = detailWith({ draft: { items: [{ kind: "PolicySet", name: "demo-tools-readers-access", op: "put", doc: "spec: [unclosed", existed: true }] } });
+    expect(itemFacts(d, d.draft.items[0]).line).toBe(NOT_READABLE_DOC);
+  });
+
+  it("reads a set that is off live and that the draft puts as turned on", () => {
+    const d = detailWith({ live: { ...DETAIL.live, "PolicySet/demo-tools-readers-access": { op: "off", doc: readersSet(false) } } });
+    expect([itemFacts(d, d.draft.items[5]).what, itemFacts(d, d.draft.items[5]).line]).toEqual(["on", ON_LINE]);
   });
 
   it("counts the tools a contact read for a new server", () => {

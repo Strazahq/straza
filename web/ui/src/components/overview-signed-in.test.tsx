@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { SignedIn, clientDiffers } from "./overview-signed-in";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { SessionRow } from "@/lib/api";
-import { ADMIN_CLIENT, NOT_MEASURED_ADMIN, NO_GOVERNED, CLIENT_BUILD_DIFFERS, SESSIONS_UNREAD, SIGNED_IN_TITLE, buildsTitle, fleetLine, seatLine } from "@/lib/config-words";
+import { ADMIN_CLIENT, HOOK_WORD, NOT_MEASURED_ADMIN, NO_GOVERNED, CLIENT_BUILD_DIFFERS, SESSIONS_UNREAD, SIGNED_IN_TITLE, buildsTitle, fleetLine, seatLine } from "@/lib/config-words";
 import { NONE } from "@/lib/words";
 
 // The server's /version commit. A box image stamps git describe and a
@@ -32,7 +32,7 @@ const tip = async (el: Element) => {
   });
 };
 
-describe("which client builds differ from the server", () => {
+describe("which client builds differ from Straza", () => {
   const cases: { name: string; over: Partial<SessionRow>; server?: string; marked: boolean }[] = [
     { name: "the same commit under a differently spelled version", over: { client_version: "1.0.0-SNAPSHOT-011d686b" }, marked: false },
     { name: "a different commit", over: { client_version: "1.0.0-SNAPSHOT-87aad807", client_commit: "87aad807" }, marked: true },
@@ -50,7 +50,7 @@ describe("which client builds differ from the server", () => {
       expect(clientDiffers(row(tc.over), tc.server ?? SERVER)).toBe(tc.marked);
       mount([row(tc.over)], false, tc.server ?? SERVER);
       expect(document.querySelectorAll("[data-build-differs]").length).toBe(tc.marked ? 1 : 0);
-      expect(document.querySelector("[data-fleet-line]")?.textContent?.includes("from the server")).toBe(tc.marked);
+      expect(document.querySelector("[data-fleet-line]")?.textContent?.includes("from Straza")).toBe(tc.marked);
     });
   }
 });
@@ -64,14 +64,14 @@ describe("who is signed in", () => {
       CONSOLE,
     ]);
     expect((document.querySelector("[data-fleet-line]") as HTMLElement).textContent).toBe(fleetLine(3, { current: 2, unmeasured: 1 }, 2));
-    expect(document.querySelector("[data-fleet-line]")?.textContent).toContain("2 client builds differ from the server");
+    expect(document.querySelector("[data-fleet-line]")?.textContent).toContain("2 client builds differ from Straza");
     expect(document.querySelectorAll("[data-build-differs]").length).toBe(2);
     expect(screen.getAllByText(CLIENT_BUILD_DIFFERS).length).toBe(2);
   });
 
   it("says one client build in the singular", () => {
     mount([row({ client_commit: "87aad807" })]);
-    expect(document.querySelector("[data-fleet-line]")?.textContent).toContain("1 client build differs from the server");
+    expect(document.querySelector("[data-fleet-line]")?.textContent).toContain("1 client build differs from Straza");
   });
 
   it("names both builds on the mark and the full version on the version", async () => {
@@ -84,7 +84,7 @@ describe("who is signed in", () => {
     const mark = document.querySelector("[data-build-differs]") as HTMLElement;
     expect(mark.textContent).toBe(CLIENT_BUILD_DIFFERS);
     expect(await tip(mark)).toBe(buildsTitle("87aad807", SERVER));
-    expect(buildsTitle("87aad807", SERVER)).toBe("This session started on 87aad807. The server runs 011d686b.");
+    expect(buildsTitle("87aad807", SERVER)).toBe("This session started on 87aad807. Straza runs 011d686b.");
   });
 
   it("names the server's commit at the client's length, at least eight characters", async () => {
@@ -140,7 +140,27 @@ describe("who is signed in", () => {
 
   it("says the seat cannot read the sessions instead of failing the panel", () => {
     mount(null, true);
-    expect(screen.getByText(seatLine(SIGNED_IN_TITLE, "sessions:read"))).toBeTruthy();
+    expect(screen.getByText(seatLine(SIGNED_IN_TITLE, "sessions"))).toBeTruthy();
+  });
+
+  it.each([
+    ["current", "current"],
+    ["allowed", "not current"],
+    ["mismatch", "not registered"],
+    ["unmeasured", "not measured"],
+  ])("reads the hook configuration state %s as %s in a plain chip, and counts it by the same words", (state, word) => {
+    mount([row({ wiring_status: state })]);
+    const chip = document.querySelector("[data-hook]") as HTMLElement;
+    expect(chip.textContent).toBe(word);
+    expect(chip.getAttribute("data-tone")).toBe("plain");
+    expect(HOOK_WORD[state]).toBe(word);
+    expect((document.querySelector("[data-fleet-line]") as HTMLElement).textContent).toBe("1 governed session: 1 " + word);
+  });
+
+  it("holds the table to a floor wide enough for the longest hook word, so a narrow window scrolls it in its box", () => {
+    mount([row({ wiring_status: "mismatch" })]);
+    expect((document.querySelector("table") as HTMLElement).style.minWidth).toBe("780px");
+    expect(document.querySelector("table")?.parentElement?.className).toContain("overflow-x-auto");
   });
 
   it("keeps a missing session read distinct from an empty list", () => {

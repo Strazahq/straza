@@ -27,6 +27,7 @@ func TestAssignmentCountsByRole(t *testing.T) {
 		}
 
 		past := time.Now().Add(-time.Hour).UTC()
+		seedUserIDs(t, s, "u1", "u2", "u3")
 		for _, asg := range []RoleAssignment{
 			{SubjectKind: SubjectUser, SubjectID: "u1", RoleID: a.ID},
 			{SubjectKind: SubjectUser, SubjectID: "u2", RoleID: a.ID},
@@ -72,6 +73,7 @@ func TestAssignmentPairsInForce(t *testing.T) {
 		now := time.Now().UTC().Truncate(time.Microsecond)
 		past := now.Add(-time.Hour)
 		future := now.Add(time.Hour)
+		seedUserIDs(t, s, "u1", "u2", "u3", "u4", "u5")
 		for _, asg := range []RoleAssignment{
 			{SubjectKind: SubjectUser, SubjectID: "u1", RoleID: a.ID},
 			{SubjectKind: SubjectUser, SubjectID: "u2", RoleID: a.ID, ValidTo: &past},

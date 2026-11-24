@@ -71,7 +71,7 @@ describe("the self-service worker", () => {
     await s.handlers.push(push({ command: "rm -rf /" }));
     await s.handlers.push(push(null));
     expect(s.shown).toHaveLength(2);
-    expect(s.shown[0].opts.body).toBe("Something happened in your approvals. Open the self-service page to see it.");
+    expect(s.shown[0].opts.body).toBe("Open the self-service page to see what changed.");
     expect(s.shown[0].opts.body).not.toContain("rm");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(s.messages).toEqual([{ type: "straza-approvals", kind: "" }, { type: "straza-approvals", kind: "" }]);

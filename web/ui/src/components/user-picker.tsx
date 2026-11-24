@@ -12,6 +12,10 @@ type Props = {
   onChange: (u: PickedUser | null) => void;
   label: string;
   placeholder?: string;
+  // pick says the picker chooses a user in a dialog rather than filtering
+  // a list. The placeholder then leaves out the label, which the dialog's
+  // title already says, and the clear button clears the user, not a filter.
+  pick?: boolean;
   className?: string;
 };
 
@@ -21,7 +25,7 @@ type Found = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; rows: Use
 // and external id, eight rows), so a filter by user never needs the whole
 // directory in the browser. A picked user shows as a chip with a clear
 // button; the filter sends the id.
-export function UserPicker({ value, onChange, label, placeholder = "Type a name", className }: Props) {
+export function UserPicker({ value, onChange, label, placeholder = "Type a name", pick, className }: Props) {
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
   const [found, setFound] = React.useState<Found>({ kind: "idle" });
@@ -36,7 +40,7 @@ export function UserPicker({ value, onChange, label, placeholder = "Type a name"
     const t = setTimeout(() => {
       listUsers(query({ q: needle, limit: 8, sort: "name", order: "asc" })).then(
         (page) => { if (my === seq.current) setFound({ kind: "ready", rows: page.items || [] }); },
-        (e: ApiError) => { if (my === seq.current) setFound({ kind: "error", message: e.unreachable ? "strazad did not answer." : e.message }); },
+        (e: ApiError) => { if (my === seq.current) setFound({ kind: "error", message: e.unreachable ? "Straza did not answer." : e.message }); },
       );
     }, 250);
     return () => clearTimeout(t);
@@ -44,18 +48,18 @@ export function UserPicker({ value, onChange, label, placeholder = "Type a name"
 
   if (value) {
     return (
-      <span className={cn("inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background pl-2.5 pr-1 text-sm", className)} data-user-picker="picked">
+      <span className={cn("inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background pl-2.5 pr-1 text-dense", className)} data-user-picker="picked">
         <UserIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
         <span className="text-muted-foreground">{label}</span>
         <span className="font-mono">{value.username}</span>
-        <Button variant="ghost" size="icon-xs" aria-label={"Clear the " + label.toLowerCase() + " filter"} onClick={() => onChange(null)}><XIcon /></Button>
+        <Button variant="ghost" size="icon-xs" aria-label={"Clear the " + label.toLowerCase() + (pick ? "" : " filter")} onClick={() => onChange(null)}><XIcon /></Button>
       </span>
     );
   }
   return (
     <div className={cn("relative", className)} data-user-picker="open">
       <Command shouldFilter={false} label={label} className="h-9 rounded-md border border-border bg-background">
-        <CommandInput placeholder={label + ": " + placeholder} value={q} onValueChange={setQ} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} aria-label={label} className="h-9" />
+        <CommandInput placeholder={pick ? placeholder : label + ": " + placeholder} value={q} onValueChange={setQ} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} aria-label={label} className="h-9" />
         {open && q.trim() && (
           <CommandList className="absolute left-0 top-10 z-20 w-72 rounded-md border border-border bg-popover shadow-md">
             {found.kind === "loading" && <CommandItem value="loading" disabled>Searching the directory.</CommandItem>}

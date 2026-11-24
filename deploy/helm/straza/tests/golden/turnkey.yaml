@@ -18,7 +18,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-2.2.0
+    helm.sh/chart: straza-2.3.0
 spec:
   podSelector:
     matchLabels:
@@ -44,7 +44,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-2.2.0
+    helm.sh/chart: straza-2.3.0
 spec:
   podSelector:
     matchLabels:
@@ -74,7 +74,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-2.2.0
+    helm.sh/chart: straza-2.3.0
 spec:
   selector:
     app.kubernetes.io/name: straza-nats
@@ -93,7 +93,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-2.2.0
+    helm.sh/chart: straza-2.3.0
 spec:
   selector:
     app.kubernetes.io/name: straza-postgres
@@ -109,7 +109,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-2.2.0
+    helm.sh/chart: straza-2.3.0
 spec:
   type: ClusterIP
   selector:
@@ -129,7 +129,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-2.2.0
+    helm.sh/chart: straza-2.3.0
 spec:
   replicas: 2
   selector:
@@ -153,7 +153,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: strazad
-          image: ghcr.io/strazahq/straza:2.2.0
+          image: ghcr.io/strazahq/straza:2.3.0
           imagePullPolicy: IfNotPresent
           args: ["serve", "--profile", "enterprise", "--listen", "0.0.0.0:8420"]
           ports:
@@ -187,6 +187,8 @@ spec:
               value: "https://idp.example.com/realms/prod"
             - name: STRAZA_OIDC_CLIENT_ID
               value: "straza"
+            - name: STRAZA_SECRETS_KEK_FILE
+              value: /etc/straza/secret.key
             # On by default and visible here. Off renders nothing, so a relay
             # block in configYaml is never clobbered by an env face. The token
             # lives in the emptyDir data dir, so every pod start mints one
@@ -196,11 +198,15 @@ spec:
             - name: STRAZA_APPROVAL_PUSH_RELAY_TOKEN_FILE
               value: /var/lib/straza/push-relay-token
           volumeMounts:
-            # Writable data dir (rootfs is read-only): apps dir, and the
-            # generated KEK when secrets.kekExistingSecret is unset (that
-            # per-pod key is ephemeral; set kekExistingSecret in production).
+            # Writable data dir (rootfs is read-only): apps dir, and on the
+            # standalone profile the generated KEK, which lives and dies with
+            # the pod's sqlite store beside it.
             - name: data
               mountPath: /var/lib/straza
+            - name: kek
+              mountPath: /etc/straza/secret.key
+              subPath: kek
+              readOnly: true
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             initialDelaySeconds: 2
@@ -223,6 +229,9 @@ spec:
       volumes:
         - name: data
           emptyDir: {}
+        - name: kek
+          secret:
+            secretName: straza-kek
 ---
 # Source: straza/templates/nats.yaml
 apiVersion: apps/v1
@@ -233,7 +242,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-2.2.0
+    helm.sh/chart: straza-2.3.0
 spec:
   serviceName: straza-straza-nats
   replicas: 1
@@ -273,7 +282,7 @@ metadata:
     app.kubernetes.io/name: straza
     app.kubernetes.io/instance: straza
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: straza-2.2.0
+    helm.sh/chart: straza-2.3.0
 spec:
   serviceName: straza-straza-postgres
   replicas: 1

@@ -2,13 +2,16 @@ package snapshot
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/policy"
+	"github.com/strazahq/straza/internal/secrets"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -56,11 +59,26 @@ func testStore(t *testing.T) store.Store {
 	return s
 }
 
+// testKEK answers one KEK for the whole test binary, so that every signer a
+// test builds over one store opens the key another one sealed.
+var testKEK = sync.OnceValue(func() *secrets.Builtin {
+	dir, err := os.MkdirTemp("", "straza-snapshot-kek")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	kek, err := secrets.LoadOrCreateKEK(filepath.Join(dir, "kek"))
+	if err != nil {
+		panic(err)
+	}
+	return kek
+})
+
 // testSigner is the production Signer (authn.SnapshotKeys) over the test
 // store; it creates the active snapshot signing key on first use.
 func testSigner(t *testing.T, st store.Store) Signer {
 	t.Helper()
-	keys, err := authn.NewSnapshotKeys(context.Background(), st.SigningKeys())
+	keys, err := authn.NewSnapshotKeys(context.Background(), st.SigningKeys(), testKEK())
 	if err != nil {
 		t.Fatal(err)
 	}

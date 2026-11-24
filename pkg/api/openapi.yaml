@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: Straza platform API
-  version: 0.166.0
+  version: 0.183.0
   description: >
     Control-plane API of strazad. This document is the source of
     truth for the /v1 wire surface AND the unauthenticated infra and discovery
@@ -44,7 +44,7 @@ tags:
   - name: Users and devices
     description: Users, their enrolled devices, locks and the revocation rows the kill switch writes.
   - name: Roles, assignments and knowledge packs
-    description: Roles with the roles they compose, the assignments that give a person a role and the knowledge packs attached to them.
+    description: Roles with the roles they compose and the assignments that give a person a role. The knowledge pack routes are retired and answer 410.
   - name: PolicySets
     description: Stored PolicySets, with validation, simulation and activation into the signed snapshot.
   - name: Drafts
@@ -239,7 +239,7 @@ paths:
     post:
       operationId: checkin
       tags: ["Enrollment and check-in"]
-      summary: Start or refresh a session; returns session token and packs
+      summary: Start or refresh a session; returns session token
       parameters:
         - $ref: "#/components/parameters/dpopProof"
       requestBody:
@@ -650,9 +650,12 @@ paths:
                       type: string
                       description: >-
                         Read-time envelope enrichment (not part of the
-                        hash-covered CE bytes): resolved username of the
-                        record's data.user, falling back to the attributed
-                        admin actor.
+                        hash-covered CE bytes): who the record is listed
+                        under. On a straza.audit.admin record that names an
+                        actor it is data.actor, the person or admin API
+                        token that made the change. On every other record it
+                        is the resolved username of data.userId or
+                        data.user, falling back to data.actor.
                     decidedByUsername:
                       type: string
                       description: >-
@@ -660,6 +663,14 @@ paths:
                         resolved username of data.decidedBy, so the ledger
                         can say who decided. Omitted when the CE carries no
                         decidedBy.
+                    about:
+                      type: string
+                      description: >-
+                        Read-time envelope enrichment for straza.audit.admin
+                        records: the resolved username of data.user, the
+                        user the change was about. Omitted when the record
+                        names no user, when that user no longer resolves, and
+                        when it is the same as username.
 
   /v1/admin/apps:
     get:
@@ -978,6 +989,37 @@ paths:
                             reach: { type: string, enum: [argument, credential, all, none], description: "How far one call of the tool reaches: the object one argument names, what the call's credential reaches, every object, or no object. A tool the pinned declaration does not name reads all." }
                             covers: { type: string, enum: [every, some, none], description: "every when a role the subject holds covers every object and binds the tool. some when no such role binds it but a role on some objects does, the reach is argument, the server's mark on the tool has not drifted and apps.objects.enabled is on, so a call is allowed on those objects alone. none when the gateway would refuse every call of it." }
                           required: [type, reach, covers]
+                  refused:
+                    type: string
+                    enum: [disabled, revoked]
+                    description: "Why the gateway refuses every call of the user before any policy runs. It is disabled when the user's status is not active, and revoked when the user is active and on the denylist by a lock or a kill. Set in the user lane only, and absent when the user's calls reach policy. The entries still say what the user's roles give. Added in 0.177.0."
+                  machine:
+                    type: array
+                    description: >
+                      The servers on a person's machine: MCP servers the
+                      subject's policies name that Straza has not registered.
+                      A harness reaches such a server by itself, and only the
+                      hook decides its calls. Absent when the policies name
+                      none. Added in 0.171.0. Since 0.172.0 a server with a
+                      row in Straza is never listed, running or stopped. A
+                      tool that a policy rule with no apps list names is a row
+                      of every listed server. One answer lists at most 2,000
+                      tool names over all its servers, and a server whose
+                      names are cut has open true. A row is decided for a
+                      session with no attestation, no device certificate and
+                      no harness, as the registered rows are, so a policy rule
+                      with a require block reads as denied here even where a
+                      managed machine passes it.
+                    items:
+                      type: object
+                      properties:
+                        app: { type: string, description: "The server's name as the policy rules write it." }
+                        open: { type: boolean, description: "True when a policy rule decides tools of the server that the rows do not hold. Absent when false." }
+                        policies: { type: array, items: { type: string }, description: "The policies whose rules name the server in apps, sorted. Added in 0.172.0." }
+                        tools:
+                          type: array
+                          description: "One row per tool name the policy rules list whole, in the shape of an entries row, with status visible, approve_gated or hidden_policy."
+                          items: { type: object }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
@@ -1467,6 +1509,19 @@ paths:
                   scim:
                     type: object
                     description: Always an empty object, kept for older readers.
+                  entra:
+                    type: object
+                    description: The identity.entra section of the config. It is absent while the section is off. Servers before 0.174.0 never send it.
+                    properties:
+                      tenant: { type: string, description: "The ID of the Entra tenant." }
+                      client_id: { type: string, description: "The client ID of the service app that strazad signs in to Microsoft Graph as." }
+                      read: { type: array, items: { type: string }, description: "The kinds of account that Entra owns, any of people, agentUsers and agentIdentities. A reader shows a kind it does not know as it is." }
+                      role_groups: { type: boolean, description: "Whether strazad writes one security group for each role." }
+                      group_name_prefix: { type: string, description: "The text that starts the display name of every role group." }
+                      delta_interval_seconds: { type: integer, description: "How often strazad asks Entra which role groups changed." }
+                      reconcile_interval_seconds: { type: integer, description: "How often strazad reads every role group in full." }
+                      removal_guard_percent: { type: integer, description: "The share of a role's Entra holders above which a pass is held." }
+                      removal_guard_min_members: { type: integer, description: "The fewest removals that can hold a pass." }
                   governance:
                     type: object
                     properties:
@@ -1506,6 +1561,13 @@ paths:
                     properties:
                       gitops_dir_enabled: { type: boolean }
                       upstream_timeout_seconds: { type: integer }
+                      default_remote_rps:
+                        type: integer
+                        description: >
+                          Since 0.180.0. The rate limit, in tools/call
+                          requests a second for each session, that the
+                          gateway applies to a remote server whose manifest
+                          sets no limits.rps or sets 0.
                   capture:
                     type: object
                     description: >
@@ -1519,6 +1581,56 @@ paths:
                       mode: { type: string, enum: [verbatim, redact, mixed] }
                       retention_hours: { type: integer }
                       body_store: { type: string, enum: [inline, s3] }
+
+  /v1/admin/entra:
+    get:
+      operationId: getEntraStatus
+      tags: ["Roles, assignments and knowledge packs"]
+      summary: Read whether Straza can read Microsoft Entra ID
+      description: Answers whether the Entra sync is on, when it last read Entra in full and since when a read has been failing. Since 0.174.0.
+      security: [{ adminBearer: [] }]
+      responses:
+        "200":
+          description: The state of the read
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntraStatus" }
+
+  /v1/admin/roles/{id}/entra-group/release:
+    post:
+      operationId: releaseEntraRemovals
+      tags: ["Roles, assignments and knowledge packs"]
+      summary: Let the held removals of a role's group in Entra through
+      description: >
+        The removal guard holds a pass that would end a large share of a
+        role's holders from Entra. This lets those removals through, and the
+        sync's next pass applies them. It answers 409 when no removals of the
+        role are on hold. Emits straza.audit.admin action entra.pass.released.
+        Since 0.174.0.
+      security: [{ adminBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200": { $ref: "#/components/responses/Status" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/roles/{id}/entra-group/recreate:
+    post:
+      operationId: recreateEntraGroup
+      tags: ["Roles, assignments and knowledge packs"]
+      summary: Create a role's group in Entra again after it was deleted there
+      description: >
+        Ends every assignment that Entra gave the role, because the new group
+        starts with no members, and has the sync create the group at its next
+        pass. It answers 409 unless the group's state is missing. Emits one
+        straza.audit.admin roles.unassign for each ended assignment and one
+        entra.group.recreate. Since 0.174.0.
+      security: [{ adminBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200": { $ref: "#/components/responses/Status" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
 
   /v1/admin/overview:
     get:
@@ -1814,15 +1926,20 @@ paths:
     get:
       operationId: pushSubscribe
       tags: ["Enrollment and check-in"]
-      summary: Stream kill-switch revocations and policy refresh hints as server-sent events, scoped to the caller's own session, device and user
+      summary: Stream kill-switch revocations, policy refresh hints and role change hints as server-sent events, scoped to the caller's own session, device and user
       description: >
         Gateway-edge push stream (SSE): the kill-switch and policy-nudge lane
         of the Straza background service, one stream per session it holds,
         over the HTTPS channel it already authenticates to.
         Events: ready (lane live), revocation (drop session state NOW),
         policy (refresh hint; the snapshot is still fetched and verified
-        through the normal channel). Subjects derive from the session token's
-        own claims (session/user/device + the policy broadcast), so a client
+        through the normal channel), and since 0.178.0 roles (the roles the
+        session's user holds changed, by a grant or a removal, or since
+        0.179.0 by a change to what a role contains; renew the
+        session, which resolves them again, and drop no session state). A
+        client ignores an event it does not know. Subjects derive from the
+        session token's own claims (session/user/device, the user's role
+        changes, and the policy and role broadcasts), so a client
         can only hear about itself. An accelerator by contract: a session
         still renews when a call finds it near expiry and checks the snapshot
         after its decisions; 503 (lane down or pod cap
@@ -2909,7 +3026,7 @@ paths:
                 properties:
                   active:
                     $ref: "#/components/schemas/EngineDecision"
-                    description: "decision under the active snapshot"
+                    description: "The decision under the active snapshot. Since 0.177.0, for a stored user sent without roles who is disabled or revoked, active and draft are a deny that says so, with no rule, and neither the object check nor the engine is consulted, as at the gateway."
                   draft:
                     $ref: "#/components/schemas/EngineDecision"
                     description: "decision with the draft overlaid (present only when a draft was sent)"
@@ -2953,7 +3070,10 @@ paths:
         the set stays draft (unknown names stay legal selectors). Sets
         that were already active before either gate keep governing
         (strazad logs one WARN per such set at boot) until their next
-        activation.
+        activation. Since 0.180.0 a set that does not compile on its own,
+        such as one whose Rego module calls a refused built-in, answers 400
+        with the sentence validate gives and stays as it was. Servers
+        before 0.180.0 answer 500 there.
       security: [{ adminBearer: [] }]
       parameters:
         - { name: name, in: path, required: true, schema: { type: string } }
@@ -2995,10 +3115,14 @@ paths:
         (batched over the page), locks (0.58.0, batched: the lock rows
         the kill-switch lanes write, same shape as the detail read; empty
         array = not locked) and sponsored_count (0.100.0, one grouped
-        read); it also accepts the q/status/role/sponsor filters and the
-        sort and order parameters. The bare lane keeps the legacy plain
-        array without enrichment, and refuses filters and sorts with a
-        400 rather than silently ignoring them.
+        read); it also accepts the q/status/role/sponsor/kind filters and the
+        sort and order parameters. Its envelope carries kind_counts as
+        well: an object with the keys person, agent and service, each the
+        count of users of that kind under the request's other filters,
+        ignoring kind and the cursor, and 0 for a kind with no user. The
+        bare lane keeps the legacy plain array without enrichment, and
+        refuses filters and sorts with a 400 rather than silently ignoring
+        them.
       security: [{ adminBearer: [] }]
       parameters:
         - { $ref: "#/components/parameters/pageLimit" }
@@ -3023,6 +3147,13 @@ paths:
           in: query
           schema: { type: string }
           description: Exact sponsor username, so the page lists the agents that user sponsors (paged lane only)
+        - name: kind
+          in: query
+          schema: { type: string, enum: [person, agent, service] }
+          description: >
+            What the users are: service for the type service, agent for the
+            type agent or the kind nhi, else person. Any other value is a
+            400 (paged lane only)
         - name: sort
           in: query
           schema: { type: string, enum: [created, name, status, last_seen] }
@@ -3099,7 +3230,7 @@ paths:
             schema: { $ref: "#/components/schemas/UserUpdate" }
       responses:
         "200":
-          description: Updated. Only the fields whose value the request changes are written, so a PATCH of another field at the same moment keeps its value, and the answer is the row as stored after the write. Disabling a user revokes their sessions. Since 0.160.0 a write that leaves the user an AI agent or a service account also clears a stored password, and its user.update record names password among the changed fields.
+          description: Updated. Only the fields whose value the request changes are written, so a PATCH of another field at the same moment keeps its value, and the answer is the row as stored after the write. Disabling a user revokes their sessions. Since 0.160.0 a write that leaves the user an AI agent or a service account also clears a stored password, and its user.update record names password among the changed fields. Since 0.182.0 an enable lifts the disable and a deactivation by the identity manager or by Entra, and never a lock. When a lock still refuses the user, the status is active all the same, the record is user.lift.blocked in place of user.reactivated, and the answer carries notice, which names each lock and how to lift it. notice also says when Straza could not lift the disable in its database. An enable of a user who reads active, because the identity manager enabled the user after a disable in Straza, lifts that disable the same way.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
@@ -3119,7 +3250,21 @@ paths:
           description: >
             Another user holds the entra_agent_id in the request. Nothing
             changed. The answer names the user that holds it and the strazactl
-            command that clears it there. Since 0.162.0.
+            command that clears it there. Since 0.162.0. Since 0.175.0 also
+            a change of the status, the display name or the email of a person
+            of origin entra while identity.entra.read lists people. Nothing
+            changed, because Straza would write Entra's state back at its
+            next read. The answer says to change the account in Entra and to
+            lock it to stop the person at once. Since 0.176.0 also a change
+            of the status, the display name, the email, the sponsor or the
+            entra_agent_id of an agent of origin entra while
+            identity.entra.read lists agentUsers or agentIdentities, with
+            the answer "ledger-agent was not changed here, because the agent
+            comes from Microsoft Entra ID and Straza would write Entra's
+            state back at its next read. Change the agent, or its sponsor, in
+            Entra. To stop ledger-agent at once, lock the account." Nothing
+            changed. A lock, an unlock, the end of the agent's sessions and
+            the agent's key routes still answer.
         "500":
           $ref: "#/components/responses/Error"
           description: >
@@ -3153,6 +3298,17 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Status" }
         "404": { $ref: "#/components/responses/Error" }
+        "409":
+          $ref: "#/components/responses/Error"
+          description: >
+            The user is a person of origin entra while identity.entra.read
+            lists people. Nothing was deleted, because Microsoft Entra ID
+            owns the account. The answer says to change the
+            account in Entra and to lock it to stop the person at once. Since
+            0.175.0. Since 0.176.0 also an agent of origin entra while
+            identity.entra.read lists agentUsers or agentIdentities, with the
+            answer that says to change the agent, or its sponsor, in Entra
+            and to lock it to stop the agent at once.
         "500":
           $ref: "#/components/responses/Error"
           description: >
@@ -3424,7 +3580,7 @@ paths:
                     kind: { type: string, enum: [user, session, device, jti] }
                     target_id: { type: string }
                     reason: { type: string }
-                    origin: { type: string, enum: [scim, admin, external] }
+                    origin: { type: string, enum: [scim, admin, external, entra, admin-disable], description: "The authority that wrote the row. entra is a disable that Straza read in Microsoft Entra ID, and servers before 0.175.0 never send it. admin-disable is a disable in Straza, which an enable lifts, and admin and external are locks, which only an unlock lifts. Servers before 0.182.0 wrote admin for a disable in Straza, with the reason user disabled by admin." }
                     created_at: { type: string, format: date-time }
 
   /v1/admin/users/{id}/nhi-key:
@@ -3745,12 +3901,13 @@ paths:
     delete:
       operationId: deleteRoleImplication
       tags: ["Roles, assignments and knowledge packs"]
-      summary: Remove a composition edge, named by the composed role's id, effective at the subjects' next check-in
+      summary: Remove a composition edge, named by the composed role's id
       description: >
         Remove a composition edge (0.58.0). implicationId is the composed
         role's id, exactly as the list serves it. Edges shape role
-        resolution, so the removal takes effect at the subjects' next
-        check-in like every identity write.
+        resolution, so the removal reaches a session with a connected push
+        stream within seconds, by the roles event of GET /v1/push, and any
+        other session at its next check-in.
         Since 0.120.0 the removal is published as a one-item draft of the
         api door by the caller and writes straza.audit.admin
         roles.implication.delete.
@@ -3796,82 +3953,112 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Assignment" }
+        "400":
+          description: >
+            The request is malformed, or no user or no role has the id it
+            names. Since 0.180.0 the answer says which of the two is unknown
+            and cuts an id over 256 bytes.
+          content: { application/json: { schema: { type: object, properties: { error: { type: string } } } } }
         "409": { $ref: "#/components/responses/Error" }
+        "500":
+          description: >
+            Since 0.180.0. The store refused the write or did not answer.
+            Servers before 0.180.0 answer 400 here.
+          content: { application/json: { schema: { type: object, properties: { error: { type: string } } } } }
 
   /v1/admin/assignments/{id}:
     delete:
       operationId: deleteAssignment
       tags: ["Roles, assignments and knowledge packs"]
       summary: Remove an assignment
+      description: An assignment whose origin is entra is not removed here and answers 409, because it comes from the role's group in Microsoft Entra ID. Remove the user from that group. Servers before 0.174.0 hold no such assignment.
       security: [{ adminBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "200": { $ref: "#/components/responses/Status" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
 
   /v1/admin/packs:
     get:
       operationId: listPacks
       tags: ["Roles, assignments and knowledge packs"]
-      summary: List knowledge packs
+      summary: Retired. Listed knowledge packs, and now answers 410
+      deprecated: true
+      description: >
+        Retired. Knowledge packs were removed from Straza, so this route
+        reads and writes nothing. After the usual admin authentication it
+        answers 410 with an error that says to remove the call. A caller the
+        admin plane refuses keeps its 401 or 403. The route stays until the
+        next major version, so an older strazactl or script reads that
+        sentence instead of a 404.
       security: [{ adminBearer: [] }]
       responses:
-        "200":
-          description: Packs
-          content:
-            application/json:
-              schema: { type: array, items: { $ref: "#/components/schemas/Pack" } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
     post:
       operationId: createPack
       tags: ["Roles, assignments and knowledge packs"]
-      summary: Create a knowledge pack (checksum computed server-side)
+      summary: Retired. Created a knowledge pack, and now answers 410
+      deprecated: true
+      description: >
+        Retired. Knowledge packs were removed from Straza, so this route
+        reads and writes nothing. After the usual admin authentication it
+        answers 410 with an error that says to remove the call. A caller the
+        admin plane refuses keeps its 401 or 403. The route stays until the
+        next major version, so an older strazactl or script reads that
+        sentence instead of a 404.
       security: [{ adminBearer: [] }]
       requestBody:
-        description: "The pack's name, version and content; the checksum is computed by the server."
-        required: true
+        description: "Ignored. The route reads no body."
+        required: false
         content:
           application/json:
             schema: { $ref: "#/components/schemas/Pack" }
       responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Pack" }
-        "409": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
 
   /v1/admin/packs/{id}:
     delete:
       operationId: deletePack
       tags: ["Roles, assignments and knowledge packs"]
-      summary: Delete a knowledge pack that no role is bound to
+      summary: Retired. Deleted a knowledge pack, and now answers 410
+      deprecated: true
       description: >
-        Delete a knowledge pack. A pack a role is still bound to is refused,
-        because the delete would take the pack away from every session that
-        holds one of those roles at its next check-in: the answer names the
-        roles to a caller who may read them and counts them for any other,
-        and the fix is unbinding the pack from each of them first.
-        The bound check is part of the delete statement, so a binding that
-        lands while the request runs is refused the same way (0.125.0).
+        Retired. Knowledge packs were removed from Straza, so this route
+        reads and writes nothing. After the usual admin authentication it
+        answers 410 with an error that says to remove the call. A caller the
+        admin plane refuses keeps its 401 or 403. The route stays until the
+        next major version, so an older strazactl or script reads that
+        sentence instead of a 404.
       security: [{ adminBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
-        "200": { $ref: "#/components/responses/Status" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409":
-          description: A role is still bound to the pack. The sentence names the roles to a caller who may read them, counts them for any other, and says to unbind the pack from each first.
-          content: { application/json: { schema: { type: object, properties: { error: { type: string } } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
 
   /v1/admin/packs/{id}/bindings:
     post:
       operationId: bindPack
       tags: ["Roles, assignments and knowledge packs"]
-      summary: Bind a knowledge pack to a role
+      summary: Retired. Bound a knowledge pack to a role, and now answers 410
+      deprecated: true
+      description: >
+        Retired. Knowledge packs were removed from Straza, so this route
+        reads and writes nothing. After the usual admin authentication it
+        answers 410 with an error that says to remove the call. A caller the
+        admin plane refuses keeps its 401 or 403. The route stays until the
+        next major version, so an older strazactl or script reads that
+        sentence instead of a 404.
       security: [{ adminBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       requestBody:
-        description: "The id of the role that receives the pack."
-        required: true
+        description: "Ignored. The route reads no body."
+        required: false
         content:
           application/json:
             schema:
@@ -3880,28 +4067,31 @@ paths:
                 role_id: { type: string }
               required: [role_id]
       responses:
-        "201":
-          description: Bound
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/PackBinding" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
 
   /v1/admin/packs/{id}/bindings/{bindingId}:
     delete:
       operationId: unbindPack
       tags: ["Roles, assignments and knowledge packs"]
-      summary: Unbind a knowledge pack from a role, named by the role id, exactly as the packs list serves each binding's id
+      summary: Retired. Unbound a knowledge pack from a role, and now answers 410
+      deprecated: true
       description: >
-        Unbind a knowledge pack from a role (0.58.0). bindingId is the role id,
-        exactly as the packs list serves each binding's id (the edge has
-        no row id of its own).
+        Retired. Knowledge packs were removed from Straza, so this route
+        reads and writes nothing. After the usual admin authentication it
+        answers 410 with an error that says to remove the call. A caller the
+        admin plane refuses keeps its 401 or 403. The route stays until the
+        next major version, so an older strazactl or script reads that
+        sentence instead of a 404.
       security: [{ adminBearer: [] }]
       parameters:
         - { $ref: "#/components/parameters/id" }
         - { name: bindingId, in: path, required: true, schema: { type: string } }
       responses:
-        "200": { $ref: "#/components/responses/Status" }
-        "404": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
 
   /v1/admin/sessions:
     get:
@@ -3914,6 +4104,15 @@ paths:
         - { $ref: "#/components/parameters/pageCursor" }
         - { name: status, in: query, schema: { type: string, enum: [active, revoked, closed] }, description: "Unknown values are a 400, never an empty 200." }
         - { name: user, in: query, schema: { type: string }, description: "Filter to one user's sessions (user id)." }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 128 }
+          description: >
+            A search, paged lane only: a session matches when its owner's
+            username contains q or its id starts with q, both without regard
+            to case. It combines with status, user and every sort, and the
+            cursor walks the matches. On the bare lane, and over 128 bytes,
+            it is a 400.
         - name: sort
           in: query
           schema: { type: string, enum: [started, last_seen, user, status, attestation] }
@@ -3934,6 +4133,25 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/Session" } }
         "400": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/sessions/{id}:
+    get:
+      operationId: getSession
+      tags: ["Sessions and transcripts"]
+      summary: Read one session, in the row shape of the sessions list
+      description: >
+        The segment revoke is the bulk revoke's, which takes POST, so a GET
+        of /v1/admin/sessions/revoke answers 405 and reads no session.
+      security: [{ adminBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: The session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "404": { $ref: "#/components/responses/Error" }
+        "405": { $ref: "#/components/responses/Error" }
 
   /v1/admin/sessions/{id}/revoke:
     post:
@@ -4015,8 +4233,12 @@ paths:
         governance.deviceTokenTTL lengthens that wait. The response carries
         both timings in seconds. A call while a staged key exists answers
         with that key and creates no second one. Every call writes one
-        straza.audit.admin record with action signing-keys.rotate and the
-        kid. The scope area is sessions.
+        straza.audit.admin record with action signing-keys.rotate, purpose
+        session and the kid. The promotion and the retirement each write
+        their own straza.audit.admin record without actor fields, once for
+        the whole deployment: signing-keys.promote with purpose, kid and
+        previous_kid, and signing-keys.retire with purpose and kid. The
+        scope area is sessions.
       security: [{ adminBearer: [] }]
       responses:
         "200":
@@ -4305,6 +4527,7 @@ paths:
         - { $ref: "#/components/parameters/pageLimit" }
         - { $ref: "#/components/parameters/pageCursor" }
         - { name: state, in: query, schema: { type: string, enum: [pending, approved, denied, expired, all] }, description: "Default pending. Unknown values are a 400 (0.46.0; they used to coerce to pending)." }
+        - { name: user, in: query, schema: { type: string }, description: "Only the requests of this user id, combined with state. An id no user has answers an empty list. On the bare lane, at most the user's newest 500." }
       responses:
         "200":
           description: Approval records
@@ -4344,9 +4567,9 @@ paths:
       description: >
         Approve the record as the person the bearer names. A person's session
         or ID token passes; an admin API token carries no person and reads
-        401. A session a coding harness checked in reads 403, as does, while
-        the record is pending, a person outside the record's deciders or a
-        requester deciding their own request.
+        401. A session a coding harness checked in reads 403, as does a
+        person outside the record's deciders or a requester deciding their
+        own request, whether the record is pending or resolved.
       security: [{ userBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       requestBody:
@@ -4369,9 +4592,9 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409":
           description: >
-            The record was already decided with the other verdict. A decider
-            who repeats the verdict the record carries reads 200 with the
-            record.
+            The record was already decided with the other verdict. The person
+            who decided it, or a person who may decide it, who repeats the
+            verdict the record carries reads 200 with the record.
           content: { application/json: { schema: { type: object, properties: { error: { type: string } } } } }
         "410": { $ref: "#/components/responses/Error" }
 
@@ -4383,9 +4606,9 @@ paths:
       description: >
         Deny the record as the person the bearer names. A person's session
         or ID token passes; an admin API token carries no person and reads
-        401. A session a coding harness checked in reads 403, as does, while
-        the record is pending, a person outside the record's deciders or a
-        requester deciding their own request.
+        401. A session a coding harness checked in reads 403, as does a
+        person outside the record's deciders or a requester deciding their
+        own request, whether the record is pending or resolved.
       security: [{ userBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       requestBody:
@@ -4408,9 +4631,9 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409":
           description: >
-            The record was already decided with the other verdict. A decider
-            who repeats the verdict the record carries reads 200 with the
-            record.
+            The record was already decided with the other verdict. The person
+            who decided it, or a person who may decide it, who repeats the
+            verdict the record carries reads 200 with the record.
           content: { application/json: { schema: { type: object, properties: { error: { type: string } } } } }
         "410": { $ref: "#/components/responses/Error" }
 
@@ -4678,6 +4901,112 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /v1/self/devices:
+    get:
+      operationId: listSelfApproverDevices
+      tags: ["The calling user"]
+      summary: The calling person's own approver phones and browsers, newest first
+      description: >
+        One row per approver device the calling person enrolled, newest
+        first. A removed device has no row, so it is not listed. A row
+        carries no key material, no token and no push endpoint: notifies
+        says only whether a push route is registered, so the device can
+        notify its owner. The route takes a person's sign-in session of the
+        console or the self-service page, or the person's ID token. A coding
+        harness's session, an AI agent's or a service account's session, an
+        admin API token and an approver device's own token are refused, as
+        on POST /v1/approvals/self/enroll-token, and a refusal is recorded
+        as there.
+      security: [{ userBearer: [] }]
+      responses:
+        "200":
+          description: The caller's own devices, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, platform, key_security_level, created_at, notifies]
+                      properties:
+                        id: { type: string, description: "The apd_-prefixed device id that the removal takes." }
+                        name: { type: string, description: "The name the person gave the device." }
+                        platform: { type: string, description: "browser, ios or android, as the admin list sends it." }
+                        key_security_level: { type: string, description: "Where the device keeps its key, as the admin list sends it." }
+                        attestation: { type: string, description: "The attestation kind the device reported, as the admin list sends it. Absent when empty." }
+                        created_at: { type: string, format: date-time, description: "When the device was set up." }
+                        last_seen: { type: string, format: date-time, description: "When the device last read its queue. Absent when it never did." }
+                        notifies: { type: boolean, description: "True when a push route is registered for the device." }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/self/devices/{id}:
+    delete:
+      operationId: removeSelfApproverDevice
+      tags: ["The calling user"]
+      summary: Remove one of the calling person's own approver phones or browsers
+      description: >
+        Removes the device as DELETE /v1/admin/approvers/{id} does: the row
+        goes, so the device's token is refused with 401 device_revoked from
+        its next request on and its push routes go inert. The removal writes
+        the straza.identity.updated record a device writes when it retires
+        itself through DELETE /v1/approver/enrollment: action
+        approver-device-revoked with device, user and via self. An id that
+        names no device of the caller answers 404, and another person's
+        device answers the same status and the same body, so the answer
+        never tells whether the id exists. A second removal of the same id
+        answers that 404 too. The caller is checked as on GET
+        /v1/self/devices.
+      security: [{ userBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "204":
+          description: The device is removed, and its token is refused from here on.
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/self/requests:
+    get:
+      operationId: listSelfRequests
+      tags: ["The calling user"]
+      summary: The calling person's waiting requests, read with the sign-in session and with no challenge
+      description: >
+        A person's waiting requests, read with the person's sign-in session,
+        so a person sees them before a device is set up. scope=decidable
+        answers the rows GET /v1/approver/pending?scope=decidable answers to
+        an approver device of the person, by the same rule. scope=mine
+        answers the pending requests the person raised, with the fields of
+        the device lane's rows. Both scopes read the newest 500 waiting
+        requests on the server, so a waiting request is listed however many
+        settled records are newer. A row never carries challenge, so nothing
+        can be signed from it, and deciding still needs an enrolled device.
+        The read writes nothing: no challenge, no device's last-seen time and
+        no audit record. The caller is checked as on GET /v1/self/devices.
+      security: [{ userBearer: [] }]
+      parameters:
+        - { name: scope, in: query, required: true, schema: { type: string, enum: [decidable, mine] }, description: "decidable for the requests the caller may decide, mine for the requests the caller raised. Any other value answers 400." }
+      responses:
+        "200":
+          description: The waiting requests, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests:
+                    type: array
+                    description: "ApproverRow without challenge."
+                    items: { $ref: "#/components/schemas/ApproverRow" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
 
   /v1/admin/approvers:
     get:
@@ -6154,6 +6483,21 @@ components:
               maxLength: 256
               description: The build's version. Since 0.152.0 at most 256 bytes, refused with 400 as harness.name is.
             commit: { type: string }
+        host:
+          type: string
+          maxLength: 256
+          description: >
+            The host name of the machine the client's service runs on. The
+            server records it on the session a check-in starts, ignores it on
+            a refresh and verifies nothing. At most 256 bytes and no NUL
+            character, or the check-in answers 400. Added in 0.169.0.
+        folder:
+          type: string
+          maxLength: 1024
+          description: >
+            The folder the session started in, with the user's home directory
+            written as ~. Recorded and bounded as host is, at most 1024
+            bytes. Added in 0.169.0.
     CheckinResponse:
       type: object
       properties:
@@ -6166,6 +6510,8 @@ components:
         snapshot_id: { type: string }
         knowledge_packs:
           type: array
+          deprecated: true
+          description: Retired. Always an empty list.
           items:
             type: object
             properties:
@@ -6306,7 +6652,7 @@ components:
         display: { type: string }
         title: { type: string, description: "SCIM core title (RFC 7643): job title / agent function; informational" }
         status: { type: string, enum: [active, disabled] }
-        origin: { type: string, enum: [local, scim] }
+        origin: { type: string, enum: [local, scim, entra], description: "Who owns the user. It is local for a user made in Straza, scim for one an identity manager provisioned, and entra for a person or an agent that Microsoft Entra ID owns, which Straza created or took over from what it read over Graph. Servers before 0.175.0 never send entra, and servers before 0.176.0 never send it for an agent." }
         kind: { type: string, enum: [human, nhi], description: "what the identity IS (origin says who created it); nhi = created via the agentic-SCIM extension" }
         external_id: { type: string }
         user_type: { type: string, enum: [human, agent, service], description: "The identity typology; absent means unclassified. Mastered over SCIM in the enterprise profile." }
@@ -6315,6 +6661,15 @@ components:
         swarm_id: { type: string }
         ephemeral: { type: boolean }
         entra_agent_id: { type: string, description: "The client id of the Entra agent identity an AI agent acts as at Entra, a lower-case GUID. Absent when the user holds none. Only an agent holds one, and no two users hold the same. Since 0.162.0." }
+        notice:
+          type: string
+          readOnly: true
+          description: >
+            The sentence for the administrator when an update enabled the
+            user and Straza still refuses the user. It names each lock that
+            holds, with who set it and its reason, and how to lift it, or it
+            says that Straza could not lift the disable in its database. It
+            is absent on every other answer. Since 0.182.0.
         sponsored_count:
           type: integer
           readOnly: true
@@ -6322,6 +6677,37 @@ components:
             How many agents name this user as their sponsor. Present on the
             paged lane and the detail read; the bare lane keeps the legacy
             row without it.
+        entra:
+          type: object
+          readOnly: true
+          description: >
+            What Microsoft Entra ID says about an agent of origin entra. It
+            is present on the detail read only, for such an agent once the
+            Entra sync has stored its state, and absent otherwise. Servers
+            before 0.176.0 never send it.
+          properties:
+            identity: { type: string, enum: [enabled, disabled], description: "How Entra lists the agent identity: enabled, or disabled when it is disabled or deleted in Entra. Absent when Entra lists none." }
+            agent_user: { type: string, enum: [enabled, disabled], description: "How Entra lists the agent user of the agent identity. Absent when Entra lists none. The agent is active only while neither identity nor agent_user is disabled." }
+            agent_user_id: { type: string, description: "The Entra object id of the agent user, so a reader can open it in Entra. Absent when Entra lists no agent user." }
+            sponsor_state:
+              type: string
+              enum: [none, several, not-person, no-user]
+              description: >
+                Why the agent has no sponsor in Straza. It is absent while
+                Entra lists exactly one sponsor that is a person Straza has,
+                and that person is then the sponsor. none means Entra lists no
+                sponsor, several more than one, not-person one that is no
+                person, such as a group or an agent, and no-user one person
+                that has no Straza user. A reader shows a value it does not
+                know as it is.
+            sponsors:
+              type: array
+              description: What Entra lists as the agent's sponsors while sponsor_state is set. Absent when Entra lists none.
+              items:
+                type: object
+                properties:
+                  id: { type: string, description: "The sponsor's object ID in Entra." }
+                  kind: { type: string, description: "The sponsor's type as Entra reports it, such as user, group, agentUser, agentIdentity, servicePrincipal or other. A reader shows a value it does not know as it is." }
     UserCreate:
       type: object
       properties:
@@ -6433,6 +6819,80 @@ components:
             The tool list of a server-owned role, read off its one access row
             on its server. ["*"] is every tool, and the list is absent on a
             role no server owns. Added in 0.106.0.
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When the role was made. Absent on the create's answer.
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: >
+            When a write last changed the role. Every publish that changes
+            the role's description, access row or composition moves it, and
+            so does the removal of a role it composes. Absent on the
+            create's answer.
+        entra:
+          $ref: "#/components/schemas/RoleEntraGroup"
+    RoleEntraGroup:
+      type: object
+      readOnly: true
+      description: >
+        The role's security group in Microsoft Entra ID. It is present on the
+        roles list for a role that has, or is getting, such a group, and
+        absent otherwise. Servers before 0.174.0 never send it.
+      properties:
+        group_id: { type: string, description: "The object ID of the group in Entra. It is empty until Entra confirmed the create." }
+        state:
+          type: string
+          enum: [creating, linked, missing, deleting, held, released]
+          description: >
+            How the link stands. creating means Entra has not confirmed the
+            group yet. linked means its members are read and applied. missing
+            means the group was deleted in Entra and an admin decides. held
+            means a pass would remove a large share of the role's holders and
+            waits for an admin. released means an admin let those removals
+            through and the next pass applies them. deleting means the role is
+            gone and its group is being deleted.
+        read_at: { type: string, format: date-time, description: "The last complete read of the group's members. It is absent before the first one." }
+        error: { type: string, description: "What is wrong with the group and what to do about it, in a sentence. It is absent while nothing is." }
+        not_applied:
+          type: array
+          description: The members of the group that the last read found and did not give the role, at most 200 of them.
+          items:
+            type: object
+            properties:
+              id: { type: string, description: "The member's object ID in Entra." }
+              kind: { type: string, enum: [user, agentUser, agentIdentity, servicePrincipal, other], description: "The member's type as Entra reports it. agentIdentity is an agent identity, and servicePrincipal is an application's service principal that is no agent identity. Servers before 0.176.0 never send agentIdentity." }
+              reason:
+                type: string
+                enum: [no-user, not-read, disabled, name-taken, agent, not-agent, unread]
+                description: >
+                  Why the member holds no role. not-read means the deployment
+                  does not read this kind of account from Entra. name-taken
+                  means another Straza user has the account's sign-in name and
+                  is not linked to this Entra account. not-agent means the
+                  member is an application's service principal and no agent
+                  identity, and Straza gives roles to people and agents only.
+                  unread means Entra returned a type and an ID only, or Straza
+                  could not read the agent behind the member. agent meant the
+                  member is an agent, which the server did not apply: servers
+                  before 0.176.0 sent it, and servers from 0.176.0 on never
+                  send it, because they apply agents. Servers before 0.176.0
+                  never send not-agent. Servers from 0.175.0 on never send
+                  no-user or disabled, because they create a person for a
+                  member and keep a disabled person's role, and servers
+                  before it never send name-taken.
+    EntraStatus:
+      type: object
+      properties:
+        enabled: { type: boolean, description: "Whether the config turns the Entra sync on." }
+        tenant: { type: string, description: "The ID of the Entra tenant. It is absent while the sync is off." }
+        last_good: { type: string, format: date-time, description: "The end of the last pass in which every request to Entra succeeded. It is absent before the first one." }
+        stale_since: { type: string, format: date-time, description: "The first failed pass since the last good one. It is absent while reads succeed. While it is set, every role keeps its last good holders." }
+        error: { type: string, description: "The sentence of the last failure. It is absent while reads succeed." }
+        held: { type: integer, description: "How many roles have removals on hold for an admin." }
     RoleCreate:
       type: object
       properties:
@@ -6487,9 +6947,14 @@ components:
         valid_to: { type: string, format: date-time }
         origin:
           type: string
-          enum: [scim, admin]
+          enum: [scim, admin, entra]
           readOnly: true
-          description: The lane that wrote the row, scim for an identity manager group membership and admin for the admin API. A value sent in a request body is ignored.
+          description: The lane that wrote the row. It is scim for an identity manager group membership, admin for the admin API and entra for a member of the role's group in Microsoft Entra ID. A user may hold one role through an entra row and one other row at once. A value sent in a request body is ignored. Servers before 0.174.0 never send entra.
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When the role was assigned. A repeated identity manager write of the same membership keeps the first time. A value sent in a request body is ignored.
       required: [subject_kind, subject_id, role_id]
     Device:
       type: object
@@ -6551,9 +7016,14 @@ components:
         id: { type: string }
         user_id: { type: string }
         username: { type: string, description: Resolved owner username (empty if the user row is gone) }
+        user_kind: { type: string, enum: [person, agent, service], description: "What the owner is: service or agent by its type, agent also for the kind nhi, else person. Absent when the user row cannot be read." }
+        sponsor: { type: string, description: "The username of the owner's sponsor. Absent when the owner has none." }
+        waiting: { type: integer, minimum: 1, description: "How many of the session's approval requests wait for an answer now: pending and not expired. Absent when none." }
         harness: { type: string }
         client_version: { type: string, description: The straza build the client named at check-in; absent for a client older than the field or a web login }
         client_commit: { type: string, description: "The git commit of the straza build named at check-in, at most 64 bytes, absent for older clients and sessions and for a web login." }
+        host: { type: string, description: "The machine the session runs on, as the client named it at check-in. Absent for older clients and sessions." }
+        folder: { type: string, description: "The folder the session started in, the home directory written as ~. Absent for older clients and sessions." }
         attestation: { type: string }
         status: { type: string, description: active | revoked | closed (janitor closes sessions idle past token expiry) }
         started_at: { type: string, format: date-time }
@@ -6862,7 +7332,19 @@ components:
         group: { type: string, description: "On a risk only: the risks a client lets the publisher confirm together, once for the whole group, which is the risk's code. Absent on a risk confirmed on its own, a server removal and an agent's loosening of a set that binds it, whose typed text is the name. The publish body still carries every risk's own key in ticked and its own typed text in typed." }
         key: { type: string, description: "The finding's key from before any cut for its reader, which a publish echoes in ticked and typed." }
         document: { type: integer, description: "The number of the sent document a reading refusal names, counted from 1 across every text sent. A text refused whole carries the number of its first document. A client that sent the texts can say where it sits, and a warning that replaces such a refusal keeps the number. Absent on every other finding." }
+        rows: { type: array, items: { $ref: "#/components/schemas/DraftToolRow" }, description: "The server and tool of each gain row a risk of who gains covers. It is set on access.ungated and the other risks of who gains, for the role the object names, in the order of the verdict's gains, each pair once. It is absent on every other finding and on a line cut for its reader. Servers before 0.173.0 never send it." }
+        rule: { type: string, description: "The id of the rule a policy.local-allow or ready.rule-names-nothing line is about. It is absent where a folded line covers several rules or servers, and on a line cut for its reader. Servers before 0.173.0 never send it." }
+        server: { type: string, description: "The server that rule names. It is absent for a rule that names every server or none, where a folded line covers several, and on a line cut for its reader. Servers before 0.173.0 never send it." }
+        tools: { type: array, items: { type: string }, description: "The tool names that rule allows. It is absent for a rule that allows every tool, where a folded line covers several rules or servers, on a line about a rule of a live policy the draft does not write, and on a line cut for its reader. Servers before 0.173.0 never send it." }
+        binds_proposer: { type: boolean, description: "True on a policy.guardrail-changed line of a policy that applies to the draft's proposer, before or after the draft. It is absent otherwise, on a line cut for its reader, and for every reader but the proposer, root and a holder of identity:read. Servers before 0.173.0 never send it." }
       required: [code, class, sentence, key]
+    DraftToolRow:
+      description: One tool of one server.
+      type: object
+      properties:
+        server: { type: string }
+        tool: { type: string }
+      required: [server, tool]
     DraftGain:
       description: One row of who gains what, a role and a tool, today and after publishing.
       type: object
@@ -6874,9 +7356,36 @@ components:
         holders_count: { type: integer, description: "How many users hold the role, directly or through another role." }
         before: { type: string, enum: [runs, needs-approval, denied, not-reachable, unknown] }
         after: { type: string, enum: [runs, needs-approval, denied, not-reachable, unknown] }
-        before_words: { type: string }
-        after_words: { type: string }
+        before_words: { type: string, description: "The gate of the side before publishing, in words. Absent where the reader may not read what the words name, as DraftGainGate says." }
+        after_words: { type: string, description: "The gate of the side after publishing, in words. Absent where the reader may not read what the words name, as DraftGainGate says." }
+        before_gate: { $ref: "#/components/schemas/DraftGainGate" }
+        after_gate: { $ref: "#/components/schemas/DraftGainGate" }
       required: [role, server, tool, holders_count, before, after]
+    DraftGainGate:
+      description: >
+        The gate of one side of a gain row, as fields: the same gate the side's
+        words say, built from the same decision. Present when the side is
+        needs-approval, denied, or runs after a classifier or the server
+        allows it, and absent otherwise. A reader who may not read one of
+        its approver roles gets neither the gate nor the side's words. A
+        reader who may not read its policy gets a denied side without gate
+        and words, and any other side with its words and with the gate
+        without rule and set. Servers before 0.173.0 never send it.
+      type: object
+      properties:
+        rule: { type: string, description: "The rule that decides, when the decision names one." }
+        set: { type: string, description: "The policy of that rule." }
+        class: { type: string, enum: [hold, ticket], description: "On needs-approval only." }
+        seconds: { type: integer, description: "The hold's timeout or the ticket's life, on needs-approval. 0 otherwise." }
+        roles: { type: array, items: { type: string }, description: "The approver roles, sorted. Empty under a confirmation." }
+        sponsor: { type: boolean, description: "The agent's sponsor decides." }
+        requester: { type: boolean, description: "The requester may approve their own call." }
+        confirm: { type: boolean, description: "The requester confirms, and nobody else decides." }
+        within_seconds: { type: integer, description: "The window to use a ticket in or retry a held call in, where it is not the default. 0 at the default." }
+        any_arguments: { type: boolean, description: "One approval covers any arguments of the tool." }
+        classifier: { type: boolean, description: "A classifier must allow the call." }
+        server_check: { type: boolean, description: "The server must allow the call." }
+      required: [seconds, roles, sponsor, requester, confirm, within_seconds, any_arguments, classifier, server_check]
     DraftCoverage:
       description: >
         What one role reaches on one server that pins an object type, today
@@ -6967,6 +7476,7 @@ components:
             risks: { type: integer }
             warnings: { type: integer }
             unchecked: { type: integer }
+            passed: { type: integer, description: "How many checks passed. Absent on a check stored before the server counted them." }
             revision: { type: integer, description: "The revision those counts belong to." }
             checked_at: { type: string, format: date-time }
         working: { type: boolean }
@@ -7140,6 +7650,7 @@ components:
             risks: { type: integer }
             warnings: { type: integer }
             unchecked: { type: integer }
+            passed: { type: integer, description: "How many checks passed, so a published draft can say how many held. Absent on a draft decided before the server counted them, never sent as 0 for that reason." }
             revision: { type: integer, description: "The revision those counts belong to, the draft's current one." }
             checked_at: { type: string, format: date-time }
         may_publish: { type: boolean, description: "Whether the caller may publish it now, by who the caller is and the standing each item needs. Display only: a publish checks again, and the second-person setting can still refuse it with 409. False on a draft that is not open." }

@@ -8,7 +8,7 @@ import { ShellSteps } from "@/components/what-ran-shell";
 import { COPIED, COPY_REFUSED } from "@/lib/audit-words";
 import { notify } from "@/lib/notify";
 import { cutOf, hiddenChars } from "@/lib/shell-read";
-import { ARGS_NONE, CUT_TAIL, FILE_NOTE, HIDDEN_TAIL, INPUT_CUT_BODY, INPUT_CUT_HEAD, RAW, READABLE, WHAT_RAN, WRAP_LINES, copyLabel, cutBody, cutHead, fileVerb, hiddenHead, rawCount } from "@/lib/what-ran-words";
+import { ARGS_NONE, FILE_NOTE, HIDDEN_TAIL, INPUT_CUT_BODY, INPUT_CUT_HEAD, RAW, READABLE, WHAT_RAN, WRAP_LINES, copyLabel, cutBody, cutHead, fileVerb, hiddenHead, rawCount } from "@/lib/what-ran-words";
 
 // The What ran section of the audit record sheet: the call a decision
 // record holds, in a Readable view that lays it out and a Raw view that is
@@ -40,7 +40,7 @@ function RawBox({ text }: { text: string }) {
   const id = React.useId();
   return (
     <div className="min-w-0 rounded-md border border-border bg-card" data-raw>
-      <div className="flex flex-wrap items-center gap-2.5 border-b border-border px-2.5 py-1.5 text-[13px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2.5 border-b border-border px-2.5 py-1.5 text-caption text-muted-foreground">
         <span>{rawCount(text.split("\n").length, text.length)}</span>
         <label htmlFor={id} className="ml-auto inline-flex items-center gap-1.5">
           <Switch id={id} checked={wrap} onCheckedChange={setWrap} />
@@ -76,20 +76,20 @@ function Notices({ text, cut, input }: { text: string; cut: Cut | null; input: b
   return (
     <div className="flex flex-col gap-2">
       {hidden.length > 0 && (
-        <div className="flex flex-col gap-1 rounded-md border border-warn/45 px-3 py-2 text-[13px] text-text-2" data-notice="hidden">
+        <div className="flex flex-col gap-1 rounded-md border border-warn/45 px-3 py-2 text-caption text-text-2" data-notice="hidden">
           <span className="font-semibold text-warn">{hiddenHead(hidden.length, input)}</span>
           <span>
             {[...kinds].map(([k, lines], n) => (
-              <React.Fragment key={k}>{n > 0 && ", "}<span className="font-mono text-[12.5px]">{k}</span>{" on line " + [...new Set(lines)].join(", ")}</React.Fragment>
+              <React.Fragment key={k}>{n > 0 && ", "}<span className="font-mono text-caption">{k}</span>{" on line " + [...new Set(lines)].join(", ")}</React.Fragment>
             ))}
             {". " + HIDDEN_TAIL}
           </span>
         </div>
       )}
       {cut && (
-        <div className="flex flex-col gap-1 rounded-md border border-border px-3 py-2 text-[13px] text-text-2" data-notice="cut">
+        <div className="flex flex-col gap-1 rounded-md border border-border px-3 py-2 text-caption text-text-2" data-notice="cut">
           <span className="font-semibold text-foreground">{input ? INPUT_CUT_HEAD : cutHead(cut.kept.length)}</span>
-          <span>{input ? INPUT_CUT_BODY : cutBody(cut.bytes)}<span className="font-mono text-[12.5px] break-all">{cut.sha256}</span>{input ? "." : CUT_TAIL}</span>
+          <span>{input ? INPUT_CUT_BODY : cutBody(cut.bytes)}<span className="font-mono text-caption break-all">{cut.sha256}</span>.</span>
         </div>
       )}
     </div>
@@ -98,15 +98,15 @@ function Notices({ text, cut, input }: { text: string; cut: Cut | null; input: b
 
 function ArgsTable({ args }: { args: Record<string, unknown> }) {
   return (
-    <table className="w-full border-collapse text-[13.5px]" data-args>
+    <table className="w-full border-collapse text-dense" data-args>
       <tbody>
         {Object.entries(args).map(([k, v]) => (
           <tr key={k} className="border-b border-border last:border-b-0">
-            <td className="w-px py-1.5 pr-3 align-top font-mono text-[13px] whitespace-nowrap text-muted-foreground">{k}</td>
+            <td className="w-px py-1.5 pr-3 align-top font-mono text-caption whitespace-nowrap text-muted-foreground">{k}</td>
             <td className="py-1.5 align-top">
               {typeof v === "string"
                 ? <div className={v.includes("\n") || v.length > 80 ? "whitespace-pre-wrap text-text-2 [overflow-wrap:anywhere]" : "[overflow-wrap:anywhere]"}><Marked text={v} /></div>
-                : <span className="font-mono text-[13px] whitespace-pre-wrap [overflow-wrap:anywhere]">{JSON.stringify(v, null, 2)}</span>}
+                : <span className="font-mono text-caption whitespace-pre-wrap [overflow-wrap:anywhere]">{JSON.stringify(v, null, 2)}</span>}
             </td>
           </tr>
         ))}
@@ -156,13 +156,13 @@ export function WhatRan({ data }: { data: Record<string, unknown> }) {
 
   let readable: React.ReactNode;
   if (kind === "command") readable = <ShellSteps src={cut ? cut.kept : command} cut={!!cut} />;
-  else if (kind === "arguments") readable = !args ? <p className="text-[13px] text-muted-foreground">{ARGS_NONE}</p> : parsed && Object.keys(parsed).length ? <ArgsTable args={parsed} /> : <RawBox text={raw} />;
+  else if (kind === "arguments") readable = !args ? <p className="text-caption text-muted-foreground">{ARGS_NONE}</p> : parsed && Object.keys(parsed).length ? <ArgsTable args={parsed} /> : <RawBox text={raw} />;
   else readable = (
     <div className="flex flex-col gap-1.5" data-paths>
-      <div className="rounded-md border border-border bg-card px-3 py-2.5 font-mono text-[13px] [overflow-wrap:anywhere]">
+      <div className="rounded-md border border-border bg-card px-3 py-2.5 font-mono text-caption [overflow-wrap:anywhere]">
         <span className="text-muted-foreground">{fileVerb(tool) + " "}</span>{paths.map(rel).join(", ")}
       </div>
-      <p className="text-[13px] text-muted-foreground">{FILE_NOTE}</p>
+      <p className="text-caption text-muted-foreground">{FILE_NOTE}</p>
     </div>
   );
 
@@ -177,14 +177,14 @@ export function WhatRan({ data }: { data: Record<string, unknown> }) {
             <TabsTrigger value="readable">{READABLE}</TabsTrigger>
             <TabsTrigger value="raw">{RAW}</TabsTrigger>
           </TabsList>
-          <span className="text-[13px] text-muted-foreground" data-what-ran-meta>
+          <span className="text-caption text-muted-foreground" data-what-ran-meta>
             <span className="font-mono text-text-2">{kind === "arguments" && call ? call : native ? tool + " " + native : tool}</span>
             {workspace && <>{" in "}<span className="font-mono text-text-2 [overflow-wrap:anywhere]">{workspace}</span></>}
           </span>
         </div>
         <Notices text={kind === "arguments" ? args : command} cut={cut} input={kind === "arguments"} />
         <TabsContent value="readable" className="min-w-0">{readable}</TabsContent>
-        <TabsContent value="raw" className="min-w-0">{kind === "arguments" && !args ? <p className="text-[13px] text-muted-foreground">{ARGS_NONE}</p> : <RawBox text={raw} />}</TabsContent>
+        <TabsContent value="raw" className="min-w-0">{kind === "arguments" && !args ? <p className="text-caption text-muted-foreground">{ARGS_NONE}</p> : <RawBox text={raw} />}</TabsContent>
       </Tabs>
     </Section>
   );

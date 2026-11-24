@@ -1,8 +1,8 @@
 ---
 title: strazactl users enable
-description: 'Enable a disabled user: the status goes back to active, the user''s revocations are lifted, and a device still enrolled needs no new enrollment'
+description: 'Enable a disabled user: the status goes back to active, the disable is lifted, a lock stays until `strazactl users unlock`, and a device still enrolled needs no new enrollment'
 pagetype: reference
-weight: 107
+weight: 101
 draft: false
 sources:
   - cmd/strazactl

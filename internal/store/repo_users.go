@@ -186,39 +186,7 @@ func (r userRepo) Page(ctx context.Context, f UserFilter, srt Sort, c Cursor, li
 	if srt.Key == "last_seen" {
 		q += ` LEFT JOIN (SELECT user_id, MAX(last_seen) AS last_seen FROM sessions GROUP BY user_id) ls ON ls.user_id = users.id`
 	}
-	q += ` WHERE deleted_at IS NULL`
-	if f.Q != "" {
-		needle := "%" + strings.ToLower(f.Q) + "%"
-		q += ` AND (lower(username) LIKE ` + ph(needle) +
-			` OR lower(email) LIKE ` + ph(needle) +
-			` OR lower(external_id) LIKE ` + ph(needle) + `)`
-	}
-	if f.Status != "" {
-		q += ` AND status = ` + ph(f.Status)
-	}
-	if f.Sponsor != "" {
-		q += ` AND sponsor = ` + ph(f.Sponsor)
-	}
-	if len(f.RoleIDs) > 0 {
-		nw := f.Now
-		if nw.IsZero() {
-			nw = now()
-		}
-		in := func() string {
-			ps := make([]string, len(f.RoleIDs))
-			for i, id := range f.RoleIDs {
-				ps[i] = ph(id)
-			}
-			return strings.Join(ps, ", ")
-		}
-		window := func() string {
-			return ` AND (ra.valid_from IS NULL OR ra.valid_from <= ` + ph(r.s.tArg(nw)) + `)` +
-				` AND (ra.valid_to IS NULL OR ra.valid_to > ` + ph(r.s.tArg(nw)) + `)`
-		}
-		q += ` AND EXISTS (SELECT 1 FROM role_assignments ra` +
-			` WHERE ra.subject_kind = ` + ph(SubjectUser) +
-			` AND ra.subject_id = users.id AND ra.role_id IN (` + in() + `)` + window() + `)`
-	}
+	q += ` WHERE deleted_at IS NULL` + r.filterSQL(f, ph)
 	where, order, err := r.s.keyset(key, "id", srt, c, ph)
 	if err != nil {
 		return nil, err
@@ -236,6 +204,89 @@ func (r userRepo) Page(ctx context.Context, f UserFilter, srt Sort, c Cursor, li
 			return nil, err
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// filterSQL renders f as ` AND ...` terms over the live users table,
+// binding each value through ph in the order the terms appear.
+func (r userRepo) filterSQL(f UserFilter, ph func(any) string) string {
+	w := ""
+	if f.Q != "" {
+		needle := "%" + strings.ToLower(f.Q) + "%"
+		w += ` AND (lower(username) LIKE ` + ph(needle) +
+			` OR lower(email) LIKE ` + ph(needle) +
+			` OR lower(external_id) LIKE ` + ph(needle) + `)`
+	}
+	if f.Status != "" {
+		w += ` AND status = ` + ph(f.Status)
+	}
+	if f.Sponsor != "" {
+		w += ` AND sponsor = ` + ph(f.Sponsor)
+	}
+	if len(f.RoleIDs) > 0 {
+		nw := f.Now
+		if nw.IsZero() {
+			nw = now()
+		}
+		in := func() string {
+			ps := make([]string, len(f.RoleIDs))
+			for i, id := range f.RoleIDs {
+				ps[i] = ph(id)
+			}
+			return strings.Join(ps, ", ")
+		}
+		window := func() string {
+			return ` AND (ra.valid_from IS NULL OR ra.valid_from <= ` + ph(r.s.tArg(nw)) + `)` +
+				` AND (ra.valid_to IS NULL OR ra.valid_to > ` + ph(r.s.tArg(nw)) + `)`
+		}
+		w += ` AND EXISTS (SELECT 1 FROM role_assignments ra` +
+			` WHERE ra.subject_kind = ` + ph(SubjectUser) +
+			` AND ra.subject_id = users.id AND ra.role_id IN (` + in() + `)` + window() + `)`
+	}
+	if f.Kind != "" {
+		w += ` AND ` + r.kindSQL() + ` = ` + ph(f.Kind)
+	}
+	return w
+}
+
+// kindSQL is User.Kind as a SQL expression over a users row: service for
+// the type service, agent for the type agent or the attrs kind nhi, else
+// person. Attrs is jsonb on Postgres. On SQLite it is text, and attrs that
+// do not parse read as no kind, as they do in Go, rather than failing the
+// whole query.
+func (r userRepo) kindSQL() string {
+	attrsKind := `(attrs->>'kind')`
+	if r.s.d == dialectSQLite {
+		attrsKind = `(CASE WHEN json_valid(attrs) THEN json_extract(attrs, '$.kind') END)`
+	}
+	return `(CASE WHEN user_type = 'service' THEN 'service'` +
+		` WHEN user_type = 'agent' OR ` + attrsKind + ` = 'nhi' THEN 'agent' ELSE 'person' END)`
+}
+
+// KindCounts counts the live users of each kind under f, with f.Kind
+// ignored, in one grouped query. A kind with no user is absent.
+func (r userRepo) KindCounts(ctx context.Context, f UserFilter) (map[string]int, error) {
+	f.Kind = ""
+	var args []any
+	ph := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+	rows, err := r.s.query(ctx, `SELECT `+r.kindSQL()+`, COUNT(*) FROM users WHERE deleted_at IS NULL`+
+		r.filterSQL(f, ph)+` GROUP BY 1`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int{}
+	for rows.Next() {
+		var kind string
+		var n int
+		if err := rows.Scan(&kind, &n); err != nil {
+			return nil, err
+		}
+		out[kind] = n
 	}
 	return out, rows.Err()
 }
@@ -276,21 +327,39 @@ func (r userRepo) SponsoredCounts(ctx context.Context, usernames []string) (map[
 // it signs in with its key, so a write that leaves u a non-person clears
 // the hash, as a SCIM retype of a person does.
 func (r userRepo) Update(ctx context.Context, u User) (User, error) {
-	u.UpdatedAt = now()
-	if u.IsNHI() {
-		u.PasswordHash = ""
-	}
-	err := mustAffect(r.s.exec(ctx, `UPDATE users SET external_id = $1, username = $2, email = $3,
-		display = $4, title = $5, status = $6, password_hash = $7, attrs = $8,
-		user_type = $9, agency_mode = $10, sponsor = $11, swarm_id = $12, ephemeral = $13, entra_agent_id = $14, updated_at = $15
-		WHERE id = $16 AND deleted_at IS NULL`,
-		u.ExternalID, u.Username, u.Email, u.Display, u.Title, u.Status, u.PasswordHash,
-		u.Attrs, u.UserType, u.AgencyMode, u.Sponsor, u.SwarmID, u.Ephemeral, u.EntraAgentID,
-		r.s.tArg(u.UpdatedAt), u.ID))
-	if err != nil {
+	query, args := r.updateStmt(u)
+	if err := mustAffect(r.s.exec(ctx, query, args...)); err != nil {
 		return User{}, err
 	}
 	return r.GetByID(ctx, u.ID)
+}
+
+// updateStmt answers the statement that writes every column of the live
+// user u, and its arguments.
+func (r userRepo) updateStmt(u User) (string, []any) {
+	if u.IsNHI() {
+		u.PasswordHash = ""
+	}
+	stmt := `UPDATE users SET external_id = $1, username = $2, email = $3,
+		display = $4, title = $5, status = $6, password_hash = $7, attrs = $8,
+		user_type = $9, agency_mode = $10, sponsor = $11, swarm_id = $12, ephemeral = $13, entra_agent_id = $14, updated_at = $15
+		WHERE id = $16 AND deleted_at IS NULL`
+	return stmt, []any{
+		u.ExternalID, u.Username, u.Email, u.Display, u.Title, u.Status, u.PasswordHash,
+		u.Attrs, u.UserType, u.AgencyMode, u.Sponsor, u.SwarmID, u.Ephemeral, u.EntraAgentID,
+		r.s.tArg(now()), u.ID,
+	}
+}
+
+// TakeOver stores the Entra object id objectID as the external id of the
+// live user id and sets its origin to entra, and answers the row read back.
+func (r userRepo) TakeOver(ctx context.Context, id, objectID string) (User, error) {
+	err := mustAffect(r.s.exec(ctx, `UPDATE users SET external_id = $1, origin = $2, updated_at = $3
+		WHERE id = $4 AND deleted_at IS NULL`, objectID, OriginEntra, r.s.tArg(now()), id))
+	if err != nil {
+		return User{}, err
+	}
+	return r.GetByID(ctx, id)
 }
 
 // UserFields names the columns of a partial user write: a nil field leaves
@@ -399,6 +468,22 @@ func (r userRepo) UpdateFields(ctx context.Context, id string, f UserFields, rev
 		return User{}, err
 	}
 	return u, nil
+}
+
+// SetPasswordHash stores hash as the password hash of the live user id and
+// writes the outbox event ev, unpublished, in one transaction, so the
+// database takes both or neither. A missing or soft-deleted id is
+// ErrNotFound.
+func (r userRepo) SetPasswordHash(ctx context.Context, id, hash string, ev OutboxEvent) error {
+	ev.CE = boundRecord(ev.CE)
+	return r.s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, r.s.q(`UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3 AND deleted_at IS NULL`),
+			hash, r.s.tArg(now()), id)
+		if err := mustAffect(res, r.s.mapErr(err)); err != nil {
+			return err
+		}
+		return r.s.insertOutboxTx(ctx, tx, ev)
+	})
 }
 
 // SoftDelete marks the user deleted and disabled and deletes its role

@@ -85,11 +85,13 @@ type Session struct {
 	PolicyRefused  string
 	PolicyDeadline time.Time
 	Renewal        Renewal
-	Packs          []localapi.Pack
 	Reused         bool
 	// StartText is the governance paragraph the server wrote at check-in,
 	// nil when the server sent none.
 	StartText *string
+	// Folder is the folder the window that started the session started in,
+	// as its session start named it, empty when it named none.
+	Folder string
 }
 
 // Subject builds the policy subject of the session, the same way strazad
@@ -151,8 +153,15 @@ type credentials interface {
 	// seconds or less left, re-acquires once through the enrollment on a
 	// 401 (D30), and reports that renewal on Session.Renewal. With start
 	// set it checks in when h has no live session. An empty h.Session
-	// picks c's newest live session of h.Name. Failures are *Refused.
+	// picks c's newest live session of h.Name. Failures are *Refused. A
+	// check-in for a window c still holds, revoked or lapsed, sends that
+	// window's folder.
 	Session(ctx context.Context, c Caller, h localapi.Harness, start bool) (Session, error)
+	// Start is Session with start set, for a session start that names
+	// folder, the folder the window started in. A session it checks in for
+	// h keeps folder and sends it with the check-in. A live session it
+	// reuses keeps its own folder. An empty folder is Session's case.
+	Start(ctx context.Context, c Caller, h localapi.Harness, folder string) (Session, error)
 	// Policy returns the verified engine of the session's current snapshot
 	// pin, the snapshot's maxAge in seconds and the id of the snapshot it
 	// used, fetching the snapshot when the service does not hold it. The

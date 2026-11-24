@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Row, actionLabel, ceRow, objectOf, rowLabel, csvOf, effectTone, effectWord, foldAdjacent, parseCE, shortType, typeMatches, whyOf } from "./audit-words";
+import { type Row, actionLabel, ceRow, objectOf, rowLabel, csvOf, effectTone, effectWord, foldAdjacent, parseCE, searchLine, sentinelWhat, shortType, typeMatches, typeWord, whyOf } from "./audit-words";
 import type { AuditRow } from "./api";
 
 // The readers of the Audit screen, read once here so the screen and its
@@ -63,7 +63,7 @@ describe("ceRow", () => {
     expect(r.what).toBe("midpoint.assign_role · {\"role\":\"sre\"}");
     expect(r.effect).toBe("approve");
     expect(effectWord(r.effect)).toBe("needs approval");
-    expect(r.reason).toBe("rule iga-writes");
+    expect(r.reason).toBe("policy rule iga-writes");
   });
 
   it("reads an unclassified harness tool as its own name with its arguments", () => {
@@ -90,14 +90,14 @@ describe("ceRow", () => {
   it("reads an approval as the requester, the action, the verdict and the decider", () => {
     const r = ceRow(approval);
     expect(r.approval).toBe(true);
-    expect(r.what).toBe("joe-java-developer-agent's assign role in midpoint approved by judy (rule iga-writes)");
+    expect(r.what).toBe("joe-java-developer-agent's assign role in midpoint approved by judy (policy rule iga-writes)");
     expect(r.effect).toBe("approved");
     expect(r.reason).toBe("reviewed the target, fine");
   });
 
   it("reads a capture record as the reference row and never the captured text", () => {
     const r = ceRow(prompt);
-    expect(r.what).toBe("content 412 B · redact · 8f43c1a09b2e…");
+    expect(r.what).toBe("content 412 B · masked · 8f43c1a09b2e…");
     expect(r.what).not.toContain("AKIAIOSFODNN7EXAMPLE");
     expect(r.effect).toBe("");
   });
@@ -151,6 +151,27 @@ describe("foldAdjacent", () => {
     const out = foldAdjacent([ceRow(sentinel), ceRow(rec(4212, JSON.parse(sentinel.ce)))], {});
     expect(out.map((r) => r.foldN)).toEqual([undefined, undefined]);
   });
+
+  // update is a change the Entra sync made to one user, the way strazad
+  // chains it.
+  const update = (seq: number, changed: string[], reason: string): Row => ceRow(rec(seq, {
+    type: "straza.audit.admin", time: "2026-11-17T09:12:0" + (seq % 10) + "Z",
+    data: { action: "user.update", target: USER_ID, user: USER_ID, username: "dan@example.com", changed, origin: "entra", reason },
+  }, { username: "dan@example.com" }));
+
+  it.each([
+    ["the same change with different reasons", [update(12355, ["status"], "the account is disabled in Entra"), update(12354, ["status"], "the account is enabled in Entra")], [undefined, undefined]],
+    ["the same reason with different fields changed", [update(12355, ["display"], "Entra changed the account"), update(12354, ["title"], "Entra changed the account")], [undefined, undefined]],
+    ["identical admin records", [update(12355, ["status"], "the account is disabled in Entra"), update(12354, ["status"], "the account is disabled in Entra")], [2]],
+    ["repeated reads", [read(4217), read(4216)], [2]],
+  ])("on %s, folds only rows that are the same", (_, rows, want) => {
+    expect(foldAdjacent(rows, {}).map((r) => r.foldN)).toEqual(want);
+  });
+
+  it("keeps two refusals of one command apart when their reasons differ", () => {
+    const deny = (seq: number, reason: string) => ceRow(rec(seq, { ...JSON.parse(tool.ce), data: { ...JSON.parse(tool.ce).data, reason } }, { username: "joe-java-developer-agent" }));
+    expect(foldAdjacent([deny(4213, "refused for role dev"), deny(4212, "refused for every role")], {}).map((r) => r.foldN)).toEqual([undefined, undefined]);
+  });
 });
 
 describe("whyOf", () => {
@@ -158,17 +179,17 @@ describe("whyOf", () => {
 
   it("says a rule in a policy decided it, with the rule's own reason", () => {
     const w = why({ effect: "deny", ruleId: "no-destructive-delete", setName: "dev-guardrails", reason: "Straza: destructive delete is refused for role dev", snapshot: "sha256:4b1e" });
-    expect(w?.outcome).toBe("Denied.");
+    expect(w?.outcome).toBe("Denied");
     expect(w?.tone).toBe("danger");
-    expect(w?.basis).toBe("Decided by rule no-destructive-delete in policy dev-guardrails: Straza: destructive delete is refused for role dev");
+    expect(w?.basis).toBe("Decided by policy rule no-destructive-delete in policy dev-guardrails: Straza: destructive delete is refused for role dev");
     expect(w?.wire).toBe("effect=deny · ruleId=no-destructive-delete · setName=dev-guardrails · snapshot=sha256:4b1e");
   });
 
   it("says a rule in a policy decided it when the record carries no reason", () => {
     const w = why({ effect: "allow", ruleId: "dev-reads", setName: "dev-guardrails" });
-    expect(w?.outcome).toBe("Allowed.");
+    expect(w?.outcome).toBe("Allowed");
     expect(w?.tone).toBe("ok");
-    expect(w?.basis).toBe("Decided by rule dev-reads in policy dev-guardrails.");
+    expect(w?.basis).toBe("Decided by policy rule dev-reads in policy dev-guardrails.");
   });
 
   it("says no policy matched when the record carries no rule", () => {
@@ -179,27 +200,27 @@ describe("whyOf", () => {
   it("preserves role-access allowance without inventing a denial or pending approval", () => {
     const reason = "allowed by role access. No policy rule gates this tool.";
     const w = why({ effect: "allow", ruleId: "", setName: "", default: true, reason }, "straza.audit.mcp");
-    expect(w?.outcome).toBe("Allowed.");
+    expect(w?.outcome).toBe("Allowed");
     expect(w?.basis).toBe("No policy rule was recorded for this call. " + reason);
-    expect(w?.context).toBe("Recorded at decision time.");
+    expect(w?.context).toBe("");
   });
 
   it("does not invent a cause when an older decision has no rule or reason", () => {
     const w = why({ effect: "deny" });
-    expect(w?.outcome).toBe("Denied.");
+    expect(w?.outcome).toBe("Denied");
     expect(w?.basis).toBe("No policy rule was recorded for this call.");
   });
 
   it("says the policy name was not recorded on a record written before the field existed", () => {
     const w = why({ effect: "allow", ruleId: "dev-reads" });
-    expect(w?.basis).toBe("Decided by rule dev-reads. The policy name was not recorded on this record.");
+    expect(w?.basis).toBe("Decided by policy rule dev-reads. The policy's name was not recorded on this record.");
   });
 
   it("sends a held MCP call to Approvals for the outcome, and reads nothing that is not a decision", () => {
     const w = why({ effect: "approve", ruleId: "iga-writes", setName: "iga" }, "straza.audit.mcp");
-    expect(w?.outcome).toBe("Needs approval.");
+    expect(w?.outcome).toBe("Needs approval");
     expect(w?.tone).toBe("warn");
-    expect(w?.context).toContain("see Approvals for the outcome");
+    expect(w?.context).toBe("The gateway records the policy's outcome before a person answers. See Approvals for what the person decided.");
     expect(whyOf(parseCE(sentinel.ce))).toBeNull();
     expect(whyOf(parseCE(admin.ce))).toBeNull();
   });
@@ -226,13 +247,71 @@ describe("effectTone and the lens", () => {
   });
 });
 
+describe("typeWord", () => {
+  it.each([
+    ["tool", "tool call"],
+    ["mcp", "MCP call"],
+    ["approval", "approval"],
+    ["prompt", "prompt"],
+    ["reply", "reply"],
+    ["sentinel", "sentinel alert"],
+    ["admin", "admin change"],
+    ["identity", "identity change"],
+    ["policy", "policy change"],
+    ["revocation.session", "revocation"],
+    ["revocation.user", "revocation"],
+    ["apps.deployed", "MCP server"],
+    ["session.started", "session"],
+    ["policy.activated", "policy change"],
+    ["frob.nitz", "frob.nitz"],
+    ["?", "?"],
+  ])("says the short type %s as %s", (short, want) => {
+    expect(typeWord(short)).toBe(want);
+  });
+
+  it("reads the short type the table cuts from the event type", () => {
+    expect(typeWord(shortType("straza.audit.admin"))).toBe("admin change");
+    expect(typeWord(shortType("straza.revocation.session"))).toBe("revocation");
+  });
+});
+
+describe("the outcome words of a record", () => {
+  it.each([
+    ["pending", "waiting"],
+    ["approved", "approved"],
+    ["denied", "denied"],
+    ["expired", "expired"],
+    ["allow", "allowed"],
+    ["deny", "denied"],
+    ["approve", "needs approval"],
+    ["", "none"],
+  ])("says %s as %s", (effect, want) => {
+    expect(effectWord(effect)).toBe(want);
+  });
+
+  it("says a search's decision as its outcome", () => {
+    expect(searchLine("git", "deny", "alice", true)).toBe("for “git”, outcome denied, by alice, newest 200 shown");
+    expect(searchLine("", "allow", "", false)).toBe("outcome allowed");
+  });
+
+  it("counts a sentinel alert's evidence in records", () => {
+    expect(sentinelWhat(9)).toBe("sentinel alert · 9 records of evidence");
+    expect(sentinelWhat(1)).toBe("sentinel alert · 1 record of evidence");
+  });
+});
+
 describe("csvOf", () => {
   it("writes the header, one line per row, and quotes a cell that carries a comma", () => {
     const lines = csvOf([ceRow(tool), ceRow(approval), ceRow(admin)]).split("\n");
     expect(lines[0]).toBe("seq,time,user,session,type,effect,what,reason");
     expect(lines[1]).toBe("4210,2026-09-12T10:45:01Z,joe-java-developer-agent," + SESSION + ",straza.audit.tool,deny,rm -rf ./build,Straza: destructive delete is refused for role dev");
-    expect(lines[2]).toBe("4205,2026-09-12T10:31:45Z,joe-java-developer-agent,,straza.audit.approval,approved,joe-java-developer-agent's assign role in midpoint approved by judy (rule iga-writes),\"reviewed the target, fine\"");
+    expect(lines[2]).toBe("4205,2026-09-12T10:31:45Z,joe-java-developer-agent,,straza.audit.approval,approved,joe-java-developer-agent's assign role in midpoint approved by judy (policy rule iga-writes),\"reviewed the target, fine\"");
     expect(lines[3]).toBe("4218,2026-09-12T10:51:07Z,alice,,straza.audit.admin,,user.unlock carol,");
+  });
+
+  it("writes the Who the server answers, which on an admin record is the actor and not the user it was about", () => {
+    const assign = rec(4219, { type: "straza.audit.admin", time: "2026-09-12T10:52:00Z", data: { action: "roles.assign", user: USER_ID, role: "dev", actor: "midpoint" } }, { username: "midpoint" });
+    expect(csvOf([ceRow(assign)]).split("\n")[1]).toBe("4219,2026-09-12T10:52:00Z,midpoint,,straza.audit.admin,,roles.assign,");
   });
 });
 
@@ -249,10 +328,13 @@ const ACTIONS = [
   "nhi-key.set", "oauth.connect", "oauth.connect.refused", "attestation-hash.registered", "attestation-hash.removed",
   "user.killed", "user.reactivated", "user.lift.blocked",
   "session.start", "enroll", "renew", "breakglass.login", "approver-enroll", "approver-self-enroll-token", "approver-device-revoked",
-  "enroll-token.create", "enroll-token.refused", "scim.refused", "approver.enroll", "approver.revoke",
+  "enroll-token.create", "enroll-token.refused", "scim.refused", "admin.refused", "approver.enroll", "approver.revoke",
   "token.connect", "oauth.disconnect", "connection.agents", "identity.created", "identity.updated", "identity.deactivated", "policy.updated",
   "revocation.session", "revocation.sessions", "revocation.user", "revocation.device", "revocation.lift",
   "device.revoke",
+  "entra.group.create", "entra.group.update", "entra.group.delete", "entra.group.missing", "entra.group.recreate",
+  "entra.read.stale", "entra.read.recovered", "entra.pass.held", "entra.pass.released",
+  "entra.sponsor.unresolved", "entra.sponsor.resolved",
 ];
 
 describe("actionLabel", () => {
@@ -264,21 +346,32 @@ describe("actionLabel", () => {
   });
 
   it.each([
-    ["policy.delete", "Deleted a policy set"],
+    ["policy.delete", "Deleted a policy"],
     ["apps.binding.create", "Gave a role access to an MCP server"],
-    ["policy.updated", "Made a new policy snapshot live"],
+    ["policy.updated", "Made a new policy version live"],
+    ["roles.implication.create", "Added a role to a business role"],
+    ["roles.implication.delete", "Removed a role from a business role"],
+    ["sink.replay", "Replayed an audit sink's undelivered events"],
+    ["revocation.lift", "Lifted a user's lock"],
     ["user.create", "Created a user"],
     ["user.update", "Changed a user"],
     ["enroll-token.create", "Started enrolling an approver phone or browser"],
     ["enroll-token.refused", "Refused enrolling an approver phone or browser for someone"],
     ["scim.refused", "Refused an identity manager's SCIM write"],
+    ["admin.refused", "Refused an admin change"],
     ["approver.enroll", "Enrolled an approver phone or browser"],
     ["approver.revoke", "Revoked an approver phone or browser with its user"],
     ["device.revoke", "Revoked a user's machine"],
     ["nhi-key.set", "Registered an AI agent's key"],
-    ["policy.frobnicate", "Policy set: frobnicate"],
+    ["entra.group.missing", "Found a role's group deleted in Entra"],
+    ["entra.pass.released", "Applied the held removals of a role's group in Entra"],
+    ["entra.read.stale", "Could not read Entra"],
+    ["entra.sponsor.unresolved", "Left an agent from Entra with no sponsor"],
+    ["entra.sponsor.resolved", "Set the sponsor of an agent from Entra"],
+    ["entra.group.renamed", "Entra: group renamed"],
+    ["policy.frobnicate", "Policy: frobnicate"],
     ["roles.implication.re-rank", "Role: implication re rank"],
-    ["policy.re_rank", "Policy set: re rank"],
+    ["policy.re_rank", "Policy: re rank"],
     ["apps.binding.create2", "MCP server: binding create2"],
     ["identity.suspended", "User: suspended"],
     ["frob-nitz.sparkle", "Frob nitz: sparkle"],
@@ -295,7 +388,7 @@ describe("rowLabel", () => {
     ["a gateway call to the server draft", call("straza.audit.mcp", { app: "draft", toolName: "create", effect: "allow" }), "draft.create"],
     ["a gateway call to the server user", call("straza.audit.mcp", { app: "user", toolName: "get-profile", effect: "allow" }), "user.get-profile"],
     ["a shell command named like an action", call("straza.audit.tool", { tool: "shell.exec", command: "enroll", effect: "deny" }), "enroll"],
-    ["an admin record", call("straza.audit.admin", { action: "policy.delete" }), "Deleted a policy set"],
+    ["an admin record", call("straza.audit.admin", { action: "policy.delete" }), "Deleted a policy"],
     ["a revocation with no action", call("straza.revocation.session", { session: "s-1" }), "Revoked a session"],
   ])("reads %s", (_, row, want) => {
     expect(rowLabel(row)).toBe(want);

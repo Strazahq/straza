@@ -30,7 +30,7 @@ Stop one identity, one machine or every agent session during an incident, and co
 |---|---|
 | Interrupt what agents do now and keep their access | Revoke sessions. The console's Sessions page revokes many at once, and `strazactl sessions revoke` revokes one. |
 | Keep an identity out until someone lets it back | Disable the user, or lock the user when your identity manager must not lift it. |
-| Cut one machine and leave the person untouched | Revoke that device on the user's sheet, or with `strazactl devices revoke`. |
+| Cut one machine and leave the person untouched | Revoke that device on the **Devices and keys** tab of the user's page, or with `strazactl devices revoke`. |
 
 
 Every lever writes the audit chain and reaches every server replica over the event bus. An enrolled machine learns of it in under two seconds at the 99th percentile, the project's budget for the push path, while `straza service`, the Straza background service, holds the push stream of the session. Otherwise it learns of it at the first call that renews the session, which is at most about three minutes after its token was minted for a session that keeps working. [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#sessions-and-the-client" >}}) lists every lifetime a revoke waits on.
@@ -41,10 +41,12 @@ Every lever writes the audit chain and reaches every server replica over the eve
 ## See what is running
 
 
-The examples stop the person `mara`, enrolled on a machine that has started two harness sessions. Replace `mara` with the identity you are stopping, and list its live sessions first, so that you can compare afterwards.
+The examples stop the person `mara`, enrolled on a machine that has started two harness sessions. Replace `mara` with the identity you are stopping, and list its live sessions first to compare afterwards.
 
 {{< console >}}
-{{< clicks "Sessions" "active" "User" "mara" >}}
+{{< clicks "Sessions" "Active" >}}
+
+Type `mara` in the search box.
 
 {{< shot name="sessions-mara" caption="mara's two active sessions, grouped under her name." >}}
 {{< /console >}}
@@ -71,13 +73,13 @@ The listing is trimmed to her rows.
 Disabling sets the identity's status to disabled, and the server cascades from there: it writes a revocation, revokes every active session, adds the identity to the in-memory denylist on every replica, pushes the revocation to the enrolled machines, and records one identity event on the audit chain.
 
 {{< console >}}
-{{< clicks "Users" "mara" "Disable user" "Disable user" >}}
+{{< clicks "Users" "mara" "Stop access" "Disable" "Disable" >}}
 
-{{< shot name="user-mara" caption="Disable user sits on the Status row of mara's sheet, under Lock user." >}}
+{{< shot name="user-mara" caption="Disable sits in the Stop access menu at the top right of mara's page, under Lock." >}}
 
 {{< shot name="user-disable" caption="The dialog says what a disable stops before you confirm it." >}}
 
-{{< see >}}The **Status** row of mara's sheet reads `disabled`, and its button now says **Enable user**. The **Straza lock** row above it lists the revocation the disable wrote, with the reason `user disabled by admin`.{{< /see >}}
+{{< see >}}mara's page reads `disabled` beside her name. A strip under the head says `by an administrator` and carries **Enable**.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -151,13 +153,13 @@ Then the hook can keep allowing for the five minutes of its token plus the fifte
 The audit chain holds one identity event per kill, with the reason, the origin that pulled the lever, and the number of sessions it revoked.
 
 {{< console >}}
-{{< clicks "Users" "mara" "Audit trail: open" >}}
+{{< clicks "Users" "mara" "Audit chain of mara" >}}
 
-Audit opens on mara's records, and the newest is the `identity` record `user.killed`. Open it, and open **The record as stored** to see the whole event, with the reason and the count of revoked sessions.
+The link **Audit chain of mara** sits at the foot of the **Access** tab of her page. Audit opens on mara's records, and the newest is the `identity change` record `Cut off a user's access`. Open it, and open **The record as stored** to see the whole event, with the reason and the count of revoked sessions.
 
-{{< shot name="user-audit-trail" caption="mara's records, opened from her sheet. Each disable writes `user.killed`, and each enable `user.reactivated`." >}}
+{{< shot name="user-audit-trail" caption="mara's records, opened from her page. Each disable writes `user.killed`, and each enable `user.reactivated`." >}}
 
-Then open **Sessions**, press **revoked**, and pick mara under **User**. Her two sessions are listed there now.
+Then open **Sessions**, press **Revoked**, and search for mara. Her two sessions are listed there now.
 {{< /console >}}
 
 {{< cli >}}
@@ -197,7 +199,7 @@ A SIEM fed by a sink holds the same event under the same id, and [Sinks and SIEM
 To interrupt every session of one identity without locking it out, revoke its sessions instead of disabling it. A session revoke is a stand-down: the machine stays enrolled, and `straza service` starts a new session with the machine's key when the harness starts its next session. A window that sat unused when its session was revoked never heard the revoke, so its next call starts a new session the same way.
 
 {{< console >}}
-On **Sessions**, keep **active** and mara under **User**, tick the box in the table's header, and press the revoke button, which names the count.
+On **Sessions**, keep **Active** and mara in the search, tick the box in the table's header, and press the revoke button, which names the count.
 
 {{< shot name="sessions-revoke-bar" caption="Both sessions ticked. The button names how many it revokes." >}}
 
@@ -240,9 +242,9 @@ A revoke writes the session's new status, its revocation record and the event th
 To cut one machine and leave the person and their other machines alone, revoke that device.
 
 {{< console >}}
-On mara's sheet, find the device under **Devices**. Each row names the device, its platform and when it enrolled. Press **Revoke** on the row you mean, then confirm.
+On mara's page, open the **Devices and keys** tab and find the device under **Devices**. Each row names the device, its platform and when it enrolled. Press **Revoke** on the row you mean, then confirm.
 
-{{< clicks "Users" "mara" "Revoke" "Revoke device" >}}
+{{< clicks "Users" "mara" "Devices and keys" "Revoke" "Revoke device" >}}
 
 {{< shot name="device-revoke" caption="The confirmation names the device and says what revoking it does." >}}
 {{< /console >}}
@@ -281,9 +283,9 @@ The machine's key can no longer start a session, and the device's active session
 No single switch ends every session, so a fleet-wide stop is one of two motions. The first stands every agent down while the identities stay valid for later.
 
 {{< console >}}
-{{< clicks "Sessions" "active" >}}
+{{< clicks "Sessions" "Active" >}}
 
-Leave **User** empty, tick the box in the table's header, press the revoke button, and confirm. The box ticks the rows the page has loaded, so on a large fleet press **Load more** first, or repeat until the active list is empty. Your own console session is among the rows, and the dialog warns `This includes the console's own session, so you will be signed out.` Untick your row first to stay signed in.
+Leave the search empty, press **Last seen** so every loaded row shows, tick the box in the table's header, press the revoke button, and confirm. The box ticks only loaded rows, so on a large fleet press **Load more** first, or repeat until the list is empty. The console's own session has no box, so you stay signed in.
 {{< /console >}}
 
 {{< cli >}}
@@ -312,16 +314,16 @@ The second motion is to stop strazad itself. In the enterprise profile the [offl
 ## Lock, and cut from the identity manager {.nostep}
 
 
-A lock runs the same cascade as a disable with one difference: it leaves the status field alone, so a later enable from your identity manager cannot lift it, and only **Unlock user** in the console or `strazactl users unlock` does. The reason is required and lands on the chain.
+A lock runs the same cascade as a disable with one difference: it leaves the status field alone, so a later enable from your identity manager cannot lift it, and only **Unlock** in the console or `strazactl users unlock` does. The reason is required and lands on the chain.
 
 {{< console >}}
-{{< clicks "Users" "mara" "Lock user" >}}
+{{< clicks "Users" "mara" "Stop access" "Lock" >}}
 
-Type the reason in **Reason, recorded on the audit chain** and press **Lock user**.
+Type the reason in **Reason, recorded on the audit chain** and press **Lock**.
 
 {{< shot name="user-lock" caption="The lock asks for its reason, which goes on the audit chain." >}}
 
-{{< see >}}The **Straza lock** row of mara's sheet reads `Locked by Straza.` with your reason, beside **Unlock user**.{{< /see >}}
+{{< see >}}mara's page reads `locked` beside her name. A red strip under the head says `by an administrator` with your reason, beside **Unlock**.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -344,23 +346,26 @@ A lock writes its revocation record and the event that tells the other servers a
 
 {{< fails >}}
 `user USERNAME is locked and the lock is saved, but only this server refuses the user now. Straza could not write the event that tells the other servers, so they admit the user until they restart. Run strazactl users lock USERNAME again with the same reason, which writes the event again. The strazad log names the cause under request id REQUEST-ID.`
-: The console shows this lock, so it offers **Unlock user** and not **Lock user**. Run the lock again from strazactl once the database answers, and look up REQUEST-ID in the strazad log for the cause.
+: The console shows this lock, so it offers **Unlock**, and its **Stop access** menu no longer offers **Lock**. Run the lock again from strazactl once the database answers, and look up REQUEST-ID in the strazad log for the cause.
 
 `user USERNAME is locked on this server only, until it restarts. Straza could not write the lock to its database or the event that tells the other servers, so they still admit the user. Run the lock again, and check the server's database connection if it fails again. The strazad log names the cause under request id REQUEST-ID.`
 : The database holds nothing of this lock, so a restart of the server that answered lifts it there too. Run the lock again once the database answers.
 
 `user USERNAME is locked on every server, but Straza could not write the lock to its database, so the console and your identity manager show no lock, and an identity manager that disables and enables the user lifts it. Run the lock again, which saves it. The strazad log names the cause under request id REQUEST-ID.`
-: The event reached every server, so they all refuse the user, but the lock that only an administrator lifts is missing. The console still offers **Lock user**, and a second lock saves the record. USERNAME and REQUEST-ID stand for the values in your answer.
+: The event reached every server, so they all refuse the user, but the lock that only an administrator lifts is missing. The console still offers **Lock** under **Stop access**, and a second lock saves the record. USERNAME and REQUEST-ID stand for the values in your answer.
+
+`mara was not changed here, because the account comes from Microsoft Entra ID and Straza would write Entra's state back at its next read. Change the account in Entra. To stop mara at once, lock the account.`
+: The answer is 409, because Microsoft Entra ID owns mara, as [Role groups in Entra]({{< relref "guides/connect-identity/entra-role-groups.md#disabled-and-deleted-accounts" >}}) explains. Lock her as the lock section shows, which takes effect at once, and disable the account in Entra, which Straza applies at its next read of Entra.
 {{< /fails >}}
 
 A fresh sign-in at the identity provider does not get a locked person back in. Enroll, session start, the approval routes and the admin plane all answer 403, and each refusal is a login failure on the chain with the reason `user is locked`. That holds for a locked administrator too, who cannot lift their own lock. A lock or a disable does not reach the admin API tokens the person minted, because a token belongs to no person, so revoke those under **Settings**, **API tokens**, where the list names who minted each one.
 
 {{< fails >}}
 `the user mara is locked, so this sign-in is refused. An administrator lifts the lock with strazactl users unlock mara.`
-: The lock holds until an administrator who is not locked lifts it with **Unlock user** or `strazactl users unlock mara`.
+: The lock holds until an administrator who is not locked lifts it with **Unlock** or `strazactl users unlock mara`.
 {{< /fails >}}
 
-The leaver process itself belongs in the identity manager, where one disable deactivates the identity over SCIM and its login at the same time. [The demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) runs that route live on the seeded agent joe.
+The leaver process itself belongs in the identity manager, where one disable deactivates the identity over SCIM and its login at the same time. Where Straza takes people from Microsoft Entra ID, that one disable happens in Entra, and Straza applies it at its next read of Entra. [The demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) runs that route live on the seeded agent joe.
 
 ## Use the admin API {.nostep}
 
@@ -381,16 +386,18 @@ curl -s -X PATCH -H "Authorization: Bearer $ADMIN_API_TOKEN" -H 'Content-Type: a
 ## Undo {.nostep}
 
 
-Re-enabling lifts the denylist entry on every replica and records `user.reactivated`. Revoked sessions stay revoked, the device enrollment is untouched, and the machine's next session start mints a fresh session.
+Re-enabling lifts the disable, and a deactivation by your identity manager or by Entra, on every replica, and records `user.reactivated`. Revoked sessions stay revoked, the device enrollment is untouched, and the machine's next session start mints a fresh session.
+
+An enable never lifts a lock. When mara is also locked, the status turns active and mara stays refused. The record is `user.lift.blocked` with the lock's origin in `heldBy`. The console's toast says mara is enabled and still locked, and `strazactl users enable` prints the server's sentence, which names the lock, who set it and its reason, and how to lift it. Only **Unlock** or `strazactl users unlock` lifts the lock.
 
 {{< console >}}
-{{< clicks "Users" "mara" "Enable user" >}}
+{{< clicks "Users" "mara" "Enable" >}}
 
-{{< shot name="user-enable" caption="After a disable, the button beside the status says Enable user." >}}
+{{< shot name="user-enable" caption="After a disable, the strip under the head of mara's page carries Enable." >}}
 
-A locked user comes back with **Unlock user** on the same sheet.
+A locked user comes back with **Unlock** on the lock's strip of the same page.
 
-{{< shot name="user-unlock" caption="The lock leaves the status active and puts Unlock user beside its reason." >}}
+{{< shot name="user-unlock" caption="The lock's strip says who locked mara, when and why, beside Unlock." >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -401,10 +408,16 @@ strazactl users enable mara
 {{< /command >}}
 
 ```text
-enabled mara. The status is active and the user's revocations are lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or the sign-in it enrolled with grew older than governance.signInMaxAge meanwhile. Such a device needs straza enroll again
+enabled mara. The status is active and the disable is lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or the sign-in it enrolled with grew older than governance.signInMaxAge meanwhile. Such a device needs straza enroll again
 ```
 
-Automation sends `{"status":"active"}` to the same admin route, which answers with the user record, its `status` now `active`:
+When a lock still holds mara, the command prints the server's sentence in its place:
+
+```text
+mara is enabled and the disable is lifted, but Straza still refuses every check-in of mara, because mara is locked. An administrator locked mara with the reason "SOC hold pending review". If the lock should end, run strazactl users unlock mara or press Unlock on mara's page in the console.
+```
+
+Automation sends `{"status":"active"}` to the same admin route, which answers with the user record, its `status` now `active`. When a lock still holds the user, the record also carries `notice`, the same sentence the command prints:
 
 {{< command terminal="Terminal" purpose="automation" >}}
 ```sh

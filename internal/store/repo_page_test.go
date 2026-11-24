@@ -50,15 +50,15 @@ func TestPageKeysets(t *testing.T) {
 			}
 			sesIDs = append(sesIDs, ses.ID)
 		}
-		got, err := s.Sessions().Page(ctx, "", "", Sort{}, Cursor{}, 10)
+		got, err := s.Sessions().Page(ctx, SessionFilter{}, Sort{}, Cursor{}, 10)
 		if err != nil || len(got) != 4 || got[0].ID != sesIDs[3] || got[3].ID != sesIDs[0] {
 			t.Fatalf("sessions page = %v (err %v), want all newest-first", got, err)
 		}
-		got, err = s.Sessions().Page(ctx, SessionActive, userIDs[0], Sort{}, Cursor{}, 10)
+		got, err = s.Sessions().Page(ctx, SessionFilter{Status: SessionActive, UserID: userIDs[0]}, Sort{}, Cursor{}, 10)
 		if err != nil || len(got) != 2 || got[0].ID != sesIDs[2] || got[1].ID != sesIDs[0] {
 			t.Fatalf("sessions filtered = %v (err %v), want u0's two active", got, err)
 		}
-		got, err = s.Sessions().Page(ctx, SessionActive, userIDs[0], Sort{}, Cursor{ID: sesIDs[2]}, 10)
+		got, err = s.Sessions().Page(ctx, SessionFilter{Status: SessionActive, UserID: userIDs[0]}, Sort{}, Cursor{ID: sesIDs[2]}, 10)
 		if err != nil || len(got) != 1 || got[0].ID != sesIDs[0] {
 			t.Fatalf("sessions filtered+cursor = %v (err %v)", got, err)
 		}
@@ -80,15 +80,15 @@ func TestPageKeysets(t *testing.T) {
 			}
 			appIDs = append(appIDs, a.ID)
 		}
-		apps, err := s.Approvals().PageByState(ctx, "approved", "", 2)
+		apps, err := s.Approvals().PageByState(ctx, "approved", "", "", 2)
 		if err != nil || len(apps) != 2 || apps[0].ID != appIDs[3] || apps[1].ID != appIDs[1] {
 			t.Fatalf("approvals page 1 = %v (err %v), want newest approved two", apps, err)
 		}
-		apps, err = s.Approvals().PageByState(ctx, "approved", apps[1].ID, 2)
+		apps, err = s.Approvals().PageByState(ctx, "approved", "", apps[1].ID, 2)
 		if err != nil || len(apps) != 1 || apps[0].ID != appIDs[0] {
 			t.Fatalf("approvals page 2 = %v (err %v)", apps, err)
 		}
-		apps, err = s.Approvals().PageByState(ctx, "", appIDs[1], 10)
+		apps, err = s.Approvals().PageByState(ctx, "", "", appIDs[1], 10)
 		if err != nil || len(apps) != 1 || apps[0].ID != appIDs[0] {
 			t.Fatalf("approvals all-states cursor = %v (err %v)", apps, err)
 		}

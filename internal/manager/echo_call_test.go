@@ -112,11 +112,11 @@ func TestCallWithholdsCredentialEcho(t *testing.T) {
 			mgr.SecretUpdated(ctx, app.ID)
 			waitStatus(t, mgr, "parked", StatusRunning)
 
-			res, err := mgr.Call(ctx, "parked", row.echo, row.echoArgs, row.call, nil)
+			res, err := mgr.Call(ctx, "ses-1", "", "parked", row.echo, row.echoArgs, row.call, nil)
 			if !errors.Is(err, ErrCredentialEcho) || res != nil {
 				t.Fatalf("a reply holding the injected credential = %v, %v, want no result and ErrCredentialEcho", res, err)
 			}
-			res, err = mgr.Call(ctx, "parked", row.clean, row.cleanArgs, row.call, nil)
+			res, err = mgr.Call(ctx, "ses-1", "", "parked", row.clean, row.cleanArgs, row.call, nil)
 			if err != nil {
 				t.Fatalf("a clean reply = %v", err)
 			}

@@ -104,9 +104,15 @@ func (c *check) setWarnings(name string, written bool) []Finding {
 		for _, s := range rule.Apps {
 			_, live := c.w.Apps[s]
 			if _, ok := c.after.Apps[s]; !ok && s != nativeApp && (written || live) {
-				out = append(out, warning(codeRuleNothing, object, fmt.Sprintf(
-					"Rule %s of %s names %s, which is not a registered server, so it matches only an MCP server that a person's own harness runs under that name.",
-					rule.ID, name, s), "If you meant a registered server, fix the name."))
+				f := ruleNamed(warning(codeRuleNothing, object, fmt.Sprintf(
+					"Rule %s of %s names %s, which is not a registered server. It matches only an MCP server that a person's own harness runs under that name.",
+					rule.ID, name, s), "If you meant a registered server, fix the name."), rule, s)
+				if !written {
+					// The tool names of a live set the draft does not write
+					// are in no word of the line, so they stay out of it.
+					f.Tools = nil
+				}
+				out = append(out, f)
 			}
 		}
 	}
@@ -115,7 +121,7 @@ func (c *check) setWarnings(name string, written bool) []Finding {
 	}
 	if roles := a.Spec.Match.Roles; len(roles) > 0 && !slices.ContainsFunc(roles, func(r string) bool { _, ok := c.after.Roles[r]; return ok }) {
 		for _, r := range roles {
-			out = append(out, warning(codeMatchUnknown, object, fmt.Sprintf("match.roles of %s names %s, which is not a role in Straza, so the set matches nobody.", name, r),
+			out = append(out, warning(codeMatchUnknown, object, fmt.Sprintf("%s applies to %s, which is not a role in Straza, so it matches nobody.", name, r),
 				"Fix the name, or create the role in this draft."))
 		}
 	}
@@ -124,7 +130,7 @@ func (c *check) setWarnings(name string, written bool) []Finding {
 	}
 	if m := a.Spec.Match; len(m.Roles) == 1 && len(m.Users) == 0 && m.Identity == nil && c.after.Roles[m.Roles[0]].Kind == RoleKindApplication && name != m.Roles[0]+"-access" {
 		out = append(out, warning(codeSetName, object, fmt.Sprintf("%s gates %s and is not named %s-access, so the console's role editor will not read it back.", name, m.Roles[0], m.Roles[0]),
-			fmt.Sprintf("Rename the set to %s-access, so the role page can edit it.", m.Roles[0])))
+			fmt.Sprintf("Rename it to %s-access.", m.Roles[0])))
 	}
 	advisories := c.in.Advisories
 	if advisories == nil {
@@ -151,7 +157,7 @@ func (c *check) ruleWarnings(name string, doc policy.Document, rule policy.Rule)
 		}
 		for _, t := range append(slices.Clone(rule.ToolNames.Allow), rule.ToolNames.Deny...) {
 			if known && !strings.Contains(t, "*") && !strings.HasPrefix(t, "re:") && !slices.Contains(offered, t) {
-				out = append(out, warning(codeRuleNothing, object, fmt.Sprintf("Rule %s of %s names %s on %s, which the server does not offer.", rule.ID, name, t, s), "Fix the name."))
+				out = append(out, ruleNamed(warning(codeRuleNothing, object, fmt.Sprintf("Rule %s of %s names %s on %s, which the server does not offer.", rule.ID, name, t, s), "Fix the name."), rule, s))
 			}
 		}
 	}
@@ -168,7 +174,7 @@ func (c *check) ruleWarnings(name string, doc policy.Document, rule policy.Rule)
 	}
 	out = append(out, c.poolWarnings(name, doc, rule, a)...)
 	if !c.w.Push && !c.w.Slack {
-		out = append(out, warning(codeNoPush, object, fmt.Sprintf("Rule %s of %s holds calls, and neither a push lane nor Slack is configured, so a person learns of a request only on the console.", rule.ID, name),
+		out = append(out, warning(codeNoPush, object, fmt.Sprintf("Neither a push lane nor Slack is configured, so the requests of rule %s of %s show only on the console.", rule.ID, name),
 			"Configure approval.push or approval.channels.slack, or keep someone watching Approvals."))
 		if timeout := cmp.Or(a.TimeoutSeconds, defaultHoldSeconds); a.Class != policy.ClassTicket && timeout < holdShortSeconds {
 			out = append(out, warning(codeHoldShort, object, fmt.Sprintf("Rule %s of %s holds a call for %s, which is short for a person who is not watching the console.", rule.ID, name, duration(timeout)),
@@ -186,7 +192,7 @@ func (c *check) ruleWarnings(name string, doc policy.Document, rule policy.Rule)
 	}
 	for _, lw := range lowWindows {
 		if v := lw.value(a); v > 0 && v < lw.below {
-			out = append(out, warning(codeWindowLow, object, fmt.Sprintf("Rule %s of %s sets %s to %s, the low end of its range, which a person rarely meets.", rule.ID, name, lw.field, strconv.Itoa(v)),
+			out = append(out, warning(codeWindowLow, object, fmt.Sprintf("Rule %s of %s sets %s to %s, the low end of its range.", rule.ID, name, lw.field, strconv.Itoa(v)),
 				"Raise it."))
 		}
 	}
@@ -287,7 +293,7 @@ func (c *check) appWarnings(name string) []Finding {
 	next, object := c.after.Apps[name], "App/"+name
 	var out []Finding
 	if next.Credential == credentialStatic && !next.SharedSecret {
-		out = append(out, warning(codeSecretMissing, object, fmt.Sprintf("%s needs a static secret and none is stored yet, so every call fails until one is.", name),
+		out = append(out, warning(codeSecretMissing, object, fmt.Sprintf("%s has no secret yet. Every call fails until one is stored.", name),
 			fmt.Sprintf("After publishing, run strazactl apps secret set %s.", name)))
 	}
 	out = append(out, c.unconnected(name)...)
@@ -296,7 +302,7 @@ func (c *check) appWarnings(name string) []Finding {
 			"Install docker on the Straza host, or run the server remotely."))
 	}
 	if next.Runtime == runtimeRemote && next.RegistryURL != "" && strings.TrimSuffix(next.RegistryURL, "/") != strings.TrimSuffix(next.URL, "/") {
-		out = append(out, warning(codeRegistryAddress, object, fmt.Sprintf("The address of %s differs from the one in the registry record its server block copies.", name),
+		out = append(out, warning(codeRegistryAddress, object, fmt.Sprintf("The address of %s differs from its registry record.", name),
 			"Check which address the server's publisher gives."))
 	}
 	return append(out, unoffered(object, "The exposure of "+name, name, next.Exposure, next.Offered)...)
@@ -394,7 +400,7 @@ func (c *check) gainWarnings(rows []gainRow) []Finding {
 			continue
 		}
 		out = append(out, warning(codeSetOrphaned, "Role/"+r, fmt.Sprintf("Removing %s leaves %s matching nothing.", r, set),
-			fmt.Sprintf("Add a Removal of %s to this draft, or turn it off with strazactl policy deactivate %s after publishing.", set, set)))
+			fmt.Sprintf("Remove %s in this draft, or turn it off with strazactl policy deactivate %s after publishing.", set, set)))
 	}
 	return out
 }

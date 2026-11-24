@@ -24,7 +24,6 @@ import {
   SEND_TEST,
   SUBJECT_CHANNELS,
   TEST_VERB,
-  channelsCount,
   reachesPush,
   targetsCount,
   testName,
@@ -97,7 +96,7 @@ describe("the channels tab", () => {
     // The detail is the server's sentence, rendered exactly as it came.
     expect(within(row("push")).getByText(push.detail as string)).toBeTruthy();
     expect(within(row("slack")).getByText(slackOff.detail as string)).toBeTruthy();
-    expect((document.querySelector("[data-row-count]") as HTMLElement).textContent).toBe(channelsCount(3));
+    expect(document.querySelector("[data-row-count]")).toBe(null);
   });
 
   it("says who each channel reaches, and sends the push row to the devices tab", async () => {
@@ -208,8 +207,8 @@ describe("the channels tab", () => {
   });
 
   const refusals: [string, ApiError, string][] = [
-    ["quotes what the server refused", new ApiError("approval: channel is not configured", 400), "The server refused it: approval: channel is not configured. Fix what it names, then try again."],
-    ["keeps the outcome uncertain when the response is lost", new ApiError("unreachable", 0, true), "The server did not respond. The change may have been saved. Reload to check before trying again."],
+    ["quotes what the server refused", new ApiError("approval: channel is not configured", 400), TEST_VERB + " refused: approval: channel is not configured. Fix what it names, then try again."],
+    ["keeps the outcome uncertain when the response is lost", new ApiError("unreachable", 0, true), TEST_VERB + " not confirmed. Straza did not answer. The change may have been saved. Reload to check before trying again."],
   ];
   it.each(refusals)("%s when the test is refused, and keeps the button", async (_name, err, sentence) => {
     vi.mocked(listChannels).mockResolvedValue({ channels: withSlack() });
@@ -218,8 +217,7 @@ describe("the channels tab", () => {
     await waitFor(() => expect(row("slack")).toBeTruthy());
     await userEvent.click(button("slack"));
     const block = await screen.findByRole("alert");
-    expect(block.textContent).toContain(TEST_VERB + " refused.");
-    expect(block.textContent).toContain(sentence);
+    expect(block.textContent).toBe(sentence);
     expect(block.textContent).not.toContain("state unknown");
     const again = button("slack");
     expect(again.textContent).toContain(SEND_TEST);
@@ -236,7 +234,7 @@ describe("the channels tab", () => {
     expect(row("push")).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
     const block = screen.getByRole("status");
-    expect(block.textContent).toContain(SUBJECT_CHANNELS + ": unreachable, state unknown.");
+    expect(block.textContent).toContain(SUBJECT_CHANNELS + " could not be read because Straza did not answer.");
     expect(block.textContent).toContain("Check that it is running, then reload.");
     expect(row("push")).toBeTruthy();
     view.unmount();
@@ -248,10 +246,19 @@ describe("the channels tab", () => {
     expect(document.querySelector("[data-channel]")).toBe(null);
   });
 
-  it("says where the choice of channels is made, under the table", async () => {
+  it("says where the choice of channels is made behind the tab's help icon, off the page", async () => {
     mount();
     await waitFor(() => expect(row("console")).toBeTruthy());
-    const foot = document.querySelector("[data-channels-foot]") as HTMLElement;
-    expect(foot.textContent).toBe(CHANNELS_FOOT);
+    expect(document.querySelector("[data-channels-foot]")).toBe(null);
+    expect(screen.queryByText(CHANNELS_FOOT)).toBe(null);
+    await userEvent.click(screen.getByRole("button", { name: "Help: Channels" }));
+    expect((await screen.findAllByText(CHANNELS_FOOT)).length).toBeGreaterThan(0);
+  });
+
+  it("leads each row with the channel's tile and keeps the Detail column room with a floor", async () => {
+    mount();
+    await waitFor(() => expect(row("console")).toBeTruthy());
+    expect(row("push").querySelector("[data-kind-icon]")?.getAttribute("data-kind-icon")).toBe("channel");
+    expect((row("push").closest("table") as HTMLElement).style.minWidth).toBe("920px");
   });
 });

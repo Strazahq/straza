@@ -1,12 +1,15 @@
 # The clocks a deployment meets every day, run against one stack whose
 # governance lifetimes are minutes instead of hours and days. Every identity
 # runs its own straza service, which renews a session when a call needs it
-# inside the token's last 120 s. Alice shows the refresh and the re-acquire:
-# a role she is given after her session started reaches her decisions only
-# when her token refreshes inside its last 120 s, and after the janitor
-# closes her session at its lifetime her next refresh is refused, her
-# service re-acquires once through her key, and a second role arrives with
-# that. Bob shows that a policy change reaches a busy session within one
+# inside the token's last 120 s, and at once when its push stream says that
+# a policy or the user's roles changed. Alice shows the role push, the
+# refresh and the re-acquire: a role she is given mid-session reaches her
+# decisions within seconds, her session's last_seen, which only a renewal
+# moves, stays put while her token has more than 120 s left and moves at
+# her first call inside them, and after the janitor closes her session at
+# its lifetime a second role is pushed to her, the refresh it starts is
+# refused, and her service re-acquires once through her key, which brings
+# that role. Bob shows that a policy change reaches a busy session within one
 # call plus the pulse lag, no refresh needed. His push stream carries the
 # change too and no step can hold it down, so the step passes on whichever
 # arrives first and does not tell the pulse from the push. With both
@@ -25,13 +28,14 @@
 # last 120 s, the snapshot pulse fires at most once per 30 s, the session
 # janitor ticks every 60 s and the key janitor every 30 s. The lifetimes
 # below are chosen against those: the lifetime close starts after alice's
-# 3:00 refresh, every re-acquire falls before the sign-in deadline, which
-# passes 7m20s after the sign-in of each enrollment and so before about
-# 7:20, the server returns after it at about 7:43, and the grace window
-# ends after the server stops.
-# A policy change reaches a session through the push or the snapshot
-# pulse, while a role reaches it only at a check-in, so the refresh and
-# re-acquire proofs use role assignments [doc].
+# refresh at about 3:20, every re-acquire falls before the sign-in deadline,
+# which passes 7m20s after the sign-in of each enrollment and so before
+# about 7:20, the server returns after it at about 7:50, and the grace
+# window ends after the server stops.
+# Every renewal a push starts mints a token that lives 300 s from then, so
+# the timed refresh comes about 180 s after the last push to the session,
+# and nothing is pushed to alice between her first role and that refresh
+# [doc].
 id: g9-clock-lifetimes
 group: G9
 title: The session, sign-in, grace and rotation clocks run their course on a stack with minute lifetimes
@@ -50,22 +54,31 @@ provenance: >-
   deadline is refused with 403); spec/snapshot/SPEC.md §Envelope
   (maxAgeSecs is the grace bound); spec/events/SPEC.md revision 28
   (session.end outcome lifetime-closed, reason naming the configured
-  lifetime); spec/events/examples/valid-audit-authn-login-device-key.json
+  lifetime), revision 70 (the role nudge, sent as the event roles on
+  GET /v1/push, which the daemon answers with a renewal) and revision 77
+  (the promotion of a session key is recorded once);
+  spec/events/examples/valid-audit-authn-login-device-key.json
   (the login failure reason names governance.signInMaxAge);
   website/content/reference/configuration.md §Governance (the knobs;
   offlineGraceTTL has no env face);
   website/content/reference/lifetimes-and-timeouts.md (the sign-in
   deadline row, whose refusal says "Your last sign-in on this machine was
-  more than" the configured period); website/content/reference/api.md
-  sections Sessions (newest first, filtered by user or status), Roles and
-  assignments, and Signing keys (rotate answers kid, status,
+  more than" the configured period, the role push row, at once by the role
+  push on the session's stream, and the policy row, a session that keeps
+  working renews about 3 minutes after its last token was minted);
+  website/content/reference/api.md
+  sections Sessions (newest first, filtered by user or status, last_seen),
+  Roles and assignments, and Signing keys (rotate answers kid, status,
   active_in_seconds, previous_key_verifies_for_seconds);
   website/content/security/credentials-and-sessions.md (the grace deny
-  wording, quoted).
+  wording, quoted); website/content/reference/lifetimes-and-timeouts.md,
+  the row An idle session (idle means no check-in or renewal).
   suspect: the sessions list order and the status word closed follow the
   API reference; the JWKS member "kid":"<id>" follows RFC 7517 in compact
   JSON; the service is assumed to pass the server's deadline sentence into
-  the hook's refusal unchanged.
+  the hook's refusal unchanged; that last_seen moves at a renewal and at
+  nothing else follows that row, which names a check-in and a renewal
+  alone.
 harnesses: [claude-code]
 governance:
   offlineGraceTTL: 2m40s
@@ -157,10 +170,10 @@ steps:
     admin:
       method: POST
       path: /v1/admin/roles
-      body: {name: g9-clock, kind: application, description: "Clock scenario, adopted at the refresh"}
+      body: {name: g9-clock, kind: application, description: "Clock scenario, adopted through the push"}
     want: {status: 201}
     save: {roleId: id}
-  - name: the admin creates the role alice receives at 3:05
+  - name: the admin creates the role alice receives after the janitor closed her session
     admin:
       method: POST
       path: /v1/admin/roles
@@ -319,15 +332,15 @@ steps:
   - name: by 0:15 the rotation is on the chain exactly once
     audit: {kind: straza.audit.admin, action: signing-keys.rotate, count: 1}
 
-  # The two clocks of a running session. A policy change reaches bob's busy
+  # The clocks of a running session. A policy change reaches bob's busy
   # session through his push stream or the snapshot pulse within about 30 s
-  # of his last decision. A role change reaches alice's session only when
-  # her token refreshes inside its last 120 s, because roles are resolved at
-  # check-in. A policy activation also renews every live session at once
-  # through its push stream, so the pulse policy goes live before alice is
-  # given her role, and a short wait lets those renewals land first. Her
-  # token is then renewed within seconds of clock zero, which puts her next
-  # refresh at about 3:00.
+  # of his last decision. A role change reaches alice's session through her
+  # push stream, and the renewal it starts mints a token that lives 300 s
+  # from then, so her service's own refresh comes at her first call inside
+  # that token's last 120 s. A policy activation also renews every live
+  # session at once, so the pulse policy goes live before alice is given her
+  # role, and a short wait lets those renewals land first. The renewal her
+  # role starts is then the last one pushed to her before her refresh.
   - name: by 0:15 the admin applies a policy for bob's role that refuses the pulse probe
     admin:
       method: PUT
@@ -365,44 +378,61 @@ steps:
     timer: policy-pulse
   - name: the renewals the activation pushed to every session have landed
     wait: 5s
-  - name: once those renewals landed, alice is given the first role, which her running session does not know yet
+  - name: once those renewals landed, alice is given the first role while her session runs
     admin:
       method: POST
       path: /v1/admin/assignments
       body: {subject_kind: user, subject_id: "${aliceId}", role_id: "${roleId}"}
     want: {status: 201}
-  - name: alice's next decision still allows the first probe, because her session does not know the role yet
-    hook:
-      as: alice
-      event: {kind: tool.pre, tool: shell.exec, command: "clock-probe one now"}
-    want: {decision: allow}
-  - name: about 3:00 alice's service refreshes her token inside its last 120 s, her session learns the role and the first probe flips to deny
+  - name: about 0:15 the role push makes alice's service renew her session at once, her session learns the role and the first probe flips to deny
     hook:
       as: alice
       event: {kind: tool.pre, tool: shell.exec, command: "clock-probe one now"}
     want: {decision: deny, reasonContains: "G9-CLOCK-ONE"}
-    within: 4m
-    timer: refresh-adopt
-
-  # The lifetime clock: a second role waits for alice's re-acquire, and the
-  # janitor closes the three sessions started at clock zero.
-  - name: 3:05 alice is given the second role, which only a new check-in can bring to her session
+    within: 30s
+    timer: role-push
+  - name: alice still has one session, and its last_seen is when that renewal reached the server
     admin:
-      method: POST
-      path: /v1/admin/assignments
-      body: {subject_kind: user, subject_id: "${aliceId}", role_id: "${roleTwoId}"}
-    want: {status: 201}
-  - name: alice's next decision still allows the second probe, because her session does not know that role yet
+      method: GET
+      path: /v1/admin/sessions?user=${aliceId}
+    want: {status: 200, body: {0.status: active, "1": null}}
+    save: {aliceSeen: 0.last_seen}
+  - name: nothing is pushed to alice while her token runs down from 300 s
+    wait: 2m30s
+  - name: about 2:45 alice's token has about 150 s left, so her next decision needs no refresh
     hook:
       as: alice
-      event: {kind: tool.pre, tool: shell.exec, command: "clock-probe two now"}
-    want: {decision: allow}
+      event: {kind: tool.pre, tool: shell.exec, command: "clock-probe one now"}
+    want: {decision: deny, reasonContains: "G9-CLOCK-ONE"}
+  - name: her session's last_seen has not moved, because nothing renewed it
+    admin:
+      method: GET
+      path: /v1/admin/sessions?user=${aliceId}
+    want: {status: 200, body: {0.last_seen: "${aliceSeen}", "1": null}}
+  - name: her token enters its last 120 s
+    wait: 35s
+  - name: about 3:20 alice's next decision finds 120 s or less left on her token, so her service refreshes it first
+    hook:
+      as: alice
+      event: {kind: tool.pre, tool: shell.exec, command: "clock-probe one now"}
+    want: {decision: deny, reasonContains: "G9-CLOCK-ONE"}
+  - name: the same session's last_seen moved, so that decision refreshed it inside the token's last 120 s
+    admin:
+      method: GET
+      path: /v1/admin/sessions?user=${aliceId}
+    want: {status: 200, body: {0.status: active, "1": null}, bodyAfter: {0.last_seen: "${aliceSeen}"}}
+
+  # The lifetime clock: the janitor closes the three sessions started at
+  # clock zero, and carol and alice each re-acquire once through their key,
+  # carol at her next decision and alice when a second role is pushed to her.
   - name: 3:45 to 4:45 the janitor closes carol's session with a chained record that names her and the lifetime
     audit: {subject: carol, kind: straza.audit.authn, reasonContains: "maximum lifetime of 3m45s", count: 1}
     within: 3m
   - name: the janitor closed all three sessions started at clock zero, each with its own record
     audit: {kind: straza.audit.authn, reasonContains: "maximum lifetime of 3m45s", count: 3}
     within: 1m
+  - name: the promotion of the key staged at 0:15 is on the chain exactly once
+    audit: {kind: straza.audit.admin, action: signing-keys.promote, count: 1}
   - name: carol's next decision is allowed, because her token is in its last 120 s, the refresh is refused for the closed session and her service re-acquires once through her key with no human action
     hook:
       as: carol
@@ -414,12 +444,18 @@ steps:
       path: /v1/admin/sessions?user=${carolId}
     want: {status: 200, body: {0.status: active, 1.status: closed, "2": null}}
     within: 30s
-  - name: about 6:00 alice's refresh is refused for the closed session, her service re-acquires once through her key, her session learns the second role and the second probe flips to deny
+  - name: alice is given the second role after the janitor closed her session
+    admin:
+      method: POST
+      path: /v1/admin/assignments
+      body: {subject_kind: user, subject_id: "${aliceId}", role_id: "${roleTwoId}"}
+    want: {status: 201}
+  - name: the role push makes alice's service renew, the refresh is refused for the closed session, her service re-acquires once through her key, her session learns the second role and the second probe flips to deny
     hook:
       as: alice
       event: {kind: tool.pre, tool: shell.exec, command: "clock-probe two now"}
     want: {decision: deny, reasonContains: "G9-CLOCK-TWO"}
-    within: 3m30s
+    within: 30s
     timer: reacquire-adopt
   - name: alice has exactly one closed and one active session, so the re-acquire happened once
     admin:
@@ -427,26 +463,30 @@ steps:
       path: /v1/admin/sessions?user=${aliceId}
     want: {status: 200, body: {0.status: active, 1.status: closed, "2": null}}
 
-  # The grace clock: bob's token expired at 5:00 and the server is gone, so
-  # his service decides locally for the grace window and then fails closed.
-  - name: about 6:04 the server is stopped
+  # The grace clock: bob made no call after his pulse probe, so his token,
+  # last renewed by the activation push at about 0:10, expires at about 5:10
+  # with no refresh. The server stops after that, so his service decides
+  # locally for the grace window and then fails closed.
+  - name: bob's token runs out with no call to refresh it
+    wait: 1m45s
+  - name: about 5:35 to 6:35 the server is stopped
     server: {action: stop}
   - name: bob's hook still allows inside the grace window
     hook:
       as: bob
       event: {kind: tool.pre, tool: shell.exec, command: "git status"}
     want: {decision: allow}
-  - name: 7:41 the grace window ends and bob's hook denies with the published wording
+  - name: about 7:50 the grace window ends and bob's hook denies with the published wording
     hook:
       as: bob
       event: {kind: tool.pre, tool: shell.exec, command: "git status"}
     want: {decision: deny, reasonContains: "offline grace period"}
-    within: 2m30s
+    within: 3m
     timer: grace-exhausted
 
   # The sign-in clock: every deadline passed while the server was down. It
   # counts from the sign-in of the enrollment, so using Straza never moved it.
-  - name: about 7:43 the server is started again on the same port and data directory
+  - name: about 7:50 the server is started again on the same port and data directory
     server: {action: start}
   - name: bob used Straza all along, yet his next decision is refused, because his session needs a check-in and his last sign-in is older than governance.signInMaxAge
     hook:

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -110,22 +112,102 @@ func (a *App) gatewayAuth(w http.ResponseWriter, r *http.Request) (authn.Claims,
 
 // handleMCP is the gateway endpoint: the combined endpoint /mcp, and a
 // server's own endpoint /mcp/{server}, which is the same handler limited to
-// that one server.
+// that one server. A request from a web page of another origin gets HTTP
+// 403 and originRefusedMsg on every method, before authentication, and no
+// record, since no caller is known yet. A request with a malformed
+// Mcp-Session-Id gets HTTP 400 and badConnLabelMsg on every method, before
+// its body is read. A GET or a DELETE whose MCP-Protocol-Version the
+// gateway does not speak gets HTTP 400 and badVersionMsg.
 func (a *App) handleMCP(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" &&
+		!slices.ContainsFunc(a.proofOrigins(r), func(o string) bool { return strings.EqualFold(o, origin) }) {
+		apiError(w, http.StatusForbidden, fmt.Sprintf(originRefusedMsg, cutUnresolved(origin)))
+		return
+	}
 	claims, sub, ok := a.gatewayAuth(w, r)
 	if !ok {
+		return
+	}
+	if _, ok := connLabel(r); !ok {
+		apiError(w, http.StatusBadRequest, badConnLabelMsg)
 		return
 	}
 	switch r.Method {
 	case http.MethodPost:
 		a.handleMCPPost(w, r, claims, sub)
 	case http.MethodGet:
-		a.gateway.streams.serve(w, r, claims.Session)
+		if !refuseVersion(w, r) {
+			a.gateway.streams.serve(w, r, claims.Session)
+		}
 	case http.MethodDelete:
-		w.WriteHeader(http.StatusOK) // stateless: nothing to terminate
+		if !refuseVersion(w, r) {
+			w.WriteHeader(http.StatusOK) // stateless: nothing to terminate
+		}
 	default:
 		apiError(w, http.StatusMethodNotAllowed, "POST, GET, or DELETE")
 	}
+}
+
+// originRefusedMsg refuses a request whose Origin header names a web page
+// that is not at the gateway's own address. It takes that origin.
+const originRefusedMsg = "Straza: this request was not taken, because it came from a web page at %q, and the Straza gateway takes MCP requests from MCP clients and from Straza's own address only. Connect an MCP client to the gateway instead of calling it from a web page."
+
+// mcpVersions are the versions of the MCP protocol the gateway speaks,
+// newest first. negotiateVersion answers one of them, and refuseVersion
+// takes no other in the MCP-Protocol-Version header.
+var mcpVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
+
+// badVersionMsg refuses a request whose MCP-Protocol-Version header names a
+// version not in mcpVersions. It takes the header's value.
+const badVersionMsg = "Straza: this request was not taken, because its MCP-Protocol-Version header names %q, a version of the MCP protocol the Straza gateway does not speak. The gateway speaks 2025-06-18, 2025-03-26 and 2024-11-05. Reconnect the MCP client so it agrees on one of them."
+
+// refuseVersion answers HTTP 400 and badVersionMsg, and true, when the
+// MCP-Protocol-Version header of r names a version not in mcpVersions. An
+// absent or empty header passes.
+func refuseVersion(w http.ResponseWriter, r *http.Request) bool {
+	v := r.Header.Get("MCP-Protocol-Version")
+	if v == "" || slices.Contains(mcpVersions, v) {
+		return false
+	}
+	apiError(w, http.StatusBadRequest, fmt.Sprintf(badVersionMsg, cutUnresolved(v)))
+	return true
+}
+
+// withoutID reports whether a JSON-RPC message carries no id, its id member
+// absent or JSON null. Such a message is a notification, which the gateway
+// never runs and never answers with a body.
+func withoutID(id json.RawMessage) bool {
+	return len(id) == 0 || string(id) == "null"
+}
+
+// mcpSessionHeader is the MCP streamable HTTP header that carries the label
+// of a client's MCP connection. serveInitialize gives one out, and the
+// client sends it back on every later request of the connection.
+const mcpSessionHeader = "Mcp-Session-Id"
+
+// badConnLabelMsg refuses a request whose Mcp-Session-Id no initialize of
+// the gateway could have answered.
+const badConnLabelMsg = "Straza: the Mcp-Session-Id header of this request is not a session id Straza gave out. Reconnect the MCP client so it starts a new session."
+
+// connLabel answers the label of the caller's MCP connection, the
+// Mcp-Session-Id header of r, and empty when the header is absent or empty.
+// It answers false for a value that is not 1 to 64 letters, digits, '-' or
+// '_'. The gateway keeps no record of the labels it gave out, so any
+// instance takes any well-formed one. A label only picks one of the caller's
+// own upstream sessions and never changes what the caller may do.
+func connLabel(r *http.Request) (string, bool) {
+	v := r.Header.Get(mcpSessionHeader)
+	if len(v) > 64 {
+		return "", false
+	}
+	for i := range len(v) {
+		switch c := v[i]; {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '-', c == '_':
+		default:
+			return "", false
+		}
+	}
+	return v, true
 }
 
 func (a *App) handleMCPPost(w http.ResponseWriter, r *http.Request, claims authn.Claims, sub policy.Subject) {
@@ -145,6 +227,18 @@ func (a *App) handleMCPPost(w http.ResponseWriter, r *http.Request, claims authn
 			return
 		}
 		writeRPCError(w, nil, -32700, "parse error: single JSON-RPC message expected (batching is not supported)")
+		return
+	}
+	// A client may send its own newest version with initialize, before any
+	// version is agreed.
+	if req.Method != "initialize" && refuseVersion(w, r) {
+		return
+	}
+	// A message without an id is answered 202 before the server scope, so
+	// it is never decided, called or recorded, on any endpoint and for any
+	// server name.
+	if withoutID(req.ID) {
+		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 
@@ -296,9 +390,11 @@ func unknownMethodMsg(method string, srv *serverScope) string {
 	return fmt.Sprintf("Straza: method %q is not served on the endpoint of the MCP server %q. This endpoint serves the server's tools, and its views only when an administrator turns views on for the server.", method, srv.name)
 }
 
-// serveInitialize answers initialize. A server endpoint whose views are on
-// also advertises resources and the MCP Apps extension.
+// serveInitialize answers initialize, with a fresh random label for the
+// connection in the Mcp-Session-Id header (connLabel). A server endpoint
+// whose views are on also advertises resources and the MCP Apps extension.
 func (a *App) serveInitialize(w http.ResponseWriter, _ *http.Request, req rpcRequest, _ authn.Claims, _ policy.Subject, srv *serverScope) {
+	w.Header().Set(mcpSessionHeader, rand.Text())
 	caps := map[string]any{"tools": map[string]any{"listChanged": true}}
 	if srv.viewsOn() {
 		caps["resources"] = map[string]any{}
@@ -326,12 +422,11 @@ func servePing(_ *App, w http.ResponseWriter, _ *http.Request, req rpcRequest, _
 // negotiateVersion echoes a supported client protocol version or answers with
 // the newest one this gateway speaks.
 func negotiateVersion(params json.RawMessage) string {
-	supported := map[string]bool{"2024-11-05": true, "2025-03-26": true, "2025-06-18": true}
 	var p struct {
 		ProtocolVersion string `json:"protocolVersion"`
 	}
-	if err := json.Unmarshal(params, &p); err == nil && supported[p.ProtocolVersion] {
+	if err := json.Unmarshal(params, &p); err == nil && slices.Contains(mcpVersions, p.ProtocolVersion) {
 		return p.ProtocolVersion
 	}
-	return "2025-06-18"
+	return mcpVersions[0]
 }

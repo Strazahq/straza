@@ -45,7 +45,7 @@ describe("the origin line", () => {
     answer([published("40", 2)], []);
     render(<OriginLine object="App/demo-tools" name="demo-tools" file={FILE} />);
     await waitFor(() => expect(line()?.textContent).toContain("Last published"));
-    expect(line()!.textContent).toBe("Origin: the file demo-tools.yaml in /etc/straza/apps.Last published by alice at " + absTime(at(2)) + ", in draft 40.");
+    expect(line()!.textContent).toBe("From /etc/straza/apps/demo-tools.yamlLast published by alice at " + absTime(at(2)) + ", in draft 40.");
     expect(listDrafts).toHaveBeenCalledWith("state=published&object=App%2Fdemo-tools&limit=20");
     expect(listDrafts).toHaveBeenCalledWith("state=open&object=App%2Fdemo-tools&limit=20");
   });
@@ -58,7 +58,7 @@ describe("the origin line", () => {
     answer(pub, []);
     render(<OriginLine object="App/demo-tools" name="demo-tools" file={FILE} differs />);
     await settle();
-    await waitFor(() => expect(line()!.textContent).toBe("Origin: the file demo-tools.yaml in /etc/straza/apps." + want));
+    await waitFor(() => expect(line()!.textContent).toBe("From /etc/straza/apps/demo-tools.yaml" + want));
   });
 
   it("points at the file's newest revision when it waits as a draft", async () => {
@@ -81,7 +81,7 @@ describe("the origin line", () => {
   it("says one waiting draft by its id", async () => {
     answer([], [row("49", {})]);
     render(<OriginLine object="PolicySet/guard" name="guard" />);
-    await waitFor(() => expect(line()?.textContent).toBe("Draft 49 changes guard and waits under Drafts.Review draft 49"));
+    await waitFor(() => expect(line()?.textContent).toBe("Draft 49 changes guard.Review draft 49"));
   });
 
   it("reads no last publish for a reader without drafts:read, who lists only some drafts, and keeps the file", async () => {
@@ -89,7 +89,7 @@ describe("the origin line", () => {
     answer([published("40", 2)], [row("44", { door: "apps-directory", source: FILE, proposer: STRAZAD }), row("50", {})]);
     render(<OriginLine object="App/demo-tools" name="demo-tools" file={FILE} differs />);
     await waitFor(() => expect(line()!.textContent).toContain("draft 44"));
-    expect(line()!.textContent).toBe("Origin: the file demo-tools.yaml in /etc/straza/apps.Live differs from the file.The file's newest revision waits as draft 44.Review draft 44");
+    expect(line()!.textContent).toBe("From /etc/straza/apps/demo-tools.yamlLive differs from the file.The file's newest revision waits as draft 44.Review draft 44");
     expect(vi.mocked(listDrafts).mock.calls.map((c) => c[0])).toEqual(["state=open&object=App%2Fdemo-tools&limit=20"]);
   });
 
@@ -97,7 +97,7 @@ describe("the origin line", () => {
     answer(new ApiError("forbidden", 403), new ApiError("unreachable", 0, true));
     render(<OriginLine object="App/demo-tools" name="demo-tools" file={FILE} />);
     await settle();
-    await waitFor(() => expect(line()!.textContent).toBe("Origin: the file demo-tools.yaml in /etc/straza/apps."));
+    await waitFor(() => expect(line()!.textContent).toBe("From /etc/straza/apps/demo-tools.yaml"));
     document.body.innerHTML = "";
     render(<OriginLine object="Role/r" name="r" />);
     await waitFor(() => expect(listDrafts).toHaveBeenCalledTimes(4));

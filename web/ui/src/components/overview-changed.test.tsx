@@ -36,6 +36,18 @@ describe("what changed", () => {
     expect((document.querySelector('[data-changed="13"] b') as HTMLElement).textContent).toBe(NONE);
   });
 
+  it.each<[string, string, Record<string, unknown>, string]>([
+    ["made a person", "straza.audit.admin", { action: "user.create", user: "u-ada", username: "ada", kind: "human", origin: "entra" }, "Created a user"],
+    ["changed a person", "straza.audit.admin", { action: "user.update", user: "u-ada", changed: ["status"], origin: "entra", reason: "the account is disabled in Entra" }, "Changed a user"],
+    ["cut a person off", "straza.audit.identity", { action: "user.killed", user: "u-ada", origin: "entra", reason: "the account is disabled in Entra", sessionsRevoked: 1 }, "Cut off a user's access"],
+    ["let a person back in", "straza.audit.identity", { action: "user.reactivated", user: "u-ada", origin: "entra" }, "Reactivated a user"],
+  ])("names Entra on a record where Straza %s because Entra said so, never the person it is about", (_name, type, data, what) => {
+    mount([record(14, type, data, "ada")]);
+    expect((document.querySelector('[data-changed="14"] b') as HTMLElement).textContent).toBe("Entra");
+    expect(screen.getByText(what)).toBeTruthy();
+    expect(screen.queryByText("ada")).toBeNull();
+  });
+
   it("falls back to the record's own type, in words, when it carries no action", () => {
     mount([record(10, "straza.identity.suspended", {}), record(9, "straza.revocation.user", { user: "u-joe", origin: "admin" })]);
     expect(screen.getAllByText(NONE)).toHaveLength(2);
@@ -55,6 +67,6 @@ describe("what changed", () => {
 
   it("says the seat cannot read the chain instead of failing the panel", () => {
     mount(null, true);
-    expect(screen.getByText(seatLine(CHANGED_TITLE, "audit:read"))).toBeTruthy();
+    expect(screen.getByText(seatLine(CHANGED_TITLE, "audit"))).toBeTruthy();
   });
 });

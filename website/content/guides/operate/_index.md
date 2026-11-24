@@ -13,6 +13,7 @@ keywords: operate deploy docker kubernetes helm run
 - [Docker]({{< relref "guides/operate/docker.md" >}}) runs a standalone server in a container with persistent storage.
 - [The enterprise shape]({{< relref "guides/operate/enterprise-shape.md" >}}) runs strazad as stateless replicas behind a load balancer with a shared database, event bus and key file.
 - [Kubernetes with Helm]({{< relref "guides/operate/kubernetes-with-helm.md" >}}) installs strazad on Kubernetes with the Helm chart and the values that matter.
+- [Deployment best practices]({{< relref "guides/operate/best-practices.md" >}}) runs each agent in its own pod and lets only strazad reach your MCP servers, with a check from inside the agent.
 - [TLS and exposure]({{< relref "guides/operate/tls-and-exposure.md" >}}) configures HTTPS and chooses which server routes each network can reach, before clients connect from another machine.
 - [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md" >}}) backs up the state that matters, upgrades strazad without logging anyone out, and rolls back.
 - [Kill-switch runbook]({{< relref "guides/operate/kill-switch-runbook.md" >}}) stops one identity or every session now, and confirms the stop landed.

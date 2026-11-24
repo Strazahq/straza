@@ -2,7 +2,7 @@
 title: strazactl sinks
 description: Inspect SIEM sinks and replay parked (dead-letter) events
 pagetype: reference
-weight: 93
+weight: 87
 draft: false
 sources:
   - cmd/strazactl

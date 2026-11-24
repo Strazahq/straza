@@ -1,0 +1,8 @@
+{
+  "id_token": "${ID_TOKEN}",
+  "harness": { "name": "claude-code", "version": "2.1.0" },
+  "attestation": { "managed": false, "hashes": {} },
+  "client": { "version": "v1.0.0-1912-g1a5a1c33", "commit": "1a5a1c33" },
+  "host": "build-box-7",
+  "folder": "~/src/billing"
+}

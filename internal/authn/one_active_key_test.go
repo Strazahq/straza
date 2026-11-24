@@ -70,7 +70,7 @@ var keyLoaders = []struct {
 }
 
 func bootSessionReplica(ctx context.Context, repo store.SigningKeyRepo) (replica, error) {
-	svc, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	svc, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		return replica{}, err
 	}
@@ -95,7 +95,7 @@ func bootSessionReplica(ctx context.Context, repo store.SigningKeyRepo) (replica
 var snapshotMessage = []byte("policy snapshot")
 
 func bootSnapshotReplica(ctx context.Context, repo store.SigningKeyRepo) (replica, error) {
-	keys, err := NewSnapshotKeys(ctx, repo)
+	keys, err := NewSnapshotKeys(ctx, repo, sharedSealer())
 	if err != nil {
 		return replica{}, err
 	}
@@ -206,7 +206,7 @@ func TestAdvanceRaceOnePromotion(t *testing.T) {
 	repo := &raceRepo{SigningKeyRepo: testRepo(t)}
 	var svcs [2]*TokenService
 	for i := range svcs {
-		svc, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+		svc, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 		if err != nil {
 			t.Fatalf("replica %d: %v", i, err)
 		}
@@ -259,6 +259,127 @@ func TestAdvanceRaceOnePromotion(t *testing.T) {
 	}
 	if len(got) != len(want) {
 		t.Errorf("the store holds %d session keys, want %d: %v", len(got), len(want), got)
+	}
+}
+
+// TestAdvanceRaceOneRetirement pins two replicas that run the rotation step
+// in the same tick once the horizon of a retiring key has passed. The
+// retirement is one compare-and-set, so exactly one replica reports it and
+// the deployment writes one record of it, and both replicas drop the key
+// from what they publish in that pass. The replica that promoted the key
+// reports the key that signed before.
+func TestAdvanceRaceOneRetirement(t *testing.T) {
+	ctx := context.Background()
+	repo := &raceRepo{SigningKeyRepo: testRepo(t)}
+	var svcs [2]*TokenService
+	for i := range svcs {
+		svc, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
+		if err != nil {
+			t.Fatalf("replica %d: %v", i, err)
+		}
+		svcs[i] = svc
+	}
+	old := activeKIDs(t, repo, store.KeyPurposeSession)
+	if len(old) != 1 {
+		t.Fatalf("%d active session keys before the rotation, want 1", len(old))
+	}
+	staged, err := svcs[0].Stage(ctx)
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	const retireAfter = time.Hour
+	promoteAt := time.Now().Add(2*KeyReloadInterval + time.Second)
+	step, err := svcs[0].Advance(ctx, promoteAt, retireAfter)
+	if err != nil {
+		t.Fatalf("Advance: %v", err)
+	}
+	if step.Promoted != staged.KID || step.Previous != old[0] {
+		t.Fatalf("promotion = %+v, want %s promoted over %s", step, staged.KID, old[0])
+	}
+
+	now := promoteAt.Add(retireAfter + KeyReloadInterval)
+	repo.arm()
+	var steps [2]Advance
+	var errs [2]error
+	var wg sync.WaitGroup
+	for i := range svcs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			steps[i], errs[i] = svcs[i].Advance(ctx, now, retireAfter)
+		}()
+	}
+	wg.Wait()
+	retired := 0
+	for i := range steps {
+		if errs[i] != nil {
+			t.Errorf("replica %d: Advance: %v", i, errs[i])
+		}
+		if steps[i].Promoted != "" || steps[i].Previous != "" {
+			t.Errorf("replica %d reports a promotion %+v, want none", i, steps[i])
+		}
+		for _, kid := range steps[i].Retired {
+			if kid != old[0] {
+				t.Errorf("replica %d retired %s, want %s", i, kid, old[0])
+			}
+			retired++
+		}
+	}
+	if retired != 1 {
+		t.Errorf("%d replicas report the retirement, want exactly 1", retired)
+	}
+	if got := keyStatuses(t, repo); got[old[0]] != store.KeyRetired || got[staged.KID] != store.KeyActive {
+		t.Errorf("statuses after the race = %v, want %s retired and %s active", got, old[0], staged.KID)
+	}
+	for i, svc := range svcs {
+		if jwksKIDs(t, svc)[old[0]] {
+			t.Errorf("replica %d still publishes the retired key %s after its pass", i, old[0])
+		}
+	}
+}
+
+// failRetireRepo is a store whose retirement write fails once armed.
+type failRetireRepo struct {
+	store.SigningKeyRepo
+	fail bool
+}
+
+func (r *failRetireRepo) Retire(ctx context.Context, kid, from string) (bool, error) {
+	if r.fail {
+		return false, errors.New("the store is down")
+	}
+	return r.SigningKeyRepo.Retire(ctx, kid, from)
+}
+
+// TestAdvanceReportsTheChangeBeforeAnError pins a pass that promotes a key
+// and then fails on a retirement: it returns the error together with the
+// promotion, because the store holds that change and the caller records it.
+func TestAdvanceReportsTheChangeBeforeAnError(t *testing.T) {
+	ctx := context.Background()
+	repo := &failRetireRepo{SigningKeyRepo: testRepo(t)}
+	svc, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.Stage(ctx)
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if _, err := svc.Advance(ctx, time.Now().Add(2*KeyReloadInterval+time.Second), 24*time.Hour); err != nil {
+		t.Fatalf("Advance: %v", err)
+	}
+	second, err := svc.Stage(ctx)
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	repo.fail = true
+	got, err := svc.Advance(ctx, time.Now().Add(time.Hour), time.Minute)
+	if err == nil {
+		t.Fatal("Advance returned no error for a failed retirement")
+	}
+	if got.Promoted != second.KID || got.Previous != first.KID || len(got.Retired) != 0 {
+		t.Errorf("step = %+v, want %s promoted over %s and nothing retired", got, second.KID, first.KID)
 	}
 }
 

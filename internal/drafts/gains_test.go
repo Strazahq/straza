@@ -149,6 +149,17 @@ func TestWhoGains(t *testing.T) {
 			if got := gainLines(v.Gains); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("Gains\n got %q\nwant %q", got, tc.want)
 			}
+			for _, g := range v.Gains {
+				for _, side := range []struct {
+					o     Outcome
+					gate  *GainGate
+					words string
+				}{{g.Before, g.BeforeGate, g.BeforeWords}, {g.After, g.AfterGate, g.AfterWords}} {
+					if side.o != OutcomeUnknown && spellGate(side.o, side.gate) != side.words {
+						t.Errorf("%s %s/%s: the gate %+v spells %q, the words say %q", g.Role, g.Server, g.Tool, side.gate, spellGate(side.o, side.gate), side.words)
+					}
+				}
+			}
 		})
 	}
 }
@@ -189,29 +200,48 @@ func TestWhoGainsCountsHoldersInTheWorldTheRowDescribes(t *testing.T) {
 	}
 }
 
+// TestProbeWords pins the outcome, the gate as fields and the gate in words
+// that probeOf reads from a decision, and that for every case the words say
+// what the fields say: the words are the fields spelled.
 func TestProbeWords(t *testing.T) {
 	t.Parallel()
 	approve := func(a policy.ApproveSpec) policy.Decision {
-		return policy.Decision{Effect: policy.EffectAllow, Approve: &a}
+		return policy.Decision{Effect: policy.EffectAllow, RuleID: "gate", SetName: "guard", Approve: &a}
 	}
 	held := &policy.ApproveSpec{Class: policy.ClassHold, TimeoutSeconds: 90, RetryTTLSeconds: 60, Roles: []string{"sec"}}
+	none := []string{}
 	cases := []struct {
 		name string
 		d    policy.Decision
 		want probe
+		gate *GainGate
 	}{
-		{"a default deny reaches nothing", policy.Decision{Effect: policy.EffectDeny, Default: true}, probe{outcome: OutcomeNotReachable}},
-		{"a rule's deny", policy.Decision{Effect: policy.EffectDeny, RuleID: "no-delete", SetName: "dev-access"}, probe{outcome: OutcomeDenied, words: "denied by rule no-delete of dev-access"}},
-		{"a Rego module's deny", policy.Decision{Effect: policy.EffectDeny, RuleID: "rego", SetName: "guard"}, probe{outcome: OutcomeDenied, words: "denied by rule rego of guard"}},
-		{"an allow runs", policy.Decision{Effect: policy.EffectAllow}, probe{outcome: OutcomeRuns}},
-		{"a classifier's allow runs after it", policy.Decision{Effect: policy.EffectAllow, Classify: true}, probe{outcome: OutcomeRuns, words: "after a classifier allows it", classify: true}},
+		{"a default deny reaches nothing", policy.Decision{Effect: policy.EffectDeny, Default: true}, probe{outcome: OutcomeNotReachable}, nil},
+		{"a rule's deny", policy.Decision{Effect: policy.EffectDeny, RuleID: "no-delete", SetName: "dev-access"},
+			probe{outcome: OutcomeDenied, words: "denied by rule no-delete of dev-access", rule: "no-delete", set: "dev-access"},
+			&GainGate{Rule: "no-delete", Set: "dev-access", Roles: none}},
+		{"a Rego module's deny", policy.Decision{Effect: policy.EffectDeny, RuleID: "rego", SetName: "guard"},
+			probe{outcome: OutcomeDenied, words: "denied by rule rego of guard", rule: "rego", set: "guard"}, &GainGate{Rule: "rego", Set: "guard", Roles: none}},
+		{"an allow runs", policy.Decision{Effect: policy.EffectAllow}, probe{outcome: OutcomeRuns}, nil},
+		{"a rule's allow runs with no gate", policy.Decision{Effect: policy.EffectAllow, RuleID: "ok", SetName: "guard"}, probe{outcome: OutcomeRuns, rule: "ok", set: "guard"}, nil},
+		{"a classifier's allow runs after it", policy.Decision{Effect: policy.EffectAllow, RuleID: "scan", SetName: "guard", Classify: true},
+			probe{outcome: OutcomeRuns, words: "after a classifier allows it", rule: "scan", set: "guard", classify: true},
+			&GainGate{Rule: "scan", Set: "guard", Roles: none, Classifier: true}},
 		{"a held call the server also checks", policy.Decision{Effect: policy.EffectAllow, ServerCheck: true, Approve: held}, probe{outcome: OutcomeApproval,
-			words: "a hold, up to 90 seconds, decided by sec, after the server allows it", approve: held, serverCheck: true}},
+			words: "a hold, up to 90 seconds, decided by sec, after the server allows it", approve: held, serverCheck: true},
+			&GainGate{Class: "hold", Seconds: 90, Roles: []string{"sec"}, ServerCheck: true}},
+		{"a call a classifier and the server check", policy.Decision{Effect: policy.EffectAllow, Classify: true, ServerCheck: true},
+			probe{outcome: OutcomeRuns, words: "after a classifier and the server allow it", classify: true, serverCheck: true},
+			&GainGate{Roles: none, Classifier: true, ServerCheck: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := probeOf(tc.d); got != tc.want {
+			got := probeOf(tc.d)
+			if got != tc.want {
 				t.Errorf("probeOf = %+v, want %+v", got, tc.want)
+			}
+			if gate := gateOf(got); !reflect.DeepEqual(gate, tc.gate) || spellGate(got.outcome, gate) != got.words {
+				t.Errorf("gateOf = %+v spelled %q, want %+v spelled as the words %q", gate, spellGate(got.outcome, gate), tc.gate, got.words)
 			}
 		})
 	}
@@ -220,25 +250,34 @@ func TestProbeWords(t *testing.T) {
 		d       policy.Decision
 		confirm bool
 		want    string
+		gate    GainGate
 	}{
-		{"a bare hold goes to the person behind the agent", approve(policy.ApproveSpec{Class: "hold", TimeoutSeconds: 90, RetryTTLSeconds: 60}), false,
-			"a hold, up to 90 seconds, decided by the person behind the agent"},
+		{"a bare hold goes to the agent's sponsor", approve(policy.ApproveSpec{Class: "hold", TimeoutSeconds: 90, RetryTTLSeconds: 60}), false,
+			"a hold, up to 90 seconds, decided by the agent's sponsor", GainGate{Class: "hold", Seconds: 90, Roles: none, Sponsor: true}},
 		{"a hold for a pool", approve(policy.ApproveSpec{Class: "hold", TimeoutSeconds: 120, RetryTTLSeconds: 60, Roles: []string{"sec-approvers", "leads"}}), false,
-			"a hold, up to 2 minutes, decided by leads or sec-approvers"},
-		{"a pool, the person behind the agent and the requester", approve(policy.ApproveSpec{Class: "hold", TimeoutSeconds: 3600, RetryTTLSeconds: 600, Roles: []string{"leads"},
-			Deciders: []string{"sponsor"}, SelfApproval: true}), false, "a hold, up to 1 hour, decided by leads, the person behind the agent or the requester, retried within 10 minutes"},
+			"a hold, up to 2 minutes, decided by leads or sec-approvers", GainGate{Class: "hold", Seconds: 120, Roles: []string{"leads", "sec-approvers"}}},
+		{"a pool, the agent's sponsor and the requester", approve(policy.ApproveSpec{Class: "hold", TimeoutSeconds: 3600, RetryTTLSeconds: 600, Roles: []string{"leads"},
+			Deciders: []string{"sponsor"}, SelfApproval: true}), false, "a hold, up to 1 hour, decided by leads, the agent's sponsor or the requester, retried within 10 minutes",
+			GainGate{Class: "hold", Seconds: 3600, Roles: []string{"leads"}, Sponsor: true, Requester: true, WithinSeconds: 600}},
 		{"a ticket", approve(policy.ApproveSpec{Class: "ticket", TicketTTLSeconds: 86400, GrantTTLSeconds: 3600, Deciders: []string{"sponsor"}}), false,
-			"a ticket good for 1 day, decided by the person behind the agent"},
+			"a ticket good for 1 day, decided by the agent's sponsor", GainGate{Class: "ticket", Seconds: 86400, Roles: none, Sponsor: true}},
 		{"a ticket with its grant and binding widened, and the reserved bind that widens nothing", approve(policy.ApproveSpec{Class: "ticket", TicketTTLSeconds: 7200, GrantTTLSeconds: 86400,
 			Roles: []string{"leads"}, Bind: "predicate", Binding: "tool"}), false,
-			"a ticket good for 2 hours, decided by leads, used within 1 day, for any arguments"},
-		{"a confirmation", approve(policy.ApproveSpec{Class: "hold", TimeoutSeconds: 90, RetryTTLSeconds: 60}), true, "a hold, up to 90 seconds, confirmed by the requester"},
+			"a ticket good for 2 hours, decided by leads, used within 1 day, for any arguments",
+			GainGate{Class: "ticket", Seconds: 7200, Roles: []string{"leads"}, WithinSeconds: 86400, AnyArguments: true}},
+		{"a confirmation", approve(policy.ApproveSpec{Class: "hold", TimeoutSeconds: 90, RetryTTLSeconds: 60}), true, "a hold, up to 90 seconds, confirmed by the requester",
+			GainGate{Class: "hold", Seconds: 90, Roles: none, Confirm: true}},
 	}
 	for _, tc := range words {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.d.Confirm = tc.confirm
-			if got := probeOf(tc.d); got.outcome != OutcomeApproval || got.words != tc.want {
+			got := probeOf(tc.d)
+			if got.outcome != OutcomeApproval || got.words != tc.want {
 				t.Errorf("probeOf = %s %q, want %q", got.outcome, got.words, tc.want)
+			}
+			tc.gate.Rule, tc.gate.Set = "gate", "guard"
+			if gate := gateOf(got); !reflect.DeepEqual(gate, &tc.gate) || spellGate(got.outcome, gate) != got.words {
+				t.Errorf("gateOf = %+v spelled %q, want %+v spelled as the words %q", gate, spellGate(got.outcome, gate), tc.gate, got.words)
 			}
 		})
 	}

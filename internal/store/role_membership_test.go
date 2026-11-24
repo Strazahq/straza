@@ -18,6 +18,7 @@ func TestApplyMembership(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		seedUserIDs(t, s, "alice", "sam")
 		held, err := s.Roles().Assign(ctx, RoleAssignment{SubjectKind: SubjectUser, SubjectID: "alice", RoleID: role.ID})
 		if err != nil {
 			t.Fatal(err)

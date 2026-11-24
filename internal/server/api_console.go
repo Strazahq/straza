@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/strazahq/straza/internal/config"
+	"github.com/strazahq/straza/internal/manager"
 	"github.com/strazahq/straza/internal/policy"
 	"github.com/strazahq/straza/internal/store"
 )
@@ -24,6 +25,40 @@ type configOIDCPayload struct {
 
 type configSCIMPayload struct{}
 
+// configEntraPayload is the identity.entra section as the config sets it:
+// the tenant and the service app, the kinds of account read from Entra,
+// whether a group is written for each role and under which name prefix,
+// the two intervals in seconds, and the removal guard's two numbers. It is
+// absent while the section is off.
+type configEntraPayload struct {
+	Tenant                   string   `json:"tenant"`
+	ClientID                 string   `json:"client_id"`
+	Read                     []string `json:"read"`
+	RoleGroups               bool     `json:"role_groups"`
+	GroupNamePrefix          string   `json:"group_name_prefix"`
+	DeltaIntervalSeconds     int      `json:"delta_interval_seconds"`
+	ReconcileIntervalSeconds int      `json:"reconcile_interval_seconds"`
+	RemovalGuardPercent      int      `json:"removal_guard_percent"`
+	RemovalGuardMinMembers   int      `json:"removal_guard_min_members"`
+}
+
+// entraConfig renders the identity.entra section, nil while it is off.
+func entraConfig(cfg *config.Config) *configEntraPayload {
+	e := cfg.Identity.Entra
+	if !e.Enabled() {
+		return nil
+	}
+	read := e.Read
+	if read == nil {
+		read = []string{}
+	}
+	return &configEntraPayload{
+		Tenant: e.Tenant, ClientID: e.ClientID, Read: read, RoleGroups: e.RoleGroups, GroupNamePrefix: e.GroupNamePrefix,
+		DeltaIntervalSeconds: int(e.DeltaInterval.Seconds()), ReconcileIntervalSeconds: int(e.ReconcileInterval.Seconds()),
+		RemovalGuardPercent: e.RemovalGuard.Percent, RemovalGuardMinMembers: e.RemovalGuard.MinMembers,
+	}
+}
+
 type configGovernancePayload struct {
 	MinAttestation         string `json:"min_attestation"`
 	OfflineGraceTTLSeconds int    `json:"offline_grace_ttl_seconds"`
@@ -31,9 +66,12 @@ type configGovernancePayload struct {
 	AuditBackpressure      string `json:"audit_backpressure"`
 }
 
+// configAppsPayload is the apps block. DefaultRemoteRPS is the rate a
+// remote server whose manifest sets none gets, so the console can name it.
 type configAppsPayload struct {
 	GitopsDirEnabled       bool `json:"gitops_dir_enabled"`
 	UpstreamTimeoutSeconds int  `json:"upstream_timeout_seconds"`
+	DefaultRemoteRPS       int  `json:"default_remote_rps"`
 }
 
 // configApprovalPayload surfaces the effective socket hold for mode:approve
@@ -75,7 +113,7 @@ func appsStatus(cfg *config.Config, watching bool) configAppsPayload {
 	if upstream == 0 {
 		upstream = 30 // the manager's built-in ceiling
 	}
-	return configAppsPayload{GitopsDirEnabled: watching, UpstreamTimeoutSeconds: upstream}
+	return configAppsPayload{GitopsDirEnabled: watching, UpstreamTimeoutSeconds: upstream, DefaultRemoteRPS: manager.DefaultRemoteRPS}
 }
 
 // configCapturePayload tells the operator whether conversation capture is in
@@ -140,6 +178,7 @@ type configPayload struct {
 	Events      configEventsPayload     `json:"events"`
 	OIDC        configOIDCPayload       `json:"oidc"`
 	SCIM        configSCIMPayload       `json:"scim"`
+	Entra       *configEntraPayload     `json:"entra,omitempty"`
 	Governance  configGovernancePayload `json:"governance"`
 	Approval    configApprovalPayload   `json:"approval"`
 	Admin       configAdminPayload      `json:"admin"`
@@ -176,7 +215,8 @@ func (a *App) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 			ExternalIssuer: cfg.OIDC.Issuer, // discovery URLs are public by definition
 			JITProvision:   cfg.OIDC.JITProvision,
 		},
-		SCIM: configSCIMPayload{},
+		SCIM:  configSCIMPayload{},
+		Entra: entraConfig(&cfg),
 		Governance: configGovernancePayload{
 			MinAttestation:         minAtt,
 			OfflineGraceTTLSeconds: int(cfg.Governance.OfflineGraceTTL.Seconds()),

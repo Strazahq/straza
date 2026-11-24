@@ -68,7 +68,7 @@ func TestRiskWordsMaskACapabilityInAnAddressPath(t *testing.T) {
 			"server.new-host App/hook (tick) The address of hook moves to /v2/mcp on the same host. | " + masked + " | hooks.example.com/v2/mcp"}},
 		{"the address moves to plain http", remote("http://hooks.example.com/v2/mcp"), []string{
 			"server.new-host App/hook (tick) The address of hook moves to /v2/mcp on the same host. | " + masked + " | hooks.example.com/v2/mcp",
-			"server.plain-http App/hook (typed hooks.example.com) hook will be reached at hooks.example.com over plain http, where it used https, so every call travels unencrypted. | " +
+			"server.plain-http App/hook (typed hooks.example.com) hook will be reached over plain http at hooks.example.com, not https. Every call travels unencrypted. | " +
 				"https://" + masked + " | http://hooks.example.com/v2/mcp"}},
 		{"the address moves to a new host", remote("https://relay.example.net/mcp"), []string{
 			"server.new-host App/hook (tick) hook will be reached at relay.example.net, a host no server uses today. | " + masked + " | relay.example.net/mcp"}},
@@ -187,7 +187,7 @@ func TestScopesWider(t *testing.T) {
 func TestUnlistedServerRow(t *testing.T) {
 	t.Parallel()
 	later := func(tools string) string {
-		return "access.tools-later Role/readers (tick) readers will reach more tools on jira, which nobody has listed yet, so Straza cannot name them. | get_me | " + tools
+		return "access.tools-later Role/readers (tick) readers will reach more tools on jira that nobody has listed yet. | get_me | " + tools
 	}
 	cases := []struct {
 		name      string

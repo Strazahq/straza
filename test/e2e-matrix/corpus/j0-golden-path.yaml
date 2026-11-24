@@ -11,7 +11,7 @@
 # not give; each is listed in the lane report.
 # Checked against the running binary [live], because the API
 # reference documents routes without request or response shapes: the activate
-# body is {status: active|draft}, a pack binding names role_id, deletes of
+# body is {status: active|draft}, deletes of
 # roles, apps, users and devices answer 200 with a status field, a policy
 # delete answers 204, and the bare approvals list is an object with an
 # approvals array.
@@ -24,6 +24,8 @@ title: A provisioned human and an enrolled agent work through policy, approval a
 provenance: >-
   doc website/content/security/security-model.md section The invariants and
   what each one costs; website/content/concepts/how-straza-works.md;
+  website/content/guides/govern-an-agent/what-the-agent-reads-back.md
+  section The session banner;
   website/content/concepts/mcp-apps-and-the-gateway.md;
   website/content/concepts/approvals-model.md;
   website/content/guides/operate/kill-switch-runbook.md;
@@ -37,7 +39,7 @@ provenance: >-
   suspect: the upstream tool results as the steps read them (echo, get-sum,
   get-env),
   the success status codes of the admin routes, the field names of the
-  role, pack, binding and activate bodies, the yaml body on the app
+  role and activate bodies, the yaml body on the app
   install, the 0.id path into the approvals list, the justification
   argument on the held call, and the wording of the gateway refusal
   after deactivation.
@@ -81,24 +83,6 @@ steps:
       body: {name: e2e-tools-dev, server: e2e-tools, tools: ["*"], description: "Golden path role: tool reach on e2e-tools"}
     want: {status: 201}
     save: {roleId: id}
-  - name: the admin creates a knowledge pack that names the role, so the session start has context to inject
-    # suspect: the field names name, version and content mirror the strazactl flags; 201 is assumed
-    admin:
-      method: POST
-      path: /v1/admin/packs
-      body:
-        name: e2e-dev-brief
-        version: "1"
-        content: "Knowledge pack for role e2e-tools-dev. The e2e-guardrails policy refuses recursive deletes and holds get-sum for an admin."
-    want: {status: 201}
-    save: {packId: id}
-  - name: the admin binds the pack to the role
-    # suspect: the binding body field is assumed to be role by name; 201 is assumed
-    admin:
-      method: POST
-      path: /v1/admin/packs/${packId}/bindings
-      body: {role_id: "${roleId}"}
-    want: {status: 201}
   - name: the IdM provisions alice over SCIM
     scim:
       method: POST
@@ -231,11 +215,11 @@ steps:
     enroll: {as: agent-1}
 
   # The governed part on every hook dialect and on the gateway.
-  - name: alice starts a session and the pack bound to her role arrives as context
+  - name: alice starts a session and the governance banner arrives as context
     hook:
       as: alice
       event: {kind: session.start}
-    want: {decision: allow, contextContains: "role e2e-tools-dev"}
+    want: {decision: allow, contextContains: "Straza governs this session as"}
   - name: a recursive delete is refused with the policy reason
     hook:
       as: alice
@@ -250,11 +234,11 @@ steps:
     want: {decision: allow}
   - name: the allow is on the chain exactly once with the rule's reason
     audit: {subject: alice, kind: tool.pre, decision: allow, reasonContains: "git status is allowed", count: 1}
-  - name: the agent starts a session and gets the same pack
+  - name: the agent starts a session and gets the same banner
     hook:
       as: agent-1
       event: {kind: session.start}
-    want: {decision: allow, contextContains: "role e2e-tools-dev"}
+    want: {decision: allow, contextContains: "Straza governs this session as"}
   - name: the agent's recursive delete is refused too
     hook:
       as: agent-1
@@ -417,11 +401,11 @@ steps:
           - op: remove
             path: 'members[value eq "${aliceId}"]'
     want: {status: 200}
-  - name: the tools disappear from alice's gateway list once her session re-resolves its roles at its next renewal
-    # No push carries a role change, and the service renews only when a call
-    # finds 120 s or less left on the 300 s token, so the change lands up to
-    # about 180 s after the token was minted. A 4m window covers that and
-    # the polls.
+  - name: the tools disappear from alice's gateway list once her session re-resolves its roles
+    # The role push makes the service renew at once while her push stream is
+    # connected. Without it the service renews only when a call finds 120 s
+    # or less left on the 300 s token, up to about 180 s after the token was
+    # minted. A 4m window covers that and the polls.
     mcp:
       as: alice
       list: true

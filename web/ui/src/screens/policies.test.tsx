@@ -7,7 +7,7 @@ import { ApiError, type BindingRow, type PoliciesAnswer, type PolicySetRow, type
 import { take } from "@/lib/handoff";
 import { DENIED_NONE, DENIED_VIEW } from "@/lib/harness-words";
 import { navigate } from "@/lib/router";
-import { CATEGORY, DRAFT, EDITED, EVERYONE, FILTER, LANE_FILTER, LIST_FOOT, LIVE, NOT_PARSED, NOT_PARSED_TITLE, NO_MATCH, OUTSIDE_FOOT, REC, REC_VERBATIM, SEARCH, SUBJECT_ROLES, VIEW, VIEW_LABEL, countWords } from "@/lib/policy-words";
+import { CATEGORY, DRAFT, EDITED, EVERYONE, FILTER, LANE_FILTER, LIVE, NOT_PARSED, NOT_PARSED_TITLE, NO_MATCH, REC, REC_VERBATIM, SEARCH, STATUS_OPTION, SUBJECT_ROLES, VIEW, countWords } from "@/lib/policy-words";
 import { readFailed } from "@/lib/say";
 
 // The six fixture policies, in the shapes the list envelope answers,
@@ -91,7 +91,7 @@ describe("the Policies list", () => {
     take("policies-new");
   });
 
-  it("splits the policies into the two categories, each with its title, count and line", async () => {
+  it("splits the policies into the two categories, each with its title and its count in a pill", async () => {
     mount();
     await screen.findByRole("button", { name: "Open dev-guardrails" });
     const titles = Array.from(document.querySelectorAll("[data-category] h2")).map((h) => h.textContent);
@@ -100,9 +100,9 @@ describe("the Policies list", () => {
     expect(categoryCount("roles")).toBe("5");
     expect(rowsOf("everyone")).toEqual(["broken-policy", "org-baseline"]);
     expect(rowsOf("roles")).toEqual(["dev-guardrails", "dev-tools-access", "finance-agents", "release-window", "sre-tools-access"]);
-    expect(within(section("everyone")).getByText(CATEGORY.everyone.line)).toBeTruthy();
+    expect((document.querySelector('[data-category-count="roles"]') as HTMLElement).className).toContain("rounded-pill");
+    expect(section("everyone").querySelector("h2")?.parentElement?.textContent).toBe(CATEGORY.everyone.title + "2");
     expect((document.querySelector("[data-row-count]") as HTMLElement).textContent).toBe(countWords(7, 7));
-    expect(screen.getByText(LIST_FOOT + " " + OUTSIDE_FOOT)).toBeTruthy();
   });
 
   it("reads one policy row across its columns", async () => {
@@ -121,13 +121,36 @@ describe("the Policies list", () => {
     expect(within(row("org-baseline")).getByText(EVERYONE)).toBeTruthy();
   });
 
+  it("leads each row with the policy's tile and names its roles with the application role's icon", async () => {
+    mount();
+    const dev = await screen.findByRole("button", { name: "Open dev-guardrails" });
+    expect(dev.querySelector('[data-kind-icon="policy-set"]')).toBeTruthy();
+    expect(dev.querySelector('[data-applies="dev-tools"] svg.lucide-id-card')).toBeTruthy();
+  });
+
+  it("carries a policy's whole name on its name, where a narrow cell cuts it", async () => {
+    mount();
+    const name = within(await screen.findByRole("button", { name: "Open dev-guardrails" })).getByText("dev-guardrails");
+    expect(name.className).toContain("truncate");
+    expect(name.getAttribute("title")).toBe("dev-guardrails");
+  });
+
+  it("says a policy's state in lower case in its chip", async () => {
+    mount();
+    await screen.findByRole("button", { name: "Open dev-guardrails" });
+    const chip = (name: string) => row(name).querySelector("[data-policy-status]") as HTMLElement;
+    expect([chip("dev-guardrails").textContent, chip("dev-guardrails").getAttribute("data-tone")]).toEqual(["live", "ok"]);
+    expect([chip("release-window").textContent, chip("release-window").getAttribute("data-tone")]).toEqual(["off", "plain"]);
+    expect([chip("finance-agents").textContent, chip("finance-agents").getAttribute("data-tone")]).toEqual(["draft waits", "warn"]);
+  });
+
   it("splits the human bucket and names the lanes in a count hover", async () => {
     mount();
     await screen.findByRole("button", { name: "Open dev-guardrails" });
-    expect(count("dev-guardrails", "deny").getAttribute("title")).toBe("2 rules deny · lanes: 2 shell");
-    expect(count("dev-guardrails", "hum").getAttribute("title")).toBe("3 holds · 2 day-scale tickets · lanes: 4 mcp · 1 shell");
-    expect(count("dev-guardrails", "allow").getAttribute("title")).toBe("4 rules allow · lanes: 4 mcp");
-    expect(count("org-baseline", "allow").getAttribute("title")).toBe("Nothing is allowed by this policy's own rules. MCP tools run by role access; local tools follow the profile default, denied under enterprise.");
+    expect(count("dev-guardrails", "deny").getAttribute("title")).toBe("2 policy rules deny: 2 shell command");
+    expect(count("dev-guardrails", "hum").getAttribute("title")).toBe("3 holds · 2 tickets: 4 MCP tool, 1 shell command");
+    expect(count("dev-guardrails", "allow").getAttribute("title")).toBe("4 policy rules allow: 4 MCP tool");
+    expect(count("org-baseline", "allow").getAttribute("title")).toBe("No policy rule allows a call. MCP tools run by role access.");
   });
 
   it("says so where the stored text no longer parses, instead of reading as zero", async () => {
@@ -156,17 +179,21 @@ describe("the Policies list", () => {
   it("narrows on Status, on Applies to and on Lane", async () => {
     mount();
     await screen.findByRole("button", { name: "Open dev-guardrails" });
-    await choose(FILTER.status, DRAFT);
+    await userEvent.click(screen.getByRole("combobox", { name: FILTER.status }));
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual([FILTER.any, "Live", "Off", "Draft waits"]);
+    await userEvent.click(screen.getByRole("option", { name: STATUS_OPTION.off }));
     expect(shownNames()).toEqual(["release-window"]);
-    await choose(FILTER.status, EDITED);
+    await choose(FILTER.status, STATUS_OPTION.edited);
     expect(shownNames()).toEqual(["finance-agents"]);
     await choose(FILTER.status, FILTER.any);
     await choose(FILTER.applies, EVERYONE);
     expect(shownNames()).toEqual(["broken-policy", "org-baseline"]);
     await choose(FILTER.applies, "sre-tools");
     expect(shownNames()).toEqual(["release-window", "sre-tools-access"]);
-    await choose(FILTER.applies, FILTER.anyRole);
-    await choose(FILTER.lane, LANE_FILTER.files);
+    await choose(FILTER.applies, FILTER.any);
+    await userEvent.click(screen.getByRole("combobox", { name: FILTER.lane }));
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Any", "MCP tool", "Shell command", "File", "Network", "Other"]);
+    await userEvent.click(screen.getByRole("option", { name: LANE_FILTER.files }));
     expect(shownNames()).toEqual(["org-baseline"]);
   });
 
@@ -180,26 +207,33 @@ describe("the Policies list", () => {
     expect(navigate).toHaveBeenCalledWith("policies", ["new"]);
   });
 
-  it("navigates to the other view from the view control", async () => {
+  it("navigates to the other view from its tab, in place of the address", async () => {
     mount();
     await screen.findByRole("button", { name: "Open dev-guardrails" });
-    await userEvent.click(screen.getByRole("button", { name: VIEW.roles }));
-    expect(navigate).toHaveBeenCalledWith("policies", ["by-role"]);
+    await userEvent.click(screen.getByRole("tab", { name: VIEW.roles }));
+    expect(navigate).toHaveBeenCalledWith("policies", ["by-role"], true);
   });
 
-  it("navigates to the calls denied by default from the view control's third button", async () => {
+  it("shows the three views as tabs under the header, also while the list loads", async () => {
+    vi.mocked(listPolicies).mockReturnValue(new Promise(() => {}));
+    mount();
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual([VIEW.sets, VIEW.roles, DENIED_VIEW]);
+    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("group", { name: "View" })).toBeNull();
+  });
+
+  it("navigates to the calls denied by default from the third tab", async () => {
     mount();
     await screen.findByRole("button", { name: "Open dev-guardrails" });
-    const views = within(screen.getByRole("group", { name: VIEW_LABEL })).getAllByRole("button").map((b) => b.textContent);
-    expect(views).toEqual([VIEW.sets, VIEW.roles, DENIED_VIEW]);
-    await userEvent.click(screen.getByRole("button", { name: DENIED_VIEW }));
-    expect(navigate).toHaveBeenCalledWith("policies", ["denied"]);
+    await userEvent.click(screen.getByRole("tab", { name: DENIED_VIEW }));
+    expect(navigate).toHaveBeenCalledWith("policies", ["denied"], true);
   });
 
   it("shows the calls denied by default in their own view, with no row count", async () => {
     mount("denied");
     await waitFor(() => expect(document.querySelector("[data-denied-view]")).toBeTruthy());
-    expect(screen.getByRole("button", { name: DENIED_VIEW }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("tab", { name: DENIED_VIEW }).getAttribute("aria-selected")).toBe("true");
     expect(document.querySelector("[data-row-count]")).toBeNull();
     expect(document.querySelector("[data-category]")).toBeNull();
     await waitFor(() => expect(screen.getByText(DENIED_NONE)).toBeTruthy());
@@ -220,7 +254,7 @@ describe("the Policies list", () => {
     vi.mocked(listRoles).mockRejectedValue(err);
     mount();
     await screen.findByRole("button", { name: "Open dev-guardrails" });
-    expect(screen.getByText(readFailed(SUBJECT_ROLES, err), { exact: false })).toBeTruthy();
+    expect(screen.getByText("roles: service unavailable. Reload to try again.", { exact: false }).textContent).toContain(readFailed(SUBJECT_ROLES, err));
     expect(shownNames().length).toBe(7);
   });
 

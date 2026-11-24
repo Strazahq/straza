@@ -100,27 +100,6 @@ func (a *App) buildRoleExport(r *http.Request, role store.Role) (drafts.RoleDoc,
 		doc.Spec.Bindings = append(doc.Spec.Bindings, drafts.RoleBinding{App: app.Name, Tools: tools, Covers: covers})
 	}
 	sort.Slice(doc.Spec.Bindings, func(i, j int) bool { return doc.Spec.Bindings[i].App < doc.Spec.Bindings[j].App })
-
-	packBindings, err := a.store.Packs().ListBindings(ctx)
-	if err != nil {
-		return doc, err
-	}
-	if len(packBindings) > 0 {
-		packs, err := a.store.Packs().List(ctx)
-		if err != nil {
-			return doc, err
-		}
-		packName := make(map[string]string, len(packs))
-		for _, p := range packs {
-			packName[p.ID] = p.Name
-		}
-		for _, pb := range packBindings {
-			if pb.RoleID == role.ID {
-				doc.Spec.Packs = append(doc.Spec.Packs, packName[pb.PackID])
-			}
-		}
-		sort.Strings(doc.Spec.Packs)
-	}
 	return doc, nil
 }
 

@@ -4,12 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { Settings } from "./settings";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, type ApiTokenRow, type AttestationHashRow, listApiTokens, listAttestationHashes } from "@/lib/api";
-import { DRAFT_TITLE } from "@/lib/config-words";
 import { type SigningKeyRow, listSigningKeys } from "@/lib/keys-api";
-import { CREATE_KEY, ROTATE_KEY, hiddenKeysTabLine } from "@/lib/keys-words";
+import { hiddenKeysTabLine } from "@/lib/keys-words";
 import { navigate, pathFor } from "@/lib/router";
 import { adminAreas } from "@/lib/session";
-import { NEW_TOKEN, TABS, hiddenTabsLine, hiddenTokensTabLine } from "@/lib/settings-words";
+import { READ_ONLY, hiddenTabsLine, hiddenTokensTabLine } from "@/lib/settings-words";
 
 // Three renders over two artifacts: the codex band carries an older render
 // beside the current one, so the tab count is renders and not rows.
@@ -42,22 +41,17 @@ vi.mock("@/lib/keys-api", async (orig) => ({ ...(await orig<typeof import("@/lib
 vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/session")>()), adminAreas: vi.fn() }));
 
-// The three tabs are driven by their own suites, so the page's suite
+// The four tabs are driven by their own suites, so the page's suite
 // stands them in as markers and watches what the page hands them.
 vi.mock("@/components/settings-config", () => ({
-  ConfigTab: ({ draftRequest }: { draftRequest: number }) => <div data-tab="configuration" data-draft-request={draftRequest} />,
+  ConfigTab: ({ row }: { row?: string }) => <div data-tab="configuration" data-row={row} />,
 }));
 vi.mock("@/components/settings-registry", () => ({ RegistryTab: () => <div data-tab="registry" /> }));
-vi.mock("@/components/settings-tokens", () => ({
-  TokensTab: ({ mintRequest }: { mintRequest: number }) => <div data-tab="tokens" data-mint-request={mintRequest} />,
-}));
-vi.mock("@/components/settings-keys", () => ({
-  KeysTab: ({ rotateRequest }: { rotateRequest: number }) => <div data-tab="keys" data-rotate-request={rotateRequest} />,
-}));
+vi.mock("@/components/settings-tokens", () => ({ TokensTab: () => <div data-tab="tokens" /> }));
+vi.mock("@/components/settings-keys", () => ({ KeysTab: () => <div data-tab="keys" /> }));
 
-const mount = (tab?: string) => render(<TooltipProvider><Settings tab={tab} /></TooltipProvider>);
+const mount = (tab?: string, row?: string) => render(<TooltipProvider><Settings tab={tab} row={row} /></TooltipProvider>);
 const tabNames = () => screen.getAllByRole("tab").map((t) => (t.textContent || "").replace(/\s+/g, " ").trim());
-const actions = () => Array.from(document.querySelectorAll("[data-page-head] button")).map((b) => (b.textContent || "").trim()).filter(Boolean);
 const panel = (name: string) => document.querySelector('[data-tab="' + name + '"]');
 
 describe("the Settings page", () => {
@@ -69,13 +63,36 @@ describe("the Settings page", () => {
     vi.mocked(navigate).mockClear();
   });
 
-  it("opens on Configuration when the address names no tab, and counts the other three", async () => {
+  it("opens a full administrator on API tokens, puts Configuration last, and counts the other three", async () => {
     mount();
-    await waitFor(() => expect(tabNames()).toEqual([TABS[0].label, TABS[1].label + " 3", TABS[2].label + " 2", TABS[3].label + " 1"]));
-    expect(panel("configuration")).toBeTruthy();
-    expect(panel("registry")).toBeNull();
+    await waitFor(() => expect(tabNames()).toEqual(["API tokens 2", "Agent signing keys 1", "Attestation registry 3", "Configuration " + READ_ONLY]));
+    expect(panel("tokens")).toBeTruthy();
+    expect(panel("configuration")).toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeTruthy();
-    expect(screen.queryByText(pathFor("settings", ["configuration"]))).toBeNull();
+    expect(screen.queryByText("API tokens, agent signing keys, the attestation registry and the deployment's configuration.")).toBeNull();
+    expect(screen.queryByText(pathFor("settings", ["tokens"]))).toBeNull();
+  });
+
+  it("marks Configuration read-only on the tab itself", async () => {
+    mount();
+    const config = await screen.findByRole("tab", { name: /^Configuration/ });
+    expect(config.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(within(config).getByText(READ_ONLY).getAttribute("data-tone")).toBe("plain");
+  });
+
+  it("puts no action in the page head, since each tab carries its own", async () => {
+    for (const tab of ["tokens", "keys", "registry", "configuration"]) {
+      const view = mount(tab);
+      await screen.findByRole("tab", { name: /^API tokens/ });
+      expect((view.container.querySelector("[data-page-head]") as HTMLElement).querySelectorAll("button").length).toBe(0);
+      view.unmount();
+    }
+  });
+
+  it("hands the row the address names to the Configuration tab", async () => {
+    mount("configuration", "floor");
+    await screen.findByRole("tab", { name: /^Configuration/ });
+    expect(panel("configuration")?.getAttribute("data-row")).toBe("floor");
   });
 
   it("opens the tab the address names and puts a picked tab in the address", async () => {
@@ -87,76 +104,38 @@ describe("the Settings page", () => {
     expect(navigate).toHaveBeenCalledWith("settings", ["tokens"], true);
   });
 
-  it("gives each tab its own action and no other", async () => {
-    mount();
-    await screen.findByRole("tab", { name: /Configuration/ });
-    expect(actions()).toEqual([DRAFT_TITLE]);
-    expect(screen.getByRole("button", { name: DRAFT_TITLE }).getAttribute("data-variant")).toBe("outline");
-
-    mount("registry");
-    await screen.findAllByRole("tab", { name: /Attestation registry/ });
-    expect(Array.from(document.querySelectorAll("[data-page-head]")).map((h) => Array.from(h.querySelectorAll("button")).length)).toEqual([1, 0]);
-
-    mount("tokens");
-    await screen.findAllByRole("tab", { name: /API tokens/ });
-    const mint = screen.getByRole("button", { name: new RegExp(NEW_TOKEN) });
-    expect(mint.getAttribute("data-variant")).toBe("default");
-  });
-
-  it("moves the counter the tab opens its sheet from", async () => {
-    mount("tokens");
-    await screen.findByRole("tab", { name: /API tokens/ });
-    expect(panel("tokens")?.getAttribute("data-mint-request")).toBe("0");
-    await userEvent.click(screen.getByRole("button", { name: new RegExp(NEW_TOKEN) }));
-    await waitFor(() => expect(panel("tokens")?.getAttribute("data-mint-request")).toBe("1"));
-
-    mount();
-    await screen.findAllByRole("tab", { name: /Configuration/ });
-    await userEvent.click(screen.getAllByRole("button", { name: DRAFT_TITLE })[0]);
-    await waitFor(() => expect(document.querySelectorAll('[data-tab="configuration"]')[0].getAttribute("data-draft-request")).toBe("1"));
-  });
-
-  it("shows a delegated seat only the tabs its grants cover, and names the rest", async () => {
+  it("opens a tokens-only seat on API tokens, and names the rest", async () => {
     vi.mocked(adminAreas).mockReturnValue({ tokens: true });
     mount();
-    await waitFor(() => expect(tabNames()).toEqual([TABS[2].label + " 2"]));
+    await waitFor(() => expect(tabNames()).toEqual(["API tokens 2"]));
     expect(panel("tokens")).toBeTruthy();
-    expect((document.querySelector("[data-hidden-tabs]") as HTMLElement).textContent).toBe(hiddenTabsLine([TABS[0].label, TABS[1].label]) + " " + hiddenKeysTabLine(TABS[3].label));
+    expect((document.querySelector("[data-hidden-tabs]") as HTMLElement).textContent).toBe(hiddenTabsLine(["Attestation registry", "Configuration"]) + " " + hiddenKeysTabLine("Agent signing keys"));
     // The seat may not read the registry or the keys, so the page never
     // asks for them.
     expect(listAttestationHashes).not.toHaveBeenCalled();
     expect(listSigningKeys).not.toHaveBeenCalled();
   });
 
-  it("names the tokens tab when the seat holds config alone", async () => {
+  it("opens a config-only seat on Attestation registry, and names the tokens tab", async () => {
     vi.mocked(adminAreas).mockReturnValue({ config: true });
     mount();
-    await waitFor(() => expect(tabNames()).toEqual([TABS[0].label, TABS[1].label + " 3"]));
-    expect((document.querySelector("[data-hidden-tabs]") as HTMLElement).textContent).toBe(hiddenTokensTabLine(TABS[2].label) + " " + hiddenKeysTabLine(TABS[3].label));
+    await waitFor(() => expect(tabNames()).toEqual(["Attestation registry 3", "Configuration " + READ_ONLY]));
+    expect(panel("registry")).toBeTruthy();
+    expect((document.querySelector("[data-hidden-tabs]") as HTMLElement).textContent).toBe(hiddenTokensTabLine("API tokens") + " " + hiddenKeysTabLine("Agent signing keys"));
     expect(listApiTokens).not.toHaveBeenCalled();
   });
 
   it("leaves a count off the label when its read fails, and keeps the page", async () => {
     vi.mocked(listAttestationHashes).mockRejectedValue(new ApiError("HTTP 503", 503));
     mount();
-    await waitFor(() => expect(tabNames()).toEqual([TABS[0].label, TABS[1].label, TABS[2].label + " 2", TABS[3].label + " 1"]));
-    expect(panel("configuration")).toBeTruthy();
+    await waitFor(() => expect(tabNames()).toEqual(["API tokens 2", "Agent signing keys 1", "Attestation registry", "Configuration " + READ_ONLY]));
+    expect(panel("tokens")).toBeTruthy();
   });
 
-  it("gives the keys tab Rotate key, Create key when there is no key, and nothing while a rotation runs", async () => {
-    mount("keys");
-    const rotate = await screen.findByRole("button", { name: new RegExp(ROTATE_KEY) });
-    expect(panel("keys")?.getAttribute("data-rotate-request")).toBe("0");
-    await userEvent.click(rotate);
-    await waitFor(() => expect(panel("keys")?.getAttribute("data-rotate-request")).toBe("1"));
-
-    vi.mocked(listSigningKeys).mockResolvedValue([keys[1]]);
-    const none = mount("keys");
-    await waitFor(() => expect(within(none.container).getByRole("button", { name: new RegExp(CREATE_KEY) })).toBeTruthy());
-
+  it("counts the live client assertion keys, a staged one included", async () => {
     vi.mocked(listSigningKeys).mockResolvedValue([keys[0], { ...keys[0], kid: "3a9e41c2-58d0-4f7b-b1e6-7c2d90a4f513", status: "staged" }]);
-    const staged = mount("keys");
-    await waitFor(() => expect(within(staged.container).getByRole("tab", { name: new RegExp(TABS[3].label + " 2") })).toBeTruthy());
-    expect(within(staged.container).queryByRole("button", { name: new RegExp(ROTATE_KEY + "|" + CREATE_KEY) })).toBeNull();
+    mount("keys");
+    expect(await screen.findByRole("tab", { name: /^Agent signing keys 2/ })).toBeTruthy();
+    expect(panel("keys")).toBeTruthy();
   });
 });

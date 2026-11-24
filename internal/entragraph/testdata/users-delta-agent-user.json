@@ -1,0 +1,13 @@
+{
+ "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users(id,userPrincipalName,displayName,mail,accountEnabled,identityParentId)",
+ "@odata.nextLink": "https://graph.microsoft.com/v1.0/users/delta?$skiptoken=TEST-USERS-SKIPTOKEN-1",
+ "value": [
+  {
+   "userPrincipalName": "demo-agent@lab.example",
+   "displayName": "demo-agent user",
+   "accountEnabled": true,
+   "identityParentId": "3a3a3a3a-6666-4666-8666-666666666666",
+   "id": "2a2a2a2a-5555-4555-8555-555555555555"
+  }
+ ]
+}

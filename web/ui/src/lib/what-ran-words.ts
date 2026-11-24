@@ -10,7 +10,7 @@ export const PATHS_NAMED = "Paths named in the command";
 export const PATHS_NAMED_HELP = "Read from the text of the command, so this is what it names, not proof of what it touched.";
 export const RAW_NOTE = "exactly as recorded";
 export const ARGS_NONE = "The record holds no arguments for this call.";
-export const FILE_NOTE = "The record holds the path. It does not hold what changed in the file.";
+export const FILE_NOTE = "The record holds no file contents.";
 
 // CONNECTOR says in words how a command leads to the next, by the operator
 // between them. "&$" is a last command sent to the background.
@@ -52,19 +52,18 @@ export const summaryLine = (commands: number, scripts: number) =>
 // it ends.
 export const docWho = (program: string) => (program ? "Given to " + program + " as its input" : "Input");
 export const docEnd = (h: Heredoc, cut: boolean) =>
-  h.closed ? "ends at " + h.delim : cut ? "cut here by the record bound" : "never closed, so it runs to the end of the command";
+  h.closed ? "ends at " + h.delim : cut ? "cut here by the record bound" : "not closed: runs to the end of the command";
 export const DOC_CUT_END = "… the record keeps no more of this command";
 
 export const unreadable = (error: string) => "Straza cannot split this command into steps: " + error + ". It is shown as it ran.";
 
 export const hiddenHead = (n: number, input = false) => (input ? "This call's input holds " : "This command holds ") + plural(n, "character", "characters") + " that do not show on screen.";
-export const HIDDEN_TAIL = "They can make the text read differently from what ran. Both views mark them.";
+export const HIDDEN_TAIL = "They can make the text read differently from what ran.";
 
 export const cutHead = (kept: number) => "Straza kept the first " + kept.toLocaleString("en-US") + " characters of this command.";
 // cutBody opens the sentence that gives the whole command's hash, with its
 // length when the record says it.
 export const cutBody = (bytes: number) => (bytes > 0 ? "The whole command was " + bytes.toLocaleString("en-US") + " bytes. Its SHA-256 is " : "The whole command's SHA-256 is ");
-export const CUT_TAIL = ", so a copy the client kept can be checked against it.";
 // INPUT_CUT_HEAD and INPUT_CUT_BODY are the same notice for a tool's input,
 // which the record shortens by its longest values and not from its end.
 export const INPUT_CUT_HEAD = "The record keeps a shortened copy of what this call was given.";

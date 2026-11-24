@@ -114,6 +114,7 @@ func TestEnterpriseBootstrapAdmin(t *testing.T) {
 	}
 
 	// First login: kim is provisioned despite JIT off and granted admin.
+	nudges := listenRolesNudges(t, platform)
 	code, checkin := checkinAs(loginDeviceFlow(t, idpBase, "kim", "hunter2!"))
 	if code != http.StatusOK {
 		t.Fatalf("bootstrap checkin = %d %v", code, checkin)
@@ -121,6 +122,11 @@ func TestEnterpriseBootstrapAdmin(t *testing.T) {
 	kim, err := platform.store.Users().GetByUsername(ctx, "kim")
 	if err != nil {
 		t.Fatalf("bootstrap user missing: %v", err)
+	}
+	// The grant is a role change like any other, so kim's other sessions
+	// hear one role nudge.
+	if got := nudges.take(t, platform); len(got) != 1 || got[0].subject != rolesPushSubject(kim.ID) {
+		t.Fatalf("the bootstrap grant published %v, want one role nudge for kim", got)
 	}
 	adminAssignments := func() []string {
 		role, err := platform.store.Roles().GetByName(ctx, AdminRole)

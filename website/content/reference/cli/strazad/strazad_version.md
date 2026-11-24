@@ -2,7 +2,7 @@
 title: strazad version
 description: Print version information
 pagetype: reference
-weight: 4
+weight: 7
 draft: false
 sources:
   - cmd/strazad

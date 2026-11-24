@@ -122,7 +122,9 @@ func TestUserDisableAndDeleteCommitWithTheirRevocation(t *testing.T) {
 
 	type change struct {
 		name, verb, method, reason, notDone string
-		body                                any
+		// origin is the origin of the change's revocation row.
+		origin string
+		body   any
 		// answered reports whether out is the answer of a clean commit.
 		answered func(id string, out map[string]any) bool
 		// deprovisions marks the change that ends the user's grant, key and
@@ -137,7 +139,7 @@ func TestUserDisableAndDeleteCommitWithTheirRevocation(t *testing.T) {
 		records func(t *testing.T, id string) (audit, identity int)
 	}
 	changes := []change{
-		{name: "disable", verb: "disable", method: http.MethodPatch, reason: "user disabled by admin",
+		{name: "disable", verb: "disable", method: http.MethodPatch, reason: "user disabled by admin", origin: store.RevocationOriginAdminDisable,
 			notDone: userNotDisabledMsg, body: map[string]string{"status": store.UserDisabled},
 			answered: func(id string, out map[string]any) bool {
 				return out["id"] == id && out["status"] == store.UserDisabled
@@ -155,7 +157,7 @@ func TestUserDisableAndDeleteCommitWithTheirRevocation(t *testing.T) {
 				}
 				return n, len(eventsNaming(t, app, "straza.identity.updated", "id", id))
 			}},
-		{name: "delete", verb: "delete", method: http.MethodDelete, reason: "user deleted by admin",
+		{name: "delete", verb: "delete", method: http.MethodDelete, reason: "user deleted by admin", origin: store.RevocationOriginAdmin,
 			notDone: userNotDeletedMsg, deprovisions: true,
 			answered: func(_ string, out map[string]any) bool { return len(out) == 1 && out["status"] == "deleted" },
 			landed: func(id string) bool {
@@ -209,8 +211,8 @@ func TestUserDisableAndDeleteCommitWithTheirRevocation(t *testing.T) {
 			t.Errorf("revocation rows = %d (%v), want %d", len(rows), err, n)
 		}
 		for _, rv := range rows {
-			if rv.Reason != c.reason || rv.Origin != store.RevocationOriginAdmin {
-				t.Errorf("revocation row = %+v, want reason %q and origin admin", rv, c.reason)
+			if rv.Reason != c.reason || rv.Origin != c.origin {
+				t.Errorf("revocation row = %+v, want reason %q and origin %s", rv, c.reason, c.origin)
 			}
 		}
 		if got := eventsNaming(t, app, "straza.revocation.user", "user", u.ID); len(got) != n {

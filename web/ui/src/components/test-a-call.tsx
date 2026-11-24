@@ -1,18 +1,20 @@
 import * as React from "react";
 import { Loader2Icon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Chip } from "@/components/chip";
 import { FetchError, RefusedError } from "@/components/error-state";
+import { Segmented } from "@/components/segmented";
 import { type Gate, WhyCard, wireLine, type CardTone } from "@/components/why-card";
 import { type ApiError, type AuditRow, type ObjectListing, type ObjectRow, type ObjectsBlock, type RoleRow, type SimObject, type SimulateAnswer, type SimulateRequest, appObjects, listAudit, listRoles, overview, query, simulate } from "@/lib/api";
 import { cap, stripOf } from "@/lib/object-words";
+import { TEST_NO_TOOL, TEST_USER_HINT, TEST_VERIFICATION, TEST_VERIFICATION_OPTION, TEST_WHO, testEventLine, testSubjectLine } from "@/lib/policy-words";
 import { version } from "@/lib/public";
 import { readFailed } from "@/lib/say";
-import { OUTCOME, SIMULATION_ONLY, unknownOutcome } from "@/lib/server-words";
+import { OUTCOME, unknownOutcome } from "@/lib/server-words";
 import { aboutServer } from "@/lib/words";
 import { cn } from "@/lib/utils";
 
@@ -32,9 +34,9 @@ const ATTESTATIONS = ["none", "advisory", "managed"];
 // carry an empty value, so the word stands in and the request omits it.
 const UNSET = "unset";
 
-const CAPS = "text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground";
-const HINT = "text-[13px] leading-relaxed text-muted-foreground";
-const PILL = "inline-flex h-8 items-center rounded-full border px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
+const CAPS = "text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground";
+const HINT = "text-caption leading-relaxed text-muted-foreground";
+const PILL = "inline-flex h-8 items-center rounded-pill border px-3 text-dense outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 const PILL_ON = "border-link/40 bg-accent-bg text-foreground";
 const PILL_OFF = "border-border bg-background text-text-2 hover:bg-accent";
 const MISSING = "Pick at least one role, or name a user.";
@@ -53,7 +55,7 @@ const SEARCH_LIMIT = 20;
 
 // pinnedOf reads the nouns and the tool reaches of a pinned block.
 export const pinnedOf = (b: ObjectsBlock): Pinned => ({ type: b.type, plural: b.plural || b.type + "s", tools: b.tools });
-const objectHint = (p: Pinned, arg: string) => "Pick the " + p.type + " the call works on. Test a call sends it in the argument " + arg + ", as the agent would.";
+const objectHint = (p: Pinned) => "Pick the " + p.type + " the call works on.";
 export const objectMissing = (p: Pinned) => "Pick the " + p.type + " this call works on.";
 const searchLabel = (p: Pinned) => "Search " + p.plural + " by name";
 
@@ -136,9 +138,8 @@ function ResultCard({ result, profile }: { result: Result; profile: string }) {
   const d = result.answer.active;
   const outcome = simulationOutcome(d);
   const who = result.subject.roles ? "roles " + result.subject.roles.join("/") : result.subject.user || "";
-  const gate = "rounded-md border-link/40 bg-accent-bg font-mono text-[13px] font-normal text-foreground";
   const obj = result.answer.object;
-  const subjectLine = <>{"subject: " + who + " · snapshot "}<span className="font-mono">{String(result.answer.snapshot || "").slice(0, 16)}</span>{SIMULATION_ONLY}</>;
+  const subjectLine = <>{testSubjectLine(who)}<span className="font-mono">{String(result.answer.snapshot || "").slice(0, 16)}</span></>;
   const covered = obj ? objectLine(obj) : "";
   return (
     <WhyCard
@@ -151,8 +152,8 @@ function ResultCard({ result, profile }: { result: Result; profile: string }) {
       head={
         <>
           <span className="font-semibold">{outcome.label}</span>
-          {d.serverCheck && <Badge variant="outline" className={gate}>{OUTCOME.serverCheck}</Badge>}
-          {d.classify && <Badge variant="outline" className={gate}>{OUTCOME.classify}</Badge>}
+          {d.serverCheck && <Chip tone="accent">{OUTCOME.serverCheck}</Chip>}
+          {d.classify && <Chip tone="accent">{OUTCOME.classify}</Chip>}
         </>
       }
       context={
@@ -201,7 +202,7 @@ export function ObjectPicker({ app, pinned, arg, picked, onPick }: { app: { id: 
             {picked.value}
             <button type="button" aria-label={"Clear the " + pinned.type} className="text-muted-foreground hover:text-foreground" onClick={() => onPick(null)}>×</button>
           </span>
-          <span className="font-mono text-[13px] text-muted-foreground">{picked.id ? "id " + picked.id : ""}</span>
+          <span className="font-mono text-caption text-muted-foreground">{picked.id ? "id " + picked.id : ""}</span>
         </div>
       ) : (
         <>
@@ -213,7 +214,7 @@ export function ObjectPicker({ app, pinned, arg, picked, onPick }: { app: { id: 
             <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-card" data-object-list>
               {search.rows.map((o) => (
                 <button key={o.id} type="button" onClick={() => onPick(o)}
-                  className="flex w-full items-baseline gap-3 border-b border-border px-3 py-1.5 text-left text-[13px] last:border-b-0 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+                  className="flex w-full items-baseline gap-3 border-b border-border px-3 py-1.5 text-left text-caption last:border-b-0 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
                   <span className="font-mono text-foreground">{o.value}</span>
                   {o.title && <span className="min-w-0 flex-1 truncate text-muted-foreground">{o.title}</span>}
                   <span className="ml-auto font-mono text-muted-foreground">{o.id}</span>
@@ -224,8 +225,8 @@ export function ObjectPicker({ app, pinned, arg, picked, onPick }: { app: { id: 
           {search.kind === "ready" && search.more && <p className={HINT}>{firstOnly(pinned)}</p>}
         </>
       )}
-      <p className={HINT}>{objectHint(pinned, arg)}</p>
-      <p className="font-mono text-[13px] text-muted-foreground" data-args-preview>{"args " + JSON.stringify(picked ? { [arg]: picked.value } : {})}</p>
+      <p className={HINT}>{objectHint(pinned)}</p>
+      <p className="font-mono text-caption text-muted-foreground" data-args-preview>{"args " + JSON.stringify(picked ? { [arg]: picked.value } : {})}</p>
     </div>
   );
 }
@@ -271,7 +272,7 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
         setRolesRead({
           kind: "failed",
           detail: e.unreachable
-            ? "The roles could not be read because strazad did not answer. Type the role names instead, comma separated."
+            ? "The roles could not be read because Straza did not answer. Type the role names instead, comma separated."
             : "The roles could not be read: " + e.message + ". Type the role names instead, comma separated.",
         });
       },
@@ -336,8 +337,8 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
       if (err.status === 401) return;
       if (err.status === 404 && err.message === "HTTP 404") { setUnsupported(true); return; }
       setProblem(err.unreachable
-        ? "The test did not reach strazad. Check the connection, then run it again."
-        : "The server answered: " + err.message + ". Check the user name and the tool name, then run the test again.");
+        ? "The test did not reach Straza. Check the connection, then run it again."
+        : "Straza answered: " + err.message + ". Check the user name and the tool name, then run the test again.");
     } finally {
       setRunning(false);
     }
@@ -356,7 +357,7 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
       setReplay({
         kind: "failed",
         detail: err.unreachable
-          ? "The recent calls could not be read because strazad did not answer. Try again, or fill the form by hand."
+          ? "The recent calls could not be read because Straza did not answer. Try again, or fill the form by hand."
           : "The recent calls could not be read: " + err.message + ". Try again, or fill the form by hand.",
       });
     }
@@ -374,7 +375,7 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
   if (unsupported) {
     return (
       <div className="flex-1 px-4 pb-6">
-        <p className="text-sm leading-relaxed text-text-2" data-unsupported>This server does not offer Test a call yet. Upgrade strazad to test calls from the console.</p>
+        <p className="text-dense leading-relaxed text-text-2" data-unsupported>Straza does not offer Test a call yet. Upgrade Straza to test calls from the console.</p>
       </div>
     );
   }
@@ -388,11 +389,13 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
       <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-4 pb-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
-            <span className={CAPS}>subject</span>
-            <div className="flex gap-1">
-              <button type="button" className={cn(PILL, mode === "roles" ? PILL_ON : PILL_OFF)} aria-pressed={mode === "roles"} onClick={() => { touch(); setMode("roles"); }}>roles</button>
-              <button type="button" className={cn(PILL, mode === "user" ? PILL_ON : PILL_OFF)} aria-pressed={mode === "user"} onClick={() => { touch(); setMode("user"); }}>one user</button>
-            </div>
+            <span className={CAPS}>{TEST_WHO}</span>
+            <Segmented
+              label={TEST_WHO}
+              value={mode}
+              onChange={(m) => { touch(); setMode(m); }}
+              options={[{ value: "roles", label: "Roles" }, { value: "user", label: "One user" }]}
+            />
             {mode === "roles" && rolesRead.kind === "loading" && <p className={HINT}>Reading the roles.</p>}
             {mode === "roles" && rolesRead.kind === "failed" && (
               <>
@@ -406,27 +409,26 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
                   {rolesRead.roles.map((r) => (
                     <button key={r.id || r.name} type="button" className={cn(PILL, picked.includes(r.name) ? PILL_ON : PILL_OFF)} aria-pressed={picked.includes(r.name)} onClick={() => toggleRole(r.name)}>{r.name}</button>
                   ))}
-                  {rolesRead.roles.length === 0 && <p className={HINT}>The server lists no role yet.</p>}
+                  {rolesRead.roles.length === 0 && <p className={HINT}>No roles yet.</p>}
                 </div>
-                <p className={HINT}>Application roles carry access rows; the others are here so a wrong pick reads as a denial, not a surprise.</p>
               </>
             )}
             {mode === "user" && (
               <>
-                <Input ref={userRef} value={user} onChange={(e) => { touch(); setUser(e.target.value); }} aria-label="user" placeholder="username, roles resolve on the server" className="h-9 font-mono" spellCheck={false} />
-                <p className={HINT}>The server resolves the user's roles and typology, so the answer matches a live session.</p>
+                <Input ref={userRef} value={user} onChange={(e) => { touch(); setUser(e.target.value); }} aria-label="user" placeholder="username" className="h-9 font-mono" spellCheck={false} />
+                <p className={HINT}>{TEST_USER_HINT}</p>
               </>
             )}
-            {missing && <p className="text-[13px] text-danger" role="alert" data-missing>{missing}</p>}
+            {missing && <p className="text-caption text-danger" role="alert" data-missing>{missing}</p>}
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="tac-attestation" className={CAPS}>attestation</Label>
+            <Label htmlFor="tac-attestation" className={CAPS}>{TEST_VERIFICATION}</Label>
             <Select value={attestation} onValueChange={(v) => { touch(); setAttestation(v); }}>
-              <SelectTrigger id="tac-attestation" aria-label="attestation" className="h-9 w-full"><SelectValue /></SelectTrigger>
+              <SelectTrigger id="tac-attestation" aria-label={TEST_VERIFICATION} className="h-9 w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value={UNSET}>unset</SelectItem>
-                {ATTESTATIONS.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                <SelectItem value={UNSET}>{TEST_VERIFICATION_OPTION.unset}</SelectItem>
+                {ATTESTATIONS.map((a) => <SelectItem key={a} value={a}>{TEST_VERIFICATION_OPTION[a]}</SelectItem>)}
               </SelectContent>
             </Select>
             <p className={HINT}>What the calling session proved about its hooks.</p>
@@ -436,8 +438,7 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <span className={CAPS}>event</span>
-            <span className="flex h-9 items-center font-mono text-sm text-text-2" data-event>{"tool.pre · mcp.call on " + app.name}</span>
-            <p className={HINT}>Pinned to this server; the Policies page tests any event.</p>
+            <span className="flex h-9 items-center font-mono text-dense text-text-2" data-event>{testEventLine(app.name)}</span>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="tac-tool" className={CAPS}>tool name</Label>
@@ -451,24 +452,24 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
             ) : (
               <>
                 <Input ref={toolRef} id="tac-tool" value={toolName} onChange={(e) => { touch(); setToolName(e.target.value); }} aria-label="tool name" placeholder="tool name" className="h-9 font-mono" spellCheck={false} />
-                <p className={HINT}>The server listed no tool yet; type the name to test.</p>
+                <p className={HINT}>{TEST_NO_TOOL}</p>
               </>
             )}
-            {toolMissing && <p className="text-[13px] text-danger" role="alert">{toolMissing}</p>}
+            {toolMissing && <p className="text-caption text-danger" role="alert">{toolMissing}</p>}
           </div>
         </div>
 
         {pinned && arg && (
           <div className="flex flex-col gap-1.5">
             <ObjectPicker app={app} pinned={pinned} arg={arg} picked={target} onPick={pick} />
-            {objectMissingNote && <p className="text-[13px] text-danger" role="alert" data-object-missing>{objectMissingNote}</p>}
+            {objectMissingNote && <p className="text-caption text-danger" role="alert" data-object-missing>{objectMissingNote}</p>}
           </div>
         )}
 
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => (replay.kind === "closed" ? void loadReplay() : setReplay({ kind: "closed" }))}>
-              {replay.kind === "closed" ? "Replay a recent call to this server" : "Close the replay list"}
+              {replay.kind === "closed" ? "Replay a call" : "Close list"}
             </Button>
             <span className={HINT}>Prefills the form from a real record.</span>
           </div>
@@ -482,7 +483,7 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
                   key={r.seq}
                   type="button"
                   onClick={() => applyReplay(r)}
-                  className="flex w-full items-center gap-3 border-b border-border px-3 py-1.5 text-left font-mono text-[13px] text-foreground last:border-b-0 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className="flex w-full items-center gap-3 border-b border-border px-3 py-1.5 text-left font-mono text-caption text-foreground last:border-b-0 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
                   <span className="text-muted-foreground">{"#" + r.seq}</span>
                   <span>{r.user}</span>
@@ -499,8 +500,7 @@ function Body({ app, tools }: { app: { id: string; name: string }; tools: string
       </div>
 
       <div className="flex items-center gap-3 border-t border-border px-4 py-4">
-        <span className={cn(HINT, "min-w-0 flex-1")}>Test a call runs the access check first, then the engine. It is the door for an operator who has no agent yet.</span>
-        <Button onClick={() => void run()} disabled={running} className="shrink-0" data-run>
+        <Button onClick={() => void run()} disabled={running} className="ml-auto shrink-0" data-run>
           {running && <Loader2Icon className="animate-spin" />}
           {running ? "Running" : "Run test"}
         </Button>
@@ -514,7 +514,7 @@ export function TestACall({ open, onOpenChange, app, tools }: TestACallProps) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-xl" data-test-a-call>
         <SheetHeader className="pb-0">
-          <SheetTitle className="text-lg font-semibold">Test a call: what would happen</SheetTitle>
+          <SheetTitle className="text-section leading-7 font-semibold">Test a call</SheetTitle>
           <SheetDescription>{"Testing the policies live right now, on " + app.name + ". Nothing is saved or enforced, and no audit record is written."}</SheetDescription>
         </SheetHeader>
         <Body app={app} tools={tools} />

@@ -2,7 +2,7 @@
 title: strazactl signing-keys certificate
 description: Print the certificate of a client assertion key, to upload to an Entra agent blueprint
 pagetype: reference
-weight: 88
+weight: 82
 draft: false
 sources:
   - cmd/strazactl

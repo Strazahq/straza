@@ -21,10 +21,11 @@ func TestBundleFixtures(t *testing.T) {
 		items   []string // the object and op of each item, in document order
 		refused []string // the code and object of each refusal
 	}{
-		"role-dev.yaml":     {items: []string{"Role/dev put"}},
-		"role-owned.yaml":   {items: []string{"Role/demo-tools-readers put"}},
-		"role-every.yaml":   {items: []string{"Role/ghapp-read put"}},
-		"role-objects.yaml": {items: []string{"Role/ghapp-write-payments put"}},
+		"role-dev.yaml":        {items: []string{"Role/dev put"}},
+		"role-dev-export.yaml": {items: []string{"Role/dev put"}},
+		"role-owned.yaml":      {items: []string{"Role/demo-tools-readers put"}},
+		"role-every.yaml":      {items: []string{"Role/ghapp-read put"}},
+		"role-objects.yaml":    {items: []string{"Role/ghapp-write-payments put"}},
 		"bundle-onboard.yaml": {items: []string{"App/github put", "Role/github-readers put",
 			"Role/github-writers put", "PolicySet/github-writers-access put"}},
 		"bundle-removal.yaml":              {items: []string{"App/old-tools remove"}},

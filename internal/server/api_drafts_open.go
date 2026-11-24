@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"reflect"
 	"slices"
 
 	"github.com/strazahq/straza/internal/drafts"
@@ -82,7 +83,7 @@ func waiveFor(c draftCaller, cd checkedDraft, fs []drafts.Finding) checkedDraft 
 	cd.v = c.readerVerdict(cd.w, cd.d, cd.v, waived)
 	out := []drafts.Finding{}
 	for _, f := range append(cd.v.Refused, refused...) {
-		if !slices.Contains(out, f) {
+		if !slices.ContainsFunc(out, func(g drafts.Finding) bool { return reflect.DeepEqual(g, f) }) {
 			out = append(out, f)
 		}
 	}

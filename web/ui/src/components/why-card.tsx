@@ -1,10 +1,12 @@
 import type * as React from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { OutcomeChip } from "@/components/chip";
 import { HelpTip } from "@/components/help-tip";
 import type { Decision } from "@/lib/api";
+import { ALLOWED_BY_ACCESS, DECIDED_BY, DENIED_DEFAULT, DENIED_DEFAULT_ENTERPRISE, IN_POLICY } from "@/lib/audit-words";
 import type { Bucket, Who } from "@/lib/policy-model";
-import { BUCKET_WORD, CONFIRM_DECIDES, ENGINE_FIELDS, ENGINE_FIELDS_HELP, decidesLine } from "@/lib/policy-words";
+import { BUCKET_OUTCOME, CONFIRM_DECIDES, ENGINE_FIELDS, ENGINE_FIELDS_HELP, decidesLine } from "@/lib/policy-words";
 import { cn } from "@/lib/utils";
 
 // The card that reads one decision back, shared by the two what-if sheets:
@@ -21,10 +23,6 @@ const BORDER: Record<CardTone, string> = {
   danger: "border-danger/40",
   plain: "border-border",
 };
-
-// The three words in their hues. A call that waits for a person keeps the
-// plain text colour: the waiting is the news, not an alarm.
-const OUTCOME_TEXT: Record<Bucket, string> = { deny: "text-danger", hum: "text-foreground", allow: "text-ok" };
 
 // approveOf reads the approve block the engine sets on an allow that waits
 // for a person, and answers null for every other decision.
@@ -56,10 +54,9 @@ function outcomeOf(d: Decision): Bucket {
   return "allow";
 }
 
-// Outcome is the decision in one word, in its tone.
+// Outcome is the decision as its outcome chip.
 export function Outcome({ d }: { d: Decision }) {
-  const bucket = outcomeOf(d);
-  return <span className={cn("text-base font-semibold", OUTCOME_TEXT[bucket])} data-outcome={bucket}>{BUCKET_WORD[bucket]}</span>;
+  return <OutcomeChip outcome={BUCKET_OUTCOME[outcomeOf(d)]} />;
 }
 
 // decidersLine says who resolves the gate this decision carries, and is
@@ -86,18 +83,18 @@ function Provenance({ d, profile, gate }: { d: Decision; profile: string; gate?:
   }
   if (!d.ruleId) {
     if (d.approve || confirms(d) || d.serverCheck || d.classify || !["allow", "deny"].includes(d.effect)) {
-      return <span>No policy rule was identified in the response.{d.reason ? " " + d.reason : ""}</span>;
+      return <span>The answer names no policy rule.{d.reason ? " " + d.reason : ""}</span>;
     }
     const rest = d.effect === "deny"
-      ? (profile === "enterprise" ? "Denied by the enterprise profile default: a call nothing allows is denied." : "Denied by the profile default: no policy allowed this call.")
-      : /allowed by role access/i.test(d.reason || "") ? "Allowed by role access. No policy rule gates this tool." : "Allowed by the profile default: no policy matched.";
+      ? (profile === "enterprise" ? DENIED_DEFAULT_ENTERPRISE : DENIED_DEFAULT)
+      : /allowed by role access/i.test(d.reason || "") ? ALLOWED_BY_ACCESS : "Allowed by the profile default.";
     return <span><b className="font-semibold text-foreground">No policy matched this call.</b>{" " + rest}</span>;
   }
   const reason = d.reason ? ": " + stripDot(d.reason) : "";
   return (
     <span>
-      {"Decided by rule "}<b className="font-semibold text-foreground">{d.ruleId}</b>
-      {d.setName ? <>{" in policy "}<b className="font-semibold text-foreground">{d.setName}</b></> : null}
+      {DECIDED_BY}<b className="font-semibold text-foreground">{d.ruleId}</b>
+      {d.setName ? <>{IN_POLICY}<b className="font-semibold text-foreground">{d.setName}</b></> : null}
       {reason + "."}
     </span>
   );
@@ -129,13 +126,13 @@ export function EngineFields({ line }: { line: string }) {
   return (
     <Collapsible className="mt-2 border-t border-dashed border-border pt-2" data-engine-fields>
       <div className="flex items-center gap-1">
-        <CollapsibleTrigger className="group inline-flex items-center gap-1 rounded-sm text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
+        <CollapsibleTrigger className="group inline-flex items-center gap-1 rounded-md text-caption text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
           <ChevronRightIcon className="size-3.5 transition-transform group-data-[state=open]:rotate-90" aria-hidden="true" />
           {ENGINE_FIELDS}
         </CollapsibleTrigger>
         <HelpTip label={ENGINE_FIELDS} text={ENGINE_FIELDS_HELP} />
       </div>
-      <CollapsibleContent className="pt-1.5 font-mono text-[13px] break-all text-muted-foreground">{line}</CollapsibleContent>
+      <CollapsibleContent className="pt-1.5 font-mono text-caption break-all text-muted-foreground">{line}</CollapsibleContent>
     </Collapsible>
   );
 }
@@ -161,11 +158,11 @@ export type WhyCardProps = {
 // WhyCard frames one decision.
 export function WhyCard({ d, profile, mark, caption, head, context, wire, tone = "plain", gate }: WhyCardProps) {
   return (
-    <div role="status" data-why-card={mark} className={cn("flex flex-col gap-1.5 rounded-md border bg-card px-4 py-3 text-sm", BORDER[tone])}>
-      {caption && <span className="text-[12px] font-semibold uppercase tracking-[.06em] text-muted-foreground">{caption}</span>}
+    <div role="status" data-why-card={mark} className={cn("flex flex-col gap-1.5 rounded-md border bg-card px-4 py-3 text-dense", BORDER[tone])}>
+      {caption && <span className="text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground">{caption}</span>}
       <div className="flex flex-wrap items-center gap-2">{head}</div>
       <p className="leading-relaxed text-text-2"><Provenance d={d} profile={profile} gate={gate} /></p>
-      {context && <p className="text-[13px] leading-relaxed text-muted-foreground">{context}</p>}
+      {context && <p className="text-caption leading-relaxed text-muted-foreground">{context}</p>}
       {wire && <EngineFields line={wire} />}
     </div>
   );

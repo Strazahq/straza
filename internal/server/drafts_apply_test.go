@@ -320,7 +320,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 
 // whoamiOn answers what the tagged server that app runs says it is.
 func whoamiOn(ctx context.Context, app *App) (string, error) {
-	res, err := app.manager.Call(ctx, "tagged", "whoami", nil, nil, nil)
+	res, err := app.manager.Call(ctx, "ses-1", "", "tagged", "whoami", nil, nil, nil)
 	if err != nil {
 		return "", err
 	}
@@ -353,7 +353,7 @@ func replicaPair(t *testing.T) (a, b *App, baseA, baseB string) {
 	}
 	baseB = "http://" + b.Addr()
 	b.cfg.Server.PublicURL = baseB
-	tokens, err := authn.NewTokenService(ctx, b.store.SigningKeys(), baseA, 0)
+	tokens, err := authn.NewTokenService(ctx, b.store.SigningKeys(), b.kek, baseA, 0)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -1895,7 +1895,7 @@ func TestBootStraddlingAPublishServesItConsistently(t *testing.T) {
 	}
 	baseB := "http://" + b.Addr()
 	b.cfg.Server.PublicURL = baseB
-	tokens, err := authn.NewTokenService(bctx, b.store.SigningKeys(), baseB, 0)
+	tokens, err := authn.NewTokenService(bctx, b.store.SigningKeys(), b.kek, baseB, 0)
 	if err != nil {
 		cancel()
 		t.Fatal(err)

@@ -2,7 +2,7 @@
 title: strazactl sessions transcript
 description: Print a session's recorded conversation (recording is policy-opted-in)
 pagetype: reference
-weight: 86
+weight: 80
 draft: false
 sources:
   - cmd/strazactl

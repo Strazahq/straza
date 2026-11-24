@@ -1,36 +1,36 @@
 import * as React from "react";
-import { KeyRoundIcon, PencilIcon, PlusIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { LockIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Chip } from "@/components/chip";
 import { PageHead } from "@/components/page-head";
 import { ConfigTab } from "@/components/settings-config";
 import { KeysTab } from "@/components/settings-keys";
 import { RegistryTab } from "@/components/settings-registry";
 import { TokensTab } from "@/components/settings-tokens";
 import { listApiTokens, listAttestationHashes } from "@/lib/api";
-import { DRAFT_TITLE } from "@/lib/config-words";
 import { ASSERTION_PURPOSE, type SigningKeyRow, listSigningKeys } from "@/lib/keys-api";
-import { CREATE_KEY, ROTATE_KEY, hiddenKeysTabLine } from "@/lib/keys-words";
+import { hiddenKeysTabLine } from "@/lib/keys-words";
 import { navigate } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
 import { adminAreas } from "@/lib/session";
-import { NEW_TOKEN, type SettingsTab, TABS, hiddenTabsLine, hiddenTokensTabLine, rendersOf } from "@/lib/settings-words";
+import { READ_ONLY, type SettingsTab, TABS, hiddenTabsLine, hiddenTokensTabLine, rendersOf } from "@/lib/settings-words";
 
-// Settings is the configuration read-out, the attestation registry, the
-// API tokens and the signing keys: one tab
-// each with the tab in the address, the tab's own action in the page head,
-// and the tabs a delegated seat cannot read left out with one line saying
-// which grant they need.
+// Settings is the API tokens, the signing keys, the attestation registry
+// and the configuration read-out: one tab each with the tab in the
+// address, each tab's action inside the tab, and the tabs a delegated
+// seat cannot read left out with one line saying which grant they need.
 
 const route = routeByKey("settings");
 
-type Props = { tab?: string };
+// row is the configuration row the address names after the tab, as in
+// settings/configuration/floor, which the tab opens.
+type Props = { tab?: string; row?: string };
 
 // Counts are the numbers in the tab labels. null is a count this seat may
 // not read or a read that failed, and the label then carries no number.
 type Counts = { registry: number | null; tokens: number | null };
 
-export function Settings({ tab }: Props) {
+export function Settings({ tab, row }: Props) {
   const areas = adminAreas();
   const canConfig = !areas || !!areas.config;
   const canTokens = !areas || !!areas.tokens;
@@ -41,15 +41,9 @@ export function Settings({ tab }: Props) {
 
   const [counts, setCounts] = React.useState<Counts>({ registry: null, tokens: null });
   // keys is the client assertion key list, from the page's read and from
-  // each read the tab makes, so the count and the head's action follow a
-  // rotation. null is a list this seat may not read or a read that failed.
+  // each read the tab makes, so the count follows a rotation. null is a
+  // list this seat may not read or a read that failed.
   const [keys, setKeys] = React.useState<SigningKeyRow[] | null>(null);
-  // Each action button moves its tab's counter; the tab opens its sheet
-  // when the counter moves, so the head owns the action and the tab owns
-  // the panel it opens.
-  const [mintRequest, setMintRequest] = React.useState(0);
-  const [draftRequest, setDraftRequest] = React.useState(0);
-  const [rotateRequest, setRotateRequest] = React.useState(0);
 
   // The counts ride their own reads and never fail the page: a count that
   // could not be read is left off the label, and the tab's own body says
@@ -84,23 +78,12 @@ export function Settings({ tab }: Props) {
     ...hidden.filter((t) => t.area === "full").map((t) => hiddenKeysTabLine(t.label)),
   ].filter(Boolean).join(" ");
 
-  // While a rotation runs, its panel carries the next step, so the head
-  // offers no second rotation.
-  const rotating = !!keys && keys.some((k) => k.status === "staged" || k.status === "retiring");
-  const keysAction = !keys || rotating ? undefined
-    : <Button onClick={() => setRotateRequest((n) => n + 1)}><KeyRoundIcon /> {keys.some((k) => k.status === "active") ? ROTATE_KEY : CREATE_KEY}</Button>;
-  const actions = current === "tokens"
-    ? <Button onClick={() => setMintRequest((n) => n + 1)}><PlusIcon /> {NEW_TOKEN}</Button>
-    : current === "configuration"
-      ? <Button variant="outline" onClick={() => setDraftRequest((n) => n + 1)}><PencilIcon /> {DRAFT_TITLE}</Button>
-      : current === "keys" ? keysAction : undefined;
-
   const liveKeys = keys ? keys.filter((k) => k.status !== "retired").length : null;
   const countOf = (key: SettingsTab) => (key === "registry" ? counts.registry : key === "tokens" ? counts.tokens : key === "keys" ? liveKeys : null);
 
   return (
     <>
-      <PageHead label={route.label} description={route.description} actions={actions} />
+      <PageHead label={route.label} description={route.description} />
       <div className="flex flex-col gap-4 px-6 py-5">
         <Tabs value={current} onValueChange={(v) => navigate("settings", [v], true)}>
           <div className="flex items-center border-b border-border">
@@ -109,24 +92,26 @@ export function Settings({ tab }: Props) {
                 const n = countOf(t.key);
                 return (
                   <TabsTrigger key={t.key} value={t.key}>
-                    {t.label} {n !== null && <span className="font-mono text-xs text-muted-foreground">{n}</span>}
+                    {t.key === "configuration" && <LockIcon aria-hidden="true" />}
+                    {t.label} {n !== null && <span className="font-mono text-caption leading-4 text-muted-foreground">{n}</span>}
+                    {t.key === "configuration" && <Chip tone="plain">{READ_ONLY}</Chip>}
                   </TabsTrigger>
                 );
               })}
             </TabsList>
           </div>
-          {hiddenLine && <p className="text-[13px] text-muted-foreground" data-hidden-tabs>{hiddenLine}</p>}
+          {hiddenLine && <p className="text-caption text-muted-foreground" data-hidden-tabs>{hiddenLine}</p>}
           {tabs.some((t) => t.key === "configuration") && (
-            <TabsContent value="configuration"><ConfigTab draftRequest={draftRequest} /></TabsContent>
+            <TabsContent value="configuration"><ConfigTab row={row} /></TabsContent>
           )}
           {tabs.some((t) => t.key === "registry") && (
             <TabsContent value="registry"><RegistryTab /></TabsContent>
           )}
           {tabs.some((t) => t.key === "tokens") && (
-            <TabsContent value="tokens"><TokensTab mintRequest={mintRequest} /></TabsContent>
+            <TabsContent value="tokens"><TokensTab /></TabsContent>
           )}
           {tabs.some((t) => t.key === "keys") && (
-            <TabsContent value="keys"><KeysTab rotateRequest={rotateRequest} onRows={setKeys} /></TabsContent>
+            <TabsContent value="keys"><KeysTab onRows={setKeys} /></TabsContent>
           )}
         </Tabs>
       </div>

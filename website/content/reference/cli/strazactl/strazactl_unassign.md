@@ -2,7 +2,7 @@
 title: strazactl unassign
 description: Take a role away from a user
 pagetype: reference
-weight: 102
+weight: 96
 draft: false
 sources:
   - cmd/strazactl

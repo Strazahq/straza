@@ -2,7 +2,8 @@ package server
 
 import (
 	"context"
-	"reflect"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -46,11 +47,12 @@ func TestAssignmentAt(t *testing.T) {
 // TestAgentDraftChecksEveryRoleSetItWillHold pins the check of an agent's
 // draft through the straza-app door against every set of roles the agent
 // holds while its assignments start and end. A draft that widens a role
-// the agent holds from tomorrow is refused as agent.own-reach. So is a
-// draft that widens a role starting after a wider role ends, though the
-// two roles together reach no more. The agent reads that refusal, the one
-// draft.check record of the draft names that code alone with no actor, and
-// the one draft.create record names the agent as its actor.
+// the agent holds from tomorrow raises agent.own-reach. So does a draft
+// that widens a role starting after a wider role ends, though the two
+// roles together reach no more. The draft is not refused: the agent reads
+// the risk and that a person has to accept it, the one draft.check record
+// of the draft names that code under its risks with no actor, and the one
+// draft.create record names the agent as its actor.
 func TestAgentDraftChecksEveryRoleSetItWillHold(t *testing.T) {
 	t.Parallel()
 	r := newDoorRig(t)
@@ -99,21 +101,23 @@ func TestAgentDraftChecksEveryRoleSetItWillHold(t *testing.T) {
 			id, _ := sc["draft"].(string)
 			r.awaitChecked(t, id)
 			_, _, sc = status(t, r.base, tok, id)
-			want := []string{"agent.own-reach"}
-			if got := agentCodes(sc["refused"]); !reflect.DeepEqual(got, want) {
-				t.Fatalf("refused codes = %v, want %v, in the status %v", got, want, sc)
+			if got := agentCodes(sc["refused"]); len(got) > 0 || sc["publishable"] != true {
+				t.Fatalf("refused codes = %v, publishable %v, want the draft open for a person, in the status %v", got, sc["publishable"], sc)
 			}
-			const sentence = "This draft would let you reach tools of jira that nobody has listed yet, which widens your own reach. An agent's draft may not."
-			if f := findingOf(sc["refused"], "agent.own-reach"); f["sentence"] != sentence || f["fix"] != "Leave that change out. A person can make it." {
-				t.Errorf("the refusal = %v, want the sentence %q and its fix", f, sentence)
+			const sentence = "This draft lets the agent that wrote it reach tools of jira that nobody has listed yet."
+			if f := findingOf(sc["risks"], "agent.own-reach"); f["sentence"] != sentence || f["typed"] != "jira" {
+				t.Errorf("the risk = %v, want the sentence %q typed jira", f, sentence)
+			}
+			if want := fmt.Sprintf(nextAccepts, id); sc["next"] != want {
+				t.Errorf("next = %q, want %q", sc["next"], want)
 			}
 			var checks, creates []map[string]any
 			waitFor(t, "the draft.create and draft.check records of draft "+id, func() bool {
 				checks, creates = draftRecords(t, r.app, "draft.check", id), draftRecords(t, r.app, "draft.create", id)
 				return len(checks) > 0 && len(creates) > 0
 			})
-			if len(checks) != 1 || !reflect.DeepEqual(agentCodes(checks[0]["refused"]), want) {
-				t.Errorf("draft.check records = %v, want one whose refused codes are %v", checks, want)
+			if len(checks) != 1 || len(agentCodes(checks[0]["refused"])) > 0 || !slices.Contains(agentCodes(checks[0]["risks"]), "agent.own-reach") {
+				t.Errorf("draft.check records = %v, want one with no refusal and agent.own-reach among its risks", checks)
 			}
 			noActorIn(t, checks[0])
 			if len(creates) != 1 || creates[0]["actor"] != tc.agent || creates[0]["actorId"] != u.ID {

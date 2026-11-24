@@ -16,12 +16,12 @@ export function StepStrip({ labels, at }: { labels: string[]; at: number }) {
             key={label}
             aria-current={current ? "step" : undefined}
             className={cn(
-              "-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm",
+              "-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-dense",
               current ? "border-link font-semibold text-link" : "border-transparent",
               done ? "text-foreground" : !current && "text-muted-foreground",
             )}
           >
-            <span aria-hidden="true" className={cn("font-mono text-xs", done && "text-ok")}>{done ? <CheckIcon className="size-3.5" /> : i + 1}</span>
+            <span aria-hidden="true" className={cn("font-mono text-caption leading-4", done && "text-ok")}>{done ? <CheckIcon className="size-3.5" /> : i + 1}</span>
             {label}
           </li>
         );

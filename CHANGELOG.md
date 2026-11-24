@@ -10,6 +10,259 @@ Straza numbers its binaries, its API and its wire formats.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-24
+
+Straza 2.3.0 syncs with Microsoft Entra ID directly over Microsoft Graph, where SCIM 2.0
+provisioning was the only way to sync from Entra before. It creates one group in Entra for each
+role, and a person or an agent you add to that group gets the role, without midPoint or another IGA.
+The release also encrypts the session and snapshot signing keys in the database with `secret.key`,
+limits how fast a session and a user can call a remote MCP server, and rebuilds the console's pages
+for users, sessions, drafts and approvals. strazad migrates its database, and you have to stop every
+replica before the first 2.3.0 replica starts.
+[Upgrade from 2.2.0 to 2.3.0](https://docs.straza.ai/guides/operate/backup-and-upgrade/#upgrade-from-220-to-230)
+walks the upgrade step by step.
+
+### Upgrade notes
+
+1. Back up the store and `secret.key`, because the first start runs migrations 43 to 47 and encrypts
+   the signing keys with that file. strazad no longer starts without it. Keep its copy apart from
+   the database backups, because the two together open the keys.
+2. On Kubernetes, set `secrets.kekExistingSecret` if you have not yet, because the chart refuses to
+   render the enterprise profile without it.
+3. Raise `straza.limits.rps` in the manifest of each remote MCP server that one session calls more
+   than 20 times a second. That default limit is new, and 0 no longer means no limit for a remote
+   server.
+4. Raise it too for a server that one user's sessions together call more than five times its rate.
+   With the default rate that is 100 calls a second. This ceiling for one user is new.
+5. Check MCP clients of your own that call the gateway. After `initialize`, a request whose
+   `MCP-Protocol-Version` header names a version other than `2025-06-18`, `2025-03-26` or
+   `2024-11-05` now gets 400.
+6. Remove `strazactl packs` and calls to `/v1/admin/packs` from your scripts, because knowledge
+   packs are gone.
+7. Stop every replica before the first one of this version starts, because an older replica crashes
+   on an encrypted signing key. On Kubernetes, scale the Deployment to zero, run `helm upgrade` and,
+   with `autoscaling.enabled`, scale it up again yourself.
+   [Kubernetes with Helm](https://docs.straza.ai/guides/operate/kubernetes-with-helm/#upgrade-and-roll-back)
+   has the commands.
+8. Upgrade strazactl after strazad, because a newer strazactl may send a field that an older strazad
+   refuses.
+9. To go back to 2.2.0, stop every replica and run `strazad migrate --to 46`, then 45, 44, 43 and
+   42, with this version's binary and `secret.key` in place. That removes every role assigned
+   through an Entra group.
+   [Roll back](https://docs.straza.ai/guides/operate/backup-and-upgrade/#roll-back) lists what
+   each step gives up.
+10. On Kubernetes, name the revision in `helm rollback`. Without one, Helm can return to a revision
+    that is still this version.
+
+### Added
+
+- Straza now syncs with Microsoft Entra ID directly over Microsoft Graph. Before, SCIM 2.0
+  provisioning was the only way to sync from Entra, and it keeps working. You register one more app
+  in Entra for the sync and set `identity.entra`.
+  [Role groups in Entra](https://docs.straza.ai/guides/connect-identity/entra-role-groups/) walks
+  the setup.
+- The sync assigns roles through groups, without midPoint or another IGA. strazad creates one
+  security group in Entra for each role. Add someone to that group, and they get the role in
+  Straza. Remove them, and they lose it.
+- A removal guard holds the removals when one read of a group would take the role from at least 5 of
+  its holders and from more than half of them. The role's page in the console then offers Apply the
+  removals. `identity.entra.removalGuard` sets both numbers.
+- A group's members get the role only if `identity.entra.read` lists their kind: `people`,
+  `agentUsers` or `agentIdentities`. Entra then owns the accounts of that kind. Straza creates,
+  disables and enables them as Entra says, and refuses SCIM writes and admin changes to them.
+- An agent from Entra also gets its sponsor from Entra, but only when Entra lists exactly one
+  sponsor for it and that sponsor is a person in Straza.
+- The console shows each role's group in Entra and marks the holders who have the role from Entra.
+  Overview says when Straza can no longer read Entra, and `GET /v1/admin/entra` returns that state.
+- To replace `secret.key`, run `strazad reseal-signing-keys --new-kek-file <path>`, which moves the
+  signing keys to the new file. Before, replacing the file meant retiring the client assertion key.
+  The command does not move stored credentials, so set each one again afterwards.
+- On an enterprise server, run `strazad break-glass set-password` on the server host to give the
+  break-glass admin a new password. The command makes the password itself, prints it once and leaves
+  an audit record.
+- The audit log now records an admin change that was refused. When the admin API answers 403 to a
+  change by a person or an API token, one record says who tried, on which route and why. Refused
+  reads are not recorded.
+- After you rotate the session signing key, the audit log records when the new key starts to sign
+  and when the old one is retired. The actions are `signing-keys.promote` and `signing-keys.retire`.
+- You can see which machine a session runs on and which folder it started in. The Sessions list
+  shows both under Where, and the admin API returns them as `host` and `folder`. A session of an
+  older client shows neither.
+- In the console, each user has a page with its own address. It lists the MCP servers and tools the
+  user can reach, with the outcome for each. It also shows where each role comes from, and the
+  user's sessions, devices and keys.
+- A session has a page with its own address too. It lists every call the session made, with the
+  outcome and the policy rule behind it.
+- A user's page has one menu, Stop access, that holds Lock, Disable and Revoke all sessions. Revoke
+  all sessions ends every active session of the user at once.
+- The self-service page opens on Home. Home shows the requests that wait for you, the servers that
+  need a credential and the devices you approve from. Devices lists this browser and your phones,
+  and you can remove one there.
+- A draft's page starts with In short. Its few rows tell you what publishing adds, changes, turns
+  off or removes, and what access it gives.
+- With only their sign-in, a person can list their own approver devices and requests at
+  `GET /v1/self/devices` and `GET /v1/self/requests`, and remove a device with
+  `DELETE /v1/self/devices/{id}`. Deciding a request still needs an enrolled phone or browser.
+- In the admin API, `GET /v1/admin/sessions/{id}` returns one session, and the sessions list takes a
+  search in `q`. The users list filters by `kind=person`, `agent` or `service` and counts each kind
+  in `kind_counts`. The approvals list filters by `user=`.
+- The admin API and the console show when a role was assigned to someone, and when a role was
+  created and last changed.
+- A user's Access tab also lists the MCP servers on a person's own machine that a policy names, with
+  each tool and its outcome. `GET /v1/admin/catalog/preview` returns the same list.
+- Set `STRAZA_SANDBOX_WAIT_FOR_ENROLLMENT=1`, and a container from the sandbox image waits until it
+  is enrolled. An agent pod then no longer restarts in a loop before its enrollment.
+- The new page [Deployment best practices](https://docs.straza.ai/guides/operate/best-practices/)
+  shows how to run agents in pods so that only Straza reaches your MCP servers.
+
+### Changed
+
+- A remote MCP server whose manifest sets no `straza.limits.rps` now takes at most 20 calls a second
+  from each session. A manifest's own value still wins, and the console shows which one applies. A
+  server that is not remote has no default limit.
+- One user's sessions together now get five times a server's rate for one session. Before, every
+  session a user opened added its own full rate. A higher `straza.limits.rps` raises both limits.
+- Each MCP connection in a Straza session now gets its own MCP session with a remote MCP server.
+  Before, every caller that used the same credential shared one. Clients need no new version.
+- A Straza session holds at most 64 MCP sessions on one remote MCP server. One without a call for
+  600 seconds is closed.
+- When you assign, remove or change a role, the hooks on the agent's machine follow within
+  seconds. Before, that took up to 180 seconds. A session without live updates, or on an older
+  `straza` client, picks the change up at its next renewal.
+- Enabling a user no longer removes a lock. The answer tells you that the user is still locked, who
+  locked them and how to unlock.
+- A user you disable in Straza no longer looks locked to an IGA that reads the user over SCIM.
+  If an admin locked a user with exactly the reason `user disabled by admin`, that lock counts as a
+  disable after the upgrade.
+- An AI agent can now submit a draft that widens its own access or changes a policy that applies to
+  it. Before, Straza refused such a draft. It is now stored, and the person who publishes confirms
+  by typing the server's or the policy's name.
+- The gateway's combined endpoint `/mcp` now lists a tool's `_meta`, and every endpoint lists its
+  `outputSchema`. An output schema that is not plain, such as one with references, is left out.
+  `straza mcp` passes a tool's title, annotations and output schema to the harness.
+- The gateway no longer runs a JSON-RPC message without an id. It answers 202 and does nothing.
+  Before, a `tools/call` without an id ran.
+- After `initialize`, the gateway answers 400 to a request whose `MCP-Protocol-Version` header names
+  a version it does not speak.
+- A tool whose input schema is not a JSON object, or names a type other than `object`, is left out
+  of the catalog. strazad logs a warning that names the tool. `straza mcp` now skips such a tool,
+  where it stopped before.
+- The console now uses the same word for the same thing on every screen. An outcome, for example, is
+  always allowed, needs approval, denied or no access. Names, counts and outcomes also look the same
+  everywhere.
+- The Users list has tabs for people, AI agents and services, each with a count. The Sessions list
+  has a search box and shows a session's health in one cell.
+- You decide a request in its own dialog, on the self-service page and on Approvals. The reason
+  field sits in that dialog, above Deny and Approve. Each request has its own address, so a link
+  opens it.
+- Credentials on the self-service page shows one line for each server and owner. The line names what
+  the server uses, gives a short status and has one button that says what it does.
+- Add MCP server asks for the server's address first. Its review describes in words what will be
+  created, and View as YAML shows the document. Once the server runs, it offers what to do next.
+- A draft's page shows one card for each object, and only the policy rules that change. The Checks
+  heading carries the counts, and every line that needs an action from you stays open.
+- Settings in the console opens on API tokens. Configuration tells you where each value is set.
+  Settings also shows whether a change that widens access needs a second person to publish it.
+- Help in the console opens on a click or a tap, so it works on a phone too.
+- When `straza service` cannot use its state directory, it now says why and how to fix it, for
+  example by mounting a volume one level above. Before, it printed only the system's error.
+- The demo stack runs Keycloak 26.8.2 and midPoint 4.10.5, pinned by digest, with the Java fix for
+  CVE-2026-114938. Run the seeder again after Keycloak is recreated. The `MP_VER` variable is gone.
+- The agent skill plugin is 0.6.55.
+
+### Removed
+
+- Knowledge packs are removed, and with them the console's Packs tab, the `strazactl packs` commands
+  and the pack text at a session's start. The routes under `/v1/admin/packs` answer 410. Older
+  clients keep working, and a Role file that lists `packs` still applies.
+
+### Fixed
+
+- When strazad stops, it waits up to 12 seconds for a background worker to write the audit record of
+  a change it made. Before, a stop could lose that record. If the worker is still writing after the
+  wait, strazad logs one error line.
+- Who in the audit list now names whoever made a change, and the record's User names who it was
+  about. Before, a role that midPoint assigned was listed under the person who got it.
+  `strazactl audit tail` and the CSV export show the same.
+- Only one replica at a time now refreshes OAuth tokens. Before, two replicas could redeem the same
+  refresh token, which ends the grant at a provider that revokes a used token.
+- Opening a session with a remote MCP server no longer holds up other callers of that server.
+  Before, they waited up to the 15 second connect timeout.
+- The admin API refuses to assign a role when the user or the role id does not exist, and names the
+  id. Before, an unknown user got 201 and a stored assignment. A database failure now answers 500
+  where it answered 400.
+- Activating a PolicySet that does not compile now answers 400 with the same sentence as validate.
+  Before, it answered 500.
+- A disabled AI agent that tries to start a session is now told that it is disabled and whom to ask.
+  Before, it was told that the identity provider refused its sign-in. The record of the refused
+  sign-in now names the agent.
+- For a disabled or locked user, the Access tab and policy simulate now say that every call is
+  refused. Before, they showed what the user's roles give. `GET /v1/admin/catalog/preview` says the
+  same in its new member `refused`.
+- You can no longer change the break-glass admin into an AI agent or a service account. That change
+  cleared its password and closed the emergency sign-in.
+- Every publish that changes a role's tools, or the roles it combines, now updates
+  `meta.lastModified` of the role's SCIM Group. Before, only a changed description did.
+- On the Audit screen, opening the record of an admin change or a revocation now shows what it did.
+  Before, it showed only the header, the chain hash and the raw record.
+- The Audit screen folds neighbouring records into one row only when their reasons match too.
+  Before, records with different reasons could fold together.
+- A role's Access tab now counts the tools that a pattern such as `get_*` matches. Before, it
+  counted none.
+- Add MCP server, New policy and New role now ask before you leave a form that holds answers, also
+  when you leave by a link or the menu. Before, the menu and most links left without asking.
+- When a later publish has replaced a published draft, the draft says so and no longer offers Undo
+  this publish.
+- In the console, keyboard focus returns to the button that opened a dialog. In a narrow window a
+  table scrolls inside its own box. On a phone a request is a card with both buttons in view.
+- In the dark theme, the console's filter switches show which option is selected, and its red
+  buttons have dark text.
+
+### Security
+
+- The session and snapshot signing keys are now encrypted in the database with `secret.key`. A copy
+  of the database or of a backup alone can no longer mint a session token or sign policy. The keys
+  stay the same, so no session ends.
+- A new enterprise installation no longer writes a break-glass password into the server log. The
+  emergency sign-in stays closed until you set one with `strazactl users set-password break-glass`.
+- If an existing installation forwarded its first log anywhere, that log holds the break-glass
+  password. Set a new one, end that account's sessions and revoke the admin API tokens it minted.
+- A tool's input schema that loops or is costly to check can no longer crash strazad. The crash
+  could happen when strazad checked a call that needs approval. Such a schema is now left unchecked,
+  and the call goes on to approval.
+- An MCP server that puts a JSON null in its tool or resource list can no longer stop strazad at its
+  next health check.
+- The drift alarm now also covers a tool's `readOnlyHint`, `destructiveHint`, `idempotentHint` and
+  `openWorldHint`. A server that changes one of them is marked degraded, and the reason names up to
+  10 changed tools.
+- The gateway now refuses an MCP request sent by a web page at any address but Straza's own. It
+  answers 403 before sign-in. A request without an `Origin` header passes as before.
+- Callers that use the same credential no longer share one MCP session with a remote MCP server, so
+  one caller cannot see what another stored in that session. A server that Straza runs as a process
+  or a container still has one session for all callers.
+- A role you remove from a user now ends at the gateway with the session's next call. Before, the
+  session kept the role there for up to 300 seconds.
+- The role access editor now keeps the rules for tools that a stopped server does not list. Before,
+  a save while the server was stopped dropped the approval and deny rules of those tools, so a
+  denied tool ran after the publish.
+- With `demoTools.enabled`, the Helm chart now adds a NetworkPolicy that lets only the strazad pods
+  reach its demo MCP server. Before, any pod in the cluster could call that server past the gateway.
+  The policy needs a network plugin that enforces NetworkPolicy.
+- An audit record that someone uploads by hand with a session's token can no longer name another
+  person. The server takes every identity field from the session that sent the record.
+- When a call's arguments break the tool's input schema, the reason in its audit record is now a
+  fixed sentence. Before, the reason could quote part of a submitted draft, a credential in it
+  included.
+- A session keeps the harness name it started with. Before, a hand-made refresh request could put
+  another name into the session's token, and policy rules and audit records then read that name.
+- A person who may not decide an approval can no longer read one that is already decided. Before,
+  sending the verdict it was decided with returned the record.
+- A user that SCIM or Entra deactivates now loses the local password, so that password no longer
+  works once the user is enabled again. A user deactivated before this release keeps the password
+  until an admin sets a new one.
+- A draft's checks no longer show the name of a policy rule or an approver role to someone who may
+  not read it.
+
 ## [2.2.0] - 2026-11-12
 
 Straza 2.2.0 lets an AI agent call an MCP server as its own Microsoft Entra agent identity, fixes
@@ -485,7 +738,8 @@ The first public release.
 - Signed release archives for Linux, macOS and Windows, the container image
   `ghcr.io/strazahq/straza` and the Helm chart under `deploy/helm/straza`.
 
-[Unreleased]: https://github.com/strazahq/straza/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/strazahq/straza/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/strazahq/straza/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/strazahq/straza/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/strazahq/straza/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/strazahq/straza/compare/v2.0.0...v2.0.1

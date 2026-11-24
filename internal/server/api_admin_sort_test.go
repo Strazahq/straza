@@ -141,7 +141,7 @@ func TestAdminListSort(t *testing.T) {
 		{"/v1/admin/users?limit=5&sort=name&order=sideways", "order must be asc or desc"},
 		{"/v1/admin/sessions?limit=5&sort=harness", "sort must be one of attestation, last_seen, started, status, user"},
 		{"/v1/admin/api-tokens?limit=5&sort=name", "this list has one order and takes no sort"},
-		{"/v1/admin/users?sponsor=kim", "q/status/role/sponsor filters require pagination: add limit="},
+		{"/v1/admin/users?sponsor=kim", "q/status/role/sponsor/kind filters require pagination: add limit="},
 	} {
 		var body map[string]any
 		if code := adminReq(t, http.MethodGet, base+tc.path, adminTok, nil, &body); code != http.StatusBadRequest {

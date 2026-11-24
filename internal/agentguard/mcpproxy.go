@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -58,7 +61,8 @@ func runMCPProxy(ctx context.Context, harnessOverride, server string, transport 
 	// Start or reuse the harness's session before the first dial, so a
 	// machine that is not enrolled, or a service that is not running, gets
 	// its own sentence instead of a failed MCP handshake.
-	ses, err := svc.StartSession(ctx, localapi.SessionRequest{Harness: localapi.Harness{Name: harness, Version: proxyHarnessVersion}})
+	cwd, _ := os.Getwd()
+	ses, err := svc.StartSession(ctx, localapi.SessionRequest{Harness: localapi.Harness{Name: harness, Version: proxyHarnessVersion}, Folder: sessionFolder(cwd)})
 	if err != nil {
 		return errors.New(denyLine(serviceSentence(err, outcomeNoMCP)))
 	}
@@ -190,6 +194,9 @@ type mcpProxy struct {
 	// stdio server currently carries for it, so resync can tell a genuine
 	// schema change from an unchanged tool (see reconcile).
 	registered map[string]string
+	// skipped names the tools the last reconcile skipped for their input
+	// schema, so a change of them is logged once.
+	skipped string
 	// views maps a mirrored view URI to the digest of the resource the stdio
 	// server carries for it (see reconcileViews).
 	views map[string]string
@@ -258,10 +265,11 @@ func (p *mcpProxy) mirrored(name string) bool {
 const digestUnhashable = "\x00unhashable"
 
 // toolDigest is the sha256 of the canonical JSON for EXACTLY the fields the
-// proxy mirrors onto the stdio server (mirrorTool: name, description,
-// inputSchema, _meta). A tool without _meta hashes exactly like its three
-// contract fields alone. ok is false only when marshaling fails, which the
-// caller treats as "re-add", never "skip".
+// proxy mirrors onto the stdio server (mirrorTool: name, title, description,
+// inputSchema, outputSchema, annotations, _meta). A field the mirror leaves
+// empty is omitted, so a tool with only a name, a description and an input
+// schema hashes exactly like those three fields alone. ok is false only when
+// marshaling fails, which the caller treats as "re-add", never "skip".
 func toolDigest(t *mcp.Tool) (digest string, ok bool) {
 	b, err := json.Marshal(t)
 	if err != nil {
@@ -272,9 +280,21 @@ func toolDigest(t *mcp.Tool) (digest string, ok bool) {
 }
 
 // mirrorTool is the tool the stdio server carries for a gateway tool: the
-// contract fields plus _meta verbatim, which links a tool to its MCP Apps view.
+// name, title, description, input schema, annotations and _meta verbatim,
+// where _meta links a tool to its MCP Apps view. The output schema is
+// carried only when it is a JSON object whose type is "object", because
+// go-sdk Server.AddTool panics on any other output schema. Any other schema
+// is left out and the tool is mirrored without one.
 func mirrorTool(t *mcp.Tool) *mcp.Tool {
-	return &mcp.Tool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema, Meta: t.Meta}
+	m := &mcp.Tool{Name: t.Name, Title: t.Title, Description: t.Description, InputSchema: t.InputSchema,
+		Annotations: t.Annotations, Meta: t.Meta}
+	// The bridge's go-sdk client decodes a listed schema into a map[string]any
+	// for a JSON object and into a string, []any, bool or float64 otherwise.
+	// AddTool refuses every form but a map whose "type" is the string "object".
+	if s, ok := t.OutputSchema.(map[string]any); ok && s["type"] == "object" {
+		m.OutputSchema = s
+	}
+	return m
 }
 
 // resyncListAttempts bounds how many times listAllTools re-walks the catalog
@@ -409,7 +429,11 @@ func (t notSentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // reconcile brings the stdio server's tool set in line with the freshly listed
-// catalog (add new, drop vanished, re-add on schema drift).
+// catalog (add new, drop vanished, re-add on schema drift). A tool whose
+// input schema is not a JSON object whose type is "object" is skipped, and
+// dropped when it was mirrored before, because go-sdk Server.AddTool panics
+// on it, which would end the bridge for every other tool. A change of the
+// skipped tools is logged once.
 func (p *mcpProxy) reconcile(tools []*mcp.Tool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -418,7 +442,12 @@ func (p *mcpProxy) reconcile(tools []*mcp.Tool) {
 	}
 	seen := map[string]bool{}
 	added := 0 // debug-trace count of tools (re)registered this pass
+	var skipped []string
 	for _, t := range tools {
+		if s, ok := t.InputSchema.(map[string]any); !ok || s["type"] != "object" {
+			skipped = append(skipped, strconv.Quote(t.Name))
+			continue
+		}
 		seen[t.Name] = true
 		name := t.Name
 		tool := mirrorTool(t)
@@ -453,6 +482,13 @@ func (p *mcpProxy) reconcile(tools []*mcp.Tool) {
 	}
 	if len(gone) > 0 {
 		p.srv.RemoveTools(gone...)
+	}
+	if names := strings.Join(skipped, ", "); names != p.skipped {
+		p.skipped = names
+		if names != "" {
+			p.log("tools", "skipped the tools "+names+" that the gateway listed, because the input schema of each is not a JSON object of type object, which MCP requires. "+
+				"Every other tool works. The MCP server's author publishes an object schema for the tool's arguments")
+		}
 	}
 	if p.tr.DebugOn() {
 		p.tr.Debug("mcp.reconcile", slog.Int("added", added), slog.Int("removed", len(gone)))

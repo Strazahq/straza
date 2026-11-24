@@ -14,10 +14,10 @@ steps: true
 applies_to: standalone
 tested:
   version: v1.0.0-1700-g89d0cf1d
-  platform: in a fresh Alpine 3.20 container on Linux amd64, with the browser steps in headless Chromium. The approve dialog's sentence and its toast were reworded from the code on 2026-11-03 and not walked
+  platform: in a fresh Alpine 3.20 container on Linux amd64, with the browser steps in headless Chromium. The approve dialog's sentence and its toast were reworded from the code on 2026-11-03 and not walked. The self-service setup, the request dialog and the hook's deny reason were rewritten from the code on 2026-11-15 and not walked
   date: 2026-11-02
   except: Claude Code itself, whose calls went to straza hook by hand, and the enroll browser sign-in, done by device code
-keywords: try laptop standalone enroll install first deny confirm approve self-service this browser requests retry claude code
+keywords: try laptop standalone enroll install first deny confirm approve self-service set up browser requests retry claude code
 ---
 
 
@@ -67,7 +67,7 @@ Open `http://127.0.0.1:8420/console/` in your browser and press **Sign in**. On 
 
 `strazactl` has no sign-in of its own, so mint it an admin API token here.
 
-{{< clicks "Settings" "API tokens" "New API token" >}}
+{{< clicks "Settings" "Mint a token" >}}
 
 Name it `admin-terminal`. Under **Lifetime** pick `expires in 30 days`, under **The job** pick **Full root**, and press **Mint token**. Copy the token now, because the sheet shows it once and the server keeps only its hash.
 
@@ -218,21 +218,21 @@ published confirm-git-push, it is live now; new snapshot efb029c325312d809e3fb89
 
 The running Claude Code session uses the new rule within seconds. For a person with no sponsor, a rule with the mode `approve` that names no approver role holds the call the same way, because the request then goes to that person.
 
-## Turn on approvals in this browser
+## Set up this browser to approve
 
 
-Open `http://127.0.0.1:8420/self-service/`. It says `Signed in as admin`, because it shares the console's sign-in. Press **Sign out**, then **Sign in**, and sign in as alice.
+Open `http://127.0.0.1:8420/self-service/`. It names `admin` at the top right, because it shares the console's sign-in. Open that menu, press **Sign out**, then **Sign in**, and sign in as alice.
 
-Open **This browser**, press **Enable this browser**, keep or change the name, and press **Enable**. The browser makes a key that never leaves it. The server keeps only the public half. Use a normal window, since a private window deletes the key when it closes.
+On **Home**, press **Set up this browser**, give the browser a name such as `alice-laptop`, and press **Set up**. The browser makes a key that never leaves it. The server keeps only the public half. Use a normal window, since a private window deletes the key when it closes.
 
-{{< see >}}`Enabled. This browser decides as alice.`, and one device row for alice marked `this browser` and `software key`.{{< /see >}}
+{{< see >}}`Set up. This browser approves as alice.`, and on **Devices** one row for alice marked `this browser`.{{< /see >}}
 
 ## Approve your agent's call
 
 
 Ask Claude Code to run `git push`. The hook denies it at once. Claude Code shows a reason that starts `Straza: this call needs the requester's confirmation` and ends with a reference.
 
-On the self-service page, open **Requests**. Within a few seconds a row shows `git push` for alice, with `only the requester confirms`. Press **Approve**, then **Approve request**. The dialog says `The call runs once, when the agent retries it soon after your yes.`
+On the self-service page, open **Requests**. Within a few seconds a row shows `git push` for alice. Press **Approve** on the row, and the request opens. Under **If you approve** it says `The call runs once, when the agent retries it soon after your yes.` Press **Approve** in the dialog.
 
 Within 60 seconds of your approval, ask Claude Code to run `git push` again in the same session.
 
@@ -246,8 +246,8 @@ printf '%s' '{"hook_event_name":"PreToolUse","session_id":"laptop-1","cwd":"/tmp
 ```
 
 ```text
-Straza: this call needs the requester's confirmation, on their enrolled phone, or the self-service page under This browser (http://127.0.0.1:18420/self-service/); retry after it is confirmed (ref 01a19de1-3f04-73a3-8a89-46c524213da7)
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Straza: this call needs the requester's confirmation, on their enrolled phone, or the self-service page under This browser (http://127.0.0.1:18420/self-service/); retry after it is confirmed (ref 01a19de1-3f04-73a3-8a89-46c524213da7)"}}
+Straza: this call needs the requester's confirmation, on the requester's enrolled phone, or Requests on the self-service page (http://127.0.0.1:18420/self-service/) in a browser set up to approve; retry after it is confirmed (ref 01a19de1-3f04-73a3-8a89-46c524213da7)
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Straza: this call needs the requester's confirmation, on the requester's enrolled phone, or Requests on the self-service page (http://127.0.0.1:18420/self-service/) in a browser set up to approve; retry after it is confirmed (ref 01a19de1-3f04-73a3-8a89-46c524213da7)"}}
 exit 2
 ```
 
@@ -323,7 +323,7 @@ Last, delete the directory you started the server in. It holds the server's data
 
 The confirm rule catches a mistake by the agent, and a prompt injection that asks for a command you did not mean. The agent cannot approve its own call, because a session that a coding tool checked in can never decide a request.
 
-It does not stop you, because you are the one who approves. A hook installed for your user only advises, so an agent that can run any command can bypass it. Started by hand, the service runs as you, so any program you run can read alice's key, including the agent. An agent that can read your sign-in could also enroll an approval device of its own. [Known limits]({{< relref "security/known-limits.md" >}}) has a row for each of the last three, and [The security model]({{< relref "evaluate/security-model.md" >}}) shows where Straza enforces a boundary.
+It does not stop you, because you are the one who approves. A hook installed for your user only advises, so an agent that can run any command can bypass it. Started by hand, the service runs as you, so any program you run can read alice's key, including the agent. An agent that can read your sign-in could also enroll an approval device of its own. [The security model]({{< relref "evaluate/security-model.md" >}}) shows where Straza enforces a boundary.
 
 {{< details summary="How this page was walked" >}}
 

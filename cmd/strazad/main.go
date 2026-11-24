@@ -44,15 +44,15 @@ func rootCmd() *cobra.Command {
 		}
 		return err
 	})
-	root.AddCommand(serveCmd(), versionCmd(), migrateCmd())
+	root.AddCommand(serveCmd(), versionCmd(), migrateCmd(), resealCmd(), breakGlassCmd())
 	root.AddCommand(devCommands...)
 	return root
 }
 
 // configFlags are the flags a strazad command resolves its config from:
 // --config names the file, and every other flag the user set overrides the
-// file and the environment. serve and migrate share them, so both commands
-// find one store the same way.
+// file and the environment. serve, migrate and break-glass set-password
+// share them, so every command finds one store the same way.
 type configFlags struct {
 	path                                         string
 	profile, dataDir, listen, logLevel, storeDSN string

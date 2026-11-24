@@ -76,6 +76,48 @@ func (s *sqlStore) MigrateTo(_ context.Context, version uint) (uint, error) {
 	return version, nil
 }
 
+// SchemaCurrent answers nil when the database is at the newest migration
+// this binary embeds. Otherwise it answers the sentence that says where the
+// database is and what to run first, for a database whose version it
+// cannot read, with no migration applied, marked dirty, older than the
+// first migration, behind the newest or ahead of it. It moves nothing, so
+// a command that writes rows can refuse a schema its queries were not
+// written for.
+func (s *sqlStore) SchemaCurrent(_ context.Context) error {
+	first, head, err := s.migrationRange()
+	if err != nil {
+		return err
+	}
+	const unread = "the command could not read the migration version of the database (%w), so nothing changed. " +
+		"Check that the database is reachable and that its user may read it, then run the command again"
+	m, err := s.migrator()
+	if err != nil {
+		return fmt.Errorf(unread, err)
+	}
+	cur, dirty, err := m.Version()
+	switch {
+	case errors.Is(err, migrate.ErrNilVersion):
+		return errors.New("the database has no Straza migration applied, because strazad serve has not booted on it yet, so nothing changed. " +
+			"If this is the right database, start strazad serve once with these settings, then run the command again. " +
+			"If it is not, give the command the same --config, --profile, --data-dir and --store-dsn that strazad serve runs with")
+	case err != nil:
+		return fmt.Errorf(unread, err)
+	case dirty:
+		return dirtyRefusal(cur)
+	case cur < first:
+		return fmt.Errorf("the database is at migration %d, and this strazad's migrations start at %d, so nothing changed. "+
+			"Upgrade the database with an earlier strazad release whose migrations reach %d, then run strazad migrate --to %d with this release and run the command again",
+			cur, first, first, head)
+	case cur > head:
+		return fmt.Errorf("the database is at migration %d, and this strazad knows migrations up to %d, so nothing changed. "+
+			"Run the command with a strazad release that has migration %d", cur, head, cur)
+	case cur < head:
+		return fmt.Errorf("the database is at migration %d, and this strazad expects migration %d, so nothing changed. "+
+			"Run strazad migrate --to %d with the same flags first, then run the command again", cur, head, head)
+	}
+	return nil
+}
+
 // dirtyFix is what an operator does about a database marked dirty.
 const dirtyFix = "Restore the backup taken before the upgrade, or repair the schema by hand, then run the command again"
 

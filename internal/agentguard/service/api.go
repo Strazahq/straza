@@ -448,7 +448,9 @@ func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
 // sessions answers POST sessions: the caller's session for the window,
 // started when none is live, with the capture directive its policy gives
 // the session's subject. Only a start that checks in keeps its start
-// token, and the whole start runs within sessionBudget.
+// token, and the whole start runs within sessionBudget. The request's
+// folder is bound by localapi.CleanFolder, because any local process can
+// send one, and a folder never fails the start.
 func (a *api) sessions(w http.ResponseWriter, r *http.Request) {
 	var req localapi.SessionRequest
 	if !a.read(w, r, smallBodyMax, &req) || !a.named(w, r, req.Harness) {
@@ -461,7 +463,7 @@ func (a *api) sessions(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), sessionBudget)
 	defer cancel()
-	s, err := a.creds.Session(ctx, c, req.Harness, true)
+	s, err := a.creds.Start(ctx, c, req.Harness, localapi.CleanFolder(req.Folder))
 	switch {
 	case err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		a.refuse(w, r, http.StatusServiceUnavailable, busyStarting)
@@ -480,7 +482,7 @@ func (a *api) sessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, localapi.SessionAnswer{
 		SessionID: s.ID, User: s.User, Roles: s.Roles, Attestation: s.Attestation,
 		SnapshotID: snapshot, ServerURL: s.ServerURL, Capture: eng.Capture(s.Subject()),
-		Packs: s.Packs, Reused: s.Reused, StartText: s.StartText,
+		Reused: s.Reused, StartText: s.StartText,
 	})
 }
 

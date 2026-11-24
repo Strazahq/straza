@@ -128,8 +128,8 @@ describe("the objects tab of an MCP server", () => {
   });
 
   it.each([
-    ["set", "Straza calls repo_list every 10 minutes with ghapp's listing credential. A failed listing changes nothing, and every listing is in the audit log."],
-    ["not-needed", "Straza calls repo_list every 10 minutes. A failed listing changes nothing, and every listing is in the audit log."],
+    ["set", "Straza calls repo_list every 10 minutes with ghapp's listing credential. Each listing is audited."],
+    ["not-needed", "Straza calls repo_list every 10 minutes. Each listing is audited."],
   ])("explains how the listing runs behind the help icon when the credential is %s", async (credential, text) => {
     vi.mocked(appObjects).mockResolvedValue(answerOf({}, { credential }));
     mount();
@@ -148,6 +148,9 @@ describe("the objects tab of an MCP server", () => {
     expect(straza.querySelector("[data-new]")).toBeNull();
     const desktop = rowOf(t, "Strazahq/straza-desktop");
     expect(desktop.querySelector("[data-new]")?.textContent).toBe("new");
+    expect(desktop.querySelector("[data-new]")?.getAttribute("data-change")).toBe("new");
+    expect(straza.querySelector("[data-attr] .rounded-pill")).toBeTruthy();
+    expect(t.className).toContain("min-w-[840px]");
     expect([...desktop.querySelectorAll("[data-not-set]")].map((n) => n.textContent)).toEqual(["not set", "not set"]);
     expect(screen.getByText("3 of 3 shown")).toBeTruthy();
   });
@@ -179,11 +182,15 @@ describe("the objects tab of an MCP server", () => {
     await userEvent.click(link);
     expect(navigate).toHaveBeenCalledWith("roles", ["r-write"]);
     const runbooks = rowOf(t, "Strazahq/ops-runbooks");
-    expect(runbooks.querySelectorAll("td")[3].textContent).toBe("no role No agent reaches it.");
+    expect(runbooks.querySelectorAll("td")[3].textContent).toBe("no role");
     // A role the session's roles list does not carry is named without a link.
     const desktop = rowOf(t, "Strazahq/straza-desktop");
     expect(within(desktop).queryByRole("link", { name: "ghapp-legacy" })).toBeNull();
     expect(desktop.textContent).toContain("ghapp-legacy");
+    // A covering role the list carries wears its kind's icon, and one it
+    // does not carry keeps a plain tag.
+    expect(link.querySelector("svg")?.getAttribute("class")).toContain("lucide-id-card");
+    expect(desktop.querySelector('[data-role-kind-tag="ghapp-legacy"] svg')).toBeNull();
   });
 
   it("says who may set each attribute and what each column holds behind the header help icons", async () => {
@@ -192,7 +199,7 @@ describe("the objects tab of an MCP server", () => {
     expect(await tip("area")).toBe("Only the organization's admins can set it, so the admins of one repo cannot move it into a role.");
     expect(await tip("team")).toBe("The repo's own admins can set it too.");
     expect(await tip("Covered by")).toBe("The roles whose tools on ghapp reach this repo today.");
-    expect(await tip("In open drafts")).toBe("Open drafts you may read that would add a role to this repo or drop one from it. Nothing changes until a person publishes the draft.");
+    expect(await tip("In open drafts")).toBe("Open drafts you may read that add or drop a role here.");
   });
 
   it("keeps each id behind a help icon on its row instead of a column", async () => {
@@ -201,7 +208,7 @@ describe("the objects tab of an MCP server", () => {
     expect(t.querySelector("[data-id]")).toBeNull();
     const straza = rowOf(t, "Strazahq/straza");
     expect(within(straza).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Help: Id of Strazahq/straza"]);
-    expect(await tip("Id of Strazahq/straza")).toBe("The id the server gives this repo is 9012331. If it is deleted and made again under the same name, it gets a new id, so no access carries over.");
+    expect(await tip("Id of Strazahq/straza")).toBe("Id 9012331. Made again under the same name, it gets a new id and no access.");
     expect(within(straza).getAllByRole("cell")[0].textContent).toBe("Strazahq/straza");
   });
 
@@ -227,7 +234,7 @@ describe("the objects tab of an MCP server", () => {
     expect(link.getAttribute("href")).toBe(pathFor("drafts", ["244"]));
     await userEvent.click(link);
     expect(navigate).toHaveBeenCalledWith("drafts", ["244"]);
-    expect(await tip("Id of TCK-1")).toBe("The id the server gives this ticket is t-1. If it is deleted and made again under the same name, it gets a new id, so no access carries over.");
+    expect(await tip("Id of TCK-1")).toBe("Id t-1. Made again under the same name, it gets a new id and no access.");
   });
 
   it("leaves the drafts cell empty for a row with no open draft and for a server that sends no drafts", async () => {
@@ -246,7 +253,7 @@ describe("the objects tab of an MCP server", () => {
     await table();
     expect(document.querySelector("[data-drift]")).toBeNull();
     const fold = document.querySelector("[data-declared]") as HTMLElement;
-    expect(fold.querySelector("summary")?.textContent).toBe("What ghapp declares in its tools/list answer");
+    expect(fold.querySelector("summary")?.textContent).toBe("What ghapp says about its tools");
     const pre = fold.querySelector("pre")?.textContent || "";
     for (const want of ["type: repo", "tool: repo_list", "setBy: org", "repo_read:\n    argument: repo", "search_code: all"]) expect(pre).toContain(want);
     document.body.innerHTML = "";
@@ -254,7 +261,7 @@ describe("the objects tab of an MCP server", () => {
     vi.mocked(appObjects).mockResolvedValue(answerOf({ drift: true, declared: { ...PINNED, tools: { repo_read: "all" } }, declaredFaults: ["issue_create carries a mark of type issue, but ghapp declares type repo."] }));
     mount();
     const drift = await waitFor(() => { const el = document.querySelector("[data-drift]") as HTMLElement; expect(el).not.toBeNull(); return el; });
-    expect(drift.textContent).toBe("ghapp's marks differ from the pinned repos. Draft the change with strazactl apps objects draft ghapp.");
+    expect(drift.textContent).toBe("ghapp now describes its repos differently from what is pinned. Draft the change with strazactl apps objects draft ghapp.");
     expect([...document.querySelectorAll("[data-declared-fault]")].map((f) => f.textContent)).toEqual(["issue_create carries a mark of type issue, but ghapp declares type repo."]);
   });
 
@@ -264,7 +271,7 @@ describe("the objects tab of an MCP server", () => {
     await table();
     const fold = document.querySelector("[data-declared]") as HTMLElement;
     expect(fold.querySelector("pre")).toBeNull();
-    expect(fold.textContent).toContain("None of ghapp's tools carries a Straza mark, so only its manifest says what its repos are.");
+    expect(fold.textContent).toContain("None of ghapp's tools names its repos.");
   });
 
   it("loads the next page after the last value and stops when the list ends", async () => {
@@ -322,6 +329,6 @@ describe("the objects tab of an MCP server", () => {
     vi.mocked(appObjects).mockRejectedValue(apiError(404, "unknown server"));
     mount();
     const el = await waitFor(() => { const e = document.querySelector("[data-fetch-error]") as HTMLElement; expect(e).not.toBeNull(); return e; });
-    expect(el.textContent).toBe("Repos: unreachable, state unknown. The repos could not be read: unknown server. Reload to try again.");
+    expect(el.textContent).toBe("The repos could not be read: unknown server. Reload to try again.");
   });
 });

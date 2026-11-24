@@ -1,8 +1,8 @@
 import type * as React from "react";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Facts, Section } from "@/components/sheet-parts";
-import { WordBadge } from "@/components/users-table";
+import { Chip } from "@/components/chip";
 import type { ApiTokenRow } from "@/lib/api";
 import { CLOSE } from "@/lib/role-words";
 import {
@@ -16,7 +16,6 @@ import {
   SENSITIVE,
   TOKEN_COLUMN,
   TOKEN_ELIDED,
-  TOKEN_KIND,
   USE_TITLE,
   areaHint,
   expiresWord,
@@ -31,17 +30,17 @@ import { absTime, relTimeText } from "@/lib/words";
 // how a caller signs with it, and Revoke alone on the left of the footer.
 
 const DANGER_BUTTON = "border-danger/40 text-danger hover:bg-danger-bg hover:text-danger";
-export const PRE = "overflow-x-auto rounded-md border border-border bg-secondary/40 px-3 py-2 font-mono text-[13px] text-foreground";
+export const PRE = "overflow-x-auto rounded-md border border-border bg-secondary/40 px-3 py-2 font-mono text-caption text-foreground";
 
 // GrantChips renders a token's scope as one chip per grant, the sensitive
 // ones in amber with their reason on hover, and a full scope as the one
 // root badge.
 export function GrantChips({ scope }: { scope: string }) {
-  if (scope === "full") return <WordBadge word={FULL_BADGE} tone="warn" title={FULL_TIP} attr="data-grant" />;
+  if (scope === "full") return <Chip tone="warn" title={FULL_TIP} data-grant={FULL_BADGE}>{FULL_BADGE}</Chip>;
   return (
     <span className="flex flex-wrap gap-1">
       {grantsOf(scope).map((g) => (
-        <WordBadge key={g} word={g} tone={SENSITIVE[g] ? "warn" : "plain"} mono title={SENSITIVE[g]} attr="data-grant" />
+        <Chip key={g} tone={SENSITIVE[g] ? "warn" : "plain"} title={SENSITIVE[g]} data-grant={g}>{g}</Chip>
       ))}
     </span>
   );
@@ -75,10 +74,9 @@ export function TokenSheet({ token, open, onOpenChange, onRevoke }: Props) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-[560px]" data-token-sheet={token.name}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-[560px]" aria-describedby={undefined} data-token-sheet={token.name}>
         <SheetHeader className="border-b border-border pr-12">
-          <SheetTitle className="font-mono text-lg leading-snug">{token.name}</SheetTitle>
-          <SheetDescription>{TOKEN_KIND}</SheetDescription>
+          <SheetTitle className="font-mono text-section leading-snug">{token.name}</SheetTitle>
         </SheetHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
@@ -86,8 +84,8 @@ export function TokenSheet({ token, open, onOpenChange, onRevoke }: Props) {
 
           <Section title={GRANTS_TITLE}>
             {token.scope === "full" ? (
-              <p className="flex flex-wrap items-center gap-2 text-sm text-text-2">
-                <WordBadge word={FULL_BADGE} tone="warn" attr="data-grant" />
+              <p className="flex flex-wrap items-center gap-2 text-dense text-text-2">
+                <Chip tone="warn" data-grant={FULL_BADGE}>{FULL_BADGE}</Chip>
                 {FULL_TIP}
               </p>
             ) : (
@@ -97,8 +95,8 @@ export function TokenSheet({ token, open, onOpenChange, onRevoke }: Props) {
                   const sensitive = SENSITIVE[g];
                   return (
                     <div key={g} className="flex flex-col gap-0.5" data-grant-line={g}>
-                      <b className={"font-mono text-[13px] font-semibold " + (sensitive ? "text-warn" : "text-foreground")}>{g}</b>
-                      <span className="text-[13px] leading-snug text-text-2">{areaHint(area) + "." + (sensitive ? " " + sensitive : "")}</span>
+                      <b className={"font-mono text-caption font-semibold " + (sensitive ? "text-warn" : "text-foreground")}>{g}</b>
+                      <span className="text-caption leading-snug text-text-2">{areaHint(area) + "." + (sensitive ? " " + sensitive : "")}</span>
                     </div>
                   );
                 })}
@@ -108,7 +106,7 @@ export function TokenSheet({ token, open, onOpenChange, onRevoke }: Props) {
 
           <Section title={USE_TITLE}>
             <pre className={PRE}>{headerLine(TOKEN_ELIDED)}</pre>
-            <span className="text-[13px] leading-snug text-text-2">{useLine(hasScim(token.scope))}</span>
+            <span className="text-caption leading-snug text-text-2">{useLine(hasScim(token.scope))}</span>
           </Section>
         </div>
 

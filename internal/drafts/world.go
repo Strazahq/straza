@@ -156,7 +156,7 @@ type PinnedObjects struct {
 // Role is one role. Owner is the name of the server that owns an owned
 // application role, empty for a global role. Plane is access or control.
 // Owned is true for every server-owned role, also when its server is gone
-// and Owner cannot name it. Packs names the knowledge packs bound to it.
+// and Owner cannot name it.
 type Role struct {
 	ID          string
 	Name        string
@@ -165,7 +165,6 @@ type Role struct {
 	Owner       string
 	Owned       bool
 	Description string
-	Packs       []string
 }
 
 // Access is an application role's access row: its id, the server it

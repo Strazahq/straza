@@ -132,6 +132,7 @@ func TestConnectTakesAnAdminAPIToken(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			before := len(connectRecords(t, app))
+			since := outboxSince(t, app)
 			var out map[string]any
 			code := adminReq(t, tc.method, base+tc.path, tc.tok, tc.body, &out)
 			if code != tc.code {
@@ -139,6 +140,17 @@ func TestConnectTakesAnAdminAPIToken(t *testing.T) {
 			}
 			if tc.says != "" && out["error"] != tc.says {
 				t.Errorf("error = %q, want %q", out["error"], tc.says)
+			}
+			// An admin API token's refused write leaves one admin.refused
+			// record on the chain, also beside a connection.refused event,
+			// which is not chained. A person's session is not watched here.
+			refused := since("straza.audit.admin", func(d map[string]any) bool { return d["action"] == actionAdminRefused })
+			want := 0
+			if tc.code == http.StatusForbidden && tc.method != http.MethodGet && strings.HasPrefix(tc.tok, "wat_") {
+				want = 1
+			}
+			if len(refused) != want {
+				t.Errorf("admin.refused records = %v, want %d", refused, want)
 			}
 			recs := connectRecords(t, app)[before:]
 			if tc.action == "" {

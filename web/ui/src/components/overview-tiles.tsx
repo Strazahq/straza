@@ -4,7 +4,7 @@ import type { ApprovalRow, OverviewAnswer } from "@/lib/api";
 import { isPlainClick, navigate, pathFor } from "@/lib/router";
 import type { RouteKey } from "@/lib/routes";
 import {
-  CHAIN_INTACT,
+  CHAIN_SCOPE,
   CHAIN_SEAT,
   CHAIN_UNREAD,
   CHAIN_UNVERIFIED,
@@ -65,16 +65,16 @@ function Tile({ to, label, help, value, of, dead, detail, metadata, tone }: Tile
       className="flex min-w-0 flex-col gap-1 rounded-md border border-border bg-card px-3.5 py-3 text-foreground no-underline hover:border-link focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
       onClick={(e) => { if (!isPlainClick(e)) return; e.preventDefault(); navigate(to); }}
     >
-      <span className="flex items-center gap-1.5 text-[13px] whitespace-nowrap text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-caption whitespace-nowrap text-muted-foreground">
         {label}
         <HelpTip label={label} text={help} />
       </span>
-      <span className={cn("flex flex-wrap items-baseline gap-1.5 leading-tight font-semibold tabular-nums", dead ? "text-base font-normal text-muted-foreground" : "text-[28px]")} data-tile-value>
+      <span className={cn("flex flex-wrap items-baseline gap-1.5 leading-tight font-semibold tabular-nums", dead ? "text-body leading-6 font-normal text-muted-foreground" : "text-stat")} data-tile-value>
         {value}
-        {of && !dead && <small className="text-sm font-normal text-muted-foreground">{of}</small>}
+        {of && !dead && <small className="text-dense font-normal text-muted-foreground">{of}</small>}
       </span>
-      <span className={cn("text-[13px] leading-snug text-text-2", tone && TONE[tone])} data-tile-detail>{detail}</span>
-      {metadata && <span className="text-[13px] text-muted-foreground" data-tile-metadata>{metadata}</span>}
+      <span className={cn("text-caption leading-snug text-text-2", tone && TONE[tone])} data-tile-detail>{detail}</span>
+      {metadata && <span className="text-caption text-muted-foreground" data-tile-metadata>{metadata}</span>}
     </a>
   );
 }
@@ -96,7 +96,7 @@ type Props = {
 // chainDetail is the Audit tile's line: what this browser proved about the
 // newest records, or why it proved nothing.
 function chainDetail(chain: ChainRead): { detail: string; tone: Tone } {
-  if (chain.word === "intact") return { detail: CHAIN_INTACT, tone: "ok" };
+  if (chain.word === "intact") return { detail: CHAIN_SCOPE, tone: "ok" };
   if (chain.word === "broken") return { detail: chainBrokenDetail(chain.seq), tone: "danger" };
   if (chain.word === "seat") return { detail: CHAIN_SEAT, tone: "" };
   if (chain.word === "unverified") return { detail: CHAIN_UNVERIFIED, tone: "" };
@@ -168,7 +168,7 @@ export function Tiles({ answer, approvals, approvalsDenied, chain, denied = fals
           help={TILE.approvals.help}
           value={approvalsDenied ? NOT_READ : NO_ANSWER}
           dead
-          detail={approvalsDenied ? lacksGrant("approvals:read") : ""}
+          detail={approvalsDenied ? lacksGrant("approvals") : ""}
         />
       ) : (
         <Tile

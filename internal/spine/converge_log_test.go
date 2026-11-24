@@ -21,7 +21,7 @@ func TestConvergeApplyLogsReloadAtInfo(t *testing.T) {
 			SelfSource: "strazad/self-pod",
 			OnPolicy:   func(context.Context) error { return nil },
 			OnApps:     func(context.Context) error { return errors.New("boom") },
-			OnIdentity: func(context.Context) error { return nil },
+			OnIdentity: func(context.Context, string) error { return nil },
 		},
 		log: slog.New(slog.NewTextHandler(&buf, nil)),
 	}

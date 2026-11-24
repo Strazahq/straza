@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -335,9 +336,9 @@ func (p *publishRun) secondPerson(v drafts.Verdict) bool {
 func typedRisk(f drafts.Finding) bool { return f.Ack == drafts.AckTyped && f.Typed != "" }
 
 // confirmVerb is what typing the text of the typed risk f does: it accepts
-// an agent's loosening of a set that binds it, and confirms every other.
+// an agent's change of its own access, and confirms every other.
 func confirmVerb(f drafts.Finding) string {
-	if f.Code == agentGuardrailCode {
+	if agentAccepted(f) {
 		return "to accept it"
 	}
 	return "to confirm"
@@ -382,7 +383,8 @@ func acksRefusal(id string, v drafts.Verdict, view verdictPayload, body publishB
 			}
 			return "Publish refused: " + line.Sentence + " " + confirm + ", then publish again."
 		case typed && !strings.EqualFold(sent, strings.TrimSpace(f.Typed)):
-			return fmt.Sprintf("Publish refused: the text typed for %s is not %s. Type %s %s, then publish again.", line.Object, line.Typed, line.Typed, confirmVerb(f))
+			// An agent's reach into the built-in server names no object.
+			return fmt.Sprintf("Publish refused: the text typed for %s is not %s. Type %s %s, then publish again.", cmp.Or(line.Object, "this risk"), line.Typed, line.Typed, confirmVerb(f))
 		}
 	}
 	return ""

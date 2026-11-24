@@ -128,7 +128,8 @@ spec:
 // watcher, never `cfg.AppsDir() != ""`, which the accessor's
 // "<dataDir>/apps" fallback makes unconditionally true. Both answers are
 // reachable in code; see appsStatus for why only `true` is reachable in a
-// deployment.
+// deployment. `default_remote_rps` names the rate a remote server with none
+// of its own gets.
 func TestConsoleConfigAppsStatus(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -152,6 +153,9 @@ func TestConsoleConfigAppsStatus(t *testing.T) {
 			}
 			if got.UpstreamTimeoutSeconds != tc.wantTimeout {
 				t.Errorf("upstream_timeout_seconds = %d, want %d", got.UpstreamTimeoutSeconds, tc.wantTimeout)
+			}
+			if got.DefaultRemoteRPS != 20 {
+				t.Errorf("default_remote_rps = %d, want 20", got.DefaultRemoteRPS)
 			}
 		})
 	}

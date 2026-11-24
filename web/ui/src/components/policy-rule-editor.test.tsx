@@ -9,7 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import type { RoleRow } from "@/lib/api";
 import { type Doc, type RuleView, docText, openDoc, rulesOf } from "@/lib/policy-model";
 import {
-  ADVANCED, BUCKET_WORD, CANCEL, HOW_HOLD, HOW_TICKET, HOW_TICKET_END, NO_APPROVER_ROLE, REASON, REASON_STALE, REASON_UNUSED, REMOVE,
+  ADVANCED, BUCKET_WORD, CANCEL, HOW_HOLD, HOW_TICKET, HOW_TICKET_END, NO_APPROVER_ROLE, REASON, REASON_HINT, REASON_HINT_DENY, REASON_STALE, REASON_UNUSED, REMOVE,
   REMOVE_RULE, UNSET_SPAN, WHO_BOTH, WHO_SPONSOR, WHO_TEAM, allowRemoves, appliesToAll, consequenceWords, moveOut,
 } from "@/lib/policy-words";
 
@@ -179,7 +179,7 @@ describe("changing what a rule does", () => {
     await userEvent.type(num(HOW_HOLD), "90");
     await waitFor(() => expect(now("dev-mcp-midpoint-workitem-selfapprove").timeoutSeconds).toBe(90));
     const line = document.querySelector("[data-w1]") as HTMLElement;
-    expect(line.textContent).toContain("2 people paged for a 90 s window");
+    expect(line.textContent).toContain("2 holders get 90 seconds to answer.");
   });
 
   it("flags a reason that still refuses once the rule waits for a person", async () => {
@@ -192,6 +192,15 @@ describe("changing what a rule does", () => {
     await userEvent.type(box, "Straza: a person decides destructive commands");
     await userEvent.tab();
     expect(document.querySelector("[data-reason-stale]")).toBeNull();
+  });
+
+  it("says the agent alone reads a denial's reason, and the decider too once it waits", async () => {
+    mount("no-rm-rf");
+    expect(screen.getByText(REASON_HINT_DENY)).toBeTruthy();
+    expect(screen.queryByText(REASON_HINT)).toBeNull();
+    await userEvent.click(seg(BUCKET_WORD.hum));
+    expect(screen.getByText(REASON_HINT)).toBeTruthy();
+    expect(screen.queryByText(REASON_HINT_DENY)).toBeNull();
   });
 
   it("says what a switch from a denial to Allowed takes away", async () => {
@@ -226,7 +235,7 @@ describe("removing a rule", () => {
     const onRemove = mount("no-rm-rf");
     await userEvent.click(screen.getByRole("button", { name: REMOVE_RULE }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog.textContent).toContain("Remove rule no-rm-rf?");
+    expect(dialog.textContent).toContain("Remove policy rule no-rm-rf?");
     await userEvent.click(screen.getByRole("button", { name: CANCEL }));
     expect(onRemove).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: REMOVE_RULE }));

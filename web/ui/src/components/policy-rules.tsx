@@ -2,12 +2,17 @@ import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { HEAD } from "@/components/data-table";
-import { WordBadge } from "@/components/users-table";
+import { ChangeChip, OutcomeChip, Pill, Tag, ToolChip } from "@/components/chip";
+import { ObjectTag } from "@/components/draft-parts";
+import { KIND_ICON } from "@/components/kind-icon";
+import { Segmented } from "@/components/segmented";
+import type { Outcome } from "@/lib/chip-words";
 import { ON_MACHINES, ON_MACHINES_TITLE } from "@/lib/harness-words";
+import { machineServers, onMachines } from "@/lib/machine-servers";
 import type { Bucket, Lane, RuleView } from "@/lib/policy-model";
 import {
-  ALL_RULES, BUCKET_WORD, EVERY_SERVER, EVERY_WORD, MARK, MCP_SERVER_TITLE, NO_REASON_YET, NO_RULE_MATCH, RESTATES_ACCESS,
-  RULES_FOOT, RULES_SEARCH, RULE_COLUMN, RULE_ID_TITLE, WHERE_WORD, howLine, openRule, rulesMatch, sentence,
+  ALL_RULES, BUCKET_OUTCOME, BUCKET_WORD, EVERY_SERVER, EVERY_WORD, MCP_SERVER_TITLE, NO_REASON_YET, NO_RULE_MATCH, RESTATES_ACCESS,
+  RULES_FILTER, RULES_SEARCH, RULE_COLUMN, RULE_ID_TITLE, WHERE_WORD, howLine, openRule, rulesMatch, sentence,
 } from "@/lib/policy-words";
 import { cn } from "@/lib/utils";
 
@@ -35,21 +40,19 @@ type Props = {
 };
 
 const COLUMNS = ["where", "calls", "what", "reason", "rule"] as const;
-const WIDTHS: Record<string, string> = { where: "14%", calls: "26%", what: "19%", reason: "27%", rule: "14%" };
-
-// TONE paints the outcome word in its reserved hue.
-const TONE: Record<Bucket, string> = { deny: "text-danger", hum: "text-warn", allow: "text-ok" };
+const WIDTHS: Record<string, string> = { where: "17%", calls: "26%", what: "19%", reason: "24%", rule: "14%" };
 
 // LANE_ORDER sorts the table by where the call goes: the MCP servers
 // first, then the local lanes in the order the enterprise profile meets
 // them.
 const LANE_ORDER: Record<Lane, number> = { mcp: 0, shell: 1, files: 2, net: 3, harness: 4, tools: 5, other: 6, all: 7 };
 
-const CHIP = "inline-flex items-center rounded-md border border-border bg-background px-1.5 py-px font-mono text-[13px] whitespace-nowrap";
+// TOOL_LANES are the lanes whose names are tool names, which wear the
+// policy rule's outcome. A command pattern and a path are not tools.
+const TOOL_LANES: Lane[] = ["mcp", "harness", "tools"];
 
 const FILTERS: (Bucket | "all")[] = ["all", "deny", "hum", "allow"];
 const FILTER_WORD = (f: Bucket | "all") => (f === "all" ? ALL_RULES : BUCKET_WORD[f]);
-const SEG = "inline-flex h-8 items-center border-r border-border px-3 text-[13px] text-text-2 last:border-r-0 hover:bg-accent focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
 // whereKey is the sort key of one row: the lane, the server of an MCP
 // rule, and the id to break the tie.
@@ -62,33 +65,38 @@ function hit(r: RuleView, q: string): boolean {
   return [r.id, r.reason, r.app || "", ...(r.names || [])].some((t) => t.toLowerCase().includes(q));
 }
 
-// onMachines says whether an MCP rule names a server that is not
-// registered, which a person's own harness runs.
-const onMachines = (rule: RuleView, registered?: string[] | null) =>
-  rule.lane === "mcp" && !!rule.app && !!registered && rule.app.split(", ").some((a) => a !== "straza" && !registered.includes(a));
-
-// Where is the first cell: the server an MCP rule matches in the accent,
-// and the lane's own word for every other rule.
-function Where({ rule, registered }: { rule: RuleView; registered?: string[] | null }) {
+// Where is the first cell: the servers an MCP rule matches, each as a tag
+// of its kind, a registered server or one on a person's machine, and the
+// lane's own word for every other rule. The checks of a draft show it in
+// their table of loosened rules.
+export function Where({ rule, registered }: { rule: RuleView; registered?: string[] | null }) {
   if (rule.lane === "mcp") {
+    const machine = registered ? machineServers(rule, registered) : [];
     return (
-      <span className="flex flex-wrap items-center gap-1">
-        <span className={cn(CHIP, "border-link/55 bg-accent-bg font-semibold text-foreground")} title={MCP_SERVER_TITLE}>{rule.app || EVERY_SERVER}</span>
-        {onMachines(rule, registered) && <span className={cn(CHIP, "font-sans text-[12px] text-muted-foreground")} title={ON_MACHINES_TITLE} data-on-machines>{ON_MACHINES}</span>}
+      <span className="flex min-w-0 flex-wrap items-center gap-1">
+        {rule.app
+          ? rule.app.split(", ").map((s) => <ObjectTag key={s} kind={machine.includes(s) ? "local-server" : "server"} name={s} />)
+          : <Tag icon={KIND_ICON.server} title={MCP_SERVER_TITLE}>{EVERY_SERVER}</Tag>}
+        {onMachines(rule, registered) && (
+          <Pill title={ON_MACHINES_TITLE} className="max-w-full" data-on-machines><span className="min-w-0 truncate">{ON_MACHINES}</span></Pill>
+        )}
       </span>
     );
   }
-  return <span className={cn(CHIP, "font-sans text-[12px] text-muted-foreground")}>{WHERE_WORD[rule.lane]}</span>;
+  return <Pill className="max-w-full"><span className="min-w-0 truncate">{WHERE_WORD[rule.lane]}</span></Pill>;
 }
 
 // Calls names what the rule matches on its lane, or the lane's every-call
-// word when it names nothing.
-function Calls({ rule }: { rule: RuleView }) {
+// word when it names nothing. A tool name wears the outcome when one is
+// given. The draft page shows it in its rule tables, without the outcome.
+export function Calls({ rule, outcome }: { rule: RuleView; outcome?: Outcome }) {
   const names = rule.names && rule.names.length ? rule.names : null;
+  const wears = names && TOOL_LANES.includes(rule.lane) ? outcome : undefined;
   return (
-    <span className="flex flex-wrap items-center gap-1">
+    <span className="flex max-w-full min-w-0 flex-wrap items-center gap-1">
       {(names || [EVERY_WORD[rule.lane]]).map((n) => (
-        <span key={n} className={cn(CHIP, names && "font-semibold text-foreground")}>{n}</span>
+        // A long name or pattern is cut inside its chip, whole on hover.
+        <ToolChip key={n} outcome={wears}>{n}</ToolChip>
       ))}
     </span>
   );
@@ -124,19 +132,7 @@ export function PolicyRules({ rules, changed, added, openId, onOpen, registered 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div role="group" aria-label={RULE_COLUMN.what} className="inline-flex w-fit overflow-hidden rounded-md border border-border" data-rules-filter={filter}>
-          {FILTERS.map((f) => (
-            <button
-              key={f}
-              type="button"
-              aria-pressed={filter === f}
-              className={cn(SEG, filter === f && "bg-accent-bg font-semibold text-foreground")}
-              onClick={() => setFilter(f)}
-            >
-              {FILTER_WORD(f)}
-            </button>
-          ))}
-        </div>
+        <Segmented label={RULES_FILTER} value={filter} onChange={setFilter} options={FILTERS.map((f) => ({ value: f, label: FILTER_WORD(f) }))} data-rules-filter={filter} />
         <Input
           aria-label={RULES_SEARCH}
           placeholder={RULES_SEARCH}
@@ -145,11 +141,14 @@ export function PolicyRules({ rules, changed, added, openId, onOpen, registered 
           className="h-8 w-72"
           onChange={(e) => setSearch(e.target.value)}
         />
-        {q !== "" && <span className="text-[13px] text-muted-foreground" data-rules-match>{rulesMatch(shown.length, rules.length)}</span>}
+        {q !== "" && <span className="text-caption text-muted-foreground" data-rules-match>{rulesMatch(shown.length, rules.length)}</span>}
       </div>
 
       <div className="overflow-x-auto rounded-md border border-border bg-card" data-rules={shown.length}>
-        <Table className="table-fixed">
+        {/* The floor keeps the outcome chip inside What happens and a
+            server's tag inside Call type; below it the table scrolls in
+            its box. */}
+        <Table className="min-w-[880px] table-fixed">
           <colgroup>
             {COLUMNS.map((id) => <col key={id} style={{ width: WIDTHS[id] }} />)}
           </colgroup>
@@ -178,21 +177,21 @@ export function PolicyRules({ rules, changed, added, openId, onOpen, registered 
                   tabIndex={0}
                   aria-label={openRule(rule.id)}
                   title={sentence(rule)}
-                  className={cn("cursor-pointer align-top text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50", openId === rule.id && "bg-accent-bg")}
+                  className={cn("cursor-pointer align-top text-dense focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50", openId === rule.id && "bg-accent-bg")}
                   onClick={() => onOpen(rule.id)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(rule.id); } }}
                 >
-                  <TableCell className="align-top"><Where rule={rule} registered={registered} /></TableCell>
-                  <TableCell className="overflow-hidden align-top whitespace-normal"><Calls rule={rule} /></TableCell>
+                  <TableCell className="overflow-hidden align-top whitespace-normal"><Where rule={rule} registered={registered} /></TableCell>
+                  <TableCell className="overflow-hidden align-top whitespace-normal"><Calls rule={rule} outcome={BUCKET_OUTCOME[rule.bucket]} /></TableCell>
                   <TableCell className="align-top whitespace-normal">
-                    <span className={cn("font-semibold", TONE[rule.bucket])}>{BUCKET_WORD[rule.bucket]}</span>
-                    {how !== "" && <span className="block text-[13px] leading-snug text-muted-foreground">{how}</span>}
+                    <OutcomeChip outcome={BUCKET_OUTCOME[rule.bucket]} />
+                    {how !== "" && <span className="block text-caption leading-snug text-muted-foreground">{how}</span>}
                   </TableCell>
                   <TableCell className="overflow-hidden align-top"><Reason rule={rule} registered={registered} /></TableCell>
                   <TableCell className="overflow-hidden align-top">
                     <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <span className="block max-w-full truncate font-mono text-[13px] text-muted-foreground" title={rule.id + ": " + RULE_ID_TITLE}>{rule.id}</span>
-                      {badge && <WordBadge word={MARK[badge]} tone={badge === "new" ? "accent" : "warn"} />}
+                      <span className="block max-w-full truncate font-mono text-caption text-muted-foreground" title={rule.id + ": " + RULE_ID_TITLE}>{rule.id}</span>
+                      {badge && <ChangeChip change={badge === "new" ? "new" : "changed"} />}
                     </span>
                   </TableCell>
                 </TableRow>
@@ -201,8 +200,6 @@ export function PolicyRules({ rules, changed, added, openId, onOpen, registered 
           </TableBody>
         </Table>
       </div>
-
-      <p className="text-[13px] text-muted-foreground">{RULES_FOOT}</p>
     </div>
   );
 }

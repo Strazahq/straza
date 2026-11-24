@@ -1,4 +1,6 @@
 import type * as React from "react";
+import { REFUSED_BY, UNANSWERED } from "@/lib/say";
+import { absTime } from "@/lib/words";
 
 // The two error shapes. A read that did not
 // reach the server leaves the state unknown, so its block is violet and the
@@ -15,15 +17,33 @@ type FetchProps = {
   heading?: string;
 };
 
-// FetchError is the read shape: "<Subject>: unreachable, state unknown."
-// with the detail and the time of the last successful read.
+// SAYS_UNREAD splits a detail that readFailed made into its opening, which
+// says what could not be read, and the rest, which says why and what to do.
+const SAYS_UNREAD = /^(.{1,80}? could not be read)(: | because )([\s\S]*)$/;
+
+// FetchError is the read shape. A detail that itself opens with what could
+// not be read is shown as it is, once, with that opening as the heading, so
+// the block names the read in the page's own words and says it one time.
+// Any other detail follows the heading "<Subject> could not be read.", or
+// the heading the caller gives. The block ends with the clock time of the
+// last good read, in the active zone with the zone named.
 export function FetchError({ subject, detail, lastRead, heading }: FetchProps) {
-  const at = lastRead ? lastRead.toLocaleTimeString([], { hour12: false }) : null;
+  const at = lastRead ? absTime(lastRead.toISOString()).slice(11) : null;
+  const own = heading === undefined ? SAYS_UNREAD.exec(detail) : null;
   return (
-    <div role="status" className="border-l-[3px] border-unknown bg-card px-4 py-3 text-sm leading-relaxed text-text-2" data-fetch-error>
-      <span className="font-semibold text-unknown">{heading ?? subject + ": unreachable, state unknown."}</span>{" "}
-      {detail}
-      {at && <span>{" last successful read " + at + "."}</span>}
+    <div role="status" className="border-l-[3px] border-unknown bg-card px-4 py-3 text-dense leading-relaxed text-text-2" data-fetch-error>
+      {own ? (
+        <>
+          <span className="font-semibold text-unknown">{own[1] + (own[2] === ": " ? ":" : "")}</span>
+          {(own[2] === ": " ? " " : own[2]) + own[3]}
+        </>
+      ) : (
+        <>
+          <span className="font-semibold text-unknown">{heading ?? subject + " could not be read."}</span>{" "}
+          {detail}
+        </>
+      )}
+      {at && <span>{" Last good read: " + at + "."}</span>}
     </div>
   );
 }
@@ -40,12 +60,17 @@ type RefusedProps = {
 };
 
 // RefusedError is the write shape: "<Subject> refused." with what the
-// server said.
+// server said. A message from refused folds its opening into the heading,
+// "<Subject> refused: <why>.", so the block says refused once. A write
+// Straza did not answer is headed "<Subject> not confirmed.", since it may
+// have landed.
 export function RefusedError({ subject, message, heading, children }: RefusedProps) {
+  const said = heading === undefined && message.startsWith(REFUSED_BY) ? message.slice(REFUSED_BY.length) : null;
+  const head = heading ?? (said !== null ? subject + " refused:" : message.startsWith(UNANSWERED) ? subject + " not confirmed." : subject + " refused.");
   return (
-    <div role="alert" className="border-l-[3px] border-danger bg-card px-4 py-3 text-sm leading-relaxed text-text-2" data-refused-error>
-      <span className="font-semibold text-danger">{heading ?? subject + " refused."}</span>{" "}
-      {message}
+    <div role="alert" className="border-l-[3px] border-danger bg-card px-4 py-3 text-dense leading-relaxed text-text-2" data-refused-error>
+      <span className="font-semibold text-danger">{head}</span>{" "}
+      {said ?? message}
       {children && <p className="mt-1.5 mb-0">{children}</p>}
     </div>
   );

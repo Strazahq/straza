@@ -41,11 +41,11 @@ A hold is an allow that needs approval first. A rule with `mode: approve` lets t
 Approvers are a role of kind `approver`. It carries the right to decide and never a tool, and it is the only kind a policy may name in `approve.roles` besides `straza-admin`. In a deployment fed by your identity manager, the assignment comes over SCIM instead.
 
 {{< console >}}
-{{< clicks "Roles" "New role" "Approver role" "Next" "Save and publish" >}}
+{{< clicks "Roles" "New role" "Approver role" "Next: Review" "Save and publish" >}}
 
 {{< shot name="role-new-approver" caption="New role with **Approver role** picked and the name `release-approvers`." >}}
 
-Type `release-approvers` under Name before **Next**. Then assign it to the person who decides:
+Type `release-approvers` under Name before **Next: Review**. Then assign it to the person who decides:
 
 {{< clicks "Roles" "release-approvers" "Assign to a user" "lena" "Assign role" >}}
 {{< /console >}}
@@ -70,15 +70,15 @@ assigned release-approvers to lena
 {{< console >}}
 The New policy wizard writes this rule whole, one question per step:
 
-{{< clicks "Policies" "New policy" "Needs approval" "Next" "A role" "local-tools" "Next" "Shell command" >}}
+{{< clicks "Policies" "New policy" "Needs approval" "Next: Applies to" "A role" "local-tools" "Next: Which calls" "Shell command" >}}
 
-1. Under Command patterns, type `kubectl apply *` and press **Add**, then **Next**.
-2. Under Who decides, pick **An approver role** and `release-approvers`. Under How, pick **A hold, up to** and set 5 minutes. Type the reason under Reason the agent reads, then press **Next**.
-3. On Review, name the set `kubectl-apply-hold` and press **Save and publish**, then **Publish**.
+1. Under Command patterns, type `kubectl apply *` and press **Add**, then **Next: Who decides**.
+2. Under Who decides, pick **An approver role** and `release-approvers`. Under How, pick **A hold, up to** and set 5 minutes. Type the reason under Reason the agent reads, then press **Next: Review**.
+3. On Review, name the policy `kubectl-apply-hold` and press **Save and publish**, then **Publish**.
 
 {{< shot name="policy-new-how" caption="The Who decides step, with `release-approvers` deciding and a hold of up to 5 minutes." >}}
 
-The wizard stores the set at priority 150, names the rule itself, and leaves the retry window at its default of 60 seconds. Later records name that rule where this page shows `hold-kubectl-apply`.
+The wizard stores the policy at priority 150, names the rule itself, and leaves the retry window at its default of 60 seconds. Later records name that rule where this page shows `hold-kubectl-apply`.
 {{< /console >}}
 
 
@@ -160,11 +160,11 @@ This step is lena's. The console, the self-service page and an enrolled phone de
 {{< console >}}
 An approver who is also an administrator decides in the console. Approvals opens on the Waiting filter, and a row opens the request with its parameters and who decides.
 
-{{< clicks "Approvals" "Requests" "kubectl apply -f deploy/app.yaml" "Approve" "Approve request" >}}
+{{< clicks "Approvals" "Requests" "kubectl apply -f deploy/app.yaml" "Approve" >}}
 
-{{< shot name="approval-approve" caption="The Approve question for dana's `kubectl apply`, with the optional reason." >}}
+{{< shot name="approval-approve" caption="dana's `kubectl apply` request, with the optional reason above **Deny** and **Approve**." >}}
 
-A reason is optional, under `Reason, optional`. An approver who is no admin decides on the self-service page instead. Once the browser is enabled under This browser, which needs the role `straza-enroll-browser` or `straza-admin`, its Requests tab lists the calls that are theirs to decide. Until then the tab says `This browser is not enrolled to decide.` and lists nothing. [Approve in the console]({{< relref "guides/approve/console.md" >}}) shows that screen in detail.
+A reason is optional, under `Reason, optional`. An approver who is no admin decides on the self-service page instead. Its Requests tab lists the calls that are theirs to decide. They answer from a browser set up once on Home, which needs the role `straza-enroll-browser` or `straza-admin`. [Approve in the console]({{< relref "guides/approve/console.md" >}}) shows that screen in detail.
 {{< /console >}}
 
 {{< cli >}}
@@ -210,9 +210,9 @@ exit 0
 The approval writes a record of its own for each phase: the request, the resolution and the retry that used it. That retry also writes its allow. The resolution names the decider and the channel, and a decision made in the console is recorded under the channel `console`.
 
 {{< console >}}
-{{< clicks "Audit" "Lens" "approvals" >}}
+{{< clicks "Audit" "Kind of record" "Approvals" >}}
 
-{{< shot name="audit-approvals" caption="The `approvals` lens, with one record for each phase of dana's requests." >}}
+{{< shot name="audit-approvals" caption="**Approvals** under **Kind of record**, with one record for each phase of dana's requests." >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -267,9 +267,9 @@ strazactl policy validate -f kubectl-delete-confirm.yaml
 
 {{< see >}}`kubectl-delete-confirm.yaml: PolicySet "kubectl-delete-confirm" OK (1 rules, priority 0)` and the note about roles that every validate prints.{{< /see >}}
 
-Its `approve` block keeps the timeouts, the class and the binding of a hold. The New policy wizard has no confirm outcome, so in the console the rule goes in through Write YAML instead, and its card reads `The requester confirms it themselves. Change it on the YAML tab.`
+Its `approve` block keeps the timeouts, the class and the binding of a hold. The New policy wizard has no confirm outcome, so in the console the rule goes in through Write YAML instead, and its row reads `The requester confirms it themselves. Change it on the YAML tab.`
 
-When the rule fires, the hook denies the call at once with a reason that starts `Straza: this call needs the requester's confirmation, on their enrolled phone, or the self-service page under This browser`, followed by the page's address and the reference. Once the person confirms there, the agent retries. An autonomous agent has no person to confirm, so the same rule denies its call outright with `Straza: rule kubectl-delete-confirm/confirm-kubectl-delete requires the requester's confirmation; an autonomous session has no human to confirm`.
+When the rule fires, the hook denies the call at once with a reason that starts `Straza: this call needs the requester's confirmation, on the requester's enrolled phone, or Requests on the self-service page`, followed by the page's address and the reference. Once the person confirms there, the agent retries. An autonomous agent has no person to confirm, so the same rule denies its call outright with `Straza: rule kubectl-delete-confirm/confirm-kubectl-delete requires the requester's confirmation; an autonomous session has no human to confirm`.
 
 {{< fails >}}
 `mode confirm may not set approve.roles (the requester is the decider)`
@@ -287,9 +287,9 @@ A hold on an MCP tool is the same rule with `tools: [mcp.call]`, the server in `
 {{< console >}}
 {{< clicks "Policies" "kubectl-apply-hold" "More" "Turn off" "Turn off" >}}
 
-{{< shot name="policy-turn-off" caption="The question that turns kubectl-apply-hold off, which says what stops governing." >}}
+{{< shot name="policy-turn-off" caption="The question that turns kubectl-apply-hold off, which says what stops applying." >}}
 
-A request that is still waiting is denied from its row with **Deny**, then **Deny request**, which is final for that request. The same call in the same session is then refused, without a new request, until the request's decision window ends.
+A request that is still waiting is denied with **Deny** in its request, which is final for that request. The same call in the same session is then refused, without a new request, until the request's decision window ends.
 {{< /console >}}
 
 {{< cli >}}
@@ -303,7 +303,7 @@ Five limits apply before the first real use:
 
 - On a rule that names roles, the requester never decides their own request unless the rule says `selfApproval: true`, and an autonomous agent never gets that right whatever the rule says.
 - An AI agent never decides anything, even if an approver role was assigned to it by mistake.
-- A person who may decide their own request decides it on their enrolled phone, or on the self-service page under This browser, because those sign the decision with the device's own key. The console refuses it and says where to go, unless the operator set `approval.unsignedOwnDecisions` to true in the server config and accepted that an agent on the person's machine can then approve its own calls. An agent that can read an admin API token holding `approvals:write` can mint an enroll token for the person and decide with a device of its own, which is one more reason never to put a token where an agent runs, as [Known limits]({{< relref "security/known-limits.md" >}}) says.
+- A person who may decide their own request decides it on their enrolled phone, or on the self-service page in a browser set up to approve, because those sign the decision with the device's own key. The console refuses it and says where to go, unless the operator set `approval.unsignedOwnDecisions` to true in the server config and accepted that an agent on the person's machine can then approve its own calls. An agent that can read an admin API token holding `approvals:write` can mint an enroll token for the person and decide with a device of its own, which is one more reason never to put a token where an agent runs.
 - A session that a coding harness checked in never decides a request for anybody.
 - An approve rule only ever marks an allow. A deny from any set still wins, so a command that another set denies is denied, and no request opens.
 

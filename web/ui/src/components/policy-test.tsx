@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FetchError, RefusedError } from "@/components/error-state";
+import { Segmented } from "@/components/segmented";
 import { Section } from "@/components/sheet-parts";
 import { type PickedUser, UserPicker } from "@/components/user-picker";
 import { ObjectPicker, argumentOf, gateOf, objectLine, objectMissing, pinnedOf } from "@/components/test-a-call";
@@ -13,13 +14,12 @@ import { Outcome, WhyCard, decidersLine, wireLine } from "@/components/why-card"
 import { type ApiError, type AppRow, type BindingRow, type Decision, type ObjectRow, type SimulateAnswer, type SimulateRequest, type ToolRow, type UserRow, listApps, listBindings, listTools, listUsers, query, simulate } from "@/lib/api";
 import { version } from "@/lib/public";
 import {
-  CLOSE, DECIDED_LIVE, LANE_LABEL, LIVE_NOW, NET_LINE, SERVER, SUBJECT_SERVERS, TEST, TEST_ANSWER, TEST_COMMAND,
-  TEST_EVERY_SERVER, TEST_FROM_AUDIT, TEST_LEDE, TEST_LEDE_DRAFT, TEST_MISSING_WHAT, TEST_MISSING_WHO, TEST_NO_SERVERS,
+  CLOSE, LANE_LABEL, LIVE_NOW, NET_LINE, SERVER, SUBJECT_SERVERS, TEST, TEST_ANSWER, TEST_COMMAND,
+  TEST_EVERY_SERVER, TEST_LEDE, TEST_LEDE_DRAFT, TEST_MISSING_WHAT, TEST_MISSING_WHO, TEST_NO_SERVERS,
   TEST_PATH, TEST_PATH_LINE, TEST_SERVERS_HINT, TEST_TITLE, TEST_TOOL, TEST_WHAT, TEST_WHO, TEST_WHO_HINT, WITH_EDITS,
-  WITH_EDITS_LINE, holdsLine,
+  holdsLine,
 } from "@/lib/policy-words";
 import { checkFailed, readFailed } from "@/lib/say";
-import { cn } from "@/lib/utils";
 
 // PolicyTest is the Test a call sheet of the Policies area: who calls, what
 // they call on which lane, and the answer as the
@@ -45,6 +45,9 @@ export type PolicyTestProps = {
   // and with the edits.
   draft?: { name: string; yaml: string } | null;
   prefill?: PolicyTestPrefill;
+  // onClosed runs once the sheet is gone, where a page that opens it
+  // without a trigger puts the focus back on what opened it.
+  onClosed?: () => void;
 };
 
 type Lane = "mcp" | "shell" | "files" | "net";
@@ -55,12 +58,9 @@ const LANES: Lane[] = ["mcp", "shell", "files", "net"];
 // the strictest of the file verbs.
 const TOOL_OF: Record<Lane, string> = { mcp: "mcp.call", shell: "shell.exec", files: "file.write", net: "net.fetch" };
 
-const CAPS = "text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground";
-const HINT = "text-[13px] leading-relaxed text-muted-foreground";
-const ERROR = "text-[13px] text-danger";
-const PILL = "inline-flex h-8 items-center rounded-full border px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
-const PILL_ON = "border-link/40 bg-accent-bg text-foreground";
-const PILL_OFF = "border-border bg-background text-text-2 hover:bg-accent";
+const CAPS = "text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground";
+const HINT = "text-caption leading-relaxed text-muted-foreground";
+const ERROR = "text-caption text-danger";
 
 // Catalog is what the What section picks from: the servers, their tools,
 // and the access rows that say which server a role reaches.
@@ -83,10 +83,6 @@ function eventOf(ask: Ask): SimulateRequest["event"] {
   if (ask.lane === "files") event.paths = [ask.path];
   return event;
 }
-
-// contextLine is the sentence under the outcome: who decides when the call
-// waits for a person, then which version of the policies answered.
-const contextLine = (d: Decision, which: string) => [decidersLine(d), which].filter(Boolean).join(" ");
 
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
 
@@ -243,7 +239,7 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
   const covered = obj ? objectLine(obj) : "";
   // context is the sentence under an outcome, after the object line of a
   // call a held role covers.
-  const context = (d: Decision, which: string) => <>{covered && <span className="block text-text-2" data-object-line>{covered}</span>}{contextLine(d, which)}</>;
+  const context = (d: Decision) => <>{covered && <span className="block text-text-2" data-object-line>{covered}</span>}{decidersLine(d)}</>;
 
   return (
     <>
@@ -256,19 +252,13 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
         </Section>
 
         <Section title={TEST_WHAT}>
-          <div className="flex flex-wrap gap-1" data-lanes>
-            {LANES.map((l) => (
-              <button
-                key={l}
-                type="button"
-                aria-pressed={lane === l}
-                className={cn(PILL, lane === l ? PILL_ON : PILL_OFF)}
-                onClick={() => { touch(); setLane(l); }}
-              >
-                {LANE_LABEL[l]}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label={TEST_WHAT}
+            value={lane}
+            onChange={(l) => { touch(); setLane(l); }}
+            options={LANES.map((l) => ({ value: l, label: LANE_LABEL[l] }))}
+            data-lanes
+          />
 
           {read.kind === "failed" && lane === "mcp" && <FetchError subject={SUBJECT_SERVERS} detail={read.detail} />}
 
@@ -331,7 +321,7 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
                 mark="live"
                 caption={answer.draft ? LIVE_NOW : undefined}
                 head={<Outcome d={answer.active} />}
-                context={context(answer.active, DECIDED_LIVE)}
+                context={context(answer.active)}
                 wire={wireLine(answer.active, answer.snapshot, "live")}
                 gate={gateOf(obj)}
               />
@@ -343,7 +333,7 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
                 mark="draft"
                 caption={WITH_EDITS}
                 head={<Outcome d={answer.draft} />}
-                context={context(answer.draft, WITH_EDITS_LINE)}
+                context={context(answer.draft)}
                 wire={wireLine(answer.draft, answer.snapshot, "draft")}
                 gate={gateOf(obj)}
               />
@@ -352,8 +342,7 @@ function Body({ draft, prefill, onClose }: { draft?: { name: string; yaml: strin
         )}
       </div>
 
-      <SheetFooter className="mt-0 flex-row items-center gap-3 border-t border-border">
-        <span className={cn(HINT, "min-w-0 flex-1")}>{TEST_FROM_AUDIT}</span>
+      <SheetFooter className="mt-0 flex-row items-center justify-end gap-3 border-t border-border">
         <Button variant="outline" onClick={onClose}>{CLOSE}</Button>
         <Button onClick={test} disabled={running} data-test-run>
           {running ? <Loader2Icon className="animate-spin" /> : <PlayIcon />} {TEST}
@@ -375,12 +364,12 @@ async function resolve(username: string): Promise<UserRow | null> {
   }
 }
 
-export function PolicyTest({ open, onOpenChange, draft, prefill }: PolicyTestProps) {
+export function PolicyTest({ open, onOpenChange, draft, prefill, onClosed }: PolicyTestProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-xl" data-policy-test>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-xl" data-policy-test onCloseAutoFocus={(e) => { if (onClosed) { e.preventDefault(); onClosed(); } }}>
         <SheetHeader className="border-b border-border pr-12">
-          <SheetTitle className="text-lg font-semibold">{TEST_TITLE}</SheetTitle>
+          <SheetTitle className="text-section leading-7 font-semibold">{TEST_TITLE}</SheetTitle>
           <SheetDescription>{draft ? TEST_LEDE_DRAFT : TEST_LEDE}</SheetDescription>
         </SheetHeader>
         <Body draft={draft} prefill={prefill} onClose={() => onOpenChange(false)} />

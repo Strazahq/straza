@@ -106,16 +106,28 @@ func (a *App) handleAuditList(w http.ResponseWriter, r *http.Request) {
 	out := make([]auditListRow, 0, len(records))
 	for _, rec := range records {
 		m := ceMeta(rec.CE)
+		// Who on an admin record is the actor the server stamped (spec/events
+		// rev 18), so a role midpoint assigned to alice reads midpoint, not
+		// alice. Only this type is read actor first: an uploaded client
+		// record is never straza.audit.admin, and one uploaded before
+		// normalizeClientCE removed the actor fields may still carry a forged
+		// actor.
+		username := ""
+		if m.ceType == "straza.audit.admin" {
+			username = m.actor
+		}
 		// Authn records carry the id under data.userId and the janitor's
 		// session ends carry nothing else, while decision records carry the
-		// id under data.user, so both are tried in that order.
-		username := resolve(m.userID)
+		// id under data.user, so both are tried in that order. An admin
+		// record with no actor, such as one the Entra sync wrote, names its
+		// user here too.
+		if username == "" {
+			username = resolve(m.userID)
+		}
 		if username == "" {
 			username = resolve(m.user)
 		}
-		// Admin events carry no data.user, so the Who column falls back to
-		// the attributed actor (spec/events rev 18), so console-driven
-		// mutations read "kim", not blank.
+		// A record whose user does not resolve falls back to its actor field.
 		if username == "" {
 			username = m.actor
 		}
@@ -125,12 +137,21 @@ func (a *App) handleAuditList(w http.ResponseWriter, r *http.Request) {
 		if sessionFilter != "" && sessionFilter != m.session {
 			continue
 		}
+		// About is the user an admin record was about, through the same
+		// memoized lookup, when that user still resolves and is not Who.
+		about := ""
+		if m.ceType == "straza.audit.admin" {
+			if about = resolve(m.user); about == username {
+				about = ""
+			}
+		}
 		out = append(out, auditListRow{
 			Record: audit.Record{
 				Seq: rec.Seq, CE: rec.CE, PrevHash: rec.PrevHash, Hash: rec.Hash,
 				Username: username,
 			},
 			DecidedByUsername: resolve(m.decidedBy),
+			About:             about,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -139,11 +160,14 @@ func (a *App) handleAuditList(w http.ResponseWriter, r *http.Request) {
 // auditListRow is the /v1/admin/audit response item: the chain-record
 // envelope plus read-time name enrichments. decidedByUsername resolves an
 // approval CE's data.decidedBy (a user ID) so the console ledger can say
-// "approved by alice". Enrichment lives on the envelope, never in
-// the CE: the chain hash covers CE bytes (verified by TestAuditListResolvesDecidedBy).
+// "approved by alice". about resolves an admin record's data.user, the user
+// the change was about, when it is not the row's Who. Enrichment lives on
+// the envelope, never in the CE: the chain hash covers CE bytes (verified by
+// TestAuditListResolvesDecidedBy).
 type auditListRow struct {
 	audit.Record
 	DecidedByUsername string `json:"decidedByUsername,omitempty"`
+	About             string `json:"about,omitempty"`
 }
 
 // ceFields are the parts of a CloudEvent the list enrichment reads: the
@@ -155,24 +179,25 @@ type ceFields struct {
 	ceType, user, userID, session, actor, decidedBy string
 }
 
-// ceMeta extracts ceFields from a CloudEvent without trusting its shape; an
-// unparseable event yields zero fields.
+// ceMeta extracts ceFields from a CloudEvent without trusting its shape. It
+// takes each field by its exact key, as the store's filter and the console
+// do, because decoding into a struct would also take a key that differs by
+// case or by a Unicode fold, which a stored upload may carry. Of duplicate
+// keys the last counts. A field that is missing or not a string reads as "",
+// and an unparseable event yields zero fields.
 func ceMeta(ce string) ceFields {
-	var m struct {
-		Type string `json:"type"`
-		Data struct {
-			User      string `json:"user"`
-			UserID    string `json:"userId"`
-			Session   string `json:"session"`
-			Actor     string `json:"actor"`
-			DecidedBy string `json:"decidedBy"`
-		} `json:"data"`
-	}
-	if json.Unmarshal([]byte(ce), &m) != nil {
+	var top, data map[string]json.RawMessage
+	if json.Unmarshal([]byte(ce), &top) != nil {
 		return ceFields{}
 	}
-	return ceFields{ceType: m.Type, user: m.Data.User, userID: m.Data.UserID, session: m.Data.Session,
-		actor: m.Data.Actor, decidedBy: m.Data.DecidedBy}
+	_ = json.Unmarshal(top["data"], &data)
+	str := func(m map[string]json.RawMessage, key string) string {
+		var s string
+		_ = json.Unmarshal(m[key], &s)
+		return s
+	}
+	return ceFields{ceType: str(top, "type"), user: str(data, "user"), userID: str(data, "userId"), session: str(data, "session"),
+		actor: str(data, "actor"), decidedBy: str(data, "decidedBy")}
 }
 
 // maxAuditBatch caps a single straza spool upload.
@@ -523,11 +548,18 @@ func namedSession(m map[string]any) string {
 
 // normalizeClientCE stamps a decoded client audit event with a server-side id
 // (if absent) and binds it to the given session and the authenticated user,
-// so a client cannot forge another principal's audit trail. The caller picks
-// the session: the uploader's, or the earlier session the record names when
+// so a client cannot forge another principal's audit trail. It removes
+// userId, actor, actorId and actorVia, which no straza client writes and
+// which the audit list and its user filter read as who a record names. Go's
+// JSON decoding into a struct matches a key that differs only by case or by
+// a Unicode fold, such as U+017F for s, and takes the last one, so every
+// such variant of those keys, of user and session and of the envelope keys
+// the server owns is removed too. The caller picks the session: the
+// uploader's, or the earlier session the record names when
 // spooledSessionRefusal accepts it. Returns the outbox subject (== the
 // normalized CE type) and the CE JSON.
 func normalizeClientCE(m map[string]any, session, user string) (string, string) {
+	dropFolded(m, true, "specversion", "id", "type", "source", "time", "data")
 	if _, ok := m["id"].(string); !ok {
 		m["id"] = uuid.NewString()
 	}
@@ -544,7 +576,22 @@ func normalizeClientCE(m map[string]any, session, user string) (string, string) 
 	}
 	data["session"] = session
 	data["user"] = user
+	dropFolded(data, true, "session", "user")
+	dropFolded(data, false, "userId", "actor", "actorId", "actorVia")
 	m["data"] = data
 	out, _ := json.Marshal(m)
 	return ceType, string(out)
+}
+
+// dropFolded deletes from m every key that equals one of keys under
+// strings.EqualFold. With keepExact a key spelled exactly as listed stays.
+func dropFolded(m map[string]any, keepExact bool, keys ...string) {
+	for k := range m {
+		for _, key := range keys {
+			if strings.EqualFold(k, key) && (!keepExact || k != key) {
+				delete(m, k)
+				break
+			}
+		}
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,9 +21,25 @@ import (
 
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/dpop"
+	"github.com/strazahq/straza/internal/secrets"
 	"github.com/strazahq/straza/internal/store"
 	"github.com/strazahq/straza/internal/store/storetest"
 )
+
+// sharedSealer answers one KEK for the whole test binary, so that every
+// service a test builds over one store opens the keys another one sealed.
+var sharedSealer = sync.OnceValue(func() KeySealer {
+	dir, err := os.MkdirTemp("", "straza-authn-kek")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	kek, err := secrets.LoadOrCreateKEK(filepath.Join(dir, "kek"))
+	if err != nil {
+		panic(err)
+	}
+	return kek
+})
 
 func testRepo(t testing.TB) store.SigningKeyRepo {
 	t.Helper()
@@ -44,7 +61,7 @@ func testRepo(t testing.TB) store.SigningKeyRepo {
 
 func testService(t *testing.T, ttl time.Duration) *TokenService {
 	t.Helper()
-	svc, err := NewTokenService(context.Background(), testRepo(t), "https://straza.local", ttl)
+	svc, err := NewTokenService(context.Background(), testRepo(t), sharedSealer(), "https://straza.local", ttl)
 	if err != nil {
 		t.Fatalf("NewTokenService: %v", err)
 	}
@@ -138,7 +155,7 @@ func mintWithTimes(t *testing.T, svc *TokenService, iat, exp time.Time) string {
 
 func TestVerifyRejectsWrongIssuer(t *testing.T) {
 	svc := testService(t, 0)
-	other, err := NewTokenService(context.Background(), testRepo(t), "https://evil.local", 0)
+	other, err := NewTokenService(context.Background(), testRepo(t), sharedSealer(), "https://evil.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +265,7 @@ func jwksKIDs(t *testing.T, svc *TokenService) map[string]bool {
 func TestStageIsIdempotent(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
-	svc, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	svc, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +313,7 @@ func TestStageIsIdempotent(t *testing.T) {
 func TestRotationLifecycle(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
-	svc, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	svc, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,6 +335,7 @@ func TestRotationLifecycle(t *testing.T) {
 		name            string
 		now             time.Time
 		wantPromoted    string
+		wantPrevious    string
 		wantRetired     []string
 		wantStatuses    map[string]string
 		wantOldVerifies bool
@@ -334,6 +352,7 @@ func TestRotationLifecycle(t *testing.T) {
 			name:            "two intervals after staging promote the staged key",
 			now:             base.Add(2*KeyReloadInterval + time.Second),
 			wantPromoted:    staged.KID,
+			wantPrevious:    oldKID,
 			wantStatuses:    map[string]string{oldKID: store.KeyRetiring, staged.KID: store.KeyActive},
 			wantOldVerifies: true, wantMintKID: staged.KID, wantJWKS: []string{oldKID, staged.KID},
 		},
@@ -371,6 +390,9 @@ func TestRotationLifecycle(t *testing.T) {
 			}
 			if got.Promoted != st.wantPromoted {
 				t.Errorf("promoted = %q, want %q", got.Promoted, st.wantPromoted)
+			}
+			if got.Previous != st.wantPrevious {
+				t.Errorf("previous = %q, want %q", got.Previous, st.wantPrevious)
 			}
 			if len(got.Retired) != len(st.wantRetired) || (len(got.Retired) == 1 && got.Retired[0] != st.wantRetired[0]) {
 				t.Errorf("retired = %v, want %v", got.Retired, st.wantRetired)
@@ -411,7 +433,7 @@ func TestRotationLifecycle(t *testing.T) {
 
 	// A fresh service over the same store agrees with the walk: it signs with
 	// the promoted key and refuses the retired one.
-	svc2, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	svc2, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,11 +458,11 @@ func TestRotationLifecycle(t *testing.T) {
 func TestReloadPicksUpPeerStaging(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
-	peer, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	peer, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lagging, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	lagging, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +504,7 @@ func TestBootWithOnlyStagedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	svc, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatalf("NewTokenService: %v", err)
 	}
@@ -517,7 +539,7 @@ func TestBootWithOnlyStagedKey(t *testing.T) {
 func TestJWKSExposesOnlyPublicMaterial(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
-	svc, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	svc, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +1008,7 @@ var idTokenExampleCases = []idTokenExampleCase{
 // returns its file bytes.
 func buildIDTokenExample(t *testing.T, c idTokenExampleCase) []byte {
 	t.Helper()
-	priv, err := importPrivate(exampleKeyRecord(exampleStrazaSeed))
+	priv, err := importPrivate(exampleGrantKID, testProofKey(exampleStrazaSeed))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1003,7 +1025,7 @@ func buildIDTokenExample(t *testing.T, c idTokenExampleCase) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, err := importPublic(exampleKeyRecord(exampleStrazaSeed))
+	pub, err := importPublic(exampleGrantKID, testProofKey(exampleStrazaSeed).Public().(ed25519.PublicKey))
 	if err != nil {
 		t.Fatal(err)
 	}

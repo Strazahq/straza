@@ -2,7 +2,7 @@
 title: strazactl policy validate
 description: Validate PolicySet YAML files locally against the v1beta1 spec
 pagetype: reference
-weight: 73
+weight: 67
 draft: false
 sources:
   - cmd/strazactl

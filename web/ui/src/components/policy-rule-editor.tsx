@@ -1,17 +1,18 @@
 import * as React from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HelpTip } from "@/components/help-tip";
 import { PolicyMatching } from "@/components/policy-matching";
+import { Segmented } from "@/components/segmented";
 import { CAPS, HINT } from "@/components/wizard/parts";
 import type { EventSupport, RoleRow } from "@/lib/api";
 import { type Bucket, type Doc, HOLD_DEFAULT, type RuleView, setApprove, setPosture, setReason } from "@/lib/policy-model";
 import {
   BUCKET_WORD, CANCEL, HOW, HOW_HELP, HOW_HOLD, HOW_HOLD_LINE, HOW_TICKET, HOW_TICKET_END, HOW_TICKET_LINE, HOW_TICKET_MID,
-  NO_APPROVER_ROLE, REASON, REASON_HINT, REASON_STALE, REASON_UNUSED, REMOVE, REMOVE_RULE, REMOVE_RULE_BODY, UNITS, UNSET_SPAN, W1,
+  NO_APPROVER_ROLE, REASON, REASON_HINT, REASON_HINT_DENY, REASON_STALE, REASON_UNUSED, REMOVE, REMOVE_RULE, REMOVE_RULE_BODY, UNITS, UNSET_SPAN, W1,
   WHAT_HAPPENS, WHO_BOTH, WHO_DECIDES, WHO_HELP, WHO_SPONSOR, WHO_TEAM, WHO_TEAM_LINE, allowRemoves, appliesToAll,
   consequenceWords, removeRuleTitle, unitWord,
 } from "@/lib/policy-words";
@@ -37,7 +38,9 @@ export type RuleEditorProps = {
   // for the unpublished bar.
   onEdit: (touched: string, fn: (doc: Doc) => void) => void;
   // onRemove drops the rule from the page; absent on a rule that is not
-  // on the page yet, so the sheet's Cancel is its only way out.
+  // on the page yet, so the sheet's Cancel is its only way out. Such a rule
+  // draws no Remove rule and opens with Matching open, where its calls are
+  // given.
   onRemove?: (id: string) => void;
   // onSplit moves one call the rule names into a rule of its own. The
   // matching fold offers the link only where the page passes it.
@@ -56,8 +59,6 @@ function spanOf(seconds: number): { n: number; unit: Unit } {
 }
 
 const BUCKETS: Bucket[] = ["deny", "hum", "allow"];
-const SEG = "inline-flex h-8 items-center border-r border-border px-3.5 text-[13px] text-text-2 last:border-r-0 hover:bg-accent focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
-const SEG_ON: Record<Bucket, string> = { deny: "bg-accent-bg font-semibold text-danger", hum: "bg-accent-bg font-semibold text-foreground", allow: "bg-accent-bg font-semibold text-ok" };
 // W1 is the warning line under How: a team paged for a window shorter than
 // this expires to a denial more often than it decides.
 const SHORT_HOLD = 120;
@@ -83,7 +84,7 @@ function Choice({ id, value, label, line, children }: { id: string; value: strin
     <div className="flex items-start gap-2.5">
       <RadioGroupItem value={value} id={id} aria-label={label} className="mt-1" />
       <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-dense text-foreground">
           <label htmlFor={id}>{label}</label>
           {children}
         </div>
@@ -169,8 +170,8 @@ function Reason({ rule, unused, stale, onEdit }: { rule: RuleView; unused: boole
       />
       {unused
         ? <span className={HINT} data-reason-unused>{REASON_UNUSED}</span>
-        : <span className={HINT}>{REASON_HINT}</span>}
-      {stale && <span className="text-[13px] leading-relaxed text-warn" data-reason-stale>{REASON_STALE}</span>}
+        : <span className={HINT}>{rule.bucket === "deny" ? REASON_HINT_DENY : REASON_HINT}</span>}
+      {stale && <span className="text-caption leading-relaxed text-warn" data-reason-stale>{REASON_STALE}</span>}
     </div>
   );
 }
@@ -224,17 +225,11 @@ export function RuleEditor({ rule, events, roles, onEdit, onRemove, onSplit }: R
     <div className="flex flex-col gap-3.5" data-rule-editor={rule.id}>
       <div className="flex flex-col gap-1.5">
         <Head label={WHAT_HAPPENS} />
-        <div role="group" aria-label={WHAT_HAPPENS} className="inline-flex w-fit overflow-hidden rounded-md border border-border" data-posture={rule.bucket}>
-          {BUCKETS.map((b) => (
-            <button key={b} type="button" aria-pressed={rule.bucket === b} className={cn(SEG, rule.bucket === b && SEG_ON[b])} onClick={() => pick(b)}>
-              {BUCKET_WORD[b]}
-            </button>
-          ))}
-        </div>
-        <span className="text-sm text-text-2" data-consequence>{consequenceWords(rule.posture)}</span>
+        <Segmented label={WHAT_HAPPENS} value={rule.bucket} onChange={pick} options={BUCKETS.map((b) => ({ value: b, label: BUCKET_WORD[b] }))} data-posture={rule.bucket} />
+        <span className="text-dense text-text-2" data-consequence>{consequenceWords(rule.posture)}</span>
         {names > 1 && <span className={HINT} data-applies-all>{appliesToAll(names)}</span>}
         {droppedDenial && rule.bucket === "allow" && (
-          <span className="text-[13px] leading-relaxed text-warn" data-allow-removes>{allowRemoves(names || 1)}</span>
+          <span className="text-caption leading-relaxed text-warn" data-allow-removes>{allowRemoves(names || 1)}</span>
         )}
       </div>
 
@@ -267,12 +262,12 @@ export function RuleEditor({ rule, events, roles, onEdit, onRemove, onSplit }: R
             </Choice>
             <Choice id={"how-ticket-" + rule.id} value="ticket" label={HOW_TICKET} line={HOW_TICKET_LINE}>
               <Duration label={HOW_TICKET} seconds={rule.ticketTTLSeconds} on={rule.posture === "ticket"} onChange={(s) => edit((doc) => setApprove(doc, rule.id, { ticketTTLSeconds: s }))} />
-              <span className="text-sm text-foreground">{HOW_TICKET_MID}</span>
+              <span className="text-dense text-foreground">{HOW_TICKET_MID}</span>
               <Duration label={HOW_TICKET_END} seconds={rule.grantTTLSeconds} on={rule.posture === "ticket"} onChange={(s) => edit((doc) => setApprove(doc, rule.id, { grantTTLSeconds: s }))} />
-              <span className="text-sm text-foreground">{HOW_TICKET_END}</span>
+              <span className="text-dense text-foreground">{HOW_TICKET_END}</span>
             </Choice>
           </RadioGroup>
-          {short && <p className="max-w-[80ch] text-[13px] leading-relaxed text-warn" data-w1>{W1(holders, rule.timeoutSeconds)}</p>}
+          {short && <p className="max-w-[80ch] text-caption leading-relaxed text-warn" data-w1>{W1(holders, rule.timeoutSeconds)}</p>}
         </div>
       )}
 
@@ -283,24 +278,28 @@ export function RuleEditor({ rule, events, roles, onEdit, onRemove, onSplit }: R
         onEdit={onEdit}
       />
 
-      <PolicyMatching rule={rule} events={events} onEdit={onEdit} onSplit={onSplit} />
+      <PolicyMatching rule={rule} events={events} onEdit={onEdit} onSplit={onSplit} startOpen={!onRemove} />
 
-      <div className="flex border-t border-border pt-3">
-        <Button variant="outline" className="border-danger/40 text-danger hover:bg-danger-bg hover:text-danger" onClick={() => setAsk(true)}>{REMOVE_RULE}</Button>
-      </div>
+      {onRemove && (
+        <>
+          <div className="flex border-t border-border pt-3">
+            <Button variant="outline" className="border-danger/40 text-danger hover:bg-danger-bg hover:text-danger" onClick={() => setAsk(true)}>{REMOVE_RULE}</Button>
+          </div>
 
-      <AlertDialog open={ask} onOpenChange={setAsk}>
-        <AlertDialogContent className="sm:max-w-[560px]">
-          <AlertDialogHeader>
-            <AlertDialogTitle>{removeRuleTitle(rule.id)}</AlertDialogTitle>
-            <AlertDialogDescription>{REMOVE_RULE_BODY}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{CANCEL}</AlertDialogCancel>
-            <AlertDialogAction className="bg-danger text-white hover:bg-danger/90" onClick={() => onRemove && onRemove(rule.id)}>{REMOVE}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          <AlertDialog open={ask} onOpenChange={setAsk}>
+            <AlertDialogContent className="sm:max-w-[560px]">
+              <AlertDialogHeader>
+                <AlertDialogTitle>{removeRuleTitle(rule.id)}</AlertDialogTitle>
+                <AlertDialogDescription>{REMOVE_RULE_BODY}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{CANCEL}</AlertDialogCancel>
+                <AlertDialogAction className={DANGER_FILL} onClick={() => onRemove(rule.id)}>{REMOVE}</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
     </div>
   );
 }

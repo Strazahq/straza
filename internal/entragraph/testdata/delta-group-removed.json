@@ -1,0 +1,12 @@
+{
+ "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#groups(members)",
+ "@odata.deltaLink": "https://graph.microsoft.com/v1.0/groups/delta?$deltatoken=TEST-DELTATOKEN-2",
+ "value": [
+  {
+   "id": "9a9a9a9a-1111-4111-8111-111111111111",
+   "@removed": {
+    "reason": "changed"
+   }
+  }
+ ]
+}

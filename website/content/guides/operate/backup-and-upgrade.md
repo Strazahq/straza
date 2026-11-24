@@ -36,7 +36,7 @@ Five things make up a deployment, and each fails differently when it is missing 
 | What | Where it lives | What breaks without it |
 |---|---|---|
 | the store | `straza.db` in the data directory, or your Postgres database | everything: identities, policy, sessions, signing keys and the audit chain are gone |
-| the key-encryption key | `secret.key` in the data directory, or `secrets.kekFile` | stored credentials cannot be opened and the MCP servers that use them fail closed |
+| the key-encryption key | `secret.key` in the data directory, or `secrets.kekFile` | strazad refuses to start, because it cannot open its signing keys, and no stored credential can be opened |
 | the approver TLS pair | `approver-tls/` in the data directory, or your own pair | the Straza approver app's pin no longer matches and every approver enrolls again |
 | the WebPush signing key | wherever `approval.push.webpush.vapidKeyFile` points: the data volume in the repository compose file, a Secret on the chart | every browser push subscription is bound to the old key and stops receiving |
 | the config file | wherever you put `straza.yaml` | the server boots with defaults, or refuses to boot when it named a missing file |
@@ -86,7 +86,7 @@ key.pem
 
 {{< see >}}`secret.key`, `straza.db` and `approver-tls` with both of its files in the copy.{{< /see >}}
 
-The copy holds the store, the key-encryption key and the approver pair, and its `nats` directory is the embedded event bus's storage, which comes along with the rest. The WebPush key is in the copy only when `approval.push.webpush.vapidKeyFile` points into the data directory. Start the server again with `cd /srv/straza && strazad serve`.
+The copy holds the store, the key-encryption key and the approver pair, and its `nats` directory is the embedded event bus's storage, which comes along with the rest. A copy that holds the store and the key-encryption key together opens every key in the store, so guard it as you guard the server. The WebPush key is in the copy only when `approval.push.webpush.vapidKeyFile` points into the data directory. Start the server again with `cd /srv/straza && strazad serve`.
 
 ### Or back up an enterprise deployment
 
@@ -96,7 +96,7 @@ Dump the Postgres database with the tooling you already run for it, and back up 
 - On Kubernetes all three are Secrets you created, `secrets.kekExistingSecret`, `approverTLS.existingSecret` and `webpush.existingSecret`, so a backup of the namespace's Secrets covers them.
 - With the repository compose file, the key-encryption key and the WebPush key sit in the data volume, so back up the volume as well.
 
-The signing keys for sessions and snapshots need no separate step, because they are rows in the database.
+The signing keys for sessions and snapshots are rows in the database, sealed under the key-encryption key, so a dump opens them only together with that key. Keep the copy of the key somewhere other than the database dumps.
 
 
 If you have no database backup tooling yet, `pg_dump` takes a consistent copy while strazad keeps serving. Point the Postgres client tools at your server with the usual libpq variables, such as `PGHOST` and `PGUSER`, as the role that owns the database. The example names the database `straza`, as the repository compose file does.
@@ -115,6 +115,8 @@ The custom format is the one `pg_restore` reads in [Or restore an enterprise dat
 
 
 An upgrade is a restart on the new binary. At boot, before the line `store ready`, the server applies every embedded migration the store has not seen, so an upgrade needs no separate migration step. Take a backup first.
+
+The upgrade from 2.2.0 to 2.3.0 has its own steps in [Upgrade from 2.2.0 to 2.3.0](#upgrade-from-220-to-230), because that release migrates the database, seals the signing keys and needs every replica stopped first.
 
 To upgrade from 2.1.0 to 2.2.0, follow [Upgrade from 2.1.0 to 2.2.0](#upgrade-from-210-to-220), because that release migrates the database and the order of the steps matters.
 
@@ -151,7 +153,7 @@ This release's migrations start at version 37. Only a build from before the firs
 {{< /fails >}}
 
 
-In a container, remove the container and start it again from the new image with the same volume and the same arguments, as [Docker]({{< relref "guides/operate/docker.md" >}}) shows. On Kubernetes, `helm upgrade` with the new `image.tag` rolls the pods, as [Kubernetes with Helm]({{< relref "guides/operate/kubernetes-with-helm.md" >}}) shows. In the enterprise shape a rolling restart costs each session one 401 and no new login, as [The enterprise shape]({{< relref "guides/operate/enterprise-shape.md" >}}) explains.
+In a container, remove the container and start it again from the new image with the same volume and the same arguments, as [Docker]({{< relref "guides/operate/docker.md" >}}) shows. On Kubernetes, `helm upgrade` with the new `image.tag` rolls the pods, as [Kubernetes with Helm]({{< relref "guides/operate/kubernetes-with-helm.md" >}}) shows. In the enterprise shape a rolling restart costs each session one 401 and no new login, as [The enterprise shape]({{< relref "guides/operate/enterprise-shape.md" >}}) explains. The upgrade from 2.2.0 to 2.3.0 is the exception, because every replica stops before the first 2.3.0 replica starts.
 
 ## Verify
 
@@ -174,6 +176,24 @@ strazactl audit verify
 
 
 In the console, the foot of the sidebar names the profile and the strazad build, and its tooltip adds the commit. The Overview card re-hashes the 25 newest records in your browser, and the Audit screen re-hashes every record it has loaded, starting with the newest 200. Only `strazactl audit verify` checks the whole chain.
+
+## Upgrade from 2.2.0 to 2.3.0 {#upgrade-from-220-to-230 .nostep}
+
+
+Straza 2.3.0 is a minor release that migrates the database and seals the session and snapshot signing keys under the key-encryption key, `secret.key`. Do the steps in this order.
+
+1. Take a backup, as [Back up a standalone server](#back-up-a-standalone-server) or [Or back up an enterprise deployment](#or-back-up-an-enterprise-deployment) shows. Migrations 43 to 47 run at the first start of strazad 2.3.0.
+2. Check that every replica mounts the same `secret.key`. On Kubernetes the chart refuses to render the enterprise profile without `secrets.kekExistingSecret`, as [Kubernetes with Helm]({{< relref "guides/operate/kubernetes-with-helm.md" >}}) shows.
+3. Compare the rate at which your agents call each remote MCP server with two new limits. A server whose manifest sets no `straza.limits.rps` is now limited to 20 calls a second for each session, and all sessions of one user together get five times a server's rate, which is 100 calls a second with the default. Set a higher `straza.limits.rps` for a server that needs more, as [Runtimes, limits and timeouts]({{< relref "guides/serve-mcp-apps/add-a-server.md#runtimes-limits-and-timeouts" >}}) shows. A value of 0 no longer means no limit for a remote server.
+4. Test each MCP client of your own that calls the gateway. A request whose `MCP-Protocol-Version` header names a version other than `2025-06-18`, `2025-03-26` or `2024-11-05` now gets 400, and a request that a web page at another address than Straza's sends gets 403. A client that keeps the version the gateway answers at `initialize` is not affected.
+5. Remove `strazactl packs` and calls to the routes under `/v1/admin/packs` from your scripts. Knowledge packs are gone, and those routes answer 410.
+6. Stop every strazad replica before the first 2.3.0 replica starts. A 2.2.0 replica cannot read a sealed signing key and crashes at its next key reload, at most 30 seconds after the first 2.3.0 start. On Kubernetes that means scaling the Deployment to zero before `helm upgrade`, because a rolling update starts new pods beside old ones, and [Kubernetes with Helm]({{< relref "guides/operate/kubernetes-with-helm.md#upgrade-and-roll-back" >}}) has the commands. With `autoscaling.enabled`, `helm upgrade` leaves the Deployment at zero and the autoscaler does not scale it up from there, so scale it back to `autoscaling.minReplicas` yourself.
+7. Start strazad 2.3.0. Its first start seals both signing keys where they sit. They stay the same keys, so no session ends and no workstation enrolls again.
+8. Upgrade strazactl after strazad.
+
+From this release on strazad does not start without the `secret.key` its database was sealed with, so keep a copy of that file, and keep it somewhere other than the database backups. A backup taken before this upgrade still holds both signing keys unsealed, and so does a file-level or point-in-time backup that spans the upgrade. Delete them once you no longer need the way back, or guard them as you guard a key. `strazactl signing-keys rotate session` replaces the session key, and the snapshot key has no rotation.
+
+To go back to 2.2.0, move the database down to migration 42 with the 2.3.0 binary first, one `strazad migrate --to` run per migration, as [Roll back](#roll-back) shows. The first run, to migration 46, opens the signing keys again for the older server and needs `secret.key` in place.
 
 ## Upgrade from 2.1.0 to 2.2.0 {#upgrade-from-210-to-220 .nostep}
 
@@ -219,7 +239,7 @@ Skip this step when people sign in at strazad's built-in issuer, which needs not
 The browser runs the sign-in only on a page served over HTTPS or opened at 127.0.0.1. Serve the console over HTTPS before the upgrade if people open it at another address over plain HTTP.
 
 {{< fails >}}
-`This page is served over plain HTTP from a network address, so the browser will not run the sign-in. Serve Straza over HTTPS, or open it at 127.0.0.1 on the server.`
+`This page is served over plain HTTP from a network address, so the browser will not run the sign-in. Serve Straza over HTTPS, or open it at 127.0.0.1 on the strazad host.`
 : The console or the self-service page was opened over plain HTTP at an address other than 127.0.0.1. Serve strazad over HTTPS, as [TLS and exposure]({{< relref "guides/operate/tls-and-exposure.md" >}}) shows.
 {{< /fails >}}
 
@@ -282,7 +302,7 @@ A 1.1.x client kept an AI agent's key in a file in the agent's own home, or its 
 ### Move off what 2.0.0 removed
 
 
-Approver phones and browsers that people enrolled before the upgrade keep working. From 2.0.0 a person enrolls a new phone or browser only on the self-service page, signed in as themselves, with **Add a phone**, which needs the role `straza-enroll-mobile`, or **Enable this browser**, which needs `straza-enroll-browser`. Assign those roles in your identity manager, or under Roles in the console when no identity manager feeds Straza. The admin route that minted an enroll code for another person refuses every caller now, and a code it minted before the upgrade no longer enrolls anything. [Phone]({{< relref "guides/approve/phone.md" >}}) walks the enrollment.
+Approver phones and browsers that people enrolled before the upgrade keep working. From 2.0.0 a person enrolls a new phone or browser only on the self-service page, signed in as themselves, with **Add a phone**, which needs `straza-enroll-mobile`, or **Set up this browser**, which needs `straza-enroll-browser`. Assign those roles in your identity manager, or under Roles in the console when no identity manager feeds Straza. The admin route that minted an enroll code for another person refuses every caller now, and a code it minted before the upgrade no longer enrolls anything. [Phone]({{< relref "guides/approve/phone.md" >}}) walks the enrollment.
 
 
 `straza daemon` and `straza drain` are gone, because `straza service` does their work. Remove every systemd unit, launchd job, scheduled task or script that runs either of them. `straza connect --allow-agents` is gone too. A person lets their agents use a connection with the switch **My agents may use this** on the Credentials tab of the self-service page.
@@ -314,10 +334,15 @@ A rollback has two ways:
 
 An older strazad refuses to start on a database a newer one migrated, and only the newer binary carries the step that undoes its own migration. The command therefore runs before the older binary starts. It cannot see other replicas, so stop every replica before you run it. Give it the same `--config`, `--profile`, `--data-dir` and `--store-dsn` that `strazad serve` runs with, from the same directory.
 
-The target is the newest migration of the release you return to. This release carries migrations 37 to 42, and each run of the command moves the database down one of them. Each step gives up what its migration added:
+The target is the newest migration of the release you return to. This release carries migrations 37 to 47, and each run of the command moves the database down one of them. Each step gives up what its migration added:
 
 | Step | What the older server no longer has |
 |---|---|
+| 47 to 46 | The origin `admin-disable` of the revocation a disable in Straza writes. Each becomes `admin` again, so a user who is disabled stays disabled, and the older server's enable lifts every revocation of the user, a lock included. The seal on the session and snapshot signing keys goes too: the command opens each with `secret.key` and stores it the way the older server reads it, so run this step with that file in place. |
+| 46 to 45 | What Microsoft Entra ID says about each agent it owns: whether its agent identity and its agent user are enabled, and the sponsors Entra lists while the agent has no single sponsor. The agents stay, and the sync stores that state again when it next reads them after the next upgrade. |
+| 45 to 44 | The origin `entra` of every person and agent that Microsoft Entra ID owns. Each such person becomes a local user and keeps the Entra object ID as its `externalId`, and each such agent keeps its Entra agent ID. After the next upgrade the sync takes each of them over again when it next reads them. |
+| 44 to 43 | Every role assignment that a role group in Entra gave, the link of each role to its group, and the leases that keep a background job on one replica. The members stay in the groups in Entra, and the sync gives them their roles again after the next upgrade. |
+| 43 to 42 | The machine and the folder recorded on each session. |
 | 42 to 41 | Every AI agent's Entra agent identity. Set each one again after the next upgrade. |
 | 41 to 40 | The commit of the client build recorded on each session. |
 | 40 to 39 | Every device enrolled with a key. The step writes a device revocation for each one and deletes its row, so each such machine installs the straza client of the release you return to and enrolls again. A device enrolled without a key keeps its row. |
@@ -325,11 +350,14 @@ The target is the newest migration of the release you return to. This release ca
 | 38 to 37 | The object list of every server and the credential each listing used. Every other credential stays. |
 
 {{< fails >}}
-`this strazad has no migration 36. Its migrations run from 37 to 42, so name one of those`
+`this strazad has no migration 36. Its migrations run from 37 to 47, so name one of those`
 : This build cannot move the database below migration 37. For a release older than that, restore the backup you took before the upgrade.
+
+`but its signing keys are still sealed, and a strazad for migration 46 or below cannot read them`
+: The schema moved to migration 46, and the command found no `secret.key` or one that does not open the keys. Put the `secret.key` of this database back where `secrets.kekFile` or the data directory points and run the same command again. Start no older strazad before that.
 {{< /fails >}}
 
-The command refuses a target more than one step down before anything runs and names the step to run first. Run it once for each step, with `TARGET` set to 41, then 40, and so on down to the newest migration of the release you return to. On the standalone host, with the target in the shell variable `TARGET`:
+The command refuses a target more than one step down before anything runs and names the step to run first. Run it once for each step, with `TARGET` set to 46, then 45, and so on down to the newest migration of the release you return to, which is 42 for 2.2.0. On the standalone host, with the target in the shell variable `TARGET`:
 
 {{< command terminal="Terminal" purpose="on the strazad host" >}}
 ```sh
@@ -394,7 +422,7 @@ key.pem
 {{< see >}}`secret.key`, `straza.db` and `approver-tls` with both of its files.{{< /see >}}
 
 
-Look for `secret.key` before you go on. When it is missing, strazad creates a new key without a warning. Then it refuses to start if the store holds a client assertion key. Otherwise it starts, and every credential the store sealed under the old key stops opening. When the WebPush key lives outside the data directory, put it back from its own backup now.
+Look for `secret.key` before you go on. When it is missing, strazad refuses to start and makes no new key, because the store holds signing keys that only that file opens. When the WebPush key lives outside the data directory, put it back from its own backup now.
 
 3. Start the server.
 
@@ -420,8 +448,11 @@ The output is trimmed to the four lines that show the restore.
 `approver TLS pair minted`
 : The backup's approver pair did not come back, so the server made a new one, and every phone would have to enroll again. Stop the server, replace `/var/lib/straza/approver-tls` with the folder from the backup, and start it again. The server loads a pair it finds and never replaces it, so the phones that pinned the old pair reach the server again.
 
-`does not open: it was sealed under another KEK or changed in the database. Every replica must mount the same secrets.kekFile`
-: strazad made a new `secret.key`, because the one from the backup did not come back. Its refusal line starts with `strazad: authn: client assertion key` and the key's id. strazad has already exited. Copy `secret.key` from the backup over the new one, then start it again. This refusal comes only when the store holds a client assertion key. Without one the server starts, and its sealed credentials fail when a server uses them.
+`is missing, and this database already holds signing keys, so strazad makes no new key and does not start`
+: The `secret.key` from the backup did not come back. strazad has already exited and created nothing. Copy `secret.key` from the backup into the data directory, then start it again.
+
+`does not open: it was sealed under another secret.key or changed in the database`
+: A `secret.key` is in place, and it is not the one this database was sealed with. The refusal line names the signing key that does not open, and strazad has changed nothing. Copy `secret.key` from the backup over it, then start strazad again.
 {{< /fails >}}
 
 4. In a second terminal, run the checks of [Verify](#verify).
@@ -576,7 +607,7 @@ To retire a machine, take three steps in order:
 
 1. Remove the managed hook wiring while the package's binary is still there, with `sudo straza uninstall --managed claude-code`, and name each harness the managed install wired.
 2. Purge or erase the package, with `sudo apt purge straza` or `sudo dnf remove straza`.
-3. Revoke each person's device of that machine, on the person's sheet in the console or with `strazactl devices list alice` and `strazactl devices revoke alice DEVICE-ID`, as [Cut one machine]({{< relref "guides/operate/kill-switch-runbook.md#cut-one-machine" >}}) shows. For an AI agent that ran there, run `strazactl users nhi-key unset build-bot`.
+3. Revoke each person's device of that machine, on the **Devices and keys** tab of the person's page in the console or with `strazactl devices list alice` and `strazactl devices revoke alice DEVICE-ID`, as [Cut one machine]({{< relref "guides/operate/kill-switch-runbook.md#cut-one-machine" >}}) shows. For an AI agent that ran there, run `strazactl users nhi-key unset build-bot`.
 
 Revoking closes the time in which a copy of the machine's keys, such as one in a disk image, could still start a session.
 

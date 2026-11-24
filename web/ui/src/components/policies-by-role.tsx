@@ -1,10 +1,14 @@
 import { HEAD } from "@/components/data-table";
 import { HelpTip } from "@/components/help-tip";
-import { RecChip } from "@/components/policies-table";
+import { Chip, Tag } from "@/components/chip";
+import { KIND_ICON, KindTile } from "@/components/kind-icon";
+import { RecChip } from "@/components/policy-facts";
+import { MARKS, markOf } from "@/components/role-kind";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { BindingRow, PolicySetRow, RoleRow } from "@/lib/api";
+import type { Kind as IconKind } from "@/lib/chip-words";
 import { type Bucket, type Postures, NO_POSTURES, addPostures, posturesOf } from "@/lib/policy-model";
-import { CATEGORY, DOOR_APPROVE, DOOR_APPROVE_EVERYONE_TITLE, DOOR_DENY, DOOR_DENY_EVERYONE_TITLE, EVERYONE, EVERYONE_LINE, FLOOR_LINE, NO_ALLOW_EVERYONE, NO_ALLOW_ROLE, NO_RECORDING, NO_ROLE_POLICY, ROLE_COLUMN, ROLE_FOOT, ROLE_HELP, allowWords, denyWords, doorApproveTitle, doorDenyTitle, draftLine, humSplit, liveLine, reachLine, recWord, setChipTitle } from "@/lib/policy-words";
+import { CATEGORY, DOOR_APPROVE, DOOR_APPROVE_EVERYONE_TITLE, DOOR_DENY, DOOR_DENY_EVERYONE_TITLE, DRAFT, EDITED, EVERYONE, EVERYONE_LINE, FLOOR_LINE, NO_ALLOW, NO_RECORDING, NO_ROLE_POLICY, ROLE_COLUMN, ROLE_HELP, allowWords, denyWords, doorApproveTitle, doorDenyTitle, draftLine, humSplit, liveLine, reachLine, recWord, setChipTitle } from "@/lib/policy-words";
 import { put } from "@/lib/handoff";
 import { navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
@@ -29,9 +33,9 @@ export function openNewPolicy(door: PolicyDoor) {
   navigate("policies", ["new"]);
 }
 
-const WIDTHS: Record<string, string> = { role: "22%", policies: "28%", deny: "9%", hum: "14%", allow: "9%", recording: "18%" };
+const WIDTHS: Record<string, string> = { role: "25%", policies: "25%", deny: "9%", hum: "14%", allow: "9%", recording: "18%" };
 
-const TONE: Record<Bucket, string> = { deny: "text-danger", hum: "text-foreground", allow: "text-ok" };
+const TONE: Record<Bucket, string> = { deny: "text-danger", hum: "text-warn", allow: "text-ok" };
 
 const isLive = (row: PolicySetRow) => row.status === "active";
 
@@ -43,6 +47,8 @@ type Line = {
   mono: boolean;
   line: string;
   title?: string;
+  // kind is the icon of the role's kind, for a row that names a role.
+  kind?: IconKind;
   // role is the name a door prefills; null is Everyone.
   role: string | null;
   doors: boolean;
@@ -62,21 +68,25 @@ function Head({ id, right, help }: { id: keyof typeof ROLE_COLUMN; right?: boole
   );
 }
 
-// SetChip names one policy that governs the row, in its state: a policy
-// that is off is muted and italic, a live policy a draft edits is amber, a
-// live policy is green. A click opens the policy.
+// SetChip names one policy that governs the row: a tag with the policy's
+// icon, and after it the chip the By policy view draws for a policy that
+// is off or that a draft edits. A live policy carries no chip. A click
+// opens the policy. A name wider than the cell is cut short inside the tag.
 function SetChip({ row, onOpen }: { row: PolicySetRow; onOpen: () => void }) {
-  const tone = !isLive(row) ? "italic text-muted-foreground" : row.drift ? "text-warn" : "text-ok";
+  const live = isLive(row);
   return (
     <button
       type="button"
       data-set={row.name}
       aria-label={"Open " + row.name}
-      title={setChipTitle(row.status, row.drift)}
-      className={cn("mr-1 mb-0.5 inline-block rounded-md border border-border bg-background px-1.5 py-px font-mono text-[13px] hover:border-link", tone)}
+      title={setChipTitle(row.name, row.status, row.drift)}
+      className="group mr-1 mb-0.5 inline-flex max-w-full items-center gap-1 rounded-md"
       onClick={onOpen}
     >
-      {row.name}
+      <Tag icon={KIND_ICON["policy-set"]} className="min-w-0 group-hover:border-link">
+        <span className="min-w-0 truncate">{row.name}</span>
+      </Tag>
+      {!live ? <Chip tone="plain" data-policy-status={DRAFT}>{DRAFT}</Chip> : row.drift ? <Chip tone="warn" data-policy-status={EDITED}>{EDITED}</Chip> : null}
     </button>
   );
 }
@@ -89,7 +99,7 @@ function Door({ label, title, onOpen }: { label: string; title: string; onOpen: 
       type="button"
       title={title}
       data-door={label}
-      className="rounded-md border border-dashed border-border px-1.5 py-px text-[13px] text-link hover:border-link hover:text-foreground"
+      className="rounded-md border border-dashed border-border px-1.5 py-px text-caption text-link hover:border-link hover:text-foreground"
       onClick={onOpen}
     >
       {label}
@@ -124,6 +134,7 @@ export function PoliciesByRole({ rows, roles, bindings, lane, onOpenPolicy }: Pr
       mono: true,
       line: r.description || "",
       title: bindings ? reachLine(servers(r.name)) : undefined,
+      kind: MARKS[markOf(r)],
       role: r.name,
       doors: true,
       none: NO_ROLE_POLICY,
@@ -164,7 +175,7 @@ export function PoliciesByRole({ rows, roles, bindings, lane, onOpenPolicy }: Pr
       const title = line.role ? (deny ? doorDenyTitle(line.role) : doorApproveTitle(line.role)) : deny ? DOOR_DENY_EVERYONE_TITLE : DOOR_APPROVE_EVERYONE_TITLE;
       return <Door label={deny ? DOOR_DENY : DOOR_APPROVE} title={title} onOpen={() => openNewPolicy({ role: line.role, intent: deny ? "deny" : "approve", lane: lane || undefined })} />;
     }
-    const title = n === 0 && bucket === "allow" && line.doors ? (line.role ? NO_ALLOW_ROLE : NO_ALLOW_EVERYONE) : countTitleOf(line, bucket);
+    const title = n === 0 && bucket === "allow" && line.doors ? NO_ALLOW : countTitleOf(line, bucket);
     return (
       <span className={cn("font-mono tabular-nums", n ? TONE[bucket] : "text-muted-foreground")} title={title || undefined} data-count={bucket}>{n}</span>
     );
@@ -173,7 +184,9 @@ export function PoliciesByRole({ rows, roles, bindings, lane, onOpenPolicy }: Pr
   return (
     <div className="flex flex-col gap-2">
       <div className="overflow-x-auto rounded-md border border-border bg-card">
-        <Table className="table-fixed">
+        {/* The floor keeps the doors and the Recording words inside their
+            cells in a narrow window; below it the table scrolls in its box. */}
+        <Table className="min-w-[1000px] table-fixed" data-by-role-table>
           <colgroup>
             {["role", "policies", "deny", "hum", "allow", "recording"].map((id) => <col key={id} style={{ width: WIDTHS[id] }} />)}
           </colgroup>
@@ -191,14 +204,19 @@ export function PoliciesByRole({ rows, roles, bindings, lane, onOpenPolicy }: Pr
             {lines.map((line) => {
               const rec = line.sets.filter(isLive).find((s) => s.summary && s.summary.capture);
               return (
-                <TableRow key={line.key} data-role={line.name} className="text-sm">
+                <TableRow key={line.key} data-role={line.name} className="text-dense">
                   <TableCell title={line.title}>
-                    <div className={cn("truncate text-foreground", line.mono ? "font-mono font-semibold" : "font-semibold")}>{line.name}</div>
-                    {line.line && <div className="truncate text-[13px] text-muted-foreground" title={line.line}>{line.line}</div>}
+                    <div className="flex min-w-0 items-center gap-2">
+                      {line.kind && <KindTile kind={line.kind} size="sm" />}
+                      <div className="min-w-0">
+                        <div className={cn("truncate text-foreground", line.mono ? "font-mono font-semibold" : "font-semibold")} title={line.name} data-role-name>{line.name}</div>
+                        {line.line && <div className="truncate text-caption text-muted-foreground" title={line.line}>{line.line}</div>}
+                      </div>
+                    </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-normal" data-policies-cell>
                     {line.sets.length === 0
-                      ? <span className="text-[13px] text-muted-foreground">{line.none}</span>
+                      ? <span className="text-caption text-muted-foreground">{line.none}</span>
                       : line.sets.map((s) => <SetChip key={s.name} row={s} onOpen={() => onOpenPolicy(s.name)} />)}
                   </TableCell>
                   <TableCell className="text-right">{countCell(line, "deny")}</TableCell>
@@ -209,10 +227,10 @@ export function PoliciesByRole({ rows, roles, bindings, lane, onOpenPolicy }: Pr
                       ? (
                         <span className="inline-flex items-center gap-1.5">
                           <RecChip capture={rec.summary.capture} />
-                          <span className="text-[13px] text-muted-foreground">{recWord(rec.summary.capture)}</span>
+                          <span className="text-caption text-muted-foreground">{recWord(rec.summary.capture)}</span>
                         </span>
                       )
-                      : <span className="text-[13px] text-muted-foreground">{NO_RECORDING}</span>}
+                      : <span className="text-caption text-muted-foreground">{NO_RECORDING}</span>}
                   </TableCell>
                 </TableRow>
               );
@@ -220,7 +238,6 @@ export function PoliciesByRole({ rows, roles, bindings, lane, onOpenPolicy }: Pr
           </TableBody>
         </Table>
       </div>
-      <p className="text-[13px] text-muted-foreground">{ROLE_FOOT}</p>
     </div>
   );
 }

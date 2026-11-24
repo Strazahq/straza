@@ -210,7 +210,7 @@ func testAppFaultLog(t *testing.T, log *slog.Logger) (*App, string, *faultStore)
 	app.gateway.notify.SetDelay(0)
 	base := "http://" + app.Addr()
 	app.cfg.Server.PublicURL = base
-	tokens, err := authn.NewTokenService(ctx, app.store.SigningKeys(), base, 0)
+	tokens, err := authn.NewTokenService(ctx, app.store.SigningKeys(), app.kek, base, 0)
 	if err != nil {
 		cancel()
 		t.Fatal(err)

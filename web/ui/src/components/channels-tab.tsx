@@ -5,8 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DataTable, plain } from "@/components/data-table";
 import { FetchError, RefusedError } from "@/components/error-state";
+import { HelpTip } from "@/components/help-tip";
+import { KindTile } from "@/components/kind-icon";
 import { Section } from "@/components/sheet-parts";
-import { WordBadge } from "@/components/users-table";
+import { Chip } from "@/components/chip";
 import { type ApiError, type ChannelRow, type ChannelTestReport, listChannels, testChannel } from "@/lib/api";
 import {
   CHANNELS_FOOT,
@@ -27,9 +29,9 @@ import {
   SENDING,
   SEND_TEST,
   SUBJECT_CHANNELS,
+  TABS,
   TEST_VERB,
   channelStatus,
-  channelsCount,
   reachesPush,
   targetsCount,
   testName,
@@ -45,14 +47,18 @@ import { absTime, relTimeText } from "@/lib/words";
 // a channel has no sheet, because the row already carries everything the
 // server keeps, and the test result lands under the table.
 
-const SMALL = "text-[13px] leading-snug text-muted-foreground";
-const DETAIL = "text-[13px] leading-snug text-text-2";
+const SMALL = "text-caption leading-snug text-muted-foreground";
+const DETAIL = "text-caption leading-snug text-text-2";
 const POLL_MS = 15000;
 const CONSOLE = "console";
 const PUSH = "push";
 // The widths leave the Detail column the rest of a 1280 px page, which
-// would otherwise be a narrow tower of wrapped words.
-const WIDTHS: Record<string, string> = { channel: "96px", status: "118px", reaches: "190px", last: "150px", act: "118px" };
+// would otherwise be a narrow tower of wrapped words. FLOOR keeps about
+// 190 px for it in a narrow window, where the table scrolls inside its box.
+const WIDTHS: Record<string, string> = { channel: "112px", status: "156px", reaches: "190px", last: "150px", act: "118px" };
+const FLOOR = "920px";
+// CHANNELS_TAB is the tab's own label, which names its help icon.
+const CHANNELS_TAB = TABS.find((t) => t.key === "channels")?.label || "";
 const LABELS: Record<string, string> = {
   channel: CHANNEL_COLUMN.channel,
   status: CHANNEL_COLUMN.status,
@@ -124,14 +130,19 @@ export function ChannelsTab({ onSeeDevices }: ChannelsProps) {
     {
       id: "channel",
       header: plain<ChannelRow>(CHANNEL_COLUMN.channel),
-      cell: ({ row }) => <b className="font-semibold text-foreground">{row.original.name}</b>,
+      cell: ({ row }) => (
+        <span className="flex items-center gap-2">
+          <KindTile kind="channel" />
+          <b className="min-w-0 font-semibold text-foreground">{row.original.name}</b>
+        </span>
+      ),
     },
     {
       id: "status",
       header: plain<ChannelRow>(CHANNEL_COLUMN.status),
       cell: ({ row }) => {
         const word = channelStatus(row.original);
-        return <WordBadge word={word} tone={word === NOT_CONFIGURED ? "plain" : "ok"} attr="data-channel-status" />;
+        return <Chip tone={word === NOT_CONFIGURED ? "plain" : "ok"} data-channel-status={word}>{word}</Chip>;
       },
     },
     {
@@ -181,7 +192,7 @@ export function ChannelsTab({ onSeeDevices }: ChannelsProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {state.kind === "loading" && <p className="text-sm text-muted-foreground">{READING_CHANNELS}</p>}
+      {state.kind === "loading" && <p className="text-dense text-muted-foreground">{READING_CHANNELS}</p>}
       {state.kind === "error" && <FetchError subject={SUBJECT_CHANNELS} detail={state.message} />}
       {state.kind === "ready" && (
         <>
@@ -194,14 +205,13 @@ export function ChannelsTab({ onSeeDevices }: ChannelsProps) {
             rowKey={(c) => c.name}
             rowName={(c) => c.name}
             dataAttr="data-channel"
-            count={(shown) => channelsCount(shown)}
             emptyText=""
             widths={WIDTHS}
+            minWidth={FLOOR}
+            filterBar={<HelpTip label={CHANNELS_TAB} text={CHANNELS_FOOT} />}
           />
 
           {result && <TestResult result={result} />}
-
-          <p className={SMALL + " max-w-[90ch]"} data-channels-foot>{CHANNELS_FOOT}</p>
         </>
       )}
     </div>
@@ -236,7 +246,7 @@ function LastDelivery({ channel }: { channel: ChannelRow }) {
   return (
     <span className="flex flex-col items-start gap-0.5">
       <span className="flex items-center gap-1.5">
-        <WordBadge word={last.ok ? DELIVERY_OK : DELIVERY_FAILED} tone={last.ok ? "ok" : "danger"} />
+        <Chip tone={last.ok ? "ok" : "danger"}>{last.ok ? DELIVERY_OK : DELIVERY_FAILED}</Chip>
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="cursor-default text-text-2">{relTimeText(last.at)}</span>
@@ -266,16 +276,16 @@ function TestResult({ result }: { result: Result }) {
     <div className="rounded-md border border-border bg-card px-4 py-3" data-channel-test={result.name}>
       <Section title={testTitle(result.name)}>
         {targets.length === 0 ? (
-          <p className="max-w-[75ch] text-sm text-text-2">{result.name === PUSH ? NO_TARGETS_PUSH : NO_TARGETS}</p>
+          <p className="max-w-[75ch] text-dense text-text-2">{result.name === PUSH ? NO_TARGETS_PUSH : NO_TARGETS}</p>
         ) : (
           <>
-            <p className="text-sm text-text-2">{targetsCount(targets.length)}</p>
+            <p className="text-dense text-text-2">{targetsCount(targets.length)}</p>
             <ul className="flex flex-col gap-1.5">
               {targets.map((t) => (
                 <li key={t.target} className="flex flex-wrap items-baseline gap-1.5">
-                  <WordBadge word={t.ok ? DELIVERED : DELIVERY_FAILED} tone={t.ok ? "ok" : "danger"} />
-                  <span className="font-mono text-[13px] text-text-2">{t.target}</span>
-                  {t.error && <span className="text-[13px] text-danger">{t.error}</span>}
+                  <Chip tone={t.ok ? "ok" : "danger"}>{t.ok ? DELIVERED : DELIVERY_FAILED}</Chip>
+                  <span className="font-mono text-caption text-text-2">{t.target}</span>
+                  {t.error && <span className="text-caption text-danger">{t.error}</span>}
                 </li>
               ))}
             </ul>

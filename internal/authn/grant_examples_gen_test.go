@@ -14,7 +14,6 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 
 	"github.com/strazahq/straza/internal/dpop"
-	"github.com/strazahq/straza/internal/store"
 )
 
 // The grant examples come from fixed seeds and fixed times. Ed25519
@@ -136,14 +135,6 @@ var grantExampleCases = []grantExampleCase{
 		}, reason: "aud is not this server's git base URL"},
 }
 
-// exampleKeyRecord is the signing key record of the given seed under the
-// example kid.
-func exampleKeyRecord(fill byte) store.SigningKey {
-	priv := testProofKey(fill)
-	return store.SigningKey{KID: exampleGrantKID, Purpose: store.KeyPurposeSession, Status: store.KeyActive,
-		PrivateKey: priv.Seed(), PublicKey: priv.Public().(ed25519.PublicKey)}
-}
-
 // buildGrantExample signs one example and returns its file bytes.
 func buildGrantExample(t *testing.T, c grantExampleCase) []byte {
 	t.Helper()
@@ -151,7 +142,7 @@ func buildGrantExample(t *testing.T, c grantExampleCase) []byte {
 	if signer == 0 {
 		signer = exampleStrazaSeed
 	}
-	priv, err := importPrivate(exampleKeyRecord(signer))
+	priv, err := importPrivate(exampleGrantKID, testProofKey(signer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +175,7 @@ func buildGrantExample(t *testing.T, c grantExampleCase) []byte {
 		t.Fatal(err)
 	}
 
-	pub, err := importPublic(exampleKeyRecord(exampleStrazaSeed))
+	pub, err := importPublic(exampleGrantKID, testProofKey(exampleStrazaSeed).Public().(ed25519.PublicKey))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -538,6 +539,9 @@ func TestClientAssertionKeyTwoReplicas(t *testing.T) {
 	cfg := podA.cfg
 	cfg.DataDir, cfg.Server.Listen = dir, "127.0.0.1:0"
 	cfg.Secrets.KEKFile = filepath.Join(dir, "other.key")
+	if err := os.WriteFile(cfg.Secrets.KEKFile, bytes.Repeat([]byte{7}, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	_, err = New(ctx, cfg, podA.log)
 	if err == nil || !strings.Contains(err.Error(), "secrets.kekFile") {
 		t.Errorf("a replica with another KEK booted: err = %v, want a refusal that names secrets.kekFile", err)

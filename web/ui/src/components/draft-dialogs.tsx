@@ -10,6 +10,7 @@ import { pickKey } from "@/lib/drafts-model";
 import {
   BASE_TEXT,
   CANCEL,
+  CHECK_AGAIN,
   CHECK_AGAIN_SUBJECT,
   DISCARD_BODY,
   DISCARD_GO,
@@ -17,7 +18,6 @@ import {
   KEEP_DRAFT_TEXT,
   KEEP_LIVE_TEXT,
   PICKS_BODY,
-  PICKS_GO,
   PICKS_MISSING,
   PICKS_TITLE,
   REASON_HINT,
@@ -38,7 +38,9 @@ import { notify } from "@/lib/notify";
 // author reads, and the picks Check again asks for when a field changed on
 // both sides since the draft was checked.
 
-type DiscardProps = { draft: Draft; open: boolean; onOpenChange: (open: boolean) => void; onDiscarded: () => void };
+// onClosed runs once the discard dialog is gone, so the page can put focus
+// back on the button that opened it.
+type DiscardProps = { draft: Draft; open: boolean; onOpenChange: (open: boolean) => void; onClosed: () => void; onDiscarded: () => void };
 
 // unlinked is the server a discard keeps running when the draft is the
 // apps directory's proposal to remove it.
@@ -48,7 +50,7 @@ export function unlinked(draft: Draft): string | null {
   return it ? it.name : null;
 }
 
-function DiscardBody({ draft, onOpenChange, onDiscarded }: Omit<DiscardProps, "open">) {
+function DiscardBody({ draft, onOpenChange, onDiscarded }: Omit<DiscardProps, "open" | "onClosed">) {
   const [reason, setReason] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [refusal, setRefusal] = React.useState<string | null>(null);
@@ -72,12 +74,12 @@ function DiscardBody({ draft, onOpenChange, onDiscarded }: Omit<DiscardProps, "o
     <>
       <DialogHeader>
         <DialogTitle>{discardTitle(draft.id)}</DialogTitle>
-        <DialogDescription className="text-sm leading-relaxed text-text-2">{server ? discardUnlinks(server) : DISCARD_BODY}</DialogDescription>
+        <DialogDescription className="text-dense leading-relaxed text-text-2">{server ? discardUnlinks(server) : DISCARD_BODY}</DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="discard-reason" className="text-sm font-semibold text-foreground">{REASON_LABEL}</label>
+        <label htmlFor="discard-reason" className="text-dense font-semibold text-foreground">{REASON_LABEL}</label>
         <Textarea id="discard-reason" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
-        <span className="text-[13px] text-muted-foreground">{REASON_HINT}</span>
+        <span className="text-caption text-muted-foreground">{REASON_HINT}</span>
       </div>
       {refusal && <RefusedError subject={DISCARD_SUBJECT} message={refusal} />}
       <DialogFooter>
@@ -88,10 +90,10 @@ function DiscardBody({ draft, onOpenChange, onDiscarded }: Omit<DiscardProps, "o
   );
 }
 
-export function DiscardDialog({ open, ...rest }: DiscardProps) {
+export function DiscardDialog({ open, onClosed, ...rest }: DiscardProps) {
   return (
     <Dialog open={open} onOpenChange={rest.onOpenChange}>
-      <DialogContent className="sm:max-w-[520px]" data-discard-dialog onOpenAutoFocus={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).querySelector<HTMLButtonElement>("[data-cancel]")?.focus(); }}>
+      <DialogContent className="sm:max-w-[520px]" data-discard-dialog onOpenAutoFocus={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).querySelector<HTMLButtonElement>("[data-cancel]")?.focus(); }} onCloseAutoFocus={(e) => { e.preventDefault(); onClosed(); }}>
         <DiscardBody {...rest} />
       </DialogContent>
     </Dialog>
@@ -115,8 +117,8 @@ const textual = (c: DraftConflict) => [c.base, c.draft, c.live].some((v) => v.in
 function TextFold({ summary, text, className }: { summary: string; text: string; className?: string }) {
   return (
     <details className={className}>
-      <summary className="cursor-pointer text-[13px] text-muted-foreground hover:text-foreground">{summary}</summary>
-      <pre className="mt-1 max-h-48 overflow-auto rounded-md border border-border bg-secondary/40 px-3 py-2 font-mono text-[12.5px] leading-relaxed text-foreground">{text}</pre>
+      <summary className="cursor-pointer text-caption text-muted-foreground hover:text-foreground">{summary}</summary>
+      <pre className="mt-1 max-h-48 overflow-auto rounded-md border border-border bg-secondary/40 px-3 py-2 font-mono text-caption leading-relaxed text-foreground">{text}</pre>
     </details>
   );
 }
@@ -138,15 +140,15 @@ function PicksBody({ conflicts, onOpenChange, busy, refusal, onPick }: Omit<Pick
     <>
       <DialogHeader>
         <DialogTitle>{PICKS_TITLE}</DialogTitle>
-        <DialogDescription className="text-sm leading-relaxed text-text-2">{PICKS_BODY}</DialogDescription>
+        <DialogDescription className="text-dense leading-relaxed text-text-2">{PICKS_BODY}</DialogDescription>
       </DialogHeader>
       <div ref={listRef} className="flex flex-col gap-3">
         {conflicts.map((c) => {
           const key = pickKey(c);
           return (
-            <fieldset key={key} className="m-0 flex flex-col gap-1.5 rounded-md border border-border p-3 text-sm" data-pick={key}>
-              <legend className="px-1 font-semibold text-foreground">{objectWords(c.object)} <span className="font-mono text-[13px]">{c.field}</span></legend>
-              {textual(c) ? <TextFold summary={BASE_TEXT} text={c.base} /> : <span className="text-[13px] text-muted-foreground">{pickWas(c.base)}</span>}
+            <fieldset key={key} className="m-0 flex flex-col gap-1.5 rounded-md border border-border p-3 text-dense" data-pick={key}>
+              <legend className="px-1 font-semibold text-foreground">{objectWords(c.object)} <span className="font-mono text-caption">{c.field}</span></legend>
+              {textual(c) ? <TextFold summary={BASE_TEXT} text={c.base} /> : <span className="text-caption text-muted-foreground">{pickWas(c.base)}</span>}
               {(["draft", "live"] as const).map((side) => (
                 <div key={side} className="flex flex-col gap-1">
                   <label className="flex items-center gap-2 text-text-2">
@@ -160,11 +162,11 @@ function PicksBody({ conflicts, onOpenChange, busy, refusal, onPick }: Omit<Pick
           );
         })}
       </div>
-      {tried && missing && <p className="m-0 text-sm text-danger">{PICKS_MISSING}</p>}
+      {tried && missing && <p className="m-0 text-dense text-danger">{PICKS_MISSING}</p>}
       {refusal && <RefusedError subject={CHECK_AGAIN_SUBJECT} message={refusal} />}
       <DialogFooter>
         <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy} data-cancel>{CANCEL}</Button>
-        <Button onClick={go} disabled={busy}>{busy && <Loader2Icon className="animate-spin" />}{PICKS_GO}</Button>
+        <Button onClick={go} disabled={busy}>{busy && <Loader2Icon className="animate-spin" />}{CHECK_AGAIN}</Button>
       </DialogFooter>
     </>
   );

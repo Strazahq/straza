@@ -139,7 +139,7 @@ describe("the Secrets section of the publish dialog", () => {
     expect(within(section).getByText("Secret")).toBeTruthy();
     // The heading reads like the dialog's other section labels, never in caps.
     expect(within(section).getByText("Secret").className).not.toContain("uppercase");
-    expect(section.textContent).toContain("github has no secret yet, and every call to it fails until one is stored. Enter it here, and Straza stores it right after the publish.");
+    expect(section.textContent).toContain("github has no secret yet. Every call to it fails until one is stored.");
     expect(field("Secret of github").type).toBe("password");
     const hint = document.getElementById(field("Secret of github").getAttribute("aria-describedby") || "");
     expect(hint?.textContent).toBe(secretHint("joe-java-developer-agent"));
@@ -157,16 +157,16 @@ describe("the Secrets section of the publish dialog", () => {
 
   it("leaves the agent out of the hint of a draft only people wrote", () => {
     mount([secretWarn("github")], { draft: { ...DRAFT, authors: [ALICE] } });
-    expect(secretHint(null)).toBe("Straza stores it encrypted. It is never shown again and never returned by any read.");
+    expect(secretHint(null)).toBe("Stored encrypted and never shown again.");
     expect(document.getElementById(field("Secret of github").getAttribute("aria-describedby") || "")?.textContent).toBe(secretHint(null));
   });
 
-  it("names the button for one secret, for several, and Publish when every field waits for later", async () => {
+  it("keeps the button Publish for several secrets and for a field that waits for later", async () => {
     mount([secretWarn("github"), secretWarn("linear")]);
-    expect(go().textContent).toBe("Publish and store 2 secrets");
+    expect(go().textContent).toBe("Publish");
     expect(within(document.querySelector("[data-secrets]") as HTMLElement).getByText("Secrets")).toBeTruthy();
     await userEvent.click(laterOf("linear"));
-    expect(go().textContent).toBe("Publish and store the secret");
+    expect(go().textContent).toBe("Publish");
     expect(field("Secret of linear").disabled).toBe(true);
     expect(document.querySelector('[data-secret="linear"] [data-later]')?.textContent).toBe(laterLine("linear"));
     await userEvent.click(laterOf("github"));
@@ -179,7 +179,7 @@ describe("the Secrets section of the publish dialog", () => {
     expect(missingLines()).toEqual([ACK_MISSING, enterOr("github")]);
     expect(go().getAttribute("aria-describedby")).toBe((document.querySelector("[data-ack-missing]") as HTMLElement).id);
     await userEvent.type(within(dialog()).getByRole("textbox", { name: "Type api.githubcopilot.com to confirm" }), "api.githubcopilot.com");
-    await userEvent.click(within(dialog()).getByRole("checkbox", { name: REACH_RISK.sentence }));
+    await userEvent.click(within(dialog()).getByRole("checkbox", { name: (n) => n.includes(REACH_RISK.sentence) }));
     expect(go().disabled).toBe(true);
     expect(missingLines()).toEqual([enterOr("github")]);
     await userEvent.type(field("Secret of github"), "s3cret");
@@ -206,7 +206,7 @@ describe("the Secrets section of the publish dialog", () => {
     await userEvent.click(go());
     expect(title()).toBe("Publishing draft 41");
     expect(rows()).toEqual(["runningPublish draft 41", "pendingStore the secret of github", "pendingCheck github"]);
-    expect(foot()).toEqual(["Cancel", "Publish and store the secret"]);
+    expect(foot()).toEqual(["Cancel", "Publish"]);
     expect([...(document.querySelector('[data-slot="dialog-footer"]') as HTMLElement).querySelectorAll("button")].every((b) => b.disabled)).toBe(true);
     pub.resolve(PUBLISHED);
     await waitFor(() => expect(rows()).toEqual(["donePublish draft 41", "runningStore the secret of github", "pendingCheck github"]));
@@ -218,7 +218,7 @@ describe("the Secrets section of the publish dialog", () => {
     expect(setSecret).toHaveBeenCalledTimes(1);
     expect(vi.mocked(publishDraft).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(setSecret).mock.invocationCallOrder[0]);
     expect(vi.mocked(setSecret).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(recheckApp).mock.invocationCallOrder[0]);
-    expect(document.querySelector("[data-health]")?.textContent).toBe("Running. 2 tools found: get_me, list_issues. Checked just now.");
+    expect(document.querySelector("[data-health]")?.textContent).toBe("Running. 2 tools: get_me, list_issues.");
     expect(onChecked).toHaveBeenCalledWith("github", expect.objectContaining({ id: "app-github", status: "running" }), secretWarn("github").fix);
     expect(foot()).toEqual(["Close", "Open github"]);
     expect(notify.ok).not.toHaveBeenCalled();
@@ -245,7 +245,7 @@ describe("the Secrets section of the publish dialog", () => {
     expect(foot()).toEqual(["Close"]);
     expect(field("Secret of github").value).toBe("");
     expect(document.getElementById(field("Secret of github").getAttribute("aria-describedby") || "")?.textContent).toBe(retryHint("github"));
-    const again = within(dialog()).getByRole("button", { name: "Store the secret and check" }) as HTMLButtonElement;
+    const again = within(dialog()).getByRole("button", { name: "Store and check" }) as HTMLButtonElement;
     expect(again.disabled).toBe(true);
     await userEvent.type(field("Secret of github"), "right-one");
     await userEvent.click(again);
@@ -264,15 +264,15 @@ describe("the Secrets section of the publish dialog", () => {
     await waitFor(() => expect(title()).toBe("Draft 41 is live."));
     expect(rows()).toEqual(["donePublish draft 41", "doneStore the secret of github", "refusedCheck github"]);
     expect(document.querySelector("[data-stored-not-passed]")?.textContent).toBe(storedNotPassed("github"));
-    expect(document.querySelector("[data-health]")?.textContent).toBe("Refused. " + URL_ + " answered 401 to the secret you stored. Check the value with whoever issued it, set it again, then Recheck. The server exists and keeps this state; you can finish access later from its page.");
-    expect(foot()).toEqual(["Set the secret again", "Recheck", "Finish later, open github"]);
-    await userEvent.click(within(dialog()).getByRole("button", { name: "Set the secret again" }));
+    expect(document.querySelector("[data-health]")?.textContent).toBe("Refused. " + URL_ + " answered 401 to the secret you stored. Check the value with whoever issued it, set it again, then Recheck.");
+    expect(foot()).toEqual(["Set it again", "Recheck", "Open github"]);
+    await userEvent.click(within(dialog()).getByRole("button", { name: "Set it again" }));
     expect(document.getElementById(field("Secret of github").getAttribute("aria-describedby") || "")?.textContent).toBe(againHint("github"));
-    expect(foot()).toEqual(["Recheck", "Finish later, open github"]);
+    expect(foot()).toEqual(["Recheck", "Open github"]);
     await userEvent.click(within(dialog()).getByRole("button", { name: "Recheck" }));
     await waitFor(() => expect(recheckApp).toHaveBeenCalledTimes(2));
     expect(setSecret).toHaveBeenCalledTimes(1);
-    await userEvent.click(within(dialog()).getByRole("button", { name: "Finish later, open github" }));
+    await userEvent.click(within(dialog()).getByRole("button", { name: "Open github" }));
     expect(navigate).toHaveBeenCalledWith("servers", ["app-github"]);
     expect(publishDraft).toHaveBeenCalledTimes(1);
   });
@@ -296,7 +296,7 @@ describe("the Secrets section of the publish dialog", () => {
     expect(within(github).getByRole("button", { name: "Open github" })).toBeTruthy();
     expect(rows(linear)).toEqual(["failedStore the secret of linear", "failedCheck linear"]);
     expect(within(linear).getByRole("alert").textContent).toBe(notStored("linear") + " " + notStoredText("41", "linear", "store secret failed"));
-    expect(within(dialog()).getAllByRole("button", { name: "Store the secret and check" }).length).toBe(1);
+    expect(within(dialog()).getAllByRole("button", { name: "Store and check" }).length).toBe(1);
     expect(within(linear).getByLabelText("Secret of linear")).toBeTruthy();
     expect(within(dialog()).queryByLabelText("Secret of github")).toBeNull();
     expect(vi.mocked(setSecret).mock.calls).toEqual([["app-github", "one"], ["app-linear", "two"]]);
@@ -341,15 +341,15 @@ describe("the Secrets section of the publish dialog", () => {
       expect(section.textContent).toContain(leadBoth("postgres", PIN));
       expect(field("Secret of postgres").type).toBe("password");
       expect(field("Listing credential of postgres").type).toBe("password");
-      expect(document.getElementById(field("Listing credential of postgres").getAttribute("aria-describedby") || "")?.textContent).toBe(listingHint("postgres", PIN, "joe-java-developer-agent"));
-      expect(listingHint("postgres", PIN, null)).toBe("Only Straza's own listing of the databases of postgres carries it, when Straza calls list_databases. Calls by people and agents never carry it. Straza stores it encrypted and never shows it again.");
-      expect(go().textContent).toBe("Publish and store 2 secrets");
+      expect(document.getElementById(field("Listing credential of postgres").getAttribute("aria-describedby") || "")?.textContent).toBe(listingHint(PIN, "joe-java-developer-agent"));
+      expect(listingHint(PIN, null)).toBe("Straza uses it only to list databases. Stored encrypted and never shown again.");
+      expect(go().textContent).toBe("Publish");
     });
 
-    it("names the button for the listing credential when it is the only value asked", async () => {
+    it("asks for the listing credential alone when it is the only value missing", async () => {
       mount([LISTING_WARN]);
       expect([...document.querySelectorAll("[data-secrets] input[type=password]")].map((i) => i.id && document.querySelector('label[for="' + i.id + '"]')?.textContent)).toEqual(["Listing credential of postgres"]);
-      expect(go().textContent).toBe("Publish and store the listing credential");
+      expect(go().textContent).toBe("Publish");
       expect(missingLines()).toEqual([enterListingOr("postgres")]);
       await userEvent.type(field("Listing credential of postgres"), "list-token");
       expect(go().disabled).toBe(false);
@@ -380,7 +380,7 @@ describe("the Secrets section of the publish dialog", () => {
       expect(rows()).toEqual(["donePublish draft 41", "doneStore the secret of postgres", "failedStore the listing credential of postgres", "doneCheck postgres"]);
       expect(document.querySelector("[data-health]")?.getAttribute("data-health")).toBe("running");
       expect(within(dialog()).getByRole("alert").textContent).toBe(listingNotStored("postgres") + " " + listingNotStoredText("41", "postgres", PIN, true, "store the listing credential failed"));
-      expect(listingNotStoredText("41", "postgres", PIN, true, "store the listing credential failed")).toBe("Draft 41 is published and stays published, and the secret of postgres is stored, so its calls work. Straza cannot list its databases, and only roles on every database can use its database tools until it has one. The reason Straza gave: \"store the listing credential failed\". Enter it again below. Nothing is published again.");
+      expect(listingNotStoredText("41", "postgres", PIN, true, "store the listing credential failed")).toBe("Draft 41 is published and stays published, and the secret of postgres is stored, so its calls work. Straza cannot list its databases, and only roles on every database can use its database tools until it has one. The reason Straza gave: \"store the listing credential failed\". Enter it again below.");
       expect(within(dialog()).queryByLabelText("Secret of postgres")).toBeNull();
       expect(foot()).toEqual(["Close", "Open postgres"]);
       await userEvent.type(field("Listing credential of postgres"), "list-token-2");
@@ -398,7 +398,7 @@ describe("the Secrets section of the publish dialog", () => {
       await userEvent.type(field("Secret of postgres"), "s3cret");
       await userEvent.click(laterOf("postgres/listing"));
       expect(document.querySelector('[data-secret="postgres/listing"] [data-later]')?.textContent).toBe(laterListing("postgres", PIN));
-      expect(go().textContent).toBe("Publish and store the secret");
+      expect(go().textContent).toBe("Publish");
       await userEvent.click(go());
       await waitFor(() => expect(title()).toBe("Draft 41 is live."));
       expect(rows()).toEqual(["donePublish draft 41", "doneStore the secret of postgres", "doneCheck postgres"]);

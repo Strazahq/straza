@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AttestationHashRow } from "./api";
-import { agoWord, canonicalScope, grantsOf, hiddenTabsLine, rendersOf, revokeBody, shortHash } from "./settings-words";
+import { canonicalScope, expiryOf, grantsOf, hiddenTabsLine, rendersOf, revokeBody, shortHash, usedWord } from "./settings-words";
+import { setTimeZone } from "./timezone";
 
 const row = (artifact: string, platform: string, hash: string, current: boolean, note?: string): AttestationHashRow => ({ id: artifact + "/" + platform, artifact, harness: artifact.replace("hooks.", ""), platform, hash, current, note, created_at: "2026-09-07T09:12:00Z" });
 
@@ -27,20 +28,12 @@ describe("settings words", () => {
   });
 
   it.each<[string, string]>([
-    ["scim:read,scim:write,identity:read,apps:read,changes:read,config:read", "Whatever signs in as midpoint loses the SCIM plane, its reads of users and roles, its reads of servers, the change feed and the configuration read-out within seconds."],
-    ["audit:read,sessions:read", "Whatever signs in as midpoint loses the ledger and its view of sessions within seconds."],
-    ["policy:write", "Whatever signs in as midpoint loses its policy access within seconds."],
-    ["full", "Whatever signs in as midpoint loses every admin route within seconds."],
+    ["scim:read,scim:write,identity:read,apps:read,changes:read,config:read", "midpoint loses the SCIM plane, its reads of users and roles, its reads of servers, the change feed and the configuration read-out within seconds."],
+    ["audit:read,sessions:read", "midpoint loses the audit records and its view of sessions within seconds."],
+    ["policy:write", "midpoint loses its policy access within seconds."],
+    ["full", "midpoint loses every admin route within seconds."],
   ])("builds the revoke sentence from the grants %s", (scope, body) => {
     expect(revokeBody({ name: "midpoint", scope })).toBe(body);
-  });
-
-  it("reads a past stamp in days once it is older than a day, so a column holds it", () => {
-    const day = 86400000;
-    expect(agoWord(new Date(Date.now() - 23 * day).toISOString())).toBe("23 d ago");
-    expect(agoWord(new Date(Date.now() - 78 * day).toISOString())).toBe("78 d ago");
-    expect(agoWord(new Date(Date.now() - 2 * 3600000).toISOString())).toBe("2 h ago");
-    expect(agoWord(undefined)).toBe("none");
   });
 
   it("renders the canonical scope and reads grants back", () => {
@@ -48,7 +41,39 @@ describe("settings words", () => {
     expect(canonicalScope(true, ["audit:read"])).toBe("full");
     expect(grantsOf("full")).toEqual([]);
     expect(grantsOf(" audit:read, sessions:read ")).toEqual(["audit:read", "sessions:read"]);
-    expect(hiddenTabsLine(["Configuration", "Attestation registry"])).toBe("Configuration and Attestation registry need the config area, which this session does not hold.");
-    expect(hiddenTabsLine(["Configuration"])).toBe("Configuration needs the config area, which this session does not hold.");
+    expect(hiddenTabsLine(["Configuration", "Attestation registry"])).toBe("Configuration and Attestation registry need a role that includes Overview and Settings.");
+    expect(hiddenTabsLine(["Configuration"])).toBe("Configuration needs a role that includes Overview and Settings.");
+  });
+});
+
+describe("the dates of the API tokens table, with the clock at 14 Nov 2026, 10:00 UTC", () => {
+  beforeEach(() => {
+    setTimeZone("utc");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-14T10:00:00Z"));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it.each([
+    ["2026-11-14T09:58:00Z", "2 m ago"],
+    ["2026-11-13T23:00:00Z", "11 h ago"],
+    ["2026-11-13T08:00:00Z", "yesterday"],
+    ["2026-11-12T23:00:00Z", "12 Nov 2026"],
+    ["2026-10-12T10:00:00Z", "12 Oct 2026"],
+  ])("reads a last use at %s as %s", (iso, word) => {
+    expect(usedWord(iso)).toBe(word);
+  });
+
+  it.each([
+    ["2027-02-05T12:00:00Z", "in 83 days", "plain"],
+    ["2026-11-29T10:00:00Z", "in 15 days", "plain"],
+    ["2026-11-28T10:00:00Z", "in 14 days", "warn"],
+    ["2026-11-15T09:00:00Z", "in 1 day", "warn"],
+    ["2026-11-14T20:00:00Z", "today", "warn"],
+    ["2026-11-14T08:00:00Z", "expired today", "danger"],
+    ["2026-11-13T12:00:00Z", "expired yesterday", "danger"],
+    ["2026-11-11T10:00:00Z", "expired 3 days ago", "danger"],
+  ])("reads an expiry at %s as %s in the %s tone", (iso, word, tone) => {
+    expect(expiryOf(iso)).toEqual({ word, tone });
   });
 });

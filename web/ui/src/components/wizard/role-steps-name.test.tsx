@@ -33,7 +33,7 @@ const onOpenServer = vi.fn();
 type MountedProps = { fromServer?: string; kind?: Draft["kind"]; server?: string; plans?: Draft["plans"]; miss?: "server" | null };
 
 function Mounted({ fromServer, kind = "application", server = "", plans = {}, miss = null }: MountedProps) {
-  const [draft, setDraft] = React.useState<Draft>({ kind, name: "", description: "", server, plans, composed: [], packs: [] });
+  const [draft, setDraft] = React.useState<Draft>({ kind, name: "", description: "", server, plans, composed: [] });
   return (
     <TooltipProvider>
       <NameStep
@@ -58,7 +58,9 @@ function Mounted({ fromServer, kind = "application", server = "", plans = {}, mi
 }
 
 const check = () => document.querySelector("[data-name-check]") as HTMLElement;
-const preview = () => (document.querySelector("[data-name-preview]") as HTMLElement).textContent;
+// tags reads the two tags beside the name's chip: the name as stored, and
+// the name the identity manager imports.
+const tags = () => ["[data-name-stored]", "[data-name-iga]"].map((s) => (document.querySelector("[data-name-preview] " + s) as HTMLElement).textContent);
 const prefix = () => (document.querySelector("[data-name-prefix]") as HTMLElement).textContent;
 const rail = (server: string) => screen.getByRole("radio", { name: "server " + server });
 const suffix = () => screen.getByRole("textbox", { name: "role name suffix" });
@@ -69,23 +71,51 @@ describe("the first step of an application role", () => {
     expect(screen.getAllByRole("radio", { name: /^server / }).map((b) => b.getAttribute("aria-label"))).toEqual(["server demo-tools", "server midpoint", "server obsidian"]);
     expect(rail("obsidian").getAttribute("aria-disabled")).toBe("true");
     expect(rail("obsidian").textContent).toContain("no tools known: the server is stopped");
-    await userEvent.click(screen.getByRole("radio", { name: "kind business" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Business role" }));
     expect(screen.queryByRole("radio", { name: /^server / })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Name" })).toBeTruthy();
-    await userEvent.click(screen.getByRole("radio", { name: "kind approver" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Approver role" }));
     expect(screen.queryByRole("radio", { name: /^server / })).toBeNull();
   });
 
-  it("fixes the picked server's prefix, keeps the typed word on a switch and previews the stored name", async () => {
+  it("fixes the picked server's prefix, keeps the typed word on a switch and tags the stored name", async () => {
     render(<Mounted server="demo-tools" />);
     expect(prefix()).toBe("demo-tools-");
-    expect(preview()).toBe("Application role, stored as demo-tools-. An IGA imports it as AR:demo-tools-.");
+    expect(tags()).toEqual(["stored as demo-tools-", "identity manager: AR:demo-tools-"]);
     await userEvent.type(suffix(), "Read Only");
-    expect(preview()).toBe("Application role, stored as demo-tools-read-only. An IGA imports it as AR:demo-tools-read-only.");
+    expect(tags()).toEqual(["stored as demo-tools-read-only", "identity manager: AR:demo-tools-read-only"]);
     await userEvent.click(rail("midpoint"));
     expect(prefix()).toBe("midpoint-");
     expect((suffix() as HTMLInputElement).value).toBe("Read Only");
-    expect(preview()).toBe("Application role, stored as midpoint-read-only. An IGA imports it as AR:midpoint-read-only.");
+    expect(tags()).toEqual(["stored as midpoint-read-only", "identity manager: AR:midpoint-read-only"]);
+  });
+
+  it("draws the prefix as text inside the one name box, and a click on it lands in the input", async () => {
+    render(<Mounted server="demo-tools" />);
+    const box = document.querySelector("[data-name-prefix]")?.parentElement as HTMLElement;
+    expect(box.tagName).toBe("LABEL");
+    expect(box.contains(suffix())).toBe(true);
+    // The box draws the border and the focus ring. The input draws neither,
+    // so focus shows one ring around the prefix and the word together.
+    expect(box.className.split(" ")).toEqual(expect.arrayContaining(["border", "focus-within:ring-[3px]"]));
+    expect(suffix().className.split(" ")).toEqual(expect.arrayContaining(["border-0", "focus-visible:ring-0", "focus-visible:outline-none!"]));
+    expect(suffix().id).toBe("nr-name");
+    expect(screen.getByLabelText("Name")).toBe(suffix());
+    await userEvent.click(document.querySelector("[data-name-prefix]") as HTMLElement);
+    expect(document.activeElement).toBe(suffix());
+  });
+
+  it("puts the outcome chip and the two name tags in one row under the name", async () => {
+    render(<Mounted server="demo-tools" />);
+    await userEvent.type(suffix(), "video");
+    const row = document.querySelector("[data-name-preview]") as HTMLElement;
+    const chip = row.querySelector('[data-name-check="free"]') as HTMLElement;
+    expect(chip.getAttribute("data-tone")).toBe("ok");
+    // A screen reader hears the chip as Name available.
+    expect(chip.querySelector(".sr-only")?.textContent).toBe("Name ");
+    expect(chip.textContent).toBe("Name available");
+    expect([...row.children].map((c) => c.textContent)).toEqual(["Name available", "stored as demo-tools-video", "identity manager: AR:demo-tools-video"]);
+    expect(screen.queryByText("Policies, access rows and your identity manager refer to the role by this name.")).toBeNull();
   });
 
   // Each case is the server, the typed word, and the check line the stored
@@ -94,8 +124,8 @@ describe("the first step of an application role", () => {
   const checks: [string, string, string, string, string][] = [
     ["refuses a stored name a role already has", "demo-tools", "readers", "error", "A role named demo-tools-readers already exists.Open it"],
     ["warns on a word close to one of the server's roles, and names that role only", "demo-tools", "reader", "warn", "Close to existing: demo-tools-readers."],
-    ["reads a word far from every role of the server as free, though they share its prefix", "demo-tools", "audit", "free", "Name available."],
-    ["reads a free stored name as free", "midpoint", "readers", "free", "Name available."],
+    ["reads a word far from every role of the server as free, though they share its prefix", "demo-tools", "audit", "free", "Name available"],
+    ["reads a free stored name as free", "midpoint", "readers", "free", "Name available"],
   ];
   it.each(checks)("%s", async (_case, server, word, level, text) => {
     render(<Mounted server={server} />);
@@ -107,7 +137,7 @@ describe("the first step of an application role", () => {
   it("says under the servers that ticks on another server are not given", () => {
     render(<Mounted server="midpoint" plans={{ "demo-tools": { reach: "tick", picked: { echo: true }, call: "allow", choice: {}, shape: { pool: "sponsor", how: "hold", hold: 120, ticket: 86400, grant: 3600 }, own: {} } }} />);
     expect((document.querySelector('[data-switch-warning="demo-tools"]') as HTMLElement).textContent).toBe(
-      "An application role reaches one server: the 1 tool ticked on demo-tools is not given while midpoint is picked.",
+      "1 tool ticked on demo-tools is not saved while midpoint is picked.",
     );
   });
 
@@ -122,7 +152,7 @@ describe("the name check against a server's prefix", () => {
     render(<Mounted kind="business" />);
     await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "demo-tools-x");
     expect(check().getAttribute("data-name-check")).toBe("server");
-    expect(check().textContent).toBe("Role names beginning with demo-tools- belong to the server demo-tools. Create it on that server's page so it becomes server-owned.Open demo-tools");
+    expect(check().textContent).toBe("Names beginning with demo-tools- belong to demo-tools. Pick another name, or make an application role for demo-tools.Open demo-tools");
     await userEvent.click(screen.getByRole("button", { name: "Open demo-tools" }));
     expect(onOpenServer).toHaveBeenCalledWith(apps[0]);
   });
@@ -134,18 +164,18 @@ describe("the name check against a server's prefix", () => {
     expect(check().textContent).toBe("Close to existing: demo-tools-readers and demo-tools-sandbox.");
   });
 
-  // Each case is the picked kind, the typed name, and the name line under
-  // the field: the kind and the name an IGA imports, BR: for a business
+  // Each case is the picked kind, the typed name, and the tags under the
+  // field: the stored name and the name an IGA imports, BR: for a business
   // role and AR: for an approver role.
-  const lines: [Draft["kind"], string, string][] = [
-    ["business", "analysts", "Business role, stored as analysts. An IGA imports it as BR:analysts."],
-    ["approver", "pay-approvers", "Approver role, stored as pay-approvers. An IGA imports it as AR:pay-approvers."],
+  const lines: [Draft["kind"], string, string[]][] = [
+    ["business", "analysts", ["stored as analysts", "identity manager: BR:analysts"]],
+    ["approver", "pay-approvers", ["stored as pay-approvers", "identity manager: AR:pay-approvers"]],
   ];
-  it.each(lines)("names the kind of a %s role in the name line", async (kind, name, want) => {
+  it.each(lines)("tags the stored and the imported name of a %s role", async (kind, name, want) => {
     render(<Mounted kind={kind} />);
     expect(document.querySelector("[data-name-preview]")).toBeNull();
     await userEvent.type(screen.getByRole("textbox", { name: "Name" }), name);
-    expect(preview()).toBe(want);
+    expect(tags()).toEqual(want);
   });
 
   it("shows no name line for a business role's name inside a server's prefix", async () => {
@@ -158,7 +188,7 @@ describe("the name check against a server's prefix", () => {
     render(<Mounted kind="business" />);
     await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "analysts");
     expect(check().getAttribute("data-name-check")).toBe("free");
-    expect(check().textContent).toBe("Name available.");
+    expect(check().textContent).toBe("Name available");
   });
 });
 

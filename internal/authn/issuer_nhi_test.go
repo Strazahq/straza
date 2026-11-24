@@ -118,6 +118,16 @@ func TestClientCredentialsGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	off, err := f.users.Create(ctx, store.User{
+		Username: "off-bot", Email: "off@x.io", Attrs: `{"kind":"nhi"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	off.Status = store.UserDisabled
+	if off, err = f.users.Update(ctx, off); err != nil {
+		t.Fatal(err)
+	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -127,15 +137,16 @@ func TestClientCredentialsGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The lookup closure owns identity policy (active + kind=nhi + key
-	// registered); the issuer treats every closure error as failed client
-	// authentication. This test's closure mimics the server's.
+	// The lookup closure owns identity policy (kind=nhi + key registered)
+	// and hands a disabled user over with its key; the issuer refuses that
+	// user and treats every closure error as failed client authentication.
+	// This test's closure mimics the server's.
 	f.issuer.NHIKeys = func(ctx context.Context, clientID string) (store.User, ed25519.PublicKey, error) {
-		if clientID != nhi.Username && clientID != keyless.Username {
+		if clientID != nhi.Username && clientID != keyless.Username && clientID != off.Username {
 			return store.User{}, nil, fmt.Errorf("no such NHI client")
 		}
 		u, err := f.users.GetByUsername(ctx, clientID)
-		if err != nil || u.Status != store.UserActive {
+		if err != nil {
 			return store.User{}, nil, fmt.Errorf("client not eligible")
 		}
 		if clientID == keyless.Username {
@@ -168,9 +179,11 @@ func TestClientCredentialsGrant(t *testing.T) {
 	// A signature that does not verify with the registered key says so and
 	// how to register the right key. Every other assertion fault keeps the
 	// grammar sentence that custom clients mint by. A client the lookup
-	// refuses gets one sentence whatever it signed with.
+	// refuses gets one sentence whatever it signed with. A disabled agent
+	// reads that it is disabled only when it proves its registered key.
 	const (
 		authFailed = "client authentication failed"
+		disabled   = "Straza: this agent is disabled on the server. Ask a Straza admin to enable it, then start the session again."
 		grammar    = "client assertion rejected: mint a fresh EdDSA assertion (iss=sub=client_id, aud=issuer, exp ≤ 5 min, unique jti)"
 	)
 	wrongKey := "the key that signed the request is not the key registered for ci-bot. " +
@@ -204,6 +217,14 @@ func TestClientCredentialsGrant(t *testing.T) {
 			mintAssertion(t, wrongPriv, "ghost", "ghost", aud, time.Minute, "jti-ghost-wrongkey")), 400, "invalid_client", authFailed},
 		{"known client with no key", form(keyless.Username,
 			mintAssertion(t, wrongPriv, keyless.Username, keyless.Username, aud, time.Minute, "jti-keyless")), 400, "invalid_client", authFailed},
+		{"disabled agent that proves its key", form(off.Username,
+			mintAssertion(t, priv, off.Username, off.Username, aud, time.Minute, "jti-off")), 400, "invalid_client", disabled},
+		{"disabled agent signed by another key", form(off.Username,
+			mintAssertion(t, wrongPriv, off.Username, off.Username, aud, time.Minute, "jti-off-wrongkey")), 400, "invalid_client", authFailed},
+		{"disabled agent with an expired assertion", form(off.Username,
+			mintAssertion(t, priv, off.Username, off.Username, aud, -2*time.Minute, "jti-off-expired")), 400, "invalid_client", authFailed},
+		{"disabled agent with another audience", form(off.Username,
+			mintAssertion(t, priv, off.Username, off.Username, "https://elsewhere.example", time.Minute, "jti-off-aud")), 400, "invalid_client", authFailed},
 		{"expired assertion", form(nhi.Username,
 			mintAssertion(t, priv, nhi.Username, nhi.Username, aud, -2*time.Minute, "jti-expired")), 400, "invalid_client", grammar},
 		{"audience mismatch", form(nhi.Username,
@@ -251,6 +272,8 @@ func TestClientCredentialsGrant(t *testing.T) {
 				if at, _ := body["access_token"].(string); at != raw {
 					t.Errorf("access_token should mirror id_token (Straza API convention)")
 				}
+			} else if body["id_token"] != nil || body["access_token"] != nil {
+				t.Fatalf("a refused grant carried a token: %v", body)
 			} else if got, _ := body["error"].(string); got != tc.wantError {
 				t.Errorf("error = %q (%v), want %q", got, body, tc.wantError)
 			}
@@ -321,6 +344,12 @@ func TestClientCredentialsGrant(t *testing.T) {
 			{"bad claims keep the same reason", form(nhi.Username,
 				mintAssertion(t, priv, nhi.Username, nhi.Username, aud, -2*time.Minute, "jti-hook-expired")),
 				[]call{{userID: nhi.ID, username: nhi.Username, reason: "client assertion rejected"}}},
+			{"disabled agent that proves its key is named", form(off.Username,
+				mintAssertion(t, priv, off.Username, off.Username, aud, time.Minute, "jti-hook-off")),
+				[]call{{userID: off.ID, username: off.Username, reason: "user is disabled"}}},
+			{"disabled agent signed by another key is named", form(off.Username,
+				mintAssertion(t, wrongPriv, off.Username, off.Username, aud, time.Minute, "jti-hook-off-bad")),
+				[]call{{userID: off.ID, username: off.Username, reason: "user is disabled"}}},
 			{"malformed request judges nothing", form(nhi.Username, ""), nil},
 		}
 		for _, tc := range cases {

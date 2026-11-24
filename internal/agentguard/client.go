@@ -127,14 +127,13 @@ type Attestation struct {
 
 // CheckinResponse mirrors POST /v1/checkin.
 type CheckinResponse struct {
-	SessionID    string        `json:"session_id"`
-	SessionToken string        `json:"session_token"`
-	ExpiresIn    int           `json:"expires_in"`
-	Attestation  string        `json:"attestation"`
-	User         string        `json:"user"`
-	Roles        []string      `json:"roles"`
-	SnapshotID   string        `json:"snapshot_id"`
-	Packs        []PackPayload `json:"knowledge_packs"`
+	SessionID    string   `json:"session_id"`
+	SessionToken string   `json:"session_token"`
+	ExpiresIn    int      `json:"expires_in"`
+	Attestation  string   `json:"attestation"`
+	User         string   `json:"user"`
+	Roles        []string `json:"roles"`
+	SnapshotID   string   `json:"snapshot_id"`
 	// Identity typology (spec/policyset revision 9): mirrored onto the cached
 	// session so local hook decisions match identity-scoped sets exactly like
 	// the server (one engine, no drift). Absent from older servers = empty.
@@ -152,23 +151,24 @@ type CheckinResponse struct {
 	StartText *string `json:"start_text,omitempty"`
 }
 
-// PackPayload is a delivered knowledge pack.
-type PackPayload struct {
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	Content  string `json:"content"`
-	Checksum string `json:"checksum"`
-}
-
-// Checkin starts a session with an ID token.
-func (c *Client) Checkin(ctx context.Context, idToken, deviceID, harnessName, harnessVersion string, att Attestation) (CheckinResponse, error) {
-	return c.checkin(ctx, map[string]any{
+// Checkin starts a session with an ID token. host and folder name the
+// machine and the folder the session started in, and each is left out of
+// the body when empty.
+func (c *Client) Checkin(ctx context.Context, idToken, deviceID, harnessName, harnessVersion string, att Attestation, host, folder string) (CheckinResponse, error) {
+	body := map[string]any{
 		"id_token":    idToken,
 		"client":      clientStamp(),
 		"device_id":   deviceID,
 		"harness":     map[string]string{"name": harnessName, "version": harnessVersion},
 		"attestation": att,
-	})
+	}
+	if host != "" {
+		body["host"] = host
+	}
+	if folder != "" {
+		body["folder"] = folder
+	}
+	return c.checkin(ctx, body)
 }
 
 // Refresh renews a session with a session token.

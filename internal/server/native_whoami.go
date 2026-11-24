@@ -23,12 +23,6 @@ import (
 // holds. A new session checks in again.
 const whoamiNoSession = "Straza: whoami could not read this session's check-in on this server. Start a new session, then call whoami again."
 
-// whoamiPack is a knowledge pack the session received.
-type whoamiPack struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
 // whoamiObjects is what a tool may touch on a server that pins an object
 // type: every object, or the first covered names and how many there are.
 type whoamiObjects struct {
@@ -54,9 +48,7 @@ type whoamiTool struct {
 
 // whoamiAnswer is whoami's structured answer. Kind is person, agent or
 // service. Recording is the capture mode, verbatim or redact, when
-// Recorded is set. Packs are the knowledge packs bound to the session's
-// roles at its last check-in, which may differ from the packs injected at
-// session start after an admin binds or unbinds one.
+// Recorded is set.
 type whoamiAnswer struct {
 	User      string       `json:"user"`
 	Kind      string       `json:"kind"`
@@ -65,7 +57,6 @@ type whoamiAnswer struct {
 	Roles     []string     `json:"roles"`
 	Recorded  bool         `json:"recorded"`
 	Recording string       `json:"recording,omitempty"`
-	Packs     []whoamiPack `json:"packs"`
 	Tools     []whoamiTool `json:"tools"`
 	// EntraAgentID is the Entra agent identity the agent acts as at Entra,
 	// as its last check-in read it, absent when it holds none.
@@ -82,15 +73,12 @@ func (a *App) whoami(claims authn.Claims, sub policy.Subject) (*mcp.CallToolResu
 		return nil, whoamiNoSession
 	}
 	ans := whoamiAnswer{User: sub.User, Kind: "agent", Sponsor: sub.Sponsor, Harness: sub.Harness,
-		Roles: sub.Roles, Packs: e.facts.packs, Tools: []whoamiTool{}, EntraAgentID: e.facts.entraAgentID}
+		Roles: sub.Roles, Tools: []whoamiTool{}, EntraAgentID: e.facts.entraAgentID}
 	switch {
 	case e.facts.person:
 		ans.Kind = "person"
 	case sub.UserType == store.UserTypeService:
 		ans.Kind = "service"
-	}
-	if ans.Packs == nil {
-		ans.Packs = []whoamiPack{}
 	}
 	if eng := a.snapshots.Current().Engine; eng != nil {
 		if c := eng.Capture(sub); c.Conversations {
@@ -144,11 +132,6 @@ func (w whoamiAnswer) text() string {
 	} else {
 		b.WriteString("Recording: the prompts and responses of this session are not recorded.\n")
 	}
-	packs := make([]string, len(w.Packs))
-	for i, p := range w.Packs {
-		packs[i] = p.Name + " version " + p.Version
-	}
-	fmt.Fprintf(&b, "Knowledge packs for this session's roles: %s.\n", joinOr(packs, "none"))
 	if len(w.Tools) == 0 {
 		b.WriteString("Tools: none. Ask an administrator for a role that grants the tools you need.\n")
 		return b.String()
@@ -194,16 +177,6 @@ func joinOr(items []string, none string) string {
 		return none
 	}
 	return strings.Join(items, ", ")
-}
-
-// whoamiPacksOf answers the names and versions of the knowledge packs a
-// check-in delivers, which whoami tells the session.
-func whoamiPacksOf(packs []store.KnowledgePack) []whoamiPack {
-	out := make([]whoamiPack, len(packs))
-	for i, p := range packs {
-		out[i] = whoamiPack{Name: p.Name, Version: p.Version}
-	}
-	return out
 }
 
 // whoamiOffered reports whether the gateway serves whoami and sub's policy

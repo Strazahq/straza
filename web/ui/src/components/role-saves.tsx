@@ -1,12 +1,12 @@
 import * as React from "react";
 import { Loader2Icon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { type DraftSaveOptions, type SaveNote, SaveNoteLine, useDraftSave, useWorkingDraft } from "@/components/use-draft-save";
 import { HINT } from "@/components/wizard/parts";
 import { type ApiError, exportRole } from "@/lib/api";
 import type { SaveItem } from "@/lib/draft-save";
-import { CANCEL, KEEP_EDITING, liveDocument } from "@/lib/role-words";
+import { CANCEL, KEEP_EDITING, liveDocument, publishNewRole } from "@/lib/role-words";
 import { CLOSE_BODY, CLOSE_DROP, CLOSE_TITLE, NOTHING_SAVED, SAVE_DRAFT, SAVE_PUBLISH, workingHolds } from "@/lib/save-words";
 import { readFailed } from "@/lib/say";
 import { cn } from "@/lib/utils";
@@ -35,7 +35,8 @@ type Props = {
   role: string;
   toast?: string;
   // creates is what a create door hands the save flow, so a check that
-  // answers the role as live refuses the save.
+  // answers the role as live refuses the save and the publish question
+  // names a new role.
   creates?: DraftSaveOptions["creates"];
   // build reads what the save starts from and answers what to send.
   // confirmed is true once the question of ask was answered yes.
@@ -53,8 +54,6 @@ type Props = {
   onBusy?: (busy: boolean) => void;
 };
 
-const DESTRUCTIVE = "bg-danger text-white hover:bg-danger/90";
-
 // RoleSaves is the foot of a role editor: Cancel, Save draft and Save and
 // publish through the editors' one save flow,
 // the note beside them, and the line that says the person's working draft
@@ -62,7 +61,7 @@ const DESTRUCTIVE = "bg-danger text-white hover:bg-danger/90";
 // starts with no note.
 export function RoleSaves({ role, toast, creates, build, ask, onPublished, onCancel, changed, edits, onBusy }: Props) {
   const held = useWorkingDraft("Role/" + role);
-  const save = useDraftSave({ name: role, toast, creates, onPublished });
+  const save = useDraftSave({ name: role, title: creates ? publishNewRole(role) : undefined, toast, creates, onPublished });
   // reading is the button whose build is still reading what the save
   // starts from.
   const [reading, setReading] = React.useState<"draft" | "publish" | null>(null);
@@ -122,7 +121,7 @@ export function RoleSaves({ role, toast, creates, build, ask, onPublished, onCan
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{KEEP_EDITING}</AlertDialogCancel>
-            <AlertDialogAction className={DESTRUCTIVE} onClick={onCancel}>{CLOSE_DROP}</AlertDialogAction>
+            <AlertDialogAction className={DANGER_FILL} onClick={onCancel}>{CLOSE_DROP}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -250,32 +250,20 @@ func (s *Service) Enroll(ctx context.Context, in EnrollInput) (EnrollResult, err
 	return EnrollResult{DeviceID: dev.ID, UserID: tok.UserID, Username: u.Username}, nil
 }
 
-// Decidable returns the pending records the bound user MAY decide, each with a
-// fresh single-use challenge. Eligibility is filtered server-side: kind=nhi
-// users NEVER get rows, nor does a user whose row cannot be read until the
-// store answers; four-eyes rules hide the requester's own record; the
-// bound user must hold one of the rule's approve roles (fresh identity read) or
-// the straza-admin fallback.
+// Decidable returns the pending records the bound user MAY decide, by
+// decidableRecords' rule, each with a fresh single-use challenge bound to
+// deviceID, and touches the device's last-seen time. A user who decides
+// nothing at all gets no rows and no touch.
 func (s *Service) Decidable(ctx context.Context, deciderUserID, deviceID string) ([]PendingRow, error) {
-	if nhi, _ := s.isNHI(ctx, deciderUserID); nhi {
+	recs, decider, err := s.decidableRecords(ctx, deciderUserID)
+	if err != nil {
+		return nil, err
+	}
+	if !decider {
 		return []PendingRow{}, nil
 	}
-	roles, err := s.resolver.ResolveRoles(ctx, deciderUserID, s.now())
-	if err != nil {
-		return nil, err
-	}
-	roleSet := roleNameSet(roles)
-	deciderName := s.deciderUsername(ctx, deciderUserID)
-	pending, err := s.st.Approvals().List(ctx, string(StatePending))
-	if err != nil {
-		return nil, err
-	}
 	out := []PendingRow{}
-	for _, a := range pending {
-		rec := recordFromStore(a)
-		if !eligibleToDecide(rec, deciderUserID, deciderName, roleSet) {
-			continue
-		}
+	for _, rec := range recs {
 		ch, err := s.mintChallenge(ctx, deviceID, rec.ID)
 		if err != nil {
 			return nil, err // fail closed
@@ -284,6 +272,70 @@ func (s *Service) Decidable(ctx context.Context, deciderUserID, deviceID string)
 	}
 	_ = s.st.Approvers().TouchDevice(ctx, deviceID, s.now())
 	return out, nil
+}
+
+// DecidableRows returns the rows Decidable returns to a device of the same
+// user, by the same rule, without a challenge. It writes nothing: no
+// challenge row and no device's last-seen time, so nothing can be signed
+// from its rows.
+func (s *Service) DecidableRows(ctx context.Context, deciderUserID string) ([]PendingRow, error) {
+	recs, _, err := s.decidableRecords(ctx, deciderUserID)
+	if err != nil {
+		return nil, err
+	}
+	out := []PendingRow{}
+	for _, rec := range recs {
+		out = append(out, s.toPendingRow(ctx, rec, ""))
+	}
+	return out, nil
+}
+
+// RaisedRows returns the pending records requesterUserID raised, among the
+// newest 500 pending records, newest first, with no challenge. Settled
+// records never crowd a waiting one out, unlike Mine's window over every
+// state. It writes nothing.
+func (s *Service) RaisedRows(ctx context.Context, requesterUserID string) ([]PendingRow, error) {
+	pending, err := s.st.Approvals().List(ctx, string(StatePending))
+	if err != nil {
+		return nil, err
+	}
+	out := []PendingRow{}
+	for _, a := range pending {
+		if a.UserID == requesterUserID {
+			out = append(out, s.toPendingRow(ctx, recordFromStore(a), ""))
+		}
+	}
+	return out, nil
+}
+
+// decidableRecords is the rule of who may decide what, which both reads of
+// the decidable queue share: the pending records among the newest 500 that
+// userID may decide, newest first. kind=nhi users NEVER decide, nor does a
+// user whose row cannot be read until the store answers, and for them
+// decider is false and nothing past the user row is read. Four-eyes rules
+// hide the requester's own record, and the user must hold one of the rule's
+// approve roles (fresh identity read), sit in its decide pool, or hold the
+// straza-admin fallback. It writes nothing.
+func (s *Service) decidableRecords(ctx context.Context, userID string) (recs []Record, decider bool, err error) {
+	if nhi, _ := s.isNHI(ctx, userID); nhi {
+		return nil, false, nil
+	}
+	roles, err := s.resolver.ResolveRoles(ctx, userID, s.now())
+	if err != nil {
+		return nil, true, err
+	}
+	roleSet := roleNameSet(roles)
+	deciderName := s.deciderUsername(ctx, userID)
+	pending, err := s.st.Approvals().List(ctx, string(StatePending))
+	if err != nil {
+		return nil, true, err
+	}
+	for _, a := range pending {
+		if rec := recordFromStore(a); eligibleToDecide(rec, userID, deciderName, roleSet) {
+			recs = append(recs, rec)
+		}
+	}
+	return recs, true, nil
 }
 
 // Mine returns the bound user's OWN records (status-watching), newest first,

@@ -9,10 +9,10 @@ import { isPlainClick, navigate, pathFor } from "@/lib/router";
 export function NotFound({ path }: { path: string }) {
   return (
     <>
-      <PageHead label="Page not found" description="The address in the bar names no page of this console." />
+      <PageHead label="Page not found" description={null} />
       <EmptyState
         icon={FileQuestionIcon}
-        title="There is no page at this address."
+        title={"No page at " + path}
         action={
           <Button variant="outline" asChild>
             <a
@@ -27,9 +27,7 @@ export function NotFound({ path }: { path: string }) {
             </a>
           </Button>
         }
-      >
-        {"Nothing in the console answers to " + path + ". Check the address, or start from " + landing.label + "."}
-      </EmptyState>
+      />
     </>
   );
 }

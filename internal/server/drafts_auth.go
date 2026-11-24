@@ -86,7 +86,12 @@ type draftCaller struct {
 func (a *App) requireDrafts(next func(http.ResponseWriter, *http.Request, draftCaller)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := a.authenticateAdmin(w, r)
-		if !ok || a.refuseCodingHarness(w, r, p) {
+		if !ok {
+			return
+		}
+		w, r, report := a.watchRefusals(w, r, p.actor)
+		defer report()
+		if a.refuseCodingHarness(w, r, p) {
 			return
 		}
 		c, ok := a.draftCallerOf(w, r, p)

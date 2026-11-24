@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Door, Panel, PanelNote, ToneBadge, oldestPending } from "./overview-parts";
+import { Door, Panel, PanelNote, oldestPending } from "./overview-parts";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ApprovalRow } from "@/lib/api";
 import { navigate, pathFor } from "@/lib/router";
@@ -19,9 +19,9 @@ describe("the Overview chrome", () => {
     expect(vi.mocked(navigate)).toHaveBeenCalledWith("audit", []);
   });
 
-  it("carries a row's id as the hash, so the target opens on that row", () => {
-    render(<Door to="settings" rest={["configuration"]} hash="floor" label="Set governance.minAttestation" arrow={false} />);
-    expect(screen.getByRole("link", { name: "Set governance.minAttestation" }).getAttribute("href")).toBe(pathFor("settings", ["configuration"]) + "#floor");
+  it("carries a row's id in the path, so the target opens on that row", () => {
+    render(<Door to="settings" rest={["configuration", "floor"]} label="Set governance.minAttestation" arrow={false} />);
+    expect(screen.getByRole("link", { name: "Set governance.minAttestation" }).getAttribute("href")).toBe(pathFor("settings", ["configuration", "floor"]));
   });
 
   it("gives every panel a title and the help icon that carries its sentence", () => {
@@ -33,11 +33,6 @@ describe("the Overview chrome", () => {
     expect(screen.getByRole("heading", { name: /Posture/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Help: Posture" })).toBeTruthy();
     expect(screen.getByText("Nothing yet.")).toBeTruthy();
-  });
-
-  it("badges a word in its tone", () => {
-    render(<ToneBadge tone="danger" word="denied" />);
-    expect(screen.getByText("denied").getAttribute("data-tone")).toBe("danger");
   });
 
   it("finds the request that has waited longest", () => {

@@ -29,16 +29,16 @@ const HASH = "c41b9e2f0a7d3b8e51c6d4f2a9e0b7c3d5f1a8e6b2c4d0f9a7e3b1c5d8f2a6e0";
 
 // row reads one wire record the way the screen does, so the sheet is
 // tested on the same reading the table renders.
-const row = (data: Record<string, unknown>, type = "straza.audit.tool", username = "joe-java-developer-agent"): Row =>
-  ceRow({ seq: 4210, ce: JSON.stringify({ specversion: "1.0", type, source: "straza", time: "2026-09-12T10:45:01Z", data }), hash: HASH, prevHash: "ab12", username });
+const row = (data: Record<string, unknown>, type = "straza.audit.tool", username = "joe-java-developer-agent", about?: string): Row =>
+  ceRow({ seq: 4210, ce: JSON.stringify({ specversion: "1.0", type, source: "straza", time: "2026-09-12T10:45:01Z", data }), hash: HASH, prevHash: "ab12", username, about });
 
 const DENY = { session: SESSION, user: USER_ID, tool: "shell.exec", command: "rm -rf ./build", effect: "deny", ruleId: "no-destructive-delete", setName: "dev-guardrails", reason: "Straza: destructive delete is refused for role dev", snapshot: "sha256:4b1e" };
 const MCP = { session: SESSION, user: USER_ID, app: "midpoint", toolName: "assign_role", effect: "approve", ruleId: "iga-writes", setName: "iga" };
 const SENTINEL_ROW = row({ session: SESSION, detector: "burst-deny", severity: "critical", evidence: [1, 2, 3], reason: "9 refusals in 60 s in one session" }, "straza.audit.sentinel", "");
 
 // blocks names the sheet's blocks in the order they are rendered.
-const blocks = () => [...document.querySelectorAll("[data-record-sheet] [data-why], [data-record-sheet] [data-sentinel-strip], [data-record-sheet] [data-section]")]
-  .map((e) => e.getAttribute("data-section") || (e.hasAttribute("data-why") ? "why" : "sentinel"));
+const blocks = () => [...document.querySelectorAll("[data-record-sheet] [data-why], [data-record-sheet] [data-sentinel-strip], [data-record-sheet] [data-record-card], [data-record-sheet] [data-section]")]
+  .map((e) => e.getAttribute("data-section") || (e.hasAttribute("data-why") ? "why" : e.hasAttribute("data-record-card") ? "record" : "sentinel"));
 
 const show = (r: Row, props: Partial<React.ComponentProps<typeof RecordSheet>> = {}) =>
   render(<TooltipProvider><RecordSheet row={r} open={true} onOpenChange={() => {}} revoked={false} verified={true} {...props} /></TooltipProvider>);
@@ -50,24 +50,23 @@ describe("the record sheet", () => {
 
   it("names the record, its subject and its session, then leads with the why box", async () => {
     show(row(DENY));
-    expect(screen.getByRole("heading", { name: "Record 4210 tool" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Record 4210 tool call" })).toBeTruthy();
     expect(screen.getByText("joe-java-developer-agent, 2026-09-12 10:45:01 UTC, session", { exact: false }).textContent)
       .toBe("joe-java-developer-agent, 2026-09-12 10:45:01 UTC, session 0199cf12-4b1e…");
     expect(blocks()).toEqual(["why", "What ran", "Chain", "The record as stored"]);
     const why = document.querySelector("[data-why]") as HTMLElement;
-    expect(why.textContent).toContain("Denied.");
-    expect(why.textContent).toContain("Decided by rule no-destructive-delete in policy dev-guardrails: Straza: destructive delete is refused for role dev");
-    expect(why.textContent).toContain("Recorded at decision time.");
+    expect(why.textContent).toContain("Denied");
+    expect(why.textContent).toContain("Decided by policy rule no-destructive-delete in policy dev-guardrails: Straza: destructive delete is refused for role dev");
     expect(why.textContent).not.toContain("effect=deny");
     await userEvent.click(screen.getByRole("button", { name: ENGINE_FIELDS }));
     expect(why.textContent).toContain("effect=deny · ruleId=no-destructive-delete · setName=dev-guardrails · snapshot=sha256:4b1e");
   });
 
   it.each([
-    { name: "a refusal", data: DENY, type: "straza.audit.tool", tone: "danger", word: "Denied.", meta: "shell.exec" },
-    { name: "a held call", data: MCP, type: "straza.audit.mcp", tone: "warn", word: "Needs approval.", meta: "midpoint.assign_role" },
-    { name: "an allowance", data: { ...DENY, effect: "allow" }, type: "straza.audit.tool", tone: "ok", word: "Allowed.", meta: "shell.exec" },
-  ])("sets the verdict of $name on a neutral card, its word and dot in its tone, and the call under What ran", ({ data, type, tone, word, meta }) => {
+    { name: "a refusal", data: DENY, type: "straza.audit.tool", tone: "danger", word: "Denied", meta: "shell.exec", held: false },
+    { name: "a held call", data: MCP, type: "straza.audit.mcp", tone: "warn", word: "Needs approval", meta: "midpoint.assign_role", held: true },
+    { name: "an allowance", data: { ...DENY, effect: "allow" }, type: "straza.audit.tool", tone: "ok", word: "Allowed", meta: "shell.exec", held: false },
+  ])("sets the verdict of $name on a neutral card, its word and dot in its tone, and the call under What ran", ({ data, type, tone, word, meta, held }) => {
     show(row(data, type));
     const why = document.querySelector("[data-why]") as HTMLElement;
     expect(why.className).toContain("bg-card");
@@ -76,6 +75,8 @@ describe("the record sheet", () => {
     const verdict = why.querySelector("[data-outcome]") as HTMLElement;
     expect(verdict.textContent).toBe(word);
     expect(verdict.className).toContain("text-" + tone);
+    // Only a call the gateway held says that a person answers after the record.
+    expect(why.textContent?.includes("The gateway records the policy's outcome before a person answers.")).toBe(held);
     expect(document.querySelector("[data-call]")).toBeNull();
     const ran = document.querySelector("[data-section=\"What ran\"]") as HTMLElement;
     expect((ran.querySelector("[data-what-ran-meta]") as HTMLElement).textContent).toBe(meta);
@@ -89,7 +90,7 @@ describe("the record sheet", () => {
 
   it("leaves What ran out when the record names no call", () => {
     show(row({ session: SESSION, user: USER_ID, effect: "allow", ruleId: "dev-reads", setName: "dev-guardrails" }));
-    expect((document.querySelector("[data-why]") as HTMLElement).textContent).toContain("Allowed.");
+    expect((document.querySelector("[data-why]") as HTMLElement).textContent).toContain("Allowed");
     expect(document.querySelector("[data-section=\"What ran\"]")).toBeNull();
   });
 
@@ -104,7 +105,7 @@ describe("the record sheet", () => {
     expect(setName).toBe("dev-guardrails");
     show(row(old));
     expect((document.querySelector("[data-why]") as HTMLElement).textContent)
-      .toContain("Decided by rule no-destructive-delete. The policy name was not recorded on this record.");
+      .toContain("Decided by policy rule no-destructive-delete. The policy's name was not recorded on this record.");
   });
 
   it("folds the record as it is stored, and shows it indented once opened", async () => {
@@ -137,7 +138,7 @@ describe("the record sheet", () => {
 
   it("says a search result was not re-hashed, and never in the verified tone", () => {
     show(row(DENY), { verified: false });
-    expect(screen.getByText("Not verified in this browser. See the audit chain status for details.")).toBeTruthy();
+    expect(screen.getByText("Not verified in this browser.")).toBeTruthy();
     expect(screen.queryByText("Hash matches the loaded chain.")).toBeNull();
     const chain = document.querySelector("[data-section=\"Chain\"]") as HTMLElement;
     expect(chain.querySelector("[data-chain-check]")?.getAttribute("data-chain-check")).toBe("unknown");
@@ -226,6 +227,56 @@ describe("the record sheet", () => {
     const foot = document.querySelector("[data-slot=\"sheet-footer\"]") as HTMLElement;
     await userEvent.click(within(foot).getByRole("button", { name: "Close" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("a record that decided no call", () => {
+  // facts reads the card's fact rows as each label with its pills.
+  const facts = () => [...document.querySelectorAll("[data-record-card] [data-facts] dt")].map((dt) => [dt.textContent, [...(dt.nextElementSibling?.querySelectorAll("span.rounded-pill") || [])].map((p) => p.textContent)]);
+  const card = () => document.querySelector("[data-record-card]") as HTMLElement;
+
+  it.each([
+    {
+      name: "a user Entra changed", type: "straza.audit.admin",
+      data: { action: "user.update", target: USER_ID, user: USER_ID, username: "dan@example.com", changed: ["origin", "entra_agent_id"], origin: "entra", reason: "Entra took over the account" },
+      label: "Changed a user", facts: [["User", ["dan@example.com"]], ["Changed", ["origin", "entra agent id"]], ["Origin", ["Entra"]], ["Target", [USER_ID]]], reason: "Entra took over the account",
+    },
+    {
+      name: "a role midpoint assigned to a user the server named", type: "straza.audit.admin", about: "alice",
+      data: { action: "roles.assign", target: "as-7", user: USER_ID, role: "dev", roleId: "r-dev", origin: "scim", actor: "midpoint", actorId: "tok-1", actorVia: "api-token" },
+      label: "Assigned a role", facts: [["User", ["alice"]], ["Role", ["dev"]], ["Origin", ["scim"]], ["Target", ["as-7"]]], reason: null,
+    },
+    {
+      name: "a role midpoint assigned to a user the server could not name", type: "straza.audit.admin",
+      data: { action: "roles.assign", target: "as-7", user: USER_ID, role: "dev", roleId: "r-dev", origin: "scim", actor: "midpoint", actorId: "tok-1", actorVia: "api-token" },
+      label: "Assigned a role", facts: [["User", [USER_ID]], ["Role", ["dev"]], ["Origin", ["scim"]], ["Target", ["as-7"]]], reason: null,
+    },
+    {
+      name: "a revocation", type: "straza.revocation.user",
+      data: { user: USER_ID, reason: "deactivated via SCIM", origin: "scim" },
+      label: "Revoked a user's access", facts: [["Origin", ["scim"]]], reason: "deactivated via SCIM",
+    },
+    {
+      name: "a role's group in Entra", type: "straza.audit.admin",
+      data: { action: "entra.group.create", role: "finance-readers", group: "5d2a7c1e-9b40-4f6e-8a11-3c0d5e7f9a21", name: "Straza: finance-readers", description: "Members of this group hold the Straza role finance-readers." },
+      label: "Created a role's group in Entra", facts: [["Role", ["finance-readers"]], ["Group", ["5d2a7c1e-9b40-4f6e-8a11-3c0d5e7f9a21"]], ["Name", ["Straza: finance-readers"]], ["Description", ["Members of this group hold the Straza role finance-readers."]]], reason: null,
+    },
+    {
+      name: "a refused admin change", type: "straza.audit.admin",
+      data: { action: "admin.refused", route: "DELETE /v1/admin/users/{id}", httpStatus: 403, reason: "token lacks scope identity:write", target: USER_ID, actor: "iga-reader", actorVia: "api-token" },
+      label: "Refused an admin change", facts: [["Target", [USER_ID]], ["Route", ["DELETE /v1/admin/users/{id}"]]], reason: "token lacks scope identity:write",
+    },
+  ])("leads $name with what happened, its facts as pills and its reason", ({ type, data, label, facts: want, reason, about }) => {
+    show(row(data, type, "dan@example.com", about));
+    expect(blocks()).toEqual(["record", "Chain", "The record as stored"]);
+    expect((card().querySelector("[data-record-label]") as HTMLElement).textContent).toBe(label);
+    expect(facts()).toEqual(want);
+    expect(card().querySelector("[data-record-reason]")?.textContent ?? null).toBe(reason);
+  });
+
+  it("leaves the card out where the verdict card or the sentinel strip says it", () => {
+    show(row(DENY));
+    expect(card()).toBeNull();
   });
 });
 

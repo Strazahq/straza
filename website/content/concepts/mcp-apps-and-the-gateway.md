@@ -35,7 +35,7 @@ The enterprise profile refuses a server that would run as a process inside Straz
 To build a session's tool list, the gateway first keeps each tool that the server lists now, that its manifest exposes, and that an access row of one of the session's [roles]({{< relref "concepts/roles-and-access.md" >}}) names. Then it runs the [policy]({{< relref "concepts/policy-model.md" >}}) for the session. By default a tool that policy denies is hidden, and a tool that needs a person's [approval]({{< relref "concepts/approvals-model.md" >}}) stays visible and asks the agent for a reason. A tool without access and a hidden tool get the same unknown-tool answer, so the answer never reveals that a hidden tool exists.
 
 
-When [your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}), or an admin on standalone, changes the roles of a person or an agent, a running session takes the change at its next check-in. The gateway then tells the client that the tool list changed, and the client lists again without a restart.
+When [your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}), or an admin on standalone, changes the roles of a person or an agent, a running session takes the change within seconds through its push stream. A session without a connected push stream waits for its next check-in, at most 5 minutes. The gateway then tells the client that the tool list changed, and the client lists again without a restart.
 
 ## What happens to a tool call
 
@@ -43,7 +43,7 @@ When [your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}), or an admin
 For each tool call, the gateway checks these in order:
 
 1. Whether the session may see the tool.
-2. The server's rate limit for this session.
+2. The server's rate limit for this session, and for all sessions of the same person or agent together.
 3. On a server that declares objects, whether a role the session holds covers the object the call names.
 4. Policy, against the policy snapshot in force.
 5. A person's approval, when the rule asks for one.
@@ -52,10 +52,13 @@ For each tool call, the gateway checks these in order:
 8. The call itself, which times out after 30 seconds unless the manifest or the deployment sets another limit.
 
 
-A manifest can set a rate limit, which caps the calls a session makes to that server each second. The limit runs before policy, so a runaway loop costs no policy work and spends no approval. Each refused call still leaves its record.
+A manifest can set a rate limit, which caps the calls a session makes to that server each second. All sessions of one person or agent together may make five times as many, so opening more sessions gives no more calls. Both limits run before policy, so a runaway loop costs no policy work and spends no approval. Each refused call still leaves its record. Every strazad instance counts both limits on its own.
 
 
 A deny comes back as a tool error whose text starts with `Straza:` and carries the reason. The model reads the reason and can tell the deny apart from a connection fault.
+
+
+Some servers keep state for each MCP session, such as a working folder or the rows a query left open. On a remote server the gateway opens one session with the server for each MCP connection of a Straza session, so no caller reaches the state the server keeps for another, and two agent windows of one person do not share it. One Straza session holds at most 64 of them on one server. It closes that session after ten minutes without a call, and also when a call on it fails, and the next call opens a new one. A server that Straza starts as a process or a container is one process with one session, and every caller shares it. Run a server that keeps state for each session as a remote server.
 
 ## How an agent connects
 
@@ -68,14 +71,14 @@ The gateway also offers a built-in server named `straza`. Its tools let an agent
 ## Why a gateway, and what it costs
 
 
-A hook on the agent's machine is advisory, because an agent that can run anything can skip it. The gateway is a security boundary, because the server's credential stays there and a call that goes around the gateway has none. This is true only while agents have no other route to the server, so remove such routes when you deploy. [The security model]({{< relref "evaluate/security-model.md" >}}) says which paths are a boundary.
+How much a hook on the agent's machine holds depends on its install. An agent without root cannot switch off the hook of a managed install, and an agent can remove a hook the user installed. The gateway is a security boundary in both cases, because the server's credential stays there and a call that goes around the gateway has none. This is true only while agents have no other route to the server, so remove such routes when you deploy. [Deployment best practices]({{< relref "guides/operate/best-practices.md" >}}) shows how on Kubernetes. [The security model]({{< relref "evaluate/security-model.md" >}}) says which paths are a boundary.
 
 
-Every governed MCP call crosses the gateway, which adds a network hop. When the gateway cannot be reached, the agent has no MCP tools at all. You also run one more service, sized to your fleet. The gateway is built to keep no state of its own, so you scale it by adding instances and any instance can serve any session.
+Every governed MCP call crosses the gateway, which adds a network hop. When the gateway cannot be reached, the agent has none of the MCP tools behind it. You also run one more service, sized to your fleet. The gateway is built to keep no state of its own, so you scale it by adding instances and any instance can serve any session. The rate limits are counted inside each instance, so with several instances a session, or all sessions of one person or agent, can get the rate once for each instance.
 
 {{< details summary="How it works inside" >}}
 
-strazad serves the gateway at `/mcp`, and each server's own endpoint under `/mcp/` and the server's name. The gateway checks each request's session token against cached keys. Then it checks the revocation list and the deployment's minimum attestation. If this instance has not seen the session since its last restart, it asks the client to check in again.
+strazad serves the gateway at `/mcp`, and each server's own endpoint under `/mcp/` and the server's name. Before anything else, the gateway refuses a request whose `Origin` header names a web page at any address but Straza's own. It checks each request's session token against cached keys. Then it checks the revocation list and the deployment's minimum attestation. If this instance has not seen the session since its last restart, it asks the client to check in again.
 
 
 A large tool list comes in pages, and each page cursor is checked against the list it was issued for. When an access row or a policy changes while a client is paging, its cursor fails and the client lists again from the start.

@@ -775,7 +775,7 @@ import_mp roles /tmp/admin-role.xml "role 'BR:Straza-admin-access'"
 
 # --- BR:Straza-approver-access: the DECIDER access package. sec-approvers is
 # an approver-kind role, so holding it carries decide authority and nothing
-# else (no tools, no packs, no console areas): it is what a policy's
+# else (no tools, no console areas): it is what a policy's
 # approve.roles may name besides straza-admin. Same shape as the access
 # packages above (imported role + Keycloak login, the account rides
 # AR:Straza:Account on the user), so an access review over this ONE package
@@ -828,7 +828,7 @@ cat > /tmp/approver-role.xml <<EOF
   approval device, and enrollment eligibility is IGA-mastered) plus a
   Keycloak login via AR:Keycloak:Account, so the holder can sign in, enroll
   a phone or browser, and answer approval requests. Decide authority only: approver-kind roles
-  carry no tools, no packs, no console areas. The Straza account itself
+  carry no tools and no console areas. The Straza account itself
   rides AR:Straza:Account. Unassign this role and the person stops being a
   decider while the account stays.</description>
   <requestable>false</requestable>

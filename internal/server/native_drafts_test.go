@@ -648,6 +648,21 @@ func TestDraftingRates(t *testing.T) {
 	if !limited {
 		t.Error("five status calls in a row met no session rate")
 	}
+	// The drafting tools are outside the ceiling a user's sessions share on
+	// a server. Eight sessions spend two calls each, 16 against the 10 such
+	// a ceiling would hold, and none meets it.
+	r.agent(t, "many")
+	var many [8]string
+	for i := range many {
+		many[i] = agentSessionToken(t, r.app, r.base, "many")
+	}
+	for _, tok := range many {
+		for range 2 {
+			if text, _, _ := status(t, r.base, tok, "1"); strings.Contains(text, "all your sessions together") {
+				t.Errorf("a drafting call met the ceiling of a user's sessions: %q", text)
+			}
+		}
+	}
 	if _, err := r.app.store.Policies().Create(ctx, store.PolicySet{Name: "poll-approvals", Status: "active", YAMLSource: "apiVersion: straza.dev/v1beta1\nkind: PolicySet\n" +
 		"metadata: {name: poll-approvals}\nspec:\n  match: {users: [poll]}\n  rules:\n    - id: approvals\n      tools: [mcp.call]\n      apps: [straza]\n" +
 		"      toolNames: {allow: [approval_status]}\n      effect: allow\n"}); err != nil {
@@ -758,8 +773,7 @@ func TestDraftSubmitApprovalPreviewIsTheDigest(t *testing.T) {
 
 // TestSubjectCacheKeepsTheSessionFacts pins what check-in records beside
 // the subject: whether the user is a person and the harness name, which
-// the drafting tools read, and the delivered packs, which whoami reads.
-// The fixture binds golang-style to a role kim holds and none to joe.
+// the drafting tools read.
 func TestSubjectCacheKeepsTheSessionFacts(t *testing.T) {
 	t.Parallel()
 	r := newDoorRig(t)
@@ -767,15 +781,14 @@ func TestSubjectCacheKeepsTheSessionFacts(t *testing.T) {
 	for _, tc := range []struct {
 		tok    string
 		person bool
-		packs  []whoamiPack
-	}{{sessionToken(t, r.base, "kim"), true, []whoamiPack{{"golang-style", "1"}}}, {joeTok, false, []whoamiPack{}}} {
+	}{{sessionToken(t, r.base, "kim"), true}, {joeTok, false}} {
 		claims, err := r.app.tokens.Verify(tc.tok)
 		if err != nil {
 			t.Fatal(err)
 		}
 		e, ok := r.app.subjects.lookup(claims.Session)
-		if !ok || e.facts.person != tc.person || e.facts.harness != "claude-code" || !slices.Equal(e.facts.packs, tc.packs) {
-			t.Errorf("the cached facts of %s = %+v (%v), want person %v, harness claude-code and packs %v", e.sub.User, e.facts, ok, tc.person, tc.packs)
+		if !ok || e.facts.person != tc.person || e.facts.harness != "claude-code" {
+			t.Errorf("the cached facts of %s = %+v (%v), want person %v and harness claude-code", e.sub.User, e.facts, ok, tc.person)
 		}
 	}
 }

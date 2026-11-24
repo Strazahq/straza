@@ -27,6 +27,8 @@ var unpairedBodies = map[string]string{
 	"PUT /v1/admin/policies":                "the body is one PolicySet document in YAML that policy.ParseAll reads, so its fields are the PolicySet schema's",
 	"POST /v1/admin/policies/validate":      "the body is PolicySet YAML that policy.Parse reads, so its fields are the PolicySet schema's",
 	"POST /v1/admin/approvers/enroll-token": "the route answers 403 to every caller and reads the body leniently, only to name a user in the refusal's record",
+	"POST /v1/admin/packs":                  "knowledge packs were removed, so the route answers 410 to every administrator and reads no body",
+	"POST /v1/admin/packs/{id}/bindings":    "knowledge packs were removed, so the route answers 410 to every administrator and reads no body",
 }
 
 // bodyDecoders names the functions that decode an admin request body, each

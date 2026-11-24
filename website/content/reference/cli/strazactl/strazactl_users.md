@@ -2,7 +2,7 @@
 title: strazactl users
 description: Manage users
 pagetype: reference
-weight: 103
+weight: 97
 draft: false
 sources:
   - cmd/strazactl
@@ -27,7 +27,7 @@ strazactl users [flags]
 * [strazactl users create](/reference/cli/strazactl/strazactl_users_create/): Create a local user
 * [strazactl users create-nhi](/reference/cli/strazactl/strazactl_users_create-nhi/): Provision an AI agent or a service account (headless, no password, key-based)
 * [strazactl users disable](/reference/cli/strazactl/strazactl_users_disable/): Disable a user (status disabled, every session revoked, lifted by `strazactl users enable`)
-* [strazactl users enable](/reference/cli/strazactl/strazactl_users_enable/): Enable a disabled user: the status goes back to active, the user's revocations are lifted, and a device still enrolled needs no new enrollment
+* [strazactl users enable](/reference/cli/strazactl/strazactl_users_enable/): Enable a disabled user: the status goes back to active, the disable is lifted, a lock stays until `strazactl users unlock`, and a device still enrolled needs no new enrollment
 * [strazactl users entra-agent-id](/reference/cli/strazactl/strazactl_users_entra-agent-id/): Manage the Entra agent identity an AI agent acts as at Entra
 * [strazactl users list](/reference/cli/strazactl/strazactl_users_list/): List users
 * [strazactl users lock](/reference/cli/strazactl/strazactl_users_lock/): Lock a user: a revocation that an identity manager cannot lift by enabling the user; the status stays as it is

@@ -14,7 +14,7 @@ export function Marked({ text, className }: { text: string; className?: string }
     if (at > last) parts.push(text.slice(last, at));
     const cp = codepoint(m[0]);
     parts.push(
-      <span key={at} data-hidden-char={cp} title={cp + " " + hiddenName(m[0])} className="mx-px inline-block rounded-[3px] border border-warn px-[3px] align-[1px] font-mono text-[10.5px] leading-tight text-warn">
+      <span key={at} data-hidden-char={cp} title={cp + " " + hiddenName(m[0])} className="mx-px inline-block rounded-md border border-warn px-[3px] align-[1px] font-mono text-caption leading-tight text-warn">
         {cp}
       </span>,
     );
@@ -45,7 +45,7 @@ export function CodeLines({ text, lang, wrap = true, cutEnd }: { text: string; l
   const row = "grid grid-cols-[3.2em_minmax(0,1fr)]";
   const body = cn("pr-2.5", wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "whitespace-pre");
   return (
-    <div className="max-h-[460px] overflow-auto py-1.5 font-mono text-[12.5px] leading-[1.55]" data-code={lang} data-wrap={wrap ? "on" : "off"}>
+    <div className="max-h-[460px] overflow-auto py-1.5 font-mono text-caption leading-[1.55]" data-code={lang} data-wrap={wrap ? "on" : "off"}>
       {lines.map((parts, k) => (
         <div key={k} className={row} data-line={k + 1}>
           <span className="pr-3 text-right text-muted-foreground tabular-nums select-none" aria-hidden="true">{k + 1}</span>

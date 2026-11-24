@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TestACall, simulationOutcome } from "./test-a-call";
 import { type ObjectsAnswer, appObjects, listAudit, listRoles, overview, simulate } from "@/lib/api";
+import { TEST_VERIFICATION_OPTION, TEST_WHO } from "@/lib/policy-words";
 import { version } from "@/lib/public";
 
 vi.mock("@/lib/api", async (importOriginal) => ({
@@ -48,11 +49,21 @@ describe("the Test a call sheet", () => {
 
   it("opens with the title, the live context line and the pinned event", async () => {
     mount();
-    expect(screen.getByRole("heading", { name: "Test a call: what would happen" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Test a call" })).toBeTruthy();
     expect(screen.getByText("Testing the policies live right now, on demo-tools. Nothing is saved or enforced, and no audit record is written.")).toBeTruthy();
-    expect(screen.getByText("tool.pre · mcp.call on demo-tools")).toBeTruthy();
-    expect(screen.getByText("Pinned to this server; the Policies page tests any event.")).toBeTruthy();
+    expect(screen.getByText("before the tool runs · MCP call on demo-tools")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("It is the door for an operator");
     await ready();
+  });
+
+  it("picks the subject in one switch, roles first", async () => {
+    mount();
+    await ready();
+    const group = screen.getByRole("group", { name: TEST_WHO });
+    const options = () => within(group).getAllByRole("button").map((b) => [b.textContent, b.getAttribute("aria-pressed")]);
+    expect(options()).toEqual([["Roles", "true"], ["One user", "false"]]);
+    await userEvent.click(within(group).getByRole("button", { name: "One user" }));
+    expect(options()).toEqual([["Roles", "false"], ["One user", "true"]]);
   });
 
   it("lists the roles with the application roles first and the first one picked", async () => {
@@ -60,7 +71,6 @@ describe("the Test a call sheet", () => {
     await ready();
     expect(listRoles).toHaveBeenCalledTimes(1);
     expect(pills()).toEqual([["dev-tools", "true"], ["dev", "false"], ["sec-approvers", "false"]]);
-    expect(screen.getByText("Application roles carry access rows; the others are here so a wrong pick reads as a denial, not a surprise.")).toBeTruthy();
   });
 
   it("names the missing answer instead of running with nothing picked", async () => {
@@ -69,7 +79,7 @@ describe("the Test a call sheet", () => {
     await run();
     expect(screen.getByText("Pick at least one role, or name a user.")).toBeTruthy();
     expect(simulate).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "one user" }));
+    await userEvent.click(screen.getByRole("button", { name: "One user" }));
     await run();
     expect(screen.getByText("Pick at least one role, or name a user.")).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "user" }));
@@ -93,11 +103,11 @@ describe("the Test a call sheet", () => {
     answer({ effect: "allow" });
     mount();
     await ready();
-    await userEvent.click(screen.getByRole("button", { name: "one user" }));
+    await userEvent.click(screen.getByRole("button", { name: "One user" }));
     await userEvent.type(screen.getByRole("textbox", { name: "user" }), "alice");
-    expect(screen.getByText("The server resolves the user's roles and typology, so the answer matches a live session.")).toBeTruthy();
-    await userEvent.click(screen.getByRole("combobox", { name: "attestation" }));
-    await userEvent.click(await screen.findByRole("option", { name: "managed" }));
+    expect(screen.getByText("Uses the user's roles as Straza holds them.")).toBeTruthy();
+    await userEvent.click(screen.getByRole("combobox", { name: "client verification" }));
+    await userEvent.click(await screen.findByRole("option", { name: TEST_VERIFICATION_OPTION.managed }));
     await userEvent.click(screen.getByRole("combobox", { name: "tool name" }));
     await userEvent.click(await screen.findByRole("option", { name: "get-sum" }));
     await run();
@@ -114,8 +124,8 @@ describe("the Test a call sheet", () => {
     expect(within(card).getByText("Needs approval")).toBeTruthy();
     expect(card.className).toContain("border-warn");
     expect(within(card).queryByText("allowed")).toBeNull();
-    expect(card.textContent).toContain("Decided by rule dev-mcp-sum-approval-showcase in policy dev-guardrails: Straza: get-sum held for approval.");
-    expect(card.textContent).toContain("subject: roles dev-tools · snapshot b8c0a55073d40b84 · Simulation only. No tool call was executed. Role access was checked before policy evaluation.");
+    expect(card.textContent).toContain("Decided by policy rule dev-mcp-sum-approval-showcase in policy dev-guardrails: Straza: get-sum held for approval.");
+    expect(card.textContent).toContain("subject: roles dev-tools · policy version b8c0a55073d40b84");
   });
 
   it("reads an allow by role access as running instantly", async () => {
@@ -125,7 +135,7 @@ describe("the Test a call sheet", () => {
     await run();
     const card = await result();
     expect(within(card).getByText("Allowed")).toBeTruthy();
-    expect(card.textContent).toContain("No policy matched this call. Allowed by role access. No policy rule gates this tool.");
+    expect(card.textContent).toContain("No policy matched this call. Allowed by role access. No policy rule decides this tool.");
   });
 
   it("reads a deny with a rule", async () => {
@@ -135,7 +145,7 @@ describe("the Test a call sheet", () => {
     await run();
     const card = await result();
     expect(within(card).getByText("Denied")).toBeTruthy();
-    expect(card.textContent).toContain("Decided by rule no-env in policy dev-guardrails: Straza: get-env blocked.");
+    expect(card.textContent).toContain("Decided by policy rule no-env in policy dev-guardrails: Straza: get-env blocked.");
     expect(within(card).queryByText("allowed")).toBeNull();
   });
 
@@ -144,7 +154,7 @@ describe("the Test a call sheet", () => {
     mount();
     await ready();
     await run();
-    expect((await result()).textContent).toContain("No policy matched this call. Denied by the enterprise profile default: a call nothing allows is denied.");
+    expect((await result()).textContent).toContain("No policy matched this call. Denied by default. On the enterprise profile a call that nothing allows is denied.");
   });
 
   it("falls back to the plain profile sentence when the profile is unknown", async () => {
@@ -153,7 +163,7 @@ describe("the Test a call sheet", () => {
     mount();
     await ready();
     await run();
-    expect((await result()).textContent).toContain("No policy matched this call. Denied by the profile default: no policy allowed this call.");
+    expect((await result()).textContent).toContain("No policy matched this call. Denied by default. No policy allowed this call.");
   });
 
   it("replays a recent call to this server from the audit window", async () => {
@@ -167,16 +177,16 @@ describe("the Test a call sheet", () => {
     answer({ effect: "allow" });
     mount();
     await ready();
-    await userEvent.click(screen.getByRole("button", { name: "Replay a recent call to this server" }));
+    await userEvent.click(screen.getByRole("button", { name: "Replay a call" }));
     const list = await screen.findByText("#1491");
-    expect(screen.getByRole("button", { name: "Close the replay list" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close list" })).toBeTruthy();
     expect(listAudit).toHaveBeenCalledWith("after=1300&limit=1000");
     const rows = within(list.closest("[data-replay-list]") as HTMLElement).getAllByRole("button").map((b) => b.textContent);
     expect(rows).toEqual(["#1491sam-sre-agentechoallow", "#1489sam-sre-agentget-sumapprove"]);
     await userEvent.click(screen.getByRole("button", { name: /#1489/ }));
     expect(document.querySelector("[data-replay-list]")).toBeNull();
-    expect(screen.getByRole("button", { name: "Replay a recent call to this server" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "one user" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Replay a call" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "One user" }).getAttribute("aria-pressed")).toBe("true");
     expect((screen.getByRole("textbox", { name: "user" }) as HTMLInputElement).value).toBe("sam-sre-agent");
     expect(screen.getByRole("combobox", { name: "tool name" }).textContent).toContain("get-sum");
     await run();
@@ -189,7 +199,7 @@ describe("the Test a call sheet", () => {
     vi.mocked(listAudit).mockResolvedValue([]);
     mount();
     await ready();
-    await userEvent.click(screen.getByRole("button", { name: "Replay a recent call to this server" }));
+    await userEvent.click(screen.getByRole("button", { name: "Replay a call" }));
     expect(await screen.findByText("No call to this server in the recent audit window.")).toBeTruthy();
     expect(listAudit).toHaveBeenCalledWith("after=0&limit=1000");
   });
@@ -199,7 +209,7 @@ describe("the Test a call sheet", () => {
     mount();
     await ready();
     await run();
-    expect(await screen.findByText("This server does not offer Test a call yet. Upgrade strazad to test calls from the console.")).toBeTruthy();
+    expect(await screen.findByText("Straza does not offer Test a call yet. Upgrade Straza to test calls from the console.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Run test" })).toBeNull();
     expect(screen.queryByRole("button", { name: "dev-tools" })).toBeNull();
   });
@@ -211,7 +221,7 @@ describe("the Test a call sheet", () => {
     await run();
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Test a call refused.");
-    expect(alert.textContent).toContain("The server answered: no such user. Check the user name and the tool name, then run the test again.");
+    expect(alert.textContent).toContain("Straza answered: no such user. Check the user name and the tool name, then run the test again.");
     expect(screen.getByRole("button", { name: "Run test" })).toBeTruthy();
   });
 
@@ -239,7 +249,7 @@ describe("the Test a call sheet", () => {
     answer({ effect: "allow" });
     mount([]);
     await ready();
-    expect(screen.getByText("The server listed no tool yet; type the name to test.")).toBeTruthy();
+    expect(screen.getByText("The server listed no tool yet. Type the name to test.")).toBeTruthy();
     await run();
     expect(screen.getByText("Type the tool name to test.")).toBeTruthy();
     expect(simulate).not.toHaveBeenCalled();
@@ -254,12 +264,12 @@ describe("practical simulation outcomes", () => {
   it.each([
     [{ effect: "allow", approve: {} }, "Needs approval", "warn"],
     [{ effect: "allow", confirm: true }, "Needs approval", "warn"],
-    [{ effect: "allow", serverCheck: true }, "Requires additional checks", "warn"],
-    [{ effect: "allow", classify: true }, "Requires additional checks", "warn"],
+    [{ effect: "allow", serverCheck: true }, "Needs more checks", "warn"],
+    [{ effect: "allow", classify: true }, "Needs more checks", "warn"],
     [{ effect: "deny", approve: {} }, "Denied", "danger"],
     [{ effect: "allow" }, "Allowed", "ok"],
-    [{ effect: "" }, "No verdict: the server answered the effect none, which this console cannot read. The line below holds the full answer.", "plain"],
-    [{ effect: "hold" }, "No verdict: the server answered the effect hold, which this console cannot read. The line below holds the full answer.", "plain"],
+    [{ effect: "" }, "No outcome: Straza answered none, which this console cannot read. The line below holds the full answer.", "plain"],
+    [{ effect: "hold" }, "No outcome: Straza answered hold, which this console cannot read. The line below holds the full answer.", "plain"],
   ] as const)("reads the complete response %j", (decision, label, tone) => {
     expect(simulationOutcome(decision)).toEqual({ label, tone });
   });
@@ -297,7 +307,7 @@ describe("Test a call on a server that pins repos", () => {
     });
     mountGh();
     await search();
-    expect(screen.getByText("Pick the repo the call works on. Test a call sends it in the argument repo, as the agent would.")).toBeTruthy();
+    expect(screen.getByText("Pick the repo the call works on.")).toBeTruthy();
     expect(preview()).toBe("args {}");
     await userEvent.click(await screen.findByRole("button", { name: /Strazahq\/pay-api/ }));
     expect((document.querySelector("[data-picked]") as HTMLElement).textContent).toContain("Strazahq/pay-api");
@@ -362,7 +372,7 @@ describe("Test a call on a server that pins repos", () => {
     expect(card.className).toContain("border-danger");
     expect(within(card).getByText("Denied")).toBeTruthy();
     expect((card.querySelector("[data-gate]") as HTMLElement).textContent).toBe("The repo check refused this call before any policy ran. pr_create on Strazahq/site was refused: none of your roles on ghapp covers that repo. If the repo is new, Straza refreshes the list within a minute, so try again then.");
-    expect(card.textContent).toContain("subject: roles ghapp-write · snapshot b8c0a55073d40b84 · Simulation only.");
+    expect(card.textContent).toContain("subject: roles ghapp-write · policy version b8c0a55073d40b84");
     expect(card.textContent).not.toContain("No policy matched");
   });
 
@@ -377,7 +387,7 @@ describe("Test a call on a server that pins repos", () => {
     mountGh();
     await userEvent.click(await screen.findByRole("button", { name: /Strazahq\/site/ }));
     expect(document.querySelector("[data-picked]")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Replay a recent call to this server" }));
+    await userEvent.click(screen.getByRole("button", { name: "Replay a call" }));
     await userEvent.click(await screen.findByRole("button", { name: /#38/ }));
     expect(document.querySelector("[data-picked]")).toBeNull();
     expect(preview()).toBe("args {}");
@@ -403,7 +413,7 @@ describe("Test a call on a server that pins repos", () => {
     ]);
     mountGh();
     await search();
-    await userEvent.click(screen.getByRole("button", { name: "Replay a recent call to this server" }));
+    await userEvent.click(screen.getByRole("button", { name: "Replay a call" }));
     await userEvent.click(await screen.findByRole("button", { name: /#39/ }));
     expect((document.querySelector("[data-picked]") as HTMLElement).textContent).toContain("Strazahq/site");
     expect(preview()).toBe("args {\"repo\":\"Strazahq/site\"}");

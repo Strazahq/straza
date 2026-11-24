@@ -2,7 +2,7 @@
 title: strazactl users create
 description: Create a local user
 pagetype: reference
-weight: 104
+weight: 98
 draft: false
 sources:
   - cmd/strazactl

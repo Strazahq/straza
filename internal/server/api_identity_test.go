@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +62,7 @@ func testAppPreRun(t *testing.T, preRun []func(*App), mutators ...func(*config.C
 	// PublicURL must match the bound port for issuer/token issuer identity.
 	base := "http://" + app.Addr()
 	app.cfg.Server.PublicURL = base
-	tokens, err := authn.NewTokenService(ctx, app.store.SigningKeys(), base, 0)
+	tokens, err := authn.NewTokenService(ctx, app.store.SigningKeys(), app.kek, base, 0)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -92,8 +91,7 @@ func testAppPreRun(t *testing.T, preRun []func(*App), mutators ...func(*config.C
 	return app, base
 }
 
-// seedIdentity creates a local user (password login), roles dev⇒reader, and
-// a knowledge pack bound to reader (delivered transitively via implication).
+// seedIdentity creates a local user (password login) and roles dev⇒reader.
 func seedIdentity(t *testing.T, app *App) store.User {
 	t.Helper()
 	ctx := context.Background()
@@ -116,8 +114,6 @@ func seedIdentity(t *testing.T, app *App) store.User {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	pack, _ := app.store.Packs().Create(ctx, store.KnowledgePack{Name: "golang-style", Version: "1", Content: "use gofmt", Checksum: "c1"})
-	_ = app.store.Packs().Bind(ctx, reader.ID, pack.ID)
 	app.resolver.Bump()
 	return u
 }
@@ -180,8 +176,8 @@ func postJSON(t *testing.T, urlStr string, body any) (int, map[string]any) {
 }
 
 // TestEnrollAndCheckinFlow drives enrollment end to end: device-code login,
-// enroll, checkin with packs, offline token verification, refresh, and the
-// disabled-user refusal.
+// enroll, checkin with the retired knowledge_packs property as an empty
+// list, offline token verification, refresh, and the disabled-user refusal.
 func TestEnrollAndCheckinFlow(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -200,8 +196,8 @@ func TestEnrollAndCheckinFlow(t *testing.T) {
 	}
 	deviceID := h.device
 
-	// Checkin: session starts, roles resolve (dev + implied reader), the
-	// reader-bound pack arrives, attestation caps at advisory.
+	// Checkin: session starts, roles resolve (dev + implied reader),
+	// knowledge_packs is an empty list, attestation caps at advisory.
 	code, checkin := h.checkin()
 	if code != http.StatusOK {
 		t.Fatalf("checkin = %d %v", code, checkin)
@@ -213,16 +209,11 @@ func TestEnrollAndCheckinFlow(t *testing.T) {
 	if len(roles) != 2 || roles[0] != "dev" || roles[1] != "reader" {
 		t.Errorf("roles = %v, want [dev reader]", roles)
 	}
-	packs, _ := checkin["knowledge_packs"].([]any)
-	if len(packs) != 1 || packs[0].(map[string]any)["name"] != "golang-style" {
-		t.Errorf("packs = %v", packs)
+	if packs, ok := checkin["knowledge_packs"].([]any); !ok || len(packs) != 0 {
+		t.Errorf("knowledge_packs = %#v, want an empty list, never null or absent", checkin["knowledge_packs"])
 	}
 	if got := checkin["start_text"]; got != agentguard.StartText("kim", true) {
 		t.Errorf("start_text = %v, want the governance paragraph for kim with the whoami sentence", got)
-	}
-	if e, ok := app.subjects.lookup(checkin["session_id"].(string)); !ok ||
-		!slices.Equal(e.facts.packs, []whoamiPack{{Name: "golang-style", Version: packs[0].(map[string]any)["version"].(string)}}) {
-		t.Errorf("the cached facts carry packs %+v (%v), want the delivered golang-style pack", e.facts.packs, ok)
 	}
 	if ttl := checkin["expires_in"].(float64); ttl < 250 || ttl > 300 {
 		t.Errorf("expires_in = %v, want ~300", ttl)
@@ -367,6 +358,8 @@ func TestCheckinContractFixtures(t *testing.T) {
 		{"checkin-invalid-no-auth.json", http.StatusBadRequest, "", "", false},
 		{"checkin-invalid-harness-name-long.json", http.StatusBadRequest, "", fmt.Sprintf(harnessNameTooLongMsg, 257, checkinTextMax), false},
 		{"checkin-invalid-harness-name-nul.json", http.StatusBadRequest, "", fmt.Sprintf(checkinNULMsg, "harness.name", nulStepStraza), false},
+		{"checkin-valid-where.json", http.StatusOK, "none", "", false},
+		{"checkin-invalid-folder-long.json", http.StatusBadRequest, "", fmt.Sprintf(folderTooLongMsg, 1025, checkinFolderMax), false},
 		{"checkin-valid-key.json", http.StatusUnauthorized, "", "", true},
 		{"checkin-invalid-key-counter-zero.json", http.StatusBadRequest, "", "", true},
 		{"checkin-invalid-key-with-token.json", http.StatusBadRequest, "", "", true},

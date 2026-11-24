@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Loader2Icon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Fact } from "@/components/server-overview";
@@ -11,12 +11,11 @@ import { notify } from "@/lib/notify";
 import { KIND_NAME, sentWords } from "@/lib/server-words";
 import { ENV_WARNING_SHORT, absTime, agentsLine, kindLine } from "@/lib/words";
 
-const CODE = "rounded bg-muted px-1 font-mono text-[13px] text-foreground";
-const CHIP = "rounded bg-teal-bg px-1.5 align-[1px] font-mono text-xs text-teal";
+const CODE = "rounded-md bg-muted px-1 font-mono text-caption text-foreground";
 
 type SecretsState = { kind: "loading" } | { kind: "ready"; rows: SecretRow[] } | { kind: "error"; err: ApiError };
 
-const EMPTY_VALUE = "Type the secret the server expects. It is stored sealed and never shown again.";
+const EMPTY_VALUE = "Type the secret the server expects.";
 const NO_ROLE = "Pick the application role this secret is for.";
 const UNUSED = "Stored, but this credential type does not read it. Remove it, or let agents fall back to it.";
 const UNUSED_ROLES = "Stored, but this credential type does not read them. Remove them, or let agents fall back to them.";
@@ -119,8 +118,8 @@ function SecretForm({ app, perRole, onDone, onCancel, onRefused }: FormProps) {
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel} disabled={busy}>Cancel</Button>
       </div>
-      {missing && <p className="text-[13px] text-danger" role="alert">{missing === "role" ? NO_ROLE : EMPTY_VALUE}</p>}
-      <p className="text-[13px] text-muted-foreground">Stored sealed. Never shown again, never returned by any read.</p>
+      {missing && <p className="text-caption text-danger" role="alert">{missing === "role" ? NO_ROLE : EMPTY_VALUE}</p>}
+      <p className="text-caption text-muted-foreground">Stored encrypted. Never shown again.</p>
     </div>
   );
 }
@@ -182,11 +181,11 @@ export function useCredentialFacts(app: AppRow, onRefused: (err: ApiError) => vo
 
   const stored = (() => {
     if (secrets.kind === "loading") return <span className="text-muted-foreground">Reading the stored credential.</span>;
-    if (secrets.kind === "error") return "The stored credential could not be read: " + (secrets.err.unreachable ? "strazad did not answer" : secrets.err.message) + ". Reload the page to try again.";
+    if (secrets.kind === "error") return "The stored credential could not be read: " + (secrets.err.unreachable ? "Straza did not answer" : secrets.err.message) + ". Reload the page to try again.";
     if (own) {
       return (
         <>
-          {"Set " + absTime(own.set_at) + ", fingerprint "}<code className={CODE}>{own.fingerprint + "…"}</code>{". Never shown again. "}
+          {"Set " + absTime(own.set_at) + ", fingerprint "}<code className={CODE}>{own.fingerprint + "…"}</code>{" "}
           <Button size="sm" variant="ghost" className="h-7" onClick={() => setForm("app")}>Set it again</Button>
           <Button size="sm" variant="ghost" className="h-7" onClick={() => setAsk(own)}>Remove</Button>
         </>
@@ -200,14 +199,14 @@ export function useCredentialFacts(app: AppRow, onRefused: (err: ApiError) => vo
         </>
       );
     }
-    if (caller) return "Nothing here. Each person's " + what + " is sealed under their own id.";
+    if (caller) return "Each person's own, kept per person.";
     return "Nothing.";
   })();
 
   const facts: Fact[] = [];
   facts.push(manifestKnown
-    ? { label: "Type", body: <>{(KIND_NAME[kind] || kind) + " "}<code className={CHIP}>{kind}</code></>, sub: kindMore(cred) }
-    : { label: "Type", body: NOT_KNOWN + " The rows below are what strazad holds." });
+    ? { label: "Type", body: KIND_NAME[kind] || kind, sub: kindMore(cred) }
+    : { label: "Type", body: NOT_KNOWN + " The rows below are what Straza holds." });
   if (kind === "oauth") {
     const scopes = cred?.oauth?.scopes || [];
     facts.push({ label: "Provider and scopes", body: <>{cred?.oauth?.provider || "the provider"}{scopes.length ? <>{", scopes "}<code className={CODE}>{scopes.join(" ")}</code></> : ", no scopes named"}</> });
@@ -228,7 +227,7 @@ export function useCredentialFacts(app: AppRow, onRefused: (err: ApiError) => vo
       label: "Per-role secrets",
       body: (
         <div data-role-secrets>
-          {doorsOpen && perRole.length === 0 && (sharedRow ? "None. " : "Not used here. Each caller's own " + what + " is the credential.")}
+          {doorsOpen && perRole.length === 0 && (sharedRow ? "None. " : "Not used here. Each person's own " + what + " is the credential.")}
           {perRole.map((r) => (
             <div key={r.id} className="flex flex-wrap items-center gap-x-1">
               <span>{r.role + ", fingerprint "}<code className={CODE}>{r.fingerprint + "…"}</code>{", set " + absTime(r.set_at)}</span>
@@ -237,7 +236,7 @@ export function useCredentialFacts(app: AppRow, onRefused: (err: ApiError) => vo
           ))}
           {doorsOpen && sharedRow && (
             <>
-              <Button size="sm" variant="ghost" className="h-7" onClick={() => setForm("role")}>Add one for a role</Button>
+              <Button size="sm" variant="ghost" className="h-7" onClick={() => setForm("role")}>Add for a role</Button>
               {" A role's own secret replaces the shared one for that role's " + (caller ? "agents" : "calls") + "."}
             </>
           )}
@@ -247,7 +246,7 @@ export function useCredentialFacts(app: AppRow, onRefused: (err: ApiError) => vo
       warn: !sharedRow && perRole.length > 0 ? UNUSED_ROLES : undefined,
     });
   }
-  if (kind !== "none" && cred?.inject?.as === "env") facts.push({ label: "Watch out", body: ENV_WARNING_SHORT });
+  if (kind !== "none" && cred?.inject?.as === "env") facts.push({ label: "Risk", body: ENV_WARNING_SHORT });
 
   const overlay = (
     <AlertDialog open={ask !== null} onOpenChange={(open) => { if (!open) setAsk(null); }}>
@@ -259,12 +258,12 @@ export function useCredentialFacts(app: AppRow, onRefused: (err: ApiError) => vo
               ? UNUSED_REMOVE
               : ask?.role
                 ? "Calls by " + ask.role + " fall back to the shared secret, or run without one when none is stored."
-                : "Calls and health checks for " + app.name + " run without a credential from now on, unless a role has its own. A server that requires one reads degraded until a secret is set again."}
+                : "Calls and health checks run with no credential, except roles with their own. A server that needs one is degraded until a secret is set again."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-          <AlertDialogAction className="bg-danger text-white hover:bg-danger/90" disabled={busy} onClick={() => { if (ask) void remove(ask); }}>Remove secret</AlertDialogAction>
+          <AlertDialogAction className={DANGER_FILL} disabled={busy} onClick={() => { if (ask) void remove(ask); }}>Remove secret</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

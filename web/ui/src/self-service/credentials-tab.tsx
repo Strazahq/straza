@@ -10,12 +10,11 @@ import * as React from "react";
 import { KeyRoundIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
-import { FetchError, RefusedError } from "@/components/error-state";
+import { RefusedError } from "@/components/error-state";
+import { Segmented } from "@/components/segmented";
 import { type ApiError, type ConnectAnswer, connectAgents, connectFinish, connectStart, selfServers } from "@/lib/api";
 import { notify } from "@/lib/notify";
-import { bare, readFailed, refused } from "@/lib/say";
 import { refresh } from "@/lib/session";
-import { cn } from "@/lib/utils";
 import { type ComeBack, leaveFor, takeComeBack } from "./come-back";
 import { useSelf } from "./context";
 import { type Ask, ConfirmDialog } from "./credential-dialogs";
@@ -23,7 +22,7 @@ import { type CredentialRow, keyOf, needing, sortRows, thingOf } from "./credent
 import { PasteSheet } from "./credential-sheet";
 import { type Cells, CredentialTable, type RowNote } from "./credential-table";
 import * as W from "./credential-words";
-import { SIGN_IN } from "./words";
+import { NO_ANSWER, SIGN_IN, failedWhy, readSaid } from "./words";
 
 export function CredentialsTab() {
   const { session, self, openSignIn, setCount, setNotice } = useSelf();
@@ -77,7 +76,7 @@ export function CredentialsTab() {
         // A 401 has already ended the login session inside the api module,
         // so the page redraws as signed out and says nothing here.
         const err = e as ApiError;
-        if (alive && err.status !== 401) setProblem(readFailed(W.SUBJECT, err));
+        if (alive && err.status !== 401) setProblem(problemOf(err));
         return;
       }
       let failed = "";
@@ -88,7 +87,7 @@ export function CredentialsTab() {
         } catch (e) {
           const err = e as ApiError;
           if (err.status === 401) return;
-          failed = readFailed(W.SUBJECT, err);
+          failed = problemOf(err);
           got.push(...kept.current.filter((r) => r.who === u));
         }
       }
@@ -138,7 +137,7 @@ export function CredentialsTab() {
       } catch (e) {
         const err = e as ApiError;
         if (err.status === 401) setNotice({ tone: "warn", text: W.CAME_BACK_SIGNED_OUT });
-        else setRefusal(err.unreachable ? refused(err) : bare(err.message) + ".");
+        else setRefusal(failedWhy(err));
       } finally {
         setFinishing(false);
       }
@@ -160,7 +159,7 @@ export function CredentialsTab() {
       leaveFor(started.authorize_url);
     } catch (e) {
       const err = e as ApiError;
-      if (err.status !== 401) setNote({ key, subject: W.SUBJECT_SIGN_IN, text: refused(err) });
+      if (err.status !== 401) setNote({ key, heading: W.SIGN_IN_NOT_STARTED, text: failedWhy(err) });
     } finally {
       setBusy(null);
     }
@@ -178,7 +177,7 @@ export function CredentialsTab() {
       notify.ok(answer.allow_agents ? W.switchedOn(row.app) : W.switchedOff(row.app, thingOf(row)));
     } catch (e) {
       const err = e as ApiError;
-      if (err.status !== 401) setNote({ key, subject: W.SUBJECT_SWITCH, text: refused(err) });
+      if (err.status !== 401) setNote({ key, heading: W.SWITCH_NOT_CHANGED, text: failedWhy(err) });
     } finally {
       setBusy(null);
     }
@@ -219,7 +218,7 @@ export function CredentialsTab() {
     toggle: (row) => void toggle(row),
   };
 
-  const cameBack = refusal && <RefusedError subject={W.SUBJECT_SIGN_IN} message={refusal} />;
+  const cameBack = refusal && <RefusedError subject="" heading={W.SIGN_IN_NOT_FINISHED} message={refusal} />;
 
   if (!signedIn) {
     return (
@@ -230,56 +229,53 @@ export function CredentialsTab() {
           title={W.SIGNED_OUT_TITLE}
           action={<Button onClick={openSignIn} data-credentials-sign-in>{SIGN_IN}</Button>}
         >
-          {W.SIGNED_OUT_BODY}
+          {null}
         </EmptyState>
       </div>
     );
   }
 
-  const scoped = all.filter((r) => filter === "all" || r.who === filter);
-  const shown = sortRows(scoped.filter((r) => r.kind !== "none"));
-  const none = [...new Set(scoped.filter((r) => r.kind === "none").map((r) => r.app))];
+  // The rows are ranked across every owner before the filter narrows them,
+  // since an agent's row reads the person's own row for its band.
+  const listed = all.filter((r) => r.kind !== "none");
+  const picked = (r: CredentialRow) => filter === "all" || r.who === filter;
+  const shown = sortRows(listed).filter(picked);
+  const none = [...new Set(all.filter((r) => r.kind === "none" && picked(r)).map((r) => r.app))];
   const owner = filter === "all" || filter === "" ? "" : filter;
   const chips = [
-    { key: "all", attr: "all", label: W.CHIP_ALL },
-    { key: "", attr: "yours", label: W.chipYours(count(all, "")) },
-    ...sponsored.map((u) => ({ key: u, attr: u, label: W.chipAgent(count(all, u), u) })),
+    { key: "all", attr: "all", label: W.CHIP_ALL, count: listed.length },
+    { key: "", attr: "yours", label: W.CHIP_YOURS, count: count(listed, "") },
+    ...sponsored.map((u) => ({ key: u, attr: u, label: W.chipAgent(u), count: count(listed, u) })),
   ];
 
   return (
     <div className="flex flex-col gap-4">
       {cameBack}
-      <p className="max-w-[75ch] text-sm leading-relaxed text-text-2">{W.LEDE}</p>
-      {finishing && <p className="text-sm text-muted-foreground" role="status" data-finishing>{W.FINISHING}</p>}
-      {problem && <FetchError subject={W.SUBJECT} detail={problem} lastRead={lastRead} />}
-      {rows === null && !problem && <p className="text-sm text-muted-foreground">{W.READING}</p>}
-      {rows !== null && all.length === 0 && (
-        <EmptyState icon={KeyRoundIcon} title={W.emptyTitle("")}>{W.emptyBody("")}</EmptyState>
+      {finishing && <p className="text-dense text-muted-foreground" role="status" data-finishing>{W.FINISHING}</p>}
+      {problem && (
+        <p role="alert" className="m-0 rounded-md border border-input bg-secondary px-3.5 py-2.5 text-dense leading-relaxed text-text-2" data-read-problem>
+          {problem}{lastRead ? " " + W.lastRead(lastRead.toLocaleTimeString([], { hour12: false })) : ""}
+        </p>
       )}
-      {rows !== null && all.length > 0 && (
+      {rows === null && !problem && <p className="text-dense text-muted-foreground">{W.READING}</p>}
+      {rows !== null && all.length === 0 && (
+        <EmptyState icon={KeyRoundIcon} title={W.emptyTitle("")}>{W.EMPTY_BODY}</EmptyState>
+      )}
+      {rows !== null && all.length > 0 && listed.length === 0 && (
+        <EmptyState icon={KeyRoundIcon} title={W.emptyTitle("")}>{W.noneOnly([...new Set(all.map((r) => r.app))])}</EmptyState>
+      )}
+      {rows !== null && listed.length > 0 && (
         <>
           {sponsored.length > 0 && (
-            <div role="group" aria-label={W.STRIP_LABEL} className="flex flex-wrap items-center gap-2" data-credentials-strip>
-              {chips.map((c) => (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  key={c.attr}
-                  type="button"
-                  aria-pressed={filter === c.key}
-                  data-chip={c.attr}
-                  onClick={() => setFilter(c.key)}
-                  className={cn(
-                    "rounded-full border px-2.5 py-1 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                    filter === c.key ? "border-link bg-accent-bg text-link" : "border-input bg-card text-text-2",
-                  )}
-                >
-                  {c.label}
-                </Button>
-              ))}
-            </div>
+            <Segmented
+              label={W.STRIP_LABEL}
+              value={filter}
+              onChange={setFilter}
+              options={chips.map((c) => ({ value: c.key, label: c.label, count: c.count, "data-chip": c.attr }))}
+              data-credentials-strip
+            />
           )}
-          <CredentialTable shown={shown} scoped={scoped} none={none} owner={owner} cells={cells} />
+          <CredentialTable shown={shown} none={none} owner={owner} cells={cells} />
         </>
       )}
       <PasteSheet row={sheet} onClose={() => setSheet(null)} onSaved={saved} />
@@ -288,5 +284,12 @@ export function CredentialsTab() {
   );
 }
 
-// count is how many rows of the table one chip stands for.
-const count = (rows: CredentialRow[], who: string) => rows.filter((r) => r.kind !== "none" && r.who === who).length;
+// problemOf words a failed read for the person. A server that did not
+// answer, or answered with a bare status, says the same thing.
+function problemOf(err: ApiError): string {
+  if (err.unreachable || /^HTTP \d+$/.test(err.message)) return NO_ANSWER;
+  return readSaid(err.message, W.readProblem);
+}
+
+// count is how many rows of the table one option of the filter stands for.
+const count = (rows: CredentialRow[], who: string) => rows.filter((r) => r.who === who).length;

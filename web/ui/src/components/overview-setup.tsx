@@ -24,27 +24,29 @@ function Mark({ done }: { done: boolean }) {
   );
 }
 
-// Setup renders the list with its progress count.
+// Setup renders the list with its progress count. The count leaves out a
+// step whose key is absent from marks, since it can never be marked done.
 export function Setup({ marks }: Props) {
   const done = SETUP.filter((s) => marks[s.key] === true).length;
+  const markable = SETUP.filter((s) => s.key in marks).length;
   return (
     <Panel
       name="setup"
       title={SETUP_TITLE}
       help={SETUP_HELP}
-      lead={<span className="font-mono text-[12px] font-normal text-muted-foreground" data-setup-progress>{setupProgress(done, SETUP.length)}</span>}
+      lead={<span className="font-mono text-caption font-normal text-muted-foreground" data-setup-progress>{setupProgress(done, markable)}</span>}
       flush
     >
       {SETUP.map((s) => {
         const mark = marks[s.key];
         return (
-          <div key={s.key} data-setup={s.key} data-done={mark === true ? "true" : undefined} className="flex items-center gap-3 border-b border-border px-3.5 py-2.5 text-sm last:border-b-0">
+          <div key={s.key} data-setup={s.key} data-done={mark === true ? "true" : undefined} className="flex items-center gap-3 border-b border-border px-3.5 py-2.5 text-dense last:border-b-0">
             {mark === undefined ? <span className="size-5 shrink-0" aria-hidden="true" /> : <Mark done={mark} />}
             <span className="flex min-w-0 flex-col gap-0.5">
               <b className={cn("font-semibold", mark ? "font-normal text-muted-foreground" : "text-foreground")}>{s.title}</b>
-              <span className="text-[13px] text-muted-foreground">{s.line}</span>
+              <span className="text-caption text-muted-foreground">{s.line}</span>
             </span>
-            <Door to={s.to} className="ml-auto" />
+            <Door to={s.to} rest={s.rest} className="ml-auto" />
           </div>
         );
       })}

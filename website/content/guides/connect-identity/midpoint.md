@@ -57,15 +57,15 @@ midPoint holds one admin API token for both directions. It writes users and role
 | `config:read` | the connection test reads Overview |
 
 {{< console >}}
-{{< clicks "Settings" "API tokens" "New API token" >}}
+{{< clicks "Settings" "Mint a token" >}}
 
-{{< shot name="settings-new-token" caption="The New API token sheet, shown with another name, where **IGA connector** is the first of the job cards." >}}
+{{< shot name="settings-new-token" caption="The Mint a token sheet, shown with another name, where **IGA connector** is the first of the job cards." >}}
 
 Enter `midpoint-prod` under **Name** and pick a **Lifetime**. Under **The job**, pick **IGA connector**, which fills in the six scopes. Press **Mint token**.
 
 {{< see >}}The sheet `midpoint-prod is minted`, with the token and a **Copy** button.{{< /see >}}
 
-The console's lifetime starts at `expires in 90 days`. Once the token expires, Straza refuses every request midPoint sends with it, so note the date or mint a token that never expires.
+The console's lifetime starts at `90 days`. Once the token expires, Straza refuses every request midPoint sends with it, so note the date or mint a token that never expires.
 {{< /console >}}
 
 {{< cli >}}
@@ -132,10 +132,10 @@ The resource's account object type maps these items. `agencyMode`, `sponsor`, `s
 | extension `strazaAgencyMode` | `agencyMode` | `autonomous`, `supervised` or `interactive` |
 | extension `strazaSponsor` | `sponsor` | the person behind the agent |
 | extension `strazaSwarmId` | `swarmId` | a fleet label policy can match |
-| extension `strazaEntraAgentId` | `entraAgentId` | an AI agent only: the client id of the Entra agent identity it acts as at Entra, sent in lower case. A server that trusts Entra gets the agent's token as that identity |
+| extension `strazaEntraAgentId` | `entraAgentId` | an AI agent only: the client id of the Entra agent identity it acts as at Entra, sent in lower case. A server that trusts Entra gets the agent's token as that identity. While `identity.entra.read` lists `agentUsers` or `agentIdentities`, Straza takes such an agent and its sponsor from Entra and refuses it over SCIM, as [Role groups in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}) shows |
 | extension `strazaExternalId` | `externalId` | an agent's subject at your identity provider, sent only when the item is set |
 | extension `strazaPersona` | `kind` | read back from Straza, `human` or `nhi` |
-| extension `strazaOrigin` | `origin` | read back from Straza, `local` or `scim` |
+| extension `strazaOrigin` | `origin` | read back from Straza, `local`, `scim` or `entra` |
 | activation `administrativeStatus` | `active` | native activation, the kill switch |
 
 
@@ -205,7 +205,7 @@ midPoint hands out the roles Straza has, so you build the roles a job needs in S
 {{< console >}}
 {{< clicks "Roles" "New role" >}}
 
-Pick **Business role**. The wizard then walks **Name and kind**, **Compose** and **Review**, and **Review** ends with **Save draft** and **Save and publish**. On an existing business role, press **Compose a role** on its page, pick the role under **Pick a role to compose**, and press **Compose role**. The pencil beside the description, **Change the description**, edits it.
+Pick **Business role**. The wizard then walks **Kind and name**, **Compose** and **Review**, and **Review** ends with **Save draft** and **Save and publish**. On an existing business role, press **Compose a role** on its page, pick the role under **Pick a role to compose**, and press **Compose role**. The pencil beside the description, **Change the description**, edits it.
 {{< /console >}}
 
 {{< cli >}}
@@ -263,9 +263,9 @@ The headers are trimmed to the two that matter. midPoint provisions the account 
 {{< console >}}
 {{< clicks "Users" >}}
 
-{{< shot name="demo-users" caption="Users on the demo stack, where each person and agent that midPoint provisioned carries the origin `SCIM`." >}}
+{{< shot name="demo-users" caption="Users on the demo stack, where each person and agent that midPoint provisioned reads `Identity manager` under **Source**." >}}
 
-{{< see >}}A `dana-kovac` row with the origin badge **SCIM**.{{< /see >}}
+{{< see >}}A `dana-kovac` row with `Identity manager` under **Source**.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -331,7 +331,7 @@ curl -s -o /dev/null -w 'HTTP %{http_code}\n' -u 'administrator:StrazaEval5ecr3t
 
 `ROLE_OID` is the identifier of the package in your midPoint, or of a single imported role when that is what you hand out. The long identifier in the URL is the person. Within seconds the agent's SCIM render lists `analyst` under `groups`, and the catalog preview resolves the agent to the tools the business role composes.
 
-{{< only form="cli" >}}The console previews a role, never a person, so this check runs in a terminal.{{< /only >}}
+In the console, the **Access** tab of the agent's page under Users lists the same tools under their outcome.
 
 {{< command terminal="Terminal" purpose="Straza administration" >}}
 ```sh
@@ -352,7 +352,7 @@ demo-tools   get-env                         approve_gated  has access; demo-too
 The preview is trimmed to its first three rows, and the whole answer covers every tool of every server the role reaches. One assignment gave the agent three Straza roles, because `analyst` composes two application roles.
 
 
-midPoint is meant to be the only writer of membership for the roles it imports. A role you grant a midPoint-managed person in the Straza console or with `strazactl assign` works at once, but it is drift. The console badges it with "Your identity manager masters this membership and can undo it." The grant also shows up in the account's groups in midPoint, so review it there as you would any account drift.
+midPoint is meant to be the only writer of membership for the roles it imports. A role you grant a midPoint-managed person in the Straza console or with `strazactl assign` works at once, but it is drift. The console marks it `changed here` beside "Your identity manager owns this membership and can undo it." The grant also shows up in the account's groups in midPoint, so review it there as you would any account drift.
 
 ## Cut access from midPoint
 
@@ -362,7 +362,7 @@ Disable dana in midPoint. The body is the same modification shape with `replace`
 {{< console >}}
 {{< clicks "Users" "Status" "disabled" >}}
 
-{{< shot name="demo-users-status" caption="The **Status** filter of Users, open on `all`, `active` and `disabled`." >}}
+{{< shot name="demo-users-status" caption="The **Status** filter of Users, open on `any`, `active` and `disabled`." >}}
 
 {{< see >}}The `dana-kovac` row.{{< /see >}}
 {{< /console >}}
@@ -389,7 +389,7 @@ Setting the status back to `enabled` re-activates the account, and the render re
 ## Undo
 
 
-Remove the package from nina with the same modification body and `delete` as the modification type. The agent's SCIM render then carries no `groups` at all, and its effective roles in Straza are empty. The package was the agent's only role, so its account goes with it, and Straza shows the row as `disabled`. A session that is already running keeps the removed roles until its next check-in, while a deactivation cuts sessions at once.
+Remove the package from nina with the same modification body and `delete` as the modification type. The agent's SCIM render then carries no `groups` at all, and its effective roles in Straza are empty. The package was the agent's only role, so its account goes with it, and Straza shows the row as `disabled`. A running session loses the removed roles within seconds, or at its next check-in when its push stream is not connected. A deactivation cuts sessions at once.
 
 Delete dana in midPoint. midPoint deprovisions her account, and Straza answers by deactivating it:
 

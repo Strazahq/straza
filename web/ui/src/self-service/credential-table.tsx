@@ -1,35 +1,38 @@
-// The table of the Credentials tab: six
-// columns that answer, for one server and one owner, what it uses, what
-// state that is in, what the row holds and what one press does. The four
-// group bands come from the rank in credential-rows.ts, and a sentence
-// that is true of a kind of row rather than of one row is printed once at
-// the foot instead of under every row it applies to.
+// The table of the Credentials tab: one line per server and owner that says
+// where the call goes, who it is for, what the server uses, the state of
+// that and what one press does. The four group bands come from the rank in
+// credential-rows.ts. The one sentence a row needs sits behind a help icon
+// beside its status.
 import * as React from "react";
 import { Loader2Icon } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Chip, type Tone } from "@/components/chip";
 import { DataTable, plain } from "@/components/data-table";
 import { RefusedError } from "@/components/error-state";
-import { WordBadge } from "@/components/users-table";
-import { CAPS } from "@/components/wizard/parts";
-import { cn } from "@/lib/utils";
-import { dayOf, relTimeText } from "@/lib/words";
+import { HelpTip } from "@/components/help-tip";
+import { KindTile } from "@/components/kind-icon";
+import { dayWord } from "@/lib/words";
 import type { Ask } from "./credential-dialogs";
-import { BANDS, type CredentialRow, expired, keyOf, needing, oneProcess, ownOf, rank, thingOf, viaSponsor } from "./credential-rows";
+import { BANDS, type CredentialRow, expired, keyOf, oneProcess, ownOf, rank, thingOf, viaSponsor } from "./credential-rows";
 import * as W from "./credential-words";
 
-const SMALL = "text-[13px] leading-snug text-muted-foreground";
-const DANGER_BUTTON = "border-danger text-danger hover:bg-danger-bg";
-const WIDTHS = { server: "14%", for: "15%", credential: "15%", status: "16%", detail: "26%", actions: "14%" };
-const LABELS = { server: W.COL_SERVER, for: W.COL_FOR, credential: W.COL_CREDENTIAL, status: W.COL_STATUS, detail: W.COL_DETAIL, actions: W.COL_ACTIONS };
+const MUTED = "text-caption text-muted-foreground";
+const NAME = "min-w-0 truncate font-mono text-caption text-foreground";
+// WIDTHS hold every cell on one line at 1280 px. The Uses column takes what
+// is left, and MIN_WIDTH is the fixed columns plus 200 px for it, below
+// which the table scrolls inside its own box.
+const WIDTHS = { server: "180px", for: "200px", status: "240px", actions: "380px" };
+const MIN_WIDTH = "1200px";
+const LABELS = { server: W.COL_SERVER, for: W.COL_FOR, uses: W.COL_USES, status: W.COL_STATUS, actions: W.COL_ACTIONS };
 // The bands are never folded here, so one empty set serves every render.
 const OPEN_BANDS = new Set<string>();
 
-// RowNote is one sentence under one row, for an action that failed without
-// a dialog of its own to say it in: which row, what was refused, and the
-// sentence the server answered with.
-export type RowNote = { key: string; subject: string; text: string };
+// RowNote is one error block under one row, for an action that failed
+// without a dialog of its own to say it in: which row, the heading that
+// says what did not happen, and why.
+export type RowNote = { key: string; heading: string; text: string };
 
 // Cells is what every cell needs beyond its own row: the other rows, so an
 // agent's row can read the person's, who is signed in, which row is busy,
@@ -46,63 +49,56 @@ export type Cells = {
   toggle: (row: CredentialRow) => void;
 };
 
+// CellsContext hands every cell the Cells of the render. The columns are
+// built once, so each cell keeps its elements across renders and the button
+// that opened a dialog is still in the page when the focus goes back to it.
+const CellsContext = React.createContext<Cells | null>(null);
+const useCells = () => React.useContext(CellsContext) as Cells;
+
 type Props = {
   // shown are the rows of the table, already in band order.
   shown: CredentialRow[];
-  // scoped are every row the chip strip lets through, the kind-none ones
-  // included, which is what the count and the foot line are counted from.
-  scoped: CredentialRow[];
   // none are the servers in reach that need no credential at all.
   none: string[];
-  // owner is the agent the chip strip narrowed to, or "" for the person.
+  // owner is the agent the filter narrowed to, or "" for the person.
   owner: string;
   cells: Cells;
 };
 
-// CredentialTable draws the rows with their bands and the sentences that
-// belong to the whole table at its foot.
-export function CredentialTable({ shown, scoped, none, owner, cells }: Props) {
-  const hints: string[] = [];
-  for (const r of shown) {
-    if (oneProcess(r)) add(hints, W.oneProcessHint(r.runtime));
-    if (r.who && r.kind === "oauth" && !r.connected && !viaSponsor(r, ownOf(cells.rows, r.app)) && r.agents !== "sponsor" && r.agents !== "shared") {
-      add(hints, W.ADMIN_ROUTE);
-    }
-  }
-  const foot = (none.length > 0 || hints.length > 0) && (
-    <div className="flex flex-col gap-3" data-credentials-foot>
-      {none.length > 0 && <p className={SMALL}>{W.noneLine(none, owner)}</p>}
-      {hints.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <span className={CAPS}>{W.HINTS_TITLE}</span>
-          {hints.map((t) => <p key={t} className={cn(SMALL, "max-w-[75ch]")}>{t}</p>)}
-        </div>
-      )}
+// CredentialTable draws the rows with their bands and, under them, the
+// servers that need nothing.
+export function CredentialTable({ shown, none, owner, cells }: Props) {
+  const foot = none.length > 0 && (
+    <div className="flex flex-col gap-2" data-credentials-foot>
+      <p className="text-caption leading-snug text-muted-foreground">{W.noneLine(none, owner)}</p>
     </div>
   );
   return (
-    <DataTable
-      rows={shown}
-      columns={buildColumns(cells)}
-      labels={LABELS}
-      rowKey={keyOf}
-      rowName={nameOf}
-      dataAttr="data-credential"
-      count={(n) => W.countWords(n, needing(scoped))}
-      emptyText={W.emptyBody(owner)}
-      widths={WIDTHS}
-      groups={{
-        key: (r) => String(rank(r)),
-        header: (key, members) => (
-          <span className="flex items-center gap-2 px-2 py-1 text-sm" data-band={BANDS[Number(key)]}>
-            <b className="font-semibold text-foreground">{BANDS[Number(key)]}</b>
-            <span className="text-muted-foreground">{members.length}</span>
-          </span>
-        ),
-        collapsed: OPEN_BANDS,
-      }}
-      foot={foot || undefined}
-    />
+    <CellsContext.Provider value={cells}>
+      <DataTable
+        rows={shown}
+        columns={COLUMNS}
+        labels={LABELS}
+        rowKey={keyOf}
+        rowName={nameOf}
+        dataAttr="data-credential"
+        emptyText={W.EMPTY_FILTER}
+        columnsMenu={false}
+        widths={WIDTHS}
+        minWidth={MIN_WIDTH}
+        groups={{
+          key: (r) => String(rank(r, cells.rows)),
+          header: (key, members) => (
+            <span className="flex items-center gap-2 px-2 py-1 text-dense" data-band={BANDS[Number(key)]}>
+              <b className="font-semibold text-foreground">{BANDS[Number(key)]}</b>
+              <span className="font-mono text-caption text-muted-foreground" data-band-count>{members.length}</span>
+            </span>
+          ),
+          collapsed: OPEN_BANDS,
+        }}
+        foot={foot || undefined}
+      />
+    </CellsContext.Provider>
   );
 }
 
@@ -110,11 +106,9 @@ export function CredentialTable({ shown, scoped, none, owner, cells }: Props) {
 // the row is not the person's own.
 export const nameOf = (r: CredentialRow) => (r.who ? r.app + " for " + r.who : r.app);
 
-// add keeps a sentence that is true of a kind of row rather than of one
-// row, so the table prints it once at its foot.
-function add(hints: string[], text: string) {
-  if (!hints.includes(text)) hints.push(text);
-}
+// lent says an agent's row has nothing of its own and runs on the person's
+// own row for the same server.
+const lent = (r: CredentialRow, rows: CredentialRow[]) => !!r.who && !r.connected && viaSponsor(r, ownOf(rows, r.app));
 
 // setterOf reads who set a credential the way the person reads it: their
 // own username is "you".
@@ -123,187 +117,160 @@ function setterOf(row: CredentialRow, me: string): string {
   return who === me ? "you" : who;
 }
 
-type Tone = "ok" | "warn" | "danger" | "plain";
+// Said is the Status cell: the word and its tone, the few muted words after
+// it, and the sentence behind its help icon, each empty where a row has
+// none. The word alone says the state, so the tone only repeats it.
+type Said = { word: string; tone: Tone; muted: string; help: string };
 
-// statusOf is the Status cell: the word, its hue and the small line under
-// it. The word alone says the state, so the hue only repeats it.
-function statusOf(row: CredentialRow, c: Cells): { word: string; tone: Tone; line: string } {
-  if (!row.reached) return { word: row.who ? W.NOT_IN_ITS_REACH : W.NOT_IN_YOUR_REACH, tone: "plain", line: W.LEFTOVER_LINE };
-  if (row.kind === "static" || oneProcess(row)) {
-    const one = oneProcess(row);
-    return { word: one ? W.SHARED_ONLY : W.SHARED, tone: "plain", line: one ? W.ONE_PROCESS_LINE : W.SHARED_LINE };
+function statusOf(row: CredentialRow, c: Cells): Said {
+  const { app, who } = row;
+  const said = (word: string, tone: Tone, muted: string, help: string): Said => ({ word, tone, muted, help });
+  if (!row.reached) return said(W.OUT_OF_REACH, "plain", "", W.leftover(app, who, thingOf(row)));
+  if (oneProcess(row)) return said(W.SHARED_ONLY, "plain", W.SHARED_LINE, "");
+  if (row.kind !== "token" && row.kind !== "oauth") return said(W.SHARED, "plain", W.SHARED_LINE, "");
+  if (row.kind === "oauth" && row.connected) return said(W.SIGNED_IN, "ok", W.RENEWS_LINE, "");
+  if (row.connected && expired(row)) {
+    const day = dayWord(row.expires_at);
+    return said(W.EXPIRED, "danger", day, W.expiredSentence(app, day, who));
   }
-  const via = row.who ? viaSponsor(row, ownOf(c.rows, row.app)) : false;
-  if (row.kind === "oauth") {
-    if (row.connected) return { word: W.SIGNED_IN, tone: "ok", line: W.signedInLine(row.updated_at ? dayOf(row.updated_at) : "") };
-    if (via) return { word: W.USES_YOUR_SIGN_IN, tone: "ok", line: W.WHILE_SWITCH_ON };
-    return { word: row.who ? W.AGENT_SIGN_IN_UNAVAILABLE : W.NOT_SIGNED_IN, tone: "warn", line: row.who ? "" : W.OWN_SIGN_IN_LINE };
+  if (row.connected) {
+    const since = row.updated_at ? dayWord(row.updated_at) : "";
+    const muted = row.expires_at ? W.untilLine(dayWord(row.expires_at)) : since ? W.sinceLine(since) : "";
+    return said(W.SET, "ok", muted, W.setSentence(who, since, setterOf(row, c.me)));
   }
-  if (row.connected && expired(row)) return { word: W.expiredWord(dayOf(row.expires_at)), tone: "danger", line: W.EXPIRED_LINE };
-  if (row.connected) return { word: W.SET, tone: "ok", line: W.setByLine(setterOf(row, c.me), row.updated_at ? dayOf(row.updated_at) : "") };
-  if (via) return { word: W.USES_YOUR_TOKEN, tone: "ok", line: W.WHILE_SWITCH_ON };
-  const line = row.who ? (row.agents === "shared" ? W.agentSharedLine(row.app) : W.agentRefusedLine(row.app)) : W.OWN_TOKEN_LINE;
-  return { word: W.NOT_SET, tone: "warn", line };
+  if (!who) {
+    if (row.kind === "oauth") return said(W.NOT_SIGNED_IN, "warn", "", W.ownNotSignedIn(app, row.provider || ""));
+    return said(W.NOT_SET, "warn", "", W.ownNotSet(app));
+  }
+  if (lent(row, c.rows)) return said(W.USES_YOURS, "ok", "", W.lentSentence(who, app));
+  if (row.agents === "shared") return said(W.SHARED_ACCOUNT, "plain", "", W.sharedAccountSentence(who, app));
+  const sponsor = row.agents === "sponsor";
+  if (row.kind === "oauth") return said(W.CANNOT_SIGN_IN, "warn", "", W.cannotSignIn(who, app, sponsor));
+  return said(W.NOT_SET, "warn", "", W.agentNotSet(who, app, sponsor));
 }
 
-// AgentSwitch is the person's opt-in for the agents they sponsor, offered
-// only where the server lets an agent run on its sponsor's credential. The
-// caption names those agents and says how their calls are recorded, since
-// that is the whole consequence of turning it on.
-function AgentSwitch({ row, c }: { row: CredentialRow; c: Cells }) {
-  const on = !!row.allow_agents;
-  const thing = thingOf(row);
+function StatusCell({ row }: { row: CredentialRow }) {
+  const said = statusOf(row, useCells());
   return (
-    <span className="flex flex-col gap-1">
-      <span className="flex items-center gap-2">
-        <Switch
-          checked={on}
-          disabled={c.busy === keyOf(row)}
-          onCheckedChange={() => c.toggle(row)}
-          aria-label={W.SWITCH_LABEL}
-          data-agents-switch={row.app}
-        />
-        <span className="text-[13px] text-foreground">{W.SWITCH_LABEL}</span>
-      </span>
-      <span className={SMALL}>{on ? W.switchOn(c.sponsored, row.app, thing) : W.switchOff(c.sponsored, row.app, thing)}</span>
+    <span className="flex items-center gap-1.5 whitespace-nowrap">
+      <Chip tone={said.tone} data-status={said.word}>{said.word}</Chip>
+      {said.muted && <span className={MUTED} data-status-line>{said.muted}</span>}
+      {said.help && <HelpTip label={W.whyName(nameOf(row))} text={said.help} />}
     </span>
   );
 }
 
-// DetailCell is what the row has and what it means: the fingerprint and
-// when a token stops working, the scopes and the grant's end for a sign-in,
-// the switch where it applies, and the one sentence the row needs.
-function DetailCell({ row, c }: { row: CredentialRow; c: Cells }) {
-  const parts: React.ReactNode[] = [];
-  const via = row.who ? viaSponsor(row, ownOf(c.rows, row.app)) : false;
-  const line = (text: string) => <p key={text} className={cn(SMALL, "max-w-[60ch] whitespace-normal")}>{text}</p>;
-  const mono = (text: string) => <span key={"mono:" + text} className="font-mono text-[12.5px] text-foreground">{text}</span>;
-
-  if (!row.reached) {
-    if (row.fingerprint) parts.push(mono(row.fingerprint));
-    parts.push(line(W.leftover(row.app, row.who, thingOf(row))));
-  } else if (row.kind === "token") {
-    if (row.connected) {
-      if (row.fingerprint) parts.push(mono(row.fingerprint));
-      parts.push(line(W.stopsLine(expired(row), row.expires_at ? dayOf(row.expires_at) : "")));
-      if (expired(row)) parts.push(line(W.expiredSentence(row.app, dayOf(row.expires_at), row.who)));
-      else if (!row.who && row.agents === "sponsor") parts.push(<AgentSwitch key="switch" row={row} c={c} />);
-      else if (row.who) parts.push(line(W.agentOwnToken(row.who, row.app)));
-    } else {
-      parts.push(line(row.who ? W.agentNoToken(row.who, row.app, row.agents, via) : W.ownNotSet(row.app)));
-    }
-  } else if (row.kind === "oauth") {
-    if (row.connected) {
-      if (row.scopes && row.scopes.length) parts.push(mono(row.scopes.join(" ")));
-      if (row.expires_at) parts.push(line(W.grantLine(relTimeText(row.expires_at))));
-      if (!row.who && row.agents === "sponsor") parts.push(<AgentSwitch key="switch" row={row} c={c} />);
-      else if (!row.who && row.agents === "own") parts.push(line(W.NO_SWITCH_HERE));
-    } else if (row.who) {
-      parts.push(line(W.agentSignIn(row.who, row.app, row.provider || "", row.agents, via)));
-    } else {
-      parts.push(line(W.ownNotSignedIn(row.app, row.provider || "")));
-    }
-  }
-  const note = c.note && c.note.key === keyOf(row) ? c.note : null;
-  if (note) parts.push(<RefusedError key="note" subject={note.subject} message={note.text} />);
-  if (!parts.length) return null;
-  return <span className="flex flex-col items-start gap-1">{parts}</span>;
+// AgentSwitch is the person's opt-in for the agents they sponsor, offered
+// only on their own row where the server lets an agent run on its
+// sponsor's credential. The help names those agents and says how their
+// calls are recorded, since that is the whole consequence of turning it on.
+function AgentSwitch({ row, c }: { row: CredentialRow; c: Cells }) {
+  const on = !!row.allow_agents;
+  const thing = thingOf(row);
+  return (
+    <span className="flex items-center gap-2">
+      <Switch
+        checked={on}
+        disabled={c.busy === keyOf(row)}
+        onCheckedChange={() => c.toggle(row)}
+        aria-label={W.SWITCH_LABEL}
+        data-agents-switch={row.app}
+      />
+      <span className="text-dense text-foreground">{W.SWITCH_LABEL}</span>
+      <HelpTip
+        label={W.actionName(W.SWITCH_LABEL, nameOf(row))}
+        text={on ? W.switchOn(c.sponsored, row.app, thing) : W.switchOff(c.sponsored, row.app, thing)}
+      />
+    </span>
+  );
 }
 
-// ActionsCell is what one press does to the row, as small outline buttons
-// with the destructive one in the danger hue.
-function ActionsCell({ row, c }: { row: CredentialRow; c: Cells }) {
+type Variant = "default" | "outline" | "ghost";
+
+// ActionsCell is what one press does to the row, as small buttons on one
+// line. None of them is red: the confirm a removal opens carries the red.
+function ActionsCell({ row }: { row: CredentialRow }) {
+  const c = useCells();
   const key = keyOf(row);
   const busy = c.busy === key;
-  const named = (label: string) => W.actionName(label, nameOf(row));
   const out: React.ReactNode[] = [];
-  const danger = (label: string, ask: Ask) => (
-    <Button key={label} variant="outline" size="sm" className={DANGER_BUTTON} disabled={busy} aria-label={named(label)} onClick={() => c.ask(ask)}>
-      {label}
+  const button = (label: string, variant: Variant, onClick: () => void, spins = false) => (
+    <Button key={label} variant={variant} size="sm" disabled={busy} aria-label={W.actionName(label, nameOf(row))} onClick={onClick}>
+      {spins && busy && <Loader2Icon className="animate-spin" />}{label}
     </Button>
   );
+  const paste = () => c.paste(row);
+  const remove = () => c.ask({ row, kind: "remove" });
+  const sponsorSwitch = !row.who && row.agents === "sponsor" ? <AgentSwitch key="switch" row={row} c={c} /> : null;
 
   if (!row.reached) {
-    if (row.kind === "token" || row.kind === "oauth") out.push(danger(W.REMOVE, { row, kind: "leftover" }));
+    if (row.kind === "token" || row.kind === "oauth") out.push(button(W.REMOVE, "ghost", () => c.ask({ row, kind: "leftover" })));
   } else if (row.kind === "token") {
-    const label = row.connected ? (expired(row) ? W.PASTE_NEW : W.REPLACE) : W.PASTE;
-    out.push(
-      <Button key="paste" variant="outline" size="sm" disabled={busy} aria-label={named(label)} onClick={() => c.paste(row)}>{label}</Button>,
-    );
-    if (row.connected) out.push(danger(W.REMOVE, { row, kind: "remove" }));
-  } else if (row.kind === "oauth") {
-    if (row.connected) {
-      if (!row.who) {
-        out.push(
-          <Button key="again" variant="outline" size="sm" disabled={busy} aria-label={named(W.SIGN_IN_AGAIN)} onClick={() => c.signIn(row)}>
-            {busy && <Loader2Icon className="animate-spin" />}{W.SIGN_IN_AGAIN}
-          </Button>,
-        );
-      }
-      out.push(danger(W.DISCONNECT, { row, kind: "disconnect" }));
-    } else if (!row.who) {
-      out.push(
-        <Button key="signin" variant="outline" size="sm" disabled={busy} aria-label={named(W.signInWith(row.provider || ""))} onClick={() => c.signIn(row)}>
-          {busy && <Loader2Icon className="animate-spin" />}{W.signInWith(row.provider || "")}
-        </Button>,
-      );
-    }
+    if (!row.connected) out.push(button(W.PASTE, row.who ? "outline" : "default", paste));
+    else if (expired(row)) out.push(button(W.PASTE_NEW, "default", paste), button(W.REMOVE, "ghost", remove));
+    else out.push(sponsorSwitch, button(W.REPLACE, "ghost", paste), button(W.REMOVE, "ghost", remove));
+  } else if (row.kind === "oauth" && !row.who) {
+    const provider = row.provider || "";
+    if (!row.connected) out.push(button(W.signInWith(provider), "default", () => c.signIn(row), true));
+    else out.push(sponsorSwitch, button(W.DISCONNECT, "ghost", () => c.ask({ row, kind: "disconnect" })));
   }
-  if (!out.length) return null;
-  return <span className="flex flex-wrap justify-end gap-2">{out}</span>;
+  const note = c.note && c.note.key === key ? c.note : null;
+  if (!out.length && !note) return null;
+  return (
+    <span className="flex flex-col items-end gap-2 whitespace-normal">
+      {out.length > 0 && <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">{out}</span>}
+      {note && <RefusedError subject="" heading={note.heading} message={note.text} />}
+    </span>
+  );
 }
 
-// buildColumns draws the six columns: where the call goes, who it is for,
-// what the server uses, the state, the detail, and what to press.
-function buildColumns(c: Cells): ColumnDef<CredentialRow>[] {
-  return [
-    {
-      id: "server",
-      header: plain<CredentialRow>(W.COL_SERVER),
-      cell: ({ row }) => (
-        <span className="inline-block rounded-md border border-link/40 bg-background px-1.5 py-px font-mono text-[13px] text-link" data-server={row.original.app}>
-          {row.original.app}
-        </span>
-      ),
-    },
-    {
-      id: "for",
-      header: plain<CredentialRow>(W.COL_FOR),
-      cell: ({ row }) => (
-        <span className="flex flex-col items-start gap-0.5">
-          <b className="font-semibold text-foreground">{row.original.who || W.YOU}</b>
-          {row.original.who && <span className={SMALL}>{W.SPONSORED_LINE}</span>}
-        </span>
-      ),
-    },
-    {
-      id: "credential",
-      header: plain<CredentialRow>(W.COL_CREDENTIAL, W.CREDENTIAL_HELP),
-      cell: ({ row }) => <span className="text-sm text-text-2">{W.kindWords(row.original.kind, row.original.who, row.original.provider)}</span>,
-    },
-    {
-      id: "status",
-      header: plain<CredentialRow>(W.COL_STATUS),
-      cell: ({ row }) => {
-        const said = statusOf(row.original, c);
-        return (
-          <span className="flex flex-col items-start gap-0.5">
-            <WordBadge word={said.word} tone={said.tone} attr="data-status" />
-            <span className={cn(SMALL, "whitespace-normal")}>{said.line}</span>
-          </span>
-        );
-      },
-    },
-    {
-      id: "detail",
-      header: plain<CredentialRow>(W.COL_DETAIL),
-      cell: ({ row }) => <DetailCell row={row.original} c={c} />,
-    },
-    {
-      id: "actions",
-      header: plain<CredentialRow>(""),
-      enableHiding: false,
-      cell: ({ row }) => <ActionsCell row={row.original} c={c} />,
-    },
-  ];
+// UsesCell is the Uses column: what the server uses for the row's owner.
+function UsesCell({ row }: { row: CredentialRow }) {
+  const words = W.usesWords(row.kind, row.who, row.provider, lent(row, useCells().rows));
+  return <span className="block truncate text-text-2" title={words}>{words}</span>;
 }
+
+// COLUMNS are the five columns: where the call goes, who it is for, what
+// the server uses, the state, and what to press.
+const COLUMNS: ColumnDef<CredentialRow>[] = [
+  {
+    id: "server",
+    header: plain<CredentialRow>(W.COL_SERVER),
+    cell: ({ row }) => (
+      <span className="flex min-w-0 items-center gap-2" data-server={row.original.app}>
+        <KindTile kind="server" size="sm" />
+        <span className={NAME} title={row.original.app}>{row.original.app}</span>
+      </span>
+    ),
+  },
+  {
+    id: "for",
+    header: plain<CredentialRow>(W.COL_FOR),
+    cell: ({ row }) => {
+      const who = row.original.who;
+      if (!who) return <span className="text-foreground">{W.YOU}</span>;
+      return (
+        <span className="flex min-w-0 items-center gap-2" data-for={who}>
+          <KindTile kind="agent" size="sm" />
+          <span className={NAME} title={who}>{who}</span>
+        </span>
+      );
+    },
+  },
+  {
+    id: "uses",
+    header: plain<CredentialRow>(W.COL_USES),
+    cell: ({ row }) => <UsesCell row={row.original} />,
+  },
+  {
+    id: "status",
+    header: plain<CredentialRow>(W.COL_STATUS),
+    cell: ({ row }) => <StatusCell row={row.original} />,
+  },
+  {
+    id: "actions",
+    header: plain<CredentialRow>(""),
+    enableHiding: false,
+    cell: ({ row }) => <ActionsCell row={row.original} />,
+  },
+];

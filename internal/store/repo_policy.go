@@ -469,18 +469,20 @@ func (r auditRepo) filterSQL(f AuditFilter, args *[]any) string {
 		// The user filter lands before the limit like q and effect, so a
 		// quiet user's page is never emptied by busier users' rows. The
 		// data.userId term reaches the authn records, whose data.user is the
-		// username and which the janitor's session ends carry on its own.
-		if r.s.d == dialectPostgres {
-			w += ` AND ((ce::jsonb #>> '{data,user}') IN (` + ph(f.UserID) + `, ` + ph(f.Username) + `)` +
-				` OR (ce::jsonb #>> '{data,userId}') = ` + ph(f.UserID) +
-				` OR (ce::jsonb #>> '{data,actorId}') = ` + ph(f.UserID) +
-				` OR (ce::jsonb #>> '{data,actor}') = ` + ph(f.Username) + `)`
-		} else {
-			w += ` AND (json_extract(ce, '$.data.user') IN (` + ph(f.UserID) + `, ` + ph(f.Username) + `)` +
-				` OR json_extract(ce, '$.data.userId') = ` + ph(f.UserID) +
-				` OR json_extract(ce, '$.data.actorId') = ` + ph(f.UserID) +
-				` OR json_extract(ce, '$.data.actor') = ` + ph(f.Username) + `)`
+		// username and which the janitor's session ends carry on its own. The
+		// actor terms count on straza.audit.admin only, the one type the
+		// server stamps them on, so an older uploaded record that carries a
+		// forged actor is not found under that name.
+		field := func(path string) string {
+			if r.s.d == dialectPostgres {
+				return `(ce::jsonb #>> '{` + path + `}')`
+			}
+			return `json_extract(ce, '$.` + strings.ReplaceAll(path, ",", ".") + `')`
 		}
+		w += ` AND (` + field("data,user") + ` IN (` + ph(f.UserID) + `, ` + ph(f.Username) + `)` +
+			` OR ` + field("data,userId") + ` = ` + ph(f.UserID) +
+			` OR (` + field("type") + ` = 'straza.audit.admin' AND (` + field("data,actorId") + ` = ` + ph(f.UserID) +
+			` OR ` + field("data,actor") + ` = ` + ph(f.Username) + `)))`
 	}
 	return w
 }

@@ -31,7 +31,7 @@ import {
   typedMatches,
   typedWrongly,
 } from "./drafts-model";
-import { CUT_RISK, DETAIL, GITHUB_APP, PUBLISHED_DETAIL, STALE, VERDICT, demoTools, detailWith, readersSet, role, WRITERS_SET } from "@/test/drafts-fixture";
+import { CUT_RISK, DETAIL, GITHUB_APP, OLD_TOOLS, PUBLISHED_DETAIL, STALE, VERDICT, demoTools, detailWith, readersSet, role, WRITERS_SET } from "@/test/drafts-fixture";
 
 // The pure reading of a draft the review page and the publish dialog share.
 // The publish body is the one place a mistake would publish the wrong thing,
@@ -266,23 +266,26 @@ describe("the documents of the items", () => {
   });
 
   it("reads an App document's facts in the server page's words", () => {
-    const facts = appFacts(manifestOf(GITHUB_APP) || {});
+    const facts = appFacts(manifestOf(GITHUB_APP) || {}, 20);
     expect(facts).toEqual([
-      ["Transport", "HTTP, streamable"],
+      ["Transport", "Streamable HTTP"],
       ["Address", "https://api.githubcopilot.com/mcp/"],
-      ["Type", "Each caller's own token"],
-      ["Sent as", "The Authorization header, as Bearer and the person's token."],
-      ["Agents with nothing of their own", "Run on their sponsor's token once the sponsor allowed it (agents sponsor)."],
+      ["Type", "Each person's own token"],
+      ["Sent as", "Authorization: Bearer <the person's token>"],
+      ["Agents with nothing of their own", "Run on their sponsor's token once the sponsor allowed it."],
       ["Description", "GitHub's remote MCP server"],
       ["Tools exposed", "All tools, including ones it adds later."],
-      ["Rate limit", "Not limited."],
+      ["Rate limit", "20 calls per second, per session, the default."],
     ]);
+    expect(appFacts(manifestOf(GITHUB_APP) || {}, null).at(-1)).toEqual(["Rate limit", "The default for a remote server."]);
+    expect(appFacts(manifestOf(OLD_TOOLS) || {}, 20).at(-1)).toEqual(["Rate limit", "Not limited."]);
     expect(remoteApp(GITHUB_APP)).toBe(true);
     expect(remoteApp(demoTools(5).replace("kind: remote", "kind: command"))).toBe(false);
   });
 
   it("reads a changed App as the Now and After rows of the change sheets", () => {
     expect(appRows(manifestOf(demoTools(10)) || {}, manifestOf(demoTools(20)) || {})).toEqual([["Rate limit", "10 calls per second, per session.", "20 calls per second, per session."]]);
+    expect(appRows(manifestOf(demoTools(10)) || {}, manifestOf(demoTools(0)) || {}, 20)).toEqual([["Rate limit", "10 calls per second, per session.", "20 calls per second, per session, the default."]]);
   });
 
   it("reads a document that does not parse as nothing", () => {
@@ -339,6 +342,14 @@ describe("the documents of the items", () => {
       { kind: "Role", what: "changed", n: 2 },
       { kind: "PolicySet", what: "new", n: 1 },
       { kind: "PolicySet", what: "changed", n: 1 },
+    ]);
+  });
+
+  it("counts a policy that is off live and that the draft puts as turned on, apart from the changed ones", () => {
+    const live = { ...DETAIL.live, "PolicySet/demo-tools-readers-access": { op: "off" as const, doc: "" } };
+    expect(changeCounts(DETAIL.draft.items, live).filter((c) => c.kind === "PolicySet")).toEqual([
+      { kind: "PolicySet", what: "new", n: 1 },
+      { kind: "PolicySet", what: "on", n: 1 },
     ]);
   });
 });

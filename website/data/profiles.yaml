@@ -19,7 +19,7 @@
     - id: break-glass
       what: The break-glass admin
       standalone: Created at the first start, with its password printed once in the log. It signs in on the same page as everyone.
-      enterprise: Created at the first start in the same way. Straza's own page signs in this account and no other, under the title Emergency sign-in to Straza.
+      enterprise: Created at the first start with no password, so its sign-in stays closed until the first admin or `strazad break-glass set-password` on the server host sets one. Straza's own page signs in this account and no other, under the title Emergency sign-in to Straza.
     # internal/server/build.go 200-215; internal/server/admin_bootstrap.go 263-299, 351-404; internal/server/api_identity_login.go 37-47
     - id: first-admin
       what: The first admin

@@ -283,7 +283,7 @@ describe("the browser sign-in", () => {
     { name: "a token for another nonce", nonce: "another", want: "This sign-in answer was not started in this tab" },
     { name: "the provider's refusal", params: { error: "access_denied", error_description: "The user cancelled the sign-in" }, want: "Your identity provider did not sign you in. It said: The user cancelled the sign-in. Press Sign in to try again, or ask your administrator whether your account may use Straza." },
     { name: "a spent code", token: { status: 400, body: { error: "invalid_grant", error_description: "the code is unknown" } }, want: "Your identity provider says the sign-in answer expired or was already used. Press Sign in to start again." },
-    { name: "an unreachable strazad", token: "down", want: "strazad is unreachable, state unknown. Check the server, then press Sign in again." },
+    { name: "an unreachable strazad", token: "down", want: "Straza did not answer. Check that it is running, then press Sign in again." },
   ];
   it.each(refusals)("refuses $name with its sentence and checks in nothing", async ({ params, token: tokenAnswer, age, nonce, want }) => {
     let p = { nonce: "" };
@@ -315,7 +315,7 @@ describe("the browser sign-in", () => {
 
   it.each([
     { status: 403, error: "user is disabled. Contact your administrator", want: "You signed in at your identity provider, but Straza refused the session: user is disabled. Contact your administrator." },
-    { status: 503, error: "store unavailable", want: "Straza is temporarily unavailable, try again in a moment (the sign-in itself succeeded, nothing on your side needs fixing)." },
+    { status: 503, error: "store unavailable", want: "Straza is not available right now. Your sign-in worked. Press Sign in again in a moment." },
   ])("words a check-in answered $status", async ({ status, error, want }) => {
     let p = { nonce: "" };
     stubFetch({ "POST /oidc/token": () => ok({ id_token: idTokenWith(p.nonce) }), "POST /v1/checkin": () => refuse(status, error) });
@@ -325,7 +325,7 @@ describe("the browser sign-in", () => {
     expect("problem" in done && done.problem).toBe(want);
   });
 
-  it("keeps an Enable this browser name for the page to resume, once", async () => {
+  it("keeps a Set up this browser name for the page to resume, once", async () => {
     let p = { nonce: "" };
     stubFetch({ "POST /oidc/token": () => ok({ id_token: idTokenWith(p.nonce) }), "POST /v1/checkin": () => ok(good) });
     signInLocation("/self-service/browser");

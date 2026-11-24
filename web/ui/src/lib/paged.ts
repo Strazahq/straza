@@ -9,9 +9,11 @@ import { readFailed } from "./say";
 
 export type Sorting = { key: string; order: SortOrder };
 
+// PagedState is the list as read. A ready state's sorting is the sort its
+// rows were read in, which trails the sort asked for while a new one is read.
 export type PagedState<T> =
   | { kind: "loading" }
-  | { kind: "ready"; rows: T[]; next: string; lastRead: Date; problem: string | null; more: boolean }
+  | { kind: "ready"; rows: T[]; next: string; lastRead: Date; problem: string | null; more: boolean; sorting: Sorting | null }
   | { kind: "error"; message: string };
 
 type Options<T> = {
@@ -46,9 +48,11 @@ export function usePagedList<T>({ read, subject, params, sorting, limit = 100, p
       const page = await read(base(cursor));
       if (my !== seq.current) return;
       const items = page.items || [];
+      // sorting is the sort of the query base built, since both change only
+      // with key.
       setState((s) => {
         const rows = mode === "more" && s.kind === "ready" ? [...s.rows, ...items] : items;
-        return { kind: "ready", rows, next: page.next_cursor || "", lastRead: new Date(), problem: null, more: !!page.next_cursor };
+        return { kind: "ready", rows, next: page.next_cursor || "", lastRead: new Date(), problem: null, more: !!page.next_cursor, sorting };
       });
       if (mode === "more") walked.current = true;
     } catch (e) {

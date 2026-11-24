@@ -1,9 +1,9 @@
 import * as React from "react";
 import { UserRoundIcon, ArrowUpRightIcon } from "lucide-react";
 import { StrazaMark } from "@/components/straza-mark";
-import { Badge } from "@/components/ui/badge";
+import { Chip } from "@/components/chip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { type Route, type RouteKey, draftsBadgeTitle, serversBadgeTitle, groupedRoutes } from "@/lib/routes";
+import { type Route, type RouteKey, approvalsBadgeTitle, draftsBadgeTitle, serversBadgeTitle, groupedRoutes } from "@/lib/routes";
 import { isPlainClick, navigate, pathFor } from "@/lib/router";
 import { type VersionInfo, version as readVersion } from "@/lib/public";
 import { cn } from "@/lib/utils";
@@ -18,12 +18,19 @@ type Props = {
   // drafts is the count of drafts that wait, as the Drafts row draws it,
   // "" for none or before the first read.
   drafts?: string;
+  // approvals is the count of requests that wait, not drawn at 0.
+  approvals?: number;
 };
+
+// Count is the number beside a rail item, pushed to the item's right end.
+function Count({ title, children, ...data }: { title: string; children: React.ReactNode; [key: `data-${string}`]: boolean }) {
+  return <span className="ml-auto rounded-md bg-secondary px-1.5 font-mono text-caption leading-[18px] text-foreground" title={title} {...data}>{children}</span>;
+}
 
 // Sidebar is the left rail: the brand, the areas the
 // person's grants cover, the active one marked by fill and weight, and a
 // footer with the profile word and the version string from GET /version.
-export function Sidebar({ routes, active, servers = 0, drafts = "" }: Props) {
+export function Sidebar({ routes, active, servers = 0, drafts = "", approvals = 0 }: Props) {
   const [version, setVersion] = React.useState<VersionInfo | null>(null);
   React.useEffect(() => {
     let live = true;
@@ -33,7 +40,7 @@ export function Sidebar({ routes, active, servers = 0, drafts = "" }: Props) {
 
   return (
     <aside className="console-sidebar flex h-full w-[220px] shrink-0 flex-col border-r border-border bg-card" data-sidebar>
-      <div className="flex h-14 items-center gap-2.5 border-b border-border px-5 text-[15px] font-semibold tracking-wide text-foreground">
+      <div className="flex h-14 items-center gap-2.5 border-b border-border px-5 text-body font-semibold tracking-wide text-foreground">
         <StrazaMark className="size-6 shrink-0" />
         STRAZA
       </div>
@@ -48,7 +55,7 @@ export function Sidebar({ routes, active, servers = 0, drafts = "" }: Props) {
               href={pathFor(r.key)}
               aria-current={on ? "page" : undefined}
               className={cn(
-                "flex min-h-9 items-center gap-3 rounded-md px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                "flex min-h-9 items-center gap-3 rounded-md px-3 py-2 text-dense outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                 on ? "bg-accent-bg font-semibold text-link [&>svg]:text-link" : "text-text-2 hover:bg-secondary/60 hover:text-foreground",
               )}
               onClick={(e) => {
@@ -59,28 +66,21 @@ export function Sidebar({ routes, active, servers = 0, drafts = "" }: Props) {
             >
               <r.icon className="size-[18px] shrink-0" aria-hidden="true" />
               {r.label}
-              {servers > 0 && r.key === "servers" && (
-                <Badge variant="secondary" className="ml-auto rounded-md font-mono text-[12px] font-normal" title={serversBadgeTitle(servers)} data-servers-badge>
-                  {servers}
-                </Badge>
-              )}
-              {drafts && r.key === "drafts" && (
-                <Badge variant="secondary" className="ml-auto rounded-md font-mono text-[12px] font-normal" title={draftsBadgeTitle(drafts)} data-drafts-badge>
-                  {drafts}
-                </Badge>
-              )}
+              {servers > 0 && r.key === "servers" && <Count title={serversBadgeTitle(servers)} data-servers-badge>{servers}</Count>}
+              {drafts && r.key === "drafts" && <Count title={draftsBadgeTitle(drafts)} data-drafts-badge>{drafts}</Count>}
+              {approvals > 0 && r.key === "approvals" && <Count title={approvalsBadgeTitle(approvals)} data-approvals-badge>{approvals}</Count>}
             </a>
           );
         })}</section>)}
       </nav>
       <div className="personal-destination"><a href="/self-service/" data-self-service><UserRoundIcon aria-hidden="true" /><strong>Self-service</strong><ArrowUpRightIcon aria-hidden="true" /><span>Your requests, credentials and approval devices</span></a></div>
-      <div className="mt-auto flex flex-col items-start gap-1.5 border-t border-border px-5 py-3 text-[13px] text-muted-foreground" data-version>
+      <div className="mt-auto flex flex-col items-start gap-1.5 border-t border-border px-5 py-3 text-caption text-muted-foreground" data-version>
         {version ? (
           <>
-            <Badge variant="secondary" className="rounded-md font-mono text-[12px] font-normal">{version.profile || "no profile"}</Badge>
+            <Chip tone="plain">{version.profile || "no profile"}</Chip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="block max-w-full cursor-default truncate font-mono text-[12px]">{"strazad " + version.version}</span>
+                <span className="block max-w-full cursor-default truncate font-mono text-caption">{"strazad " + version.version}</span>
               </TooltipTrigger>
               <TooltipContent>{version.version + " · " + version.commit + " · " + version.go}</TooltipContent>
             </Tooltip>

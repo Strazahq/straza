@@ -2,7 +2,7 @@
 title: strazactl policy list
 description: List stored PolicySets
 pagetype: reference
-weight: 70
+weight: 64
 draft: false
 sources:
   - cmd/strazactl

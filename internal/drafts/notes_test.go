@@ -25,12 +25,12 @@ func TestNotes(t *testing.T) {
 		want  []string
 	}{
 		{"a remote server nobody contacted", []Item{appItem("newsrv")}, map[string]App{"newsrv": newsrv}, ClassUnchecked, []string{
-			"unchecked.tools App/newsrv Straza has not contacted mcp.example.net, because an address in a draft is contacted only when a person asks, so the tool names of newsrv are unknown."}},
+			"unchecked.tools App/newsrv Straza has not contacted mcp.example.net yet, so the tool names of newsrv are unknown. It contacts an address in a draft only when a person asks."}},
 		{"a command server not started", []Item{appItem("local")}, map[string]App{"local": {Runtime: "command", Exec: "mcp", Credential: CredentialNone}},
 			ClassUnchecked, []string{"unchecked.tools App/local Straza has not started local, so its tool names are unknown until it is published."}},
 		{"a rule whose gate depends on the session", []Item{{Kind: KindPolicySet, Name: "readers-access", Op: OpPut, Doc: gainSet("readers-access", "{ roles: [readers] }",
 			"    - id: managed\n      tools: [shell.exec]\n      effect: allow\n      require: { attestation: managed, harness: [claude-code, codex] }\n")}}, nil, ClassUnchecked, []string{
-			"unchecked.require  Straza read who gains what for a session that meets every require predicate of readers-access, the widest reach a holder can have, so a session that does not meet them reaches less."}},
+			"unchecked.require  Straza read who gains what for a session that meets every require predicate of readers-access."}},
 		{"a set that compiles, pools that decide, no secret", []Item{{Kind: KindPolicySet, Name: "readers-access", Op: OpPut, Doc: gainSet("readers-access", "{ roles: [readers] }",
 			"    - id: hold\n      tools: [mcp.call]\n      effect: allow\n      mode: approve\n      approve: { roles: [sec-approvers] }\n")}}, nil, ClassPassed, []string{
 			"passed.compile  The policy compiles with this draft.",
@@ -38,15 +38,19 @@ func TestNotes(t *testing.T) {
 			"passed.secrets  No document holds a secret or the shape of one."}},
 		{"a new role nobody holds, with packs", []Item{gainRole("writers", "    kind: application\n    packs: [go-style]\n")}, nil, ClassInfo, []string{
 			"info.nobody-holds Role/writers Nobody holds writers yet, so it reaches nothing until someone is assigned it.",
-			"info.packs Role/writers The knowledge packs of writers are bound directly, not through drafts, so this draft leaves them as they are."}},
+			"info.packs Role/writers This Role names knowledge packs, which were removed from Straza. The packs field is ignored."}},
+		{"a live role whose document differs only by packs", []Item{gainRole("readers", "    kind: application\n    packs: [go-style]\n    bindings:\n        - app: github\n          tools: [get_me]\n")},
+			nil, ClassInfo, []string{
+				"info.no-change Role/readers The role readers equals live.",
+				"info.packs Role/readers This Role names knowledge packs, which were removed from Straza. The packs field is ignored."}},
 		{"a server that is down", []Item{appItem("jira")},
 			map[string]App{"jira": {Runtime: "remote", URL: "https://jira.example.com/mcp", Credential: CredentialNone, Manifest: "{}"}}, ClassInfo, []string{
 				"info.server-down App/jira jira reads degraded now: upstream answered 502."}},
 		{"documents equal to live", []Item{gainRole("readers", "    kind: application\n    bindings:\n        - app: github\n          tools: [get_me]\n"),
 			{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: devAccess}, {Kind: KindRole, Name: "nosuch", Op: OpRemove}}, nil, ClassInfo, []string{
-			"info.no-change PolicySet/dev-access PolicySet/dev-access equals live, so publishing changes nothing for it.",
-			"info.no-change Role/nosuch Role/nosuch equals live, so publishing changes nothing for it.",
-			"info.no-change Role/readers Role/readers equals live, so publishing changes nothing for it."}},
+			"info.no-change PolicySet/dev-access The policy dev-access equals live.",
+			"info.no-change Role/nosuch The role nosuch equals live.",
+			"info.no-change Role/readers The role readers equals live."}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

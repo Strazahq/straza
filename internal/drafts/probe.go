@@ -19,11 +19,12 @@ const (
 )
 
 // probe is what one call gives a subject: the outcome, the gate in words,
-// the approval behind a needs-approval outcome, and whether a classifier
-// or the server must allow the call.
+// the rule and set that decide, the approval behind a needs-approval
+// outcome, and whether a classifier or the server must allow the call.
 type probe struct {
 	outcome               Outcome
 	words                 string
+	rule, set             string
 	approve               *policy.ApproveSpec
 	confirm               bool
 	classify, serverCheck bool
@@ -178,58 +179,110 @@ func (n *narrowEngines) of(id int, sub policy.Subject) *policy.Engine {
 // probeOf reads a decision as an outcome and its whole gate: a default
 // deny reaches nothing, a rule's deny is denied, an allow with an approval
 // needs approval, and any other allow runs, each allow with the checks a
-// classifier or the server makes on it.
+// classifier or the server makes on it. Its words spell the gate gateOf
+// reads from it, so the words and a Gain's gate fields never disagree.
 func probeOf(d policy.Decision) probe {
+	var p probe
 	switch {
 	case d.Effect != policy.EffectAllow && d.Default:
 		return probe{outcome: OutcomeNotReachable}
 	case d.Effect != policy.EffectAllow:
-		return probe{outcome: OutcomeDenied, words: fmt.Sprintf("denied by rule %s of %s", d.RuleID, d.SetName)}
+		p = probe{outcome: OutcomeDenied, rule: d.RuleID, set: d.SetName}
+	case d.Approve != nil:
+		p = probe{outcome: OutcomeApproval, rule: d.RuleID, set: d.SetName, approve: d.Approve, confirm: d.Confirm, classify: d.Classify, serverCheck: d.ServerCheck}
+	default:
+		p = probe{outcome: OutcomeRuns, rule: d.RuleID, set: d.SetName, classify: d.Classify, serverCheck: d.ServerCheck}
 	}
-	p := probe{outcome: OutcomeRuns, classify: d.Classify, serverCheck: d.ServerCheck}
-	var words []string
-	if d.Approve != nil {
-		p.outcome, p.approve, p.confirm = OutcomeApproval, d.Approve, d.Confirm
-		words = append(words, approveWords(d.Approve, d.Confirm))
-	}
-	switch {
-	case d.Classify && d.ServerCheck:
-		words = append(words, "after a classifier and the server allow it")
-	case d.Classify:
-		words = append(words, "after a classifier allows it")
-	case d.ServerCheck:
-		words = append(words, "after the server allows it")
-	}
-	p.words = strings.Join(words, ", ")
+	p.words = spellGate(p.outcome, gateOf(p))
 	return p
 }
 
-// approveWords spells an approval gate, as "a hold, up to 2 minutes,
-// decided by sec-approvers" or "a ticket good for 1 day, decided by the
-// person behind the agent", naming every setting that can make it looser.
-func approveWords(a *policy.ApproveSpec, confirm bool) string {
-	var b strings.Builder
-	if a.Class == policy.ClassTicket {
-		b.WriteString("a ticket good for " + duration(a.TicketTTLSeconds))
-	} else {
-		b.WriteString("a hold, up to " + duration(a.TimeoutSeconds))
+// gateOf answers the gate of p as a Gain side carries it: the rule and set
+// of a deny, and of an allow that needs approval or a check, with the
+// approval's class, window, deciders and binding as approveWords names
+// them and the checks a classifier or the server makes. It is nil for a
+// side with no gate. The roles are sorted, and empty under a confirmation,
+// which the requester alone decides.
+func gateOf(p probe) *GainGate {
+	switch {
+	case p.outcome == OutcomeDenied:
+		return &GainGate{Rule: p.rule, Set: p.set, Roles: []string{}}
+	case p.outcome != OutcomeApproval && (p.outcome != OutcomeRuns || !p.classify && !p.serverCheck):
+		return nil
 	}
-	if confirm {
+	g := &GainGate{Rule: p.rule, Set: p.set, Roles: []string{}, Classifier: p.classify, ServerCheck: p.serverCheck}
+	a := p.approve
+	if p.outcome != OutcomeApproval || a == nil {
+		return g
+	}
+	g.Class, g.Seconds, g.Confirm, g.AnyArguments = policy.ClassHold, a.TimeoutSeconds, p.confirm, a.Binding == policy.ApproveBindingTool
+	switch {
+	case a.Class == policy.ClassTicket:
+		g.Class, g.Seconds = policy.ClassTicket, a.TicketTTLSeconds
+		if a.GrantTTLSeconds != defaultGrantSeconds {
+			g.WithinSeconds = a.GrantTTLSeconds
+		}
+	case a.RetryTTLSeconds != defaultRetrySeconds:
+		g.WithinSeconds = a.RetryTTLSeconds
+	}
+	if !p.confirm {
+		g.Roles = append(g.Roles, sortedCopy(a.Roles)...)
+		g.Sponsor = slices.Contains(a.Deciders, policy.DeciderSponsor) || (len(a.Roles) == 0 && len(a.Deciders) == 0 && !a.SelfApproval)
+		g.Requester = a.SelfApproval
+	}
+	return g
+}
+
+// spellGate words the gate g of a side whose outcome is o, as a Gain's
+// before_words and after_words carry it, and nothing when g is nil.
+func spellGate(o Outcome, g *GainGate) string {
+	switch {
+	case g == nil:
+		return ""
+	case o == OutcomeDenied:
+		return fmt.Sprintf("denied by rule %s of %s", g.Rule, g.Set)
+	}
+	var words []string
+	if o == OutcomeApproval {
+		words = append(words, approveWords(g))
+	}
+	switch {
+	case g.Classifier && g.ServerCheck:
+		words = append(words, "after a classifier and the server allow it")
+	case g.Classifier:
+		words = append(words, "after a classifier allows it")
+	case g.ServerCheck:
+		words = append(words, "after the server allows it")
+	}
+	return strings.Join(words, ", ")
+}
+
+// approveWords spells the approval of g, as "a hold, up to 2 minutes,
+// decided by sec-approvers" or "a ticket good for 1 day, decided by the
+// agent's sponsor", naming every setting that can make it looser.
+func approveWords(g *GainGate) string {
+	var b strings.Builder
+	if g.Class == policy.ClassTicket {
+		b.WriteString("a ticket good for " + duration(g.Seconds))
+	} else {
+		b.WriteString("a hold, up to " + duration(g.Seconds))
+	}
+	if g.Confirm {
 		b.WriteString(", confirmed by the requester")
 	} else {
-		deciders := pool(probe{approve: a})
-		if a.SelfApproval {
+		deciders := pool(g)
+		if g.Requester {
 			deciders = append(deciders, "the requester")
 		}
 		b.WriteString(", decided by " + listWords(deciders, "or"))
 	}
 	switch {
-	case a.Class == policy.ClassTicket && a.GrantTTLSeconds != defaultGrantSeconds:
-		b.WriteString(", used within " + duration(a.GrantTTLSeconds))
-	case a.Class != policy.ClassTicket && a.RetryTTLSeconds != defaultRetrySeconds:
-		b.WriteString(", retried within " + duration(a.RetryTTLSeconds))
+	case g.WithinSeconds != 0 && g.Class == policy.ClassTicket:
+		b.WriteString(", used within " + duration(g.WithinSeconds))
+	case g.WithinSeconds != 0:
+		b.WriteString(", retried within " + duration(g.WithinSeconds))
 	}
-	if a.Binding == policy.ApproveBindingTool {
+	if g.AnyArguments {
 		b.WriteString(", for any arguments")
 	}
 	return b.String()
@@ -255,18 +308,17 @@ func normalApprove(r policy.Rule) *policy.ApproveSpec {
 	return &a
 }
 
-// pool answers who may decide the approval of p, the requester's own
-// approval left out: the approver roles, sorted, then the person behind the
-// agent when the rule names the sponsor or names nobody, in the words of the
+// pool answers who may decide the approval of the gate g, the requester's
+// own approval left out: the approver roles, sorted, then the agent's
+// sponsor where gateOf says the sponsor decides, in the words of the
 // console. A confirmation is the requester's.
-func pool(p probe) []string {
-	if p.confirm {
+func pool(g *GainGate) []string {
+	if g.Confirm {
 		return []string{"the requester"}
 	}
-	a := p.approve
-	out := sortedCopy(a.Roles)
-	if slices.Contains(a.Deciders, policy.DeciderSponsor) || (len(a.Roles) == 0 && len(a.Deciders) == 0 && !a.SelfApproval) {
-		out = append(out, "the person behind the agent")
+	out := slices.Clone(g.Roles)
+	if g.Sponsor {
+		out = append(out, "the agent's sponsor")
 	}
 	return out
 }

@@ -56,7 +56,7 @@ exit /b %errorlevel%
 `install.cmd` stops on any exit code of the MSI other than `0` and `3010`. It then runs the managed install with the `straza.exe` the MSI installed, and it hands Intune the MSI's exit code. A `3010` means the install succeeded and a restart finishes removing an old file that was in use, and Intune counts it as a soft reboot.
 
 
-Claude Code uses only its highest managed settings source, so on a Windows machine with a registry policy for Claude Code or server-managed settings that lack Straza's hooks, Claude Code skips them with no warning, as [Claude Code skips Straza's hooks under a higher managed source]({{< relref "security/known-limits.md" >}}) in Known limits says.
+Claude Code uses only its highest managed settings source, so on a Windows machine with a registry policy for Claude Code or server-managed settings that lack Straza's hooks, Claude Code skips them with no warning. Put your own Claude Code settings in `managed-settings.d`, or set `managedSourcesBehavior` to `merge` in the profile you send, as [Claude Code]({{< relref "guides/govern-an-agent/claude-code.md#install-the-hook-wiring" >}}) explains.
 
 Then package the folder.
 
@@ -90,7 +90,7 @@ Add the detection rule of the next step, then assign the app to your device grou
 On the Detection rules page, choose a custom detection script and upload the one below, saved as `detect.ps1`. Leave its two options at No: running as a 32-bit process and enforcing a signature check. Write the version from your MSI's file name in `$want`, such as `2.0.0` for `straza_2.0.0_windows_amd64.msi`.
 
 ```powershell
-$want = '2.2.0'
+$want = '2.3.0'
 $exe = 'C:\ProgramData\straza\bin\straza.exe'
 $svc = Get-Service straza-service -ErrorAction SilentlyContinue
 if ($svc.Status -ne 'Running' -or -not (Test-Path $exe)) { exit 1 }
@@ -126,7 +126,7 @@ In the Microsoft Intune admin center, open Apps, then All Apps, and create an ap
 | Field | Value |
 |---|---|
 | Ignore app version | No |
-| Included apps | One entry, with the bundle ID `ai.straza.straza` and the version of the pkg, such as `2.2.0` for `straza_2.2.0_darwin_universal.pkg`. Delete any other entry. |
+| Included apps | One entry, with the bundle ID `ai.straza.straza` and the version of the pkg, such as `2.3.0` for `straza_2.3.0_darwin_universal.pkg`. Delete any other entry. |
 
 The pkg installs no app bundle, so `ai.straza.straza` is the identifier of its package receipt. A post on Microsoft's Intune blog says that the agent reads package receipts too, and no tenant has shown yet that Intune reports this app as installed. With Ignore app version set to No, Intune installs a pkg whose version differs from the one on the Mac, which is how a later release reaches the fleet.
 
@@ -164,7 +164,7 @@ Then open Devices, then By platform, macOS, Manage devices, Scripts, and add the
 Intune runs scripts and app installs side by side, so the script waits up to 30 minutes for the binary that the pkg installs. A nonzero exit, from that wait or from the managed install, shows as Failed in the script's Device status, so a Mac whose managed install failed stands out there. The managed install runs as root, outside sudo, so for codex it writes no Straza MCP registration into any person's `config.toml` and says so. The managed codex hooks still govern every codex tool call.
 
 
-Claude Code uses only its highest managed settings source, so on a Mac with a Claude Code profile or server-managed settings that lack Straza's hooks, Claude Code skips them with no warning, as [Claude Code skips Straza's hooks under a higher managed source]({{< relref "security/known-limits.md" >}}) in Known limits says.
+Claude Code uses only its highest managed settings source, so on a Mac with a Claude Code profile or server-managed settings that lack Straza's hooks, Claude Code skips them with no warning. Put your own Claude Code settings in `managed-settings.d`, or set `managedSourcesBehavior` to `merge` in the profile you send, as [Claude Code]({{< relref "guides/govern-an-agent/claude-code.md#install-the-hook-wiring" >}}) explains.
 
 ### Keep the service switched on
 

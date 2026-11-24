@@ -1,6 +1,6 @@
 import * as React from "react";
-import { SmartphoneIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { KIND_ICON } from "@/components/kind-icon";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHead } from "@/components/page-head";
 import { RequestsTab } from "@/components/approvals-requests";
@@ -20,6 +20,7 @@ import { snapshot } from "@/lib/session";
 // no tab is ever hidden on its own.
 
 const route = routeByKey("approvals");
+const PhoneIcon = KIND_ICON.phone;
 
 type Props = {
   tab?: string;
@@ -79,7 +80,7 @@ export function Approvals({ tab, openID }: Props) {
   }, [nonce]);
 
   const actions = current === "devices"
-    ? <Button onClick={() => setAddRequest((n) => n + 1)}><SmartphoneIcon /> {ADD_PHONE}</Button>
+    ? <Button onClick={() => setAddRequest((n) => n + 1)}><PhoneIcon /> {ADD_PHONE}</Button>
     : undefined;
 
   const countOf = (key: ApprovalsTab) => (key === "requests" ? counts.waiting : key === "devices" ? counts.devices : null);
@@ -95,7 +96,7 @@ export function Approvals({ tab, openID }: Props) {
                 const n = countOf(t.key);
                 return (
                   <TabsTrigger key={t.key} value={t.key} data-tab={t.key}>
-                    {t.label} {n !== null && <span className="font-mono text-xs text-muted-foreground" data-count={t.key}>{n}</span>}
+                    {t.label} {n !== null && <span className="font-mono text-caption leading-4 text-muted-foreground" data-count={t.key}>{n}</span>}
                   </TabsTrigger>
                 );
               })}

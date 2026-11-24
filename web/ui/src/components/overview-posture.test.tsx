@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Posture } from "./overview-posture";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ConfigAnswer } from "@/lib/api";
-import { POSTURE_TITLE, configRows, postureOf, seatLine, setLink, strictLine } from "@/lib/config-words";
-import { pathFor } from "@/lib/router";
+import { POSTURE_TITLE, RELAXED_SENTENCE, configRows, postureOf, seatLine, setLink, strictLine } from "@/lib/config-words";
+import { navigate, pathFor } from "@/lib/router";
+
+vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 
 const RELAXED: ConfigAnswer = {
   public_url: "http://localhost:8420",
@@ -31,7 +33,10 @@ describe("the Posture panel", () => {
     const floor = rows.find((r) => r.id === "floor");
     await userEvent.click(screen.getByRole("button", { name: "Show security configuration" }));
     const link = screen.getByRole("link", { name: setLink(floor!) });
-    expect(link.getAttribute("href")).toBe(pathFor("settings", ["configuration"]) + "#floor");
+    expect(link.getAttribute("href")).toBe(pathFor("settings", ["configuration", "floor"]));
+    await userEvent.click(link);
+    expect(navigate).toHaveBeenCalledWith("settings", ["configuration", "floor"]);
+    expect(floor!.cost).toBe(RELAXED_SENTENCE.floorNone);
     expect(screen.getByText(new RegExp(floor!.cost!.slice(0, 20)))).toBeTruthy();
   });
 
@@ -44,6 +49,6 @@ describe("the Posture panel", () => {
 
   it("says the seat cannot read the configuration instead of failing the panel", () => {
     mount(null, true);
-    expect(screen.getByText(seatLine(POSTURE_TITLE, "config:read"))).toBeTruthy();
+    expect(screen.getByText(seatLine(POSTURE_TITLE, "config"))).toBeTruthy();
   });
 });

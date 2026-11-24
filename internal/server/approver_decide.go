@@ -77,7 +77,8 @@ const nonPersonDeciderRefusal = "the user %[1]s is %[2]s, and only a person can 
 
 // refuseNonPersonDecider answers 403 not_authorized to a signed decision
 // whose user an administrator or the identity manager retyped as an AI agent
-// or a service account after its phone enrolled. The record stays pending.
+// or a service account after its phone enrolled. The refusal changes nothing
+// on the record.
 // The user is read again for the sentence; when that read fails the sentence
 // names the user id.
 func (a *App) refuseNonPersonDecider(w http.ResponseWriter, r *http.Request, userID, requestID string) {

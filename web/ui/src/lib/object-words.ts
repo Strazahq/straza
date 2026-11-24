@@ -64,7 +64,7 @@ export const listingAgain = (app: string, w: Nouns) => "Straza is listing " + ap
 // listingHelp is the help icon beside the strip. A server that needs no
 // listing credential is listed with none, so the sentence names none.
 export const listingHelp = (app: string, tool: string, credential: string) =>
-  "Straza calls " + tool + " every 10 minutes" + (credential === "not-needed" ? "" : " with " + app + "'s listing credential") + ". A failed listing changes nothing, and every listing is in the audit log.";
+  "Straza calls " + tool + " every 10 minutes" + (credential === "not-needed" ? "" : " with " + app + "'s listing credential") + ". Each listing is audited.";
 
 // setByHelp says who may set an attribute in the source, from its setBy:
 // org when only the organization's admins may, else the thing's own admins
@@ -77,9 +77,9 @@ export const setByHelp = (setBy: string | undefined, w: Nouns) => setBy === "org
 // idLabel and idHelp are the help icon on each row that carries the id,
 // which no longer takes a column of its own.
 export const idLabel = (value: string) => "Id of " + value;
-export const idHelp = (w: Nouns, id: string) => "The id the server gives this " + w.type + " is " + id + ". If it is deleted and made again under the same name, it gets a new id, so no access carries over.";
+export const idHelp = (id: string) => "Id " + id + ". Made again under the same name, it gets a new id and no access.";
 export const coveredHelp = (app: string, w: Nouns) => "The roles whose tools on " + app + " reach this " + w.type + " today.";
-export const draftsHelp = (w: Nouns) => "Open drafts you may read that would add a role to this " + w.type + " or drop one from it. Nothing changes until a person publishes the draft.";
+export const DRAFTS_HELP = "Open drafts you may read that add or drop a role here.";
 
 export const COLUMN = { covered: "Covered by", drafts: "In open drafts" };
 
@@ -88,17 +88,15 @@ export const COLUMN = { covered: "Covered by", drafts: "In open drafts" };
 export const draftLink = (draft: string) => "Draft " + draft;
 export const LISTING = "Listing";
 export const NO_ROLE = "no role";
-export const NO_AGENT = "No agent reaches it.";
-export const NEW = "new";
 export const NOT_SET = "not set";
 
 export const filterLabel = (w: Nouns) => "Filter " + w.plural;
 export const noMatch = (w: Nouns, q: string) => "No " + w.type + ' matches "' + q + '".';
 export const emptyList = (w: Nouns) => "The list holds no " + w.plural + ".";
-export const reading = (w: Nouns) => "Reading the " + w.plural + " from strazad.";
+export const reading = (w: Nouns) => "Reading the " + w.plural + " from Straza.";
 
-// drift is the warning when the marks the server sends differ from what
+// drift is the warning when what the server's tools say differs from what
 // its manifest pins, with the command that drafts the change.
-export const drift = (app: string, w: Nouns) => app + "'s marks differ from the pinned " + w.plural + ". Draft the change with strazactl apps objects draft " + app + ".";
-export const declaresTitle = (app: string) => "What " + app + " declares in its tools/list answer";
-export const noMarks = (app: string, w: Nouns) => "None of " + app + "'s tools carries a Straza mark, so only its manifest says what its " + w.plural + " are.";
+export const drift = (app: string, w: Nouns) => app + " now describes its " + w.plural + " differently from what is pinned. Draft the change with strazactl apps objects draft " + app + ".";
+export const declaresTitle = (app: string) => "What " + app + " says about its tools";
+export const noMarks = (app: string, w: Nouns) => "None of " + app + "'s tools names its " + w.plural + ".";

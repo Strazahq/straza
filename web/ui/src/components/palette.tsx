@@ -1,14 +1,17 @@
 import * as React from "react";
-import { FileCheckIcon, PlusIcon, ServerIcon, UserIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from "@/components/ui/command";
+import { KindIcon } from "@/components/kind-icon";
 import { KindGlyph, markOf } from "@/components/role-kind";
 import { StatusBadge } from "@/components/status-badge";
 import { type ApiError, type AppRow, type PolicySetRow, type RoleRow, type UserRow, listApps, listPolicies, listRoles, listUsers, query } from "@/lib/api";
+import { kindWord } from "@/lib/user-words";
 import { holders } from "@/lib/words";
 import { type Route } from "@/lib/routes";
 import { navigate } from "@/lib/router";
 import { adminAreas } from "@/lib/session";
 import { NEW_POLICY, PALETTE_GROUP, paletteLine } from "@/lib/policy-words";
+import { bare } from "@/lib/say";
 import { TABS } from "@/lib/settings-words";
 
 type Props = {
@@ -38,10 +41,14 @@ export function matches(query: string, name: string): boolean {
 }
 
 const SHORTCUTS: { label: string; keys: string }[] = [
-  { label: "Open this palette", keys: "Ctrl K" },
-  { label: "Close the innermost overlay", keys: "Esc" },
+  { label: "Open search", keys: "Ctrl K" },
+  { label: "Close", keys: "Esc" },
   { label: "Move and open", keys: "Arrows, Enter" },
 ];
+
+// USER_KIND reads a user row's kind word as the kind of its icon. A row
+// that carries no kind reads as a person.
+const USER_KIND = { person: "person", "AI agent": "agent", service: "service" } as const;
 
 // Palette is the Ctrl+K switcher: pages the person can see, the MCP servers
 // and the roles read once per session, the users the server search finds
@@ -75,7 +82,7 @@ export function Palette({ open, onOpenChange, routes, onOpenServer, onOpenUser, 
     setServers({ kind: "loading" });
     listApps().then(
       (apps) => { if (live) setServers({ kind: "ready", apps: [...apps].sort((a, b) => a.name.localeCompare(b.name)) }); },
-      (e: ApiError) => { if (live) setServers({ kind: "error", message: e.unreachable ? "The server list could not be read because strazad did not answer." : "The server list could not be read: " + e.message + "." }); },
+      (e: ApiError) => { if (live) setServers({ kind: "error", message: e.unreachable ? "The server list could not be read because Straza did not answer. Close and reopen to try again." : "The server list could not be read: " + bare(e.message) + ". Close and reopen to try again." }); },
     );
     return () => { live = false; };
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -88,7 +95,7 @@ export function Palette({ open, onOpenChange, routes, onOpenServer, onOpenUser, 
     setRoleList({ kind: "loading" });
     listRoles().then(
       (rows) => { if (live) setRoleList({ kind: "ready", roles: [...rows].sort((a, b) => a.name.localeCompare(b.name)) }); },
-      (e: ApiError) => { if (live) setRoleList({ kind: "error", message: e.unreachable ? "The role list could not be read because strazad did not answer." : "The role list could not be read: " + e.message + "." }); },
+      (e: ApiError) => { if (live) setRoleList({ kind: "error", message: e.unreachable ? "The role list could not be read because Straza did not answer. Close and reopen to try again." : "The role list could not be read: " + bare(e.message) + ". Close and reopen to try again." }); },
     );
     return () => { live = false; };
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -102,7 +109,7 @@ export function Palette({ open, onOpenChange, routes, onOpenServer, onOpenUser, 
     setPolicyList({ kind: "loading" });
     listPolicies(query({ limit: 0 })).then(
       (answer) => { if (live) setPolicyList({ kind: "ready", rows: [...(answer.items || [])].sort((a, b) => a.name.localeCompare(b.name)) }); },
-      (e: ApiError) => { if (live) setPolicyList({ kind: "error", message: e.unreachable ? "The policy list could not be read because strazad did not answer." : "The policy list could not be read: " + e.message + "." }); },
+      (e: ApiError) => { if (live) setPolicyList({ kind: "error", message: e.unreachable ? "The policy list could not be read because Straza did not answer. Close and reopen to try again." : "The policy list could not be read: " + bare(e.message) + ". Close and reopen to try again." }); },
     );
     return () => { live = false; };
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -117,7 +124,7 @@ export function Palette({ open, onOpenChange, routes, onOpenServer, onOpenUser, 
     const t = setTimeout(() => {
       listUsers(query({ q: needle, limit: 8, sort: "name", order: "asc" })).then(
         (page) => { if (my === userSeq.current) setUsers({ kind: "ready", rows: page.items || [] }); },
-        (e: ApiError) => { if (my === userSeq.current) setUsers({ kind: "error", message: e.unreachable ? "The directory could not be searched because strazad did not answer." : "The directory could not be searched: " + e.message + "." }); },
+        (e: ApiError) => { if (my === userSeq.current) setUsers({ kind: "error", message: e.unreachable ? "The directory could not be searched because Straza did not answer. Change the search to try again." : "The directory could not be searched: " + bare(e.message) + ". Change the search to try again." }); },
       );
     }, 250);
     return () => clearTimeout(t);
@@ -193,7 +200,7 @@ export function Palette({ open, onOpenChange, routes, onOpenServer, onOpenUser, 
           <CommandGroup heading="MCP servers">
             {apps.map((a) => (
               <CommandItem key={a.id} value={"server:" + a.id} onSelect={() => { onOpenChange(false); onOpenServer(a); }}>
-                <ServerIcon />
+                <KindIcon kind="server" />
                 <span className="font-mono">{a.name}</span>
                 <span className="text-muted-foreground">{a.runtime}</span>
                 <StatusBadge status={a.status} className="ml-auto" />
@@ -227,7 +234,7 @@ export function Palette({ open, onOpenChange, routes, onOpenServer, onOpenUser, 
           <CommandGroup heading={PALETTE_GROUP}>
             {policies.map((p) => (
               <CommandItem key={p.name} value={"policy:" + p.name} onSelect={() => { onOpenChange(false); navigate("policies", [p.name]); }}>
-                <FileCheckIcon />
+                <KindIcon kind="policy-set" />
                 <span className="font-mono">{p.name}</span>
                 <span className="ml-auto text-muted-foreground">{paletteLine(p.status, (p.summary && p.summary.matchRoles) || [])}</span>
               </CommandItem>
@@ -243,7 +250,7 @@ export function Palette({ open, onOpenChange, routes, onOpenServer, onOpenUser, 
           <CommandGroup heading="Users">
             {users.rows.map((u) => (
               <CommandItem key={u.id} value={"user:" + u.id} onSelect={() => { onOpenChange(false); onOpenUser(u); }}>
-                <UserIcon />
+                <KindIcon kind={USER_KIND[kindWord(u)]} />
                 <span className="font-mono">{u.username}</span>
                 {u.display && <span className="text-muted-foreground">{u.display}</span>}
               </CommandItem>
@@ -261,7 +268,6 @@ export function Palette({ open, onOpenChange, routes, onOpenServer, onOpenUser, 
           </CommandGroup>
         )}
       </CommandList>
-      <div className="border-t border-border px-3 py-2 text-[13px] text-muted-foreground">Matches the start of a word in a page, server, role or policy name; users are searched on the server</div>
     </CommandDialog>
   );
 }

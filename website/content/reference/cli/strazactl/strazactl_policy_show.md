@@ -2,7 +2,7 @@
 title: strazactl policy show
 description: 'Print a stored PolicySet: its story on stderr, the YAML alone on stdout'
 pagetype: reference
-weight: 71
+weight: 65
 draft: false
 sources:
   - cmd/strazactl

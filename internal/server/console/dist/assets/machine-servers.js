@@ -1,0 +1,1 @@
+function i(e,n){return e.lane!=="mcp"||!e.app?[]:e.app.split(", ").filter(t=>t!=="straza"&&!n.includes(t))}const r=(e,n)=>!!n&&i(e,n).length>0;function a(e,n){const t=new Set(e);for(const o of n)o.kind==="App"&&(o.op==="remove"?t.delete(o.name):t.add(o.name));return[...t]}export{i as m,r as o,a as r};

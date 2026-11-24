@@ -24,6 +24,10 @@ describe("callOf", () => {
     expect(callOf("net.fetch")).toEqual({ where: "network", call: "fetch", whereKind: "other" });
     expect(callOf("something odd")).toEqual({ where: "", call: "something odd", whereKind: "other" });
   });
+
+  it("reads a tool Straza does not classify as its name alone", () => {
+    expect(callOf("other: refund_order")).toEqual({ where: "", call: "refund_order", whereKind: "other" });
+  });
 });
 
 describe("whose decision it is", () => {
@@ -105,8 +109,8 @@ describe("phases and clocks", () => {
   });
 
   it("words the open grant window and the record's own window", () => {
-    expect(withinWords(at(3480), NOW)).toBe("the same call within 58 min runs");
-    expect(withinWords(at(7260), NOW)).toBe("the same call within 2 h 01 min runs");
+    expect(withinWords(at(3480), NOW)).toBe("58 min left for the same call");
+    expect(withinWords(at(7260), NOW)).toBe("2 h 01 min left for the same call");
     expect(withinWords(at(-5), NOW)).toBe("the window closed");
     expect(windowWords({ createdAt: at(0), expiresAt: at(120) })).toBe("2 minutes");
     expect(windowWords({ createdAt: at(0), expiresAt: at(90) })).toBe("90 seconds");

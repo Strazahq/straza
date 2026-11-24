@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -227,117 +226,6 @@ func TestUsersListLocksBatched(t *testing.T) {
 	}
 	if admin := locksOf(user.Username); len(admin) != 0 {
 		t.Errorf("admin's own locks = %v, want empty", admin)
-	}
-}
-
-// TestPacksBindingsAndUnbind pins the packs list's bindings enrichment and
-// the unbind DELETE (0.58.0): each binding's id is the role id (the edge
-// has no row id), and unbinding is visible on the next read. It also pins
-// the pack delete: a pack a role is still bound to answers 409 naming the
-// roles and the fix, the unbound pack deletes, and a second delete is 404.
-func TestPacksBindingsAndUnbind(t *testing.T) {
-	t.Parallel()
-	app, base := testApp(t)
-	user := seedIdentity(t, app)
-	grantAdmin(t, app, user.ID)
-	tok, _ := checkinToken(t, app, base)
-	ctx := context.Background()
-
-	reader, _ := app.store.Roles().GetByName(ctx, "reader")
-	dev, _ := app.store.Roles().GetByName(ctx, "dev")
-	pack, err := app.store.Packs().GetByName(ctx, "golang-style")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := app.store.Packs().Bind(ctx, dev.ID, pack.ID); err != nil {
-		t.Fatal(err)
-	}
-	deletePack := func(t *testing.T) (int, string) {
-		t.Helper()
-		var out struct {
-			Error  string `json:"error"`
-			Status string `json:"status"`
-		}
-		code := adminReq(t, "DELETE", base+"/v1/admin/packs/"+pack.ID, tok, nil, &out)
-		return code, out.Error + out.Status
-	}
-	for _, tc := range []struct {
-		name   string
-		unbind string
-		want   int
-		says   []string
-		not    string
-	}{
-		{"bound to two roles", "", http.StatusConflict, []string{"the roles dev and reader", "Unbind it from each role first, then delete it"}, ""},
-		{"bound to one role", dev.ID, http.StatusConflict, []string{"the role reader", "Unbind it from the role first, then delete it"}, "dev"},
-	} {
-		if tc.unbind != "" {
-			if code := adminReq(t, "DELETE", base+"/v1/admin/packs/"+pack.ID+"/bindings/"+tc.unbind, tok, nil, nil); code != http.StatusOK {
-				t.Fatalf("%s: unbind = %d, want 200", tc.name, code)
-			}
-		}
-		code, says := deletePack(t)
-		if code != tc.want {
-			t.Fatalf("%s: delete = %d %q, want %d", tc.name, code, says, tc.want)
-		}
-		for _, want := range tc.says {
-			if !strings.Contains(says, want) {
-				t.Errorf("%s: refusal %q does not say %q", tc.name, says, want)
-			}
-		}
-		if tc.not != "" && strings.Contains(says, tc.not) {
-			t.Errorf("%s: refusal %q names the unbound role %q", tc.name, says, tc.not)
-		}
-	}
-
-	type binding struct {
-		ID       string `json:"id"`
-		RoleID   string `json:"role_id"`
-		RoleName string `json:"role_name"`
-	}
-	packBindings := func() []binding {
-		var packs []struct {
-			Name     string    `json:"name"`
-			Bindings []binding `json:"bindings"`
-		}
-		if code := adminReq(t, "GET", base+"/v1/admin/packs", tok, nil, &packs); code != http.StatusOK {
-			t.Fatalf("packs list = %d", code)
-		}
-		for _, p := range packs {
-			if p.Name == "golang-style" {
-				if p.Bindings == nil {
-					t.Fatal("bindings key missing or null, want array")
-				}
-				return p.Bindings
-			}
-		}
-		t.Fatal("pack golang-style not listed")
-		return nil
-	}
-
-	pre := packBindings()
-	if len(pre) != 1 || pre[0].ID != reader.ID || pre[0].RoleID != reader.ID || pre[0].RoleName != "reader" {
-		t.Fatalf("bindings = %+v, want one edge to reader (id = role id)", pre)
-	}
-
-	if code := adminReq(t, "DELETE", base+"/v1/admin/packs/"+pack.ID+"/bindings/"+reader.ID, tok, nil, nil); code != http.StatusOK {
-		t.Fatalf("unbind = %d, want 200", code)
-	}
-	if post := packBindings(); len(post) != 0 {
-		t.Errorf("post-unbind bindings = %+v, want empty", post)
-	}
-	if code := adminReq(t, "DELETE", base+"/v1/admin/packs/"+pack.ID+"/bindings/"+reader.ID, tok, nil, nil); code != http.StatusNotFound {
-		t.Errorf("second unbind = %d, want 404", code)
-	}
-
-	if code, says := deletePack(t); code != http.StatusOK || says != "deleted" {
-		t.Fatalf("delete of the unbound pack = %d %q, want 200 deleted", code, says)
-	}
-	if _, err := app.store.Packs().GetByID(ctx, pack.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("deleted pack still stored: %v", err)
-	}
-	if code, says := deletePack(t); code != http.StatusNotFound || says != "no such knowledge pack" {
-		t.Errorf("second delete = %d %q, want 404 no such knowledge pack", code, says)
 	}
 }
 

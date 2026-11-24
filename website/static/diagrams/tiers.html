@@ -161,8 +161,7 @@ text{fill:var(--text);font-family:var(--font-ui);user-select:none}
   <rect class="box" x="140" y="112" width="196" height="86" rx="6"/>
   <text class="d" x="152" y="132" style="fill:var(--text)">local tools: shell &#183; file &#183; net</text>
   <text class="d" x="152" y="148">+ MCP via the gateway</text>
-  <text class="d" x="152" y="164">+ knowledge packs at start</text>
-  <text class="d" x="152" y="180">+ conversation capture</text>
+  <text class="d" x="152" y="164">+ conversation capture</text>
 </g>
 <g class="node cell c2" id="g2" tabindex="0" aria-label="Tier 2 governs">
   <rect class="box" x="350" y="112" width="196" height="86" rx="6"/>
@@ -312,7 +311,7 @@ var FACTS={
  h2:'<strong>Tier 2, MCP gateway</strong>: any MCP client pointed at /mcp. Nothing to implement beyond the session token; conformance level defined in the spec.',
  h3:'<strong>Tier 3, exec wrapper</strong>: <code>straza exec -- cmd</code> makes the shim itself the hook layer for agents with no event model. It is a subcommand of the one static binary, not a second app.',
  h4:'<strong>python agentkit</strong>: <code>straza-agentkit</code> (kits/python): stdlib-only <code>check</code>/<code>@guard</code>/capture core spawning <code>straza hook</code> under the python-sdk dialect; policy never moves into Python.',
- g1:'<strong>Tier 1 governs</strong> local tool calls (shell, file edits, net) via PreToolUse-family hooks plus MCP through the gateway; role-bound knowledge packs are injected at session start; conversation capture has first-class seams.',
+ g1:'<strong>Tier 1 governs</strong> local tool calls (shell, file edits, net) via PreToolUse-family hooks plus MCP through the gateway. Conversation capture has first-class seams.',
  g2:'<strong>Tier 2 governs</strong> tools/list (catalog filtering) and tools/call (per-call policy, per-(session,app) rate limits, gateway-side credential injection). Local shell/file actions never pass a Straza PEP in this tier.',
  g3:'<strong>Tier 3 governs</strong> by giving the agent exactly one way to run things: every spawned process goes through the shim; argv normalizes into the same canonical tool.pre event and meets the same policy.',
  g4:'<strong>The agentkit governs</strong> native Python tool execution at official blocking seams: LangChain <code>wrap_tool_call</code>, OpenAI Agents tool guardrails, Claude Agent SDK <code>PreToolUse</code>, CrewAI <code>before_tool_call</code>, ADK <code>before_tool_callback</code>, Pydantic AI <code>WrapperToolset</code>. Deny surfaces as the framework&#8217;s native rejection with the Straza: reason.',

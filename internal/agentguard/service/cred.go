@@ -115,6 +115,9 @@ type credStore struct {
 	// an open push stream checks that its session has not lapsed.
 	drainEvery time.Duration
 	pushCheck  time.Duration
+	// host is this machine's host name as every check-in that starts a
+	// session carries it, read once, empty when it could not be read.
+	host string
 
 	mu       sync.Mutex
 	accounts map[string]*account
@@ -152,6 +155,7 @@ func newCredentials(ctx context.Context, opts Options) (*credStore, error) {
 	s := &credStore{
 		opts: opts, log: log, ctx: run, cancel: cancel, lock: lock, machine: machine,
 		selfUID: ownUID(),
+		host:    hostName(os.Hostname()),
 		base:    http.DefaultTransport.(*http.Transport).Clone(),
 		now:     time.Now, checkinTimeout: 10 * time.Second, drainEvery: 15 * time.Second, pushCheck: 5 * time.Second,
 		accounts: map[string]*account{},

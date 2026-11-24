@@ -28,6 +28,8 @@ export type RoleSpec = {
   server?: string;
   implies?: string[];
   bindings?: RoleBinding[];
+  // packs is a retired field an older export or a stored document may
+  // still carry. The server ignores it, and put never writes it.
   packs?: string[];
 };
 
@@ -58,11 +60,12 @@ type RoleDocument = { apiVersion: string; kind: string; metadata: { name: string
 export type Items = { items: SaveItem[] } | { error: string };
 
 // put answers the Role put of doc, with the empty fields left out as the
-// export leaves them.
+// export leaves them, and without the retired packs field.
 function put(doc: RoleDocument): SaveItem {
   const s = doc.spec;
   if (!s.description) delete s.description;
-  for (const k of ["implies", "bindings", "packs"] as const) if (!s[k] || !s[k].length) delete s[k];
+  delete s.packs;
+  for (const k of ["implies", "bindings"] as const) if (!s[k] || !s[k].length) delete s[k];
   return { kind: "Role", name: doc.metadata.name, op: "put", doc: stringify(doc) };
 }
 
@@ -155,8 +158,7 @@ export const roleFile = (role: NewRole, grant: GrantInput | null): string => put
 // newRoleItems answers the items of the New role wizard and the Add role
 // sheet: the Role put of the new role, owned by the server of the access
 // row grant names when there is one, then the role's own set when the grant
-// writes rules. The document names no pack, because a draft never applies
-// one, so packs are bound after the publish.
+// writes rules.
 export async function newRoleItems(role: NewRole, grant: GrantInput | null): Promise<Items> {
   const items = [put(newRoleDoc(role, grant))];
   if (grant && planRows(grant).some((r) => r.key === "publish")) {

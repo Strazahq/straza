@@ -6,6 +6,9 @@
 {{- if and (eq .Values.profile "enterprise") (gt $maxReplicas 1) (not (include "straza.eventsShared" .)) }}
 {{- fail "straza: replicas>1 with per-pod EMBEDDED events silently split-brains approvals, kill-switch and console fan-out while every probe stays green. Keep nats.enabled=true (bundled broker), set nats.url, or run one replica." }}
 {{- end }}
+{{- if and (eq .Values.profile "enterprise") (not .Values.secrets.kekExistingSecret) }}
+{{- fail (printf "straza: profile=enterprise needs secrets.kekExistingSecret, a Secret with a 32-byte key at the data key kek. strazad seals its signing keys with it. Without it each pod makes its own key, loses it at the next restart and then refuses to start. Create it with: head -c 32 /dev/urandom > kek.bin && kubectl -n %s create secret generic straza-kek --from-file=kek=kek.bin, and set secrets.kekExistingSecret=straza-kek." .Release.Namespace) }}
+{{- end }}
 {{- if and .Values.pushRelay.enabled .Values.apns.existingSecret }}
 {{- fail "straza: pushRelay.enabled (the default) and apns.existingSecret both send to iOS phones, and strazad refuses two senders for one platform at boot. Set pushRelay.enabled=false to keep the direct APNs key, or drop apns.existingSecret to send through the relay." }}
 {{- end }}
@@ -200,9 +203,9 @@ spec:
               value: /var/lib/straza/push-relay-token
             {{- end }}
           volumeMounts:
-            # Writable data dir (rootfs is read-only): apps dir, and the
-            # generated KEK when secrets.kekExistingSecret is unset (that
-            # per-pod key is ephemeral; set kekExistingSecret in production).
+            # Writable data dir (rootfs is read-only): apps dir, and on the
+            # standalone profile the generated KEK, which lives and dies with
+            # the pod's sqlite store beside it.
             - name: data
               mountPath: /var/lib/straza
             {{- if .Values.configYaml }}

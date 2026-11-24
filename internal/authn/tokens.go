@@ -62,6 +62,7 @@ func RolesHash(roleIDs []string) string {
 // tick and at rotation (rotation.go).
 type TokenService struct {
 	repo   store.SigningKeyRepo
+	sealer KeySealer
 	issuer string
 	ttl    time.Duration
 
@@ -71,12 +72,17 @@ type TokenService struct {
 }
 
 // NewTokenService loads (or creates) the signing keys and returns a ready
-// service. issuer is embedded and enforced in every token.
-func NewTokenService(ctx context.Context, repo store.SigningKeyRepo, issuer string, ttl time.Duration) (*TokenService, error) {
+// service. issuer is embedded and enforced in every token. The seed of every
+// key is sealed under sealer in the store, so every replica must hold the
+// same KEK, and a stored key that does not open is an error.
+func NewTokenService(ctx context.Context, repo store.SigningKeyRepo, sealer KeySealer, issuer string, ttl time.Duration) (*TokenService, error) {
+	if sealer == nil {
+		return nil, errNoSeedSealer
+	}
 	if ttl <= 0 {
 		ttl = DefaultTokenTTL
 	}
-	s := &TokenService{repo: repo, issuer: issuer, ttl: ttl}
+	s := &TokenService{repo: repo, sealer: sealer, issuer: issuer, ttl: ttl}
 	if err := s.Reload(ctx); err != nil {
 		return nil, err
 	}
@@ -501,24 +507,23 @@ func (s *TokenService) JWKS() ([]byte, error) {
 	return json.Marshal(set)
 }
 
-func importPrivate(rec store.SigningKey) (jwk.Key, error) {
-	priv := ed25519.NewKeyFromSeed(rec.PrivateKey)
+func importPrivate(kid string, priv ed25519.PrivateKey) (jwk.Key, error) {
 	key, err := jwk.Import(priv)
 	if err != nil {
-		return nil, fmt.Errorf("authn: import private key %s: %w", rec.KID, err)
+		return nil, fmt.Errorf("authn: import private key %s: %w", kid, err)
 	}
-	if err := annotate(key, rec.KID); err != nil {
+	if err := annotate(key, kid); err != nil {
 		return nil, err
 	}
 	return key, nil
 }
 
-func importPublic(rec store.SigningKey) (jwk.Key, error) {
-	key, err := jwk.Import(ed25519.PublicKey(rec.PublicKey))
+func importPublic(kid string, pub ed25519.PublicKey) (jwk.Key, error) {
+	key, err := jwk.Import(pub)
 	if err != nil {
-		return nil, fmt.Errorf("authn: import public key %s: %w", rec.KID, err)
+		return nil, fmt.Errorf("authn: import public key %s: %w", kid, err)
 	}
-	if err := annotate(key, rec.KID); err != nil {
+	if err := annotate(key, kid); err != nil {
 		return nil, err
 	}
 	return key, nil

@@ -6,8 +6,9 @@ import (
 )
 
 // TestRiskGroups pins Finding.Group, table-driven over the codes: a risk
-// carries its code, except a server's removal and an agent's loosening of
-// a set that binds it, which a publisher confirms one by one by name, and,
+// carries its code, except a server's removal, an agent's change of a set
+// that binds it and an agent's widening of its own reach, which a
+// publisher confirms one by one by name, and,
 // on an agent's draft, the policy.guardrail-changed lines of such a set,
 // typed by the set's name beside its agent.guardrail line. On a person's
 // draft, and for a set that does not bind the agent, those lines keep
@@ -29,6 +30,8 @@ func TestRiskGroups(t *testing.T) {
 			map[string]string{codeAgentGuardrail: "", codeGuardrail: ""}},
 		{"an agent's draft that loosens a set that does not bind it", true, []Item{removeSet("readers-guard")},
 			map[string]string{codeGuardrail: codeGuardrail}},
+		{"an agent's draft that widens its own reach", true, []Item{removeSet("dev-access")},
+			map[string]string{codeAgentOwnReach: "", codeAgentGuardrail: "", codeGuardrail: "", codeUngated: codeUngated, codeDenyRemoved: codeDenyRemoved}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

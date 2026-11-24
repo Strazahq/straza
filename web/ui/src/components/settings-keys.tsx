@@ -2,19 +2,19 @@ import * as React from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KeyRoundIcon, Loader2Icon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { DataTable, plain } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { RetiringPanel, StagedPanel } from "@/components/settings-keys-panel";
-import { WordBadge } from "@/components/users-table";
+import { Chip, StatusChip, isStatus } from "@/components/chip";
 import type { ApiError } from "@/lib/api";
 import {
   ASSERTION_PURPOSE, type SigningKeyRow, assertionKeyCertificate, entraBlueprints, listSigningKeys, promoteAssertionKey, retireAssertionKey, rotateAssertionKey, thumbprintOf, usesEntra,
 } from "@/lib/keys-api";
 import {
-  CERTIFICATE, CREATE_BODY, CREATE_NEW_KEY, CREATE_TITLE, HIDE_RETIRED, KEYS_EMPTY_TITLE, KEY_COLUMN, PROMOTE, PROMOTE_BODY, READING_KEYS, RETIRE, RETIRE_ACTIVE_BODY,
-  RETIRE_ENTRA, RETIRE_STAGED_BODY, RETIRED_LINE, ROTATE_TITLE, SUBJECT_KEYS, certFile, downloadedToast, keysCount, keysEmptyBody, keysLede, promotePlainBody, promoteTick, promoteTitle, promotedToast,
+  CERTIFICATE, CREATE_BODY, CREATE_KEY, CREATE_TITLE, HIDE_RETIRED, KEYS_EMPTY_TITLE, KEY_COLUMN, PROMOTE, PROMOTE_BODY, READING_KEYS, RETIRE, RETIRE_ACTIVE_BODY,
+  RETIRE_ENTRA, RETIRE_STAGED_BODY, RETIRED_LINE, ROTATE_KEY, ROTATE_TITLE, SUBJECT_KEYS, certFile, downloadedToast, keysCount, keysEmptyBody, keysLede, promotePlainBody, promoteTick, promoteTitle, promotedToast,
   retireTitle, retiredToast, rotateBody, shortKid, showRetired, stagedToast,
 } from "@/lib/keys-words";
 import { notify } from "@/lib/notify";
@@ -32,9 +32,9 @@ import { absTime } from "@/lib/words";
 // be read.
 
 const DANGER_BUTTON = "border-danger text-danger hover:bg-danger-bg hover:text-danger";
-const WIDTHS: Record<string, string> = { kid: "130px", status: "110px", created: "170px", until: "130px" };
+const WIDTHS: Record<string, string> = { kid: "130px", status: "110px", created: "200px", until: "130px" };
 const LABELS: Record<string, string> = { kid: KEY_COLUMN.kid, status: KEY_COLUMN.status, created: KEY_COLUMN.created, until: KEY_COLUMN.until };
-const TONE: Record<string, "ok" | "warn" | "plain"> = { active: "ok", staged: "warn" };
+const TONE: Record<string, "warn" | "plain"> = { staged: "warn" };
 
 type State =
   | { kind: "loading" }
@@ -46,15 +46,11 @@ type Ask = { kind: "rotate" } | { kind: "promote"; key: SigningKeyRow } | { kind
 type Cert = { pem: string; thumb: string | null };
 
 type Props = {
-  // rotateRequest is the page head's counter: Rotate key moves it, and the
-  // tab opens its confirm when it moves.
-  rotateRequest: number;
-  // onRows hands each fresh read to the page, which counts the keys and
-  // picks the head's action from them.
+  // onRows hands each fresh read to the page, which counts the keys.
   onRows: (rows: SigningKeyRow[]) => void;
 };
 
-export function KeysTab({ rotateRequest, onRows }: Props) {
+export function KeysTab({ onRows }: Props) {
   const [state, setState] = React.useState<State>({ kind: "loading" });
   const [certs, setCerts] = React.useState<Record<string, Cert>>({});
   const [downloaded, setDownloaded] = React.useState<Set<string>>(new Set());
@@ -92,14 +88,6 @@ export function KeysTab({ rotateRequest, onRows }: Props) {
   }, [onRows]);
 
   React.useEffect(() => { load(); }, [load]);
-
-  const seen = React.useRef(rotateRequest);
-  React.useEffect(() => {
-    if (seen.current === rotateRequest) return;
-    seen.current = rotateRequest;
-    setRefusal(null);
-    setAsk({ kind: "rotate" });
-  }, [rotateRequest]);
 
   const rows = state.kind === "ready" ? state.rows : [];
   const staged = rows.find((k) => k.status === "staged") || null;
@@ -177,8 +165,8 @@ export function KeysTab({ rotateRequest, onRows }: Props) {
   const askFor = React.useCallback((next: Ask) => { setRefusal(null); setTicked(false); setAsk(next); }, []);
 
   const columns = React.useMemo<ColumnDef<SigningKeyRow>[]>(() => [
-    { id: "kid", header: plain<SigningKeyRow>(KEY_COLUMN.kid), cell: ({ row }) => <span className="font-mono text-[13px]" title={row.original.kid}>{shortKid(row.original.kid)}</span> },
-    { id: "status", header: plain<SigningKeyRow>(KEY_COLUMN.status), cell: ({ row }) => <WordBadge word={row.original.status} tone={TONE[row.original.status] || "plain"} mono attr="data-key-status" /> },
+    { id: "kid", header: plain<SigningKeyRow>(KEY_COLUMN.kid), cell: ({ row }) => <span className="font-mono text-caption" title={row.original.kid}>{shortKid(row.original.kid)}</span> },
+    { id: "status", header: plain<SigningKeyRow>(KEY_COLUMN.status), cell: ({ row }) => isStatus(row.original.status) ? <StatusChip status={row.original.status} data-key-status={row.original.status} /> : <Chip tone={TONE[row.original.status] || "plain"} data-key-status={row.original.status}>{row.original.status}</Chip> },
     { id: "created", header: plain<SigningKeyRow>(KEY_COLUMN.created), cell: ({ row }) => <span className="tabular-nums text-text-2">{absTime(row.original.created_at)}</span> },
     ...(entra ? [{ id: "until", header: plain<SigningKeyRow>(KEY_COLUMN.until), cell: ({ row }: { row: { original: SigningKeyRow } }) => <span className="tabular-nums text-text-2">{row.original.certificate_expires_at ? absTime(row.original.certificate_expires_at).slice(0, 10) : "none"}</span> }] : []),
     {
@@ -200,7 +188,7 @@ export function KeysTab({ rotateRequest, onRows }: Props) {
     },
   ], [download, askFor, entra]);
 
-  if (state.kind === "loading" || blueprints === undefined) return <p className="text-sm text-muted-foreground">{READING_KEYS}</p>;
+  if (state.kind === "loading" || blueprints === undefined) return <p className="text-dense text-muted-foreground">{READING_KEYS}</p>;
   if (state.kind === "error") return <FetchError subject={SUBJECT_KEYS} detail={state.message} />;
 
   const live = rows.filter((k) => k.status !== "retired");
@@ -211,7 +199,12 @@ export function KeysTab({ rotateRequest, onRows }: Props) {
     <div className="flex flex-col gap-4">
       {state.problem && <FetchError subject={SUBJECT_KEYS} detail={state.problem} lastRead={state.lastRead} />}
       {problem && <RefusedError subject={CERTIFICATE} message={problem} />}
-      <p className="max-w-[75ch] text-sm text-text-2" data-keys-lede>{keysLede(entra)}</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="max-w-[75ch] flex-1 basis-[280px] text-dense text-text-2" data-keys-lede>{keysLede(entra)}</p>
+        {/* While a rotation runs, its panel carries the next step, so the
+            tab offers no second rotation. */}
+        {!rotating && <Button className="ml-auto" onClick={() => askFor({ kind: "rotate" })}><KeyRoundIcon /> {active ? ROTATE_KEY : CREATE_KEY}</Button>}
+      </div>
 
       {staged && (
         <StagedPanel staged={staged} active={active} blueprints={known} thumb={thumbOf(staged.kid)} downloaded={downloaded.has(staged.kid)}
@@ -235,15 +228,16 @@ export function KeysTab({ rotateRequest, onRows }: Props) {
           count={(shown) => keysCount(shown)}
           emptyText={keysEmptyBody(known)}
           widths={WIDTHS}
+          minWidth={entra ? "770px" : "540px"}
           rowClassName={(k) => (k.status === "retired" ? "text-muted-foreground" : "")}
         />
       )}
       {retired.length > 0 && (
         <div className="flex flex-col items-start gap-1">
-          <Button variant="link" size="sm" className="h-auto p-0 text-[13px] text-link" onClick={() => setRetiredOpen((o) => !o)}>
+          <Button variant="link" size="sm" className="h-auto p-0 text-caption text-link" onClick={() => setRetiredOpen((o) => !o)}>
             {retiredOpen ? HIDE_RETIRED : showRetired(retired.length)}
           </Button>
-          {retiredOpen && entra && <p className="text-[13px] text-muted-foreground">{RETIRED_LINE}</p>}
+          {retiredOpen && entra && <p className="text-caption text-muted-foreground">{RETIRED_LINE}</p>}
         </div>
       )}
 
@@ -254,11 +248,11 @@ export function KeysTab({ rotateRequest, onRows }: Props) {
               <AlertDialogHeader>
                 <AlertDialogTitle>{dialog.title}</AlertDialogTitle>
                 <AlertDialogDescription asChild>
-                  <div className="flex flex-col gap-2 text-sm text-muted-foreground">{dialog.body.map((b) => <p key={b}>{b}</p>)}</div>
+                  <div className="flex flex-col gap-2 text-dense text-muted-foreground">{dialog.body.map((b) => <p key={b}>{b}</p>)}</div>
                 </AlertDialogDescription>
               </AlertDialogHeader>
               {ask.kind === "promote" && entra && (
-                <label className="flex items-start gap-2 text-sm">
+                <label className="flex items-start gap-2 text-dense">
                   <input type="checkbox" className="mt-1" checked={ticked} onChange={(e) => setTicked(e.target.checked)} data-promote-tick />
                   <span>{promoteTick(thumbOf(ask.key.kid) || null, known)}</span>
                 </label>
@@ -267,7 +261,7 @@ export function KeysTab({ rotateRequest, onRows }: Props) {
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={busy}>{CANCEL}</AlertDialogCancel>
                 <AlertDialogAction
-                  className={dialog.danger ? "bg-danger text-white hover:bg-danger/90" : undefined}
+                  className={dialog.danger ? DANGER_FILL : undefined}
                   disabled={ask.kind === "promote" && entra && !ticked}
                   aria-busy={busy || undefined}
                   onClick={(e) => { e.preventDefault(); confirm(); }}
@@ -289,8 +283,8 @@ function words(ask: Ask, active: SigningKeyRow | null, entra: boolean): { title:
   switch (ask.kind) {
     case "rotate":
       return active
-        ? { title: ROTATE_TITLE, body: [rotateBody(active.kid)], verb: CREATE_NEW_KEY, danger: false }
-        : { title: CREATE_TITLE, body: [CREATE_BODY], verb: CREATE_NEW_KEY, danger: false };
+        ? { title: ROTATE_TITLE, body: [rotateBody(active.kid)], verb: ROTATE_KEY, danger: false }
+        : { title: CREATE_TITLE, body: [CREATE_BODY], verb: CREATE_KEY, danger: false };
     case "promote":
       return { title: promoteTitle(ask.key.kid), body: [entra ? PROMOTE_BODY : promotePlainBody(active ? active.kid : null)], verb: PROMOTE, danger: false };
     case "retire": {

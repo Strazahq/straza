@@ -353,7 +353,7 @@ func TestRemoteViewReadWaitsOutTheLock(t *testing.T) {
 	r.mu.Unlock()
 	err := <-done
 	r.mu.Lock()
-	pooled := r.pool[""] != nil
+	pooled := r.sessionAt(poolKey{}) != nil
 	r.mu.Unlock()
 	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "within") || evictions(r) != 0 || !pooled {
 		t.Errorf("read after the lock wait: err %v, %d evictions, session pooled %v, want the context's error and the session kept", err, evictions(r), pooled)
@@ -478,5 +478,78 @@ func TestDriftNamesALinkChange(t *testing.T) {
 	mgr.HealthCheck(ctx)
 	if v, _ := mgr.View("swap"); v.Detail != "inventory drift: the server changed which views its tools open" {
 		t.Errorf("the drift reason is %q", v.Detail)
+	}
+}
+
+// TestServedFieldChangeTellsTheCatalogs pins a probe whose inventory differs
+// from the last only in a field a catalog serves and the drift hash leaves
+// out: it tells the catalogs once, raises no drift event and keeps the
+// server running. An identical probe tells nothing, and a changed
+// description or annotation hint still drifts.
+func TestServedFieldChangeTellsTheCatalogs(t *testing.T) {
+	const uri = "ui://fields/card.html"
+	done := func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{}, nil
+	}
+	setTool := func(srv *mcp.Server, edit func(*mcp.Tool)) {
+		tl := &mcp.Tool{Name: "pick", Description: "pick", InputSchema: map[string]any{"type": "object"}, Meta: uiLink(uri)}
+		edit(tl)
+		srv.AddTool(tl, done)
+	}
+	setCard := func(srv *mcp.Server, title string) {
+		addView(srv, &mcp.Resource{URI: uri, Name: "card", Title: title, MIMEType: ViewMIMEType},
+			&mcp.ResourceContents{URI: uri, MIMEType: ViewMIMEType, Text: "<p>card</p>"})
+	}
+	rows := []struct {
+		name            string
+		change          func(srv *mcp.Server)
+		changes, drifts int32
+		status          string
+	}{
+		{"an identical inventory", func(*mcp.Server) {}, 0, 0, StatusRunning},
+		{"an output schema", func(srv *mcp.Server) {
+			setTool(srv, func(tl *mcp.Tool) { tl.OutputSchema = map[string]any{"type": "object"} })
+		}, 1, 0, StatusRunning},
+		{"a title", func(srv *mcp.Server) { setTool(srv, func(tl *mcp.Tool) { tl.Title = "Pick" }) }, 1, 0, StatusRunning},
+		{"an annotation's title", func(srv *mcp.Server) {
+			setTool(srv, func(tl *mcp.Tool) { tl.Annotations = &mcp.ToolAnnotations{Title: "Pick"} })
+		}, 1, 0, StatusRunning},
+		{"an annotation hint", func(srv *mcp.Server) {
+			setTool(srv, func(tl *mcp.Tool) { tl.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: true} })
+		}, 1, 1, StatusDegraded},
+		{"a _meta key that is not a mark", func(srv *mcp.Server) {
+			setTool(srv, func(tl *mcp.Tool) { tl.Meta["com.example/flag"] = true })
+		}, 1, 0, StatusRunning},
+		{"a view's title", func(srv *mcp.Server) { setCard(srv, "Card two") }, 1, 0, StatusRunning},
+		{"a description", func(srv *mcp.Server) { setTool(srv, func(tl *mcp.Tool) { tl.Description = "pick one" }) }, 1, 1, StatusDegraded},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			srv := mcp.NewServer(&mcp.Implementation{Name: "fields", Version: "1.0.0"}, nil)
+			setTool(srv, func(*mcp.Tool) {})
+			setCard(srv, "Card")
+			up := newViewsUpstream(t, srv)
+			mgr, sink, _ := viewsManager(t)
+			ctx := context.Background()
+			if _, err := mgr.Install(ctx, viewsManifest(t, "fields", up.URL, `["*"]`, true), store.AppSourceAPI); err != nil {
+				t.Fatal(err)
+			}
+			waitStatus(t, mgr, "fields", StatusRunning)
+			var changes atomic.Int32
+			mgr.OnChange(func() { changes.Add(1) })
+
+			row.change(srv)
+			v, _ := mgr.HealthCheckOne(ctx, "fields")
+			if got := changes.Load(); got != row.changes {
+				t.Errorf("the catalogs were told %d times, want %d", got, row.changes)
+			}
+			if got := sink.count("straza.apps.drift"); got != int(row.drifts) {
+				t.Errorf("%d drift events, want %d", got, row.drifts)
+			}
+			if v.Status != row.status {
+				t.Errorf("status = %s (%s), want %s", v.Status, v.Detail, row.status)
+			}
+		})
 	}
 }

@@ -103,7 +103,7 @@ The server never replaces the approver pair on its own. A new pair is a new pin,
 In this profile the sign-in page is served by strazad itself, and you complete it in a browser with the `admin` username and the password from the boot log.
 
 {{< console >}}
-Open `http://127.0.0.1:8420/console/` in a browser on the host. The card says `You sign in on this server's own sign-in page and come back to this page.` Press **Sign in**.
+Open `http://127.0.0.1:8420/console/` in a browser on the host. The card says `You sign in on Straza's own page.` Press **Sign in**.
 
 {{< shot name="signin" caption="The console's sign-in card." >}}
 
@@ -112,7 +112,7 @@ The tab goes to the page titled Sign in to Straza, which asks for the password e
 {{< see >}}The console opens on **Overview**, and **Users** lists `admin` and `break-glass`.{{< /see >}}
 
 {{< fails >}}
-`This page is served over plain HTTP from a network address, so the browser will not run the sign-in. Serve Straza over HTTPS, or open it at 127.0.0.1 on the server.`
+`This page is served over plain HTTP from a network address, so the browser will not run the sign-in. Serve Straza over HTTPS, or open it at 127.0.0.1 on the strazad host.`
 : The browser opened the console at the host's network address over plain HTTP, where it offers no Web Crypto for the sign-in. Open `http://127.0.0.1:8420/console/` on the host, or serve Straza over HTTPS.
 {{< /fails >}}
 {{< /console >}}
@@ -121,7 +121,7 @@ The tab goes to the page titled Sign in to Straza, which asks for the password e
 
 strazactl has no sign-in of its own. It runs on an admin API token that you mint in the console, so first sign in there as `admin`, as the console form of this step shows. On a host you reach over SSH, forward the port with `ssh -L 8420:127.0.0.1:8420` and the host's name, and open `http://127.0.0.1:8420/console/` in your own browser. Then open the mint sheet:
 
-{{< clicks "Settings" "API tokens" "New API token" >}}
+{{< clicks "Settings" "Mint a token" >}}
 
 Name the token after yourself and the host. Pick `expires in 30 days` and the job **Full root** before you press **Mint token**. The token is shown once. Copy it and hand it to strazactl:
 

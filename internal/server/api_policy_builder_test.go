@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -221,6 +222,97 @@ func TestPolicySimulate(t *testing.T) {
 	if code := adminReq(t, http.MethodPost, base+"/v1/admin/policies/simulate", adminTok,
 		map[string]any{"event": map[string]any{"kind": "tool.pre"}, "subject": map[string]any{"roles": []string{"dev"}}, "draft": "{broken"}, nil); code != http.StatusBadRequest {
 		t.Errorf("broken draft = %d, want 400", code)
+	}
+}
+
+// refusedDraft denies every git command of role dev, so a draft run that
+// reaches the engine answers with its rule.
+const refusedDraft = `apiVersion: straza.dev/v1beta1
+kind: PolicySet
+metadata: { name: sim-refused }
+spec:
+  match: { roles: [dev] }
+  rules:
+    - id: no-git
+      tools: [shell.exec]
+      command: { denyPatterns: ["git *"] }
+      effect: deny
+      reason: "Straza: git is blocked"
+`
+
+// TestPolicySimulateRefusedUser pins that simulate refuses a stored user as
+// the gateway does: a user the subject lookup found who is disabled or
+// revoked gets a deny with no rule and the refusal's reason, in active and
+// in draft, and no engine runs. Disabled wins over revoked. An active user,
+// and explicit roles sent with a refused user's name, meet the engine.
+func TestPolicySimulateRefusedUser(t *testing.T) {
+	t.Parallel()
+	app, base := testApp(t)
+	admin := seedIdentity(t, app)
+	grantAdmin(t, app, admin.ID)
+	adminTok, _ := checkinToken(t, app, base)
+	seedRefusedUsers(t, app)
+
+	type verdict struct {
+		Effect  string `json:"effect"`
+		RuleID  string `json:"ruleId"`
+		Reason  string `json:"reason"`
+		Default bool   `json:"default"`
+	}
+	allowed := verdict{Effect: "allow", Default: true}
+	gitDenied := verdict{Effect: "deny", RuleID: "no-git", Reason: "Straza: git is blocked"}
+	disabled := verdict{Effect: "deny", Reason: "Straza refuses every call of this user, because the user is disabled. Enable the user first."}
+	revoked := verdict{Effect: "deny", Reason: "Straza refuses every call of this user, because the user is revoked. Lift the revocation first."}
+	tests := []struct {
+		name       string
+		subject    map[string]any
+		wantActive verdict
+		wantDraft  *verdict // nil sends no draft
+	}{
+		{name: "an active user meets the engine", subject: map[string]any{"user": "ana"}, wantActive: allowed},
+		{name: "an active user's draft meets the engine", subject: map[string]any{"user": "ana"}, wantActive: allowed, wantDraft: &gitDenied},
+		{name: "a disabled user is refused", subject: map[string]any{"user": "bo"}, wantActive: disabled},
+		{name: "a revoked user is refused", subject: map[string]any{"user": "cy"}, wantActive: revoked},
+		{name: "a user both disabled and revoked reads disabled", subject: map[string]any{"user": "di"}, wantActive: disabled},
+		{name: "a disabled user's draft is refused too", subject: map[string]any{"user": "bo"}, wantActive: disabled, wantDraft: &disabled},
+		{name: "a revoked user's draft is refused too", subject: map[string]any{"user": "cy"}, wantActive: revoked, wantDraft: &revoked},
+		{name: "explicit roles with a disabled user's name meet the engine",
+			subject: map[string]any{"user": "bo", "roles": []string{"dev"}}, wantActive: allowed},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := map[string]any{
+				"event":   map[string]any{"kind": "tool.pre", "tool": "shell.exec", "command": "git status"},
+				"subject": tc.subject,
+			}
+			if tc.wantDraft != nil {
+				req["draft"] = refusedDraft
+			}
+			var res struct {
+				Active   verdict  `json:"active"`
+				Draft    *verdict `json:"draft"`
+				Snapshot string   `json:"snapshot"`
+				Subject  struct {
+					User  string   `json:"user"`
+					Roles []string `json:"roles"`
+				} `json:"subject"`
+			}
+			if code := adminReq(t, http.MethodPost, base+"/v1/admin/policies/simulate", adminTok, req, &res); code != http.StatusOK {
+				t.Fatalf("simulate = %d", code)
+			}
+			if res.Active != tc.wantActive {
+				t.Errorf("active = %+v, want %+v", res.Active, tc.wantActive)
+			}
+			switch {
+			case (res.Draft != nil) != (tc.wantDraft != nil):
+				t.Errorf("draft = %+v, want %+v", res.Draft, tc.wantDraft)
+			case tc.wantDraft != nil && *res.Draft != *tc.wantDraft:
+				t.Errorf("draft = %+v, want %+v", *res.Draft, *tc.wantDraft)
+			}
+			if res.Subject.User != tc.subject["user"] || !slices.Contains(res.Subject.Roles, "dev") || res.Snapshot == "" {
+				t.Errorf("subject = %+v, snapshot %q, want user %v holding dev and a snapshot", res.Subject, res.Snapshot, tc.subject["user"])
+			}
+		})
 	}
 }
 

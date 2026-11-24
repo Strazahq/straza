@@ -1,5 +1,5 @@
 // Command strazactl is the Straza admin CLI on an admin API token: identity
-// CRUD, policy lifecycle, drafts, apps/bindings, packs, sessions, audit,
+// CRUD, policy lifecycle, drafts, apps/bindings, sessions, audit,
 // transcripts, api-tokens, connect, spec conformance, status.
 package main
 
@@ -111,7 +111,7 @@ func newRootCmd(loginPath string) *cobra.Command {
 	root.AddCommand(
 		status, versionCmd(), retiredLogin("login", loginPath), retiredLogin("logout", loginPath),
 		usersCmd(client), rolesCmd(client), assignCmd(client), unassignCmd(client),
-		packsCmd(client), sessionsCmd(client), signingKeysCmd(client), devicesCmd(client), policyCmd(client),
+		sessionsCmd(client), signingKeysCmd(client), devicesCmd(client), policyCmd(client),
 		auditCmd(client), appsCmd(client), bindingsCmd(client), specCmd(),
 		apiTokenCmd(client), attestationCmd(client), connectCmd(client), disconnectCmd(client),
 		transcriptsCmd(client), approvalsCmd(client), approversCmd(client), catalogCmd(client),

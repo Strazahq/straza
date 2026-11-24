@@ -29,7 +29,7 @@ overview:
 
 # Users > alice
 alice-assign:
-  alt: "alice's sheet in the console, with the role dev assigned and the Assign picker"
+  alt: "alice's page in the console, tab Access, with the role dev under Roles and the button Assign a role"
   dark: shots/alice-assign-dark.png
   light: shots/alice-assign-light.png
   full_dark: shots/full/alice-assign-dark.png
@@ -39,9 +39,9 @@ alice-assign:
   height: 580
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# the screen at /console/users
+# Devices and keys
 user-devices:
-  alt: "alice's sheet with the Devices section and her enrolled laptop"
+  alt: "alice's page, tab Devices and keys, with her enrolled laptop under Devices"
   dark: shots/user-devices-dark.png
   light: shots/user-devices-light.png
   full_dark: shots/full/alice-assign-dark.png
@@ -53,7 +53,7 @@ user-devices:
 
 # Policies > standalone-starter
 starter-rules:
-  alt: "The standalone-starter policy page, Rules tab, with the shell patterns it denies"
+  alt: "The standalone-starter policy page, Policy rules tab, with the shell patterns it denies"
   dark: shots/starter-rules-dark.png
   light: shots/starter-rules-light.png
   full_dark: shots/full/starter-rules-dark.png
@@ -77,7 +77,7 @@ test-filled:
 
 # Test
 test-answer:
-  alt: "Test a call answering Denied, decided by rule block-recursive-delete"
+  alt: "Test a call answering Denied, decided by policy rule block-recursive-delete"
   dark: shots/test-answer-dark.png
   light: shots/test-answer-light.png
   full_dark: shots/full/test-answer-dark.png
@@ -101,7 +101,7 @@ audit-list:
 
 # the row of alice's rm -rf
 audit-deny:
-  alt: "The audit record of alice's denied rm -rf, with the rule, the reason and what ran"
+  alt: "The audit record of alice's denied rm -rf, with the policy rule, the reason and what ran"
   dark: shots/audit-deny-dark.png
   light: shots/audit-deny-light.png
   full_dark: shots/full/audit-deny-dark.png
@@ -171,9 +171,9 @@ sessions-revoke-confirm:
   height: 282
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Users > mara
+# Users > mara > Stop access
 user-mara:
-  alt: "mara's sheet in the console, with Lock user and Disable user at the top"
+  alt: "mara's page in the console, with the Stop access menu open on Revoke all sessions, Lock and Disable"
   dark: shots/user-mara-dark.png
   light: shots/user-mara-light.png
   full_dark: shots/full/user-mara-dark.png
@@ -183,7 +183,7 @@ user-mara:
   height: 460
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Lock user > Reason, recorded on the audit chain: Laptop reported lost
+# Lock > Reason, recorded on the audit chain: Laptop reported lost
 user-lock:
   alt: "The Lock mara confirmation, with the reason that goes on the audit chain"
   dark: shots/user-lock-dark.png
@@ -197,7 +197,7 @@ user-lock:
 
 # the screen at /console/users
 user-unlock:
-  alt: "mara's sheet after the lock, with the reason and the button Unlock user"
+  alt: "mara's page after the lock, with the lock's strip, its reason and the button Unlock"
   dark: shots/user-unlock-dark.png
   light: shots/user-unlock-light.png
   full_dark: shots/full/user-unlock-dark.png
@@ -207,7 +207,7 @@ user-unlock:
   height: 460
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Disable user
+# Stop access > Disable
 user-disable:
   alt: "The Disable mara confirmation, which says what a disable stops"
   dark: shots/user-disable-dark.png
@@ -221,7 +221,7 @@ user-disable:
 
 # the screen at /console/users
 user-enable:
-  alt: "mara's sheet with the status disabled and the button Enable user"
+  alt: "mara's page with the status disabled and the strip that offers Enable"
   dark: shots/user-enable-dark.png
   light: shots/user-enable-light.png
   full_dark: shots/full/user-enable-dark.png
@@ -231,7 +231,7 @@ user-enable:
   height: 460
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Revoke
+# Devices and keys > Revoke
 device-revoke:
   alt: "The confirmation that revokes mara's laptop as a device"
   dark: shots/device-revoke-dark.png
@@ -243,9 +243,9 @@ device-revoke:
   height: 242
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Open the audit trail
+# Access > Audit trail of mara
 user-audit-trail:
-  alt: "The Audit page filtered to mara, opened from her sheet"
+  alt: "The Audit page filtered to mara, opened from her page"
   dark: shots/user-audit-trail-dark.png
   light: shots/user-audit-trail-light.png
   full_dark: shots/full/user-audit-trail-dark.png
@@ -255,9 +255,9 @@ user-audit-trail:
   height: 520
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Users > build-bot > Register key > #user-key: undefined
+# Users > build-bot > Devices and keys > Register key > #user-key: undefined
 agent-key-register:
-  alt: "The sheet of the AI agent build-bot with the Assertion key form open and its public key pasted"
+  alt: "The Devices and keys tab of the AI agent build-bot, with the Assertion key form open and its public key pasted"
   dark: shots/agent-key-register-dark.png
   light: shots/agent-key-register-light.png
   full_dark: shots/full/agent-key-register-dark.png
@@ -269,7 +269,7 @@ agent-key-register:
 
 # the screen at /console/users
 user-agent-key:
-  alt: "build-bot's sheet with its assertion key registered, its fingerprint and Rotate key"
+  alt: "build-bot's tab Devices and keys with its assertion key registered, its fingerprint and Rotate key"
   dark: shots/user-agent-key-dark.png
   light: shots/user-agent-key-light.png
   full_dark: shots/full/user-agent-key-dark.png
@@ -291,7 +291,7 @@ role-new-approver:
   height: 600
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Next
+# Next: Review
 role-new-approver-review:
   alt: "The Review step of New role for release-approvers, with Save draft and Save and publish"
   dark: shots/role-new-approver-review-dark.png
@@ -327,7 +327,7 @@ policy-new-outcome:
   height: 360
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Next > A role > local-tools
+# Next: Applies to > A role > local-tools
 policy-new-who:
   alt: "New policy, step Who, with the role local-tools picked"
   dark: shots/policy-new-who-dark.png
@@ -339,7 +339,7 @@ policy-new-who:
   height: 360
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Next > Shell command > Command patterns: kubectl apply * > Add
+# Next: Which calls > Shell command > Command patterns: kubectl apply * > Add
 policy-new-calls:
   alt: "New policy, step Which calls, with Shell command and the pattern kubectl apply *"
   dark: shots/policy-new-calls-dark.png
@@ -351,7 +351,7 @@ policy-new-calls:
   height: 360
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Next > An approver role > An approver role: release-approvers > input[aria-label='A hold, up to']: 5 > #policy-reason: Straza: kubectl apply needs approval before it runs
+# Next: Who decides > An approver role > An approver role: release-approvers > input[aria-label='A hold, up to']: 5 > #policy-reason: Straza: kubectl apply needs approval before it runs
 policy-new-how:
   alt: "New policy, step How, with release-approvers deciding and a hold of up to 5 minutes"
   dark: shots/policy-new-how-dark.png
@@ -363,9 +363,9 @@ policy-new-how:
   height: 420
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Next > #policy-name: kubectl-apply-hold
+# Next: Review > #policy-name: kubectl-apply-hold
 policy-new-review:
-  alt: "New policy, step Review, with the name kubectl-apply-hold and the policy as it will be stored"
+  alt: "New policy, step Review for kubectl-apply-hold, with the facts in words and Save and publish"
   dark: shots/policy-new-review-dark.png
   light: shots/policy-new-review-light.png
   full_dark: shots/full/policy-new-review-dark.png
@@ -447,9 +447,9 @@ approvals-decided:
   height: 460
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Audit > Lens: approvals
+# Audit > Kind of record: Approvals
 audit-approvals:
-  alt: "The Audit page under the lens approvals, with the request and decision records"
+  alt: "The Audit page with Kind of record set to Approvals, with the request and decision records"
   dark: shots/audit-approvals-dark.png
   light: shots/audit-approvals-light.png
   full_dark: shots/full/audit-approvals-dark.png
@@ -459,7 +459,7 @@ audit-approvals:
   height: 520
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Policies > New policy > Needs approval > Next > A role > local-tools > Next > Shell command > Command patterns: terraform apply* > Add > Next > An approver role > An approver role: release-approvers > A ticket a person grants within > #policy-reason: Straza: terraform apply needs an approval ticket
+# Policies > New policy > Needs approval > Next: Applies to > A role > local-tools > Next: Which calls > Shell command > Command patterns: terraform apply* > Add > Next: Who decides > An approver role > An approver role: release-approvers > A ticket a person grants within > #policy-reason: Straza: terraform apply needs an approval ticket
 policy-new-ticket:
   alt: "New policy, step How, with A ticket a person grants within 1 day picked"
   dark: shots/policy-new-ticket-dark.png
@@ -627,7 +627,7 @@ server-add-server:
   height: 420
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Next > Each caller's own token
+# Next: Credential > Each caller's own token
 server-add-token:
   alt: "Add MCP server, step Credential, with Each caller's own token and what an agent with no token of its own runs on"
   dark: shots/server-add-token-dark.png
@@ -651,9 +651,9 @@ server-add-credential:
   height: 560
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Next
+# Next: Review
 server-add-review:
-  alt: "Add MCP server, step Review, with the manifest it writes and Save and publish"
+  alt: "Add MCP server, step Review, with what will happen and Save and publish"
   dark: shots/server-add-review-dark.png
   light: shots/server-add-review-light.png
   full_dark: shots/full/server-add-review-dark.png
@@ -677,7 +677,7 @@ draft-publish-typed:
 
 # the screen at /console/servers/new
 server-add-check:
-  alt: "Add MCP server, step Check, with the connection result and Create a role for scout-tools"
+  alt: "Add MCP server at its end, with scout-tools live and the What next tile Give access to it"
   dark: shots/server-add-check-dark.png
   light: shots/server-add-check-light.png
   full_dark: shots/full/server-add-check-dark.png
@@ -740,47 +740,19 @@ role-new-1:
   alt: "New role, step 1: Application role, the server scout-tools and the name readers"
   dark: shots/role-new-1-dark.png
   light: shots/role-new-1-light.png
-  full_dark: shots/full/role-new-1-dark.png
-  full_light: shots/full/role-new-1-light.png
   ring: {left: 48.23, top: 46.61, width: 23.85, height: 8.21}
   width: 960
   height: 560
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Next > echo > get-sum
+# Next: Access > echo > get-sum
 role-new-2:
   alt: "New role, step Access: Only the tools you tick, with echo and get-sum ticked"
   dark: shots/role-new-2-dark.png
   light: shots/role-new-2-light.png
-  full_dark: shots/full/role-new-2-dark.png
-  full_light: shots/full/role-new-2-light.png
   ring: {left: 1.04, top: 17.68, width: 98.96, height: 5.0}
   width: 960
   height: 560
-  build: strazad v1.0.0-1753-ga27c516c, standalone
-
-# Next > Next
-role-new-3:
-  alt: "New role, step Review, with what holders reach and the same role as strazactl commands"
-  dark: shots/role-new-3-dark.png
-  light: shots/role-new-3-light.png
-  full_dark: shots/full/role-new-3-dark.png
-  full_light: shots/full/role-new-3-light.png
-  ring: {left: 1.15, top: 85.71, width: 98.85, height: 7.14}
-  width: 960
-  height: 560
-  build: strazad v1.0.0-1753-ga27c516c, standalone
-
-# Roles > scout-tools-readers
-role-access:
-  alt: "The scout-tools-readers role page, Access tab, with the server, the tools and the policy column"
-  dark: shots/role-access-dark.png
-  light: shots/role-access-light.png
-  full_dark: shots/full/role-access-dark.png
-  full_light: shots/full/role-access-light.png
-  ring: {left: 1.15, top: 51.73, width: 98.85, height: 9.42}
-  width: 960
-  height: 520
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Edit access > Choose per tool > get-sum: require approval
@@ -819,9 +791,9 @@ server-secret-role:
   height: 417
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Users > dana > [data-grant-pick]: scout-tools-readers > Assign role
+# Users > dana > Assign a role > scout-tools-readers
 user-assign-confirm:
-  alt: "The confirmation that assigns scout-tools-readers to dana, from her sheet"
+  alt: "The Assign a role dialog on dana's page, with scout-tools-readers picked and what she reaches from her next check-in"
   dark: shots/user-assign-confirm-dark.png
   light: shots/user-assign-confirm-light.png
   full_dark: shots/full/user-assign-confirm-dark.png
@@ -829,18 +801,6 @@ user-assign-confirm:
   ring: {left: 4.49, top: 12.61, width: 91.03, height: 74.77}
   width: 624
   height: 222
-  build: strazad v1.0.0-1753-ga27c516c, standalone
-
-# Roles > dev > Knowledge packs > Pick a pack: team-conventions
-role-packs:
-  alt: "The dev role page, tab Knowledge packs, with team-conventions picked and the button Bind pack"
-  dark: shots/role-packs-dark.png
-  light: shots/role-packs-light.png
-  full_dark: shots/full/role-packs-dark.png
-  full_light: shots/full/role-packs-light.png
-  ring: {left: 36.58, top: 62.39, width: 13.16, height: 8.7}
-  width: 760
-  height: 460
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
 # Drafts
@@ -857,7 +817,7 @@ drafts-waiting:
 
 # the draft
 draft-review:
-  alt: "The draft's page with its title, the Before you publish band with Publish…, In this draft and What changes"
+  alt: "The draft's page with its title, the band with Publish…, In short and What changes"
   dark: shots/draft-review-dark.png
   light: shots/draft-review-light.png
   full_dark: shots/full/draft-review-dark.png
@@ -1035,9 +995,9 @@ transcript-search:
   height: 520
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Audit > Lens: recording
+# Audit > Kind of record: Recording
 audit-recording:
-  alt: "The Audit page under the lens recording, with the prompt record that keeps size and hash only"
+  alt: "The Audit page with Kind of record set to Recording, with the prompt record that keeps size and hash only"
   dark: shots/audit-recording-dark.png
   light: shots/audit-recording-light.png
   full_dark: shots/full/audit-recording-dark.png
@@ -1071,9 +1031,9 @@ overview-system:
   height: 560
   build: strazad v1.0.0-1753-ga27c516c, standalone
 
-# Audit > Lens: sentinel
+# Audit > Kind of record: Sentinel alerts
 audit-sentinel:
-  alt: "The Audit page under the lens sentinel, with a critical verdict on a burst of denies and its Revoke session control"
+  alt: "The Audit page with Kind of record set to Sentinel alerts, with a critical alert on a burst of denies and its Revoke session control"
   dark: shots/audit-sentinel-dark.png
   light: shots/audit-sentinel-light.png
   full_dark: shots/full/audit-sentinel-dark.png
@@ -1229,7 +1189,7 @@ demo-servers:
 
 # Policies
 demo-policies:
-  alt: "The demo stack's Policies page with the live policy sets"
+  alt: "The demo stack's Policies page with the live policies"
   dark: shots/demo-policies-dark.png
   light: shots/demo-policies-light.png
   full_dark: shots/full/demo-policies-dark.png

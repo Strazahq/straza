@@ -2,7 +2,7 @@
 title: strazactl roles
 description: Manage roles
 pagetype: reference
-weight: 74
+weight: 68
 draft: false
 sources:
   - cmd/strazactl

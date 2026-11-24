@@ -5,7 +5,7 @@ import { PolicyFacts } from "./policy-facts";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { RoleRow } from "@/lib/api";
 import { type Doc, docText, openDoc, readSet } from "@/lib/policy-model";
-import { APPLY_TO_PAGE, EVERYONE, EVERYONE_MEANS, FACT, NOTHING_TICKED, PRIORITY_LINE, RECORDING_CHOICE, TOUCHED } from "@/lib/policy-words";
+import { APPLY_TO_PAGE, EVERYONE, FACT, NOTHING_TICKED, RECORDING_CHOICE, TOUCHED } from "@/lib/policy-words";
 
 const text = `apiVersion: straza.dev/v1beta1
 kind: PolicySet
@@ -48,12 +48,11 @@ const openSheet = async (key: string) => {
 };
 
 describe("the three facts of a policy", () => {
-  it("shows who it applies to, whether it records, and its priority with the rule that reads it", () => {
+  it("shows who it applies to, whether it records, and its priority", () => {
     mount();
     expect(fact("applies").textContent).toContain("dev-tools");
     expect(fact("recording").textContent).toContain("word for word");
     expect(fact("priority").textContent).toContain("150");
-    expect(fact("priority").textContent).toContain(PRIORITY_LINE);
   });
 
   it("leads with Everyone, then every application role with its holders", async () => {
@@ -72,7 +71,7 @@ describe("the three facts of a policy", () => {
     const sheet = await openSheet("applies");
     await userEvent.click(within(sheet).getByRole("checkbox", { name: EVERYONE }));
     expect((within(sheet).getByRole("checkbox", { name: "dev-tools" }) as HTMLInputElement).checked).toBe(false);
-    expect(state(sheet)).toContain(EVERYONE_MEANS);
+    expect(state(sheet)).toBe(EVERYONE);
     await userEvent.click(within(sheet).getByRole("button", { name: APPLY_TO_PAGE }));
     await waitFor(() => expect(edits.length).toBe(1));
     expect(edits[0].touched).toBe(TOUCHED.applies);

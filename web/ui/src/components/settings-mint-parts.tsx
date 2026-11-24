@@ -54,7 +54,7 @@ export function JobCards({ picked, onPick }: { picked: string; onPick: (key: str
                 />
                 <span className={cn("font-semibold", j.full ? "text-warn" : "text-foreground")}>{j.title}</span>
               </span>
-              <span className="text-[13px] leading-normal text-text-2">{j.blurb}</span>
+              <span className="text-caption leading-normal text-text-2">{j.blurb}</span>
             </RadioGroupPrimitive.Item>
           </div>
         );
@@ -74,8 +74,8 @@ export function GrantPills({ grants, why, onRemove }: { grants: string[]; why: R
           data-pill={g}
           className={cn("inline-flex items-center gap-2 rounded-md border px-2.5 py-1", SENSITIVE[g] ? "border-warn/40 bg-warn-bg" : "border-border bg-card")}
         >
-          <b className={cn("font-mono text-[13px] font-semibold", SENSITIVE[g] ? "text-warn" : "text-foreground")}>{g}</b>
-          <span className="text-[13px] text-muted-foreground">{why[g] || areaHint(g.split(":")[0])}</span>
+          <b className={cn("font-mono text-caption font-semibold", SENSITIVE[g] ? "text-warn" : "text-foreground")}>{g}</b>
+          <span className="text-caption text-muted-foreground">{why[g] || areaHint(g.split(":")[0])}</span>
           <Button variant="ghost" size="icon-xs" aria-label={removeGrant(g)} onClick={() => onRemove(g)}><XIcon /></Button>
         </span>
       ))}
@@ -103,7 +103,7 @@ function Levels({ area, level, onPick }: { area: string; level: string; onPick: 
           key={key}
           value={key}
           className={cn(
-            "cursor-pointer border-r border-border px-2.5 py-1.5 text-[13px] outline-none last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring/50",
+            "cursor-pointer border-r border-border px-2.5 py-1.5 text-caption outline-none last:border-r-0 focus-visible:ring-2 focus-visible:ring-ring/50",
             level === key ? "bg-accent-bg font-semibold text-foreground" : "text-text-2",
           )}
         >
@@ -140,13 +140,13 @@ export function AreaTable({ grants, onChange }: { grants: string[]; onChange: (n
             return (
               <TableRow key={area} data-area={area}>
                 <TableCell className="align-top whitespace-normal">
-                  <b className={cn("block font-mono text-[13px] font-semibold", area === "tokens" ? "text-warn" : "text-foreground")}>{area}</b>
-                  <span className="block text-[13px] leading-snug text-text-2">{hint}</span>
+                  <b className={cn("block font-mono text-caption font-semibold", area === "tokens" ? "text-warn" : "text-foreground")}>{area}</b>
+                  <span className="block text-caption leading-snug text-text-2">{hint}</span>
                 </TableCell>
                 <TableCell className="align-top whitespace-normal">
                   <Levels area={area} level={level} onPick={(next) => onChange(grantsAtLevel(grants, area, next))} />
                   {level !== "none" && (
-                    <span className="mt-1 block text-[13px] leading-snug text-muted-foreground" data-level-hint={area}>{levelHint(area, level)}</span>
+                    <span className="mt-1 block text-caption leading-snug text-muted-foreground" data-level-hint={area}>{levelHint(area, level)}</span>
                   )}
                 </TableCell>
               </TableRow>

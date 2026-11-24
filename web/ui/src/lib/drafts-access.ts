@@ -5,7 +5,7 @@
 // from the coverage entry's own type and plural. No React and no sentence
 // here: drafts-words.ts words what this file answers.
 import type { DraftCoverage, DraftDetail, DraftFinding, DraftGain, DraftObjectName, DraftVerdict } from "./api";
-import { AGENT_LOOSEN_CODE, gainGroups, gainMark, roleOf } from "./drafts-model";
+import { agentAccepts, gainGroups, gainMark, roleOf } from "./drafts-model";
 import { type Nouns, nounsOf } from "./object-words";
 
 // GUARDRAIL_CHANGED_CODE is the risk of a gate that stops applying, the line
@@ -120,15 +120,17 @@ export function accessGroups(gains: DraftGain[], objects: DraftCoverage[] | unde
   });
 }
 
-// Loosening is one set an agent's draft loosens while the set binds that
-// agent: the agent.guardrail line, and the lines of the same set that say
-// which gates stop applying.
+// Loosening is one change an agent's draft makes to that agent's own
+// access: the agent.guardrail line of a set that binds it, with the lines
+// of the same set that say which gates stop applying, or the
+// agent.own-reach line of a server it comes to reach further.
 export type Loosening = { line: DraftFinding; loses: DraftFinding[] };
 
-// loosenings answers the agent's self-loosenings among the risks, in the
-// verdict's order. A refusal of the same code is not one: it stays refused.
-// A line cut for this reader names no object, so it matches no other line.
+// loosenings answers the agent's changes of its own access among the
+// risks, in the verdict's order. A refusal of the same code is not one: it
+// stays refused. A line cut for this reader names no object, so it matches
+// no other line.
 export function loosenings(v: DraftVerdict): Loosening[] {
   const risks = v.risks || [];
-  return risks.filter((f) => f.code === AGENT_LOOSEN_CODE).map((line) => ({ line, loses: line.object ? risks.filter((f) => f.code === GUARDRAIL_CHANGED_CODE && f.object === line.object) : [] }));
+  return risks.filter(agentAccepts).map((line) => ({ line, loses: line.object ? risks.filter((f) => f.code === GUARDRAIL_CHANGED_CODE && f.object === line.object) : [] }));
 }

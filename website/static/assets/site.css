@@ -318,6 +318,18 @@ html:not(.js) .m-cli, html:not(.js) .m-console { display: block; }
 .chip.unknown { color: var(--unknown); background: var(--unknown-bg); border-color: color-mix(in srgb, var(--unknown) 35%, transparent); }
 .chip.plain { color: var(--text-2); background: var(--surface-2); border-color: var(--border); }
 .chip.plain::before { display: none; }
+.chip.nodate { color: var(--muted); background: transparent; border-color: var(--border-strong); border-style: dashed; }
+.chip.nodate::before { display: none; }
+a.chip { text-decoration: none; }
+a.chip:hover { border-color: currentColor; }
+ 
+.prose > .kl-meta { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.kl-who { display: inline-flex; align-items: center; gap: 6px; padding: 2px 11px 2px 9px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: var(--fs-small); line-height: 1.5; }
+.kl-who-i { flex: none; }
+.prose > .kl-do { margin-top: 12px; }
+.kl-do { border-left: 3px solid var(--border-strong); padding: 2px 0 2px 16px; max-width: var(--measure); }
+.kl-do > * + * { margin-top: 2px; }
+.kl-do-l { font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
 .clickpath { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: var(--fs-ui); }
 .clickpath li { margin: 0; display: inline-flex; align-items: center; gap: 6px; }
 .clickpath li + li::before { content: "\203A"; content: "\203A" / ""; color: var(--muted); }
@@ -578,8 +590,6 @@ details.walk > .in { padding: 10px 0 0 22px; font-size: var(--fs-small); color: 
 .hero-model .gridln { fill: none; stroke: var(--accent); stroke-opacity: .09; stroke-width: 1; }
 .hero-model .zl { fill: var(--zc); font-family: var(--font); font-size: 11.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .hero-model .brandl { fill: var(--text); letter-spacing: .16em; font-size: 12.5px; }
-.hero-model .mk-s { fill: var(--gold); }
-.hero-model .mk-x { fill: var(--bg); }
 .hero-model .card { fill: var(--bg); stroke: color-mix(in srgb, var(--zc) 45%, var(--border)); stroke-width: 1.25; }
 .hero-model .hit { fill: transparent; stroke: none; }
 .hero-model .key { --zc: var(--gold); }

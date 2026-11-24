@@ -171,10 +171,11 @@ func NewClientAssertionKeys(ctx context.Context, repo store.SigningKeyRepo, seal
 	return s, nil
 }
 
-// sealHeader is the first line of the sealed plaintext. It binds the key to
-// its row, so a sealed key copied into another row does not load.
-func sealHeader(kid string) []byte {
-	return []byte(store.KeyPurposeClientAssertion + " " + kid + "\n")
+// sealHeader is the first line of the sealed plaintext of a signing key. It
+// binds the key to its purpose and its row, so a sealed key copied into
+// another row does not load.
+func sealHeader(purpose, kid string) []byte {
+	return []byte(purpose + " " + kid + "\n")
 }
 
 // open returns the private key of rec after every check a load makes: the
@@ -189,7 +190,7 @@ func (s *ClientAssertionKeys) open(rec store.SigningKey) (*rsa.PrivateKey, error
 		return nil, fmt.Errorf("authn: client assertion key %s does not open: it was sealed under another KEK or changed in the database. "+
 			"Every replica must mount the same secrets.kekFile: %w", rec.KID, err)
 	}
-	der, ok := bytes.CutPrefix(plain, sealHeader(rec.KID))
+	der, ok := bytes.CutPrefix(plain, sealHeader(store.KeyPurposeClientAssertion, rec.KID))
 	if !ok {
 		return nil, fmt.Errorf("authn: the sealed key in row %s belongs to another key, refused", rec.KID)
 	}
@@ -372,7 +373,7 @@ func (s *ClientAssertionKeys) Stage(ctx context.Context, now time.Time) (StagedK
 		return StagedKey{}, fmt.Errorf("authn: encode client assertion public key: %w", err)
 	}
 	kid := uuid.NewString()
-	sealed, err := s.sealer.Seal(append(sealHeader(kid), der...))
+	sealed, err := s.sealer.Seal(append(sealHeader(store.KeyPurposeClientAssertion, kid), der...))
 	if err != nil {
 		return StagedKey{}, fmt.Errorf("authn: seal client assertion key: %w", err)
 	}

@@ -1,13 +1,15 @@
 import * as React from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { KeyRoundIcon, Loader2Icon } from "lucide-react";
+import { KeyRoundIcon, Loader2Icon, PlusIcon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Chip } from "@/components/chip";
 import { DataTable, plain } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
+import { KindTile } from "@/components/kind-icon";
 import { MintSheet } from "@/components/settings-mint-sheet";
 import { GrantChips, TokenSheet } from "@/components/settings-token-sheet";
 import { type ApiError, type ApiTokenRow, listApiTokens, revokeApiToken } from "@/lib/api";
@@ -15,11 +17,11 @@ import { notify } from "@/lib/notify";
 import { CANCEL } from "@/lib/role-words";
 import { readFailed, refused } from "@/lib/say";
 import {
-  EXPIRED,
   GRANTS_HELP,
   LAST_USED_HELP,
   NEVER,
   NEVER_TIP,
+  NEW_TOKEN,
   READING_TOKENS,
   REVOKE,
   REVOKE_HELP,
@@ -29,24 +31,24 @@ import {
   TOKENS_EMPTY_TITLE,
   TOKENS_LEDE,
   TOKEN_COLUMN,
-  agoWord,
   byWord,
-  expiresWord,
+  expiryOf,
   revokeName,
   revokeTitle,
   revokeBody,
   revokedToast,
-  tokensCount,
+  usedWord,
 } from "@/lib/settings-words";
-import { absTime } from "@/lib/words";
+import { absTime, dayWord } from "@/lib/words";
 
 // The API tokens tab of Settings: the
 // credentials automation signs in with, one row each with the grants in
-// words, the token's own sheet behind a row, the mint sheet the page head
-// opens, and Revoke at the row end.
+// words, the token's own sheet behind a row, the mint sheet the tab's own
+// button opens, and Revoke at the row end.
 
-const DANGER_BUTTON = "border-danger text-danger hover:bg-danger-bg hover:text-danger";
-const WIDTHS: Record<string, string> = { name: "190px", created: "110px", expires: "110px", used: "110px", revoke: "96px" };
+const WIDTHS: Record<string, string> = { name: "240px", created: "110px", expires: "180px", used: "110px", revoke: "96px" };
+// MIN_WIDTH is the fixed columns and 220 px for the scopes.
+const MIN_WIDTH = "956px";
 const LABELS: Record<string, string> = {
   name: TOKEN_COLUMN.name,
   grants: TOKEN_COLUMN.grants,
@@ -60,13 +62,7 @@ type State =
   | { kind: "error"; message: string }
   | { kind: "ready"; rows: ApiTokenRow[]; lastRead: Date; problem: string | null };
 
-type Props = {
-  // mintRequest is the page head's counter: the New API token button moves
-  // it, and the tab opens the mint sheet when it moves.
-  mintRequest: number;
-};
-
-export function TokensTab({ mintRequest }: Props) {
+export function TokensTab() {
   const [state, setState] = React.useState<State>({ kind: "loading" });
   const [open, setOpen] = React.useState<ApiTokenRow | null>(null);
   const [ask, setAsk] = React.useState<ApiTokenRow | null>(null);
@@ -87,15 +83,6 @@ export function TokensTab({ mintRequest }: Props) {
   }, []);
 
   React.useEffect(() => { load(); }, [load]);
-
-  // The head owns the action and the tab owns the sheet, so the counter
-  // moving is the request; its first value opens nothing.
-  const seen = React.useRef(mintRequest);
-  React.useEffect(() => {
-    if (seen.current === mintRequest) return;
-    seen.current = mintRequest;
-    setMinting(true);
-  }, [mintRequest]);
 
   const revoke = async (row: ApiTokenRow) => {
     setBusy(true);
@@ -118,9 +105,13 @@ export function TokensTab({ mintRequest }: Props) {
       id: "name",
       header: plain<ApiTokenRow>(TOKEN_COLUMN.name),
       cell: ({ row }) => (
-        <span className="flex flex-wrap items-baseline gap-1.5">
-          <b className="font-semibold text-foreground">{row.original.name}</b>
-          {row.original.created_by && <span className="text-[13px] text-muted-foreground">{byWord(row.original.created_by)}</span>}
+        <span className="flex min-w-0 items-center gap-2">
+          <KindTile kind="api-token" />
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+            <span className="font-mono break-all text-foreground">{row.original.name}</span>
+            {/* A long minter name is cut inside the cell, with the whole of it on hover. */}
+            {row.original.created_by && <span className="max-w-full truncate text-caption text-muted-foreground" title={byWord(row.original.created_by)}>{byWord(row.original.created_by)}</span>}
+          </span>
         </span>
       ),
     },
@@ -132,7 +123,7 @@ export function TokensTab({ mintRequest }: Props) {
     {
       id: "created",
       header: plain<ApiTokenRow>(TOKEN_COLUMN.created),
-      cell: ({ row }) => <Stamp iso={row.original.created} text={agoWord(row.original.created)} />,
+      cell: ({ row }) => <Stamp iso={row.original.created} text={dayWord(row.original.created)} />,
     },
     {
       id: "expires",
@@ -143,7 +134,7 @@ export function TokensTab({ mintRequest }: Props) {
       id: "used",
       header: plain<ApiTokenRow>(TOKEN_COLUMN.used, LAST_USED_HELP),
       cell: ({ row }) => (row.original.lastUsed
-        ? <Stamp iso={row.original.lastUsed} text={agoWord(row.original.lastUsed)} />
+        ? <Stamp iso={row.original.lastUsed} text={usedWord(row.original.lastUsed)} />
         : <span className="text-muted-foreground" data-last-used={NEVER}>{NEVER}</span>),
     },
     {
@@ -153,9 +144,8 @@ export function TokensTab({ mintRequest }: Props) {
       cell: ({ row }) => (
         <span className="flex justify-end">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className={DANGER_BUTTON}
             aria-label={revokeName(row.original.name)}
             onClick={(e) => { e.stopPropagation(); setRefusal(null); setAsk(row.original); }}
           >
@@ -166,17 +156,23 @@ export function TokensTab({ mintRequest }: Props) {
     },
   ], []);
 
-  if (state.kind === "loading") return <p className="text-sm text-muted-foreground">{READING_TOKENS}</p>;
-  if (state.kind === "error") return <FetchError subject={SUBJECT_TOKENS} detail={state.message} />;
-
-  const rows = state.rows;
+  // The first line and its button show in every state, so a token can be
+  // minted while the list is still read or could not be read.
+  const rows = state.kind === "ready" ? state.rows : [];
 
   return (
     <div className="flex flex-col gap-4">
-      {state.problem && <FetchError subject={SUBJECT_TOKENS} detail={state.problem} lastRead={state.lastRead} />}
-      <p className="max-w-[75ch] text-sm text-text-2" data-tokens-lede>{TOKENS_LEDE}</p>
+      {state.kind === "ready" && state.problem && <FetchError subject={SUBJECT_TOKENS} detail={state.problem} lastRead={state.lastRead} />}
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="max-w-[75ch] flex-1 basis-[280px] text-dense text-text-2" data-tokens-lede>{TOKENS_LEDE}</p>
+        <Button className="ml-auto" onClick={() => setMinting(true)}><PlusIcon /> {NEW_TOKEN}</Button>
+      </div>
 
-      {rows.length === 0 ? (
+      {state.kind === "loading" ? (
+        <p className="text-dense text-muted-foreground">{READING_TOKENS}</p>
+      ) : state.kind === "error" ? (
+        <FetchError subject={SUBJECT_TOKENS} detail={state.message} />
+      ) : rows.length === 0 ? (
         <EmptyState icon={KeyRoundIcon} title={TOKENS_EMPTY_TITLE}>{TOKENS_EMPTY_BODY}</EmptyState>
       ) : (
         <DataTable
@@ -188,9 +184,9 @@ export function TokensTab({ mintRequest }: Props) {
           dataAttr="data-token"
           onOpen={(t) => setOpen(t)}
           openKey={open ? open.id : null}
-          count={(shown) => tokensCount(shown)}
           emptyText={TOKENS_EMPTY_BODY}
           widths={WIDTHS}
+          minWidth={MIN_WIDTH}
         />
       )}
 
@@ -215,7 +211,7 @@ export function TokensTab({ mintRequest }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>{revokeTitle(ask ? ask.name : "")}</AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <span className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+              <span className="flex flex-wrap items-center gap-1 text-dense text-muted-foreground">
                 {ask ? revokeBody(ask) : ""}
                 <HelpTip label={REVOKE_VERB} text={REVOKE_HELP} />
               </span>
@@ -225,7 +221,7 @@ export function TokensTab({ mintRequest }: Props) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{CANCEL}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-danger text-white hover:bg-danger/90"
+              className={DANGER_FILL}
               aria-busy={busy || undefined}
               onClick={(e) => { e.preventDefault(); if (ask && !busy) void revoke(ask); }}
             >
@@ -251,16 +247,18 @@ function Stamp({ iso, text }: { iso: string | undefined; text: string }) {
   );
 }
 
-// Expires reads an expiry in the future tense. No expiry is the amber
-// word, since a credential that lives until revoked is a posture choice,
-// and a stamp already past is the danger word.
+// Expires reads an expiry in calendar days: plain text while it is far, a
+// warn chip when it is near and a danger chip once it has passed. A token
+// with no expiry reads never, with its tip on hover.
 function Expires({ iso }: { iso: string | undefined }) {
-  if (!iso) return <span className="text-warn" title={NEVER_TIP} data-expires={NEVER}>{NEVER}</span>;
-  const word = expiresWord(iso);
+  if (!iso) return <span className="text-foreground" title={NEVER_TIP} data-expires={NEVER}>{NEVER}</span>;
+  const { word, tone } = expiryOf(iso);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={"cursor-default tabular-nums " + (word === EXPIRED ? "text-danger" : "text-text-2")} data-expires={word}>{word}</span>
+        <span className="cursor-default tabular-nums text-text-2" data-expires={word}>
+          {tone === "plain" ? word : <Chip tone={tone}>{word}</Chip>}
+        </span>
       </TooltipTrigger>
       <TooltipContent>{absTime(iso)}</TooltipContent>
     </Tooltip>

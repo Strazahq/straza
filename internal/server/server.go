@@ -119,6 +119,7 @@ type App struct {
 	manager    *manager.Manager
 	runtimes   []string // the app runtimes this host can run, for /version
 	watcher    *manager.Watcher
+	kek        *secrets.Builtin // seals the signing keys and every stored credential
 	broker     *secrets.Broker
 	objects    *objects.Lists
 	gateway    *gateway
@@ -139,6 +140,9 @@ type App struct {
 	appliedGen atomic.Int64
 	lifetime   context.Context
 	policyMark store.PolicyMark
+	// recorders counts the running workers that goRecorder started, which
+	// a stop waits for.
+	recorders sync.WaitGroup
 	// draftsWake wakes the drafts checker at once after a submit on this
 	// replica stored a draft (drafts_checker.go). It holds one wake, and a
 	// send never blocks.
@@ -229,7 +233,7 @@ func (a *App) routeTable() []route {
 	admin := a.requireAdmin
 	// A server's own verbs open to the holder of its admin role as well.
 	serverAdmin := a.requireServerAdmin
-	return []route{
+	return append([]route{
 		{"GET", "/healthz", handleHealthz},
 		{"GET", "/readyz", handleReadyz(map[string]Pinger{"store": a.store, "bus": a.bus})},
 		{"GET", "/version", a.handleVersion},
@@ -290,17 +294,20 @@ func (a *App) routeTable() []route {
 		{"POST", "/v1/admin/roles/{id}/implications", admin(a.handleImplicationCreate)},
 		{"DELETE", "/v1/admin/roles/{id}/implications/{implicationId}", admin(a.handleImplicationDelete)},
 
+		{"GET", "/v1/admin/entra", admin(a.handleEntraStatus)},
+		{"POST", "/v1/admin/roles/{id}/entra-group/release", admin(a.handleEntraRelease)},
+		{"POST", "/v1/admin/roles/{id}/entra-group/recreate", admin(a.handleEntraRecreate)},
 		{"GET", "/v1/admin/assignments", admin(a.handleAssignmentsList)},
 		{"POST", "/v1/admin/assignments", admin(a.handleAssignmentsCreate)},
 		{"DELETE", "/v1/admin/assignments/{id}", admin(a.handleAssignmentsDelete)},
 
-		{"GET", "/v1/admin/packs", admin(a.handlePacksList)},
-		{"POST", "/v1/admin/packs", admin(a.handlePacksCreate)},
-		{"DELETE", "/v1/admin/packs/{id}", admin(a.handlePackDelete)},
-		{"POST", "/v1/admin/packs/{id}/bindings", admin(a.handlePackBind)},
-		{"DELETE", "/v1/admin/packs/{id}/bindings/{bindingId}", admin(a.handlePackUnbind)},
-
+		{"GET", "/v1/admin/packs", admin(a.handlePacksRetired)},
+		{"POST", "/v1/admin/packs", admin(a.handlePacksRetired)},
+		{"DELETE", "/v1/admin/packs/{id}", admin(a.handlePacksRetired)},
+		{"POST", "/v1/admin/packs/{id}/bindings", admin(a.handlePacksRetired)},
+		{"DELETE", "/v1/admin/packs/{id}/bindings/{bindingId}", admin(a.handlePacksRetired)},
 		{"GET", "/v1/admin/sessions", admin(a.handleSessionsList)},
+		{"GET", "/v1/admin/sessions/{id}", admin(a.handleSessionGet)},
 		{"POST", "/v1/admin/sessions/{id}/revoke", admin(a.handleSessionRevoke)},
 		{"POST", "/v1/admin/sessions/revoke", admin(a.handleSessionsBulkRevoke)},
 		{"POST", "/v1/admin/signing-keys/rotate", admin(a.handleSigningKeyRotate)},
@@ -404,7 +411,7 @@ func (a *App) routeTable() []route {
 		{"POST", "/v1/admin/api-tokens", admin(a.handleAPITokenCreate)},
 		{"GET", "/v1/admin/api-tokens", admin(a.handleAPITokenList)},
 		{"DELETE", "/v1/admin/api-tokens/{id}", admin(a.handleAPITokenRevoke)},
-	}
+	}, a.selfApprovalRoutes()...)
 }
 
 type route struct {
@@ -545,30 +552,6 @@ func (a *App) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "max-age=60")
 	_, _ = w.Write(doc)
-}
-
-func handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func handleReadyz(components map[string]Pinger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
-
-		out := wire.ReadyStatus{Status: "ok", Components: map[string]string{}}
-		code := http.StatusOK
-		for name, p := range components {
-			if err := p.Ping(ctx); err != nil {
-				out.Components[name] = err.Error()
-				out.Status = "degraded"
-				code = http.StatusServiceUnavailable
-			} else {
-				out.Components[name] = "ok"
-			}
-		}
-		writeJSON(w, code, out)
-	}
 }
 
 func (a *App) handleVersion(w http.ResponseWriter, _ *http.Request) {

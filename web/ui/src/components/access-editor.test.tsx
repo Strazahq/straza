@@ -10,8 +10,8 @@ import type { AppRow, BindingRow, RoleRow, ToolRow } from "@/lib/api";
 import type { Plain } from "@/lib/policy-model";
 import { HOW_HOLD, HOW_TICKET, HOW_TICKET_END, W1, WHO_TEAM } from "@/lib/policy-words";
 import {
-  DENY_NEEDS_LATER, EVERY_NOTE, LATER_LOCKED, NAMES_ONLY, NAME_FIRST, NO_ALLOW_UNDER_EVERY, OTHERS_UNREAD, SET_FOR_TOOL, USE_SERVER_SETTING, newToolsRunWords, policyReadOnly,
-  policyUnread, shapeProblemWords,
+  CHOICE_LABEL, DENY_NEEDS_LATER, EVERY_NOTE, LATER_LOCKED, NAMES_ONLY, NAME_FIRST, NO_ALLOW_UNDER_EVERY, OTHERS_UNREAD, SET_FOR_TOOL, USE_SERVER_SETTING, newToolsRunWords, policyReadOnly,
+  NOT_REACHED, SPONSOR_POOL, policyUnread, shapeProblemWords,
 } from "@/lib/role-words";
 
 const app: AppRow = { id: "app-9", name: "demo-tools", runtime: "http", status: "running", reached_by: [] };
@@ -86,10 +86,16 @@ const textOf = (selector: string) => (document.querySelector(selector) as HTMLEl
 // ahead says a comes before b in the document.
 const ahead = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
-// rules opens the fold under the editor and reads the rules it shows.
-async function rules(title: string): Promise<string> {
-  await userEvent.click(screen.getByRole("button", { name: title }));
-  return (document.querySelector("pre") as HTMLElement).textContent || "";
+// foldNote is the line of the closed fold under the editor, which names
+// the policy rules it holds.
+const foldNote = () => (document.querySelector("[data-yaml-fold] summary") as HTMLElement | null)?.textContent || "";
+
+// rules reads the fold under the editor: its line must name the rules as
+// note says, and the rules themselves stay in the page while it is closed.
+async function rules(note: string): Promise<string> {
+  expect(foldNote()).toBe("View as YAML" + note);
+  expect((document.querySelector("[data-yaml-fold]") as HTMLDetailsElement).open).toBe(false);
+  return (document.querySelector("[data-rules-yaml]") as HTMLElement).textContent || "";
 }
 
 describe("the access editor", () => {
@@ -97,7 +103,7 @@ describe("the access editor", () => {
     render(<Harness />);
     expect(screen.getByRole("columnheader", { name: "Tool" })).toBeTruthy();
     expect(within(row("get-sum")).getAllByRole("cell")[2].textContent).toBe("Adds two numbers");
-    expect(within(row("get-env")).getAllByRole("cell")[2].textContent).toBe("The server gave no description.");
+    expect(within(row("get-env")).getAllByRole("cell")[2].textContent).toBe("No description");
     expect(textOf("[data-shown]")).toBe("3 of 3 shown");
   });
 
@@ -113,7 +119,7 @@ describe("the access editor", () => {
   it("stores the ticked names, every name today, or the glob, one card each", async () => {
     render(<Harness />);
     expect(attr("[data-reach]", "data-reach")).toBe("tick");
-    expect(sentence()).toBe("Tick at least one tool: an access row with no tool gives dev-tools nothing on demo-tools.");
+    expect(sentence()).toBe("No tool is ticked.");
     await userEvent.click(within(row("get-sum")).getAllByRole("cell")[1]);
     expect(tick("get-sum").checked).toBe(true);
     expect(grantMatchers(latest, NAMES)).toEqual(["get-sum"]);
@@ -135,15 +141,15 @@ describe("the access editor", () => {
     expect(attr("[data-call]", "data-call")).toBe("allow");
     expect(document.querySelector("[data-approval]")).toBeNull();
 
-    await userEvent.click(choice("get-sum", "require approval"));
+    await userEvent.click(choice("get-sum", CHOICE_LABEL.approve));
     expect(attr("[data-call]", "data-call")).toBe("per");
-    expect(choice("get-sum", "require approval").getAttribute("aria-checked")).toBe("true");
+    expect(choice("get-sum", CHOICE_LABEL.approve).getAttribute("aria-checked")).toBe("true");
     expect(document.querySelector('[data-approval="demo-tools"]')).toBeTruthy();
 
     await userEvent.click(card("Require approval for every call"));
     expect(latest.call).toBe("every");
     expect(textOf("[data-every-note]")).toBe(EVERY_NOTE);
-    expect(NAMES.every((n) => choice(n, "require approval").getAttribute("aria-checked") === "true")).toBe(true);
+    expect(NAMES.every((n) => choice(n, CHOICE_LABEL.approve).getAttribute("aria-checked") === "true")).toBe(true);
 
     await userEvent.click(card("Allow every call"));
     expect(latest.call).toBe("allow");
@@ -153,49 +159,49 @@ describe("the access editor", () => {
 
   it("greys allow under every call with its reason, and keeps the tool held", async () => {
     render(<Harness seed={seeded({ call: "every" })} />);
-    const allow = choice("get-sum", "allow");
+    const allow = choice("get-sum", CHOICE_LABEL.allow);
     expect(allow.getAttribute("aria-disabled")).toBe("true");
     expect(allow.getAttribute("title")).toBe(NO_ALLOW_UNDER_EVERY);
     await userEvent.click(allow);
-    expect(choice("get-sum", "require approval").getAttribute("aria-checked")).toBe("true");
+    expect(choice("get-sum", CHOICE_LABEL.approve).getAttribute("aria-checked")).toBe("true");
     expect(latest.choice["get-sum"]).toBeUndefined();
   });
 
   it("offers deny only under the glob, and writes it as one deny rule", async () => {
     render(<Harness seed={{ ...emptyPlan(), picked: { "get-sum": true }, call: "per" }} />);
-    const deny = choice("get-sum", "deny");
+    const deny = choice("get-sum", CHOICE_LABEL.deny);
     expect(deny.getAttribute("aria-disabled")).toBe("true");
     expect(deny.getAttribute("title")).toBe(DENY_NEEDS_LATER);
     await userEvent.click(deny);
-    expect(choice("get-sum", "allow").getAttribute("aria-checked")).toBe("true");
+    expect(choice("get-sum", CHOICE_LABEL.allow).getAttribute("aria-checked")).toBe("true");
 
     await userEvent.click(card("Every tool, and tools added later"));
-    expect(choice("get-sum", "deny").getAttribute("aria-disabled")).toBeNull();
-    await userEvent.click(choice("get-sum", "deny"));
-    expect(choice("get-sum", "deny").getAttribute("aria-checked")).toBe("true");
-    const text = await rules("The rule this writes, in dev-tools-access");
+    expect(choice("get-sum", CHOICE_LABEL.deny).getAttribute("aria-disabled")).toBeNull();
+    await userEvent.click(choice("get-sum", CHOICE_LABEL.deny));
+    expect(choice("get-sum", CHOICE_LABEL.deny).getAttribute("aria-checked")).toBe("true");
+    const text = await rules("The policy rule this writes, in dev-tools-access");
     expect(text).toContain("- id: demo-tools-deny");
     expect(text).toContain("deny: [get-sum]");
   });
 
   it("gives one held tool its own approval, and takes it back", async () => {
     render(<Harness seed={seeded({ call: "per", choice: { "get-sum": "approve", "get-env": "approve" } })} />);
-    expect(textOf('[data-shape-line="get-sum"]')).toContain("hold, up to 2 minutes, the person behind the agent");
+    expect(textOf('[data-shape-line="get-sum"]')).toContain("hold, up to 2 minutes, decided by " + SPONSOR_POOL);
 
     await userEvent.click(within(row("get-sum")).getByRole("button", { name: SET_FOR_TOOL }));
     const own = within(document.querySelector('[data-own="get-sum"]') as HTMLElement);
     await userEvent.click(own.getByRole("radio", { name: HOW_TICKET }));
     expect(latest.own["get-sum"].how).toBe("ticket");
     expect(latest.shape.how).toBe("hold");
-    expect(sentence()).toContain("get-sum needs a ticket the person behind the agent grants within a day; the same call within an hour runs.");
-    const text = await rules("The 2 rules this writes, in dev-tools-access");
+    expect(sentence()).toContain("get-sum needs a ticket " + SPONSOR_POOL + " grants within a day, after which the same call is allowed for an hour.");
+    const text = await rules("The 2 policy rules this writes, in dev-tools-access");
     expect(text.indexOf("- id: demo-tools-get-sum-approve")).toBeLessThan(text.indexOf("- id: demo-tools-approve"));
 
     await userEvent.click(own.getByRole("button", { name: USE_SERVER_SETTING }));
     expect(document.querySelector('[data-own="get-sum"]')).toBeNull();
     expect(latest.own["get-sum"]).toBeUndefined();
-    expect(screen.getByRole("button", { name: "The rule this writes, in dev-tools-access" })).toBeTruthy();
-    expect(textOf("pre")).not.toContain("demo-tools-get-sum-approve");
+    expect(foldNote()).toBe("View as YAMLThe policy rule this writes, in dev-tools-access");
+    expect(textOf("[data-rules-yaml]")).not.toContain("demo-tools-get-sum-approve");
   });
 
   it("writes a ticket with both windows and no timeout", async () => {
@@ -207,7 +213,7 @@ describe("the access editor", () => {
     await userEvent.clear(grant);
     await userEvent.type(grant, "2");
     expect(latest.shape).toMatchObject({ how: "ticket", ticket: 86400, grant: 7200 });
-    const text = await rules("The rule this writes, in dev-tools-access");
+    const text = await rules("The policy rule this writes, in dev-tools-access");
     expect(text).toContain("- id: demo-tools-every-call-approve");
     expect(text).toContain("class: ticket");
     expect(text).toContain("ticketTTLSeconds: 86400");
@@ -230,7 +236,7 @@ describe("the access editor", () => {
     expect(document.querySelector("[data-new-tools]")).toBeNull();
     await userEvent.click(card("Choose per tool"));
     expect(textOf("[data-new-tools]")).toBe(newToolsRunWords("demo-tools"));
-    expect(sentence()).toContain("A tool demo-tools gains later runs without approval until someone sets it here.");
+    expect(sentence()).not.toContain("gains later");
     await userEvent.click(card("Only the tools you tick"));
     expect(document.querySelector("[data-new-tools]")).toBeNull();
   });
@@ -256,7 +262,7 @@ describe("the access editor", () => {
     expect(textOf('[data-fixed="get-sum"]')).toBe("needs approval (dev-guardrails)");
     expect(textOf('[data-fixed="get-env"]')).toBe("needs approval: ticket within a day, then an hour to run (dev-tools-access)");
     expect(textOf('[data-fixed="list-files"]')).toBe("denied (dev-guardrails)");
-    expect(within(row("get-sum")).queryByRole("radio", { name: "allow" })).toBeNull();
+    expect(within(row("get-sum")).queryByRole("radio", { name: CHOICE_LABEL.allow })).toBeNull();
     expect(within(row("get-sum")).getByRole("button", { name: "Help: get-sum" })).toBeTruthy();
   });
 
@@ -268,7 +274,7 @@ describe("the access editor", () => {
     expect(textOf("[data-read-only]")).toBe(policyReadOnly("dev-tools"));
     expect(textOf('[data-policy-word="get-sum"]')).toBe("needs approval: hold, up to 2 minutes");
     expect(textOf('[data-policy-word="get-env"]')).toBe("allowed");
-    expect(within(row("list-files")).getAllByRole("cell")[3].textContent).toBe("not reached");
+    expect(within(row("list-files")).getAllByRole("cell")[3].textContent).toBe(NOT_REACHED);
     expect(within(row("get-sum")).queryByRole("radio")).toBeNull();
     expect(document.querySelector("[data-grant-sentence]")).toBeNull();
     await userEvent.click(tick("list-files"));
@@ -325,12 +331,30 @@ describe("the access editor", () => {
     expect(textOf("[data-pattern-note]")).toBe("This access row uses a pattern (get.* and list-files) the console does not edit. Saving replaces it with the tools ticked below.");
   });
 
+  it("ticks every tool a stored pattern reaches, a * anywhere in it, as the server's preview counts them", () => {
+    const stored: BindingRow = { id: "b-3", app: "demo-tools", role: "dev-tools", tools: ["get-*"] };
+    render(<Harness stored={stored} />);
+    expect(tick("get-sum").checked).toBe(true);
+    expect(tick("get-env").checked).toBe(true);
+    expect(tick("list-files").checked).toBe(false);
+    expect(sentence()).toContain("Holders of dev-tools reach 2 of 3 tools of demo-tools.");
+  });
+
+  it("puts the warning that a save replaces the pattern first in the column, before Which tools", () => {
+    const stored: BindingRow = { id: "b-3", app: "demo-tools", role: "dev-tools", tools: ["get-*"] };
+    render(<Harness stored={stored} />);
+    const column = document.querySelector("[data-access-editor]") as HTMLElement;
+    const note = column.querySelector("[data-pattern-note]") as HTMLElement;
+    expect(column.firstElementChild).toBe(note);
+    expect(note.compareDocumentPosition(column.querySelector("[data-reach]") as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   // Each case is the reads that failed and the note above the read-only
   // column that says so.
   const dark: [string, Unread, string][] = [
-    ["the own set and the preview", { own: true, others: true }, "You may change which tools dev-tools reaches, but your session cannot read dev-tools-access or the other policies that decide its calls, so the Policy column cannot say what a call does. An administrator who may read policies sees them under Policies."],
-    ["the own set", { own: true, others: false }, "You may change which tools dev-tools reaches, but your session cannot read dev-tools-access, the role's own rules, so the Policy column cannot say what a call does. An administrator who may read policies sees them under Policies."],
-    ["the preview", { own: false, others: true }, "You may change which tools dev-tools reaches, but your session cannot read the other policies that decide its calls, so the Policy column cannot say what a call does. An administrator who may read policies sees them under Policies."],
+    ["the own set and the preview", { own: true, others: true }, "You may change which tools dev-tools reaches. Your session cannot read dev-tools-access or the other policies that decide its calls, so the Policy column cannot say what a call does."],
+    ["the own set", { own: true, others: false }, "You may change which tools dev-tools reaches. Your session cannot read dev-tools-access, the role's own policy rules, so the Policy column cannot say what a call does."],
+    ["the preview", { own: false, others: true }, "You may change which tools dev-tools reaches. Your session cannot read the other policies that decide its calls, so the Policy column cannot say what a call does."],
   ];
   it.each(dark)("never says what a call does in the read-only column when %s could not be read", (_what, unread, note) => {
     const seed: Plan = { ...emptyPlan(), picked: { "get-sum": true, "get-env": true }, call: "per", choice: { "get-sum": "approve" } };
@@ -340,13 +364,13 @@ describe("the access editor", () => {
     expect(policyUnread("dev-tools", "dev-tools-access", unread.own, unread.others)).toBe(note);
     expect(textOf('[data-policy-word="get-sum"]')).toBe("not readable here");
     expect(textOf('[data-fixed="get-env"]')).toBe("denied (dev-guardrails)");
-    expect(within(row("list-files")).getAllByRole("cell")[3].textContent).toBe("not reached");
+    expect(within(row("list-files")).getAllByRole("cell")[3].textContent).toBe(NOT_REACHED);
   });
 
   it("warns an editor whose preview could not be read that its rows show only the role's own rules", () => {
     const { unmount } = render(<Harness seed={seeded({ call: "per" })} unread={{ own: false, others: true }} />);
     expect(textOf("[data-others-unread]")).toBe(OTHERS_UNREAD);
-    expect(choice("get-sum", "allow").getAttribute("aria-checked")).toBe("true");
+    expect(choice("get-sum", CHOICE_LABEL.allow).getAttribute("aria-checked")).toBe("true");
     unmount();
     render(<Harness seed={seeded({ call: "per" })} unread={{ own: false, others: false }} />);
     expect(document.querySelector("[data-others-unread]")).toBeNull();
@@ -355,7 +379,7 @@ describe("the access editor", () => {
   it("folds the rules a door says a save stores, with their ids and reasons, instead of fresh ones", async () => {
     const written: Plain[] = [{ id: "sum-hold", tools: ["mcp.call"], apps: ["demo-tools"], toolNames: { allow: ["get-sum"] }, effect: "allow", mode: "approve", approve: { deciders: ["sponsor"], timeoutSeconds: 120, binding: "call" }, reason: "Straza: get-sum is the showcase" }];
     render(<Harness seed={seeded({ call: "per", choice: { "get-sum": "approve" } })} written={written} />);
-    const text = await rules("The rule this writes, in dev-tools-access");
+    const text = await rules("The policy rule this writes, in dev-tools-access");
     expect(text).toContain("- id: sum-hold");
     expect(text).toContain("binding: call");
     expect(text).toContain('reason: "Straza: get-sum is the showcase"');
@@ -373,22 +397,23 @@ describe("the access editor", () => {
     const said = document.querySelector("[data-grant-sentence]") as HTMLElement;
     expect(ahead(said, screen.getByLabelText("Filter tools"))).toBe(true);
     expect(ahead(said, document.querySelector("[data-tool-table]") as HTMLElement)).toBe(true);
-    expect(said.className.split(" ")).toContain("text-base");
+    expect(said.className.split(" ")).toContain("text-body");
   });
 
   it("keeps the rules fold under the tool table, which has no scroll of its own", () => {
     render(<Harness seed={seeded({ call: "every" })} />);
     const table = document.querySelector("[data-tool-table]") as HTMLElement;
-    expect(ahead(table, screen.getByRole("button", { name: "The rule this writes, in dev-tools-access" }))).toBe(true);
+    expect(foldNote()).toBe("View as YAMLThe policy rule this writes, in dev-tools-access");
+    expect(ahead(table, document.querySelector("[data-yaml-fold]") as HTMLElement)).toBe(true);
     expect(table.className).not.toMatch(/max-h-|overflow-(y-)?(auto|scroll)/);
   });
 
   // Each case is a tool, the choice its row holds and the trust tone that
   // fills the chosen segment.
   const tones: [string, string, string, string][] = [
-    ["list-files", "allow", "bg-ok-bg", "text-ok"],
-    ["get-sum", "require approval", "bg-warn-bg", "text-warn"],
-    ["get-env", "deny", "bg-danger-bg", "text-danger"],
+    ["list-files", CHOICE_LABEL.allow, "bg-ok-bg", "text-ok"],
+    ["get-sum", CHOICE_LABEL.approve, "bg-warn-bg", "text-warn"],
+    ["get-env", CHOICE_LABEL.deny, "bg-danger-bg", "text-danger"],
   ];
   it.each(tones)("fills only the chosen segment of %s, %s, with its trust tone, and every segment is a control 32 px tall", (tool, name, fill, ink) => {
     render(<Harness seed={seeded({ call: "per", choice: { "get-sum": "approve", "get-env": "deny" } })} />);

@@ -2,7 +2,7 @@
 title: strazad serve
 description: Run the platform server
 pagetype: reference
-weight: 3
+weight: 6
 draft: false
 sources:
   - cmd/strazad

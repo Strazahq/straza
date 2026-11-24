@@ -2,24 +2,47 @@
 // Every reader is a pure function over the wire row, so the screen and its
 // tests share one reading of a record.
 import type { AuditRow } from "./api";
+import { OUTCOME_WORD, type Outcome } from "./chip-words";
+import { MODE_WORD } from "./config-words";
+import { ENTRA } from "./entra-words";
 import { cutOf } from "./shell-read";
 
 export const SENTINEL_TYPE = "straza.audit.sentinel";
 
 // LENSES are the type lenses of the picker. A lens may cover several type
-// prefixes; its note says which, for the hint under the picker.
+// prefixes; its note says what it shows, for the hint under the picker.
 export const LENSES: { key: string; label: string; prefixes?: string[]; note?: string }[] = [
-  { key: "all", label: "all records" },
-  { key: "decisions", label: "decisions", prefixes: ["straza.audit.tool", "straza.audit.mcp"], note: "decisions = type tool and mcp: the policy engine's verdicts on tool calls" },
-  { key: "straza.audit.approval", label: "approvals", prefixes: ["straza.audit.approval"], note: "approvals = type approval: a person's decisions on approval requests, one record per phase (request, resolution, consumed)" },
-  { key: "capture", label: "recording", prefixes: ["straza.audit.prompt", "straza.audit.reply"], note: "recording = type prompt and reply: conversation witnesses, size and hash only, never the text" },
-  { key: SENTINEL_TYPE, label: "sentinel", prefixes: [SENTINEL_TYPE], note: "sentinel = type sentinel: the audit watcher's verdicts on sessions. Alert-only: it flags, it never revokes" },
-  { key: "straza.audit", label: "audit", prefixes: ["straza.audit"], note: "audit = every straza.audit.* record: tool, mcp, approval, prompt, reply, sentinel, admin" },
-  { key: "straza.revocation", label: "revocations", prefixes: ["straza.revocation"] },
-  { key: "straza.identity", label: "identity", prefixes: ["straza.identity"] },
-  { key: "straza.apps", label: "MCP servers", prefixes: ["straza.apps"], note: "MCP servers = type apps.*: server lifecycle records (the wire keeps the apps name)" },
-  { key: "straza.policy", label: "policy", prefixes: ["straza.policy"] },
+  { key: "all", label: "All records" },
+  { key: "decisions", label: "Decisions", prefixes: ["straza.audit.tool", "straza.audit.mcp"], note: "What policy decided for each tool call and MCP call." },
+  { key: "straza.audit.approval", label: "Approvals", prefixes: ["straza.audit.approval"], note: "What people decided on approval requests, with one record for the request, one for the answer and one when a ticket is used." },
+  { key: "capture", label: "Recording", prefixes: ["straza.audit.prompt", "straza.audit.reply"], note: "One record per recorded prompt and reply, with its size and hash and never its text." },
+  { key: SENTINEL_TYPE, label: "Sentinel alerts", prefixes: [SENTINEL_TYPE], note: "What the sentinel, Straza's audit watcher, flagged on a session. It only alerts and never revokes." },
+  { key: "straza.audit", label: "Calls and admin changes", prefixes: ["straza.audit"], note: "Calls, approvals, recordings, sentinel alerts and admin changes." },
+  { key: "straza.revocation", label: "Revocations", prefixes: ["straza.revocation"] },
+  { key: "straza.identity", label: "Identity", prefixes: ["straza.identity"] },
+  { key: "straza.apps", label: "MCP servers", prefixes: ["straza.apps"], note: "Records of a server being published, changed, started and stopped." },
+  { key: "straza.policy", label: "Policy", prefixes: ["straza.policy"] },
 ];
+
+// The picker's name, the search field's placeholder, and the Outcome
+// column with its filter.
+export const LENS_LABEL = "Kind of record";
+export const SEARCH_PLACEHOLDER = "Search the whole chain: command, path, user, policy rule";
+export const OUTCOME_COLUMN = "Outcome";
+export const ANY_OUTCOME = "Any outcome";
+
+// sentinelWhat is the Action cell of a sentinel alert after its detector:
+// how many records the alert holds as evidence.
+export const sentinelWhat = (n: number) => "sentinel alert · " + (n === 1 ? "1 record of evidence" : n + " records of evidence");
+
+// TYPE_WORD says a record's type in words, by the short type the table
+// already cuts from the event type. A type with no word shows as it is.
+const TYPE_WORD: Record<string, string> = {
+  tool: "tool call", mcp: "MCP call", approval: "approval", prompt: "prompt", reply: "reply", sentinel: "sentinel alert",
+  admin: "admin change", identity: "identity change", policy: "policy change", authn: "sign-in",
+};
+const TYPE_FAMILY: Record<string, string> = { revocation: "revocation", apps: "MCP server", session: "session", policy: "policy change" };
+export const typeWord = (short: string) => TYPE_WORD[short] || TYPE_FAMILY[short.split(".")[0]] || short;
 
 export function typeMatches(type: string, lensKey: string): boolean {
   const lens = LENSES.find((l) => l.key === lensKey);
@@ -73,13 +96,17 @@ export const objectLabel = (o: ObjectFact) => o.type.charAt(0).toUpperCase() + o
 export const objectNote = (o: ObjectFact) =>
   [o.id ? "id " + o.id : "not in the " + o.type + " list", o.sha256 ? "cut at 512 bytes, SHA-256 " + o.sha256.slice(0, 12) + "…" : ""].filter(Boolean).join(", ");
 
+// LIST_READ names a list read by the event its record carries.
+const LIST_READ: Record<string, string> = { "tools.list": "tool list read", "resources.list": "resource list read" };
+
 // ceWhat is the exact thing that happened (the harness's own name of a
 // classified tool, command, target paths, upstream tool, the object it
 // named and its arguments), never displaced by the reason. The arguments
 // stay in the sheet when a command or a path already says what the call
 // did. A capture record reads as a reference row, size, mode and hash,
 // never the text, even an old record that still carries data.content on the
-// chain.
+// chain. A gateway record that served a tool or resource list has no action
+// of its own and reads as that read.
 export function ceWhat(ce: CE | null): string {
   if (!ce) return "(unreadable record)";
   const d = ce.data || {};
@@ -94,10 +121,11 @@ export function ceWhat(ce: CE | null): string {
   if (d.contentHash || d.content) {
     const bytes = d.contentBytes != null ? Number(d.contentBytes) : d.content != null ? String(d.content).length : null;
     const hash = d.contentHash ? String(d.contentHash).replace(/^sha256:/, "").slice(0, 12) + "…" : "unhashed";
-    bits.push("content " + (bytes != null ? bytes + " B · " : "") + String(d.mode || "captured") + " · " + hash);
+    const mode = String(d.mode || "captured");
+    bits.push("content " + (bytes != null ? bytes + " B · " : "") + (MODE_WORD[mode] || mode) + " · " + hash);
   }
   if (d.action) bits.push(String(d.action));
-  return bits.filter(Boolean).join(" · ");
+  return bits.filter(Boolean).join(" · ") || LIST_READ[String(d.event || "")] || "";
 }
 
 // approvalWhat is the sentence an auditor needs of an approval record:
@@ -111,11 +139,11 @@ export function approvalWhat(d: Record<string, unknown>, r: AuditRow): string {
   if (m) subject = m[2].replace(/_/g, " ") + " in " + m[1];
   let s = [who ? who + "'s" : "", subject].filter(Boolean).join(" ");
   if (d.phase === "request") s += " needs approval";
-  else if (d.phase === "consumed") s += " · ticket consumed by session " + id8(d.consumedBy || "");
+  else if (d.phase === "consumed") s += " · ticket used by session " + id8(d.consumedBy || "");
   else if (d.state === "approved") s += " approved by " + decider;
   else if (d.state === "denied") s += " denied by " + decider;
   else if (d.state === "expired") s += " expired, nobody decided in time";
-  if (d.rule) s += " (rule " + String(d.rule) + ")";
+  if (d.rule) s += " (policy rule " + String(d.rule) + ")";
   return s;
 }
 
@@ -126,6 +154,9 @@ export type Row = {
   raw: string;
   username: string;
   user: string;
+  // about is the server's name for the user an admin record was about, ""
+  // when the server sent none.
+  about: string;
   type: string;
   time: string;
   effect: string;
@@ -161,6 +192,7 @@ export function ceRow(r: AuditRow): Row {
     raw: r.ce,
     username: r.username || "",
     user: r.username || (d.user ? id8(d.user) : ""),
+    about: r.about || "",
     type: ce && ce.type ? ce.type : "?",
     time: (ce && ce.time) || "",
     effect: String(approval ? d.state || "" : d.effect || ""),
@@ -168,7 +200,7 @@ export function ceRow(r: AuditRow): Row {
     command: !approval && typeof d.command === "string" ? d.command : "",
     commandCut: d.commandTruncated === true || (typeof d.command === "string" && cutOf(d.command) !== null),
     what: approval ? approvalWhat(d, r) : ceWhat(ce),
-    reason: String(approval ? d.decidedReason || "" : d.reason || (d.effect && d.ruleId ? "rule " + String(d.ruleId) : "")),
+    reason: String(approval ? d.decidedReason || "" : d.reason || (d.effect && d.ruleId ? "policy rule " + String(d.ruleId) : "")),
     session: String(d.session || ""),
     sentinel,
     approval,
@@ -178,16 +210,24 @@ export function ceRow(r: AuditRow): Row {
   };
 }
 
-// foldAdjacent collapses runs of rows with the same type, what, user and
-// effect into their newest row carrying a count and an expand toggle.
-// Display only: exports and the chain check read the unfolded records, and
-// sentinel verdicts never fold. open is keyed by the run's newest seq.
+// foldKey is what two adjacent rows must share to fold: type, what, user,
+// effect and reason, and for a record that is not a call its data too, so
+// two changes to different fields of one user stay two rows. A call keeps
+// the shorter key, so repeated reads still fold.
+const foldKey = (r: Row) =>
+  JSON.stringify([r.type, r.what, r.user, r.effect, r.reason, CALL_TYPES.includes(r.type) ? null : parseCE(r.raw)?.data ?? null]);
+
+// foldAdjacent collapses runs of rows with the same fold key into their
+// newest row carrying a count and an expand toggle. Display only: exports
+// and the chain check read the unfolded records, and sentinel verdicts
+// never fold. open is keyed by the run's newest seq.
 export function foldAdjacent(rows: Row[], open: Record<number, boolean>): Row[] {
   const out: Row[] = [];
+  const keys = rows.map(foldKey);
   for (let i = 0; i < rows.length; ) {
     const r = rows[i];
     let j = i + 1;
-    while (j < rows.length && !r.sentinel && !rows[j].sentinel && rows[j].type === r.type && rows[j].what === r.what && rows[j].user === r.user && rows[j].effect === r.effect) j++;
+    while (j < rows.length && !r.sentinel && !rows[j].sentinel && keys[j] === keys[i]) j++;
     if (j - i > 1) {
       const isOpen = !!open[r.seq];
       out.push({ ...r, foldN: j - i, foldOpen: isOpen, foldEnd: rows[j - 1].seq });
@@ -200,7 +240,7 @@ export function foldAdjacent(rows: Row[], open: Record<number, boolean>): Row[] 
   return out;
 }
 
-// effectWords is the Effect cell: the decision's word, an approval's
+// effectWords is the Outcome cell: the decision's word, an approval's
 // state, or a sentinel's severity.
 export function effectTone(effect: string): "ok" | "warn" | "danger" | "plain" {
   if (effect === "deny" || effect === "denied") return "danger";
@@ -208,13 +248,33 @@ export function effectTone(effect: string): "ok" | "warn" | "danger" | "plain" {
   if (effect === "expired" || effect === "approve" || effect === "confirm" || effect === "pending") return "warn";
   return "plain";
 }
-export const effectWord = (effect: string) => (effect === "approve" || effect === "confirm" ? "needs approval" : effect || "none");
+// effectOutcome reads a decision's effect as an outcome, and is null for
+// an approval's state or a record that decided nothing.
+export const effectOutcome = (effect: string): Outcome | null =>
+  effect === "allow" ? "allowed" : effect === "deny" ? "denied" : effect === "approve" || effect === "confirm" ? "approval" : null;
+// APPROVAL_STATE_WORD says an approval record's state where the Outcome
+// column shows it.
+const APPROVAL_STATE_WORD: Record<string, string> = { pending: "waiting", approved: "approved", denied: "denied", expired: "expired" };
+export const effectWord = (effect: string) => {
+  const o = effectOutcome(effect);
+  return o ? OUTCOME_WORD[o] : APPROVAL_STATE_WORD[effect] || effect || "none";
+};
 
-// Why is the three-line explanation of a decision record (spec/events rev
-// 20): the outcome, the decided-by sentence, and the context, all from what the
-// record stored at decision time. hasSetName tells an old record (no
-// setName key) from a real no-match (setName "" with ruleId "").
+// Why is the explanation of a decision record (spec/events rev 20): the
+// outcome, the decided-by sentence, and for a call the gateway held the
+// context, all from what the record stored at decision time. hasSetName
+// tells an old record (no setName key) from a real no-match
+// (setName "" with ruleId "").
 export type Why = { outcome: string; tone: "ok" | "warn" | "danger"; basis: string; context: string; wire: string };
+
+// The parts of the sentence that names the policy rule and the policy that
+// decided a call, shared with the card of the two what-if sheets.
+export const DECIDED_BY = "Decided by policy rule ";
+export const IN_POLICY = " in policy ";
+// The sentences of a call no policy rule decided, on that card.
+export const DENIED_DEFAULT_ENTERPRISE = "Denied by default. On the enterprise profile a call that nothing allows is denied.";
+export const DENIED_DEFAULT = "Denied by default. No policy allowed this call.";
+export const ALLOWED_BY_ACCESS = "Allowed by role access. No policy rule decides this tool.";
 
 export function whyOf(ce: CE | null): Why | null {
   if (!ce || !/^straza\.audit\.(tool|mcp)$/.test(ce.type || "")) return null;
@@ -226,14 +286,14 @@ export function whyOf(ce: CE | null): Why | null {
   const hasSetName = Object.prototype.hasOwnProperty.call(d, "setName");
   const reason = String(d.reason || "");
   const held = effect === "approve" || effect === "confirm";
-  const outcome = effect === "deny" ? "Denied." : held ? "Needs approval." : effect === "allow" ? "Allowed." : effect + ".";
+  const outcome = effect === "deny" ? "Denied" : held ? "Needs approval" : effect === "allow" ? "Allowed" : effect;
   const tone: Why["tone"] = effect === "deny" ? "danger" : held ? "warn" : "ok";
   let basis: string;
   // An absent rule cannot establish a denial or a profile default.
   if (ruleId === "") basis = "No policy rule was recorded for this call." + (reason ? " " + reason : "");
-  else if (!hasSetName) basis = "Decided by rule " + ruleId + ". The policy name was not recorded on this record." + (reason ? " " + reason : "");
-  else basis = "Decided by rule " + ruleId + " in policy " + setName + (reason ? ": " + reason : ".");
-  const context = "Recorded at decision time." + (ce.type === "straza.audit.mcp" && held ? " The gateway records the policy verdict before a person's decision resolves; see Approvals for the outcome." : "");
+  else if (!hasSetName) basis = DECIDED_BY + ruleId + ". The policy's name was not recorded on this record." + (reason ? " " + reason : "");
+  else basis = DECIDED_BY + ruleId + IN_POLICY + setName + (reason ? ": " + reason : ".");
+  const context = ce.type === "straza.audit.mcp" && held ? "The gateway records the policy's outcome before a person answers. See Approvals for what the person decided." : "";
   const wire = ["effect=" + effect, "ruleId=" + ruleId, hasSetName ? "setName=" + setName : "", d.snapshot ? "snapshot=" + String(d.snapshot) : ""].filter(Boolean).join(" · ");
   return { outcome, tone, basis, context, wire };
 }
@@ -244,23 +304,24 @@ export function whyOf(ce: CE | null): Why | null {
 export const TAIL_WINDOW = 200;
 export const TAIL_KEEP = 2000;
 export const CHAIN_WORD = "Chain verified";
-export const CHAIN_TIP = "Every loaded record was re-hashed in this browser and linked to its predecessor. Live tail, polled every second.";
-export const chainVerified = (n: number, head: number) => n.toLocaleString("en-US") + (n === 1 ? " record" : " records") + " loaded, head at seq " + head;
-export const chainBroken = (seq: number) => "Audit chain broken at seq " + seq + ": a record fails re-hashing. Records may have been altered or removed. Verify with strazactl audit verify.";
+export const CHAIN_TIP = "Every loaded record was re-hashed in this browser and linked to its predecessor.";
+export const chainVerified = (head: number) => "Newest record " + head.toLocaleString("en-US");
+export const chainBroken = (seq: number) => "The audit chain is broken at record " + seq + ": its hash does not match. Records may have been altered or removed. Verify with strazactl audit verify.";
 export const UNVERIFIED_WORD = "Chain not verified";
 // The status before the first window lands, and after it failed to.
 export const CHECKING_WORD = "Checking audit chain";
 export const CHECKING_TEXT = "Loading and verifying the latest records.";
-export const CHECKING_TIP = "Verification is reported only after the records have loaded and their hashes have been checked.";
 export const UNREAD_WORD = "Audit unavailable";
-export const UNREAD_TEXT = "The newest records did not load, so nothing is verified yet. The notice above says why, and Reload the chain reads them again.";
+export const UNREAD_TEXT = "Nothing verified yet.";
 export const EMPTY_UNREAD = "No audit records available.";
 export const EMPTY_LOADING = "Loading audit records…";
-export const CHAIN_UNVERIFIED = "re-hashing needs a secure context (TLS or localhost)";
+export const CHAIN_UNVERIFIED = "Needs HTTPS or localhost.";
 export const SEARCH_WORD = "Whole-chain search";
-export const SEARCH_TIP = "Search results are not contiguous, so they are not re-hashed here; the tail underneath stays verified.";
+export const SEARCH_TIP = "The browser does not re-hash search results.";
+// searchLine says what a search asks for. effect is the decision the
+// server filters on, allow or deny, said as its outcome.
 export const searchLine = (q: string, effect: string, user: string, capped: boolean) => {
-  const parts = [q ? "for “" + q + "”" : "", effect ? "effect " + effect : "", user ? "by " + user : ""].filter(Boolean);
+  const parts = [q ? "for “" + q + "”" : "", effect ? "outcome " + effectWord(effect) : "", user ? "by " + user : ""].filter(Boolean);
   return (parts.length ? parts.join(", ") : "every record") + (capped ? ", newest " + TAIL_WINDOW + " shown" : "");
 };
 // policyQuery is the whole-chain search for the decisions one policy made.
@@ -273,22 +334,21 @@ export const loadedWords = (n: number, total: number) => n.toLocaleString("en-US
 // which the lens and the fold both move. loadedWords counts the window.
 export const shownWords = (n: number) => n.toLocaleString("en-US") + (n === 1 ? " row shown" : " rows shown");
 export const matchWords = (n: number) => n.toLocaleString("en-US") + (n === 1 ? " match" : " matches");
-export const EMPTY_CHAIN = "Nothing has been decided or changed yet. The first check-in or admin action writes the first record.";
-export const EMPTY_LENS = "Nothing in the loaded tail under this lens. The search box, the effect and the user filter search the whole chain.";
+export const EMPTY_CHAIN = "No records yet.";
+export const EMPTY_LENS = "No loaded record of this kind. Search reads the whole chain.";
 export const EMPTY_SEARCH = "No record in the chain matches this search.";
-export const recordMissing = (seq: number) => "Record " + seq + " is not in the audit chain, so it cannot open. Open the call again from the Overview.";
-export const revokeBody = (session: string, detector: string) =>
-  "The sentinel is alert-only: it never revokes on its own, and revoking is your call. Confirming denies every agent action in session " + session.slice(0, 13) + "…" +
-  (detector ? " (flagged by " + detector + ")" : "") + " within seconds. A session revoke is a stand-down, not a ban: the device can check in again as a new session, and a hard cut-off is a device revoke or a user lock.";
+export const recordMissing = (seq: number) => "Record " + seq + " is not in the audit chain. Search Audit for the call.";
+export const revokeBody = (session: string) =>
+  "Every agent action in session " + session.slice(0, 13) + "… is denied within seconds. The device can start a new session. To keep it out, lock the user or revoke the device.";
 
-// The record sheet's sentences. SENTINEL says on the sheet
-// what revokeBody says in the confirm, because the strip is read without
-// opening the confirm.
-export const SENTINEL = "The sentinel is alert-only: it never revokes on its own, and revoking is your call.";
+// The record sheet's sentences. SENTINEL says on the sheet that revoking
+// is the reader's call, because the strip is read without opening the
+// confirm.
+export const SENTINEL = "Alert only. The sentinel never revokes.";
 export const REHASHED = "Hash matches the loaded chain.";
-export const NOT_REHASHED = "Not verified in this browser. See the audit chain status for details.";
+export const NOT_REHASHED = "Not verified in this browser.";
 export const COPIED = "Copied.";
-export const COPY_REFUSED = "The record was not copied because the browser refused the clipboard. Select the record text above and copy it by hand.";
+export const COPY_REFUSED = "Nothing was copied: the browser refused the clipboard. Select the text and copy it by hand.";
 export const revokedWords = (session: string) => "Session " + session.slice(0, 13) + "… is revoked. Every agent action in it is denied within seconds.";
 
 // CSV and JSONL of the loaded rows.
@@ -315,10 +375,10 @@ const ACTION_LABEL: Record<string, string> = {
   "api-token.create": "Created an admin API token", "api-token.revoke": "Revoked an admin API token",
   "roles.assign": "Assigned a role", "roles.unassign": "Removed a role assignment", "roles.create": "Created a role",
   "roles.delete": "Deleted a role", "roles.update": "Changed a role",
-  "roles.implication.create": "Added a role to a composition", "roles.implication.delete": "Removed a role from a composition",
-  "policy.create": "Created a policy set", "policy.update": "Changed a policy set", "policy.delete": "Deleted a policy set",
-  "policy.activate": "Turned on a policy set", "policy.deactivate": "Turned off a policy set",
-  "policy.updated": "Made a new policy snapshot live",
+  "roles.implication.create": "Added a role to a business role", "roles.implication.delete": "Removed a role from a business role",
+  "policy.create": "Created a policy", "policy.update": "Changed a policy", "policy.delete": "Deleted a policy",
+  "policy.activate": "Turned on a policy", "policy.deactivate": "Turned off a policy",
+  "policy.updated": "Made a new policy version live",
   "signing-keys.create": "Created a signing key", "signing-keys.rotate": "Rotated a signing key",
   "signing-keys.promote": "Promoted a signing key", "signing-keys.retire": "Retired a signing key",
   "draft.create": "Created a draft", "draft.update": "Changed a draft", "draft.check": "Checked a draft",
@@ -330,7 +390,7 @@ const ACTION_LABEL: Record<string, string> = {
   "user.reactivated": "Reactivated a user", "user.lift.blocked": "Kept a user locked, since another lock remains",
   "identity.created": "Created a user", "identity.updated": "Changed a user", "identity.deactivated": "Deactivated a user",
   "nhi-key.set": "Registered an AI agent's key", "nhi-key.removed": "Removed an AI agent's key",
-  "sink.replay": "Replayed a sink's parked events",
+  "sink.replay": "Replayed an audit sink's undelivered events",
   "oauth.connect": "Connected a user to an MCP server", "oauth.connect.refused": "Refused a connection to an MCP server",
   "oauth.disconnect": "Disconnected a user from an MCP server", "token.connect": "Stored a user's token for an MCP server",
   "connection.agents": "Changed which agents use a connection",
@@ -341,19 +401,30 @@ const ACTION_LABEL: Record<string, string> = {
   "enroll-token.create": "Started enrolling an approver phone or browser", "approver.enroll": "Enrolled an approver phone or browser",
   "enroll-token.refused": "Refused enrolling an approver phone or browser for someone",
   "scim.refused": "Refused an identity manager's SCIM write",
+  "admin.refused": "Refused an admin change",
   "approver.revoke": "Revoked an approver phone or browser with its user",
   "revocation.session": "Revoked a session", "revocation.sessions": "Revoked sessions", "revocation.user": "Revoked a user's access",
-  "revocation.device": "Revoked a machine", "revocation.lift": "Lifted a user's revocation",
+  "revocation.device": "Revoked a machine", "revocation.lift": "Lifted a user's lock",
   "device.revoke": "Revoked a user's machine",
+  "entra.group.create": "Created a role's group in Entra", "entra.group.update": "Changed a role's group in Entra",
+  "entra.group.delete": "Deleted a role's group in Entra", "entra.group.missing": "Found a role's group deleted in Entra",
+  "entra.group.recreate": "Created a role's group in Entra again", "entra.read.stale": "Could not read Entra",
+  "entra.read.recovered": "Read Entra again", "entra.pass.held": "Held the removals of a role's group in Entra",
+  "entra.pass.released": "Applied the held removals of a role's group in Entra",
+  "entra.sponsor.unresolved": "Left an agent from Entra with no sponsor", "entra.sponsor.resolved": "Set the sponsor of an agent from Entra",
 };
+
+// ACTOR_BY_ORIGIN names who acted on a record that carries no actor, by
+// the record's origin: Straza changed a person because Entra said so.
+export const ACTOR_BY_ORIGIN: Record<string, string> = { entra: ENTRA };
 
 // ACTION_NOUN names the object of each action namespace, for an action
 // this console does not know yet.
 const ACTION_NOUN: Record<string, string> = {
-  apps: "MCP server", "api-token": "Admin API token", roles: "Role", policy: "Policy set", "signing-keys": "Signing key",
-  draft: "Draft", sessions: "Sessions", session: "Session", user: "User", identity: "User", "nhi-key": "AI agent key", sink: "Sink",
+  apps: "MCP server", "api-token": "Admin API token", roles: "Role", policy: "Policy", "signing-keys": "Signing key",
+  draft: "Draft", sessions: "Sessions", session: "Session", user: "User", identity: "User", "nhi-key": "AI agent key", sink: "Audit sink",
   oauth: "Connection", token: "Token", connection: "Connection", "attestation-hash": "Hook configuration hash", breakglass: "Emergency access",
-  revocation: "Revocation",
+  revocation: "Revocation", entra: "Entra",
 };
 
 const spaced = (s: string) => s.replace(/[-_]/g, " ");
@@ -378,3 +449,24 @@ const CALL_TYPES = ["straza.audit.tool", "straza.audit.mcp", "straza.audit.promp
 // recorded, so a server named policy or draft never reads as an admin
 // action, and any other record's action in words.
 export const rowLabel = (r: Row) => (CALL_TYPES.includes(r.type) ? r.what || shortType(r.type) : actionLabel(r.what || shortType(r.type)));
+
+// RECORD_FACTS are the fields the record sheet shows of a record that
+// decided no call, in order, each with its label.
+const RECORD_FACTS: [string, string][] = [["changed", "Changed"], ["role", "Role"], ["group", "Group"], ["name", "Name"], ["description", "Description"], ["origin", "Origin"], ["target", "Target"], ["route", "Route"]];
+
+// recordFacts reads those fields as labels with their values: a list as
+// its items, a changed field's name spaced, and an origin as who it names.
+// An admin record leads with the user it was about, because its Who is the
+// actor: the name the server resolved, else the record's username, else its
+// user id. A field the record does not carry, or carries empty, is left out.
+export function recordFacts(ce: CE | null, resolved = ""): [string, string[]][] {
+  const d = (ce && ce.data) || {};
+  const about = ce?.type === "straza.audit.admin" ? [resolved, d.username, d.user].find((v) => typeof v === "string" && v) : undefined;
+  const facts = RECORD_FACTS.flatMap(([key, label]): [string, string[]][] => {
+    const v = d[key];
+    const values = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" || typeof x === "number").map(String).filter(Boolean);
+    const shown = key === "changed" ? values.map(spaced) : key === "origin" ? values.map((o) => ACTOR_BY_ORIGIN[o] || o) : values;
+    return shown.length ? [[label, shown]] : [];
+  });
+  return about ? [["User", [String(about)]], ...facts] : facts;
+}

@@ -36,11 +36,11 @@ definition.
 
 A hook-layer bypass through interpreter indirection, such as `python3 script.py`
 running what the hook never saw, is a documented limitation with layered mitigations
-and not a vulnerability by itself. A user-mode hook on a machine where the agent can
-run anything is advisory and not a security boundary, and an MCP server that a user
-adds to a harness outside the gateway is that user's responsibility, so a bypass
-through either is not a vulnerability by itself. A bypass of the MCP gateway, or of a
-deny that the documentation claims is covered at the hook layer, is in scope.
+and not a vulnerability by itself. A user-mode hook is advisory and not a security
+boundary, so a way around it is not a vulnerability by itself. A bypass of the MCP
+gateway, a way to switch off or go around the hook of a managed install without root,
+and a bypass of a deny that the documentation claims is covered at the hook layer are
+each in scope.
 
 Releases ship with a software bill of materials and a cosign signature. Report any
 mismatch between the published checksums or signatures and the artifacts at once.

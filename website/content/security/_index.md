@@ -17,4 +17,4 @@ keywords: security model credentials sessions keys certificates tokens hardening
 
 To respond to a login or access incident, lock the person or device out with the [kill-switch runbook]({{< relref "guides/operate/kill-switch-runbook.md" >}}), then read [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) for what each lockout does.
 
-- [Known limits]({{< relref "security/known-limits.md" >}}) gives one table of each limit, its impact, today's mitigation and the planned fix.
+- [Known limits]({{< relref "security/known-limits.md" >}}) names each limit of an enterprise installation, who can reach it, what you do about it and what the roadmap plans.

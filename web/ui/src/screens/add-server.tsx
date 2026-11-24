@@ -2,12 +2,12 @@ import * as React from "react";
 import type { FieldPath } from "react-hook-form";
 import { DownloadIcon, Loader2Icon, LockIcon, RefreshCwIcon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { PageHead } from "@/components/page-head";
 import { TestACall } from "@/components/test-a-call";
 import { SaveNoteLine, useDraftSave } from "@/components/use-draft-save";
-import { CheckStep } from "@/components/wizard/check-step";
+import { CheckStep, whatNextShown } from "@/components/wizard/check-step";
 import { CredentialStep } from "@/components/wizard/credential-step";
 import { STEP_KEYS, stepFields } from "@/components/wizard/form-schema";
 import { HINT, type Row } from "@/components/wizard/parts";
@@ -20,14 +20,18 @@ import { useWizardForm } from "@/components/wizard/use-wizard-form";
 import { type AppRow, type ProviderRow, listApps, listProviders } from "@/lib/api";
 import { EMPTY_FORM, type Form, NAME_RE, SERVER_PICK_ANOTHER, appNameCheck, buildManifest, manifestReady, manifestYAML, needsSecret, serverTaken } from "@/lib/manifest";
 import { version } from "@/lib/public";
-import { RECHECK, SAVE_DRAFT, SAVE_PUBLISH, SECRET_WAITS, SET_AGAIN, STORE_AND_CHECK, checkRow, finishLater, publishRow } from "@/lib/save-words";
-import { registerNeedsGlobal } from "@/lib/server-words";
-import { adminAreas, adminServers } from "@/lib/session";
-import { navigate } from "@/lib/router";
-import { LEDE } from "@/lib/words";
+import {
+  ADD_SERVER_TITLE, BACK, CRUMB_ADD, RECHECK, SAVE_DRAFT, SAVE_PUBLISH, SECRET_WAITS, SERVER_STEPS, SET_AGAIN, STORE_AND_CHECK,
+  checkRow, finishLater, liveNow, nextTo, publishRow,
+} from "@/lib/save-words";
+import { openServer } from "@/lib/server-roles-words";
+import { REGISTER_NEEDS_GLOBAL } from "@/lib/server-words";
+import { adminAreas } from "@/lib/session";
+import { navigate, setLeaveGuard } from "@/lib/router";
+import { routeByKey } from "@/lib/routes";
+import { IMPORT_RECORD, LEDE } from "@/lib/words";
 import { cn, downloadText } from "@/lib/utils";
 
-const LABELS = ["Server", "Credential", "Review", "Check"];
 const soft = <T,>(p: Promise<T>) => p.catch(() => null);
 
 // AddServer is the Add MCP server wizard at /console/servers/new: Server,
@@ -44,9 +48,12 @@ export function AddServer() {
   const [apps, setApps] = React.useState<AppRow[] | null | undefined>(undefined);
   const [runtimes, setRuntimes] = React.useState<string[] | null>(null);
   const [providers, setProviders] = React.useState<ProviderRow[] | null | undefined>(undefined);
-  const [ask, setAsk] = React.useState(false);
+  // ask holds the departure the leave question waits on, from Cancel or
+  // from the router's guard.
+  const [ask, setAsk] = React.useState<{ go: () => void } | null>(null);
   const [testOpen, setTestOpen] = React.useState(false);
   const importBox = React.useRef<HTMLTextAreaElement>(null);
+  const named = React.useRef(false);
   const heading = React.useRef<HTMLHeadingElement>(null);
   const shown = React.useRef(at);
   const install = useInstall();
@@ -75,6 +82,7 @@ export function AddServer() {
 
   const step = STEP_KEYS[at];
   const name = f.name.trim();
+  const importing = f.mode === "import";
   const yaml = manifestYAML(buildManifest(f));
   const check = apps === undefined && NAME_RE.test(name) ? null : appNameCheck(f.name, apps ?? null);
   const landed = install.landed;
@@ -87,6 +95,7 @@ export function AddServer() {
   // check, is refused by the check's existed answer, never saved over.
   const saver = useDraftSave({
     name: name || "the server",
+    toast: liveNow(name),
     creates: { object: "App/" + name, taken: serverTaken(name) + " " + SERVER_PICK_ANOTHER },
     onPublished: () => {
       void install.afterPublish({ name, url: f.runtime === "remote" ? f.url.trim() : "", secret: secretFor(), onSecretTried: () => form.setValue("secret", "") }).then((reached) => { if (reached) setAt(3); });
@@ -133,6 +142,7 @@ export function AddServer() {
 
   const another = () => {
     form.reset(EMPTY_FORM);
+    named.current = false;
     install.reset();
     setTestOpen(false);
     setAt(0);
@@ -140,7 +150,24 @@ export function AddServer() {
   };
 
   const dirty = !!(name || f.desc.trim() || f.url.trim() || f.exec.trim() || f.image.trim());
-  const cancel = () => { if (installed || dirty) setAsk(true); else navigate("servers"); };
+  // away leaves for the servers list past the guard, once the person chose to.
+  const away = () => { setLeaveGuard(null); navigate("servers"); };
+  const cancel = () => { if (installed || dirty) setAsk({ go: away }); else navigate("servers"); };
+
+  // While Cancel would ask, every other door out asks the same question: the
+  // router's guard covers the breadcrumb, the rail, the header and the
+  // palette. What next ends the wizard, and a Save draft that landed opens
+  // its draft, which passes.
+  const guarded = step !== "check" && (!!installed || dirty);
+  const savingDraft = saver.busy === "draft";
+  React.useEffect(() => {
+    if (!guarded) return;
+    setLeaveGuard((next, go) => {
+      if (savingDraft && next.kind === "route" && next.key === "drafts") { go(); return; }
+      setAsk({ go });
+    });
+    return () => setLeaveGuard(null);
+  }, [guarded, savingDraft]);
 
   const label = name || "the server";
   const planned: Row[] = [
@@ -150,17 +177,18 @@ export function AddServer() {
   ];
   const spin = <Loader2Icon className="animate-spin" />;
   const push = <span className="flex-1" />;
+  const forward = <Button onClick={() => void next()}>{nextTo(SERVER_STEPS[at + 1])}</Button>;
 
   let body: React.ReactNode = null;
   let footer: React.ReactNode = null;
   if (step === "server") {
-    body = <ServerStep f={f} errors={errors} field={field} set={set} check={check} runtimes={runtimes} dry={dry} yaml={yaml} importBox={importBox} />;
-    footer = <>{push}<Button onClick={() => void next()}>Next</Button></>;
+    body = <ServerStep f={f} errors={errors} field={field} set={set} check={check} runtimes={runtimes} dry={dry} yaml={yaml} importBox={importBox} named={named} />;
+    footer = <>{push}{forward}</>;
   } else if (step === "credential") {
     body = <CredentialStep f={f} errors={errors} control={form.control} field={field} set={set} providers={providers} installed={installed ? installed.name : ""} dry={dry} yaml={yaml} />;
     footer = installed
       ? <>{push}<Button onClick={() => void storeAgain()} disabled={install.busy}>{install.busy && spin}{STORE_AND_CHECK}</Button></>
-      : <><Button variant="ghost" onClick={back}>Back</Button>{push}<Button onClick={() => void next()}>Next</Button></>;
+      : <><Button variant="ghost" onClick={back}>{BACK}</Button>{push}{forward}</>;
   } else if (step === "review") {
     body = (
       <>
@@ -183,14 +211,14 @@ export function AddServer() {
   } else if (landed && installed) {
     const running = landed.read ? landed.read.kind === "running" : false;
     const open = () => navigate("servers", [installed.id]);
-    body = <CheckStep rows={landed.rows} read={landed.read} name={installed.name} tools={installed.tools || []} problem={install.problem} />;
+    body = <CheckStep rows={landed.rows} read={landed.read} name={installed.name} tools={installed.tools || []} problem={install.problem} onOpen={open} />;
     footer = running ? (
       <>
         <Button variant="outline" onClick={() => downloadText(installed.name + ".yaml", yaml, "application/yaml")}><DownloadIcon />Download app.yaml</Button>
         {push}
         <Button variant="ghost" onClick={another}>Add another server</Button>
         <Button variant="outline" onClick={() => setTestOpen(true)}>Test a call</Button>
-        <Button onClick={open}>{"Open " + installed.name}</Button>
+        {!whatNextShown(landed.rows, landed.read) && <Button onClick={open}>{openServer(installed.name)}</Button>}
       </>
     ) : (
       <>
@@ -205,9 +233,9 @@ export function AddServer() {
   if (locked) {
     return (
       <>
-        <PageHead label="MCP servers" title="Add MCP server" description="Registering a server is a global admin's door." />
+        <PageHead label={CRUMB_ADD} crumbs={[{ label: routeByKey("servers").label, to: "servers" }]} title="Add MCP server" description="" />
         <EmptyState icon={LockIcon} title="Add MCP server is not available to this account." action={<Button variant="outline" onClick={() => navigate("servers")}>Open MCP servers</Button>}>
-          {registerNeedsGlobal(adminServers())}
+          {REGISTER_NEEDS_GLOBAL}
         </EmptyState>
       </>
     );
@@ -216,33 +244,43 @@ export function AddServer() {
   return (
     <div className="flex min-h-full flex-col">
       <PageHead
-        label="MCP servers"
-        title="Add MCP server"
-        description="One door from the manifest to a server Straza fronts. Four steps, and nothing goes live until you publish."
+        label={CRUMB_ADD}
+        crumbs={[{ label: routeByKey("servers").label, to: "servers" }]}
+        title={ADD_SERVER_TITLE}
+        description=""
         actions={step !== "check" ? <Button variant="ghost" onClick={cancel} disabled={install.busy}>Cancel</Button> : undefined}
       />
       <div className="flex flex-1 flex-col gap-5 px-6 pt-5 pb-6">
-        <StepStrip labels={LABELS} at={at} />
+        {/* What next ends the wizard, so every step reads as done there. */}
+        <StepStrip labels={SERVER_STEPS} at={step === "check" && landed && whatNextShown(landed.rows, landed.read) ? SERVER_STEPS.length : at} />
         <div>
-          <h2 ref={heading} tabIndex={-1} className="text-base font-semibold text-foreground outline-none">{LABELS[at]}</h2>
-          <p className="mt-0.5 max-w-[80ch] text-sm text-muted-foreground">{LEDE[step]}</p>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+            <h2 ref={heading} tabIndex={-1} className="text-body leading-6 font-semibold text-foreground outline-none">{SERVER_STEPS[at]}</h2>
+            {/* A registry record is not a way to reach a server, so its door sits beside the heading and opens the paste box in the step. */}
+            {step === "server" && (
+              <Button variant="link" size="sm" className="h-auto p-0" aria-expanded={importing} onClick={() => set({ mode: importing ? f.runtime : "import" })}>
+                {IMPORT_RECORD}
+              </Button>
+            )}
+          </div>
+          {LEDE[step] && <p className="mt-0.5 max-w-[80ch] text-dense text-muted-foreground">{LEDE[step]}</p>}
         </div>
         {body}
       </div>
-      <div className="sticky bottom-0 flex items-center gap-2 border-t border-border bg-background px-6 py-3" data-wizard-foot>{footer}</div>
-      <AlertDialog open={ask} onOpenChange={setAsk}>
+      <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-background px-6 py-3" data-wizard-foot>{footer}</div>
+      <AlertDialog open={!!ask} onOpenChange={(o) => { if (!o) setAsk(null); }}>
         <AlertDialogContent className="sm:max-w-[560px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{installed ? "Leave the wizard?" : "Discard these answers?"}</AlertDialogTitle>
             <AlertDialogDescription>
               {installed
-                ? <>Leave the wizard. <b className="font-semibold text-foreground">{installed.name}</b>{" stays installed and reads " + installed.status + " on the MCP servers page. You can finish access later from its page."}</>
+                ? <><b className="font-semibold text-foreground">{installed.name}</b>{" is published and stays " + installed.status + "."}</>
                 : "Nothing has been created yet. Discarding loses " + (name ? "the name " + name + " and " : "") + "the answers so far."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{installed ? "Keep going" : "Keep editing"}</AlertDialogCancel>
-            <AlertDialogAction className={installed ? undefined : "bg-danger text-white hover:bg-danger/90"} onClick={() => navigate("servers")}>
+            <AlertDialogAction className={installed ? undefined : DANGER_FILL} onClick={() => { const go = ask?.go; setAsk(null); go?.(); }}>
               {installed ? "Leave" : "Discard the answers"}
             </AlertDialogAction>
           </AlertDialogFooter>

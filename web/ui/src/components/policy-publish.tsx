@@ -11,7 +11,7 @@ import {
   listPolicies, listSessions, listUsers, query, simulate,
 } from "@/lib/api";
 import { type Bucket, type Postures, NO_POSTURES, addPostures, openDoc, posturesOf, posturesOfRules, rulesOf } from "@/lib/policy-model";
-import { CANCEL, EVERYONE, PROBE_ORIGIN, PUBLISH, PUBLISH_DRAFT_NOTE, STRIP, TEST_FIRST, VERDICT, blastSentence, list, publishTitle, rulesStrip, savedToast, verdictBy, whatChanges } from "@/lib/policy-words";
+import { CANCEL, EVERYONE, PUBLISH, PUBLISH_DRAFT_NOTE, STRIP, TEST_A_CALL, VERDICT, blastSentence, list, publishTitle, rulesStrip, savedToast, verdictBy, whatChanges } from "@/lib/policy-words";
 import { cn } from "@/lib/utils";
 
 // The publish dialog of the Policies area: what the
@@ -190,8 +190,8 @@ function Body({ name, text, baseText, wasLive, turnOn, roles, probe, extra, onOp
     <>
       <DialogHeader>
         <DialogTitle>{publishTitle(name)}</DialogTitle>
-        <DialogDescription>{whatChanges(diff.added, diff.changed, diff.removed, roles, isNew, wasLive)}</DialogDescription>
-        {turnOn && <p className="text-sm leading-relaxed text-text-2" data-turn-on-note>{PUBLISH_DRAFT_NOTE}</p>}
+        <DialogDescription>{whatChanges(diff.added, diff.changed, diff.removed, roles)}</DialogDescription>
+        {turnOn && <p className="text-dense leading-relaxed text-text-2" data-turn-on-note>{PUBLISH_DRAFT_NOTE}</p>}
       </DialogHeader>
 
       <div className="overflow-hidden rounded-md border border-border" data-publish-strip>
@@ -199,33 +199,33 @@ function Body({ name, text, baseText, wasLive, turnOn, roles, probe, extra, onOp
           <TableBody>
             {probe && (
               <TableRow className="hover:bg-transparent">
-                <TableCell className="w-40 align-top text-[13px] text-muted-foreground">{STRIP.call}</TableCell>
-                <TableCell colSpan={3} className="whitespace-normal text-sm text-foreground">
-                  {probe.label} <span className="text-muted-foreground">{"· " + PROBE_ORIGIN}</span>
+                <TableCell className="w-40 align-top text-caption text-muted-foreground">{STRIP.call}</TableCell>
+                <TableCell colSpan={3} className="whitespace-normal text-dense text-foreground">
+                  {probe.label}
                 </TableCell>
               </TableRow>
             )}
             {probe && (
               <TableRow className="hover:bg-transparent">
-                <TableCell className="w-40 align-top text-[13px] text-muted-foreground">{STRIP.now}</TableCell>
-                <TableCell className="whitespace-normal text-sm text-text-2" data-verdict-now>{verdictWords(answer?.now, name)}</TableCell>
+                <TableCell className="w-40 align-top text-caption text-muted-foreground">{STRIP.now}</TableCell>
+                <TableCell className="whitespace-normal text-dense text-text-2" data-verdict-now>{verdictWords(answer?.now, name)}</TableCell>
                 <TableCell className="w-8 text-center text-muted-foreground" aria-hidden="true">→</TableCell>
-                <TableCell className="whitespace-normal text-sm text-foreground" data-verdict-after>{verdictWords(answer?.after, name)}</TableCell>
+                <TableCell className="whitespace-normal text-dense text-foreground" data-verdict-after>{verdictWords(answer?.after, name)}</TableCell>
               </TableRow>
             )}
             <TableRow className="hover:bg-transparent">
-              <TableCell className="w-40 align-top text-[13px] text-muted-foreground">{STRIP.rules + " " + who}</TableCell>
-              <TableCell className="whitespace-normal text-sm text-muted-foreground" data-rules-now>{nowParts.join(" · ")}</TableCell>
+              <TableCell className="w-40 align-top text-caption text-muted-foreground">{STRIP.rules + " " + who}</TableCell>
+              <TableCell className="whitespace-normal text-dense text-muted-foreground" data-rules-now>{nowParts.join(" · ")}</TableCell>
               <TableCell className="w-8 text-center text-muted-foreground" aria-hidden="true">→</TableCell>
-              <TableCell className="whitespace-normal text-sm text-text-2" data-rules-after>
+              <TableCell className="whitespace-normal text-dense text-text-2" data-rules-after>
                 {afterParts.map((part, i) => (
                   <span key={part} className={cn(part !== nowParts[i] && "font-semibold text-foreground")}>{i ? " · " : ""}{part}</span>
                 ))}
               </TableCell>
             </TableRow>
             <TableRow className="hover:bg-transparent">
-              <TableCell className="w-40 align-top text-[13px] text-muted-foreground">{STRIP.sessions}</TableCell>
-              <TableCell colSpan={3} className="whitespace-normal text-sm text-text-2" data-blast>{blast ? blastSentence(blast) : ""}</TableCell>
+              <TableCell className="w-40 align-top text-caption text-muted-foreground">{STRIP.sessions}</TableCell>
+              <TableCell colSpan={3} className="whitespace-normal text-dense text-text-2" data-blast>{blast ? blastSentence(blast) : ""}</TableCell>
             </TableRow>
           </TableBody>
         </Table>
@@ -234,7 +234,7 @@ function Body({ name, text, baseText, wasLive, turnOn, roles, probe, extra, onOp
       {save.note && <SaveNoteLine note={save.note} />}
 
       <DialogFooter className="sm:justify-between">
-        <Button variant="ghost" onClick={() => setTesting(true)}><PlayIcon /> {TEST_FIRST}</Button>
+        <Button variant="ghost" onClick={() => setTesting(true)}><PlayIcon /> {TEST_A_CALL}</Button>
         <div className="flex items-center justify-end gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>{CANCEL}</Button>
           <Button onClick={publish} disabled={busy} data-publish>{busy && <Loader2Icon className="animate-spin" />}{PUBLISH}</Button>

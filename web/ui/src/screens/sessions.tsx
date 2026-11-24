@@ -1,113 +1,138 @@
 import * as React from "react";
-import type { ColumnDef } from "@tanstack/react-table";
-import { ChevronRightIcon, Loader2Icon, MonitorIcon, PowerIcon, RefreshCwIcon } from "lucide-react";
+import { ChevronRightIcon, Loader2Icon, PowerIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DataTable, type SortState, plain, sortable } from "@/components/data-table";
+import { Input } from "@/components/ui/input";
+import { DataTable, type SortState } from "@/components/data-table";
 import { FetchError, RefusedError } from "@/components/error-state";
+import { HelpTip } from "@/components/help-tip";
+import { KindTile } from "@/components/kind-icon";
 import { PageHead } from "@/components/page-head";
-import { SessionBadge, SessionSheet } from "@/components/session-sheet";
-import { UserPicker, type PickedUser } from "@/components/user-picker";
+import { KindPills, sessionColumns } from "@/components/session-list-parts";
+import { Segmented } from "@/components/segmented";
 import { type ApiError, type OverviewAnswer, type SessionRow, listSessions, overview, revokeSession, revokeSessions } from "@/lib/api";
+import { STATUS_LABEL } from "@/lib/chip-words";
 import { take } from "@/lib/handoff";
 import { notify } from "@/lib/notify";
 import { usePagedList } from "@/lib/paged";
+import { RELOAD, RELOAD_LIST, RELOAD_NOW } from "@/lib/role-words";
 import { navigate } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
 import { refused } from "@/lib/say";
 import { snapshot } from "@/lib/session";
 import {
-  ATT_LEGEND,
-  ATT_TITLE,
+  CLEAR_USER,
   EMPTY_ACTIVE,
   EMPTY_FILTERED,
-  OWN_SESSION_WARNING,
+  FILTER_ALL,
+  FILTER_LABEL,
+  GROUPS_OPEN_MAX,
+  LIVE_HELP_NAME,
+  LIVE_OFF,
+  LIVE_ON,
   READING,
-  WIRING_TITLE,
+  SEARCH_LABEL,
+  SEARCH_PLACEHOLDER,
+  SESSION_LABELS,
+  WAITING_COLUMN,
+  WHERE_COLUMN,
   activeWords,
-  attTone,
   countWords,
-  groupActive,
-  groupWords,
+  cutID,
+  groupLine,
+  healthOf,
   hideGroup,
-  pushLine,
+  liveHelp,
   revokeBody,
   revokeLabel,
   revokedWords,
+  selectName,
   selectedWords,
-  shortHash,
-  shortID,
   showGroup,
-  statusTone,
-  wiringTone,
-  worstAttestation,
+  sponsoredBy,
+  userFilter,
+  userKindOf,
 } from "@/lib/session-words";
-import { NONE, absTime, relTimeText } from "@/lib/words";
 import { cn } from "@/lib/utils";
 
-// The session list: one table the server sorts and filters, grouped under
-// one header per person while it is sorted by user, a bulk bar that
-// replaces the filter row while rows are ticked, and one confirm dialog
-// shared by the row's Revoke and the bulk Revoke.
+// The session list: one table the server sorts, filters and searches,
+// grouped under one header per person while it is sorted by user, a bulk
+// bar that replaces the filter row while rows are ticked, and the confirm
+// dialog of the bulk Revoke. A row opens the session's page.
 
 const route = routeByKey("sessions");
+const DEBOUNCE_MS = 300;
+const LABELS: Record<string, string> = { ...SESSION_LABELS, waiting: WAITING_COLUMN, where: WHERE_COLUMN };
 
 // The status segment. "all" is the absence of a status filter, so it sends
 // nothing.
-const STATUSES = ["active", "revoked", "closed", "all"] as const;
+const STATUSES = [
+  { value: "active", label: STATUS_LABEL.active },
+  { value: "revoked", label: STATUS_LABEL.revoked },
+  { value: "closed", label: STATUS_LABEL.closed },
+  { value: "all", label: FILTER_ALL },
+];
 
-const LABELS: Record<string, string> = {
-  session: "Sessions",
-  user: "User",
-  harness: "Harness",
-  client: "Client",
-  attestation: "Attestation",
-  wiring: "Hook configuration",
-  status: "Status",
-  started: "Started",
-  last_seen: "Last seen",
+// WIDTHS fixes every column but Harness, which takes the rest. The Session
+// column holds the cut id with the this console chip and Status the revoked
+// chip. Where cuts its two lines inside the cell, and a long Health word
+// wraps onto a second line beside its icon. The default columns of the
+// grouped list fit a table of 1010 px, a 1280 px window with the rail open.
+// The flat list adds the User column, so there the table scrolls inside its
+// box.
+const WIDTHS: Record<string, string> = {
+  select: "36px", user: "140px", session: "200px", where: "166px", waiting: "68px", health: "190px", last_seen: "104px", status: "106px",
+  client: "112px", attestation: "116px", wiring: "140px", started: "208px",
 };
 
-// Stamp is a relative time with the absolute stamp on hover, the way every
-// table in the console reads a time.
-function Stamp({ iso }: { iso: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="cursor-default text-text-2">{relTimeText(iso)}</span>
-      </TooltipTrigger>
-      <TooltipContent>{absTime(iso)}</TooltipContent>
-    </Tooltip>
-  );
-}
+// HARNESS_FLOOR is the room Harness keeps for "Claude Code 2.2.0".
+const HARNESS_FLOOR = 140;
+
+// minWidth is the table's floor for the columns that are shown. Below it the
+// table scrolls inside its box, so no chip or word paints over the next cell.
+const minWidth = (shown: string[]) => shown.reduce((sum, id) => sum + parseInt(WIDTHS[id] || "0", 10), shown.includes("harness") ? HARNESS_FLOOR : 0) + "px";
+
+// groupKey is the person a session belongs to, the key of its group.
+const groupKey = (r: SessionRow) => r.username || r.user_id;
+
+type Picked = { id: string; username: string };
 
 type Props = {
-  user?: { id: string; username: string };
-  // openID is a session named in the address (sessions/<id>), from a
-  // transcript or an audit record: the list opens on every status and the
-  // row's sheet opens once the page holds it.
-  openID?: string;
+  user?: Picked;
 };
 
-// Sessions is the screen. user presets the User filter when another screen
-// hands a person over, as a prop or through the hand-off box.
-export function Sessions({ user, openID }: Props) {
-  const [status, setStatus] = React.useState<string>(openID ? "all" : "active");
-  const [picked, setPicked] = React.useState<PickedUser | null>(() => user || take<PickedUser>("sessions"));
+// Sessions is the screen. user narrows the list to one person when another
+// screen hands a person over, as a prop or through the hand-off box.
+export function Sessions({ user }: Props) {
+  // handed is the user the link "All sessions of" on a user's page puts in
+  // the hand-off box. That link asks for all of them, so the list opens
+  // under All for it, and under Active otherwise.
+  const [handed] = React.useState(() => (user ? null : take<Picked>("sessions")));
+  const [status, setStatus] = React.useState<string>(handed ? "all" : "active");
+  const [picked, setPicked] = React.useState<Picked | null>(user || handed);
+  const [typed, setTyped] = React.useState("");
+  // searchBox takes the focus when the user filter is cleared, since its
+  // chip leaves the page with the button that was pressed.
+  const searchBox = React.useRef<HTMLInputElement>(null);
+  const [q, setQ] = React.useState("");
   const [sort, setSort] = React.useState<SortState>({ id: "user", desc: false });
-  // closed is the set of folded groups once the person has touched one;
-  // before that, every group is folded when more than one person is
-  // listed, so a fleet opens as a list of people.
-  const [closed, setClosed] = React.useState<Set<string> | null>(null);
+  // opened holds the groups a person folded or opened by hand, by key, and
+  // keeps them across polls. Every other group is open while the whole list
+  // is loaded and short, and folded otherwise.
+  const [opened, setOpened] = React.useState<ReadonlyMap<string, boolean>>(new Map());
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
-  const [openRow, setOpenRow] = React.useState<SessionRow | null>(null);
   const [ask, setAsk] = React.useState<SessionRow[] | null>(null);
   const [problem, setProblem] = React.useState<string | null>(null);
   const [revoking, setRevoking] = React.useState(false);
   const [health, setHealth] = React.useState<OverviewAnswer | null>(null);
 
-  const params = { status: status === "all" ? undefined : status, user: picked ? picked.id : undefined };
+  // The search box asks the server, so it waits for the typing to settle.
+  React.useEffect(() => {
+    const t = setTimeout(() => setQ(typed.trim()), DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [typed]);
+
+  const params = { status: status === "all" ? undefined : status, user: picked ? picked.id : undefined, q };
   const { state, busy, reload, loadMore } = usePagedList<SessionRow>({
     read: listSessions,
     subject: "The session list",
@@ -124,12 +149,6 @@ export function Sessions({ user, openID }: Props) {
 
   const rows = state.kind === "ready" ? state.rows : [];
   const more = state.kind === "ready" && state.more;
-  const wanted = React.useRef(openID || "");
-  React.useEffect(() => {
-    if (!wanted.current) return;
-    const hit = rows.find((r) => r.id === wanted.current);
-    if (hit) { wanted.current = ""; setOpenRow(hit); }
-  }, [rows]);
   const here = snapshot();
   const ownID = here ? here.sessionID : null;
 
@@ -137,147 +156,68 @@ export function Sessions({ user, openID }: Props) {
   const names = new Set(chosen.map((r) => r.username || r.user_id));
   const oneName = names.size === 1 ? [...names][0] : "";
 
-  const groupKey = (r: SessionRow) => r.username || r.user_id;
-  const people = [...new Set(rows.map(groupKey))];
-  const collapsed = closed ?? new Set(people.length > 1 ? people : []);
-  const toggle = (key: string) => setClosed(() => {
-    const next = new Set(collapsed);
-    if (next.has(key)) next.delete(key); else next.add(key);
-    return next;
-  });
-  // A group lies on the table's columns. Its door is the chevron in the
-  // checkbox column, and the name is the door's label, so a click on either
-  // folds or opens the group. Every other column answers for the person's
-  // sessions together.
-  const door = React.useId();
-  const groupCell = (id: string, key: string, members: SessionRow[]) => {
-    const doorID = door + people.indexOf(key);
+  // The groups follow the sort by user, the order the server hands the runs
+  // in; another sort interleaves people and reads flat, with the user
+  // column drawn instead. The rows shown keep the sort they were read in
+  // until a new sort's page lands, so the groups follow that sort, and the
+  // sort asked for only while no row is shown yet.
+  const shownSort = state.kind === "ready" && rows.length ? state.sorting?.key : sort?.id;
+  const grouped = shownSort === "user";
+  const short = rows.length <= GROUPS_OPEN_MAX && !more;
+  const collapsed = React.useMemo(
+    () => new Set(rows.map(groupKey).filter((k) => !(opened.get(k) ?? short))),
+    [rows, opened, short],
+  );
+  const toggle = (key: string) => setOpened((m) => new Map(m).set(key, !(m.get(key) ?? short)));
+  // A group is one line across the table. Its door holds the chevron and
+  // the name, so a click on either folds or opens the group.
+  const groupHead = (key: string, members: SessionRow[]) => {
     const open = !collapsed.has(key);
-    const said = (values: (string | undefined)[]) => [...new Set(values.filter((v): v is string => !!v))];
-    switch (id) {
-      case "select":
-        return (
-          <button
-            type="button"
-            id={doorID}
-            aria-expanded={open}
-            aria-label={open ? hideGroup(key) : showGroup(key)}
-            onClick={(e) => { e.stopPropagation(); toggle(key); }}
-            className="-m-2 flex p-2"
-          >
-            <ChevronRightIcon className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-90")} aria-hidden="true" />
-          </button>
-        );
-      case "user":
-        return <label htmlFor={doorID} className="block cursor-pointer truncate font-mono font-semibold text-foreground" title={key}>{key}</label>;
-      case "session":
-        return <span className="text-text-2 tabular-nums">{groupWords(members.length)}</span>;
-      case "harness":
-      case "client": {
-        const words = said(members.map((m) => (id === "harness" ? m.harness : m.client_version))).join(", ");
-        return words
-          ? <span className="block truncate font-mono text-muted-foreground" title={words}>{words}</span>
-          : <span className="text-muted-foreground">{NONE}</span>;
-      }
-      case "attestation": {
-        const worst = worstAttestation(members.map((m) => m.attestation));
-        return <SessionBadge tone={attTone(worst)} word={worst} title={ATT_TITLE[worst]} />;
-      }
-      case "wiring": {
-        const kinds = said(members.map((m) => m.wiring_status));
-        return kinds.length
-          ? <span className="flex flex-wrap gap-1">{kinds.map((w) => <SessionBadge key={w} tone={wiringTone(w)} word={w} title={WIRING_TITLE[w]} />)}</span>
-          : <span className="text-muted-foreground">{NONE}</span>;
-      }
-      case "status": {
-        const active = members.filter((m) => m.status === "active").length;
-        return active
-          ? <SessionBadge tone="ok" word={groupActive(active)} />
-          : <span className="text-muted-foreground">{groupActive(active)}</span>;
-      }
-      case "started":
-        return <Stamp iso={members.reduce((t, m) => (m.started_at < t ? m.started_at : t), members[0].started_at)} />;
-      case "last_seen":
-        return <Stamp iso={members.reduce((t, m) => (m.last_seen > t ? m.last_seen : t), "")} />;
-    }
-    return null;
+    const name = members[0].username || cutID(members[0].user_id);
+    const active = members.filter((m) => m.status === "active").length;
+    const kind = userKindOf(members[0].user_kind);
+    const sponsor = members[0].sponsor;
+    return (
+      <span className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={open ? hideGroup(name) : showGroup(name)}
+          onClick={(e) => { e.stopPropagation(); toggle(key); }}
+          className="flex min-w-0 items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <ChevronRightIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} aria-hidden="true" />
+          {kind && <KindTile kind={kind} size="sm" />}
+          <span className="truncate font-mono font-semibold text-foreground" title={name}>{name}</span>
+        </button>
+        <span className="min-w-0 truncate text-muted-foreground">
+          {[sponsor ? sponsoredBy(sponsor) : "", groupLine(members.length, active, status === "active")].filter(Boolean).join(" · ")}
+        </span>
+      </span>
+    );
   };
 
-  const columns: ColumnDef<SessionRow>[] = [
-    {
-      id: "user",
-      header: sortable<SessionRow>("User"),
-      cell: ({ row }) => (row.original.username
-        ? <span className="block truncate font-mono" title={row.original.username}>{row.original.username}</span>
-        : <span className="block truncate font-mono text-muted-foreground">{shortID(row.original.user_id)}</span>),
-    },
-    {
-      id: "session",
-      header: plain<SessionRow>("Sessions"),
-      // The console's own session wears a marked icon, not the badge the
-      // sheet carries, so the row stays one line high in the fixed column.
-      cell: ({ row }) => (
-        <span className="flex items-center gap-1.5 whitespace-nowrap">
-          <span className="font-mono">{shortID(row.original.id)}</span>
-          {row.original.id === ownID && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <MonitorIcon role="img" aria-label="this console" className="size-4 shrink-0 text-link" data-this-console />
-              </TooltipTrigger>
-              <TooltipContent>The session this console is signed in with.</TooltipContent>
-            </Tooltip>
-          )}
-        </span>
-      ),
-    },
-    { id: "harness", header: plain<SessionRow>("Harness"), cell: ({ row }) => <span className="block truncate font-mono text-muted-foreground" title={row.original.harness}>{row.original.harness}</span> },
-    {
-      id: "client",
-      header: plain<SessionRow>("Client"),
-      cell: ({ row }) => (row.original.client_version
-        ? <span className="font-mono">{row.original.client_version}</span>
-        : <span className="text-muted-foreground">{NONE}</span>),
-    },
-    {
-      id: "attestation",
-      header: sortable<SessionRow>("Attestation"),
-      cell: ({ row }) => <SessionBadge tone={attTone(row.original.attestation)} word={row.original.attestation} title={ATT_TITLE[row.original.attestation]} />,
-    },
-    {
-      id: "wiring",
-      header: plain<SessionRow>("Wiring"),
-      cell: ({ row }) => (row.original.wiring_status
-        ? <SessionBadge tone={wiringTone(row.original.wiring_status)} word={row.original.wiring_status} title={WIRING_TITLE[row.original.wiring_status] + (row.original.wiring_hash ? " " + shortHash(row.original.wiring_hash) : "")} />
-        : <span className="text-muted-foreground">{NONE}</span>),
-    },
-    { id: "status", header: sortable<SessionRow>("Status"), cell: ({ row }) => <SessionBadge tone={statusTone(row.original.status)} word={row.original.status} /> },
-    { id: "started", header: sortable<SessionRow>("Started"), cell: ({ row }) => <Stamp iso={row.original.started_at} /> },
-    { id: "last_seen", header: sortable<SessionRow>("Last seen"), cell: ({ row }) => <Stamp iso={row.original.last_seen} /> },
-  ];
+  const columns = sessionColumns(grouped, ownID);
 
   const filters = (
     <>
-      <div role="group" aria-label="Status" className="flex items-center">
-        {STATUSES.map((s) => (
-          <Button
-            key={s}
-            variant="outline"
-            size="sm"
-            aria-pressed={status === s}
-            onClick={() => setStatus(s)}
-            className={cn("-ml-px h-9 rounded-none first:ml-0 first:rounded-l-md last:rounded-r-md", status === s && "bg-accent-bg text-foreground")}
-          >
-            {s}
-          </Button>
-        ))}
+      <Segmented label={FILTER_LABEL} value={status} onChange={setStatus} options={STATUSES} />
+      <div className="relative w-full max-w-xs">
+        <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+        <Input ref={searchBox} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={SEARCH_PLACEHOLDER} aria-label={SEARCH_LABEL} className="h-9 pl-8" />
       </div>
-      <UserPicker value={picked} onChange={setPicked} label="User" className="w-64" />
+      {picked && (
+        <span className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background pl-2.5 pr-1 text-dense" data-user-chip={picked.id}>
+          {userFilter(picked.username)}
+          <Button variant="ghost" size="icon-xs" aria-label={CLEAR_USER} onClick={() => { setPicked(null); searchBox.current?.focus(); }}><XIcon /></Button>
+        </span>
+      )}
     </>
   );
 
   // The count leads selectedWords, so the words file keeps the sentence and
-  // the bar only sets its first clause in bold.
-  const lead = selected.size + " selected";
+  // the bar only sets the count in bold.
+  const lead = String(selected.size);
   const bulk = (
     <div className="flex flex-1 flex-wrap items-center gap-2" data-bulk-bar>
       <input type="checkbox" checked readOnly aria-hidden="true" tabIndex={-1} className="size-4 accent-primary" />
@@ -295,13 +235,14 @@ export function Sessions({ user, openID }: Props) {
   // The headline is the server's own count of active sessions, whatever
   // page and filter the list holds.
   const active = health && health.sessions ? health.sessions.active || 0 : null;
-  const line = pushLine(health ? health.push : undefined, active || 0);
-  const laneUp = !!(health && health.push && health.push.lane_up);
+  const push = health ? health.push : undefined;
+  // The kind pills count loaded rows, so they show only while those are
+  // every active session.
+  const pills = state.kind === "ready" && status === "active" && !more && !q && !picked;
 
   const asked = ask || [];
   const askNames = new Set(asked.map((r) => r.username || r.user_id));
   const askName = askNames.size === 1 ? [...askNames][0] : "";
-  const askOwn = asked.some((r) => r.id === ownID);
 
   const revoke = async () => {
     if (!ask || revoking) return;
@@ -312,7 +253,6 @@ export function Sessions({ user, openID }: Props) {
       if (ids.length === 1) await revokeSession(ids[0]); else await revokeSessions(ids);
       setAsk(null);
       setSelected(new Set());
-      setOpenRow(null);
       notify.ok(revokedWords(ids.length));
       void reload();
     } catch (e) {
@@ -328,34 +268,38 @@ export function Sessions({ user, openID }: Props) {
         label={route.label}
         description={route.description}
         actions={
-          <Button variant="ghost" size="sm" aria-label="Reload the list" onClick={() => { void reload(); readHealth(); }}>
-            <RefreshCwIcon /> Reload
+          <Button variant="outline" size="sm" aria-label={RELOAD_LIST} onClick={() => { void reload(); readHealth(); }}>
+            <RefreshCwIcon /> {RELOAD}
           </Button>
         }
       />
       <div className="flex flex-col gap-3 px-6 py-5">
-        {(active !== null || line) && (
+        {(active !== null || push) && (
           <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
             {active !== null && (
-              <p className="flex items-baseline gap-2.5" data-active-count>
-                <b className="text-[24px] leading-none font-semibold text-foreground tabular-nums">{active}</b>{" "}
-                <span className="text-lg leading-none font-semibold text-text-2">{activeWords(active)}</span>
-              </p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <p className="flex items-baseline gap-2.5" data-active-count>
+                  <b className="text-stat leading-none font-semibold text-foreground tabular-nums">{active}</b>{" "}
+                  <span className="text-section leading-none font-semibold text-text-2">{activeWords(active)}</span>
+                </p>
+                {pills && <KindPills rows={rows} />}
+              </div>
             )}
-            {line && (
-              <p className="flex items-center gap-2 text-[14px] text-text-2" data-push-line>
-                <span className={cn("size-2 rounded-full", laneUp ? "bg-ok" : "bg-warn")} aria-hidden="true" />
-                {line}
+            {push && (
+              <p className="flex items-center gap-2 text-dense text-text-2" data-live={push.lane_up ? "on" : "off"}>
+                <span className={cn("size-2 rounded-full", push.lane_up ? "bg-ok" : "bg-warn")} aria-hidden="true" />
+                {push.lane_up ? LIVE_ON : LIVE_OFF}
+                <HelpTip label={LIVE_HELP_NAME} text={liveHelp(push, active || 0)} />
               </p>
             )}
           </div>
         )}
 
-        {state.kind === "loading" && <p className="text-sm text-muted-foreground">{READING}</p>}
+        {state.kind === "loading" && <p className="text-dense text-muted-foreground">{READING}</p>}
         {state.kind === "error" && (
-          <div role="alert" className="rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-sm text-foreground">
+          <div role="alert" className="rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-dense text-foreground">
             {state.message}{" "}
-            <Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={() => { void reload(); readHealth(); }}>Reload now</Button>
+            <Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={() => { void reload(); readHealth(); }}>{RELOAD_NOW}</Button>
           </div>
         )}
         {state.kind === "ready" && state.problem && <FetchError subject={route.label} detail={state.problem} lastRead={state.lastRead} />}
@@ -368,25 +312,23 @@ export function Sessions({ user, openID }: Props) {
             rowKey={(r) => r.id}
             rowName={(r) => r.id}
             dataAttr="data-session"
-            onOpen={setOpenRow}
-            openKey={openRow ? openRow.id : null}
-            // Only an active session can be revoked, so only an active row
+            onOpen={(r) => navigate("sessions", [r.id])}
+            // Only an active session can be revoked, and the console's own
+            // session is revoked from its page, so only another active row
             // can be ticked.
-            selection={{ selected, onChange: setSelected, label: (r) => "Select session " + shortID(r.id), selectable: (r) => r.status === "active" }}
-            // The groups follow the sort by user, the order the server hands
-            // the runs in; another sort interleaves people and reads flat.
-            groups={sort && sort.id === "user" ? { key: groupKey, cell: groupCell, collapsed } : undefined}
+            selection={{ selected, onChange: setSelected, label: (r) => selectName(cutID(r.id)), selectable: (r) => r.status === "active" && r.id !== ownID }}
+            groups={grouped ? { key: groupKey, header: groupHead, collapsed } : undefined}
             // Fixed widths keep the header still while groups fold and open.
-            widths={{ select: "36px", user: "25%", session: "14%", harness: "16%", client: "12%", attestation: "11%", wiring: "10.5%", status: "9.5%", started: "12%", last_seen: "10%" }}
+            widths={WIDTHS}
+            minWidth={minWidth}
             filterBar={selected.size ? bulk : filters}
             count={(shown) => countWords(shown, more)}
-            emptyText={status === "active" && !picked ? EMPTY_ACTIVE : EMPTY_FILTERED}
+            emptyText={status === "active" && !picked && !q ? EMPTY_ACTIVE : EMPTY_FILTERED}
             serverSort={{ state: sort, onChange: setSort }}
-            hiddenByDefault={["client", "started"]}
-            rowClassName={(r) => (r.attestation === "none" ? "shadow-[inset_3px_0_0_var(--danger)]" : "")}
+            hiddenByDefault={["client", "attestation", "wiring", "started"]}
+            rowClassName={(r) => (healthOf(r).level === "danger" ? "shadow-[inset_3px_0_0_var(--danger)]" : "")}
             foot={
               <>
-                <p className="text-[13px] text-muted-foreground" data-att-legend>{ATT_LEGEND}</p>
                 {more && (
                   <div className="flex justify-center">
                     <Button variant="outline" size="sm" onClick={() => void loadMore()} disabled={busy}>
@@ -400,25 +342,12 @@ export function Sessions({ user, openID }: Props) {
         )}
       </div>
 
-      {openRow && (
-        <SessionSheet
-          session={openRow}
-          open
-          onOpenChange={(o) => { if (!o) setOpenRow(null); }}
-          onRevoke={(s) => { setProblem(null); setAsk([s]); }}
-          onOpenUser={(id) => navigate("users", [id])}
-          onOpenTranscript={(id) => navigate("transcripts", [id])}
-          onOpenAudit={(id) => navigate("audit", [id])}
-        />
-      )}
-
       <AlertDialog open={!!ask} onOpenChange={(o) => { if (!o && !revoking) { setAsk(null); setProblem(null); } }}>
         <AlertDialogContent className="sm:max-w-[560px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{revokeLabel(asked.length) + "?"}</AlertDialogTitle>
             <AlertDialogDescription>{revokeBody(asked.length, askName)}</AlertDialogDescription>
           </AlertDialogHeader>
-          {askOwn && <p className="text-sm font-semibold text-foreground">{OWN_SESSION_WARNING}</p>}
           {problem && <RefusedError subject={revokeLabel(asked.length)} message={problem} />}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

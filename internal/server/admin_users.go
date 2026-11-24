@@ -78,7 +78,12 @@ type pagedUserPayload struct {
 	SponsoredCount int           `json:"sponsored_count"`
 }
 
-// usersFilter parses ?q= / ?status= / ?role= and ?sponsor=, the
+// userKindRefusedMsg is the 400 of a kind filter the users list does not
+// know, formatted with the kind sent.
+const userKindRefusedMsg = "kind %q is not a kind of user: kind is person, agent or service. " +
+	"Send one of the three, or leave kind out to list every kind."
+
+// usersFilter parses ?q= / ?status= / ?role= / ?kind= and ?sponsor=, the
 // exact username of the sponsor. Filters require the paged lane: on the
 // legacy bare lane they would have to be silently ignored, and a filter that
 // silently does nothing is a lie about the data.
@@ -88,11 +93,11 @@ type pagedUserPayload struct {
 // ?role=reader.
 func (a *App) usersFilter(w http.ResponseWriter, r *http.Request, paged bool) (store.UserFilter, bool) {
 	q := r.URL.Query()
-	f := store.UserFilter{Q: strings.TrimSpace(q.Get("q")), Status: q.Get("status"), Sponsor: q.Get("sponsor")}
+	f := store.UserFilter{Q: strings.TrimSpace(q.Get("q")), Status: q.Get("status"), Sponsor: q.Get("sponsor"), Kind: q.Get("kind")}
 	role := q.Get("role")
 	if !paged {
-		if f.Q != "" || f.Status != "" || role != "" || f.Sponsor != "" {
-			apiError(w, http.StatusBadRequest, "q/status/role/sponsor filters require pagination: add limit=")
+		if f.Q != "" || f.Status != "" || role != "" || f.Sponsor != "" || f.Kind != "" {
+			apiError(w, http.StatusBadRequest, "q/status/role/sponsor/kind filters require pagination: add limit=")
 			return f, false
 		}
 		return f, true
@@ -101,6 +106,12 @@ func (a *App) usersFilter(w http.ResponseWriter, r *http.Request, paged bool) (s
 	case "", store.UserActive, store.UserDisabled:
 	default:
 		apiError(w, http.StatusBadRequest, "status must be active or disabled")
+		return f, false
+	}
+	switch f.Kind {
+	case "", store.UserKindPerson, store.UserKindAgent, store.UserKindService:
+	default:
+		apiError(w, http.StatusBadRequest, fmt.Sprintf(userKindRefusedMsg, f.Kind))
 		return f, false
 	}
 	if role != "" {
@@ -167,7 +178,12 @@ func (a *App) handleUsersList(w http.ResponseWriter, r *http.Request) {
 		users = users[:p.limit]
 		after = &users[p.limit-1]
 	}
-	a.writeUsersPage(w, r, p, users, after)
+	counts, err := a.store.Users().KindCounts(r.Context(), f)
+	if err != nil {
+		a.fail(w, r, http.StatusInternalServerError, "list users failed", err)
+		return
+	}
+	a.writeUsersPage(w, r, p, users, after, counts)
 }
 
 // The 400 answers to a password for an AI agent or a service account, which
@@ -281,6 +297,7 @@ func (a *App) handleUsersGet(w http.ResponseWriter, r *http.Request) {
 		detail.EffectiveRoles = []string{}
 	}
 	detail.Locks = []lockPayload{}
+	detail.Entra = a.entraAgentOf(r.Context(), u)
 	if locks, err := a.store.Revocations().ListByTarget(r.Context(), store.RevokeUser, u.ID); err == nil {
 		for _, rv := range locks {
 			detail.Locks = append(detail.Locks, lockPayload{
@@ -340,6 +357,8 @@ type userDetailPayload struct {
 	} `json:"counts"`
 	NHIKeyRegistered *bool `json:"nhi_key_registered,omitempty"` // kind=nhi only
 	SponsoredCount   int   `json:"sponsored_count"`
+	// Entra is what Microsoft Entra ID says about an agent Entra owns.
+	Entra *entraAgentPayload `json:"entra,omitempty"`
 }
 
 type lockPayload struct {
@@ -413,6 +432,14 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusForbidden, "the break-glass admin cannot be deactivated (lockout guarantee)")
 		return
 	}
+	// The emergency sign-in signs in a person only, so an AI agent or a
+	// service account named break-glass would lock everyone out.
+	if u.Username == BreakGlassUsername && req.UserType != nil {
+		if v := strings.ToLower(strings.TrimSpace(*req.UserType)); v == store.UserTypeAgent || v == store.UserTypeService {
+			apiError(w, http.StatusForbidden, "the break-glass admin cannot be made an AI agent or a service account (lockout guarantee)")
+			return
+		}
+	}
 	if req.Email != nil {
 		u.Email = *req.Email
 	}
@@ -465,8 +492,14 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		deactivated = u.Status == store.UserActive && *req.Status == store.UserDisabled
-		reactivated = u.Status == store.UserDisabled && *req.Status == store.UserActive
+		reactivated = *req.Status == store.UserActive && (u.Status == store.UserDisabled || a.outlivedDisable(r.Context(), u))
 		u.Status = *req.Status
+	}
+	// Entra writes what entraWrites names at its next read, so a change of it
+	// here would not last. A value sent unchanged is no change.
+	if msg := a.entraOwnedMsg(before); msg != "" && entraWrites(before, u) {
+		apiError(w, http.StatusConflict, msg)
+		return
 	}
 	if req.Password != nil {
 		if *req.Password == "" {
@@ -506,7 +539,7 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	// write leaves the user active and the same request disables it again.
 	var revoke *store.UserRevocation
 	if deactivated {
-		revoke, err = a.userRevocation(r.Context(), u.ID, "user disabled by admin", store.RevocationOriginAdmin)
+		revoke, err = a.userRevocation(r.Context(), u.ID, "user disabled by admin", store.RevocationOriginAdminDisable)
 	}
 	var updated store.User
 	if err == nil {
@@ -535,14 +568,15 @@ func (a *App) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	if deactivated {
 		a.userRevokedCtx(r.Context(), updated.ID, "user disabled by admin", store.RevocationOriginAdmin)
 	}
+	notice := ""
 	if reactivated {
-		a.allowUserCtx(r.Context(), updated.ID)
+		notice = a.enableLift(r.Context(), updated)
 	}
 	if before.EntraAgentID != u.EntraAgentID {
 		a.entraAgentIDChanged(r.Context(), updated.ID)
 	}
 	a.identityChanged(r, "straza.identity.updated", updated.ID)
-	writeJSON(w, http.StatusOK, toUserPayload(updated))
+	writeJSON(w, http.StatusOK, userUpdatePayload{userPayload: toUserPayload(updated), Notice: notice})
 }
 
 // handleUserUnlock lifts EVERY revocation lane for the user, the explicit

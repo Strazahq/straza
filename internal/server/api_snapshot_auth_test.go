@@ -78,7 +78,12 @@ func signedSessionToken(t *testing.T, app *App, issuer, session string, exp time
 		if k.Status != store.KeyActive {
 			continue
 		}
-		key, err := jwk.Import(ed25519.NewKeyFromSeed(k.PrivateKey))
+		plain, err := app.kek.Open(k.PrivateKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed := bytes.TrimPrefix(plain, []byte(store.KeyPurposeSession+" "+k.KID+"\n"))
+		key, err := jwk.Import(ed25519.NewKeyFromSeed(seed))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +144,7 @@ func TestSnapshotRouteSessionGate(t *testing.T) {
 	}
 	// A session token signed with this server's keys under another issuer
 	// stands for a token this server did not issue.
-	foreign, err := authn.NewTokenService(context.Background(), ent.store.SigningKeys(), "https://other.example", 0)
+	foreign, err := authn.NewTokenService(context.Background(), ent.store.SigningKeys(), ent.kek, "https://other.example", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

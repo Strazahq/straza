@@ -11,9 +11,9 @@ weight: 10
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: The CLI form on a throwaway standalone server in a Linux container, where the admin decided a hook hold and a ticket that dana's machine raised and revoked the session that asked. Those decisions came from strazactl, which no longer decides. The console form and the gateway retry were walked in headless Chromium against the demo stack on v1.1.0 on 2026-09-28 and not again, because deciding there writes to the shared stack. That walk's held call was the agent joe's gateway call to demo-tools get-sum, and the denied one his get-env ticket. The console's browser sign-in was written from the code on 2026-10-22 and not walked
+  platform: The CLI form on a throwaway standalone server in a Linux container, where the admin decided a hook hold and a ticket that dana's machine raised and revoked the session that asked. Those decisions came from strazactl, which no longer decides. The console form and the gateway retry were walked in headless Chromium against the demo stack on v1.1.0 on 2026-09-28 and not again, because deciding there writes to the shared stack. That walk's held call was the agent joe's gateway call to demo-tools get-sum, and the denied one his get-env ticket. The console's browser sign-in was written from the code on 2026-10-22 and not walked. The request dialog and the session's page were rewritten from the code on 2026-11-15 and not walked
   date: 2026-10-06
-  except: the console's browser sign-in, written from the code and not walked
+  except: the console's browser sign-in, the request dialog and the session's page, written from the code and not walked
 applies_to: both
 keywords: console approve hold retry
 who: Admin
@@ -45,7 +45,7 @@ A person who is not an admin decides on the self-service page at `/self-service/
 
 {{< console >}}
 
-Open the console at your server's address, `http://localhost:8420/console/` on the demo stack, and press **Sign in**. The line above the button says where you sign in, such as `You sign in at your identity provider, localhost:8480, and come back to this page.` On a standalone host it names the server's own sign-in page instead. The line under the button says who the console is for: `Admin roles only. Anyone else lands on the self-service page, still signed in.`
+Open the console at your server's address, `http://localhost:8420/console/` on the demo stack, and press **Sign in**. The line above the button says where you sign in, such as `You sign in at localhost:8480.` On a standalone host it names Straza's own page instead. The line under the button says who the console is for: `Admin roles only. Others land on the self-service page.`
 
 Your identity provider opens in the same tab. Sign in there, and the provider sends the tab back to the console, which says `Signing you in` and opens the page you started on. When the browser is still signed in at the provider, it can send you straight back without asking for your password.
 
@@ -79,7 +79,7 @@ read -rs STRAZA_API_TOKEN && export STRAZA_API_TOKEN
 
 {{< shot name="approvals-waiting" caption="The Waiting filter with dana's held `kubectl apply`, marked `yours`, and the time left." >}}
 
-The Requests label carries the number of requests that wait. Above the table sit the filters `Waiting`, `Decided` and `All`, a search box that reads `Search who asked, calls, rules`, and a count of what is shown. With two requests waiting in the example, that count read `2 requests wait, 2 yours to decide`.
+The Requests label carries the number of requests that wait. Above the table sit the filters `Waiting`, `Decided` and `All`, a search box that reads `Search who asked, calls, policy rules`, and a count of what is shown. With two requests waiting in the example, that count read `2 requests wait, 2 yours to decide`.
 
 
 Each row has five columns: Asked, Who asked, Call, Who decides and State. Here is the held `get-sum` call as the queue rendered it, one column per line, with the second line of a cell under the first.
@@ -119,20 +119,20 @@ The list prints one row per pending request, a held call and a ticket alike, und
 
 {{< console >}}
 
-Select the row to open the request. The sheet is titled `Approval request`. A strip under the title carries the kind, `hold`, and what that means: `The agent is waiting right now for your answer.` The time left stands at the right of the strip, `14 s left` over `then the call is denied`, and a thin meter under the strip drains with it.
+Select the row, and the request opens under a title that says who asks for what, such as `joe-java-developer-agent wants to call a tool`. A strip under the title carries the kind, `hold`, and what that means: `The agent is waiting for your answer.` The time left stands at the right of the strip, `14 s left` over `then the call is denied`, and a thin meter under the strip drains with it.
 
-{{< shot name="approval-request" caption="The request sheet, with the hold and its time left, the call, what each answer does and who can decide." >}}
+{{< shot name="approval-request" caption="The request dialog, with the hold and its time left, the call, what each answer does and who can decide." >}}
 
 
 The body reads in the order of the decision:
 
-- `joe-java-developer-agent wants to call` stands over a box with the tool, `get-sum`, and the MCP server `demo-tools` in a chip beside it.
+- A box holds the tool, `get-sum`, with the MCP server `demo-tools` in a chip beside it.
 - A folded line, `Parameters · 2 values`, opens a table of what the agent passed to the tool as the server stored it. Secrets are redacted, and the whole preview is cut at 2 KiB.
-- **Show as JSON and the hash**, inside it, shows the same arguments as JSON with the fingerprint the approval binds. For this call that read `sha256 6b604dd458ac…`.
-- One line places the call: `through the MCP gateway · asked 1 m ago · sponsored by you`.
-- The agent's reason comes next, in quotes, over the line `The agent's own words. Nobody checked them.` This call carried no reason, so it read `The agent gave no reason.`
+- **JSON and hash**, inside it, shows the same arguments as JSON with the fingerprint the approval binds. For this call that read `sha256 6b604dd458ac…`.
+- One line places the call: `through the MCP gateway · asked 1 m ago · you sponsor it`.
+- The agent's reason comes next, in a box headed `joe-java-developer-agent's reason`, with the chip `unverified` that says `Their own words. Nobody checked them.` This call carried no reason, so it read `The agent gave no reason.`
 - Two boxes say what each button does. `IF YOU APPROVE` reads `The call runs now, once.` and `IF YOU DENY` reads `The call does not run. The agent is told who said no.`
-- One sentence says who can decide: `You (alice), as joe-java-developer-agent's sponsor. Nobody else.`
+- One sentence says who can decide: `You, as joe-java-developer-agent's sponsor. Nobody else.`
 
 
 The last line of the body, `Details`, is folded while the request waits. It opens the record as one table of facts, with a label on every row.
@@ -140,13 +140,13 @@ The last line of the body, `Details`, is folded while the request waits. It open
 ```table
 Requested by     joe-java-developer-agent · sponsored by alice
 Session          01a0e9b2-cc62… · Open session · Open transcript
-When             1 m ago · 2026-09-28 20:26:58 UTC
+Asked            1 m ago · 2026-09-28 20:26:58 UTC
 How it came in   through the MCP gateway
 Decide by        14 s left · until 2026-09-28 20:28:58 UTC · then the call is denied
 Policy rule      demo-tools-get-sum-approve in policy demo-tools-sandbox-access
 ```
 
-Session and Policy rule carry links into the Sessions, Transcripts and Policies areas. The buttons at the foot of the sheet are Close, Deny and Approve.
+Session and Policy rule carry links into the Sessions, Transcripts and Policies areas. Under it, a request you may decide shows **Reason, optional** and the buttons Close, Deny and Approve.
 {{< /console >}}
 
 {{< cli >}}
@@ -164,18 +164,18 @@ strazactl approvals list --wide
 
 {{< console >}}
 
-{{< clicks "Approve" "Approve request" >}}
+{{< clicks "Approve" >}}
 
-Press **Approve**, on the row or at the foot of the sheet. A second dialog asks `Approve get-sum for joe-java-developer-agent?` and says what happens next: `The call runs now, once, and the agent's session gets the answer.` Type your own words under **Reason, optional**, plain text up to 500 characters, and press **Approve request**.
+Type your own words under **Reason, optional**, plain text up to 500 characters, and press **Approve** at the foot of the request. A row's own **Approve** opens the same request.
 
-{{< shot name="approval-approve" caption="The Approve question, here for dana's `kubectl apply`, with the optional reason." >}}
+{{< shot name="approval-approve" caption="The request of dana's `kubectl apply`, with the optional reason over **Deny** and **Approve**." >}}
 
 {{< see >}}A toast says `Approved. get-sum runs now for joe-java-developer-agent.`, and the row leaves the Waiting filter.{{< /see >}}
 
 ![Replay: an agent's MCP call waits on a hold while its sponsor approves it in the console's Approvals area, and then the held call runs](../../../static/replays/approval-flow.png)
 
 
-Deny asks in the same shape. On the example's ticket row it asked `Deny get-env for joe-java-developer-agent?`, with `The call is denied and the agent is told who denied it.` under the question, and its button read `Deny request`. Once every request is decided, Waiting reads `No pending approval requests.`
+**Deny** decides the same way, and on the example's ticket it said `Denied. joe-java-developer-agent is told get-env was denied.` Once every request is decided, Waiting reads `No request waits.`
 {{< /console >}}
 
 {{< cli >}}
@@ -199,15 +199,15 @@ Repeating a verdict that already landed changes nothing. The opposite verdict on
 
 {{< fails >}}
 `This is your own request.`
-: The console does not decide a request you raised. Confirm it on your enrolled phone, or in a browser you enabled on the self-service page, as [Approve in the browser]({{< relref "guides/approve/browser.md" >}}) shows.
+: The console does not decide a request you raised. Confirm it on your enrolled phone, or in a browser set up to approve on the self-service page, as [Approve in the browser]({{< relref "guides/approve/browser.md" >}}) shows.
 
-`The window closed while this was open, so the call was denied.`
+`Time ran out. The call was denied.`
 : The request's window ran out before your answer landed. The agent's next try raises a new request.
 
 `This request is no longer yours to decide:` followed by the server's reason
 : The server checked again and no longer counts you as a decider of this request. The reason after the colon says why.
 
-`<call> for <requester> was already approved by <person> from <channel> <time>, so there is nothing left to decide here.`
+`<call> for <requester> was already approved by <person> from <channel> <time>.`
 : Another person who may decide answered first. Nothing more is needed.
 {{< /fails >}}
 
@@ -219,7 +219,7 @@ Repeating a verdict that already landed changes nothing. The opposite verdict on
 
 {{< shot name="approvals-decided" caption="The Decided filter, where each request shows its state, who decided, from where and in what words." >}}
 
-The row keeps the state word and adds who decided it, from where and in what words. The request above then read `Approved` over `by alice from the console, 8 s ago · “Expected call from the build job”`. Opening that row shows the badge `Approved` in the strip, beside one sentence that says who decided. Details stands open, with the decision at the top of the same facts table.
+The row keeps the state word and adds who decided it, from where and in what words. The request above then read `Approved` over `by alice from the console, 8 s ago · “Expected call from the build job”`. Opening that row shows the badge `approved` in the strip, beside one sentence that says who decided. Details stands open, with the decision at the top of the same facts table.
 
 ```table
 Decided by    alice from the console · 2026-09-28 20:28:45 UTC · 9 s ago
@@ -257,9 +257,9 @@ In the example, joe's client had stopped waiting when a second request for the s
 
 {{< console >}}
 
-{{< clicks "Audit" "Lens" "approvals" >}}
+{{< clicks "Audit" "Kind of record" "Approvals" >}}
 
-{{< shot name="audit-approvals" caption="The `approvals` lens, with one record for each phase of a request." >}}
+{{< shot name="audit-approvals" caption="**Approvals** under **Kind of record**, with one record for each phase of a request." >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -301,14 +301,13 @@ A decision cannot be taken back. An approved hold is used once, by the call that
 
 {{< console >}}
 
-Open **Sessions**, open the row of the session that asked, and press **Revoke session**. The dialog says what that costs before you confirm it.
+Open **Sessions**, open the session that asked, and press **Revoke session** on its page. The dialog says what that costs before you confirm it.
 
 ```text
-Revoke session?
-Every agent action in this session of joe-java-developer-agent is denied within
-seconds. A session revoke is a stand-down, not a ban: the same device can check
-in again as a new session. To cut access off entirely, revoke the device or lock
-the user on their Users sheet.
+Revoke this session?
+Every agent action in this session is denied within seconds.
+joe-java-developer-agent can start a new session. To keep
+joe-java-developer-agent out, lock the user or revoke the device.
                                                     Cancel   Revoke session
 ```
 {{< /console >}}

@@ -41,9 +41,9 @@ Both kinds are valid on the `remote` runtime only. A `command` or `oci` server i
 A server whose vendor hands out a token per person, such as GitHub, GitLab, Linear, Supabase or Stripe on their hosted endpoints, takes `kind: token`. Each person pastes their own token once. The server tests it against the upstream, seals it under that person's id and keeps only the ciphertext, and every call that person makes then carries it.
 
 {{< console >}}
-In the Add MCP server wizard, pick **Each caller's own token** on the Credential step, then pick what agents with no token of their own run on: `Get nothing`, `Run on their sponsor's token` or `Use this server's shared secret`.
+In the Add MCP server wizard, pick **Each person's own token** on the Credential step, then pick what agents with no token of their own run on: `Refused`, `Run on their sponsor's token` or `Use this server's shared secret`.
 
-{{< shot name="server-add-token" caption="**Each caller's own token** picked, with how the token is sent and what agents with no token of their own run on." >}}
+{{< shot name="server-add-token" caption="**Each person's own token** picked, with how the token is sent and what agents with no token of their own run on." >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -75,13 +75,13 @@ On a `command` runtime the parser refuses the kind with "credential.kind token g
 This step is each person's own, for themselves or for an agent they sponsor.
 
 {{< console >}}
-On the self-service page at `/self-service/`, open **Credentials**. It lists every server the person's roles reach, with what each one uses: not set, set with the fingerprint, the expiry and who set it, expired, a shared account an administrator set, or shared only on a `command` or `oci` server.
+On the self-service page at `/self-service/`, open **Credentials**. It lists every server the person's roles reach, one row each, in the bands `Needs you`, `Set`, `Nothing you can do here` and `Out of reach`. **Status** reads `Not set`, `Set` with the expiry, `Expired`, `Shared account` when an administrator set one, or `Shared only` on a `command` or `oci` server.
 
 {{< clicks "Credentials" "Paste a token" "Save token" >}}
 
 {{< shot name="selfservice-paste-token" caption="The sheet for the github server, with **Token**, **Stops working on, optional** and **Save token**." >}}
 
-Paste the token in **Token**, and type the date the vendor shows in **Stops working on, optional**. Straza tests the token once, then keeps only a sealed copy. **Remove** takes a row away.
+Paste the token in **Token**, and type the date the vendor shows in **Stops working on, optional**. Straza tests the token once, then keeps only a sealed copy. **Remove** takes the token away.
 {{< /console >}}
 
 
@@ -164,7 +164,7 @@ The same block can also carry `clientCredentials`, so that agents get tokens of 
 
 
 {{< console >}}
-In the Add MCP server wizard, pick **Each caller's own sign-in** on the Credential step. The card stays off until a provider exists, and it starts on `Run on their sponsor's sign-in` for agents.
+In the Add MCP server wizard, pick **Each person's own sign-in** on the Credential step. The row is not available until a provider exists or while the list of providers cannot be read, and it starts on `Run on their sponsor's sign-in` for agents.
 {{< /console >}}
 
 {{< cli >}}
@@ -207,7 +207,8 @@ On the self-service page, open **Credentials** and press **Sign in with keycloak
 
 Straza keeps the sign-in's tokens sealed on the server and renews them before they expire, so the person signs in once. Every `oauth.refreshInterval`, one minute by default, strazad renews each sign-in whose token expires within `oauth.refreshWindow`, ten minutes by default, and stores the new refresh token when the provider sends one. Only a sign-in that came with a refresh token is renewed. A renewal the provider refuses keeps the old token, and once that expires the person's calls are denied until a later renewal works or the person signs in again. `straza disconnect midpoint` removes it. At Entra a refresh token lasts 90 days by default and each renewal brings a new one, so a sign-in in use stays until an administrator resets the person's password in the Entra or Microsoft 365 admin centre, or the person or an administrator revokes the person's sessions. A password the person changes themselves leaves it alone.
 
-Every strazad replica runs that renewal on its own, without a lock, and keeps the token it renewed itself. Entra accepts a refresh token again after it was used once, so two replicas that renew one sign-in at the same moment both get a working token.
+
+One strazad replica at a time runs that renewal, under a lease in the database, so two replicas never redeem one refresh token together. A provider that revokes a used refresh token therefore keeps the sign-in. Replicas whose clocks differ by more than 90 seconds can still overlap for one pass.
 
 {{< fails >}}
 `MCP server midpoint needs your own keycloak sign-in and you have not connected. Run straza connect midpoint, or sign in on your credentials page at https://straza.example/self-service/credentials`
@@ -253,7 +254,7 @@ An agent cannot open a browser or receive a token from a vendor, so the manifest
 When the server trusts Microsoft Entra, `client_credentials` gives each agent a token of its own Entra agent identity, so the upstream sees that agent and not a shared account. The agent never holds an Entra credential. Three things must be in place:
 
 1. An agent blueprint in your tenant that holds the certificate of Straza's client assertion key. A full administrator downloads it under Settings, **Agent signing keys** in the console, or prints it with `strazactl signing-keys certificate client_assertion <kid>`, and an Agent ID Administrator uploads it under the blueprint's Credentials, Certificates. The console shows the certificate's SHA-1 thumbprint, the value Entra lists it under, and the blueprint's client id from the provider block in step 3. Give Straza a blueprint of its own, because whoever holds a blueprint's credential can get a token as every agent identity under it, and Microsoft draws one blueprint around one trust boundary.
-2. For each agent, an agent identity under that blueprint, and its client id on the agent's Straza record as `entraAgentId`. Your IGA writes it over SCIM, or an administrator runs `strazactl users entra-agent-id set <agent> <client id>`. The agent's page under Users in the console shows the client id it is linked to and who owns the link, and does not change it.
+2. For each agent, an agent identity under that blueprint, and its client id on the agent's Straza record as `entraAgentId`. Your IGA writes it over SCIM, or an administrator runs `strazactl users entra-agent-id set <agent> <client id>`. Where Straza takes agents from Entra, as [Role groups in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}) shows, Entra writes it and neither of the two may change it. The agent's page under Users in the console shows the client id it is linked to and who owns the link, and does not change it.
 3. A provider block that names the blueprint instead of an assertion audience:
 
 ```yaml
@@ -277,7 +278,7 @@ What this does not do yet:
 
 - A server that answers its tool list only with a token offers no tool, because Straza reads a server's tool list with its own credential and never with an agent's. An identity of Straza's own at the provider, used only for that read, is planned.
 - One provider entry names one blueprint and one resource. A second resource is a second entry with the same tenant and blueprint. Agents of a second blueprint need an entry of their own and a server that names it.
-- A disable of the agent identity in Entra takes effect at its next token request, up to an hour later. Disable or lock the agent in Straza to cut it at once.
+- A disable of the agent identity in Entra takes effect at its next token request, up to an hour later. Disable or lock the agent in Straza to cut it at once. Where Straza takes agents from Entra, only the lock is open, and Straza disables the agent at its next pass, within about a minute.
 - The audit record of a call names the source `client_credentials` and the agent, not the Entra agent identity. The agent's record holds the mapping.
 - Straza's certificate is self-signed and valid for 730 days, so a tenant policy that limits certificate lifetime or requires a trusted certificate authority refuses its upload.
 
@@ -320,7 +321,7 @@ Nobody can finish a sign-in for an agent, and the agent cannot finish one either
 | An agent with a sponsor | Nothing itself. An administrator sets `credential.agents: sponsor`, the sponsor turns the switch on, and the agent runs on the sponsor's sign-in. `shared`, which the wizard offers as Use a shared account, and `client_credentials`, which only the manifest sets, are the other two ways. | agent joe has no midpoint sign-in of its own. An agent cannot sign in through a browser. An administrator sets credential.agents on midpoint to sponsor so it runs on alice's sign-in once alice allows it, or to shared or client_credentials |
 | An agent with no sponsor | Nothing itself. An administrator picks Use a shared account in the wizard, which writes `credential.agents: shared`, or sets `client_credentials` in the manifest. | agent joe has no midpoint sign-in of its own. An agent cannot sign in through a browser. An administrator sets credential.agents on midpoint to shared or client_credentials |
 
-The wizard's sign-in card starts on `agents: sponsor` for that reason, and `agents: own` on a sign-in server means an agent gets nothing. On the sponsor's Credentials tab the agent's row reads "Not signed in" with the reason, and "Uses your sign-in" once the sponsor's switch covers it.
+For that reason the wizard's sign-in row starts on `Run on their sponsor's sign-in`, which writes `agents: sponsor`. On a sign-in server, `Refused`, which writes `agents: own`, means an agent's calls are refused. On the sponsor's Credentials tab the agent's row reads "Cannot sign in" with the reason, and "Uses yours" once the sponsor's switch covers it.
 
 ## When Straza lists a server's objects {.nostep}
 

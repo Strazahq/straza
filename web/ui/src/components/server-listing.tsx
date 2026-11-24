@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Loader2Icon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HelpTip } from "@/components/help-tip";
 import type { Fact } from "@/components/server-overview";
@@ -20,7 +20,7 @@ import {
 // answer down through ObjectsReadContext rather than through the cards
 // between.
 
-const CODE = "rounded bg-muted px-1 font-mono text-[13px] text-foreground";
+const CODE = "rounded-md bg-muted px-1 font-mono text-caption text-foreground";
 
 // ObjectsRead is the page's objects answer, null while it is read or when
 // the read failed, with the door to read it again and whether the listing
@@ -144,9 +144,9 @@ function ListingRow({ app, w, lister, pinned, set, read }: RowProps) {
     }
   };
 
-  const problemLine = problem && <p className="m-0 text-[13px] text-danger" role="alert">{problem}</p>;
+  const problemLine = problem && <p className="m-0 text-caption text-danger" role="alert">{problem}</p>;
 
-  if (!pinned) return <span className="text-muted-foreground" data-listing-before>{beforePin(app.name, w)}{help}</span>;
+  if (!pinned) return <span className="text-muted-foreground" data-listing-before>{beforePin(w)}{help}</span>;
   if (read.open) {
     return (
       <div className="flex flex-col gap-1.5" data-listing-field>
@@ -160,7 +160,7 @@ function ListingRow({ app, w, lister, pinned, set, read }: RowProps) {
             spellCheck={false}
             aria-label={VALUE_LABEL}
             aria-invalid={problem === PASTE_MISSING || undefined}
-            className={made ? "h-8 w-[28rem] max-w-full font-mono text-[13px]" : "h-8 w-64 font-mono"}
+            className={made ? "h-8 w-[28rem] max-w-full font-mono text-caption" : "h-8 w-64 font-mono"}
             value={value}
             onChange={(e) => { setValue(e.target.value); setMade(false); if (problem === PASTE_MISSING) setProblem(null); }}
           />
@@ -169,9 +169,9 @@ function ListingRow({ app, w, lister, pinned, set, read }: RowProps) {
           <Button size="sm" variant="ghost" onClick={close} disabled={busy}>{CANCEL}</Button>
         </div>
         {problemLine}
-        {made && <p className="m-0 text-[13px] text-text-2" data-generated>{generatedLine(app.name)}</p>}
-        {copyRefused && <p className="m-0 text-[13px] text-warn" role="status">{COPY_REFUSED}</p>}
-        <p className="m-0 text-[13px] text-muted-foreground">{fieldFoot(app.name, lister)}</p>
+        {made && <p className="m-0 text-caption text-text-2" data-generated>{generatedLine(app.name)}</p>}
+        {copyRefused && <p className="m-0 text-caption text-warn" role="status">{COPY_REFUSED}</p>}
+        <p className="m-0 text-caption text-muted-foreground">{fieldFoot(app.name)}</p>
       </div>
     );
   }
@@ -201,7 +201,7 @@ function ListingRow({ app, w, lister, pinned, set, read }: RowProps) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{CANCEL}</AlertDialogCancel>
-            <AlertDialogAction className="bg-danger text-white hover:bg-danger/90" disabled={busy} onClick={() => void remove()}>{REMOVE_CONFIRM}</AlertDialogAction>
+            <AlertDialogAction className={DANGER_FILL} disabled={busy} onClick={() => void remove()}>{REMOVE_CONFIRM}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

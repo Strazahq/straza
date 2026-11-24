@@ -32,7 +32,7 @@ describe("the screen boundary", () => {
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain("This screen hit an error.");
     expect(alert.textContent).toContain("config.oidc is undefined");
-    expect(alert.textContent).toContain("The rest of the console is unaffected: switch screens, or try again.");
+    expect(alert.textContent).toContain("Switch screens, or try again.");
     explode = false;
     await userEvent.click(screen.getByRole("button", { name: "try again" }));
     expect(screen.getByText("The screen rendered.")).toBeTruthy();

@@ -206,10 +206,10 @@ func (s *credStore) agentSecret(uid string) (agentSecret, error) {
 	return sec, nil
 }
 
-// agentCheckin starts a session for h on the id-token lane with a DPoP
-// proof from the agent's key, so the session is bound to it. A cached ID
-// token the server refuses is fetched again once.
-func (s *credStore) agentCheckin(ctx context.Context, a *account, rec enrollment, h localapi.Harness) (agentguard.CheckinResponse, error) {
+// agentCheckin starts a session for h in folder on the id-token lane with
+// a DPoP proof from the agent's key, so the session is bound to it. A
+// cached ID token the server refuses is fetched again once.
+func (s *credStore) agentCheckin(ctx context.Context, a *account, rec enrollment, h localapi.Harness, folder string) (agentguard.CheckinResponse, error) {
 	_, api, err := a.ready()
 	if err != nil {
 		return agentguard.CheckinResponse{}, err
@@ -218,13 +218,13 @@ func (s *credStore) agentCheckin(ctx context.Context, a *account, rec enrollment
 	if err != nil {
 		return agentguard.CheckinResponse{}, err
 	}
-	resp, err := api.Checkin(ctx, tok, "", h.Name, h.Version, measureAttestation(h.Name))
+	resp, err := api.Checkin(ctx, tok, "", h.Name, h.Version, measureAttestation(h.Name), s.host, folder)
 	var refuse *agentguard.StatusError
 	if err != nil && cached && errors.As(err, &refuse) && refuse.Status == http.StatusUnauthorized {
 		if tok, _, err = s.agentToken(ctx, a, rec, true); err != nil {
 			return agentguard.CheckinResponse{}, err
 		}
-		resp, err = api.Checkin(ctx, tok, "", h.Name, h.Version, measureAttestation(h.Name))
+		resp, err = api.Checkin(ctx, tok, "", h.Name, h.Version, measureAttestation(h.Name), s.host, folder)
 	}
 	if err == nil && resp.SessionToken == "" {
 		return resp, errNoSessionToken
@@ -324,6 +324,11 @@ func fetchAgentToken(ctx context.Context, c *agentguard.Client, flow oidcflow.Fl
 	if out.Error != "" {
 		msg := fmt.Sprintf("the identity provider refused the agent's sign-in (%s): %s. "+
 			"Check the registered key or client, and that the user is an active agent", out.Error, out.ErrorDesc)
+		// Only strazad answers the key lane. It marks a complete sentence
+		// of its own with this prefix, and the caller puts the prefix back.
+		if own, ok := strings.CutPrefix(out.ErrorDesc, "Straza: "); ok && lane == laneKey && own != "" {
+			msg = own
+		}
 		if out.Error == "invalid_client" || out.Error == "unauthorized_client" {
 			// The issuer judged this client, so a renewal counts it as the
 			// server's refusal, not as a failure to reach it.

@@ -14,6 +14,8 @@ tested:
   platform: An Alpine Linux container against a standalone server, as alice holding the application role dev, with hook payloads piped into straza hook, gateway calls sent through straza mcp, and an admin deciding with strazactl, which no longer decides, so a person now decides in the console, on the self-service page or on a phone. approval.gatewayHoldSeconds was 3, so a held gateway call answered pending after three seconds
   date: 2026-10-06
 applies_to: both
+aliases:
+  - /guides/govern-an-agent/knowledge-packs/
 keywords: deny reason banner pending approval ticket approval_await approval_request approval_status agent model
 ---
 
@@ -42,7 +44,7 @@ By policy, the prompts and responses of this session are recorded with secrets m
 ```
 
 
-Knowledge packs bound to the session's roles follow the banner, as [Knowledge packs]({{< relref "guides/govern-an-agent/knowledge-packs.md" >}}) shows. For Claude Code and Codex the hook also returns `systemMessage`, one line for the person at the keyboard. It starts with a shield symbol and `Straza governance active:`, then names the user, the roles, the server, the policy and the attestation. The banner leaves those out, because the agent cannot act on them. Gemini gets the context only.
+For Claude Code and Codex the hook also returns `systemMessage`, one line for the person at the keyboard. It starts with a shield symbol and `Straza governance active:`, then names the user, the roles, the server, the policy and the attestation. The banner leaves those out, because the agent cannot act on them. Gemini gets the context only.
 
 
 When the session cannot start, the session-start hook exits with code 2 and a reason that starts `Straza:`, followed by the sentence that says why. That is the server's own refusal, or the sentence of the Straza background service when it does not run or holds no enrollment for the user. Until a session starts, every tool call is denied with `Straza: no active Straza session. Restart the session so straza can check in`. [Enroll a machine]({{< relref "guides/govern-an-agent/enroll-a-machine.md" >}}) shows the refusal a server gives a machine below its attestation minimum.
@@ -100,6 +102,9 @@ Gateway call for a tool the session cannot see
 
 Rate limit for that server at the gateway, used up
 : `Straza: rate limit exceeded for the MCP server "<server>" (<n> rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.`
+
+Rate limit for all sessions of one user together on that server, used up
+: `Straza: rate limit exceeded for the MCP server "<server>": all your sessions together may make <n> calls a second. Wait a few seconds, then try the call once more. If it is denied again, tell the user.` The number is five times the server's rate for one session.
 
 Gateway call whose request body is larger than `server.mcpMaxBodyBytes`, 4 MiB by default
 : The JSON-RPC error -32600 `Straza: this MCP request was not read, because its body is larger than <limit> bytes, the most the Straza gateway reads in one request (server.mcpMaxBodyBytes). Send less in one call, for example a file's path or address instead of its content, or ask a Straza administrator to raise server.mcpMaxBodyBytes.` The Straza server never read the call, so it decided nothing and wrote no audit record.
@@ -212,7 +217,7 @@ A call with other arguments asks again. `straza__approval_status` and `straza__a
 A rule that names no approver role sends the request to the person behind the agent, its sponsor. A person with no sponsor confirms their own call, and the answer reads:
 
 ```text
-Straza: this call needs the requester's confirmation, on their enrolled phone, or the self-service page under This browser (http://127.0.0.1:8420/self-service/); wait for it with the straza__approval_await tool, then retry (ref 01a112cf-d957-713d-a2ab-3be6a3426a6e)
+Straza: this call needs the requester's confirmation, on the requester's enrolled phone, or Requests on the self-service page (http://127.0.0.1:8420/self-service/) in a browser set up to approve; wait for it with the straza__approval_await tool, then retry (ref 01a112cf-d957-713d-a2ab-3be6a3426a6e)
 ```
 
 With `approval.unsignedOwnDecisions` on, the places named are the same as for a request to an approver.
@@ -308,6 +313,9 @@ Not a tool this session can call
 Too many requests for one server
 : `Straza: rate limit exceeded for the MCP server "<app>" (<n> rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.`
 
+Too many requests for one server from all sessions of one user together
+: `Straza: rate limit exceeded for the MCP server "<app>": all your sessions together may make <n> calls a second. Wait a few seconds, then try the call once more. If it is denied again, tell the user.`
+
 A person denied a ticket for this call, and its window is still open
 : `Straza: ticket <ref> was denied by <name>; this call stays denied until <time>`
 
@@ -335,7 +343,7 @@ MCP call without its arguments, under a rule that covers the exact call
 Reference the agent does not own, in any of the three tools
 : `Straza: no such approval <ref>`
 
-The not-a-tool answer is the same for a tool that no access row of the session's roles admits, a server that does not exist or is stopped, and a tool that the session's policy hides, so the answer does not tell them apart. With `apps.catalog.policyFilter` on, the default, policy hides every tool that a rule denies, so a call to such a tool gets the not-a-tool answer and not the denied-by-policy one. Each request for an MCP call spends one call of that server's rate limit, as the real call would. When the server's object checks refuse the call, or its arguments break the tool's input schema, the request is refused as the real call would be, and nobody is asked to approve it. Policy alone decides a described command.
+The not-a-tool answer is the same for a tool that no access row of the session's roles admits, a server that does not exist or is stopped, and a tool that the session's policy hides, so the answer does not tell them apart. With `apps.catalog.policyFilter` on, the default, policy hides every tool that a rule denies, so a call to such a tool gets the not-a-tool answer and not the denied-by-policy one. Each request for an MCP call spends one call of that server's rate limit, and one of the ceiling all sessions of the same person or agent share on that server, as the real call would. When the server's object checks refuse the call, or its arguments break the tool's input schema, the request is refused as the real call would be, and nobody is asked to approve it. Policy alone decides a described command.
 
 A ticket rule that names no approver role goes to the person behind the agent, its sponsor. A confirmation rule, `mode: confirm`, and a rule with `selfApproval: true` go to the requester instead. When the agent has no sponsor, or its sponsor cannot decide, the request is refused, and `<cause>` names what failed and the fix, such as `agent "<name>" has no sponsor, and rule "<rule>" names no approver roles. Fix: set the requester's sponsor to a person in your identity manager, or add approve.roles / approve.deciders to the rule`. The audit record of that `straza__approval_request` call is then a deny with the answer as its reason. No ticket opens and nobody is notified. `straza_approvals_unroutable_total` counts the refusal once.
 
@@ -345,13 +353,12 @@ The gateway also serves `straza__draft_submit` and `straza__draft_status`, to a 
 ## What this session may do
 
 
-Every session can call `straza__whoami`. It takes no input and answers for the calling session only: who it acts as, whether that is a person, an AI agent or a service account, who sponsors an agent, the harness, the roles, the Entra agent identity of an agent that holds one, which is the identity a server that trusts Entra sees on the agent's calls, whether the conversation is recorded, and the knowledge packs bound to the session's roles. Then it lists every tool on the session's tool list, server by server. For each tool it says whether the call runs without approval or a person approves each call first, and on a server that limits roles to some objects, which objects the tool may touch. A session of alice's agent reads an answer like this:
+Every session can call `straza__whoami`. It takes no input and answers for the calling session only: who it acts as, whether that is a person, an AI agent or a service account, who sponsors an agent, the harness, the roles, the Entra agent identity of an agent that holds one, which is the identity a server that trusts Entra sees on the agent's calls, and whether the conversation is recorded. Then it lists every tool on the session's tool list, server by server. For each tool it says whether the call runs without approval or a person approves each call first, and on a server that limits roles to some objects, which objects the tool may touch. A session of alice's agent reads an answer like this:
 
 ```text
 This session acts as "build-agent", an AI agent sponsored by "alice", through claude-code/2.1.0.
 Roles: dev.
 Recording: the prompts and responses of this session are not recorded.
-Knowledge packs for this session's roles: golang-style version 1.
 Tools this session can call, by server. Each call is still checked when it is made, so a rule on its arguments can deny it.
 ghapp:
 - pr_create: a person approves each call first; repos: Strazahq/pay-api, Strazahq/pay-web

@@ -35,7 +35,6 @@ type Store interface {
 	Roles() RoleRepo
 	Devices() DeviceRepo
 	Sessions() SessionRepo
-	Packs() PackRepo
 	Apps() AppRepo
 	ToolBindings() ToolBindingRepo
 	Credentials() CredentialRepo
@@ -52,6 +51,9 @@ type Store interface {
 	Approvers() ApproverRepo
 	Drafts() DraftRepo
 	ObjectLists() ObjectListRepo
+	Leases() LeaseRepo
+	EntraGroups() EntraGroupRepo
+	EntraAgents() EntraAgentRepo
 }
 
 // RoleRepo manages roles, implication edges, and assignments.
@@ -76,6 +78,10 @@ type RoleRepo interface {
 	RemoveImplication(ctx context.Context, roleID, impliesRoleID string) error
 	ListImplications(ctx context.Context) ([]RoleImplication, error)
 
+	// Assign stores one assignment row. It answers ErrNotFound when the
+	// subject id names no user or a deleted one, and ErrConflict when the
+	// subject holds the role already. An unknown role fails with the
+	// database's own error.
 	Assign(ctx context.Context, a RoleAssignment) (RoleAssignment, error)
 	Unassign(ctx context.Context, assignmentID string) error
 	// ApplyMembership changes who holds roleID in one transaction: it
@@ -136,8 +142,8 @@ type SessionRepo interface {
 	List(ctx context.Context, status string) ([]Session, error) // status "" = all
 	ListByUser(ctx context.Context, userID string) ([]Session, error)
 	// Page is the keyset window over sessions in the order srt names,
-	// optionally narrowed by status and/or user; c is the row it continues after.
-	Page(ctx context.Context, status, userID string, srt Sort, c Cursor, limit int) ([]Session, error)
+	// narrowed by f (see SessionFilter); c is the row it continues after.
+	Page(ctx context.Context, f SessionFilter, srt Sort, c Cursor, limit int) ([]Session, error)
 	// LastSeenByUsers returns each listed user's most recent session
 	// last_seen in ONE query, never a per-row lookup. Users with no sessions
 	// are absent from the map.
@@ -169,22 +175,6 @@ type SessionRepo interface {
 type ClosedSession struct {
 	ID     string
 	UserID string
-}
-
-// PackRepo manages knowledge packs and role bindings.
-type PackRepo interface {
-	Create(ctx context.Context, p KnowledgePack) (KnowledgePack, error)
-	GetByID(ctx context.Context, id string) (KnowledgePack, error)
-	GetByName(ctx context.Context, name string) (KnowledgePack, error)
-	List(ctx context.Context) ([]KnowledgePack, error)
-	Update(ctx context.Context, p KnowledgePack) (KnowledgePack, error)
-	Delete(ctx context.Context, id string) error
-	Bind(ctx context.Context, roleID, packID string) error
-	Unbind(ctx context.Context, roleID, packID string) error
-	ForRoles(ctx context.Context, roleIDs []string) ([]KnowledgePack, error)
-	// ListBindings reads every pack-role binding with the role name joined
-	// in, one query for the whole packs list (admin read model).
-	ListBindings(ctx context.Context) ([]PackBinding, error)
 }
 
 // OutboxRepo is the producer side of the event spine. Every write bounds its record with boundCE.
@@ -342,12 +332,17 @@ type ApprovalRepo interface {
 	// ordered strictly DESC by the UUIDv7 id. It has NO 500-row wall (each page
 	// is limit-bounded), so paging can reach arbitrarily far back.
 	ListBefore(ctx context.Context, beforeID string, limit int) ([]Approval, error)
-	// PageByState is ListBefore with the admin state filter: state ""
-	// = all states; same id-keyset window, no row wall.
-	PageByState(ctx context.Context, state, beforeID string, limit int) ([]Approval, error)
+	// PageByState is ListBefore with the admin state and user filters:
+	// state "" = all states, userID "" = every user; same id-keyset window,
+	// no row wall.
+	PageByState(ctx context.Context, state, userID, beforeID string, limit int) ([]Approval, error)
 	// CountByUser counts the approvals a user raised (per-user stats, backed
 	// by idx_approvals_user).
 	CountByUser(ctx context.Context, userID string) (int, error)
+	// WaitingBySession counts, per listed session, the pending approvals
+	// whose expiry is after now, never a query per session. A session with
+	// none is absent from the map.
+	WaitingBySession(ctx context.Context, sessionIDs []string, now time.Time) (map[string]int, error)
 	// FindPendingByKey resolves the live pending record for a dedupe tuple
 	// (ErrNotFound when none), the in-pod side of the partial unique index.
 	FindPendingByKey(ctx context.Context, sessionID, ruleID, argvHash string) (Approval, error)
@@ -533,6 +528,10 @@ type SigningKeyRepo interface {
 	// whether this call made the change, so that of two replicas retiring
 	// the same key exactly one records it.
 	Retire(ctx context.Context, kid, from string) (bool, error)
+	// ReplacePrivateKey writes the private column of the key kid when it
+	// still holds from, and reports whether this call made the change, so
+	// that of two replicas sealing the same key exactly one writes.
+	ReplacePrivateKey(ctx context.Context, kid string, from, to []byte) (bool, error)
 }
 
 // AttestationRepo is the expected-hash registry for managed installs.

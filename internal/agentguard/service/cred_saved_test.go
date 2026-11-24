@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -96,7 +97,7 @@ func (r *credRig) pulseNewPolicy(t *testing.T, ses Session) Session {
 // refusal with its deadline, a pin a background snapshot check moved, and
 // the held snapshot's pin where a lost save left an older one.
 // After the restart the window decides on the snapshot kept on disk while
-// the snapshot route is down, a start reuses it with its packs, strazad
+// the snapshot route is down, a start reuses it, strazad
 // accepts its token, its push stream connects again, and a kill switch
 // sent on that stream revokes it.
 func TestCredSavedSessionsResume(t *testing.T) {
@@ -173,8 +174,8 @@ func TestCredSavedSessionsResume(t *testing.T) {
 				t.Fatalf("decide after a restart: %+v, %v, want the saved token accepted", out, err)
 			}
 			again, err := r.s.Session(ctx, alice, want.Harness, true)
-			if err != nil || !again.Reused || again.ID != want.ID || len(again.Packs) == 0 || !slices.Equal(again.Packs, want.Packs) {
-				t.Fatalf("a start after a restart: %+v, %v, want the resumed session reused with its packs", again, err)
+			if err != nil || !again.Reused || again.ID != want.ID {
+				t.Fatalf("a start after a restart: %+v, %v, want the resumed session reused", again, err)
 			}
 			if again.StartText == nil || *again.StartText != fakeStartText {
 				t.Fatalf("a start after a restart: start text %v, want the server's %q", again.StartText, fakeStartText)
@@ -435,42 +436,48 @@ func TestCredSavedFifteenWindows(t *testing.T) {
 	})
 }
 
-// TestCredLapsedWindowDropsPacks pins that a window whose token expired
-// over refreshRefusedAfter ago keeps no knowledge packs, in memory after the
-// sweep or on disk, because only a start that reuses a live window reads
-// them, and that its re-acquire brings them back.
-func TestCredLapsedWindowDropsPacks(t *testing.T) {
+// TestCredSavedSessionsWithPacksResume pins that a sessions file an older
+// client wrote, whose sessions still hold knowledge packs, loads after a
+// restart: the window resumes without a check-in, and the next save writes
+// the file without the packs.
+func TestCredSavedSessionsWithPacksResume(t *testing.T) {
 	ctx := context.Background()
 	r := newCredRig(t)
 	r.enroll(alice)
 	ses, err := r.start(alice, "w1")
-	if err != nil || len(ses.Packs) == 0 {
-		t.Fatalf("start: %+v, %v, want a session with packs", ses, err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	r.clock.Advance(300*time.Second + time.Hour)
-	a := r.s.account(alice.UID)
-	r.s.forgetLapsed(a)
+	raw, err := os.ReadFile(r.savedPath(alice))
+	var file map[string]any
+	if err == nil {
+		err = json.Unmarshal(raw, &file)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range file["sessions"].([]any) {
+		v.(map[string]any)["packs"] = []map[string]string{{"name": "golang-style", "version": "1", "content": "always run gofmt", "checksum": "c1"}}
+	}
+	if raw, err = json.Marshal(file); err == nil {
+		err = os.WriteFile(r.savedPath(alice), raw, 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, received := r.checkins()
+	r.restart()
+	got, err := r.s.Session(ctx, alice, ses.Harness, false)
+	if err != nil || got.ID != ses.ID {
+		t.Fatalf("the window after a restart: %+v, %v, want session %s resumed", got, err, ses.ID)
+	}
+	if a, rc := r.checkins(); a != accepted || rc != received {
+		t.Fatalf("the restart cost check-ins: accepted %d to %d, received %d to %d", accepted, a, received, rc)
+	}
 	if _, err := r.start(alice, "w2"); err != nil {
 		t.Fatal(err)
 	}
-	var saved savedSessions
-	raw, err := os.ReadFile(r.savedPath(alice))
-	if err != nil || json.Unmarshal(raw, &saved) != nil {
-		t.Fatalf("the sessions file: %v", err)
-	}
-	for _, v := range saved.Sessions {
-		if lapsed := v.Harness.Session == "w1"; lapsed != (len(v.Packs) == 0) {
-			t.Fatalf("window %s saved with %d packs", v.Harness.Session, len(v.Packs))
-		}
-	}
-	if hs := a.find(ses.Harness); hs == nil || len(a.copyOf(hs).Packs) != 0 {
-		t.Fatal("the lapsed window still holds its packs in memory")
-	}
-	if _, err := r.s.Session(ctx, alice, ses.Harness, false); err != nil {
-		t.Fatal(err)
-	}
-	again, err := r.start(alice, "w1")
-	if err != nil || !again.Reused || len(again.Packs) == 0 {
-		t.Fatalf("a start after the re-acquire: %+v, %v, want the live window reused with its packs", again, err)
+	if raw, err := os.ReadFile(r.savedPath(alice)); err != nil || strings.Contains(string(raw), `"packs"`) {
+		t.Fatalf("the sessions file after a save: %s, %v, want no packs", raw, err)
 	}
 }

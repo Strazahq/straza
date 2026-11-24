@@ -13,7 +13,7 @@ import (
 // acceptance. A device token must not verify as a session token and so on,
 // and the seeds make the fuzzer explore exactly that boundary.
 func FuzzTokenVerify(f *testing.F) {
-	svc, err := NewTokenService(context.Background(), testRepo(f), "https://straza.local", 0)
+	svc, err := NewTokenService(context.Background(), testRepo(f), sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		f.Fatal(err)
 	}

@@ -77,11 +77,11 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" -H 'Content-Type: applicatio
 {"id":"<user id>","userName":"<username>","active":false}
 ```
 
-A `DELETE` answers `204` and deactivates as well. Straza never removes a row the identity manager created, so a later create with the same `userName` revives it with the same id and none of the old assignments, which is what happens when Okta re-assigns the app to a returning employee.
+A `DELETE` answers `204` and deactivates as well. Straza never removes a row the identity manager created, so a later create with the same `userName` revives it with the same id and the assignments it held, which is what happens when Okta re-assigns the app to a returning employee.
 
 ## 5. Roles as groups
 
-Straza has no group object. Each role renders as a group whose `displayName` is the role name and whose `members` are its direct holders. Import the groups into Okta so the roles are visible there. Then, for each role, take an Okta group whose name is exactly the Straza role name, add the people to it, and push it under Push Groups with Link Group onto the imported group of that name. Okta then writes the linked group's membership, as a `PATCH` of `members` or as a full-document `PUT`. Straza applies both, and on a `PUT` it applies the members and ignores the name:
+Straza has no group object. Each role renders as a group whose `displayName` is the role name and whose `members` are its direct holders, apart from those that a role group in Entra gave. Import the groups into Okta so the roles are visible there. Then, for each role, take an Okta group whose name is exactly the Straza role name, add the people to it, and push it under Push Groups with Link Group onto the imported group of that name. Okta then writes the linked group's membership, as a `PATCH` of `members` or as a full-document `PUT`. Straza applies both, and on a `PUT` it applies the members and ignores the name:
 
 ```sh
 curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" -H 'Content-Type: application/scim+json' \
@@ -116,5 +116,5 @@ In Okta the person is a member of the imported group, one per Straza role. The g
 ## Caveats
 
 - Straza roles render like every other group, so an Okta administrator who can assign group membership can assign `straza-admin`. Scope who may manage those groups in Okta the way you scope any admin role.
-- Okta reactivation lifts what Okta deactivated and nothing else. A lock placed with `strazactl users lock` stays until a Straza administrator lifts it, and existing sessions stay revoked, so the person enrolls again.
+- Okta reactivation lifts what Okta deactivated and nothing else. A lock placed with `strazactl users lock` stays until a Straza administrator lifts it. Existing sessions stay revoked, and the person's enrolled machine starts a new session at its next check-in with no new enrollment.
 - When Okta is also the login provider, map `externalId` to the value the ID token carries as `sub`, because strazad matches a verified token to the account by `externalId` first and by `preferred_username` against `userName` second.

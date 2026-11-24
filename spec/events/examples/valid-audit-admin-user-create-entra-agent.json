@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e41",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-11-17T20:31:07.118Z",
+  "data": {
+    "action": "user.create",
+    "target": "0198a1b0-4c11-7e02-9a55-0000000000a2",
+    "user": "0198a1b0-4c11-7e02-9a55-0000000000a2",
+    "username": "ledger-agent (3a3a3a3a)",
+    "kind": "nhi",
+    "userType": "agent",
+    "origin": "entra",
+    "reason": "an agent identity in a role's group in Entra. Another Straza user has the name ledger-agent, so this agent carries the start of its Entra agent ID."
+  }
+}

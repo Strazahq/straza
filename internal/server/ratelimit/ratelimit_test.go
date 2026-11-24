@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"math"
 	"strconv"
 	"testing"
 	"time"
@@ -88,6 +89,12 @@ func TestRateLimitUnlimitedAndPerKey(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		if !l.Allow("free", 0) {
 			t.Fatal("unlimited key throttled")
+		}
+	}
+	// An infinite rate does not limit either: a bucket cannot count with it.
+	for i := 0; i < 5; i++ {
+		if !l.AllowBurst("inf", math.Inf(1), math.Inf(1)) {
+			t.Fatal("a key with an infinite rate was throttled")
 		}
 	}
 	// Keys are independent.

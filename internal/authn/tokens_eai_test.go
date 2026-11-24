@@ -2,6 +2,7 @@ package authn
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -175,7 +176,7 @@ var sessionTokenExampleCases = []sessionTokenExampleCase{
 // and returns its file bytes.
 func buildSessionTokenExample(t *testing.T, c sessionTokenExampleCase) []byte {
 	t.Helper()
-	priv, err := importPrivate(exampleKeyRecord(exampleStrazaSeed))
+	priv, err := importPrivate(exampleGrantKID, testProofKey(exampleStrazaSeed))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +193,7 @@ func buildSessionTokenExample(t *testing.T, c sessionTokenExampleCase) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, err := importPublic(exampleKeyRecord(exampleStrazaSeed))
+	pub, err := importPublic(exampleGrantKID, testProofKey(exampleStrazaSeed).Public().(ed25519.PublicKey))
 	if err != nil {
 		t.Fatal(err)
 	}

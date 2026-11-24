@@ -23,7 +23,8 @@ func Link(prevHash, ce string) string {
 }
 
 // Record is one chain entry as verified by clients. Username is a read-time
-// enrichment resolved from data.user by the admin API. It lives OUTSIDE the
+// enrichment the admin API fills: the actor of an admin record, else the
+// username resolved from data.userId or data.user. It lives OUTSIDE the
 // CE on purpose: the hash chain covers the CE bytes, which must never be
 // mutated after the fact.
 type Record struct {

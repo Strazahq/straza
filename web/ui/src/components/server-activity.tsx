@@ -1,9 +1,12 @@
-import { EVENTS_NOT_READABLE } from "@/lib/server-words";
+import { EVENTS_EMPTY, EVENTS_NOT_READABLE, LOG_HELP, LOG_SEVERITY, LOG_SPAN, logLines } from "@/lib/server-words";
 import * as React from "react";
 import { ScrollTextIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Pill as CountPill } from "@/components/chip";
 import { EmptyState } from "@/components/empty-state";
 import { FetchError } from "@/components/error-state";
+import { HelpTip } from "@/components/help-tip";
+import { Segmented } from "@/components/segmented";
 import { type ApiError, type AppRow, type LogsAnswer, appLogs, listAudit, listChanges } from "@/lib/api";
 import { type EventRow, type LogRow, absTime, driftRow, eventRow, foldRuns, probeWords, relTimeText, removedAt } from "@/lib/words";
 import { cn } from "@/lib/utils";
@@ -12,8 +15,7 @@ const LOG_POLL_MS = 5000;
 const EVENTS_POLL_MS = 15000;
 const EVENTS_MAX = 30;
 
-const CAPS = "text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground";
-const HINT = "mt-1.5 text-[13px] leading-snug text-muted-foreground";
+const CAPS = "text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground";
 const BOX = "rounded-md border border-border bg-card";
 
 // clockTime is the wall clock part of a stamp in the active zone.
@@ -45,7 +47,7 @@ function usePoll<T>(fn: () => Promise<T>, ms: number, key: string, paused = fals
 // readDetail words a failed read for the FetchError block.
 function readDetail(what: string, err: ApiError): string {
   return err.unreachable
-    ? "The " + what + " could not be read because strazad did not answer. Check that it is running, then try again."
+    ? "The " + what + " could not be read because Straza did not answer. Check that it is running, then try again."
     : "The " + what + " could not be read: " + err.message + ".";
 }
 
@@ -73,13 +75,13 @@ function Events({ app }: { app: AppRow }) {
     <section>
       <div className={cn(CAPS, "mb-1.5")}>events</div>
       <div className={BOX} data-server-events>
-        {error && error.status === 403 && <p className="px-3 py-3 text-[13px] text-muted-foreground" data-events-closed>{EVENTS_NOT_READABLE}</p>}
+        {error && error.status === 403 && <p className="px-3 py-3 text-caption text-muted-foreground" data-events-closed>{EVENTS_NOT_READABLE}</p>}
         {error && error.status !== 403 && <FetchError subject="Events" detail={readDetail("events", error)} />}
         {data && data.length === 0 && (
-          <p className="px-3 py-3 text-[13px] text-muted-foreground">Nothing recorded about this server yet. Admin actions, tool list changes, denied calls and holds land here.</p>
+          <p className="px-3 py-3 text-caption text-muted-foreground">{EVENTS_EMPTY}</p>
         )}
         {data && data.length > 0 && (
-          <div className="grid grid-cols-[auto_12px_1fr] gap-x-3 text-sm">
+          <div className="grid grid-cols-[auto_12px_1fr] gap-x-3 text-dense">
             {data.map((e, i) => {
               const cell = cn("py-1.5", i < data.length - 1 && "border-b border-border");
               // The words module hands the actor and the rest apart so the
@@ -87,11 +89,11 @@ function Events({ app }: { app: AppRow }) {
               const gap = /^['\s]/.test(e.text) ? "" : " ";
               return (
                 <React.Fragment key={e.seq}>
-                  <div className={cn(cell, "pl-3 font-mono text-[13px] whitespace-nowrap text-muted-foreground")}>{e.t ? clockTime(e.t) : ""}</div>
+                  <div className={cn(cell, "pl-3 font-mono text-caption whitespace-nowrap text-muted-foreground")}>{e.t ? clockTime(e.t) : ""}</div>
                   <div className={cn(cell, "relative")}><span className={cn("absolute top-3 left-px size-[9px] rounded-full", DOT[e.tone])} aria-hidden="true" /></div>
                   <div className={cn(cell, "pr-3 text-text-2")}>
                     <span className="font-semibold text-foreground">{e.who}</span>{gap}{e.text}{" "}
-                    <span className="ml-1.5 text-[13px] text-muted-foreground">{e.src}</span>
+                    <span className="ml-1.5 text-caption text-muted-foreground">{e.src}</span>
                   </div>
                 </React.Fragment>
               );
@@ -99,7 +101,6 @@ function Events({ app }: { app: AppRow }) {
           </div>
         )}
       </div>
-      <p className={HINT}>Newest first, from the audit chain and the change feed. Denied calls and holds name the session; allowed calls are on the Audit page.</p>
     </section>
   );
 }
@@ -110,6 +111,11 @@ type Span = "since" | "all";
 const KDOT: Record<string, string> = { err: "bg-danger", wrn: "bg-warn", dbg: "bg-border", inf: "bg-transparent" };
 const cnt = (n: number, word: string) => n + " " + word + (n === 1 ? "" : "s");
 
+// The options of the log's two filters, in the order they show.
+const SEVS: { value: Sev; label: string }[] = [{ value: "err", label: "Errors" }, { value: "wrn", label: "Warnings" }, { value: "all", label: "All" }];
+const SPANS: { value: Span; label: string }[] = [{ value: "since", label: "Since last check" }, { value: "all", label: "Everything" }];
+
+// Pill is the Follow switch: one round button whose text is its state.
 function Pill({ on, onClick, children, label }: { on: boolean; onClick: () => void; children: React.ReactNode; label?: string }) {
   return (
     <button
@@ -117,7 +123,7 @@ function Pill({ on, onClick, children, label }: { on: boolean; onClick: () => vo
       aria-pressed={on}
       aria-label={label}
       onClick={onClick}
-      className={cn("h-6 rounded-full border px-2.5 text-[13px] transition-colors", on ? "border-link bg-accent-bg text-link" : "border-border bg-card text-text-2 hover:text-foreground")}
+      className={cn("h-6 rounded-pill border px-2.5 text-caption transition-colors", on ? "border-link bg-accent-bg text-link" : "border-border bg-card text-text-2 hover:text-foreground")}
     >
       {children}
     </button>
@@ -153,11 +159,13 @@ function Log({ app }: { app: AppRow }) {
   const { data, error } = usePoll<LogsAnswer | null>(() => (remote ? Promise.resolve(null) : appLogs(app.id)), LOG_POLL_MS, app.id + "/" + app.runtime, !follow);
 
   const head = <div className={cn(CAPS, "mb-1.5")}>log</div>;
+  // The ring's heading carries the help that says what the lines are.
+  const ringHead = <div className={cn(CAPS, "mb-1.5 flex items-center gap-1.5")}>log<HelpTip label="log" text={LOG_HELP} /></div>;
   if (remote) {
     return (
       <section>{head}
-        <div className={cn(BOX, "px-4 py-3 text-sm text-text-2")} data-server-log="remote">
-          {"A remote server keeps its own log. Straza shows its health checks here" + (app.last_probe_at ? ": the last one answered " + relTimeText(app.last_probe_at) : "") + "."}
+        <div className={cn(BOX, "px-4 py-3 text-dense text-text-2")} data-server-log="remote">
+          {"A remote server keeps its own log." + (app.last_probe_at ? " Last health check " + relTimeText(app.last_probe_at) + "." : "")}
         </div>
       </section>
     );
@@ -165,14 +173,14 @@ function Log({ app }: { app: AppRow }) {
   if (error && error.status === 409) {
     return (
       <section>{head}
-        <div className={cn(BOX, "px-4 py-3 text-sm text-text-2")} data-server-log="stopped">
-          The runtime is stopped, so there is no output. <b className="font-semibold text-foreground">Enable</b> it to see the log.
+        <div className={cn(BOX, "px-4 py-3 text-dense text-text-2")} data-server-log="stopped">
+          Stopped. <b className="font-semibold text-foreground">Enable</b> it to see its log.
         </div>
       </section>
     );
   }
   const problem = error ? <FetchError subject="Log" detail={readDetail("log", error)} /> : null;
-  if (!data) return <section>{head}{problem || <p className="px-3 py-3 text-[13px] text-muted-foreground">Reading the log.</p>}</section>;
+  if (!data) return <section>{head}{problem || <p className="px-3 py-3 text-caption text-muted-foreground">Reading the log.</p>}</section>;
 
   const entries = data.entries || (data.lines || []).map((line) => ({ t: "", line }));
   if (entries.length === 0) {
@@ -196,29 +204,25 @@ function Log({ app }: { app: AppRow }) {
     if (copiedTimer.current) clearTimeout(copiedTimer.current);
     copiedTimer.current = setTimeout(() => setCopied(false), 1100);
   };
-  const TALLY = "flex flex-wrap items-center gap-2 px-3 py-2 text-[13px] text-text-2";
+  const TALLY = "flex flex-wrap items-center gap-2 px-3 py-2 text-caption text-text-2";
   return (
     <section>
-      {head}
+      {ringHead}
       {problem && <div className="mb-2">{problem}</div>}
       <div className={BOX} data-server-log="ring">
         <div className={cn(TALLY, "border-b border-border")} data-log-tally>
           <span><span className="mr-1 inline-block size-2 rounded-full bg-danger" aria-hidden="true" />{cnt(tally.err, "error")}</span>
           <span><span className="mr-1 inline-block size-2 rounded-full bg-warn" aria-hidden="true" />{cnt(tally.wrn, "warning")}</span>
-          <span>{cnt(tally.lines, "line") + (span === "since" ? " since the last check" : " in the ring")}</span>
+          <span>{logLines(tally.lines, span === "since")}</span>
           {tally.lastErr && <span>{"· last error " + relTimeText(tally.lastErr)}</span>}
-          <span className="ml-auto inline-flex flex-wrap items-center gap-1">
-            <Pill on={sev === "err"} onClick={() => setSev("err")}>Errors</Pill>
-            <Pill on={sev === "wrn"} onClick={() => setSev("wrn")}>Warnings</Pill>
-            <Pill on={sev === "all"} onClick={() => setSev("all")}>All</Pill>
-            <span className="mx-1 text-border" aria-hidden="true">·</span>
-            <Pill on={span === "since"} onClick={() => setSpan("since")}>Since last check</Pill>
-            <Pill on={span === "all"} onClick={() => setSpan("all")}>Everything</Pill>
+          <span className="ml-auto inline-flex max-w-full flex-wrap items-center gap-2">
+            <Segmented label={LOG_SEVERITY} value={sev} onChange={setSev} options={SEVS} data-log-severity />
+            <Segmented label={LOG_SPAN} value={span} onChange={setSpan} options={SPANS} data-log-span />
           </span>
         </div>
-        <div className="max-h-[340px] overflow-auto font-mono text-[13px] leading-relaxed" data-log-lines>
+        <div className="max-h-[340px] overflow-auto font-mono text-caption leading-relaxed" data-log-lines>
           {shown.map((r, i) => r.marker ? (
-            <div key={"m" + i} className={cn("flex items-center gap-2 px-3 py-1 font-sans text-[13px]", r.check ? "text-link" : "text-warn")} data-log-marker>
+            <div key={"m" + i} className={cn("flex items-center gap-2 px-3 py-1 font-sans text-caption", r.check ? "text-link" : "text-warn")} data-log-marker>
               <span className="flex-1 border-t border-dashed border-border" aria-hidden="true" />
               {(r.t ? clockTime(r.t) + " · " : "") + r.text}
               <span className="flex-1 border-t border-dashed border-border" aria-hidden="true" />
@@ -228,22 +232,21 @@ function Log({ app }: { app: AppRow }) {
               <span className="text-muted-foreground tabular-nums">{r.t ? clockTime(r.t) : ""}</span>
               <span className="relative h-[1.6em]"><span className={cn("absolute top-[calc(50%-4px)] left-0.5 size-[9px] rounded-full", KDOT[r.k])} aria-hidden="true" /></span>
               <span className={cn("whitespace-pre-wrap [overflow-wrap:anywhere]", r.k === "dbg" ? "text-muted-foreground" : "text-foreground")}>{r.text}</span>
-              {r.n > 1 ? <span className="rounded-full border border-border px-1.5 font-sans text-xs whitespace-nowrap text-text-2" title={"repeated until " + absTime(r.last)}>{"×" + r.n}</span> : <span />}
+              {r.n > 1 ? <CountPill title={"repeated until " + absTime(r.last)}>{"×" + r.n}</CountPill> : <span />}
             </div>
           ))}
         </div>
         {hidden > 0 && (
-          <div className="border-t border-dashed border-border px-3 py-1 text-[13px] text-muted-foreground" data-log-hidden>
+          <div className="border-t border-dashed border-border px-3 py-1 text-caption text-muted-foreground" data-log-hidden>
             {cnt(hidden, "other line") + " hidden by the filter. "}
             <Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={() => setSev("all")}>Show all</Button>
           </div>
         )}
         <div className={cn(TALLY, "border-t border-border")}>
-          <span className="inline-flex items-center gap-1.5">Follow <Pill on={follow} onClick={() => setFollow(!follow)} label="follow the log">{follow ? "on, every 5 s while open" : "off"}</Pill></span>
+          <span className="inline-flex items-center gap-1.5">Follow <Pill on={follow} onClick={() => setFollow(!follow)} label="follow the log">{follow ? "on" : "off"}</Pill></span>
           <Button variant="ghost" size="sm" className={cn("ml-auto", copied && "text-ok")} onClick={copy}>{copied ? "Copied" : "Copy " + cnt(lines.length, "line")}</Button>
         </div>
       </div>
-      <p className={HINT}>The last lines the runtime wrote to stderr, each stamped when Straza received it. A repeated line shows once with its count. The dashed rows mark the last health check and every status change.</p>
     </section>
   );
 }

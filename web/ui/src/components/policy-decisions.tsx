@@ -7,16 +7,15 @@ import { DataTable, plain } from "@/components/data-table";
 import { FetchError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { RecordSheet } from "@/components/record-sheet";
-import { WordBadge } from "@/components/users-table";
+import { Chip, OutcomeChip } from "@/components/chip";
 import { type ApiError, type AuditRow, listAudit } from "@/lib/api";
 import { type Row, ceRow, ceWhat, effectTone, effectWord, parseCE, policyQuery, whyOf } from "@/lib/audit-words";
 import { put } from "@/lib/handoff";
 import type { Bucket } from "@/lib/policy-model";
-import { ANY_OUTCOME, ANY_WHO, BUCKET_WORD, DEC_FILTER, DECISION_COLUMN, DECISIONS_FOOT, DECISIONS_HELP, DECISIONS_LINE, NO_DECISIONS, NO_DECISIONS_HERE, OPEN_IN_AUDIT, SINCE, SUBJECT_DECISIONS, TAB, decisionCall, decisionCount } from "@/lib/policy-words";
+import { ANY_OUTCOME, ANY_WHO, BUCKET_OUTCOME, BUCKET_WORD, DEC_FILTER, DECISION_COLUMN, DECISIONS_HELP, NO_DECISIONS, NO_DECISIONS_HERE, OPEN_IN_AUDIT, SINCE, SUBJECT_DECISIONS, TAB, decisionCall, decisionCount } from "@/lib/policy-words";
 import { navigate } from "@/lib/router";
 import { readFailed } from "@/lib/say";
-import { agoWord } from "@/lib/settings-words";
-import { absTime } from "@/lib/words";
+import { absTime, agoWord } from "@/lib/words";
 
 // The Decisions tab of a policy's page: the audit
 // chain filtered to the records this policy decided, newest first. A row
@@ -70,13 +69,23 @@ function decision(r: AuditRow): Decision {
 
 const LABEL: Record<string, string> = { when: DECISION_COLUMN.when, who: DECISION_COLUMN.who, call: DECISION_COLUMN.call, outcome: DECISION_COLUMN.outcome, rule: DECISION_COLUMN.rule };
 const WIDTHS: Record<string, string> = { when: "110px", who: "180px", outcome: "150px", rule: "260px" };
+// FLOOR keeps room for Call, the one column without a width, so a narrow
+// window scrolls the table inside its box.
+const FLOOR = "900px";
 
 const COLUMNS: ColumnDef<Decision>[] = [
   { id: "when", accessorFn: (d) => d.row.time, header: plain(DECISION_COLUMN.when), cell: ({ row }) => <span title={absTime(row.original.row.time)}>{agoWord(row.original.row.time)}</span> },
   { id: "who", accessorFn: (d) => d.row.user, header: plain(DECISION_COLUMN.who), cell: ({ row }) => <b className="block truncate font-semibold text-foreground" title={row.original.row.user}>{row.original.row.user}</b> },
-  { id: "call", accessorFn: (d) => d.call, header: plain(DECISION_COLUMN.call), cell: ({ row }) => <span className="block truncate font-mono text-[13px]">{row.original.call}</span> },
-  { id: "outcome", accessorFn: (d) => d.word, header: plain(DECISION_COLUMN.outcome), cell: ({ row }) => <WordBadge word={row.original.word} tone={row.original.tone} attr="data-outcome" /> },
-  { id: "rule", accessorFn: (d) => d.ruleId, header: plain(DECISION_COLUMN.rule), cell: ({ row }) => <span className="block truncate font-mono text-[13px] text-muted-foreground">{row.original.ruleId}</span> },
+  { id: "call", accessorFn: (d) => d.call, header: plain(DECISION_COLUMN.call), cell: ({ row }) => <span className="block truncate font-mono text-caption">{row.original.call}</span> },
+  {
+    id: "outcome",
+    accessorFn: (d) => d.word,
+    header: plain(DECISION_COLUMN.outcome),
+    cell: ({ row }) => (row.original.bucket
+      ? <OutcomeChip outcome={BUCKET_OUTCOME[row.original.bucket]} />
+      : <Chip tone={row.original.tone} data-outcome={row.original.word}>{row.original.word}</Chip>),
+  },
+  { id: "rule", accessorFn: (d) => d.ruleId, header: plain(DECISION_COLUMN.rule), cell: ({ row }) => <span className="block truncate font-mono text-caption text-muted-foreground">{row.original.ruleId}</span> },
 ];
 
 const BUCKETS: Bucket[] = ["deny", "hum", "allow"];
@@ -136,8 +145,7 @@ export function PolicyDecisions({ name, onOpenAudit }: Props) {
 
   return (
     <div className="flex flex-col gap-3" data-decisions-tab>
-      <div className="flex flex-wrap items-center gap-2 text-sm text-text-2">
-        <span>{DECISIONS_LINE}</span>
+      <div className="flex flex-wrap items-center gap-2 text-dense text-text-2">
         <HelpTip label={TAB.decisions} text={DECISIONS_HELP} />
         <Button variant="ghost" size="sm" className="ml-auto text-link" onClick={onOpenAudit}>{OPEN_IN_AUDIT} <ArrowRightIcon /></Button>
       </div>
@@ -149,6 +157,7 @@ export function PolicyDecisions({ name, onOpenAudit }: Props) {
         columns={COLUMNS}
         labels={LABEL}
         widths={WIDTHS}
+        minWidth={FLOOR}
         rowKey={(d) => String(d.row.seq)}
         rowName={(d) => String(d.row.seq)}
         dataAttr="data-decision"
@@ -180,7 +189,6 @@ export function PolicyDecisions({ name, onOpenAudit }: Props) {
             </Select>
           </>
         }
-        foot={<p className="text-[13px] text-muted-foreground">{DECISIONS_FOOT}</p>}
       />
 
       {record && (

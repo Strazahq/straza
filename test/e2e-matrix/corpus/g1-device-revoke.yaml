@@ -3,7 +3,7 @@
 # the same person works again, because the user is untouched.
 # Checked against the running binary [live], because the API
 # reference documents routes without request or response shapes: the activate
-# body is {status: active|draft}, a pack binding names role_id, deletes of
+# body is {status: active|draft}, deletes of
 # roles, apps, users and devices answer 200 with a status field, a policy
 # delete answers 204, and the bare approvals list is an object with an
 # approvals array.

@@ -53,7 +53,7 @@ function openDB(): Promise<IDBDatabase> {
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error || new Error("IndexedDB refused to open"));
-    req.onblocked = () => reject(new Error("another tab is holding IndexedDB open"));
+    req.onblocked = () => reject(new Error("another tab is holding it open"));
   });
 }
 

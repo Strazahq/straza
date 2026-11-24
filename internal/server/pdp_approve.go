@@ -313,7 +313,7 @@ func (a *App) confirmSurfacesHint() string {
 	if a.cfg.Approval.UnsignedOwnDecisions {
 		return a.approvalSurfacesHint()
 	}
-	return "their enrolled phone, or the self-service page under This browser (" + a.selfServicePage() + ")"
+	return "the requester's enrolled phone, or Requests on the self-service page (" + a.selfServicePage() + ") in a browser set up to approve"
 }
 
 // surfacesHintFor names where rec can be decided: a confirm record is its

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Tag } from "@/components/chip";
 import { HelpTip } from "@/components/help-tip";
 import { HINT } from "@/components/wizard/parts";
 import type { EventSupport } from "@/lib/api";
@@ -32,10 +33,12 @@ type Props = {
   // link only where the page passes it and the rule names more than one
   // call.
   onSplit?: (name: string) => void;
+  // startOpen opens the fold on its first draw, for a rule whose calls are
+  // still to be given.
+  startOpen?: boolean;
 };
 
-const CHIP = "inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-px font-mono text-[13px] text-foreground";
-const KEY = "cursor-help text-[13px] text-muted-foreground underline decoration-dotted underline-offset-[3px]";
+const KEY = "cursor-help text-caption text-muted-foreground underline decoration-dotted underline-offset-[3px]";
 
 // Row is one label and value pair. The label carries the YAML key it
 // writes, so the card and the text read as one document.
@@ -46,7 +49,7 @@ function Row({ slot, label, yamlKey, help, children }: { slot: string; label: st
         <span className={KEY} title={yamlKey}>{label}</span>
         {help && <HelpTip label={label} text={help} />}
       </span>
-      <div className="flex min-w-0 flex-col items-start gap-1.5 text-sm text-foreground" data-match={slot}>{children}</div>
+      <div className="flex min-w-0 flex-col items-start gap-1.5 text-dense text-foreground" data-match={slot}>{children}</div>
     </>
   );
 }
@@ -68,30 +71,30 @@ function Names({ rule, label, add, hint, onEdit, onSplit, keepOne }: { rule: Rul
   return (
     <>
       <div className="flex flex-wrap items-center gap-1.5">
-        {names.length === 0 && <span className="text-sm text-muted-foreground">{EVERY_WORD[rule.lane]}</span>}
+        {names.length === 0 && <span className="text-dense text-muted-foreground">{EVERY_WORD[rule.lane]}</span>}
         {names.map((n) => (
-          <span key={n} className="inline-flex items-center gap-1">
-            <span className={CHIP} data-name={n}>
-              {n}
+          <span key={n} className="inline-flex max-w-full items-center gap-1">
+            <Tag title={n} className="max-w-full" data-name={n}>
+              <span className="min-w-0 truncate">{n}</span>
               {!(keepOne && names.length === 1) && (
                 <button type="button" aria-label={removePick(n)} className="text-muted-foreground hover:text-foreground" onClick={() => write(names.filter((x) => x !== n))}>
                   <XIcon className="size-3" aria-hidden="true" />
                 </button>
               )}
-            </span>
+            </Tag>
             {split && (
               <Button variant="link" size="sm" className="h-6 px-1" aria-label={moveOut(n)} data-move-out={n} onClick={() => split(n)}>{MOVE_OUT}</Button>
             )}
           </span>
         ))}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Input
           aria-label={label}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); push(); } }}
-          className="h-8 w-56 font-mono"
+          className="h-8 min-w-0 flex-1 basis-32 font-mono sm:w-56 sm:flex-none"
         />
         <Button variant="outline" size="sm" onClick={push}>{add}</Button>
       </div>
@@ -117,11 +120,11 @@ function Events({ rule, events, onEdit }: Props) {
   const plain = picked.length === 0 || (picked.length === 1 && picked[0] === "tool.pre");
   const cover = known.map((k) => eventsCoverage(k, missingOf(k))).join(" ");
 
-  if (rule.lane === "mcp") return <span className="text-sm text-text-2">{eventsWords(picked, rule.lane)}</span>;
+  if (rule.lane === "mcp") return <span className="text-dense text-text-2">{eventsWords(picked, rule.lane)}</span>;
   return (
     <>
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-sm text-text-2">{eventsWords(picked, rule.lane)}</span>
+        <span className="text-dense text-text-2">{eventsWords(picked, rule.lane)}</span>
         {plain ? <HelpTip label={MATCH.events} text={EVENTS_DEFAULT_HELP} /> : cover && <HelpTip label={MATCH.events} text={cover} />}
         {matrix.length > 0 && (
           <DropdownMenu>
@@ -138,7 +141,7 @@ function Events({ rule, events, onEdit }: Props) {
                   onCheckedChange={(on) => onEdit(rule.id, (doc) => setEvents(doc, rule.id, on ? [...picked, e.kind] : picked.filter((k) => k !== e.kind)))}
                 >
                   <span className="flex flex-col gap-0.5">
-                    <span className="font-mono text-[13px] text-foreground">{e.kind}</span>
+                    <span className="font-mono text-caption text-foreground">{e.kind}</span>
                     <span className={HINT}>{eventsCoverage(e.kind, missingOf(e.kind))}</span>
                   </span>
                 </DropdownMenuCheckboxItem>
@@ -147,7 +150,7 @@ function Events({ rule, events, onEdit }: Props) {
           </DropdownMenu>
         )}
       </div>
-      {never.length > 0 && <span className="text-[13px] leading-relaxed text-warn" data-never-fires>{eventsNeverFire(never)}</span>}
+      {never.length > 0 && <span className="text-caption leading-relaxed text-warn" data-never-fires>{eventsNeverFire(never)}</span>}
     </>
   );
 }
@@ -177,24 +180,26 @@ function asWritten(rule: RuleView): string {
   return Object.keys(out).length ? stringify(out, { lineWidth: 0 }) : "";
 }
 
-export function PolicyMatching({ rule, events, onEdit, onSplit }: Props) {
-  const [open, setOpen] = React.useState(false);
+export function PolicyMatching({ rule, events, onEdit, onSplit, startOpen }: Props) {
+  const [open, setOpen] = React.useState(!!startOpen);
   const requires = requireWords(rule.raw);
   const written = asWritten(rule);
   const editable = rule.lane === "mcp" || rule.lane === "shell" || rule.lane === "files" || rule.lane === "harness";
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="rounded-md border border-border bg-background" data-fold={rule.id}>
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
+      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-caption text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
         <ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
         <b className="font-semibold text-text-2">{ADVANCED}</b>
         <span className="min-w-0 truncate">{foldSummary(rule)}</span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="grid grid-cols-[minmax(96px,150px)_1fr] items-start gap-x-3 gap-y-2.5 border-t border-border px-2.5 py-3">
-        <Row slot="lane" label={MATCH.lane} yamlKey="tools"><span className="text-sm text-text-2">{WHERE_WORD[rule.lane]}</span></Row>
+      <CollapsibleContent className="grid grid-cols-[minmax(96px,150px)_minmax(0,1fr)] items-start gap-x-3 gap-y-2.5 border-t border-border px-2.5 py-3">
+        <Row slot="lane" label={MATCH.lane} yamlKey="tools"><span className="text-dense text-text-2">{WHERE_WORD[rule.lane]}</span></Row>
 
         {rule.lane === "mcp" && (
           <Row slot="server" label={MATCH.server} yamlKey="apps">
-            <span className="font-mono text-[13px] text-foreground">{rule.app || EVERY_SERVER}</span>
+            <div className="flex max-w-full flex-wrap items-center gap-1.5">
+              {(rule.app ? rule.app.split(", ") : [EVERY_SERVER]).map((s) => <Tag key={s} title={s} className="max-w-full"><span className="min-w-0 truncate">{s}</span></Tag>)}
+            </div>
           </Row>
         )}
         {rule.lane === "mcp" && (
@@ -220,7 +225,7 @@ export function PolicyMatching({ rule, events, onEdit, onSplit }: Props) {
         {!editable && (
           <Row slot="tools" label={MATCH.tools} yamlKey={rule.namesKey}>
             <div className="flex flex-wrap items-center gap-1.5">
-              {(rule.names && rule.names.length ? rule.names : [EVERY_WORD[rule.lane]]).map((n) => <span key={n} className={CHIP} data-name={n}>{n}</span>)}
+              {(rule.names && rule.names.length ? rule.names : [EVERY_WORD[rule.lane]]).map((n) => <Tag key={n} title={n} className="max-w-full" data-name={n}><span className="min-w-0 truncate">{n}</span></Tag>)}
             </div>
           </Row>
         )}
@@ -231,13 +236,13 @@ export function PolicyMatching({ rule, events, onEdit, onSplit }: Props) {
 
         <Row slot="require" label={MATCH.require} yamlKey="require" help={CONDITION_HELP}>
           {requires.length === 0
-            ? <span className="text-sm text-muted-foreground">{REQUIRE_NONE}</span>
-            : requires.map((r) => <span key={r} className="font-mono text-[13px] text-foreground">{r}</span>)}
+            ? <span className="text-dense text-muted-foreground">{REQUIRE_NONE}</span>
+            : requires.map((r) => <span key={r} className="font-mono text-caption text-foreground">{r}</span>)}
         </Row>
 
         {written && (
           <Row slot="written" label={AS_WRITTEN} yamlKey={rule.extra.filter((k) => k !== "require").join(", ")} help={AS_WRITTEN_HELP}>
-            <pre className="m-0 w-full overflow-x-auto rounded-md border border-border bg-card px-2.5 py-2 font-mono text-[13px] leading-relaxed text-text-2" data-written>{written}</pre>
+            <pre className="m-0 w-full overflow-x-auto rounded-md border border-border bg-card px-2.5 py-2 font-mono text-caption leading-relaxed text-text-2" data-written>{written}</pre>
           </Row>
         )}
       </CollapsibleContent>

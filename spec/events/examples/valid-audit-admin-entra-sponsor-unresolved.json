@@ -1,0 +1,25 @@
+{
+  "specversion": "1.0",
+  "id": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e31",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-11-17T15:02:41.118Z",
+  "data": {
+    "action": "entra.sponsor.unresolved",
+    "user": "0198a1b0-4c11-7e02-9a55-0000000000a1",
+    "username": "ledger-agent",
+    "entraAgentId": "3a3a3a3a-1111-4222-8333-444455556666",
+    "state": "several",
+    "sponsors": [
+      {
+        "id": "5b5b5b5b-1111-4222-8333-444455556601",
+        "kind": "user"
+      },
+      {
+        "id": "5b5b5b5b-1111-4222-8333-444455556602",
+        "kind": "user"
+      }
+    ],
+    "reason": "Entra lists more than one sponsor for this agent, and Straza takes a sponsor only when there is exactly one person. Leave one in Entra."
+  }
+}

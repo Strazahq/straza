@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Setup } from "./overview-setup";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SETUP, setupProgress } from "@/lib/config-words";
-import { navigate } from "@/lib/router";
+import { navigate, pathFor } from "@/lib/router";
 
 vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 
@@ -17,14 +17,14 @@ describe("the setup list of an empty deployment", () => {
     mount({ server: true, role: false, policy: true, floor: false });
     expect(Array.from(document.querySelectorAll("[data-setup]")).map((s) => s.getAttribute("data-setup")))
       .toEqual(SETUP.map((s) => s.key));
-    expect(screen.getByText(setupProgress(2, 5))).toBeTruthy();
+    expect(screen.getByText(setupProgress(2, 4))).toBeTruthy();
     expect(step("server").getAttribute("data-done")).toBe("true");
     expect(step("role").getAttribute("data-done")).toBeNull();
   });
 
-  it("leaves the approver step unmarked, because the console cannot read that fact here", () => {
+  it("leaves the approver step unmarked and out of the count, because the console cannot read that fact here", () => {
     mount({ server: false, role: false, policy: false, floor: false });
-    expect(screen.getByText(setupProgress(0, 5))).toBeTruthy();
+    expect(screen.getByText(setupProgress(0, 4))).toBeTruthy();
     expect(step("approver").getAttribute("data-done")).toBeNull();
     expect(step("approver").querySelector("[data-mark]")).toBeNull();
     expect(step("policy").querySelector("[data-mark]")?.getAttribute("data-mark")).toBe("open");
@@ -35,5 +35,13 @@ describe("the setup list of an empty deployment", () => {
     expect(document.querySelectorAll("[data-door]").length).toBe(SETUP.length);
     await userEvent.click(screen.getByRole("link", { name: /MCP servers/ }));
     expect(vi.mocked(navigate)).toHaveBeenCalledWith("servers", []);
+  });
+
+  it("opens the client verification step on the floor's row in Configuration", async () => {
+    mount({});
+    const door = step("floor").querySelector("a") as HTMLElement;
+    expect(door.getAttribute("href")).toBe(pathFor("settings", ["configuration", "floor"]));
+    await userEvent.click(door);
+    expect(vi.mocked(navigate)).toHaveBeenCalledWith("settings", ["configuration", "floor"]);
   });
 });

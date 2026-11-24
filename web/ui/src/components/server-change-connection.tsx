@@ -6,12 +6,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MISSING, headerMissing } from "@/components/wizard/form-schema";
 import { CAPS, CardGroup, ERROR, Field, HINT, OptionCard } from "@/components/wizard/parts";
 import type { ManifestDoc } from "@/lib/api";
-import { ADDRESS_HINT, ARGS_HINT, ENV_HINT, ENV_LOCKED, ENV_NAMELESS, NAME_LOCKED, TO_ENV, TO_HEADER } from "@/lib/change-words";
+import { ARGS_HINT, ENV_HINT, ENV_LOCKED, ENV_NAMELESS, NAME_LOCKED, TO_ENV, TO_HEADER } from "@/lib/change-words";
 import { HTTP_SENT, SENT_AS } from "@/lib/manifest";
 import { type Connection, callerKind, injectMoves } from "@/lib/manifest-edit";
 import { RUNTIME_NEEDS_GLOBAL } from "@/lib/server-words";
 import { adminAreas } from "@/lib/session";
-import { CALLER_OFF_SHORT, COMMAND_REFUSED, ENV_WARNING_SHORT, OCI_MISSING, OCI_MISSING_REMOTE, RUNTIMES, sentShort } from "@/lib/words";
+import { ADDRESS_HINT, CALLER_OFF_SHORT, COMMAND_REFUSED, ENV_WARNING_SHORT, OCI_MISSING, OCI_MISSING_REMOTE, RUNTIMES, sentShort } from "@/lib/words";
 
 // Miss is one field a Change sheet cannot save without: the id of the
 // input the primary focuses, and the sentence shown under it.
@@ -22,7 +22,7 @@ export const sayOf = (misses: Miss[], id: string) => misses.find((m) => m.id ===
 // Locked is a value the sheet shows and never edits, with the reason.
 export function Locked({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm leading-snug text-text-2">
+    <div className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-dense leading-snug text-text-2">
       <LockIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       <span>{children}</span>
     </div>
@@ -111,7 +111,7 @@ export function ConnectionFields({ name, base, c, set, misses, runtimes }: Props
       return (
         <>
           {text("cs-cred-env", "Shared secret's variable", "envName", "API_TOKEN", TO_ENV)}
-          <p className="rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-[13px] leading-snug text-foreground">{ENV_WARNING_SHORT}</p>
+          <p className="rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-caption leading-snug text-foreground">{ENV_WARNING_SHORT}</p>
         </>
       );
     }
@@ -140,7 +140,7 @@ export function ConnectionFields({ name, base, c, set, misses, runtimes }: Props
       <>
         {text("cs-exec", "Executable", "exec", "/usr/local/bin/mcp-server")}
         {text("cs-args", "Arguments", "args", "--stdio", ARGS_HINT)}
-        {text("cs-workdir", "Working directory", "workdir", "strazad's own when empty")}
+        {text("cs-workdir", "Working directory", "workdir", "Straza's own when empty")}
         {envRows()}
         {secretMove()}
       </>
@@ -156,8 +156,8 @@ export function ConnectionFields({ name, base, c, set, misses, runtimes }: Props
       <div className="flex flex-col gap-2">
         <span className={CAPS}>How Straza reaches it</span>
         <CardGroup label="runtime" value={c.kind} onPick={pick}>
-          {RUNTIMES.filter((r) => r.key !== "import").map((r) => (
-            <OptionCard key={r.key} value={r.key} label={"runtime " + r.key} name={r.name} tag={r.key} line={offLine(r.key) || r.desc}
+          {RUNTIMES.map((r) => (
+            <OptionCard key={r.key} value={r.key} name={r.name} line={offLine(r.key) || r.desc}
               on={c.kind === r.key} off={!!offLine(r.key)}>
               {c.kind === r.key ? fieldsOf(r.key) : null}
             </OptionCard>

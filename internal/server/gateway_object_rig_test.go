@@ -128,7 +128,8 @@ func startGHUpstream(t *testing.T) *ghUpstream {
 	return u
 }
 
-// ghManifest pins repo on ghapp at url.
+// ghManifest pins repo on ghapp at url. Its rate sits far above the remote
+// default, because one session fires every case on both endpoints at once.
 func ghManifest(url string) string {
 	return fmt.Sprintf(`
 apiVersion: straza.dev/v1beta1
@@ -139,6 +140,7 @@ straza:
   runtime:
     kind: remote
     remote: {url: %q}
+  limits: {rps: 100000}
   credential:
     kind: static
     inject: {as: header, name: Authorization, template: "Bearer {{secret}}"}
@@ -219,7 +221,7 @@ func bootGHApp(t *testing.T, clock *ghClock, mutators ...func(*config.Config)) (
 	app.gateway.notify.SetDelay(0)
 	base := "http://" + app.Addr()
 	app.cfg.Server.PublicURL = base
-	if app.tokens, err = authn.NewTokenService(ctx, app.store.SigningKeys(), base, 0); err != nil {
+	if app.tokens, err = authn.NewTokenService(ctx, app.store.SigningKeys(), app.kek, base, 0); err != nil {
 		cancel()
 		t.Fatal(err)
 	}

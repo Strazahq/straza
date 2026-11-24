@@ -114,7 +114,7 @@ func (after *World) putRole(w World, it Item) {
 	after.roleDocs[it.Name] = doc
 	live := w.Roles[it.Name]
 	ro := Role{ID: live.ID, Name: it.Name, Kind: doc.Spec.Kind, Plane: PlaneAccess, Owner: doc.Spec.Server,
-		Owned: doc.Spec.Server != "", Description: doc.Spec.Description, Packs: live.Packs}
+		Owned: doc.Spec.Server != "", Description: doc.Spec.Description}
 	if doc.Spec.Kind == RoleKindStraza {
 		ro.Kind, ro.Plane = RoleKindBusiness, PlaneControl
 	}

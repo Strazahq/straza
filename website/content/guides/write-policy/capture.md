@@ -36,13 +36,13 @@ Recording is a policy decision about whose conversations are kept. A policy set 
 
 
 {{< console >}}
-Recording is a property of a policy set, never a wizard outcome, so open a live set that matches the role:
+Recording is a property of a policy, never a wizard outcome, so open a live policy that matches the role:
 
-{{< clicks "Policies" "local-tools-guardrails" "Change" "Secrets masked" "Add to unpublished changes" "Save and publish" "Publish" >}}
+{{< clicks "Policies" "local-tools-guardrails" "Change" "Secrets masked" "Apply" "Save and publish" "Publish" >}}
 
 {{< shot name="policy-recording" caption="The **Change recording** sheet with **Secrets masked** picked." >}}
 
-**Change** sits under the fact Recording on the set's page. The sheet `Change recording` offers `No recording`, `Word for word` and `Secrets masked`. Once published, the set's row on Policies carries the mark `REC`.
+**Change** sits under the fact Recording on the policy's page. The sheet `Change recording` offers `No recording`, `Word for word` and `Secrets masked`. Once published, the policy's row on Policies carries the mark `REC`.
 {{< /console >}}
 
 
@@ -126,7 +126,7 @@ Once the prompt is spooled, the service starts an upload at once, and it also up
 
 {{< shot name="transcripts" caption="Transcripts with one recorded session of dana's, the search box and the **Match** picker." >}}
 
-The screen has one row per recorded session, newest activity first, and a row opens the whole conversation. Sessions offers the same through a session's **Open transcript**. The search box, `Search recorded prompts and replies`, finds text across sessions. Its Match picker offers `contains text` and `exact value`. An exact value is hashed in your browser, so a secret you hunt for never leaves your machine.
+The screen has one row per recorded session, newest activity first, and a row opens the whole conversation. Sessions offers the same through a session's **Open transcript**. The search box, `Search recorded prompts and replies`, finds text across sessions. Its Match picker offers `Contains text` and `Exact value`. An exact value is hashed in your browser, so a secret you hunt for never leaves your machine.
 {{< /console >}}
 
 
@@ -166,9 +166,9 @@ An exact-value search finds a pasted token on its own line, and under redact mod
 The audit log holds the fact of the recording without repeating the text: the byte count, the hash of the full original, the mode and the session.
 
 {{< console >}}
-{{< clicks "Audit" "Lens" "recording" >}}
+{{< clicks "Audit" "Kind of record" "Recording" >}}
 
-{{< shot name="audit-recording" caption="The `recording` lens, where a prompt record keeps its size, its mode and a hash, never the text." >}}
+{{< shot name="audit-recording" caption="**Recording** under **Kind of record**, where a prompt record keeps its size, its mode and a hash, never the text." >}}
 {{< /console >}}
 
 {{< cli >}}

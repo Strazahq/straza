@@ -2,7 +2,7 @@
 title: strazactl signing-keys rotate
 description: 'Stage a new key of one purpose: a session key promotes itself, a client assertion key waits for promote'
 pagetype: reference
-weight: 92
+weight: 86
 draft: false
 sources:
   - cmd/strazactl

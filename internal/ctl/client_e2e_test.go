@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -260,6 +261,12 @@ func TestCLIEndToEnd(t *testing.T) {
 	if err := client.Unassign(ctx, "bob", "finance"); err != nil {
 		t.Fatalf("Unassign: %v", err)
 	}
+	if got := unassignPick(t, "entra", "admin"); got != "DELETE /v1/admin/assignments/row-admin" {
+		t.Errorf("Unassign of a role held from Entra and by hand sent %q, want the delete of the hand-made row", got)
+	}
+	if got := unassignPick(t, "entra"); !strings.Contains(got, "Remove bob from the group in Entra") {
+		t.Errorf("Unassign of a role held from Entra alone = %q, want the sentence that sends the admin to Entra", got)
+	}
 	if err := client.Unassign(ctx, "bob", "finance"); err == nil || !strings.Contains(err.Error(), "bob does not hold finance directly") {
 		t.Fatalf("Unassign again = %v, want the refusal that names the missing row", err)
 	}
@@ -295,12 +302,11 @@ func TestCLIEndToEnd(t *testing.T) {
 		t.Fatalf("DeleteRole = %+v, %v; want status deleted and no set turned off", gone, err)
 	}
 
-	// Packs through the CLI client.
-	if _, err := client.CreatePack(ctx, "fin-rules", "1", "no wire transfers"); err != nil {
-		t.Fatalf("CreatePack: %v", err)
-	}
-	if err := client.BindPack(ctx, "fin-rules", "finance"); err != nil {
-		t.Fatalf("BindPack: %v", err)
+	// A retired knowledge pack route answers its sentence, which an older
+	// strazactl prints as the error of its packs commands.
+	if err := client.Do(ctx, http.MethodGet, "/v1/admin/packs", nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "Knowledge packs were removed from Straza, so this route does nothing.") {
+		t.Fatalf("GET /v1/admin/packs = %v, want the retired route's sentence", err)
 	}
 
 	// Policy: apply → activate through the CLI client.
@@ -387,4 +393,35 @@ func claim(changed *bool) string {
 		return "absent"
 	}
 	return strconv.FormatBool(*changed)
+}
+
+// unassignPick runs Unassign of bob's role finance against a server that
+// lists one assignment row for each origin in origins, named row-<origin>.
+// It answers the delete the client sent, or the client's error sentence.
+func unassignPick(t *testing.T, origins ...string) string {
+	t.Helper()
+	sent := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete:
+			sent = r.Method + " " + r.URL.Path
+			_, _ = w.Write([]byte(`{"status":"deleted"}`))
+		case strings.HasPrefix(r.URL.Path, "/v1/admin/users"):
+			_, _ = w.Write([]byte(`[{"id":"u-bob","username":"bob"}]`))
+		case strings.HasPrefix(r.URL.Path, "/v1/admin/roles"):
+			_, _ = w.Write([]byte(`[{"id":"r-fin","name":"finance"}]`))
+		default:
+			rows := make([]string, 0, len(origins))
+			for _, o := range origins {
+				rows = append(rows, `{"id":"row-`+o+`","subject_kind":"user","subject_id":"u-bob","role_id":"r-fin","origin":"`+o+`"}`)
+			}
+			_, _ = w.Write([]byte("[" + strings.Join(rows, ",") + "]"))
+		}
+	}))
+	defer srv.Close()
+	if err := NewClient(srv.URL).Unassign(context.Background(), "bob", "finance"); err != nil {
+		return err.Error()
+	}
+	return sent
 }

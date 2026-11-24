@@ -1,13 +1,14 @@
 import * as React from "react";
-import { Loader2Icon, PlusIcon, ShieldIcon } from "lucide-react";
+import { Loader2Icon, PlusIcon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddRoleSheet } from "@/components/add-role-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { RefusedError } from "@/components/error-state";
+import { Chip, ToolChip } from "@/components/chip";
 import { HelpTip } from "@/components/help-tip";
+import { KIND_ICON, KindTile } from "@/components/kind-icon";
 import { NoRole, RoleChip } from "@/components/status-badge";
 import { SHOWN_VALUES, coversCell } from "@/lib/access-object-words";
 import { coversOf, partial } from "@/lib/access-covers";
@@ -25,12 +26,11 @@ import {
   ROLE_HELP,
   TAB_HEAD,
   certifiedHint,
-  countLine,
   coversUnread,
   deleteBody,
   deleteTitle,
   emptyBody,
-  emptyTitle,
+  EMPTY_TITLE,
   frozenTools,
   heldDelete,
   heldRule,
@@ -50,12 +50,10 @@ import { matchesTool } from "@/lib/words";
 // removed the holders, so both actions grey out with the server's own
 // sentence and say it again on a click.
 
-const DESTRUCTIVE = "bg-danger text-white hover:bg-danger/90";
 const DANGER = "border-danger text-danger hover:bg-danger-bg";
 // CELL is one tool in the picture of a role's reach: filled in the accent
 // for a tool in the role's selection, hollow for one outside it.
-const CELL = "size-5 rounded border";
-const EVERY = "rounded-md px-2 text-[13px] font-normal bg-accent-bg text-link border-link/40";
+const CELL = "size-5 rounded-md border";
 
 export type ServerRolesTabProps = {
   app: AppRow;
@@ -151,7 +149,7 @@ export function ServerRolesTab({ app, roles, tools, bindings, globalAdmin, onCha
     return (
       <div data-server-roles={app.name}>
         {refusal && <RefusedError subject={refusal.subject} message={refusal.message} />}
-        <EmptyState icon={ShieldIcon} title={emptyTitle(app.name)} action={<Button onClick={add}><PlusIcon /> {ADD_ROLE}</Button>}>
+        <EmptyState icon={KIND_ICON["role-application"]} title={EMPTY_TITLE} action={<Button onClick={add}><PlusIcon /> {ADD_ROLE}</Button>}>
           {emptyBody(app.name)}
         </EmptyState>
         {sheetParts}
@@ -162,14 +160,14 @@ export function ServerRolesTab({ app, roles, tools, bindings, globalAdmin, onCha
   return (
     <div className="flex flex-col gap-3" data-server-roles={app.name}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13px] text-muted-foreground" data-role-count>{countLine(roles.length)}</span>
         <Button size="sm" className="ml-auto" onClick={add}><PlusIcon /> {ADD_ROLE}</Button>
       </div>
 
       {refusal && <RefusedError subject={refusal.subject} message={refusal.message} />}
 
       <div className="rounded-md border border-border">
-        <Table className="table-fixed">
+        {/* The floor keeps Edit access and Delete inside the last column, which is 20 % of it. */}
+        <Table className="min-w-[960px] table-fixed">
           <colgroup>
             <col className={w ? "w-[26%]" : "w-[34%]"} />
             <col className={w ? "w-[26%]" : "w-[38%]"} />
@@ -201,7 +199,10 @@ export function ServerRolesTab({ app, roles, tools, bindings, globalAdmin, onCha
                   <TableRow data-owned-role={r.name}>
                     <TableCell className="py-4 align-baseline whitespace-normal">
                       <div className="flex flex-col gap-1.5">
-                        <span className="font-mono font-semibold break-words text-foreground">{r.name}</span>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <KindTile kind="role-application" />
+                          <span className="min-w-0 font-mono font-semibold break-words text-foreground">{r.name}</span>
+                        </span>
                         {r.description && <span className="max-w-[52ch] text-text-2">{r.description}</span>}
                       </div>
                     </TableCell>
@@ -222,8 +223,8 @@ export function ServerRolesTab({ app, roles, tools, bindings, globalAdmin, onCha
                             {later && <span data-cell="later" className={cn(CELL, "border-dashed border-primary bg-accent-bg")} />}
                           </div>
                           {typeof names === "string"
-                            ? <div className="text-[13px] leading-snug text-muted-foreground">{names}</div>
-                            : names.length > 0 && <div className="leading-relaxed" data-tool-names>{names.map((n) => <RoleChip key={n} name={n} />)}</div>}
+                            ? <div className="text-caption leading-snug text-muted-foreground">{names}</div>
+                            : names.length > 0 && <div className="flex flex-wrap gap-1" data-tool-names>{names.map((n) => <ToolChip key={n}>{n}</ToolChip>)}</div>}
                         </div>
                       )}
                     </TableCell>
@@ -264,7 +265,7 @@ export function ServerRolesTab({ app, roles, tools, bindings, globalAdmin, onCha
                   </TableRow>
                   {!held && (
                     <TableRow data-role-line={r.name}>
-                      <TableCell colSpan={w ? 5 : 4} className="whitespace-normal pt-0 text-[13px] leading-snug text-muted-foreground">
+                      <TableCell colSpan={w ? 5 : 4} className="whitespace-normal pt-0 text-caption leading-snug text-muted-foreground">
                         {unheldLine(r.name)}
                       </TableCell>
                     </TableRow>
@@ -275,8 +276,8 @@ export function ServerRolesTab({ app, roles, tools, bindings, globalAdmin, onCha
           </TableBody>
         </Table>
       </div>
-      {w && !bindings && <p className="text-[13px] text-muted-foreground" data-covers-unread>{coversUnread(w.plural)}</p>}
-      <p className="text-[13px] text-muted-foreground" data-held-rule>{heldRule(globalAdmin)}</p>
+      {w && !bindings && <p className="text-caption text-muted-foreground" data-covers-unread>{coversUnread(w.plural)}</p>}
+      <p className="text-caption text-muted-foreground" data-held-rule>{heldRule(globalAdmin)}</p>
 
       {sheetParts}
 
@@ -290,7 +291,7 @@ export function ServerRolesTab({ app, roles, tools, bindings, globalAdmin, onCha
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={busy}>{CANCEL}</AlertDialogCancel>
-                <AlertDialogAction className={DESTRUCTIVE} disabled={busy} onClick={(e) => { e.preventDefault(); void remove(); }}>
+                <AlertDialogAction className={DANGER_FILL} disabled={busy} onClick={(e) => { e.preventDefault(); void remove(); }}>
                   {busy && <Loader2Icon className="animate-spin" />}
                   {DELETE_ROLE}
                 </AlertDialogAction>
@@ -312,13 +313,13 @@ export function ServerRolesTab({ app, roles, tools, bindings, globalAdmin, onCha
 function CoversCell({ w, rows, role, app }: { w: Nouns; rows: BindingRow[] | null; role: string; app: string }) {
   if (!rows) return <span className="text-muted-foreground">{COVERS_UNREAD}</span>;
   const c = coversOf(rows.find((b) => b.role === role && b.app === app)?.covers);
-  if (c && !partial(c)) return <Badge variant="outline" className={EVERY} data-covers="every">{coversCell(w, c)}</Badge>;
+  if (c && !partial(c)) return <Chip tone="accent" data-covers="every">{coversCell(w, c)}</Chip>;
   if (!c || !c.objects.length) return <NoRole text={noCovers(w.plural)} />;
   const rest = c.objects.length - SHOWN_VALUES;
   return (
     <div className="leading-relaxed" data-covers="objects">
       {c.objects.slice(0, SHOWN_VALUES).map((o) => <RoleChip key={o.id || o.value} name={o.value} />)}
-      {rest > 0 && <span className="text-[13px] text-muted-foreground" data-covers-more>{moreCovers(rest, w)}</span>}
+      {rest > 0 && <span className="text-caption text-muted-foreground" data-covers-more>{moreCovers(rest, w)}</span>}
     </div>
   );
 }

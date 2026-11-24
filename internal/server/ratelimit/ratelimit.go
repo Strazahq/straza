@@ -3,6 +3,7 @@
 package ratelimit
 
 import (
+	"math"
 	"sync"
 	"time"
 )
@@ -53,9 +54,10 @@ func (l *Limiter) Allow(key string, rps float64) bool {
 
 // AllowBurst is Allow with the bucket's burst given apart from its rate, for
 // a rate under one event a second that must still let a few events through
-// at once. A burst under 1 counts as 1.
+// at once. A burst under 1 counts as 1. An infinite rps does not limit,
+// because a bucket cannot count with it.
 func (l *Limiter) AllowBurst(key string, rps, burst float64) bool {
-	if rps <= 0 {
+	if rps <= 0 || math.IsInf(rps, 1) {
 		return true
 	}
 	burst = max(burst, 1)

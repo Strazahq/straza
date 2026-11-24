@@ -43,7 +43,7 @@ export function Choice({ id, value, label, line, children }: { id: string; value
     <div className="flex items-start gap-2.5">
       <RadioGroupItem value={value} id={id} aria-label={label} className="mt-1" />
       <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-dense text-foreground">
           <label htmlFor={id}>{label}</label>
           {children}
         </div>
@@ -144,12 +144,12 @@ export function ApprovalChoice({ shape, approvers, onShape, compact }: ApprovalC
           </Choice>
           <Choice id={id + "-ticket"} value="ticket" label={HOW_TICKET} line={HOW_TICKET_LINE}>
             <Duration label={HOW_TICKET} seconds={shape.ticket} onChange={(ticket) => set({ ticket, how: "ticket" })} />
-            <span className="text-sm text-foreground">{HOW_TICKET_MID}</span>
+            <span className="text-dense text-foreground">{HOW_TICKET_MID}</span>
             <Duration label={HOW_TICKET_END} seconds={shape.grant} onChange={(grant) => set({ grant, how: "ticket" })} />
-            <span className="text-sm text-foreground">{HOW_TICKET_END}</span>
+            <span className="text-dense text-foreground">{HOW_TICKET_END}</span>
           </Choice>
         </RadioGroup>
-        {few && <p className="m-0 max-w-[80ch] text-[13px] leading-relaxed text-warn" data-w1>{W1(count, shape.hold)}</p>}
+        {few && <p className="m-0 max-w-[80ch] text-caption leading-relaxed text-warn" data-w1>{W1(count, shape.hold)}</p>}
       </div>
     </div>
   );

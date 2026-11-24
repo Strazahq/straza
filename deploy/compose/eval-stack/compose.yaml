@@ -25,7 +25,8 @@ x-objects-demo-tokens: &objects-demo-tokens
 
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    # Pinned to its multi-arch index digest (docker buildx imagetools inspect).
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -653,7 +654,8 @@ services:
   midpoint-init:
     # one-shot native-repo schema init, verbatim from Evolveum's official compose
     # (Evolveum midpoint-docker, Apache-2.0)
-    image: evolveum/midpoint:${MP_VER:-4.10.3}-alpine
+    # Pinned to its multi-arch index digest. midpoint below runs the same image.
+    image: evolveum/midpoint:4.10.5-alpine@sha256:8c1cbce9a4257bb2442dd916fe95c078c229c8061529977972b65c067f5a2461
     command: >
       bash -c "
       cd /opt/midpoint ;
@@ -711,7 +713,7 @@ services:
     restart: "no"
 
   midpoint:
-    image: evolveum/midpoint:${MP_VER:-4.10.3}-alpine
+    image: evolveum/midpoint:4.10.5-alpine@sha256:8c1cbce9a4257bb2442dd916fe95c078c229c8061529977972b65c067f5a2461
     command: ["/opt/midpoint/bin/midpoint.sh", "container"]
     depends_on:
       midpoint-init:

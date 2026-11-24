@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 import { addRule, buildRule, docProblems, docText, laneOf, moveRule, newPolicyDoc, openDoc, posturesOf, proposeRuleId, readSet, removeRule, ruleView, rulesOf, setApprove, setCapture, setClass, setMatchRoles, setNames, setPosture, setReason, slug, uniqueId } from "./policy-model";
-import { countTitle, durationWords, foldSummary, outcomeWords, sentence, subjectWords, whatChanges } from "./policy-words";
+import { countTitle, durationWords, eventsWords, foldSummary, outcomeWords, sentence, subjectWords, whatChanges } from "./policy-words";
 
 const repo = (rel: string) => fileURLToPath(new URL("../../../../" + rel, import.meta.url));
 const seed = readFileSync(repo("web/ui/src/test/testdata/dev-guardrails.yaml"), "utf8");
@@ -81,29 +81,33 @@ describe("reading the seed", () => {
   });
 
   it("words each rule the way the cards and the review say it", () => {
-    expect(outcomeWords(byId["dev-mcp-sum-approval-showcase"])).toBe("needs approval by the person behind the agent within 2 minutes.");
-    expect(sentence(byId["dev-mcp-sum-approval-showcase"])).toBe("get-sum on demo-tools needs approval by the person behind the agent within 2 minutes.");
-    expect(outcomeWords(byId["dev-mcp-env-ticket"])).toBe("needs a ticket the person behind the agent grants within a day; the same call within an hour runs.");
+    expect(outcomeWords(byId["dev-mcp-sum-approval-showcase"])).toBe("needs approval by the agent's sponsor within 2 minutes.");
+    expect(sentence(byId["dev-mcp-sum-approval-showcase"])).toBe("get-sum on demo-tools needs approval by the agent's sponsor within 2 minutes.");
+    expect(outcomeWords(byId["dev-mcp-env-ticket"])).toBe("needs a ticket the agent's sponsor grants within a day, after which the same call is allowed for an hour.");
     expect(outcomeWords(byId["dev-mcp-demo-tools"])).toBe("allowed.");
     expect(sentence(byId["dev-mcp-demo-tools"])).toBe("Every tool on demo-tools is allowed.");
     expect(sentence({ ...byId["no-rm-rf"], names: null })).toBe("Every shell command is denied.");
-    expect(outcomeWords({ ...byId["dev-mcp-sum-approval-showcase"], names: null })).toBe("needs approval by the person behind the agent within 2 minutes.");
+    expect(outcomeWords({ ...byId["dev-mcp-sum-approval-showcase"], names: null })).toBe("needs approval by the agent's sponsor within 2 minutes.");
     expect(outcomeWords(byId["dev-mcp-midpoint-workitem-selfapprove"])).toBe("need approval by the approver role sec-approvers within 10 minutes, told by phone and console.");
-    expect(outcomeWords(byId["dev-deploy-ticket"])).toBe("need a ticket the person behind the agent or the approver role sec-approvers grant within a day; the same call within an hour runs.");
+    expect(outcomeWords(byId["dev-deploy-ticket"])).toBe("need a ticket the agent's sponsor or the approver role sec-approvers grant within a day, after which the same call is allowed for an hour.");
     expect(subjectWords(byId["dev-deploy-ticket"])).toBe("shell commands matching ./deploy*, make deploy* or terraform apply*");
     expect(sentence(byId["no-rm-rf"])).toBe("Shell commands matching rm -rf *, git push --force* or curl * | *sh* are denied.");
     expect(sentence(byId["protect-secrets"])).toBe("Files under **/.env*, **/id_rsa* or **/credentials.json are denied.");
     expect(outcomeWords(byId["dev-local-tools"])).toBe("allowed.");
-    expect(foldSummary(byId["dev-mcp-env-ticket"])).toBe("MCP calls to get-env on demo-tools · tool.pre: the gateway checks once, before the call");
-    expect(foldSummary(byId["no-rm-rf"])).toBe("shell commands matching 3 patterns · events: tool.pre");
+    expect(foldSummary(byId["dev-mcp-env-ticket"])).toBe("MCP calls to get-env on demo-tools · the gateway checks once, before the call");
+    expect(foldSummary(byId["no-rm-rf"])).toBe("shell commands matching 3 patterns · before the tool runs");
+    expect(eventsWords(["tool.pre"], "shell")).toBe("before the tool runs (tool.pre)");
+    expect(eventsWords(["tool.pre", "tool.post"], "files")).toBe("before the tool runs (tool.pre), after the tool ran (tool.post)");
+    expect(eventsWords([], "shell")).toBe("before the tool runs");
+    expect(eventsWords(["tool.pre"], "mcp")).toBe("the gateway checks once, before the call (tool.pre)");
   });
 
   it("counts the buckets from the server's summary", () => {
     const p = posturesOf({ deny: 2, hold: 3, ticket: 2, allow: 4 });
     expect([p.deny, p.hum, p.allow, p.hold, p.ticket, p.check]).toEqual([2, 5, 4, 3, 2, 0]);
-    expect(countTitle("hum", p, { mcp: { hold: 3, ticket: 1, allow: 4 }, shell: { ticket: 1, deny: 1 } })).toBe("3 holds · 2 day-scale tickets · lanes: 4 mcp · 1 shell");
-    expect(countTitle("deny", p, undefined)).toBe("2 rules deny");
-    expect(countTitle("allow", posturesOf({}), undefined)).toMatch(/^Nothing is allowed/);
+    expect(countTitle("hum", p, { mcp: { hold: 3, ticket: 1, allow: 4 }, shell: { ticket: 1, deny: 1 } })).toBe("3 holds · 2 tickets: 4 MCP tool, 1 shell command");
+    expect(countTitle("deny", p, undefined)).toBe("2 policy rules deny");
+    expect(countTitle("allow", posturesOf({}), undefined)).toBe("No policy rule allows a call. MCP tools run by role access.");
   });
 });
 
@@ -284,7 +288,7 @@ describe("a new policy", () => {
       "",
     ].join("\n"));
     const view = rulesOf(doc)[0];
-    expect(sentence(view)).toBe("write-file and delete-file on demo-tools need approval by the person behind the agent within 2 minutes.");
+    expect(sentence(view)).toBe("write-file and delete-file on demo-tools need approval by the agent's sponsor within 2 minutes.");
   });
 
   it("builds a shell denial, a file allow, a team ticket and a whole-lane fetch", () => {
@@ -383,7 +387,7 @@ describe("words", () => {
   it.each([
     ["one name", ["LSP"], "allow" as const, "the harness tool LSP", "The harness tool LSP is allowed."],
     ["two names", ["LSP", "NotebookEdit"], "deny" as const, "the harness tools LSP and NotebookEdit", "The harness tools LSP and NotebookEdit are denied."],
-    ["no name", [], "hold" as const, "every harness tool", "Every harness tool needs approval by the person behind the agent within 2 minutes."],
+    ["no name", [], "hold" as const, "every harness tool", "Every harness tool needs approval by the agent's sponsor within 2 minutes."],
   ])("names a harness rule with %s", (_, names, posture, subject, said) => {
     const view = ruleView(buildRule({ id: "r", lane: "harness", posture, names, timeoutSeconds: 120 }), 0);
     expect(subjectWords(view)).toBe(subject);
@@ -394,7 +398,7 @@ describe("words", () => {
     expect([90, 120, 600, 3600, 7200, 86400, 172800].map(durationWords)).toEqual(["90 seconds", "2 minutes", "10 minutes", "an hour", "2 hours", "a day", "2 days"]);
   });
   it("says what a publish changes", () => {
-    expect(whatChanges(1, [], [], ["dev-tools"], true, false)).toBe("Adds 1 rule for role dev-tools. A new policy: nothing removed.");
-    expect(whatChanges(0, ["no-rm-rf"], ["old"], [], false, true)).toBe("Replaces the running version: changes 1 rule (no-rm-rf) and removes 1 rule (old) for every session.");
+    expect(whatChanges(1, [], [], ["dev-tools"])).toBe("Adds 1 policy rule for role dev-tools.");
+    expect(whatChanges(0, ["no-rm-rf"], ["old"], [])).toBe("Changes 1 policy rule (no-rm-rf) and removes 1 policy rule (old) for every session.");
   });
 });

@@ -3,10 +3,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Roles } from "./roles";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { APP_SKELETON, REACH_SKELETON, type Skeleton } from "@/components/roles-table";
 import { ApiError, type AppRow, type BindingRow, type PoliciesAnswer, type RoleRow, type ToolRow, exportRole, listApps, listBindings, listPolicies, listRoles, listTools } from "@/lib/api";
 import { navigate } from "@/lib/router";
 import { downloadText } from "@/lib/utils";
-import { CATEGORY, COLUMN, NOT_READ, NOT_READ_WHY, SEARCH_ROLES_BY, SUBJECT_POLICY_COUNTS, SUBJECT_REACH, SUMMARY, holdersTitle, mintedFold, notReadRefused, policiesTitle, roleFileName, sideRefused } from "@/lib/role-words";
+import { CATEGORY, COLUMN, KIND_WORD, NOT_READ, NOT_READ_WHY, SEARCH_ROLES_BY, SUBJECT_POLICY_COUNTS, SUBJECT_REACH, SUMMARY, holdersTitle, mintedFold, notReadRefused, policiesTitle, roleFileName, sideRefused } from "@/lib/role-words";
 import { adminAreas } from "@/lib/session";
 
 // Seven roles in the four categories, in the shapes the roles list answers:
@@ -102,11 +103,11 @@ describe("the Roles list", () => {
     expect(screen.queryByText(roles[0].description!)).toBeNull();
   });
 
-  it.each(["application", "business", "approver", "straza"] as const)("selects %s with its explanation and descriptions", async (kind) => {
+  it.each(["application", "business", "approver", "straza"] as const)("selects %s with its count and descriptions", async (kind) => {
     mount(); await ready(); await pick(kind);
     expect(shownNames()).toEqual(roles.filter((r) => r.kind === kind).map((r) => r.name));
     expect(screen.getByRole("heading", { name: CATEGORY[kind].title })).toBeTruthy();
-    expect(screen.getByText(CATEGORY[kind].line)).toBeTruthy();
+    expect((document.querySelector("[data-category-count]") as HTMLElement).textContent).toBe(String(roles.filter((r) => r.kind === kind).length));
     expect(screen.getByRole("columnheader", { name: COLUMN.description })).toBeTruthy();
     const desc = roles.find((r) => r.kind === kind)?.description;
     expect(screen.getByText(desc!).getAttribute("title")).toBe(desc);
@@ -205,7 +206,7 @@ describe("the Roles list", () => {
     expect(document.querySelectorAll("[data-fetch-error]").length).toBe(2);
   });
 
-  it("names the grant, and offers no reload, where the server refuses the side reads", async () => {
+  it("names the area, and offers no reload, where the server refuses the side reads", async () => {
     const refusedRead = new ApiError("session lacks grant apps:read", 403);
     vi.mocked(listBindings).mockRejectedValue(refusedRead);
     vi.mocked(listApps).mockRejectedValue(refusedRead);
@@ -213,16 +214,47 @@ describe("the Roles list", () => {
     mount(); await ready();
     expect(cells("dev-tools")[2].textContent).toBe(SUMMARY.toolsRefused);
     expect(cells("straza-enroll-mobile")[2].textContent).toBe(SUMMARY.adminRefused);
-    expect(cells("dev-tools")[4].querySelector("[title]")?.getAttribute("title")).toBe(notReadRefused("policy:read"));
+    expect(cells("dev-tools")[4].querySelector("[title]")?.getAttribute("title")).toBe(notReadRefused("policy"));
     await pick("application");
     const app = within(row("dev-tools")).getAllByRole("cell");
-    expect(app.some((c) => c.querySelector("[title]")?.getAttribute("title") === notReadRefused("apps:read"))).toBe(true);
-    // The notices over the table name the grant too, and none of them
+    expect(app.some((c) => c.querySelector("[title]")?.getAttribute("title") === notReadRefused("apps"))).toBe(true);
+    // The notices over the table name the area too, and none of them
     // calls the server unreachable or offers a reload.
     const notices = [...document.querySelectorAll("[data-side-refused]")].map((n) => n.textContent);
-    expect(notices).toEqual([sideRefused(SUBJECT_REACH) + " " + notReadRefused("apps:read"), sideRefused(SUBJECT_POLICY_COUNTS) + " " + notReadRefused("policy:read")]);
+    expect(notices).toEqual([sideRefused(SUBJECT_REACH, "apps"), sideRefused(SUBJECT_POLICY_COUNTS, "policy")]);
+    expect(notices[0]).toBe("The Reach column is not shown, because your role does not include MCP servers.");
     expect(document.querySelectorAll("[data-fetch-error]").length).toBe(0);
     expect(document.body.textContent).not.toMatch(/Reload to try again|unreachable/);
+    expect(notReadRefused("policy")).toBe("This column is not shown, because your role does not include Policies.");
+    expect(SUMMARY.toolsRefused).toBe("Tool access is not shown, because your role does not include MCP servers.");
+  });
+
+  it("leads each row with the role's kind tile, draws the category as a pill and keeps a floor under the table", async () => {
+    mount(); await ready();
+    expect(cells("dev-tools")[0].querySelector('[data-kind-icon="role-application"]')).toBeTruthy();
+    const pill = cells("dev-tools")[1].querySelector("[data-category-pill]") as HTMLElement;
+    expect(pill.textContent).toBe(KIND_WORD.application);
+    expect(pill.getAttribute("title")).toBe(KIND_WORD.application);
+    expect((row("dev-tools").closest("table") as HTMLElement).className).toContain("min-w-[960px]");
+    expect(document.body.textContent).not.toContain("Select a role to view details.");
+  });
+
+  it("carries a role's whole name on its name, where a narrow cell cuts it", async () => {
+    vi.mocked(listRoles).mockResolvedValue([...roles, mcpAdmin]);
+    mount(); await ready(); await pick("straza");
+    const name = within(cells("straza-global-mcp-admin")[0]).getByText("straza-global-mcp-admin");
+    expect(name.className).toContain("truncate");
+    expect(name.getAttribute("title")).toBe("straza-global-mcp-admin");
+  });
+
+  it("gives Holders the width of its header and help icon at the 960 px floor, and keeps the edges the category tables share", () => {
+    const edge = (s: Skeleton, id: string) => s.slice(0, s.findIndex((c) => c.id === id)).reduce((n, c) => n + c.width, 0);
+    const width = (s: Skeleton, id: string) => (s.find((c) => c.id === id) as Skeleton[number]).width;
+    // The header with its help icon measured 70 px on the test stack, and
+    // its cell pads it by 8 px on each side.
+    for (const s of [APP_SKELETON, REACH_SKELETON]) expect(width(s, "holders") * 9.6).toBeGreaterThanOrEqual(86);
+    for (const id of ["description", "holders", "policies", "export"]) expect(edge(APP_SKELETON, id)).toBe(edge(REACH_SKELETON, id));
+    expect(edge(APP_SKELETON, "tools")).toBe(edge(REACH_SKELETON, "reach"));
   });
 
   it("retains rows after a failed reload and reports a failed first read", async () => {

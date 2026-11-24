@@ -87,7 +87,7 @@ C:\ProgramData\straza\bin\straza.exe enroll
 ```
 {{< /command >}}
 
-The service names each caller by the Windows account the pipe reports, so every person enrolls from their own signed-in session. From here on this page holds on Windows too, with the full path in place of `straza` wherever the folder is not on your Path. [Known limits]({{< relref "security/known-limits.md" >}}) lists what this version does not cover on Windows yet.
+The service names each caller by the Windows account the pipe reports, so every person enrolls from their own signed-in session. From here on this page holds on Windows too, with the full path in place of `straza` wherever the folder is not on your Path.
 
 ## A macOS machine {.nostep}
 
@@ -103,7 +103,7 @@ straza enroll
 ```
 {{< /command >}}
 
-The service names each caller by the account that macOS reports for the socket, so every person enrolls from their own account, and two people signed in at once keep their enrollments apart. From here on this page holds on macOS too. [Known limits]({{< relref "security/known-limits.md" >}}) lists what this version does not cover on macOS yet.
+The service names each caller by the account that macOS reports for the socket, so every person enrolls from their own account, and two people signed in at once keep their enrollments apart. From here on this page holds on macOS too.
 
 ## Start the background service
 

@@ -29,15 +29,22 @@ func (a *App) Run(ctx context.Context) error {
 	spoolDone := make(chan struct{})
 	go func() { a.runAuditSpool(spoolCtx); close(spoolDone) }() // #nosec G118
 	stopAudit := func() { stopSpool(); <-spoolDone }
-	go a.runRelay(ctx)          // #nosec G118
-	go a.runManager(ctx)        // #nosec G118
-	go a.runRefresher(ctx)      // #nosec G118 (OAuth grant rotation)
-	go a.runSessionJanitor(ctx) // #nosec G118 (session janitor, control plane)
-	go a.runKeyRotation(ctx)    // #nosec G118 (signing key reload and rotation, control plane)
-	go a.runDraftsChecker(ctx)  // #nosec G118 (drafts checker, control plane)
-	go a.runObjects(ctx)        // #nosec G118 (object lists, control plane)
+	go a.runRelay(ctx)     // #nosec G118
+	go a.runManager(ctx)   // #nosec G118
+	go a.runRefresher(ctx) // #nosec G118 (OAuth grant rotation)
+	// The recorders end with ctx, and Run ends them itself when a listener
+	// dies, so both stop paths wait for the pass a recorder is in.
+	recCtx, stopRecorders := context.WithCancel(ctx)
+	defer stopRecorders()
+	a.goRecorder(recCtx, a.runSessionJanitor) // session janitor, control plane
+	a.goRecorder(recCtx, a.runKeyRotation)    // signing key reload and rotation, control plane
+	a.goRecorder(recCtx, a.runDraftsChecker)  // drafts checker, control plane
+	a.goRecorder(recCtx, a.runObjects)        // object lists, control plane
 	if a.watcher != nil {
 		go a.runAppsWatcher(ctx) // #nosec G118
+	}
+	if a.cfg.Identity.Entra.Enabled() {
+		a.goRecorder(recCtx, a.runEntraSync) // role groups in Entra, control plane
 	}
 	go a.runAuditConsumer(ctx)        // #nosec G118
 	go a.runConversationConsumer(ctx) // #nosec G118 (conversation-turns read model, capture)
@@ -102,12 +109,14 @@ func (a *App) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		recorded := a.drainRecorders()
 		err := a.http.Shutdown(shutdownCtx)
 		if a.approverHTTP != nil {
 			if e := a.approverHTTP.Shutdown(shutdownCtx); e != nil && err == nil {
 				err = e
 			}
 		}
+		<-recorded
 		stopAudit()
 		a.close()
 		a.log.Info("strazad stopped")
@@ -120,6 +129,8 @@ func (a *App) Run(ctx context.Context) error {
 		// Shut the sibling, then surface the original error.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		stopRecorders()
+		recorded := a.drainRecorders()
 		_ = a.http.Shutdown(shutdownCtx)
 		if a.approverHTTP != nil {
 			_ = a.approverHTTP.Shutdown(shutdownCtx)
@@ -127,6 +138,7 @@ func (a *App) Run(ctx context.Context) error {
 		for i := 0; i < serving-1; i++ {
 			<-errCh //nolint:errcheck // the sibling answers http.ErrServerClosed after the Shutdown above, and the first error is the one returned
 		}
+		<-recorded
 		stopAudit()
 		a.close()
 		return err
@@ -147,6 +159,46 @@ func (a *App) close() {
 	}
 }
 
+// recorderDrainTimeout bounds how long a stop waits for the recorders: the
+// two bounded tries of one record insert, and a margin.
+const recorderDrainTimeout = 2*auditInsertTimeout + 2*time.Second
+
+// goRecorder starts a worker whose pass changes the store and then writes
+// the chained record of that change. A stop waits for these workers in
+// drainRecorders, so one that arrives between the two steps does not lose
+// the record.
+func (a *App) goRecorder(ctx context.Context, run func(context.Context)) {
+	a.recorders.Add(1)
+	go func() { // #nosec G118 -- a process-lifetime worker that Run waits for
+		defer a.recorders.Done()
+		run(ctx)
+	}()
+}
+
+// drainRecorders waits until every recorder has returned, at most
+// recorderDrainTimeout, and closes the returned channel then. It runs beside
+// the listeners' shutdown, so it adds nothing to a stop while requests
+// finish. A recorder's store calls end with its context and a record insert
+// gives up after its own bound, so the wait is short unless the store hangs.
+// A recorder still running at the bound leaves an Error line, because the
+// record of its last change may never be written.
+func (a *App) drainRecorders() <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		returned := make(chan struct{})
+		go func() { a.recorders.Wait(); close(returned) }()
+		select {
+		case <-returned:
+		case <-time.After(recorderDrainTimeout):
+			a.log.Error("strazad stops while a background worker is still writing, so the audit record of its last change may be missing. "+
+				"Check that the database answers, then compare the newest session, signing key and draft changes with the audit log",
+				"waited", recorderDrainTimeout.String())
+		}
+	}()
+	return done
+}
+
 // runAuditSpool writes the audit spool to the outbox until ctx ends, then
 // drains what it holds; Run ends ctx after the listeners have shut down.
 func (a *App) runAuditSpool(ctx context.Context) {
@@ -163,9 +215,19 @@ func (a *App) runManager(ctx context.Context) {
 	a.manager.Run(ctx)
 }
 
-// runRefresher rotates per-user OAuth grants.
+// runRefresher rotates per-user OAuth grants on the one replica that holds
+// the refresh lease, because two replicas that redeem one refresh token end
+// the grant at a provider that revokes a used token.
 func (a *App) runRefresher(ctx context.Context) {
-	a.refresher.Run(ctx)
+	interval := a.cfg.OAuth.RefreshInterval
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	a.runLeased(ctx, leaseOAuthRefresh, interval, func(ctx context.Context) {
+		if _, err := a.refresher.RefreshDue(ctx); err != nil && ctx.Err() == nil {
+			a.log.Warn("oauth refresh pass failed", "err", err)
+		}
+	})
 }
 
 // runSessionJanitor closes idle sessions and sessions past the maximum
@@ -184,11 +246,8 @@ func (a *App) runSessionJanitor(ctx context.Context) {
 	}
 }
 
-// runKeyRotation reloads the session signing keys once per reload interval,
-// so a key a peer staged verifies here before any replica signs with it, and
-// advances the rotation: promotion two intervals after staging, retirement
-// once every credential the old key could have signed has expired. Errors
-// are logged and the next tick tries again.
+// runKeyRotation runs the janitor's pass over the client assertion keys and
+// over the session signing keys once per reload interval.
 func (a *App) runKeyRotation(ctx context.Context) {
 	t := time.NewTicker(authn.KeyReloadInterval)
 	defer t.Stop()
@@ -199,21 +258,7 @@ func (a *App) runKeyRotation(ctx context.Context) {
 		case <-t.C:
 		}
 		a.clientAssertionKeyStep(ctx, time.Now())
-		if err := a.tokens.Reload(ctx); err != nil {
-			a.log.Warn("signing key reload failed", "err", err)
-			continue
-		}
-		step, err := a.tokens.Advance(ctx, time.Now(), a.keyRetireAfter())
-		if err != nil {
-			a.log.Warn("signing key rotation step failed", "err", err)
-			continue
-		}
-		if step.Promoted != "" {
-			a.log.Info("signing key promoted", "kid", step.Promoted)
-		}
-		for _, kid := range step.Retired {
-			a.log.Info("signing key retired", "kid", kid)
-		}
+		a.sessionKeyStep(ctx, time.Now())
 	}
 }
 

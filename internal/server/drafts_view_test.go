@@ -58,10 +58,10 @@ func TestVerdictFor(t *testing.T) {
 	line := func(code string, class drafts.Class, object, sentence string) drafts.Finding {
 		return drafts.Finding{Code: code, Class: class, Object: object, Sentence: sentence}
 	}
-	stale := line("draft.stale", drafts.ClassRefused, "Role/dev", "Role/dev changed after this draft was checked, when bob published draft 40 at 2026-09-24 07:05 UTC.")
+	stale := line("draft.stale", drafts.ClassRefused, "Role/dev", "The role dev changed after this draft was checked, when bob published draft 40 at 2026-09-24 07:05 UTC.")
 	parse := line("app.parse", drafts.ClassRefused, "App/jira", "App/jira holds no server document: yaml: line 3.")
 	ghRisk := drafts.Finding{Code: "access.ungated", Class: drafts.ClassRisk, Ack: drafts.AckTyped, Object: "Role/dev", Typed: "dev",
-		Sentence: "push_files on github will run for holders of dev with no rule gating it, where today denied by rule r of s.",
+		Sentence: "push_files on github will run with no approval for holders of dev, where today each call is denied by rule r of s.",
 		Before:   "github/push_files=denied by rule r of s", After: "github/push_files"}
 	jiraRisk := drafts.Finding{Code: "server.runs-code", Class: drafts.ClassRisk, Ack: drafts.AckTyped, Object: "App/jira", Typed: "jira",
 		Sentence: "Publishing starts /usr/bin/jira-mcp on the Straza host as Straza's own user, now and after every restart.", After: "command /usr/bin/jira-mcp"}
@@ -71,9 +71,9 @@ func TestVerdictFor(t *testing.T) {
 	unknown := drafts.Finding{Code: "ready.tool-unknown", Class: drafts.ClassWarning, Object: "Role/dev", Sentence: "dev names get_you, which github does not offer.",
 		Fix: "Fix the name, or check the list with strazactl apps tools github."}
 	secret := drafts.Finding{Code: "ready.secret-missing", Class: drafts.ClassWarning, Object: "App/jira",
-		Sentence: "jira needs a static secret and none is stored yet, so every call fails until one is.", Fix: "After publishing, run strazactl apps secret set jira."}
-	registry := line("heuristic.registry-address", drafts.ClassWarning, "App/linear", "The address of linear differs from the one in the registry record its server block copies.")
-	tools := line("unchecked.tools", drafts.ClassUnchecked, "", "Straza has not contacted mcp.example.net, because an address in a draft is contacted only when a person asks, so the tool names of jira are unknown.")
+		Sentence: "jira has no secret yet. Every call fails until one is stored.", Fix: "After publishing, run strazactl apps secret set jira."}
+	registry := line("heuristic.registry-address", drafts.ClassWarning, "App/linear", "The address of linear differs from its registry record.")
+	tools := line("unchecked.tools", drafts.ClassUnchecked, "", "Straza has not contacted mcp.example.net yet, so the tool names of jira are unknown. It contacts an address in a draft only when a person asks.")
 	nobody := line("info.nobody-holds", drafts.ClassInfo, "Role/jira-writers", "Nobody holds jira-writers yet, so it reaches nothing until someone is assigned it.")
 	down := line("info.server-down", drafts.ClassInfo, "App/jira", "jira reads down now: connection refused.")
 	verdict := func() drafts.Verdict {
@@ -296,7 +296,7 @@ func TestVerdictForCutsNamesTheVerdictTouches(t *testing.T) {
 			t.Errorf("%s: erin reads no %s line: %+v", tc.name, tc.f.Code, got.Info)
 		case tc.cut && seen.Sentence != objectLineWords:
 			t.Errorf("%s: erin reads %+v, want its words cut", tc.name, seen.Finding)
-		case !tc.cut && seen.Finding != tc.f:
+		case !tc.cut && !reflect.DeepEqual(seen.Finding, tc.f):
 			t.Errorf("%s: erin reads %+v, want it whole", tc.name, seen.Finding)
 		}
 	}
@@ -359,7 +359,7 @@ func TestCutFinding(t *testing.T) {
 		{"the after words", with(func(f *drafts.Finding) { f.After = "jira/create_issue" }), cut(with(func(f *drafts.Finding) { f.After = "x" }))},
 	}
 	for _, tc := range cases {
-		if got := cutFinding(tc.f, []string{"jira"}, nil); got != tc.want {
+		if got := cutFinding(tc.f, []string{"jira"}, nil); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s:\n got %+v\nwant %+v", tc.name, got, tc.want)
 		}
 	}
@@ -379,7 +379,7 @@ func TestCutFinding(t *testing.T) {
 			with(func(f *drafts.Finding) { f.Sentence = "dev will reach a tool guard-rails gates." })},
 	}
 	for _, tc := range objects {
-		if got := cutFinding(tc.f, []string{"jira"}, tc.hidden); got != tc.want {
+		if got := cutFinding(tc.f, []string{"jira"}, tc.hidden); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s:\n got %+v\nwant %+v", tc.name, got, tc.want)
 		}
 	}
@@ -534,7 +534,7 @@ func TestVerdictForCutsLinesOnServersTheCallerCannotRead(t *testing.T) {
 			}
 			if !namesJira(raw) {
 				kept++
-				if got.Finding != raw {
+				if !reflect.DeepEqual(got.Finding, raw) {
 					t.Errorf("%s %s: erin reads %+v, want the check's %+v", l.name, raw.Code, got.Finding, raw)
 				}
 				continue

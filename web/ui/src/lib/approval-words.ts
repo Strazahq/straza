@@ -3,7 +3,7 @@
 // Every surface sentence is short; the sentence that explains a thing
 // sits behind its help icon.
 import type { ApprovalRow, ApproverDeviceRow, ChannelRow } from "./api";
-import { type Deciders, type DeviceFilter, type Kind, type Phase, type Seat, STALE_DAYS, callOf, decidersOf, kindOf, shortID, timeLeft, windowWords, withinWords } from "./approval-model";
+import { type Deciders, type DeviceFilter, type Kind, type Phase, type Seat, STALE_DAYS, callOf, decidersOf, kindOf, shortID, windowWords, withinWords } from "./approval-model";
 import { absTime, relTimeText } from "./words";
 
 // ---- the page ----
@@ -26,14 +26,33 @@ export const FILTERS: { key: Filter; label: string }[] = [
   { key: "decided", label: "Decided" },
   { key: "all", label: "All" },
 ];
-export const SEARCH_REQUESTS = "Search who asked, calls, rules";
-export const REQUEST_COLUMN = { asked: "Asked", who: "Who asked", call: "Call", decides: "Who decides", state: "State" };
-export const DECIDES_HELP = "The rule that held the call names who decides. An agent's call goes to its sponsor, the accountable person the identity manager names on it. A person's own agent asks that person, on their enrolled phone or browser. A person who has a sponsor is decided by that sponsor. An approver role is a role of the approver kind, and whoever holds it and answers first decides. When a rule names both, a person's own call goes to the role alone. Being an admin adds nothing. The console, the self-service page and the phone decide the same record under the same rule.";
+export const SEARCH_REQUESTS = "Search who asked, calls, policy rules";
+export const REQUEST_COLUMN = { asked: "Asked", who: "Who asked", call: "Call", decides: "Who decides", state: "State", left: "Time left", outcome: "Outcome" };
+
+// outcomeOf is a decided request's outcome in the four outcome words.
+export const outcomeOf = (p: Phase): "allowed" | "denied" => (p === "denied" || p === "expired" ? "denied" : "allowed");
+
+const FROM_WHERE: Record<string, string> = { console: "the console", slack: "Slack", phone: "a phone", browser: "a browser", api: "the API" };
+
+// decidedLine is the muted words after a decided row's outcome on the
+// self-service page: who answered and from where, in the reader's terms. me
+// is the reader, and here is the id of this browser as an approver device.
+export function decidedLine(r: ApprovalRow, phase: Phase, me: string, here: string): string {
+  if (phase === "expired") return "nobody decided within " + windowWords(r);
+  const who = r.decidedByName || r.decidedBy;
+  const mine = !!who && who === me;
+  const where = mine && here && r.decidedDeviceId === here ? "this browser"
+    : mine && r.channel === "phone" ? "your phone"
+      : FROM_WHERE[r.channel || ""] || "the console";
+  const tail = phase === "lapsed" ? ", never used" : phase === "granted" ? ", not used yet" : "";
+  return (mine ? "you" : who || "somebody") + (phase === "denied" ? " denied" : " approved") + " from " + where + tail;
+}
+export const DECIDES_HELP = "The policy rule names who decides: the agent's sponsor, an approver role, or the requester. With nobody named, any straza-admin.";
 export const YOURS = "yours";
 // The seat's own request on a lane that carries no device signature: the
 // row says so and links the page that signs, the dialog adds where to go.
 export const OWN_REQUEST = "This is your own request.";
-export const OWN_REQUEST_WHERE = "Confirm it on your phone, or on the self-service page under This browser.";
+export const OWN_REQUEST_WHERE = "Confirm it on your phone, or on the self-service page in a browser you set up.";
 export const OPEN_SELF_SERVICE = "Open the self-service page";
 export const SELF_SERVICE_PAGE = "/self-service/";
 export const NOBODY_HOLDS = "nobody holds it";
@@ -48,7 +67,9 @@ export const decidedCount = (n: number) => n + " decided";
 export const LOAD_MORE = "Load more";
 export const loadedLine = (n: number) => "Showing the newest " + n + " requests.";
 
-export const PHASE_WORD: Record<Phase, string> = { waiting: "Waiting", approved: "Approved", granted: "Approved", used: "Used", lapsed: "Expired", denied: "Denied", expired: "Expired" };
+// PHASE_WORD is a request's state as a value, in lower case, since it is
+// not a call's outcome.
+export const PHASE_WORD: Record<Phase, string> = { waiting: "waiting", approved: "approved", granted: "approved", used: "used", lapsed: "expired", denied: "denied", expired: "expired" };
 export const phaseTone = (p: Phase): "warn" | "ok" | "danger" | "plain" => (p === "waiting" ? "warn" : p === "approved" || p === "granted" || p === "used" ? "ok" : p === "denied" ? "danger" : "plain");
 export const KIND_WORD: Record<Kind, string> = { hold: "hold", ticket: "ticket" };
 // WAITING_LINE is the small line under a waiting row's kind: what the agent
@@ -73,7 +94,7 @@ export function deciderWhy(d: Deciders, requester: string): string {
     case "role": return d.roles.length === 1 ? "an approver role" : "approver roles";
     case "both": return "the sponsor, or the role";
     case "requester": return "only the requester confirms";
-    default: return "no decider named, so any admin";
+    default: return "no decider named";
   }
 }
 // stateLine is the small line under the head of the State cell: what the
@@ -105,25 +126,30 @@ export function srStateLine(r: ApprovalRow, phase: Phase, now = Date.now()): str
     return "Approved" + by + ". " + within.charAt(0).toUpperCase() + within.slice(1) + ".";
   }
   const reason = r.decidedReason ? " Their reason: “" + r.decidedReason + "”" + (/[.!?]$/.test(r.decidedReason) ? "" : ".") : "";
-  return PHASE_WORD[phase] + by + "." + reason;
+  // The state word opens the sentence, so it takes a capital here.
+  const word = PHASE_WORD[phase];
+  return word.charAt(0).toUpperCase() + word.slice(1) + by + "." + reason;
 }
-export const EMPTY_WAITING_TITLE = "No pending approval requests.";
-export const EMPTY_WAITING_BODY = "Requests appear here when a policy requires approval. Configured channels notify approvers; roles and signing requirements determine who can decide.";
+export const EMPTY_WAITING_TITLE = "No request waits.";
 export const EMPTY_DECIDED_TITLE = "No request has been decided yet.";
-export const EMPTY_DECIDED_BODY = "Decided requests stay here for as long as the server keeps them.";
-export const EMPTY_SEARCH = "No request matches. Clear the search to see them all.";
-export const ROW_HINT = "A row opens the request.";
+export const EMPTY_SEARCH = "No request matches.";
 
 // ---- the request dialog ----
 
-export const REQUEST_TITLE = "Approval request";
+// requestTitle names who asks and for what, as the dialog's title.
+export const requestTitle = (r: ApprovalRow) =>
+  (r.username || r.user) + " " + askVerb(r) + (callOf(r.summary).whereKind === "shell" ? " a command" : " a tool");
+export const reasonOf = (name: string) => name + "'s reason";
+export const ABOUT_APPROVE = "About approving";
+export const ABOUT_DENY = "About denying";
+export const YOU_SPONSOR = "you sponsor it";
 export const LANE_WORD: Record<string, string> = { gateway: "through the MCP gateway", hook: "from the hook on the agent's machine" };
-export const laneWord = (lane: string) => LANE_WORD[lane] || lane;
+export const laneWord = (lane: string) => LANE_WORD[lane] || "another way in";
 // The strip under the title: the kind in plain words, and what happens when
 // the time runs out. KIND_SAYS_HOOK replaces the hold's words for a hold the
 // hook raised, since the hook refused the call and the agent retries it.
 export const KIND_SAYS: Record<Kind, string> = {
-  hold: "The agent is waiting right now for your answer.",
+  hold: "The agent is waiting for your answer.",
   ticket: "The agent moved on. It runs this only after a yes.",
 };
 export const KIND_SAYS_HOOK = "The agent was told to retry the call after your answer.";
@@ -151,28 +177,25 @@ export const runsWhereAlone = (r: Pick<ApprovalRow, "summary" | "lane">) => RUNS
 // and who sponsors the agent. sponsor is empty when the record names none,
 // and the part is then left out.
 export function metaLine(r: ApprovalRow, sponsor: string, seat: Seat): string {
-  return [runsWhere(r), "asked " + relTimeText(r.createdAt), sponsor ? sponsoredWords(sponsor === seat.user ? "you" : sponsor) : ""].filter(Boolean).join(" · ");
+  return [runsWhere(r), "asked " + relTimeText(r.createdAt), sponsor ? (sponsor === seat.user ? YOU_SPONSOR : sponsoredWords(sponsor)) : ""].filter(Boolean).join(" · ");
 }
 // The parameters, folded under the call. The hint beside the word says how
 // many values the fold holds, or why it holds no table.
 export const CARD_PARAMS = "Parameters";
 export const paramsHint = (count: number) => (count === 1 ? "1 value" : count + " values");
-export const PARAMS_HINT_COMMAND = "the command line is the whole call";
-export const PARAMS_HINT_STORED = "as the server stored them";
+export const PARAMS_HINT_COMMAND = "command";
+export const PARAMS_HINT_STORED = "raw";
 export const PARAMS_HINT_NONE = "none";
-export const PARAMS_HELP = "What the agent passed to the tool, as the server stored it, with secrets redacted. The approval covers this exact call: the same tool with these same parameters, which the server hashed.";
-export const PARAMS_HELP_TOOL = "What the agent passed to the tool, as the server stored it, with secrets redacted. This rule binds the tool alone, so the approval covers the tool whatever the parameters.";
+export const PARAMS_HELP = "What the agent passed to the tool, as Straza stored it, with secrets redacted. The approval covers this exact call: this tool with these parameters.";
+export const PARAMS_HELP_TOOL = "What the agent passed to the tool, as Straza stored it, with secrets redacted. This policy rule binds the tool alone. The approval covers the tool whatever the parameters.";
 export const PARAM_COLUMN = { name: "Parameter", value: "Value" };
-export const PARAMS_NONE = "The server kept no parameters for this call.";
-export const PARAMS_COMMAND = "The command line above is the whole call.";
-export const SHOW_JSON = "Show as JSON and the hash";
+export const PARAMS_NONE = "Straza kept no parameters for this call.";
+export const SHOW_JSON = "JSON and hash";
 export const hashLine = (prefix: string | undefined) => (prefix ? "sha256 " + prefix + "…" : "no hash");
 export const paramsCut = (bytes: number) => "Cut at 2 KiB of " + bytes + " bytes.";
 export const UNVERIFIED = "unverified";
-export const SAYS_OWN = "The agent's own words. Nobody checked them.";
+export const SAYS_OWN = "Their own words. Nobody checked them.";
 export const SAYS_NONE = "The agent gave no reason.";
-export const SAYS_NONE_HOOK = "The agent gave no reason; a call from the hook carries none.";
-export const GRANT_UNKNOWN = "the grant window the rule sets";
 // The two boxes under the reason: what a yes does and what a no does.
 export const IF_APPROVE = "If you approve";
 export const IF_DENY = "If you deny";
@@ -185,14 +208,14 @@ const HOOK_HOLD_RUNS = "The call runs once, when the agent retries it soon after
 // releases the one call on the line, and a hold the hook raised runs on the
 // agent's retry. A ticket covers what the approval's fingerprint binds:
 // the exact call, or the tool whatever its parameters. A record that carries
-// no binding scope claims neither. grant words the ticket's grant window, or
-// GRANT_UNKNOWN.
+// no binding scope claims neither. grant words the ticket's grant window, and
+// a null grant leaves the window out.
 export function approveDoes(r: ApprovalRow, grant: string | null): string {
   if (kindOf(r) === "hold") return r.lane === "hook" ? HOOK_HOLD_RUNS : "The call runs now, once.";
-  const within = "within " + (grant || GRANT_UNKNOWN);
-  if (r.bindingScope === "tool_identity") return "Its next call of this tool runs, once, " + within + ", whatever the parameters.";
-  if (r.bindingScope === "call") return "Its next try of this exact " + (callOf(r.summary).whereKind === "shell" ? "command" : "call") + " runs, once, " + within + ".";
-  return "Its next matching call runs, once, " + within + ".";
+  const within = grant ? " within " + grant : "";
+  if (r.bindingScope === "tool_identity") return "The agent's next call of this tool runs once" + within + ", whatever the parameters.";
+  if (r.bindingScope === "call") return "The agent's next try of this exact " + (callOf(r.summary).whereKind === "shell" ? "command" : "call") + " runs once" + within + ".";
+  return "The agent's next matching call runs once" + within + ".";
 }
 export const denyDoes = (r: ApprovalRow) => (kindOf(r) === "hold" ? "The call does not run. The agent is told who said no." : "Nothing runs. The agent is told who said no.");
 // doesLine says both outcomes as one line, for a reader who does not see the
@@ -200,14 +223,13 @@ export const denyDoes = (r: ApprovalRow) => (kindOf(r) === "hold" ? "The call do
 export const doesLine = (r: ApprovalRow, grant: string | null) => IF_APPROVE + ": " + approveDoes(r, grant) + " " + IF_DENY + ": " + denyDoes(r);
 // The fold over the record rows.
 export const DETAILS = "Details";
-export const DETAILS_HINT = "session, when and how it came in, policy rule";
 // The facts table.
 export const FACT_REQUESTED = "Requested by";
 export const sponsoredWords = (name: string) => "sponsored by " + name;
 export const FACT_SESSION = "Session";
 export const OPEN_SESSION = "Open session";
 export const OPEN_TRANSCRIPT = "Open transcript";
-export const FACT_WHEN = "When";
+export const FACT_WHEN = "Asked";
 export const FACT_LANE = "How it came in";
 export const FACT_WHO = "Who can decide";
 export const WHO_HELP = DECIDES_HELP;
@@ -218,7 +240,6 @@ export const DECIDE_BY_HELP_TICKET = "The agent was told to wait and will call a
 // decideByRest is the plain part after the clock: the deadline and what
 // happens at zero.
 export const decideByRest = (r: ApprovalRow) => "until " + absTime(r.expiresAt) + " · " + atZero(r);
-export const decideByLine = (r: ApprovalRow, now = Date.now()) => timeLeft(r, now) + " · " + decideByRest(r);
 export const FACT_RULE = "Policy rule";
 export const IN_POLICY = "in policy";
 // whoLine speaks to the reader: You when the request is theirs, a name and
@@ -237,13 +258,13 @@ export function whoLine(r: ApprovalRow, seat: Seat, holders: Record<string, numb
       case "sponsor": return d.users.join(" or ") + ", as " + requester + "'s sponsor.";
       case "role": return roles + ", " + held + ".";
       case "both": return d.users.join(" or ") + ", as " + requester + "'s sponsor, or anyone holding " + roles + ".";
-      default: return "Any straza-admin, since the rule named nobody.";
+      default: return "Any straza-admin, since the policy rule named nobody.";
     }
   }
-  if (isStuck) return "Nobody. The rule names the role " + roles + " and nobody holds it.";
+  if (isStuck) return "Nobody. The policy rule names the role " + roles + " and nobody holds it.";
   switch (d.kind) {
     case "requester": return isMine ? "You, as the requester. Only you can confirm it" + (needsDevice ? ", on a device that signs." : ".") : "Only the requester, " + requester + ". Not you.";
-    case "sponsor": return isMine ? "You (" + seat.user + "), as " + requester + "'s sponsor. Nobody else." : d.users.join(" or ") + ", as " + requester + "'s sponsor. Not you.";
+    case "sponsor": return isMine ? "You, as " + requester + "'s sponsor. Nobody else." : d.users.join(" or ") + ", as " + requester + "'s sponsor. Not you.";
     case "role": return isMine ? "You, as " + (known ? "one of " + (n === 1 ? "1 person" : n + " people") + " holding " : "a holder of ") + roles + ". The first to answer decides." : roles + ", " + held + ". Not you.";
     case "both":
       if (!isMine) return d.users.join(" or ") + ", as " + requester + "'s sponsor, or anyone holding " + roles + ". Not you.";
@@ -251,11 +272,11 @@ export function whoLine(r: ApprovalRow, seat: Seat, holders: Record<string, numb
       // seat's roles cannot: the self-service page passes a seat with none.
       if (d.users.includes(seat.user)) return "You, as the sponsor, or anyone holding " + roles + ". The first to answer decides.";
       return "You, as a holder of " + roles + ", or " + d.users.join(" or ") + ", the sponsor. The first to answer decides.";
-    default: return isMine ? "You, as a straza-admin: the rule named nobody." : "Any straza-admin, since the rule named nobody. Not you.";
+    default: return isMine ? "You, as a straza-admin: the policy rule named nobody." : "Any straza-admin, since the policy rule named nobody. Not you.";
   }
 }
-export const openRole = (name: string) => "Open the role " + name;
-export const OPEN_RULE = "Open the rule";
+export const openRole = (name: string) => "Open role " + name;
+export const OPEN_RULE = "Open policy";
 // The decision rows of a decided request.
 export const FACT_DECIDED_BY = "Decided by";
 export const decidedWhere = (r: ApprovalRow) => (r.decidedByName || r.decidedBy) + " from " + channelWord(r.channel);
@@ -267,7 +288,7 @@ export const FACT_GRANT = "Grant window";
 export const grantWords = (r: ApprovalRow, phase: Phase, now = Date.now()) => (phase === "used" ? "used by session " + shortID(r.consumedBy) : phase === "granted" ? withinWords(r.grantExpiresAt, now) : "the window closed unused");
 export function expiredLine(r: ApprovalRow, isStuck: boolean): string {
   const d = decidersOf(r);
-  return "Nobody decided within " + windowWords(r) + ", so the call was denied." + (isStuck ? " The request was routed to " + deciderWords(d) + ", which nobody holds." : "");
+  return "Nobody decided within " + windowWords(r) + ". The call was denied." + (isStuck ? " The request was routed to " + deciderWords(d) + ", which nobody holds." : "");
 }
 export const DENY = "Deny";
 export const APPROVE = "Approve";
@@ -276,43 +297,34 @@ export const CLOSE = "Close";
 // ---- the decide dialog ----
 
 export type Verdict = "approve" | "deny";
-export const decideTitle = (v: Verdict, r: ApprovalRow) => (v === "approve" ? "Approve " : "Deny ") + callOf(r.summary).call + " for " + (r.username || r.user) + "?";
-export function decideBody(v: Verdict, r: ApprovalRow): string {
-  if (v === "deny") return "The call is denied and the agent is told who denied it.";
-  if (kindOf(r) === "ticket") return "The next " + callOf(r.summary).call + " call by " + (r.username || r.user) + ", in any of their sessions, within the grant window runs, once.";
-  if (r.lane === "hook") return HOOK_HOLD_RUNS;
-  return "The call runs now, once, and the agent's session gets the answer.";
-}
 export function decideHelp(v: Verdict, r: ApprovalRow): string {
   if (v === "deny") return kindOf(r) === "ticket"
     ? "A denied ticket keeps the same call from " + (r.username || r.user) + " refused in every session until " + absTime(r.expiresAt) + ", and no new request opens for it. The audit chain records who denied it and the reason."
     : "A denied hold refuses this one call, and the same call later raises a new request. The audit chain records who denied it and the reason.";
   if (kindOf(r) === "ticket") return "A ticket is used by the first matching call inside the grant window and then it is spent. The audit chain records the approval and the use as two records.";
-  if (r.lane === "hook") return "The hook refused the call at once and told the agent to retry it after a decision. Your yes lets one retry of the same call from the same session run, if it comes within the retry window the rule sets. A retry after that raises a new request.";
+  if (r.lane === "hook") return "The hook refused the call at once and told the agent to retry it after a decision. Your yes lets one retry of the same call from the same session run, if it comes within the retry window the policy rule sets. A retry after that raises a new request.";
   return "Approving a hold releases this one call. The same call later raises a new request.";
 }
 export const REASON_LABEL = "Reason, optional";
 export const REASON_PLACEHOLDER = "What the agent and the audit record will read";
-export const REASON_HINT = "Plain text, up to 500 characters.";
 export const REASON_MAX = 500;
 export const CANCEL = "Cancel";
 export const APPROVE_REQUEST = "Approve request";
 export const DENY_REQUEST = "Deny request";
 export const verdictVerb = (v: Verdict) => (v === "approve" ? APPROVE_REQUEST : DENY_REQUEST);
 // The final answers: the question is gone and Close is the only button.
-export const finalTitle = (v: Verdict) => (v === "approve" ? "Not approved" : "Not denied");
 export function alreadyDecided(r: ApprovalRow): string {
   const what = callOf(r.summary).call + " for " + (r.username || r.user);
   const verb = r.state === "approved" ? "approved" : r.state === "denied" ? "denied" : "closed";
   const by = (r.decidedByName || r.decidedBy) ? " by " + (r.decidedByName || r.decidedBy) + " from " + channelWord(r.channel) : "";
-  return what + " was already " + verb + by + " " + relTimeText(r.decidedAt ?? undefined) + ", so there is nothing left to decide here.";
+  return what + " was already " + verb + by + " " + relTimeText(r.decidedAt ?? undefined) + ".";
 }
-export const WINDOW_CLOSED = "The window closed while this was open, so the call was denied.";
+export const WINDOW_CLOSED = "Time ran out. The call was denied.";
 export const notYours = (server: string) => "This request is no longer yours to decide: " + server + ".";
 export function approvedToast(r: ApprovalRow): string {
   const c = callOf(r.summary).call;
   const who = r.username || r.user;
-  if (kindOf(r) === "ticket") return "Approved. " + c + " may run once within the grant window for " + who + ".";
+  if (kindOf(r) === "ticket") return "Approved. " + c + " may run once for " + who + ".";
   return r.lane === "hook" ? "Approved. " + c + " runs for " + who + " if the agent retries it soon." : "Approved. " + c + " runs now for " + who + ".";
 }
 export const deniedToast = (r: ApprovalRow) => "Denied. " + (r.username || r.user) + " is told " + callOf(r.summary).call + " was denied.";
@@ -323,9 +335,12 @@ export const SUBJECT_DEVICES = "The device list";
 export const READING_DEVICES = "Reading the devices.";
 export const devicesCount = (n: number) => (n === 1 ? "1 device" : n + " devices");
 export const DEVICE_COLUMN = { device: "Device", person: "Person", key: "Key", enrolled: "Enrolled", seen: "Last seen", notified: "Notified" };
-export const KEY_HELP = "Hardware means the signing key lives in the phone's secure hardware and the enrollment was attested by the platform. Software means the key lives in the operating system's keystore and the posture is the device's own claim; that is normal for a browser.";
-export const NOTIFIED_HELP = "With a push route, Straza sends each request to the device as a push notification. Without one the device sees requests only while its page is open. The device registers its route itself.";
-export const kindBadge = (d: Pick<ApproverDeviceRow, "platform">) => (d.platform === "browser" ? "browser" : "phone · " + d.platform);
+export const KEY_HELP = "Hardware means the signing key lives in the phone's secure hardware and the platform vouched for that when the device was set up. Software means the key lives in the operating system's key store and only the device says so. That is normal for a browser.";
+export const NOTIFIED_HELP = "With a push route, Straza sends each request to the device as a push notification. Without one the device sees requests only while its page is open.";
+// PLATFORM_NAME is a phone platform's own name. A platform it does not know
+// shows as the server sent it.
+const PLATFORM_NAME: Record<string, string> = { android: "Android", ios: "iOS" };
+export const kindBadge = (d: Pick<ApproverDeviceRow, "platform">) => (d.platform === "browser" ? "browser" : "phone · " + (PLATFORM_NAME[d.platform] || d.platform));
 export const isPhone = (d: Pick<ApproverDeviceRow, "platform">) => d.platform !== "browser";
 export const HARDWARE_KEY = "hardware key";
 export const SOFTWARE_KEY = "software key";
@@ -343,19 +358,19 @@ export const REVOKE_DEVICE = "Revoke device";
 export const revokeName = (name: string) => "Revoke " + name;
 export const revokeTitle = (name: string) => "Revoke " + name + "?";
 export const revokeBody = (person: string) => person + " can no longer approve from it. The device deletes its key the next time it contacts Straza.";
-export const REVOKE_HELP = "The person enrolls the device again on their own self-service page. Other devices of the same person are untouched.";
+export const REVOKE_HELP = "The person can enroll it again on the self-service page.";
 export const revokedToast = (person: string, name: string) => "Revoked. " + person + " can no longer approve from " + name + ".";
 export const DEVICES_EMPTY_TITLE = "No approver device is enrolled.";
 export const DEVICES_EMPTY_BODY = "Add your own phone from the button above. Each person adds their own phone or browser on the self-service page.";
-export const DEVICES_LEGEND = "A person approves from a phone with the Straza approver app or from their own browser. Only the person's enrolled devices sign their decisions; a decision from the console is signed by the session.";
+export const DEVICES_NO_MATCH = "No device matches.";
+export const DEVICES_LEGEND = "A person approves from a phone with the Straza approver app or from their own browser. Only the person's own devices sign their decisions. A decision from the console is signed by the session.";
 export const deviceName = (d: Pick<ApproverDeviceRow, "name" | "id">) => d.name || shortID(d.id);
-// The strip above the table: every chip is a count and a filter.
-export const DEVICE_CHIP: Record<DeviceFilter, string> = { all: "all", phones: "phones", browsers: "browsers", mustcheck: "must check", softphone: "software key on a phone", stale: "not seen in " + STALE_DAYS + " days" };
+// The strip above the table: one choice of which devices to show, each
+// option a label with its count beside it. The options are labels, so they
+// take a capital.
+export const DEVICE_CHIP: Record<DeviceFilter, string> = { all: "All", phones: "Phones", browsers: "Browsers", mustcheck: "Must check", softphone: "Software key, phone", stale: "Quiet for " + STALE_DAYS + " days" };
 export const STRIP_LABEL = "Which devices to show";
 export const devicesTotal = (n: number) => n.toLocaleString("en") + (n === 1 ? " device" : " devices");
-// chipWords is a chip's label: the count and the word, singular for one
-// phone or one browser.
-export const chipWords = (f: DeviceFilter, n: number) => (f === "all" ? DEVICE_CHIP.all : n.toLocaleString("en") + " " + (n === 1 && (f === "phones" || f === "browsers") ? DEVICE_CHIP[f].slice(0, -1) : DEVICE_CHIP[f]));
 export const SEARCH_DEVICES = "Find a person or a device";
 export const GROUP_BY_PERSON = "Group by person";
 export const matchWords = (n: number, total: number) => (n === total ? devicesTotal(n) : n.toLocaleString("en") + " of " + total.toLocaleString("en") + " devices match");
@@ -368,34 +383,34 @@ export const DEVICES_PAGE = 50;
 
 // ---- the enroll sheet ----
 
-export const ADD_PHONE_SUB = "A one-time QR code the Straza approver app scans. The phone then approves the requests routed to its owner.";
+export const ADD_PHONE_SUB = "A one-time QR code for the Straza approver app.";
 export const FOR_OTHERS_TITLE = "For someone else";
-export const FOR_OTHERS_LINE = "This sheet adds your own phone only, and no admin screen adds one for someone else. Give the person the role straza-enroll-mobile in your identity manager or under Roles, then they sign in to the self-service page below and choose Add a phone.";
-export const NO_ENROLL_ROLE = "You do not hold the role straza-enroll-mobile, so you cannot add a phone of your own. Your identity manager assigns it.";
+export const FOR_OTHERS_LINE = "Give them the role straza-enroll-mobile. They add the phone on the self-service page below.";
+export const NO_ENROLL_ROLE = "Adding a phone needs the role straza-enroll-mobile. Ask for it in your identity manager.";
 export const SUBJECT_SELF = "Your enrollment roles";
-export const CREATE_QR = "Create the QR code";
+export const CREATE_QR = "Create QR code";
 export const CREATE_ANOTHER = "Create another";
 export const SCAN_TITLE = "Scan with the Straza approver app";
-export const SCAN_LINE = "The phone reads the server and a one-time code from it, makes a key in its secure hardware and enrolls. The code expires in ";
+export const SCAN_LINE = "Expires in ";
 export const CODE_TITLE = "One-time code";
 export const COPY = "Copy";
 export const COPIED = "Copied";
 export const CODE_EXPIRED = "expired";
-export const CODE_SPENT = "The code expired before a phone scanned it. Create another.";
-export const SERVERS_TITLE = "Servers the phone tries, in order";
+export const CODE_SPENT = "The code expired. Create another.";
+export const SERVERS_TITLE = "Addresses the phone tries, in order";
 export const SERVERS_NONE = "none returned";
 export const TRUST_TITLE = "How the phone trusts it";
 export const PINNED = "pinned";
-export const PINNED_LINE = "strazad serves the phone's connection itself, so the QR carries its key and the phone accepts no other certificate. Behind an ingress there is no pin and the phone trusts the public certificate.";
+export const PINNED_LINE = "The QR code carries Straza's key. The phone accepts no other certificate.";
 export const PUBLIC_CA = "public certificate";
-export const PUBLIC_CA_LINE = "The approver address presents a publicly trusted certificate and the phone verifies it through the system trust store, the expected shape behind an ingress. A pin rides the QR only when strazad terminates the phone's connection itself.";
+export const PUBLIC_CA_LINE = "The approver address shows a publicly trusted certificate, and the phone checks it the way it checks any website.";
 export const PLAINTEXT = "plain HTTP";
-export const plaintextLine = (hosts: string[]) => hosts.join(", ") + " carries the one-time code and every approval in the clear. Fine for a local eval; give the approver address TLS before a real phone enrolls.";
+export const plaintextLine = (hosts: string[]) => hosts.join(", ") + (hosts.length === 1 ? " carries" : " carry") + " the code and every approval unencrypted. Give the approver address TLS before a real phone is added.";
 export const TRANSPORT_UNKNOWN = "transport unknown";
-export const TRANSPORT_UNKNOWN_LINE = "No usable server address came back, so the trust posture cannot be stated.";
+export const TRANSPORT_UNKNOWN_LINE = "No usable Straza address came back. Check the approver address in the configuration.";
 export const QR_TOO_BIG = "This code is too large to draw. In the approver app, choose Enter the code manually and paste the enrollment text below.";
 export const ENROLL_TEXT_TITLE = "Enrollment text";
-export const MINT_VERB = "Create the QR code";
+export const MINT_VERB = "Create QR code";
 export const QR_LABEL = "Enrollment QR code";
 // trustPosture classifies the transport the phone will use, from the
 // servers list and the pin the mint answered.
@@ -417,7 +432,7 @@ export const ALWAYS_ON = "always on";
 export const ON = "on";
 export const NOT_CONFIGURED = "not configured";
 export const channelStatus = (c: ChannelRow) => (c.name === "console" ? ALWAYS_ON : c.configured ? ON : NOT_CONFIGURED);
-export const REACHES_CONSOLE = "everyone with the approvals area";
+export const REACHES_CONSOLE = "approvals admins";
 export const REACHES_NOBODY = "nobody";
 export const REACHES_SLACK = "the channel it posts to";
 export function reachesPush(devices: number, routes: number): string {
@@ -435,8 +450,8 @@ export const testTitle = (name: string) => "Test on " + name;
 export const targetsCount = (n: number) => (n === 1 ? "1 target." : n + " targets.");
 export const DELIVERED = "delivered";
 export const NO_TARGETS = "No target. Nothing on this channel can receive a request.";
-export const NO_TARGETS_PUSH = "No target. No enrolled device has a push route, so Straza cannot send a request to any of them.";
-export const CHANNELS_FOOT = "Which channels announce a rule's requests is set on the rule (approve.notify). Deciding always works here, on the self-service page and on the phone, whatever announced it.";
+export const NO_TARGETS_PUSH = "No target. No enrolled device has a push route.";
+export const CHANNELS_FOOT = "Which channels announce a request is set on its policy rule. Deciding always works here, on the self-service page and on the phone, whatever announced it.";
 
 // ---- the enroll sheet, continued ----
 
@@ -459,11 +474,6 @@ export const FILTER_LABEL = "Which requests to show";
 
 // ---- channels, continued ----
 
-// channelsCount is the row count above the channels table. The server
-// answers the same three rows every time, so the line never reads a
-// singular.
-export const channelsCount = (n: number) => n + " channels";
-
 // testName names the row a Send a test button acts on, since a button in a
 // table says nothing about which channel it sends through.
 export const testName = (name: string) => SEND_TEST + " on " + name;
@@ -472,4 +482,4 @@ export const testName = (name: string) => SEND_TEST + " on " + name;
 
 // selfPhoneLine is the person line of Add a phone, on the console and the
 // self-service page alike, where the person is the one signed in.
-export const selfPhoneLine = (username: string) => "For you, " + username + ". The phone approves the requests routed to you.";
+export const selfPhoneLine = (username: string) => "For you, " + username + ".";

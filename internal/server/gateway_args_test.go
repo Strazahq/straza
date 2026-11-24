@@ -62,6 +62,15 @@ func TestSchemaMismatch(t *testing.T) {
 		{"draft-04 boolean exclusiveMaximum passes", map[string]any{
 			"type": "object", "properties": map[string]any{"n": map[string]any{"type": "number", "maximum": 5, "exclusiveMaximum": true}}, "required": []any{"n"},
 		}, `{}`, ""},
+		{"a 2019-09 $schema passes", map[string]any{
+			"$schema": "https://json-schema.org/draft/2019-09/schema", "type": "object", "required": []any{"path"},
+		}, `{}`, ""},
+		{"a draft-07 $schema without its # passes", map[string]any{
+			"$schema": "http://json-schema.org/draft-07/schema", "type": "object", "required": []any{"path"},
+		}, `{"path":"a"}`, ""},
+		{"a 2020-12 $schema is checked", map[string]any{
+			"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "required": []any{"path"},
+		}, `{}`, "path"},
 		{"a long instance is cut", strict, `{"roleOid":"r1","roleName":["` + strings.Repeat("<", 64<<10) + `"]}`, " bytes)"},
 	}
 	for _, row := range rows {
@@ -83,7 +92,8 @@ func TestSchemaMismatch(t *testing.T) {
 	}
 }
 
-// argsGatePolicy gates grant and loose behind an approval and lets plain run.
+// argsGatePolicy gates grant, loose and looped behind an approval and lets
+// plain run.
 const argsGatePolicy = `
 apiVersion: straza.dev/v1beta1
 kind: PolicySet
@@ -94,7 +104,7 @@ spec:
     - id: approve-grant
       tools: [mcp.call]
       apps: [argapp]
-      toolNames: {allow: ["grant", "loose"]}
+      toolNames: {allow: ["grant", "loose", "looped"]}
       effect: allow
       mode: approve
       approve: {roles: [sec-approvers], timeoutSeconds: 60}
@@ -105,9 +115,11 @@ spec:
       effect: allow
 `
 
-// startArgsUpstream serves three tools that never check their own arguments:
+// startArgsUpstream serves four tools that never check their own arguments:
 // grant and plain publish a strict schema, loose a draft-04 one the check
-// cannot read. Each answers "<name> ran", so a test sees which calls arrived.
+// cannot read, and looped one whose reference loops, which overflows the
+// validator's stack. Each answers "<name> ran", so a test sees which calls
+// arrived.
 func startArgsUpstream(t *testing.T) *gatewayUpstream {
 	t.Helper()
 	srv := mcp.NewServer(&mcp.Implementation{Name: "args-upstream", Version: "1.0.0"}, nil)
@@ -130,6 +142,8 @@ func startArgsUpstream(t *testing.T) *gatewayUpstream {
 	srv.AddTool(&mcp.Tool{Name: "grant", InputSchema: strict}, ran("grant"))
 	srv.AddTool(&mcp.Tool{Name: "plain", InputSchema: strict}, ran("plain"))
 	srv.AddTool(&mcp.Tool{Name: "loose", InputSchema: draft04}, ran("loose"))
+	looped := map[string]any{"type": "object", "required": []any{"never"}, "allOf": []any{map[string]any{"$ref": "#"}}}
+	srv.AddTool(&mcp.Tool{Name: "looped", InputSchema: looped}, ran("looped"))
 	u := &gatewayUpstream{Server: httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil))}
 	t.Cleanup(u.Close)
 	return u
@@ -138,7 +152,9 @@ func startArgsUpstream(t *testing.T) *gatewayUpstream {
 // TestGatewayArgumentsCheckedBeforeApproval drives the gateway with the real
 // approval service: an approval-gated call whose arguments break the tool's
 // schema is refused at once with one deny record and no approval, a valid one
-// is still held, and calls with no approval step reach the server unchecked.
+// is still held, a call of a tool whose schema the check cannot read or will
+// not hand to the validator is held with its schema unchecked, and calls
+// with no approval step reach the server unchecked.
 func TestGatewayArgumentsCheckedBeforeApproval(t *testing.T) {
 	// Serial: it lowers the package knob gatewayHoldCap for its run.
 	old := gatewayHoldCap
@@ -190,7 +206,8 @@ func TestGatewayArgumentsCheckedBeforeApproval(t *testing.T) {
 	})[0]
 	want := map[string]any{
 		"user": kim.ID, "session": sid, "app": "argapp", "effect": "deny",
-		"ruleId": "approve-grant", "setName": "arg-gates", "reason": text, "arguments": `{"roleOid":"r1"}`,
+		"ruleId": "approve-grant", "setName": "arg-gates", "arguments": `{"roleOid":"r1"}`,
+		"reason": "Straza checked the arguments against argapp__grant's input schema before asking for approval, and they do not match. Fix the arguments and call the tool again.",
 	}
 	for k, v := range want {
 		if rec[k] != v {
@@ -204,8 +221,11 @@ func TestGatewayArgumentsCheckedBeforeApproval(t *testing.T) {
 	if text := call("argapp__loose", map[string]any{justificationField: "why"}); !strings.Contains(text, "approval pending") {
 		t.Errorf("call of a tool whose schema the check cannot read = %q, want it held as before", text)
 	}
-	if n := pending(); n != 2 {
-		t.Errorf("pending approvals = %d, want 2 (the valid call and the unreadable schema)", n)
+	if text := call("argapp__looped", map[string]any{justificationField: "why"}); !strings.Contains(text, "approval pending") {
+		t.Errorf("call of a tool whose schema loops = %q, want it held with the schema unchecked", text)
+	}
+	if n := pending(); n != 3 {
+		t.Errorf("pending approvals = %d, want 3 (the valid call, the unreadable schema and the looping one)", n)
 	}
 	if text := call("argapp__plain", map[string]any{}); text != "plain ran" {
 		t.Errorf("ungated call with mismatched arguments = %q, want it to reach the server", text)

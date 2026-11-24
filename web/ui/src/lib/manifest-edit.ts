@@ -287,10 +287,11 @@ const envWords = (env: EnvPair[]) => env.map((e) => e.name + "=" + e.value).join
 
 // changeRows lists the fields that differ between the installed manifest
 // and the edited one, in the order the cards draw them. Runtime fields
-// show for the kind after saving, and serverWide names the default timeout.
+// show for the kind after saving, serverWide names the default timeout, and
+// remoteRps the rate limit a remote server without its own gets.
 // The pinned type and the tools whose marks moved close the list, so a
 // draft that pins a type or changes a mark is not an empty change.
-export function changeRows(before: ManifestDoc, after: ManifestDoc, serverWide: number | null = null): ChangeRow[] {
+export function changeRows(before: ManifestDoc, after: ManifestDoc, serverWide: number | null = null, remoteRps: number | null = null): ChangeRow[] {
   const rows: ChangeRow[] = [];
   const add = (label: string, was: string, now: string) => { if (was !== now) rows.push([label, was, now]); };
   const ra = before.straza?.runtime || {};
@@ -318,7 +319,7 @@ export function changeRows(before: ManifestDoc, after: ManifestDoc, serverWide: 
   }
   add("Description", before.metadata?.description || NONE, after.metadata?.description || NONE);
   add("Tools exposed", exposeWords(before.straza?.exposure?.tools), exposeWords(after.straza?.exposure?.tools));
-  add("Rate limit", rpsWords(before.straza?.limits?.rps), rpsWords(after.straza?.limits?.rps));
+  add("Rate limit", rpsWords(before.straza?.limits?.rps, (ra.kind || "remote") === "remote", remoteRps), rpsWords(after.straza?.limits?.rps, kb === "remote", remoteRps));
   add("Per-call timeout", timeoutWords(before.straza?.limits?.timeoutSeconds, serverWide), timeoutWords(after.straza?.limits?.timeoutSeconds, serverWide));
   add(PINNED_TYPE, pinnedWords(before.straza?.objects, NONE), pinnedWords(after.straza?.objects, NONE));
   const oa = before.straza?.objects;

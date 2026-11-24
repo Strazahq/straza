@@ -118,7 +118,7 @@ func TestRemoteRuntimeCallThatMayHaveRun(t *testing.T) {
 				t.Fatalf("warm ping: %v", err)
 			}
 			r.mu.Lock()
-			sid := r.pool[""].ID()
+			sid := r.sessionAt(poolKey{}).ID()
 			r.mu.Unlock()
 			up.mode.Store(row.mode)
 			if row.down {
@@ -233,7 +233,7 @@ func TestMayHaveRunCauseIsLogged(t *testing.T) {
 				mgr.SecretUpdated(ctx, app.ID)
 			}
 			waitStatus(t, mgr, "proxied", StatusRunning)
-			_, err = mgr.Call(ctx, "proxied", row.tool, nil, row.secret, nil)
+			_, err = mgr.Call(ctx, "ses-1", "", "proxied", row.tool, nil, row.secret, nil)
 			if !errors.Is(err, ErrMayHaveRun) || strings.Contains(err.Error(), row.cause) {
 				t.Fatalf("the call = %v, want the may-have-run sentence without the cause", err)
 			}

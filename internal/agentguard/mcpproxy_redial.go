@@ -5,9 +5,9 @@ package agentguard
 // exhausts reconnection (idle eviction, a
 // strazad pod restart emptying the subject cache, a network cut), and a proxy
 // holding that corpse turns one transient into a session-long outage of the
-// whole governed tool lane. The gateway is deliberately stateless (it never
-// mints an MCP session id; there is nothing to resume), so the correct
-// recovery is a fresh dial: cheap (initialize + tools/list), valid against
+// whole governed tool lane. The gateway is deliberately stateless (it keeps
+// no record of the MCP session id it gives out; there is nothing to resume),
+// so the correct recovery is a fresh dial: cheap (initialize + tools/list), valid against
 // any pod behind the balancer, and safe because revival by itself replays
 // nothing.
 

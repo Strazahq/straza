@@ -1,0 +1,53 @@
+{
+ "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals",
+ "value": [
+  {
+   "@odata.type": "#microsoft.graph.agentIdentity",
+   "id": "3a3a3a3a-6666-4666-8666-666666666666",
+   "deletedDateTime": null,
+   "accountEnabled": true,
+   "alternativeNames": [],
+   "appDisplayName": null,
+   "appDescription": null,
+   "appId": "3a3a3a3a-6666-4666-8666-666666666666",
+   "applicationTemplateId": null,
+   "appOwnerOrganizationId": null,
+   "appRoleAssignmentRequired": false,
+   "createdByAppId": "4b4b4b4b-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+   "createdDateTime": "2026-11-09T08:30:54Z",
+   "description": null,
+   "disabledByMicrosoftStatus": null,
+   "displayName": "demo-agent",
+   "homepage": null,
+   "isDisabled": null,
+   "loginUrl": null,
+   "logoutUrl": null,
+   "notes": null,
+   "notificationEmailAddresses": [],
+   "preferredSingleSignOnMode": null,
+   "preferredTokenSigningKeyThumbprint": null,
+   "replyUrls": [],
+   "servicePrincipalNames": [
+    "3a3a3a3a-6666-4666-8666-666666666666"
+   ],
+   "servicePrincipalType": "ServiceIdentity",
+   "signInAudience": null,
+   "tags": [],
+   "tokenEncryptionKeyId": null,
+   "agentIdentityBlueprintId": "4a4a4a4a-9999-4999-8999-999999999999",
+   "info": null,
+   "samlSingleSignOnSettings": null,
+   "addIns": [],
+   "appRoles": [],
+   "keyCredentials": [],
+   "oauth2PermissionScopes": [],
+   "passwordCredentials": [],
+   "resourceSpecificApplicationPermissions": [],
+   "verifiedPublisher": {
+    "displayName": null,
+    "verifiedPublisherId": null,
+    "addedDateTime": null
+   }
+  }
+ ]
+}

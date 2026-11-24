@@ -1,0 +1,12 @@
+{
+ "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users",
+ "@odata.deltaLink": "https://graph.microsoft.com/v1.0/users/delta?$deltatoken=TEST-USERS-DELTATOKEN-4",
+ "value": [
+  {
+   "id": "1b1b1b1b-4444-4444-8444-444444444444",
+   "@removed": {
+    "reason": "changed"
+   }
+  }
+ ]
+}

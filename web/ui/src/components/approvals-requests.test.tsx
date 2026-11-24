@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { BeforeSetup } from "./approval-dialog";
 import { RequestsTab } from "./approvals-requests";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ApiError, type ApprovalRow, type RoleRow, decideApproval, listApprovals, listRoles, pageApprovals } from "@/lib/api";
+import * as SW from "@/self-service/words";
+import { ApiError, type ApprovalRow, type RoleRow, decideApproval, getApproval, listApprovals, listRoles, pageApprovals } from "@/lib/api";
 import { type Seat, mine, own } from "@/lib/approval-model";
 import {
   APPROVE,
+  DENY,
   EMPTY_DECIDED_TITLE,
   EMPTY_SEARCH,
   EMPTY_WAITING_TITLE,
@@ -15,16 +18,23 @@ import {
   OPEN_SELF_SERVICE,
   OWN_REQUEST,
   OWN_REQUEST_WHERE,
+  PHASE_WORD,
+  REASON_LABEL,
   SUBJECT_REQUESTS,
   WAITING_LINE,
   YOURS,
+  YOU_SPONSOR,
+  atZero,
   decideAction,
-  decideTitle,
   decidedCount,
   decidesWord,
   requestsCount,
+  requestTitle,
+  sponsoredWords,
+  stateLine,
   waitingCount,
 } from "@/lib/approval-words";
+import { phaseOf, timeLeft } from "@/lib/approval-model";
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
@@ -85,6 +95,17 @@ const mount = (openID?: string) => render(
   </TooltipProvider>,
 );
 
+// before mounts the queue as a page does before any device of the reader is
+// set up, with the self-service page's own words.
+const setUp = vi.fn();
+const closedQueue = vi.fn();
+const SETUP: BeforeSetup = { onSetUp: setUp, words: { row: SW.SETUP_TO_ANSWER, line: SW.ANSWER_NEEDS_DEVICE, button: SW.SETUP_BROWSER } };
+const before = (openID?: string) => render(
+  <TooltipProvider>
+    <RequestsTab seat={seat} isMine={(r) => mine(r, seat)} openID={openID} onClose={closedQueue} beforeSetup={SETUP} onChanged={changed} />
+  </TooltipProvider>,
+);
+
 const row = (name: string) => screen.getByRole("button", { name: "Open " + name });
 const counted = () => (document.querySelector("[data-row-count]") as HTMLElement).textContent;
 const seg = (label: string) => screen.getByRole("button", { name: label });
@@ -97,6 +118,8 @@ describe("the requests queue", () => {
     vi.mocked(listRoles).mockResolvedValue(roles);
     vi.mocked(decideApproval).mockResolvedValue({ approval: { ...hold, state: "denied" } });
     changed.mockClear();
+    setUp.mockClear();
+    closedQueue.mockClear();
   });
   afterEach(() => { vi.useRealTimers(); });
 
@@ -178,7 +201,7 @@ describe("the requests queue", () => {
 
   it.each([
     ["a held call", "get-sum for joe-java-developer-agent", "hold", "text-warn", "text-warn", "the agent is waiting now"],
-    ["a standing approval", "get-env for joe-java-developer-agent", "ticket", "text-teal", "text-foreground", "runs later, after a yes"],
+    ["a standing approval", "get-env for joe-java-developer-agent", "ticket", "text-foreground", "text-foreground", "runs later, after a yes"],
   ])("leads %s with its kind as a chip, the time left at body size and what the agent does beneath", async (_what, name, kind, chipTone, clockTone, does) => {
     mount();
     await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
@@ -189,7 +212,7 @@ describe("the requests queue", () => {
     expect(chip.textContent).toBe(kind);
     expect(chip.className).toContain(chipTone);
     const clock = head.querySelector("[data-left]") as HTMLElement;
-    expect(clock.className).toContain("text-base");
+    expect(clock.className).toContain("text-body");
     expect(clock.className).toContain(clockTone);
     expect((row(name).querySelector("[data-state-line]") as HTMLElement).textContent).toBe(does);
     expect(WAITING_LINE[kind as "hold" | "ticket"]).toBe(does);
@@ -265,12 +288,12 @@ describe("the requests queue", () => {
     const line = (name: string) => (row(name).querySelector("[data-state-line]") as HTMLElement).textContent || "";
     const phase = (name: string) => (row(name).querySelector("[data-phase]") as HTMLElement);
 
-    expect(phase("get-sum for joe-java-developer-agent").textContent).toContain("Denied");
+    expect(phase("get-sum for joe-java-developer-agent").textContent).toBe("denied");
     expect(line("get-sum for joe-java-developer-agent")).toContain("by alice from the console");
     expect(line("get-sum for joe-java-developer-agent")).toContain("“walk cleanup”");
-    expect(line("get-env for joe-java-developer-agent")).toContain("the same call within 58 min runs");
+    expect(line("get-env for joe-java-developer-agent")).toContain("58 min left for the same call");
     expect(line("get-time for joe-java-developer-agent")).toContain("by session 01998f22-c0de…");
-    expect(phase("get-time for joe-java-developer-agent").textContent).toContain("Used");
+    expect(phase("get-time for joe-java-developer-agent").textContent).toBe("used");
     // A decided row keeps its phase word and carries no kind chip, clock or bar.
     expect(document.querySelector("[data-request] [data-kind], [data-request] [data-left], [data-request] [data-drain]")).toBe(null);
   });
@@ -336,7 +359,7 @@ describe("the requests queue", () => {
     expect(screen.getByRole("button", { name: "Open get-sum for joe-java-developer-agent" })).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     const block = screen.getByRole("status");
-    expect(block.textContent).toContain(SUBJECT_REQUESTS + ": unreachable, state unknown.");
+    expect(block.textContent).toContain(SUBJECT_REQUESTS + " could not be read because Straza did not answer.");
     expect(screen.getByRole("button", { name: "Open get-sum for joe-java-developer-agent" })).toBeTruthy();
     view.unmount();
 
@@ -362,18 +385,256 @@ describe("the requests queue", () => {
     deep.unmount();
   });
 
-  it("asks before it decides, and sends nothing while the question is open or cancelled", async () => {
+  it.each([
+    ["Deny", "deny" as const],
+    ["Approve", "approve" as const],
+  ])("opens the request dialog from a row's %s and decides nothing", async (_what, verdict) => {
     mount();
     await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
-    await userEvent.click(screen.getByRole("button", { name: decideAction("approve", hold) }));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText(decideTitle("approve", hold))).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: decideAction(verdict, hold) }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.getAttribute("data-request-dialog")).toBe("apr_hold");
+    expect(within(dialog).getByRole("heading").firstChild!.textContent).toBe(requestTitle(hold));
+    expect(within(dialog).getByLabelText(REASON_LABEL)).toBeTruthy();
+    // No second question opens, and nothing is sent until the dialog's own button.
+    expect(screen.queryByRole("alertdialog")).toBe(null);
     expect(vi.mocked(decideApproval)).not.toHaveBeenCalled();
-    // The row behind the button never opened its sheet.
+  });
+
+  it("decides from the dialog through the admin lane, then closes it and reads the lists again", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: decideAction("deny", hold) }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText(REASON_LABEL), "walk cleanup");
+    const reads = vi.mocked(listApprovals).mock.calls.length;
+    await userEvent.click(within(within(dialog).getByRole("button", { name: DENY }).parentElement!).getByRole("button", { name: DENY }));
+    await waitFor(() => expect(vi.mocked(decideApproval)).toHaveBeenCalledWith("apr_hold", "deny", "walk cleanup"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBe(null));
+    expect(changed).toHaveBeenCalled();
+    await waitFor(() => expect(vi.mocked(listApprovals).mock.calls.length).toBeGreaterThan(reads));
+  });
+
+  it("keeps the dialog open on the final answer when the request was decided elsewhere first", async () => {
+    const elsewhere: ApprovalRow = { ...hold, state: "denied", decidedAt: at(-3), decidedBy: "u-bob", decidedByName: "bob", channel: "phone" };
+    vi.mocked(decideApproval).mockRejectedValue(new ApiError("already decided", 409));
+    vi.mocked(getApproval).mockResolvedValue({ approval: elsewhere });
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: decideAction("approve", hold) }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: APPROVE }));
+    await waitFor(() => expect(dialog.querySelector("[data-final]")).not.toBe(null));
+    // The fresh record stands in for the stored one, so the dialog reads it as decided.
+    expect((dialog.querySelector("[data-strip] [data-phase]") as HTMLElement).textContent).toBe("denied");
+    expect(within(dialog).getAllByRole("button").filter((b) => b.textContent === APPROVE)).toHaveLength(0);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+
+  it("ends a row the reader may decide in the page's words before setup, with its chip and no buttons, and says who decides the others", async () => {
+    before();
+    await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    for (const name of ["get-sum for joe-java-developer-agent", "get-env for joe-java-developer-agent"]) {
+      expect(within(row(name)).queryByRole("button")).toBe(null);
+      expect(within(row(name)).getByText(YOURS)).toBeTruthy();
+      expect((row(name).querySelector("[data-setup-to-answer]") as HTMLElement).textContent).toBe(SW.SETUP_TO_ANSWER);
+    }
+    const bobs = row("get-env for sam-sre-agent");
+    expect(within(bobs).getByText(decidesWord("bob"))).toBeTruthy();
+    expect(bobs.querySelector("[data-setup-to-answer]")).toBe(null);
+    await waitFor(() => expect(within(row("printf lf-q4-x for joe-java-developer-agent")).getByText(NOBODY_CAN)).toBeTruthy());
+    expect(counted()).toBe(waitingCount(4, 2));
+  });
+
+  it.each([
+    ["with no request named", undefined],
+    ["with a request named in the address", "apr_ticket"],
+  ])("draws no filter control before setup and lists the waiting requests only, %s", async (_what, openID) => {
+    const { container } = before(openID);
+    // A named request opens over the list, so the rows are read off the
+    // container rather than by role.
+    await waitFor(() => expect(container.querySelectorAll("[data-request]").length).toBe(4));
+    await waitFor(() => expect(vi.mocked(pageApprovals)).toHaveBeenCalled());
+    expect(container.querySelector("[role=group]")).toBe(null);
+    expect([...container.querySelectorAll("button")].map((b) => b.textContent)).not.toContain("Decided");
+    expect(screen.getByLabelText("Search requests")).toBeTruthy();
+    const names = [...container.querySelectorAll("[data-request]")].map((el) => el.getAttribute("data-request"));
+    expect(names).toEqual([
+      "printf lf-q4-x for joe-java-developer-agent",
+      "get-sum for joe-java-developer-agent",
+      "get-env for joe-java-developer-agent",
+      "get-env for sam-sre-agent",
+    ]);
+    expect(counted()).toBe(waitingCount(4, 2));
+  });
+
+  it("offers the setup in the dialog of a request the reader may decide before setup", async () => {
+    before();
+    await userEvent.click(await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.querySelector("[data-reason-field]")).toBe(null);
+    await userEvent.click(within(dialog).getByRole("button", { name: SW.SETUP_BROWSER }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBe(null));
+    expect(setUp).toHaveBeenCalledTimes(1);
+    expect(closedQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a request the address names after the queue has mounted, once for each name, and says when the dialog closes", async () => {
+    const tab = (openID?: string) => (
+      <TooltipProvider>
+        <RequestsTab seat={seat} isMine={(r) => mine(r, seat)} openID={openID} onClose={closedQueue} onChanged={changed} />
+      </TooltipProvider>
+    );
+    const view = render(tab());
+    await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
     expect(screen.queryByRole("dialog")).toBe(null);
 
-    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBe(null));
+    view.rerender(tab("apr_ticket"));
+    expect((await screen.findByRole("dialog")).getAttribute("data-request-dialog")).toBe("apr_ticket");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBe(null));
+    expect(closedQueue).toHaveBeenCalledTimes(1);
+
+    // The same name again opens nothing, and the next poll does not either.
+    view.rerender(tab("apr_ticket"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("dialog")).toBe(null);
+
+    view.rerender(tab("apr_hold"));
+    expect((await screen.findByRole("dialog")).getAttribute("data-request-dialog")).toBe("apr_hold");
+  });
+
+  it("keeps the console's five columns and their headers, with the table's floor", async () => {
+    const { container } = mount();
+    await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    const heads = [...container.querySelectorAll("thead th")].map((th) => th.textContent);
+    expect(heads).toEqual(["Asked", "Who asked", "Call", "Who decides", "State", ""]);
+    expect((container.querySelector("[data-slot=table]") as HTMLElement).style.minWidth).toBe("992px");
+    expect(container.querySelector("[data-card]")).toBe(null);
+  });
+});
+
+describe("the requests queue below the sm breakpoint", () => {
+  beforeEach(() => {
+    build();
+    vi.mocked(listApprovals).mockResolvedValue({ approvals: waitingRows() });
+    vi.mocked(pageApprovals).mockResolvedValue({ items: [...waitingRows(), ...decidedRows()], next_cursor: "" });
+    vi.mocked(listRoles).mockResolvedValue(roles);
+    vi.mocked(decideApproval).mockResolvedValue({ approval: { ...hold, state: "denied" } });
+    // Only the query under the sm breakpoint matches, the way a phone answers it.
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query === "(max-width: 39.98rem)", media: query, onchange: null,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+    }) as MediaQueryList);
+  });
+  afterEach(() => { vi.mocked(window.matchMedia).mockRestore(); });
+
+  const cardOf = (name: string) => screen.getByRole("button", { name: "Open " + name });
+
+  it("draws each request as a card, not a table row, and keeps the filter and the count", async () => {
+    const { container } = mount();
+    await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    expect(container.querySelector("[data-slot=table]")).toBe(null);
+    expect(container.querySelectorAll("[data-card]").length).toBe(4);
+    expect(counted()).toBe(waitingCount(4, 2));
+    expect(seg("Decided")).toBeTruthy();
+  });
+
+  it("reads a waiting card top to bottom: who asked, what it wants to run and where, the time left, then the buttons", async () => {
+    mount();
+    const card = await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    const one = (s: string) => card.querySelector(s) as HTMLElement;
+    expect(one("[data-card-meta]").textContent).toMatch(new RegExp("^" + YOU_SPONSOR + " · [23]\\d s ago$"));
+    expect(one("[data-card-ask]").textContent).toBe("wants to call");
+    const callLine = one("[data-card-call]");
+    expect(callLine.textContent).toBe("get-sum");
+    expect(callLine.getAttribute("title")).toBe("get-sum");
+    for (const cls of ["font-mono", "text-section", "line-clamp-3"]) expect(callLine.className).toContain(cls);
+    expect(one("[data-card-where]").textContent).toBe("on demo-tools");
+    const time = one("[data-card-time]");
+    expect(time.className).toContain("border-warn");
+    expect(time.textContent).toMatch(/^1 m [23]\d s left, then the call is denied$/);
+    expect(time.textContent!.endsWith(", " + atZero(hold))).toBe(true);
+    expect(timeLeft(hold)).toMatch(/ left$/);
+    expect(one("[data-drain]").getAttribute("aria-hidden")).toBe("true");
+    const deny = within(card).getByRole("button", { name: decideAction("deny", hold) });
+    const approve = within(card).getByRole("button", { name: decideAction("approve", hold) });
+    expect(deny.parentElement!.className).toContain("grid-cols-2");
+    for (const b of [deny, approve]) expect(b.className).toContain("h-11");
+    expect(deny.className).toContain("border-danger");
+  });
+
+  it.each([
+    ["someone else's sponsor", "get-env for sam-sre-agent", sponsoredWords("bob") + " · 1 h ago"],
+    ["a request routed to a role", "printf lf-q4-x for joe-java-developer-agent", "1 m ago"],
+  ])("names %s in the card's muted line", async (_what, name, meta) => {
+    mount();
+    await screen.findByRole("button", { name: "Open " + name });
+    expect((cardOf(name).querySelector("[data-card-meta]") as HTMLElement).textContent).toBe(meta);
+  });
+
+  it("puts who decides, or that nobody can, in place of the buttons on a card the reader may not decide", async () => {
+    mount();
+    await screen.findByRole("button", { name: "Open get-env for sam-sre-agent" });
+    expect(within(cardOf("get-env for sam-sre-agent")).queryByRole("button")).toBe(null);
+    expect(within(cardOf("get-env for sam-sre-agent")).getByText(decidesWord("bob"))).toBeTruthy();
+    await waitFor(() => expect(within(cardOf("printf lf-q4-x for joe-java-developer-agent")).getByText(NOBODY_CAN)).toBeTruthy());
+  });
+
+  it("puts the door to the page that signs on the reader's own request where the lane cannot sign", async () => {
+    const mineOwn: ApprovalRow = { ...base, id: "apr_own", user: "u-alice", username: "alice", mode: "confirm", approverUsers: undefined, createdAt: at(-10), expiresAt: at(110) };
+    vi.mocked(listApprovals).mockResolvedValue({ approvals: [mineOwn] });
+    render(
+      <TooltipProvider>
+        <RequestsTab seat={seat} isMine={(r) => mine(r, seat)} needsDevice={(r) => own(r, seat)} onChanged={changed} />
+      </TooltipProvider>,
+    );
+    const card = await screen.findByRole("button", { name: "Open get-sum for alice" });
+    expect(within(card).queryByRole("button")).toBe(null);
+    expect((card.querySelector("[data-own-request]") as HTMLElement).textContent).toBe(OWN_REQUEST + " " + OPEN_SELF_SERVICE);
+    expect(within(card).getByRole("link", { name: OPEN_SELF_SERVICE }).getAttribute("href")).toBe("/self-service/");
+  });
+
+  it("ends a card the reader may decide in the page's words before setup, with no buttons and no filter, and says who decides the others", async () => {
+    const { container } = before();
+    const card = await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    expect(within(card).queryByRole("button")).toBe(null);
+    expect((card.querySelector("[data-setup-to-answer]") as HTMLElement).textContent).toBe(SW.SETUP_TO_ANSWER);
+    expect(within(cardOf("get-env for sam-sre-agent")).getByText(decidesWord("bob"))).toBeTruthy();
+    expect(cardOf("get-env for sam-sre-agent").querySelector("[data-setup-to-answer]")).toBe(null);
+    expect(container.querySelector("[role=group]")).toBe(null);
+    expect(container.querySelectorAll("[data-card]").length).toBe(4);
+  });
+
+  it("opens the request dialog from the card and from its two buttons, and decides nothing", async () => {
+    mount();
+    const card = await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    await userEvent.click(within(card).getByRole("button", { name: decideAction("approve", hold) }));
+    expect((await screen.findByRole("dialog")).getAttribute("data-request-dialog")).toBe("apr_hold");
     expect(vi.mocked(decideApproval)).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBe(null));
+    cardOf("get-env for sam-sre-agent").focus();
+    await userEvent.keyboard("{Enter}");
+    expect((await screen.findByRole("dialog")).getAttribute("data-request-dialog")).toBe("apr_foreign");
+  });
+
+  it("reads a decided card as who asked, the call and the outcome as the console's row shows it", async () => {
+    mount();
+    await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    await userEvent.click(seg("Decided"));
+    const card = await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    expect((card.querySelector("[data-card-call]") as HTMLElement).textContent).toBe("get-sum");
+    expect((card.querySelector("[data-phase]") as HTMLElement).textContent).toBe(PHASE_WORD.denied);
+    expect((card.querySelector("[data-state-line]") as HTMLElement).textContent).toBe(stateLine(denied, phaseOf(denied)));
+    expect(card.querySelector("[data-card-time]")).toBe(null);
+    expect(within(card).queryByRole("button")).toBe(null);
+  });
+
+  it("finds a card by its rule id, and says so when nothing matches", async () => {
+    const { container } = mount();
+    await screen.findByRole("button", { name: "Open get-sum for joe-java-developer-agent" });
+    await userEvent.type(screen.getByLabelText("Search requests"), "hold-printf");
+    await waitFor(() => expect(container.querySelectorAll("[data-card]").length).toBe(1));
+    await userEvent.type(screen.getByLabelText("Search requests"), "-nothing");
+    expect(await screen.findByText(EMPTY_SEARCH)).toBeTruthy();
   });
 });

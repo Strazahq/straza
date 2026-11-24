@@ -49,7 +49,7 @@ async function notify(event: PushEvent): Promise<void> {
   const msg = decode(event);
   await pingClients(msg);
   if (!msg) {
-    return show("Approval activity", "Something happened in your approvals. Open the self-service page to see it.", "");
+    return show("Approval activity", "Open the self-service page to see what changed.", "");
   }
   const row = await lookup(msg);
   if (msg.kind === "status") {

@@ -5,7 +5,7 @@ import { Drafts } from "./drafts";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, type DraftSummary } from "@/lib/api";
 import { listDrafts, waitingLabel } from "@/lib/drafts-api";
-import { EMPTY, EMPTY_MINE, LEGEND, LOAD_MORE, NOTHING_TO_ACK, NOT_CHECKED_YET, READING_LIST, SUBJECT_LIST, WHOSE } from "@/lib/drafts-words";
+import { EMPTY, EMPTY_MINE, LOAD_MORE, NOTHING_TO_ACK, NOT_CHECKED_YET, READING_LIST, SUBJECT_LIST, WHOSE } from "@/lib/drafts-words";
 import { navigate } from "@/lib/router";
 import { readFailed } from "@/lib/say";
 import { snapshot } from "@/lib/session";
@@ -49,7 +49,6 @@ describe("the Drafts queue", () => {
     expect(cell("door")).toBe("the straza app");
     expect(cell("checks")).toBe("3 widen access1 not checked");
     expect(listDrafts).toHaveBeenCalledWith("state=open&limit=100");
-    expect(screen.getByText(LEGEND)).toBeTruthy();
   });
 
   it("reads a draft with nothing to acknowledge, and one whose check is of an older revision", async () => {

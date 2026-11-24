@@ -620,9 +620,11 @@ func TestFileDoorProposesOneDraftPerHashAcrossReplicas(t *testing.T) {
 		t.Parallel()
 		dsn := freshPostgresDSN(t)
 		dir := t.TempDir()
+		kek := filepath.Join(t.TempDir(), "secret.key")
 		up := startTaggedUpstream(t, "one")
 		shared := func(c *config.Config) {
 			c.Store = config.Store{Driver: config.DriverPostgres, DSN: dsn}
+			c.Secrets.KEKFile = kek
 			c.Apps.Dir = dir
 			c.Apps.PollInterval = 50 * time.Millisecond
 			c.Apps.HealthInterval = time.Hour

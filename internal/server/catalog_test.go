@@ -618,6 +618,76 @@ spec:
 	}
 }
 
+// seedRefusedUsers seeds four users who hold role dev: ana is active, bo is
+// disabled, cy is active and on the denylist, as a lock leaves a user, and
+// di is both disabled and on the denylist.
+func seedRefusedUsers(t *testing.T, app *App) {
+	t.Helper()
+	ctx := context.Background()
+	for _, name := range []string{"ana", "bo", "cy", "di"} {
+		u := seedGatewayUser(t, app, name, "dev")
+		if name == "bo" || name == "di" {
+			u.Status = store.UserDisabled
+			if _, err := app.store.Users().Update(ctx, u); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if name == "cy" || name == "di" {
+			app.denylist.revokeUser(u.ID)
+		}
+	}
+}
+
+// TestCatalogPreviewRefused pins the refused member of the preview: the
+// user lane says why the gateway refuses every call of a disabled or a
+// revoked user, disabled first, and still lists what the user's roles
+// give. An active user and the role lane carry no refused member.
+func TestCatalogPreviewRefused(t *testing.T) {
+	t.Parallel()
+	app, _, _ := testAppCounting(t)
+	up := startGatewayUpstream(t)
+	seedRefusedUsers(t, app)
+	catInstallEcho(t, app, up, "echoapp", []string{"echo"})
+	tests := []struct {
+		name  string
+		query string
+		want  string // the refused member, "" when it is absent
+	}{
+		{name: "an active user reaches policy", query: "user=ana"},
+		{name: "a disabled user is refused", query: "user=bo", want: "disabled"},
+		{name: "an active user on the denylist is revoked", query: "user=cy", want: "revoked"},
+		{name: "a user both disabled and revoked reads disabled", query: "user=di", want: "disabled"},
+		{name: "the role lane carries no refused member", query: "role=dev"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			app.handleCatalogPreview(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/catalog/preview?"+tc.query, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("preview(%s) = %d: %s", tc.query, rec.Code, rec.Body)
+			}
+			var got struct {
+				Refused *string        `json:"refused"`
+				Entries []previewEntry `json:"entries"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			refused, present := "", got.Refused != nil
+			if present {
+				refused = *got.Refused
+			}
+			if present != (tc.want != "") || refused != tc.want {
+				t.Errorf("refused = %q (present %v), want %q", refused, present, tc.want)
+			}
+			statuses := catStatusMap(got.Entries)
+			if statuses["echoapp/echo"] != previewVisible || statuses["echoapp/env"] != previewMatcherMiss {
+				t.Errorf("entries = %v, want echoapp/echo visible and echoapp/env matcher_miss", statuses)
+			}
+		})
+	}
+}
+
 func catStatusMap(entries []previewEntry) map[string]string {
 	m := map[string]string{}
 	for _, e := range entries {

@@ -27,14 +27,11 @@ export const roleNameOf = (server: string, suffix: string) => rolePrefix(server)
 
 export const TAB_ROLES = "Server roles";
 export const ADD_ROLE = "Add role";
-export const emptyTitle = (server: string) => "No role of " + server + " yet.";
-export const emptyBody = (server: string) =>
-  "A role made here reaches this server only, is named " + rolePrefix(server) +
-  " and a word of yours, and is assigned by your identity manager, not here. Give it the tools it should reach.";
+export const EMPTY_TITLE = "No roles yet.";
+export const emptyBody = (server: string) => "A role made here reaches only " + server + ". Your identity manager assigns it.";
 
 export const TAB_HEAD = { name: "Name", role: "Role", tools: "Tools", holders: "Holders" };
 export const ROLE_HELP = "Named after this server and owned by it. The name cannot change. It goes with the server if the server is removed.";
-export const countLine = (n: number) => (n === 1 ? "1 role of this server" : n + " roles of this server");
 
 export const EDIT_ACCESS = "Edit access";
 export const DELETE_ROLE = "Delete";
@@ -45,7 +42,7 @@ export const DELETE_ROLE = "Delete";
 // server's objects, or that has no row on it, which covers none.
 export const COVERS_UNREAD = "not readable";
 export const coversUnread = (plural: string) =>
-  "Which " + plural + " each role covers is not readable with this account, because strazad refused the access rows. Ask a global admin, who can read them on each role's page.";
+  "Which " + plural + " each role covers is not readable with this account, because Straza refused the access rows. Ask a global admin, who can read them on each role's page.";
 export const noCovers = (plural: string) => "no " + plural;
 // moreCovers counts, in the server's noun, the objects a role's cell
 // leaves out after the first SHOWN_VALUES chips.
@@ -63,13 +60,13 @@ export const heldDelete = (name: string, held: number) =>
 // certifiedHint is what a global admin reads instead: they may widen a
 // held role, and the sentence says what that costs.
 export const certifiedHint = (held: number) =>
-  (held === 1 ? "1 holder was" : held + " holders were") + " certified on the current list. Widening it changes what they were certified for.";
+  "Widening it changes what " + (held === 1 ? "its holder was" : "its " + held + " holders were") + " reviewed for.";
 
 // unheldLine sits under the row of a role nobody holds. Nobody is assigned
 // here, so the line names the identity manager and the name it shows.
 // heldRule is what holding freezes, said once under the table.
 export const unheldLine = (name: string) =>
-  "Nobody holds it yet. Your IGA assigns it as AR:" + name + ", within a sync cycle.";
+  "No holders. Assign AR:" + name + " in your identity manager.";
 export const heldRule = (global: boolean) =>
   "A held role keeps its tools" + (global ? " for its server admin" : "") + " and cannot be deleted until the identity manager removes the holders.";
 // reachHead is the headline over the picture of a role's reach, split so
@@ -82,24 +79,23 @@ export const EVERY_TOOL = "every tool the server lists, and tools added later";
 
 export const deleteTitle = (name: string) => "Delete " + name + "?";
 export const deleteBody = (server: string) =>
-  "It leaves Straza with its access row to " + server + ". Nobody holds it, so no session loses a tool.";
+  "Its access row to " + server + " is deleted too. Nobody holds it.";
 
 // TOOLS_TAB_LINE stands where a global admin's door to an existing role's
 // reach is: a server admin gives reach through a role of their own server.
-export const TOOLS_TAB_LINE = "Reach for existing roles stays with the global admin. A role for this server alone: the Roles tab.";
+export const TOOLS_TAB_LINE = "Only a global admin changes existing roles. Add a role on the Server roles tab.";
 
 // ---- the Add role sheet ----
 
 export const addTitle = (server: string) => "Add a role of " + server;
-export const ADD_LEDE = "It reaches this server only. Your identity manager decides who holds it.";
+export const ADD_LEDE = "It reaches this server only.";
 export const editTitle = (name: string) => "Edit the access of " + name;
 export const EDIT_LEDE = "The name cannot change. Its tools can, until someone holds it.";
 
 export const NAME = "Name";
 export const NAME_SUFFIX = "role name suffix";
-export const DESCRIPTION = "Description";
-export const DESCRIPTION_HINT = "Optional. Shows on the role's page and in your identity manager.";
-export const CREATE_FOOTER = "Creates the role, gives it these tools and, when a call requires approval, publishes its rules, under your name on the audit chain.";
+export const DESCRIPTION = "Description (optional)";
+export const CREATE_FOOTER = "Creates the role, gives it these tools and, when a call requires approval, publishes its rules.";
 export const CREATE_ROLE = "Create role";
 
 // previewParts is the live canonical preview under the name field, split
@@ -110,7 +106,7 @@ const PREVIEW_KIND: Record<string, string> = { application: "Application", busin
 export const previewParts = (kind: string, name: string) => ({
   lead: (PREVIEW_KIND[kind] || "Application") + " role, stored as ",
   stored: name,
-  mid: ". An IGA imports it as ",
+  mid: ". Your identity manager imports it as ",
   iga: (kind === "business" ? "BR:" : "AR:") + name,
   end: ".",
 });
@@ -132,7 +128,7 @@ export const newRoleCommand = (server: string) => cliCreateRole(rolePrefix(serve
 // Roles list's marked server, so both surfaces say one thing.
 export const OWNED_BY = "owned by";
 export const ownedChip = (server: string) => OWNED_BY + " " + server;
-export const ownedChipTitle = (server: string) => "Defined by the admin of " + server + ", reaches it only";
+export const ownedChipTitle = (server: string) => "Made by the admin of " + server + ". Reaches only " + server + ".";
 
 // serverPrefixCheck answers the server whose prefix the typed name takes,
 // the longest match when two servers share an opening, else null. The
@@ -146,6 +142,6 @@ export function serverPrefixCheck(raw: string, apps: AppRow[] | null | undefined
 }
 
 export const serverPrefixRefusal = (server: string) =>
-  "Role names beginning with " + rolePrefix(server) + " belong to the server " + server +
-  ". Create it on that server's page so it becomes server-owned.";
+  "Names beginning with " + rolePrefix(server) + " belong to " + server +
+  ". Pick another name, or make an application role for " + server + ".";
 export const openServer = (server: string) => "Open " + server;

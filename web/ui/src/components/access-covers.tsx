@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { FetchError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
-import { CardGroup, Code, Fold, OptionCard } from "@/components/wizard/parts";
+import { CardGroup, OptionCard } from "@/components/wizard/parts";
+import { YamlFold } from "@/components/yaml-fold";
 import { type Covers, type Picked, listed, partial, reachOf, withPick } from "@/lib/access-covers";
 import { everyCard, everyLine, onWhich, onWhichHelp, onWhichLede, pickLabel, pickedWords, removeLabel, STORED, theseCard, theseLine, unticked as untickedWords } from "@/lib/access-object-words";
 import type { Plan } from "@/lib/access-plan";
@@ -109,39 +110,39 @@ export function CoversBlock({ app, block, plan, names, onCovers, unticked, every
   return (
     <div className="flex flex-col gap-2" data-covers={app.name}>
       <div className="flex flex-col gap-0.5">
-        <span className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+        <span className="flex items-center gap-1.5 text-dense font-semibold text-foreground">
           {onWhich(w)}
           <HelpTip label={onWhich(w)} text={onWhichHelp(app.name, w)} />
         </span>
-        <p className="m-0 max-w-[80ch] text-[13px] leading-snug text-muted-foreground">{onWhichLede(app.name, w, named)}</p>
+        <p className="m-0 max-w-[80ch] text-caption leading-snug text-muted-foreground">{onWhichLede(app.name, w, named)}</p>
       </div>
       <CardGroup label={onWhich(w)} value={value} onPick={(v) => (v === "every" ? (everyOff ? undefined : onCovers({ every: true })) : onCovers(some ? c : { objects: [] }))} className={CARDS}>
         <OptionCard value="every" label={everyCard(w)} name={everyCard(w)} tag="" on={value === "every"} off={!!everyOff} line={everyOff || everyLine(app.name, w, total)} />
         <OptionCard value="these" label={theseCard(w)} name={theseCard(w)} tag="" on={value === "these"} line={theseLine(app.name, w)} />
       </CardGroup>
-      {unticked.length > 0 && <p role="status" className="m-0 max-w-[80ch] text-[13px] leading-snug text-warn" data-unticked>{untickedWords(unticked, w)}</p>}
+      {unticked.length > 0 && <p role="status" className="m-0 max-w-[80ch] text-caption leading-snug text-warn" data-unticked>{untickedWords(unticked, w)}</p>}
 
       {some && (
         <div className="flex flex-col gap-2.5 rounded-md border border-border bg-card px-3.5 py-3" data-picker>
           <div className="flex flex-wrap items-center gap-1.5" data-picked>
-            {picked.length === 0 && <span className="text-[13px] text-muted-foreground">{pickedWords(0, w)}</span>}
-            {picked.length > 0 && <span className="mr-1 text-[13px] text-muted-foreground">{pickedWords(picked.length, w)}</span>}
+            {picked.length === 0 && <span className="text-caption text-muted-foreground">{pickedWords(0, w)}</span>}
+            {picked.length > 0 && <span className="mr-1 text-caption text-muted-foreground">{pickedWords(picked.length, w)}</span>}
             {picked.map((o) => (
-              <span key={o.id || o.value} className="inline-flex items-center gap-1.5 rounded-md border border-link/40 bg-accent-bg py-0.5 pr-0.5 pl-2 text-[13px]" data-pill={o.value}>
+              <span key={o.id || o.value} className="inline-flex items-center gap-1.5 rounded-md border border-link/40 bg-accent-bg py-0.5 pr-0.5 pl-2 text-caption" data-pill={o.value}>
                 <span className="font-mono text-foreground">{o.value}</span>
-                {o.id && <span className="font-mono text-xs text-muted-foreground">{o.id}</span>}
+                {o.id && <span className="font-mono text-caption leading-4 text-muted-foreground">{o.id}</span>}
                 <Button variant="ghost" size="icon-xs" aria-label={removeLabel(o.value)} onClick={() => pick(o)}><XIcon /></Button>
               </span>
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={filterLabel(w)} aria-label={filterLabel(w)} className="h-8 w-full max-w-xs" />
-            {list.kind === "ready" && <span className="text-[13px] text-muted-foreground">{shownWords(list.rows.length, list.total)}</span>}
+            {list.kind === "ready" && <span className="text-caption text-muted-foreground">{shownWords(list.rows.length, list.total)}</span>}
           </div>
-          {list.kind === "loading" && <p className="m-0 text-[13px] text-muted-foreground">{reading(w)}</p>}
+          {list.kind === "loading" && <p className="m-0 text-caption text-muted-foreground">{reading(w)}</p>}
           {list.kind === "error" && <FetchError subject={cap(w.plural)} detail={list.message} />}
           {strip && (
-            <div className={cn("flex flex-col gap-0.5 rounded-md border px-3 py-2 text-[13px] leading-snug text-foreground", STRIP[strip.tone])} data-listing>
+            <div className={cn("flex flex-col gap-0.5 rounded-md border px-3 py-2 text-caption leading-snug text-foreground", STRIP[strip.tone])} data-listing>
               {strip.lines.map((l) => <p key={l} className="m-0">{l}</p>)}
             </div>
           )}
@@ -164,7 +165,7 @@ export function CoversBlock({ app, block, plan, names, onCovers, unticked, every
                     {list.rows.map((o) => {
                       const on = picked.some((x) => x.id === o.id);
                       return (
-                        <TableRow key={o.id} className={cn("text-sm", on && "bg-accent-bg")} data-object={o.value} onClick={() => pick({ value: o.value, id: o.id, title: o.title })}>
+                        <TableRow key={o.id} className={cn("text-dense", on && "bg-accent-bg")} data-object={o.value} onClick={() => pick({ value: o.value, id: o.id, title: o.title })}>
                           <TableCell className="px-2 align-top">
                             <input
                               type="checkbox"
@@ -177,9 +178,9 @@ export function CoversBlock({ app, block, plan, names, onCovers, unticked, every
                           </TableCell>
                           <TableCell className="align-top whitespace-normal">
                             <span className="font-mono break-words text-foreground">{o.value}</span>
-                            {o.title && <span className="ml-2 text-[13px] text-muted-foreground">{o.title}</span>}
+                            {o.title && <span className="ml-2 text-caption text-muted-foreground">{o.title}</span>}
                           </TableCell>
-                          <TableCell className="align-top font-mono text-[13px] break-all text-muted-foreground">{o.id}</TableCell>
+                          <TableCell className="align-top font-mono text-caption break-all text-muted-foreground">{o.id}</TableCell>
                         </TableRow>
                       );
                     })}
@@ -198,9 +199,7 @@ export function CoversBlock({ app, block, plan, names, onCovers, unticked, every
         </div>
       )}
 
-      <Fold title={STORED}>
-        <Code className="rounded-none border-0">{stringify({ bindings: [bindingOf(app, plan, names)] })}</Code>
-      </Fold>
+      <YamlFold note={STORED} text={stringify({ bindings: [bindingOf(app, plan, names)] })} data-covers-yaml />
     </div>
   );
 }

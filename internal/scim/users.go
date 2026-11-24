@@ -254,15 +254,19 @@ func userResource(u store.User) map[string]any {
 
 // extensionBlock renders the Straza extension: the read-only lock lane
 // (§3.1), the writable typology (§3.2), and the Straza-born facts (§3.3).
-// Only admin/external rows count as a LOCK: a scim-origin row is just the
-// mirror of active:false, which the IdM already sees on `active`. `locked`,
+// Only admin/external rows count as a LOCK: a scim-origin or entra-origin
+// row, and an admin-disable row while the user is disabled, is just the
+// mirror of active:false, which the IdM already sees on `active`. An
+// admin-disable row on an active user outlived the IdM's enable and still
+// refuses the user, so it counts. `locked`,
 // `kind` and `origin` are always present (so IdM inbound mappings have
 // stable attributes); everything else rides only when set; the newest lock
 // wins when several exist.
 func extensionBlock(u store.User, rows []store.Revocation) map[string]any {
 	block := map[string]any{"locked": false, "kind": userKind(u), "origin": u.Origin}
 	for _, rv := range rows {
-		if rv.Origin == store.RevocationOriginSCIM {
+		if rv.Origin == store.RevocationOriginSCIM || rv.Origin == store.RevocationOriginEntra ||
+			(rv.Origin == store.RevocationOriginAdminDisable && u.Status == store.UserDisabled) {
 			continue
 		}
 		block["locked"] = true
@@ -313,6 +317,11 @@ func (s *Server) userResourceCtx(ctx context.Context, u store.User) map[string]a
 	}
 	groups := make([]map[string]any, 0, len(asg))
 	for _, a := range asg {
+		// A row the Entra sync wrote is no group membership on this wire,
+		// as on /Groups.
+		if a.Origin == store.OriginEntra {
+			continue
+		}
 		role, err := s.deps.Store.Roles().GetByID(ctx, a.RoleID)
 		if err != nil {
 			continue
@@ -429,6 +438,11 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := applyTypologyDoc(&u, doc); err != nil {
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
+		return
+	}
+	// Judged on the kind the new row would have, before the create and the
+	// revive of a deactivated row of the same userName.
+	if s.entraOwned(w, u) {
 		return
 	}
 	if !s.applyManager(w, r, &u, doc.managerWrite()) || s.refuseEntraAgentID(w, r, store.User{}, u) {

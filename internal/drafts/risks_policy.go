@@ -17,7 +17,7 @@ import (
 // selects by user or identity, and every loosening of a gate, typed
 // where the loosening is or where its set applies to the proposer. On an
 // agent's draft it also answers agent.guardrail for each set that binds
-// the agent and that the draft loosens.
+// the agent and that the draft changes.
 func (c *check) policyRisks() []Finding {
 	var out []Finding
 	ops := setOps(c.d)
@@ -48,7 +48,7 @@ func (c *check) policyRisks() []Finding {
 				before = sha256Hex(b.Spec.Escape.Rego)
 			}
 			out = append(out, risk(codeRego, object, name, fmt.Sprintf(
-				"The policy set %s carries a Rego module, which runs on every decision in strazad and on every managed machine.", name), before, sha256Hex(a.Spec.Escape.Rego)))
+				"The policy %s carries a Rego module, which runs on every decision in strazad and on every managed machine.", name), before, sha256Hex(a.Spec.Escape.Rego)))
 		}
 		if hadB {
 			out = append(out, requireLooser(name, b, a, hasA)...)
@@ -150,8 +150,8 @@ func localAllow(name string, b policy.Document, hadB bool, a policy.Document) []
 			continue
 		}
 		what := localWhat(ra, kinds, "every tool kind")
-		out = append(out, risk(codeLocalAllow, "PolicySet/"+name, "", fmt.Sprintf("Rule %s of %s allows %s on managed machines, where this deployment denies it by default.", ra.ID, name, what),
-			"", ra.ID+": "+strings.Join(kinds, ", ")))
+		out = append(out, ruleNamed(risk(codeLocalAllow, "PolicySet/"+name, "", fmt.Sprintf("Rule %s of %s allows %s on managed machines. This deployment denies those calls by default.", ra.ID, name, what),
+			"", ra.ID+": "+strings.Join(kinds, ", ")), ra, ""))
 	}
 	return out
 }
@@ -177,22 +177,22 @@ func (c *check) guardrail() (refused, loosened, risks []Finding) {
 	return dedupe(refused), dedupe(loosened), dedupe(risks)
 }
 
-// guardrailOf applies the agent guardrail, that a draft may not loosen a
-// set that binds its proposer, to every set of either world, with the
-// proposer's subject subj in each, and answers the cases where the draft
-// changes a set that binds the proposer: each as guardFinding answers it,
-// an agent.guardrail refusal or a loosening, and the policy.guardrail-changed
-// risks the same cases raise for a person. A set with only a Rego module
-// counts as a gate. For an agent's draft it also reads each set-level
-// loosening whose set binds the agent before or after, and refuses each
-// approval that starts to apply to the agent and takes over a stricter one
-// on its local tools. A set whose text does not parse is left to its parse
-// refusal.
+// guardrailOf applies the agent guardrail, that a draft changes no set
+// that binds its proposer without a person accepting it, to every set of
+// either world, with the proposer's subject subj in each, and answers the
+// cases where the draft changes a set that binds the proposer: each as
+// guardFinding answers it, an agent.guardrail refusal or risk, and the
+// policy.guardrail-changed risks the same cases raise for a person. A set
+// with only a Rego module counts as a gate. For an agent's draft it also
+// reads each set-level loosening whose set binds the agent before or
+// after, and each approval that starts to apply to the agent and takes
+// over a stricter one on its local tools. A set whose text does not parse
+// is left to its parse refusal.
 func (c *check) guardrailOf(subj [2]policy.Subject) (refused, loosened, risks []Finding) {
 	ops := setOps(c.d)
 	agent := agentDraft(c.d, c.in.Proposer)
-	guard := func(name, clause, them string, takeover bool) {
-		if f, refuse := c.guardFinding(name, clause, them, takeover); refuse {
+	guard := func(name, clause, them string) {
+		if f, refuse := c.guardFinding(name, clause, them); refuse {
 			refused = append(refused, f)
 		} else {
 			loosened = append(loosened, f)
@@ -206,7 +206,7 @@ func (c *check) guardrailOf(subj [2]policy.Subject) (refused, loosened, risks []
 		}
 		object := "PolicySet/" + name
 		bound := func(clause, them string, parts ...Finding) {
-			guard(name, clause, them, false)
+			guard(name, clause, them)
 			for _, f := range parts {
 				f.Ack, f.Typed = AckTyped, name
 				risks = append(risks, f)
@@ -255,13 +255,12 @@ func (c *check) guardrailOf(subj [2]policy.Subject) (refused, loosened, risks []
 	}
 	for _, l := range c.loosenings() {
 		if l.lane == "" && c.binds(l.changed, subj) {
-			guard(l.changed, l.clause, l.clause, l.takeover)
+			guard(l.changed, l.clause, l.clause)
 		}
 	}
 	for _, t := range c.subjectTakeovers(subj) {
-		refused = append(refused, refusal(codeAgentGuardrail, "PolicySet/"+t.x.set, visible(fmt.Sprintf(
-			"%s applies to you, and this draft lets its rule %s take over from the stricter rule %s of %s. An agent's draft may not change what binds the agent.",
-			t.x.set, t.x.rule.ID, t.y.rule.ID, t.y.set)), fmt.Sprintf("Leave %s and your roles as they are. A person can change them.", t.x.set)))
+		took := fmt.Sprintf("lets its rule %s take over from the stricter rule %s of %s", t.x.rule.ID, t.y.rule.ID, t.y.set)
+		guard(t.x.set, took, took)
 	}
 	return refused, loosened, risks
 }
@@ -273,20 +272,20 @@ const widensRule = "adds or widens rule "
 
 // guardFinding is the agent.guardrail finding of a draft that changes the
 // set name, which binds its proposer, as clause says, and them says of the
-// agent in the third person. A clause that adds or widens a rule widens
-// the agent's own reach, so it is refused, as is a takeover, and every
-// clause on a direct route, which publishes with no review, and on a check
-// that reads no risks, where nothing would show it. Otherwise the change
-// loosens the set, and refused is false: a risk a person confirms by
-// typing the set's name. Its sentence names no agent, because the reader
+// agent in the third person. On a check nobody reviews it is a refusal.
+// Otherwise refused is false: a risk a person accepts by typing the set's
+// name, whether the change loosens the set, adds or widens a rule or lets
+// an approval take over. Its sentence names no agent, because the reader
 // is the publisher.
-func (c *check) guardFinding(name, clause, them string, takeover bool) (f Finding, refused bool) {
+func (c *check) guardFinding(name, clause, them string) (f Finding, refused bool) {
 	object := "PolicySet/" + name
-	if takeover || strings.HasPrefix(clause, widensRule) || c.in.Direct || c.in.RefusalsOnly {
+	if c.unreviewed() {
 		return refusal(codeAgentGuardrail, object, visible(fmt.Sprintf("%s applies to you, and this draft %s. An agent's draft may not change what binds the agent.", name, clause)),
 			fmt.Sprintf("Leave %s and your roles as they are. A person can change them.", name)), true
 	}
-	return risk(codeAgentGuardrail, object, name, fmt.Sprintf("%s binds the agent that wrote this draft, and this draft %s.", name, them), "", ""), false
+	// The clause is the after words, so the key a publisher's typed name is
+	// held against changes when the draft comes to change the set another way.
+	return risk(codeAgentGuardrail, object, name, fmt.Sprintf("%s binds the agent that wrote this draft, and this draft %s.", name, them), "", them), false
 }
 
 // changedWhileBinding calls add for each change of a set that applies to
@@ -438,7 +437,7 @@ func (c *check) identityScoped(name string, op Op) []Finding {
 		after = "off"
 	}
 	return []Finding{risk(codeIdentityScoped, "PolicySet/"+name, "", fmt.Sprintf(
-		"Straza cannot show who gains through %s, because its match selects by %s, so check its match by hand.", name, listWords(kinds, "and")), before, after)}
+		"Straza cannot show who gains through %s, because its match selects by %s. Check its match by hand.", name, listWords(kinds, "and")), before, after)}
 }
 
 // setOps maps the name of each set d writes to the op of its item.

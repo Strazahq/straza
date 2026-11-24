@@ -24,7 +24,8 @@ import (
 // or of any session when it is "*", and every request while stalled, as a
 // stopped process, is held until its client gives up or the test ends. slow
 // delays the answer to a method, and redirectDelete answers every DELETE
-// with a redirect to /held, whose GET is held the same way.
+// with a redirect to /held, whose GET is held the same way. holdNextInit
+// holds one initialize until the test releases it.
 type methodUpstream struct {
 	*httptest.Server
 	mu             sync.Mutex
@@ -39,6 +40,8 @@ type methodUpstream struct {
 	release        chan struct{}
 	unhold         sync.Once
 	started        chan struct{}
+	initGate       chan struct{} // the next initialize waits until it is closed
+	initArrived    chan struct{} // closed when that initialize waits
 }
 
 func newMethodUpstream(t *testing.T) *methodUpstream {
@@ -78,10 +81,22 @@ func newMethodUpstream(t *testing.T) *methodUpstream {
 			(method == "ping" && (u.hangPing == "*" || (u.hangPing != "" && r.Header.Get("Mcp-Session-Id") == u.hangPing)))
 		redirect := u.redirectDelete && method == http.MethodDelete
 		slow := u.slow[method]
+		var gate, arrived chan struct{}
+		if method == "initialize" {
+			gate, arrived, u.initGate, u.initArrived = u.initGate, u.initArrived, nil, nil
+		}
 		u.mu.Unlock()
 		if redirect {
 			http.Redirect(w, r, "/held", http.StatusFound)
 			return
+		}
+		if gate != nil {
+			close(arrived)
+			select {
+			case <-r.Context().Done():
+				return
+			case <-gate:
+			}
 		}
 		time.Sleep(slow)
 		if hold {
@@ -171,6 +186,20 @@ func (u *methodUpstream) redirectDeletes(t *testing.T) {
 	u.mu.Unlock()
 }
 
+// holdNextInit holds the next initialize the upstream gets until release
+// runs or its client gives up, and answers a channel closed once that
+// initialize waits. The test's end releases it.
+func (u *methodUpstream) holdNextInit(t *testing.T) (arrived <-chan struct{}, release func()) {
+	gate, waiting := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	release = func() { once.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+	u.mu.Lock()
+	u.initGate, u.initArrived = gate, waiting
+	u.mu.Unlock()
+	return waiting, release
+}
+
 func (u *methodUpstream) endHolds() {
 	u.unhold.Do(func() { close(u.release) })
 }
@@ -239,7 +268,7 @@ func TestRemoteRuntimeCallerCancelKeepsSession(t *testing.T) {
 				t.Fatalf("warm call: %v", err)
 			}
 			r.mu.Lock()
-			shared := r.pool[""]
+			shared := r.sessionAt(poolKey{})
 			r.mu.Unlock()
 
 			err := tc.call(r, up, shared)
@@ -250,7 +279,7 @@ func TestRemoteRuntimeCallerCancelKeepsSession(t *testing.T) {
 				t.Errorf("tools/call POSTs = %d, want %d", n, 1+tc.wantCalls)
 			}
 			r.mu.Lock()
-			kept := r.pool[""] == shared
+			kept := r.sessionAt(poolKey{}) == shared
 			r.mu.Unlock()
 			if kept != tc.wantKept {
 				t.Fatalf("the shared session kept = %v, want %v", kept, tc.wantKept)

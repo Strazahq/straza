@@ -3,11 +3,11 @@ import { render, screen, within } from "@testing-library/react";
 import { type Draft, ReviewStep } from "./role-steps";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { type FixedRule, type Plan, defaultShape, emptyPlan, withCall, withChoice, withOwn, withReach } from "@/lib/access-plan";
-import type { AppRow, PackRow, ToolRow } from "@/lib/api";
+import type { AppRow, ToolRow } from "@/lib/api";
 
 // The Review of New role lists every tool the role reaches with what a call
 // to it does. The rules go live with the role in one publish, so it asks
-// nothing about them, and it says that packs are bound after the publish.
+// nothing about them.
 
 // The editor is its own suite; the review never draws it.
 vi.mock("@/components/access-editor", () => ({ AccessEditor: () => null }));
@@ -23,13 +23,12 @@ const toolsOf = (app: string) => tools.filter((t) => t.app === app);
 const ticked = (...names: string[]): Plan => ({ ...emptyPlan(), picked: Object.fromEntries(names.map((n) => [n, true])) });
 const ticket = { ...defaultShape(), pool: "sec-approvers", how: "ticket" as const };
 
-const pack: PackRow = { id: "p-1", name: "onboarding", version: "3" };
-const draftOf = (plan: Plan, packs: string[] = []): Draft => ({ kind: "application", name: "scout-role", description: "", server: "scout-tools", plans: { "scout-tools": plan }, composed: [], packs });
+const draftOf = (plan: Plan): Draft => ({ kind: "application", name: "scout-role", description: "", server: "scout-tools", plans: { "scout-tools": plan }, composed: [] });
 
-function Mounted({ plan, fixed = {}, packs = [] }: { plan: Plan; fixed?: Record<string, FixedRule>; packs?: string[] }) {
+function Mounted({ plan, fixed = {} }: { plan: Plan; fixed?: Record<string, FixedRule> }) {
   return (
     <TooltipProvider>
-      <ReviewStep draft={draftOf(plan, packs)} apps={apps} toolsOf={toolsOf} fixed={fixed} packs={[pack]} hadPacks acts={[]} commands={"strazactl roles create scout-role --kind application"} />
+      <ReviewStep draft={draftOf(plan)} apps={apps} toolsOf={toolsOf} fixed={fixed} acts={[]} commands={"strazactl roles create scout-role --kind application"} />
     </TooltipProvider>
   );
 }
@@ -80,14 +79,5 @@ describe("the New role Review", () => {
     render(<Mounted plan={withChoice(ticked("search"), "search", "approve")} />);
     expect(screen.queryByRole("radiogroup", { name: "The rules" })).toBeNull();
     expect(document.querySelector("[data-draft-warning]")).toBeNull();
-  });
-
-  it("says the picked packs are bound after the publish, and only when a pack is picked", () => {
-    const view = render(<Mounted plan={ticked("search")} />);
-    expect(document.querySelector("[data-packs-after]")).toBeNull();
-    view.unmount();
-    render(<Mounted plan={ticked("search")} packs={["p-1"]} />);
-    expect((document.querySelector("[data-packs-row]") as HTMLElement).textContent).toBe("onboarding");
-    expect((document.querySelector("[data-packs-after]") as HTMLElement).textContent).toBe("A draft never binds a knowledge pack, so Save and publish binds these once the role is live. After Save draft, bind them on the role's page once the draft is published.");
   });
 });

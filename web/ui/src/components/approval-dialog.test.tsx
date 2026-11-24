@@ -1,56 +1,68 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ApprovalDialog } from "./approval-dialog";
+import { DecideRefusal } from "./approval-decide";
+import { ApprovalDialog, type BeforeSetup } from "./approval-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { type ApprovalRow, getPolicy } from "@/lib/api";
+import * as SW from "@/self-service/words";
+import { ApiError, type ApprovalRow, getPolicy } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import {
+  ABOUT_APPROVE,
+  ABOUT_DENY,
   APPROVE,
+  APPROVE_REQUEST,
   CARD_PARAMS,
   CLOSE,
   DECIDE_BY_HELP_HOLD,
   DECIDE_BY_HELP_HOOK,
   DECIDE_BY_HELP_TICKET,
   DENY,
+  DENY_REQUEST,
   DETAILS,
   FACT_DECIDE_BY,
   FACT_WHO,
-  GRANT_UNKNOWN,
   IF_APPROVE,
   IF_DENY,
   KIND_SAYS,
   OPEN_RULE,
-  PARAMS_COMMAND,
   PARAMS_HINT_COMMAND,
   PARAMS_HINT_NONE,
   PARAMS_HINT_STORED,
   PARAMS_NONE,
-  REQUEST_TITLE,
+  REASON_LABEL,
+  REASON_PLACEHOLDER,
   SAYS_NONE,
-  SAYS_NONE_HOOK,
   SAYS_OWN,
   SHOW_JSON,
   UNVERIFIED,
+  type Verdict,
   WINDOW_CLOSED,
+  alreadyDecided,
   approveDoes,
   approvedToast,
-  decideBody,
   decideHelp,
   decidedWhere,
+  deniedToast,
   denyDoes,
   doesLine,
   expiredLine,
+  notYours,
   openRole,
+  reasonOf,
+  requestTitle,
   signedWords,
   sponsoredWords,
   whoLine,
 } from "@/lib/approval-words";
+import { refused } from "@/lib/say";
 import { absTime } from "@/lib/words";
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
   getPolicy: vi.fn(),
 }));
+vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: vi.fn() } }));
 
 const at = (s: number) => new Date(Date.now() + s * 1000).toISOString();
 const seat = { user: "alice", roles: ["straza-admin"] };
@@ -75,20 +87,40 @@ let onHook: ApprovalRow;
 let denied: ApprovalRow;
 let gone: ApprovalRow;
 
-const decide = vi.fn();
-const mount = (row: ApprovalRow, isMine = true, isStuck = false, holders: Record<string, number> = {}) => render(
+// send is the queue's decide lane, get its single read after a 409, decided
+// the record handed back and closed the dialog's own close.
+const send = vi.fn();
+const getOne = vi.fn();
+const decided = vi.fn();
+const closed = vi.fn();
+type Lane = { get?: ((id: string) => Promise<ApprovalRow | null>) | null; needsDevice?: boolean; beforeSetup?: BeforeSetup };
+const mount = (row: ApprovalRow, isMine = true, isStuck = false, holders: Record<string, number> = {}, lane: Lane = {}) => render(
   <TooltipProvider>
-    <ApprovalDialog row={row} open onOpenChange={() => undefined} seat={seat} holders={holders} isMine={isMine} isStuck={isStuck} onDecide={decide} />
+    <ApprovalDialog
+      row={row} open onOpenChange={closed} seat={seat} holders={holders} isMine={isMine} isStuck={isStuck}
+      needsDevice={lane.needsDevice} decide={send} get={lane.get === undefined ? getOne : lane.get} onDecided={decided}
+      beforeSetup={lane.beforeSetup}
+    />
   </TooltipProvider>,
 );
+// setUp is the page's setup, and SETUP the page's hook before any device of
+// the reader is set up, in the self-service page's own words.
+const setUp = vi.fn();
+const SETUP: BeforeSetup = { onSetUp: setUp, words: { row: SW.SETUP_TO_ANSWER, line: SW.ANSWER_NEEDS_DEVICE, button: SW.SETUP_BROWSER } };
 const dialog = () => screen.getByRole("dialog");
 const one = (selector: string) => document.querySelector(selector) as HTMLElement;
 const fact = (label: string) => one('[data-fact="' + label + '"]');
 const foot = () => within(one("[data-slot=dialog-footer]"));
+const press = (verdict: Verdict) => userEvent.click(foot().getByRole("button", { name: verdict === "approve" ? APPROVE : DENY }));
 
 describe("the request dialog", () => {
   beforeEach(() => {
-    decide.mockClear();
+    send.mockReset();
+    getOne.mockReset();
+    decided.mockClear();
+    closed.mockClear();
+    setUp.mockClear();
+    vi.mocked(notify.ok).mockClear();
     vi.mocked(getPolicy).mockResolvedValue({ name: "dev-guardrails", yaml: YAML } as never);
     hold = { ...base, createdAt: at(-28), expiresAt: at(92), argsPreview: '{\n  "a": 2,\n  "b": 40\n}', argvHashPrefix: "2f9c1a7e", bindingScope: "call" };
     ticket = { ...base, id: "apr_ticket", class: "ticket", rule: "dev-mcp-env-ticket", summary: "mcp.call demo-tools:get-env", createdAt: at(-60), expiresAt: at(86340), argsPreview: '{"user":"jdoe","options":{"recompute":true},"notify":["a@x","b@x"]}', argvHashPrefix: "c04d77a1", bindingScope: "call" };
@@ -114,10 +146,11 @@ describe("the request dialog", () => {
     expect(one("[data-call-card]").parentElement!.className).toContain("overflow-y-auto");
   });
 
-  it("titles the dialog Approval request alone and keeps the call in its name for a screen reader", () => {
+  it("titles the dialog with who asks and for what, and keeps the call in its name for a screen reader", () => {
     mount(hold);
     const title = within(dialog()).getByRole("heading");
-    expect(title.textContent).toBe(REQUEST_TITLE + " get-sum");
+    expect(title.textContent).toBe("joe-java-developer-agent wants to call a tool get-sum");
+    expect(title.textContent).toBe(requestTitle(hold) + " get-sum");
     expect((title.querySelector("span") as HTMLElement).className).toContain("sr-only");
     expect((title.querySelector("span") as HTMLElement).textContent).toBe(" get-sum");
     expect(title.querySelector("[data-phase]")).toBe(null);
@@ -129,31 +162,35 @@ describe("the request dialog", () => {
   ])("sets %s at title size in the mono face, the captions at caption size and the sentences at body size", (_what, pick) => {
     mount(pick());
     const tool = one("[data-card-tool]");
-    for (const cls of ["font-mono", "text-xl", "font-semibold"]) expect(tool.className).toContain(cls);
+    for (const cls of ["font-mono", "text-title", "font-semibold"]) expect(tool.className).toContain(cls);
     const captions = [...document.querySelectorAll("[data-outcomes] .uppercase")] as HTMLElement[];
     expect(captions.map((c) => c.textContent)).toEqual([IF_APPROVE, IF_DENY]);
-    for (const caption of captions) expect(caption.className).toContain("text-[13px]");
-    expect(one("[data-if=approve] p").className).toContain("text-[15px]");
+    for (const caption of captions) expect(caption.className).toContain("text-caption");
+    expect(one("[data-if=approve] p").className).toContain("text-body");
     // Nothing in the dialog is set under the 12 px floor.
     expect(dialog().querySelector('[class*="text-[11px]"], [class*="text-[10px]"]')).toBe(null);
   });
 
   it.each([
-    ["a gateway call", () => hold, "joe-java-developer-agent wants to call", "get-sum", "demo-tools"],
-    ["a command from the hook", () => onHook, "joe-java-developer-agent wants to run", "printf lf-q4-x", null],
-    ["a decided request", () => denied, "joe-java-developer-agent asked to call", "get-sum", "demo-tools"],
-  ])("says who asks for %s and shows the call once, in its own box", (_what, pick, ask, call, server) => {
+    ["a gateway call", () => hold, "joe-java-developer-agent wants to call a tool", "get-sum", "demo-tools"],
+    ["a command from the hook", () => onHook, "joe-java-developer-agent wants to run a command", "printf lf-q4-x", null],
+    ["a decided request", () => denied, "joe-java-developer-agent asked to call a tool", "get-sum", "demo-tools"],
+  ])("says who asks for %s in the title and shows the call once, in its own box", (_what, pick, ask, call, server) => {
     mount(pick(), false);
-    expect(one("[data-ask]").textContent).toBe(ask);
+    expect(within(dialog()).getByRole("heading").firstChild!.textContent).toBe(ask);
+    // The title says who asks, so no line over the call repeats it.
+    expect(document.querySelector("[data-ask]")).toBe(null);
     expect(one("[data-card-tool]").textContent).toBe(call);
     expect(document.querySelectorAll("[data-card-tool]").length).toBe(1);
     const chip = document.querySelector("[data-card-server]");
     expect(chip ? chip.textContent : null).toBe(server);
+    // A server is named as a tag with the server's own icon.
+    if (chip) expect(chip.querySelector("svg")).not.toBe(null);
   });
 
   it.each([
     ["a hold", () => hold, "hold", "text-warn", /^1 m 3\d s left$/, "then the call is denied", true],
-    ["a ticket", () => ticket, "ticket", "text-teal", /^23 h 5\d min left$/, "then the request is denied", false],
+    ["a ticket", () => ticket, "ticket", "text-foreground", /^23 h 5\d min left$/, "then the request is denied", false],
   ])("says in a strip that %s waits, how long is left and what happens at zero", (_what, pick, kind, tone, left, zero, bar) => {
     mount(pick());
     const strip = one("[data-strip]");
@@ -182,6 +219,9 @@ describe("the request dialog", () => {
     expect(document.querySelector("[data-outcomes]")).toBe(null);
     expect((one("[data-drain]").firstElementChild as HTMLElement).style.width).toBe("0%");
     expect(document.getElementById(dialog().getAttribute("aria-describedby")!)?.textContent).toBe(WINDOW_CLOSED);
+    // The record still reads pending, so the reason field and both buttons stay until the server answers.
+    expect(screen.getByLabelText(REASON_LABEL)).toBeTruthy();
+    expect(foot().getAllByRole("button").map((b) => b.textContent)).toEqual([CLOSE, DENY, APPROVE]);
   });
 
   it.each([
@@ -222,7 +262,7 @@ describe("the request dialog", () => {
   it("shows a hook call as a command with no parameter table, and a stored value that is no object as it is", () => {
     const view = mount(onHook, false, true);
     expect(document.querySelector("[data-params]")).toBe(null);
-    expect(one("[data-params-none]").textContent).toBe(PARAMS_COMMAND);
+    expect(document.querySelector("[data-params-none]")).toBe(null);
     view.unmount();
     const raw = mount({ ...hold, argsPreview: "[1,2]" });
     expect(one("[data-params-none]").textContent).toBe("[1,2]");
@@ -233,7 +273,7 @@ describe("the request dialog", () => {
   });
 
   it.each([
-    ["a gateway hold says the agent waits on the line", () => hold, "The agent is waiting right now for your answer."],
+    ["a gateway hold says the agent waits on the line", () => hold, "The agent is waiting for your answer."],
     ["a hook hold says the agent was told to retry", () => onHook, "The agent was told to retry the call after your answer."],
     ["a hook hold on an MCP call says the same", () => ({ ...hold, lane: "hook" }), "The agent was told to retry the call after your answer."],
     ["a ticket says the agent moved on, whatever the lane", () => ({ ...ticket, lane: "hook" }), "The agent moved on. It runs this only after a yes."],
@@ -254,7 +294,7 @@ describe("the request dialog", () => {
 
   it("says in one line where the call runs, when it was asked and who sponsors the agent", () => {
     const view = mount(hold);
-    expect(one("[data-meta]").textContent).toBe("through the MCP gateway · asked 28 s ago · sponsored by you");
+    expect(one("[data-meta]").textContent).toBe("through the MCP gateway · asked 28 s ago · you sponsor it");
     view.unmount();
     const other = mount({ ...hold, approverUsers: ["marta"] }, false);
     expect(one("[data-meta]").textContent).toBe("through the MCP gateway · asked 28 s ago · sponsored by marta");
@@ -263,14 +303,22 @@ describe("the request dialog", () => {
     expect(one("[data-meta]").textContent).toBe("on its own machine · asked 1 m ago");
   });
 
-  it("quotes the agent's reason as its own unchecked words, and says in one quiet line when it gave none", () => {
+  it("quotes the requester's reason in a dashed box headed with its name and an unverified chip, and says in one quiet line when it gave none", () => {
     const view = mount(hold);
+    const box = one("[data-says]");
+    expect(box.className).toContain("border-dashed");
+    expect(one("[data-says-head]").textContent).toBe(reasonOf("joe-java-developer-agent"));
+    expect(one("[data-says-head]").textContent).toBe("joe-java-developer-agent's reason");
+    const chip = one("[data-unverified]");
+    expect(chip.textContent).toBe(UNVERIFIED);
+    expect(chip.getAttribute("data-tone")).toBe("plain");
+    expect(chip.getAttribute("title")).toBe(SAYS_OWN);
     expect(one("[data-justification]").textContent).toBe("“Adding the two build durations the user asked about.”");
-    expect(one("[data-says-own]").textContent).toBe(SAYS_OWN);
-    expect(screen.queryByText(UNVERIFIED)).toBe(null);
+    expect(document.querySelector("[data-says-own]")).toBe(null);
     view.unmount();
     const hook = mount(onHook, false, true);
-    expect(one("[data-justification-none]").textContent).toBe(SAYS_NONE_HOOK);
+    expect(one("[data-justification-none]").textContent).toBe(SAYS_NONE);
+    expect(SAYS_NONE).toBe("The agent gave no reason.");
     expect(document.querySelector("[data-says]")).toBe(null);
     hook.unmount();
     mount({ ...hold, justification: "" });
@@ -283,22 +331,22 @@ describe("the request dialog", () => {
     expect(one("[data-if=deny] p").textContent).toBe("The call does not run. The agent is told who said no.");
     view.unmount();
     mount(ticket);
-    await waitFor(() => expect(one("[data-if=approve] p").textContent).toBe("Its next try of this exact call runs, once, within 2 hours."));
+    await waitFor(() => expect(one("[data-if=approve] p").textContent).toBe("The agent's next try of this exact call runs once within 2 hours."));
     expect(one("[data-if=deny] p").textContent).toBe("Nothing runs. The agent is told who said no.");
     expect(getPolicy).toHaveBeenCalledWith("dev-guardrails");
   });
 
-  it("falls back to the rule's own words when the policy cannot be read", async () => {
+  it("leaves the window out when the policy cannot be read", async () => {
     vi.mocked(getPolicy).mockRejectedValue(new Error("no"));
     mount(ticket);
     await waitFor(() => expect(getPolicy).toHaveBeenCalled());
-    expect(one("[data-if=approve] p").textContent).toBe("Its next try of this exact call runs, once, within " + GRANT_UNKNOWN + ".");
+    expect(one("[data-if=approve] p").textContent).toBe("The agent's next try of this exact call runs once.");
   });
 
   it("speaks to the reader about who can decide, and points a stuck request at the role and the rule", () => {
     const view = mount(hold);
     expect(one("[data-who-line]").textContent).toContain(FACT_WHO);
-    expect(one("[data-who]").textContent).toBe("You (alice), as joe-java-developer-agent's sponsor. Nobody else.");
+    expect(one("[data-who]").textContent).toBe("You, as joe-java-developer-agent's sponsor. Nobody else.");
     view.unmount();
     const other = mount(hold, false);
     expect(one("[data-who]").textContent).toBe("alice, as joe-java-developer-agent's sponsor. Not you.");
@@ -318,15 +366,21 @@ describe("the request dialog", () => {
     expect(details.open).toBe(false);
     expect(within(details.querySelector("summary") as HTMLElement).getByText(DETAILS)).toBeTruthy();
     const labels = [...details.querySelectorAll("[data-fact]")].map((el) => el.getAttribute("data-fact"));
-    expect(labels).toEqual(["Requested by", "Session", "When", "How it came in", "Decide by", "Policy rule"]);
+    expect(labels).toEqual(["Requested by", "Session", "Asked", "How it came in", "Decide by", "Policy rule"]);
     expect(fact("Requested by").textContent).toContain(sponsoredWords("alice"));
     expect(one("[data-decide-by]").textContent || "").toMatch(/left · until .* · then the call is denied$/);
+  });
+
+  it("says a way in it does not know in words, never the raw value", () => {
+    mount({ ...hold, lane: "carrier-pigeon" });
+    expect(fact("How it came in").textContent).toContain("another way in");
+    expect(fact("How it came in").textContent).not.toContain("carrier-pigeon");
   });
 
   it("opens Details on a decided request and leads with the decision, who decided, their reason and what signed it", () => {
     mount(denied, false);
     expect((one("[data-details]") as HTMLDetailsElement).open).toBe(true);
-    expect(one("[data-strip] [data-phase]").textContent).toBe("Denied");
+    expect(one("[data-strip] [data-phase]").textContent).toBe("denied");
     expect(one("[data-decided-line]").textContent).toMatch(/^Denied by alice from the console, 2 m ago\. Their reason: “walk cleanup”\.$/);
     expect(fact("Decided by").textContent).toContain(decidedWhere(denied));
     expect(within(fact("Their reason")).getByText("“walk cleanup”")).toBeTruthy();
@@ -336,24 +390,199 @@ describe("the request dialog", () => {
     expect(document.querySelector("[data-decide-by]")).toBe(null);
   });
 
+  it("says a stamp older than a day once in Asked and in Decided by, as days beside the date", () => {
+    const old = { ...denied, createdAt: at(-3 * 86400 - 600), expiresAt: at(-3 * 86400), decidedAt: at(-2 * 86400 - 60) };
+    mount(old, false);
+    const stamp = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/g;
+    expect(fact("Asked").textContent).toMatch(/^Asked3 d ago · \d{4}-/);
+    expect((fact("Asked").textContent || "").match(stamp)).toHaveLength(1);
+    expect(fact("Decided by").textContent).toMatch(/ · 2 d ago$/);
+    expect((fact("Decided by").textContent || "").match(stamp)).toHaveLength(1);
+  });
+
   it("says nobody decided an expired request and names the role it was routed to", () => {
     mount(gone, false, true);
-    expect(one("[data-strip] [data-phase]").textContent).toBe("Expired");
+    expect(one("[data-strip] [data-phase]").textContent).toBe("expired");
     expect(one("[data-expired-line]").textContent).toBe(expiredLine(gone, true));
     expect(one("[data-expired-line]").textContent).toContain("sec-approvers");
   });
 
-  it("puts Close on the left and Deny beside Approve on the right when the request is yours, Close alone otherwise", async () => {
-    const view = mount(hold);
-    const buttons = foot().getAllByRole("button").map((b) => b.textContent);
-    expect(buttons).toEqual([CLOSE, DENY, APPROVE]);
-    await userEvent.click(foot().getByRole("button", { name: APPROVE }));
-    expect(decide).toHaveBeenCalledWith(hold, "approve");
-    await userEvent.click(foot().getByRole("button", { name: DENY }));
-    expect(decide).toHaveBeenCalledWith(hold, "deny");
-    view.unmount();
-    mount(hold, false);
+  it("puts a quiet Close on the left and a red outline Deny beside a primary Approve on the right, in one row on every width", () => {
+    mount(hold);
+    expect(foot().getAllByRole("button").map((b) => b.textContent)).toEqual([CLOSE, DENY, APPROVE]);
+    expect(foot().getByRole("button", { name: CLOSE }).getAttribute("data-variant")).toBe("ghost");
+    const deny = foot().getByRole("button", { name: DENY });
+    expect(deny.getAttribute("data-variant")).toBe("outline");
+    expect(deny.className).toContain("border-danger");
+    expect(foot().getByRole("button", { name: APPROVE }).getAttribute("data-variant")).toBe("default");
+    const row = one("[data-slot=dialog-footer]").className;
+    expect(row).toContain("flex-row");
+    expect(row).not.toContain("flex-col-reverse");
+  });
+
+  it("shows the reason field under Details on a request the reader may decide", () => {
+    mount(hold);
+    const field = one("[data-reason-field]");
+    expect(one("[data-details]").compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const box = screen.getByLabelText(REASON_LABEL) as HTMLTextAreaElement;
+    expect(box.placeholder).toBe(REASON_PLACEHOLDER);
+  });
+
+  it.each([
+    ["someone else's request", () => mount(hold, false)],
+    ["a stuck request", () => mount(onHook, false, true)],
+    ["the reader's own request on a lane that cannot sign it", () => mount(hold, true, false, {}, { needsDevice: true })],
+    ["a decided request", () => mount(denied, false)],
+  ])("shows no reason field and no Deny or Approve on %s", (_what, arrange) => {
+    arrange();
+    expect(screen.queryByLabelText(REASON_LABEL)).toBe(null);
     expect(foot().getAllByRole("button").map((b) => b.textContent)).toEqual([CLOSE]);
+  });
+
+  it.each([
+    ["the sponsor's request", () => hold, "You, as joe-java-developer-agent's sponsor. Nobody else."],
+    ["a request routed to a role the reader holds", () => ({ ...onHook, state: "pending" }), "You, as a holder of sec-approvers. The first to answer decides."],
+  ])("reads the who line of %s before setup as the reader's to decide, and offers the setup in place of the answer", async (_what, pick, who) => {
+    const r = pick();
+    mount(r, true, false, {}, { beforeSetup: SETUP });
+    expect(one("[data-who]").textContent).toBe(who);
+    expect(one("[data-who]").textContent).toBe(whoLine(r, seat, {}, true, false));
+    expect(screen.queryByLabelText(REASON_LABEL)).toBe(null);
+    expect(document.querySelector("[data-reason-field]")).toBe(null);
+    const line = one("[data-needs-device]");
+    expect(line.textContent).toBe(SW.ANSWER_NEEDS_DEVICE);
+    expect(line.className).toContain("text-text-2");
+    expect(foot().getAllByRole("button").map((b) => b.textContent)).toEqual([CLOSE, SW.SETUP_BROWSER]);
+    const setUpButton = foot().getByRole("button", { name: SW.SETUP_BROWSER });
+    expect(setUpButton.getAttribute("data-variant")).toBe("default");
+    await userEvent.click(setUpButton);
+    expect(closed).toHaveBeenCalledWith(false);
+    expect(setUp).toHaveBeenCalledTimes(1);
+    expect(closed.mock.invocationCallOrder[0]).toBeLessThan(setUp.mock.invocationCallOrder[0]);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["someone else's request", () => mount(hold, false, false, {}, { beforeSetup: SETUP })],
+    ["a decided request", () => mount(denied, true, false, {}, { beforeSetup: SETUP })],
+  ])("offers no setup on %s before setup", (_what, arrange) => {
+    arrange();
+    expect(document.querySelector("[data-needs-device]")).toBe(null);
+    expect(foot().getAllByRole("button").map((b) => b.textContent)).toEqual([CLOSE]);
+  });
+
+  it.each([
+    ["approves with no reason", "approve" as Verdict, "", ""],
+    ["denies with the reason typed, trimmed", "deny" as Verdict, "  walk cleanup  ", "walk cleanup"],
+  ])("decides from the footer at once: %s", async (_what, verdict, typed, sent) => {
+    const answer = { ...hold, state: verdict === "approve" ? "approved" : "denied" };
+    send.mockResolvedValue(answer);
+    mount(hold);
+    if (typed) await userEvent.type(screen.getByLabelText(REASON_LABEL), typed);
+    await press(verdict);
+    await waitFor(() => expect(send).toHaveBeenCalledWith(hold, verdict, sent));
+    expect(send).toHaveBeenCalledTimes(1);
+    // A decision that landed says so in a toast, hands the record back and closes the dialog.
+    await waitFor(() => expect(vi.mocked(notify.ok)).toHaveBeenCalledWith(verdict === "approve" ? approvedToast(hold) : deniedToast(hold)));
+    expect(decided).toHaveBeenCalledWith(answer);
+    expect(closed).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole("alert")).toBe(null);
+  });
+
+  it("disables both buttons and Close while the answer is out, with the spinner on the one pressed", async () => {
+    let land: (r: ApprovalRow) => void = () => undefined;
+    send.mockReturnValue(new Promise<ApprovalRow>((ok) => { land = ok; }));
+    mount(hold);
+    await press("deny");
+    const deny = foot().getByRole("button", { name: DENY });
+    const approve = foot().getByRole("button", { name: APPROVE });
+    expect((deny as HTMLButtonElement).disabled).toBe(true);
+    expect((approve as HTMLButtonElement).disabled).toBe(true);
+    expect((foot().getByRole("button", { name: CLOSE }) as HTMLButtonElement).disabled).toBe(true);
+    expect(deny.getAttribute("aria-busy")).toBe("true");
+    expect(deny.querySelector("[data-spinner]")).not.toBe(null);
+    expect(approve.querySelector("[data-spinner]")).toBe(null);
+    // Escape does not close the dialog on an answer that is still out.
+    await userEvent.keyboard("{Escape}");
+    expect(closed).not.toHaveBeenCalled();
+    land({ ...hold, state: "denied" });
+    await waitFor(() => expect(closed).toHaveBeenCalledWith(false));
+  });
+
+  it.each([
+    ["the server did not answer", "approve" as Verdict, new ApiError("unreachable", 0, true), APPROVE_REQUEST + " not confirmed. Straza did not answer. The change may have been saved. Reload to check before trying again."],
+    ["the server failed", "deny" as Verdict, new ApiError("the approval store is unavailable", 500), DENY_REQUEST + " refused: the approval store is unavailable. Fix what it names, then try again."],
+    ["the lane worded a refusal", "approve" as Verdict, new DecideRefusal("The reason is longer than 500 bytes. Shorten it."), APPROVE_REQUEST + " refused. The reason is longer than 500 bytes. Shorten it."],
+  ])("keeps the dialog open with the refusal above the footer when %s, and the buttons work again", async (_what, verdict, err, text) => {
+    send.mockRejectedValue(err);
+    mount(hold);
+    await press(verdict);
+    const block = await screen.findByRole("alert");
+    expect(block.textContent).toBe(text);
+    // The refusal sits outside the scrolling body, just above the footer.
+    expect(block.closest("[data-slot=dialog-footer]")).toBe(null);
+    expect(one("[data-slot=dialog-footer]").previousElementSibling!.contains(block)).toBe(true);
+    expect(closed).not.toHaveBeenCalled();
+    expect(decided).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(REASON_LABEL)).toBeTruthy();
+    expect((foot().getByRole("button", { name: APPROVE }) as HTMLButtonElement).disabled).toBe(false);
+    expect((foot().getByRole("button", { name: DENY }) as HTMLButtonElement).disabled).toBe(false);
+    // A second press starts clean.
+    send.mockResolvedValue({ ...hold, state: "approved" });
+    await press("approve");
+    await waitFor(() => expect(closed).toHaveBeenCalledWith(false));
+  });
+
+  it("says nothing when the session ended, since the session module signs the person out", async () => {
+    send.mockRejectedValue(new ApiError("session expired", 401));
+    mount(hold);
+    await press("approve");
+    await waitFor(() => expect(send).toHaveBeenCalled());
+    expect(screen.queryByRole("alert")).toBe(null);
+    expect(document.querySelector("[data-final]")).toBe(null);
+    expect(foot().getAllByRole("button").map((b) => b.textContent)).toEqual([CLOSE, DENY, APPROVE]);
+  });
+
+  // A stamp older than a day reads as a date, so the sentence the table builds now still matches when the case runs.
+  const elsewhere: ApprovalRow = { ...base, state: "denied", decidedAt: "2026-10-01T09:00:00Z", decidedBy: "u-alice", decidedByName: "alice", channel: "phone", decidedReason: "not now" };
+  it.each([
+    ["it was decided elsewhere first and the lane re-reads it", "approve" as Verdict, new ApiError("already decided", 409), {}, alreadyDecided(elsewhere), true],
+    ["it was decided elsewhere first and the lane cannot re-read", "deny" as Verdict, new ApiError("already decided", 409), { get: null }, refused(new ApiError("already decided", 409)), false],
+    ["the window closed", "approve" as Verdict, new ApiError("the approval window closed", 410), {}, WINDOW_CLOSED, false],
+    ["it is no longer the reader's", "deny" as Verdict, new ApiError("you are not an approver for this request.", 403), {}, notYours("you are not an approver for this request"), false],
+    ["the lane says it is settled", "approve" as Verdict, new DecideRefusal("This request is gone, so there is nothing left to decide here.", true), {}, "This request is gone, so there is nothing left to decide here.", false],
+  ])("ends the decision with a final answer and Close alone when %s", async (_what, verdict, err, lane, sentence, handsBack) => {
+    send.mockRejectedValue(err);
+    getOne.mockResolvedValue(elsewhere);
+    mount(hold, true, false, {}, lane as Lane);
+    await press(verdict);
+    const strip = await waitFor(() => one("[data-final]"));
+    expect(strip.textContent).toBe(sentence);
+    expect(strip.textContent).not.toMatch(/^Not (approved|denied)/);
+    expect(screen.queryByLabelText(REASON_LABEL)).toBe(null);
+    expect(foot().getAllByRole("button").map((b) => b.textContent)).toEqual([CLOSE]);
+    expect(screen.queryByRole("alert")).toBe(null);
+    expect(closed).not.toHaveBeenCalled();
+    if (handsBack) expect(decided).toHaveBeenCalledWith(elsewhere);
+    else expect(decided).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["approving a gateway hold", () => hold, "approve" as Verdict, ABOUT_APPROVE],
+    ["denying a gateway hold", () => hold, "deny" as Verdict, ABOUT_DENY],
+    ["approving a hook hold", () => onHook, "approve" as Verdict, ABOUT_APPROVE],
+    ["approving a ticket", () => ticket, "approve" as Verdict, ABOUT_APPROVE],
+    ["denying a ticket", () => ticket, "deny" as Verdict, ABOUT_DENY],
+  ])("explains what %s does behind the help of its box", async (_what, pick, verdict, label) => {
+    const r = pick();
+    mount(r, false);
+    const b = within(one("[data-if=" + verdict + "]")).getByRole("button", { name: "Help: " + label });
+    await userEvent.hover(b);
+    await waitFor(() => {
+      const id = b.getAttribute("aria-describedby");
+      expect(id).toBeTruthy();
+      expect(document.getElementById(id as string)?.textContent).toBe(decideHelp(verdict, r));
+    });
   });
 });
 
@@ -366,12 +595,12 @@ describe("what a yes and a no do", () => {
     ["a hold says the same whatever the rule binds", row({ bindingScope: "tool_identity" }), null, "The call runs now, once."],
     ["a hold the hook raised runs on the agent's retry", row({ bindingScope: "call", ...shell }), null, "The call runs once, when the agent retries it soon after your yes."],
     ["a hook hold on an MCP call runs on the retry too", row({ lane: "hook" }), null, "The call runs once, when the agent retries it soon after your yes."],
-    ["a ticket bound to the call covers that exact call", row({ class: "ticket", bindingScope: "call" }), "2 hours", "Its next try of this exact call runs, once, within 2 hours."],
-    ["a ticket bound to a command covers that exact command", row({ class: "ticket", bindingScope: "call", ...shell }), "1 hour", "Its next try of this exact command runs, once, within 1 hour."],
-    ["a ticket bound to the tool covers every call of it", row({ class: "ticket", bindingScope: "tool_identity" }), "2 hours", "Its next call of this tool runs, once, within 2 hours, whatever the parameters."],
-    ["a ticket with no binding scope on the record claims neither", row({ class: "ticket" }), "2 hours", "Its next matching call runs, once, within 2 hours."],
-    ["a command with no binding scope claims neither", row({ class: "ticket", ...shell }), "1 hour", "Its next matching call runs, once, within 1 hour."],
-    ["an unread grant window is named as the rule's", row({ class: "ticket", bindingScope: "call" }), null, "Its next try of this exact call runs, once, within " + GRANT_UNKNOWN + "."],
+    ["a ticket bound to the call covers that exact call", row({ class: "ticket", bindingScope: "call" }), "2 hours", "The agent's next try of this exact call runs once within 2 hours."],
+    ["a ticket bound to a command covers that exact command", row({ class: "ticket", bindingScope: "call", ...shell }), "1 hour", "The agent's next try of this exact command runs once within 1 hour."],
+    ["a ticket bound to the tool covers every call of it", row({ class: "ticket", bindingScope: "tool_identity" }), "2 hours", "The agent's next call of this tool runs once within 2 hours, whatever the parameters."],
+    ["a ticket with no binding scope on the record claims neither", row({ class: "ticket" }), "2 hours", "The agent's next matching call runs once within 2 hours."],
+    ["a command with no binding scope claims neither", row({ class: "ticket", ...shell }), "1 hour", "The agent's next matching call runs once within 1 hour."],
+    ["an unread grant window is left out", row({ class: "ticket", bindingScope: "call" }), null, "The agent's next try of this exact call runs once."],
   ])("%s", (_what, r, grant, sentence) => {
     expect(approveDoes(r, grant)).toBe(sentence);
   });
@@ -394,23 +623,10 @@ describe("what a yes and a no do", () => {
   });
 
   it.each([
-    ["a gateway hold runs the call on the line", row({}),
-      "The call runs now, once, and the agent's session gets the answer."],
-    ["a hook hold runs on the agent's retry", row(shell),
-      "The call runs once, when the agent retries it soon after your yes."],
-    ["a ticket names its requester, whose every session may use it", row({ class: "ticket" }),
-      "The next get-sum call by joe-java-developer-agent, in any of their sessions, within the grant window runs, once."],
-    ["a ticket of a requester with no name names the user id", row({ class: "ticket", username: "" }),
-      "The next get-sum call by u-joe, in any of their sessions, within the grant window runs, once."],
-  ])("the approve body: %s", (_what, r, sentence) => {
-    expect(decideBody("approve", r)).toBe(sentence);
-  });
-
-  it.each([
     ["a gateway hold releases the one call", row({}),
       "Approving a hold releases this one call. The same call later raises a new request."],
     ["a hook hold lets one retry run inside the rule's retry window", row(shell),
-      "The hook refused the call at once and told the agent to retry it after a decision. Your yes lets one retry of the same call from the same session run, if it comes within the retry window the rule sets. A retry after that raises a new request."],
+      "The hook refused the call at once and told the agent to retry it after a decision. Your yes lets one retry of the same call from the same session run, if it comes within the retry window the policy rule sets. A retry after that raises a new request."],
   ])("the approve help: %s", (_what, r, sentence) => {
     expect(decideHelp("approve", r)).toBe(sentence);
   });
@@ -418,7 +634,7 @@ describe("what a yes and a no do", () => {
   it.each([
     ["a gateway hold runs now", row({}), "Approved. get-sum runs now for joe-java-developer-agent."],
     ["a hook hold runs on the agent's retry", row(shell), "Approved. make deploy ENV=staging runs for joe-java-developer-agent if the agent retries it soon."],
-    ["a ticket may run within its grant window, whatever the lane", row({ class: "ticket", ...shell }), "Approved. make deploy ENV=staging may run once within the grant window for joe-java-developer-agent."],
+    ["a ticket may run once, whatever the lane", row({ class: "ticket", ...shell }), "Approved. make deploy ENV=staging may run once for joe-java-developer-agent."],
   ])("the approved toast: %s", (_what, r, sentence) => {
     expect(approvedToast(r)).toBe(sentence);
   });
@@ -473,7 +689,7 @@ describe("accessible approval outcomes", () => {
     [{ state: "approved", class: "hold" }, /^Approved by alice from the console\.$/],
     [{ state: "denied", channel: "slack", decidedReason: "walk cleanup" }, /^Denied by alice from Slack\. Their reason: “walk cleanup”\.$/],
     [{ state: "approved", class: "hold", decidedReason: "Looks fine." }, /^Approved by alice from the console\. Their reason: “Looks fine\.”$/],
-    [{ state: "approved", class: "ticket", grantExpiresAt: "2099-01-01T00:00:00Z" }, /^Approved by alice from the console\. The same call within .+ runs\.$/],
+    [{ state: "approved", class: "ticket", grantExpiresAt: "2099-01-01T00:00:00Z" }, /^Approved by alice from the console\. .+ left for the same call\.$/],
     [{ state: "approved", class: "ticket", consumedAt: "2026-01-01T00:00:00Z", consumedBy: "session-used" }, /^Used by session \S+, .+\.$/],
     [{ state: "approved", class: "ticket", grantExpiresAt: "2020-01-01T00:00:00Z" }, /^Expired: approved by alice, never used\.$/],
   ] as const)("announces the stored outcome and grant phase %j as whole sentences", (patch, sentence) => {

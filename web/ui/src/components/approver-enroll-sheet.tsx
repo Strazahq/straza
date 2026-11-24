@@ -3,7 +3,7 @@ import { CopyIcon, Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FetchError, RefusedError } from "@/components/error-state";
-import { ToneBadge } from "@/components/overview-parts";
+import { Chip } from "@/components/chip";
 import { Section } from "@/components/sheet-parts";
 import { type ApiError, type EnrollTokenAnswer, readSelf, selfEnrollToken } from "@/lib/api";
 import {
@@ -44,8 +44,11 @@ import { readFailed, refused } from "@/lib/say";
 // them. The code lives in this component's state alone and goes when the
 // sheet closes; nothing writes it anywhere.
 
-const HINT = "text-[13px] leading-snug text-muted-foreground";
-const LINE = "text-[13px] leading-snug text-text-2";
+const HINT = "text-caption leading-snug text-muted-foreground";
+const LINE = "text-caption leading-snug text-text-2";
+// PHONE is a page open on a phone: a coarse pointer and a window under the
+// sm breakpoint, where no camera can scan a code drawn on the same screen.
+const PHONE = "(pointer: coarse) and (max-width: 39.98rem)";
 
 // SelfMint is the person's own lane: the person is the signed-in one and
 // the mint is their own, and everything after the mint is the console's.
@@ -61,6 +64,10 @@ type Props = {
   // self hands in the self-service page's mint. The console names none, so
   // the sheet reads who is signed in and mints that person's own phone.
   self?: SelfMint;
+  // phonePaste is the sentence that stands in for the QR code when the page
+  // is open on a phone. The console names none and draws the QR on every
+  // screen.
+  phonePaste?: string;
 };
 
 // Draw is the QR's own state: the encoder loads on first use, and a text no
@@ -72,13 +79,28 @@ type Draw = { kind: "drawing" } | { kind: "ready"; qr: QrDrawing } | { kind: "to
 // gates the mint.
 type Who = { kind: "reading" } | { kind: "ready"; username: string; mobile: boolean } | { kind: "error"; message: string };
 
-export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
+// useOnPhone says whether the page is open on a phone, and follows the
+// window as it changes.
+function useOnPhone(): boolean {
+  const [on, setOn] = React.useState(() => window.matchMedia(PHONE).matches);
+  React.useEffect(() => {
+    const mq = window.matchMedia(PHONE);
+    const follow = () => setOn(mq.matches);
+    follow();
+    mq.addEventListener("change", follow);
+    return () => mq.removeEventListener("change", follow);
+  }, []);
+  return on;
+}
+
+export function EnrollSheet({ open, onOpenChange, onMinted, self, phonePaste }: Props) {
   const [who, setWho] = React.useState<Who>({ kind: "reading" });
   const [minted, setMinted] = React.useState<EnrollTokenAnswer | null>(null);
   const [refusal, setRefusal] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [draw, setDraw] = React.useState<Draw>({ kind: "drawing" });
   const [left, setLeft] = React.useState(0);
+  const onPhone = useOnPhone();
 
   const start = React.useCallback(() => {
     setMinted(null);
@@ -170,18 +192,18 @@ export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full gap-0 p-0 sm:max-w-[560px]" data-enroll-sheet={minted ? "code" : "person"}>
         <SheetHeader className="border-b border-border pr-12">
-          <SheetTitle className="text-lg leading-snug">{ADD_PHONE}</SheetTitle>
+          <SheetTitle className="text-section leading-snug">{ADD_PHONE}</SheetTitle>
           <SheetDescription>{ADD_PHONE_SUB}</SheetDescription>
         </SheetHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
           {minted ? (
-            <Code minted={minted} draw={draw} left={left} onCopy={copy} />
+            <Code minted={minted} draw={draw} left={left} onCopy={copy} paste={phonePaste && onPhone ? phonePaste : ""} operator={!self} />
           ) : (
             <>
               <div className="flex flex-col gap-1" data-self-phone={lane ? lane.username : undefined}>
                 {lane && <span className={LINE}>{selfPhoneLine(lane.username)}</span>}
-                {noRole && <span className="text-[13px] leading-snug text-warn" data-no-enroll-role>{NO_ENROLL_ROLE}</span>}
+                {noRole && <span className="text-caption leading-snug text-warn" data-no-enroll-role>{NO_ENROLL_ROLE}</span>}
                 {who.kind === "error" && <FetchError subject={SUBJECT_SELF} detail={who.message} />}
                 {refusal && <RefusedError subject={MINT_VERB} message={refusal} />}
               </div>
@@ -220,13 +242,26 @@ export function EnrollSheet({ open, onOpenChange, onMinted, self }: Props) {
 }
 
 // Code is the sheet after the mint: the QR, the code beside it with its
-// countdown, the servers the phone tries and the transport it will get.
-function Code({ minted, draw, left, onCopy }: { minted: EnrollTokenAnswer; draw: Draw; left: number; onCopy: (text: string) => void }) {
+// countdown, the servers the phone tries and the transport it will get. With
+// paste, on a phone, the page's sentence and the text the QR would carry
+// stand in for the QR and the code. The servers and the transport are the
+// operator's to fix, so only the console's sheet, operator, shows them.
+function Code({ minted, draw, left, onCopy, paste, operator }: { minted: EnrollTokenAnswer; draw: Draw; left: number; onCopy: (text: string) => void; paste: string; operator: boolean }) {
   const servers = (minted.servers || []).filter((s) => (s || "").trim() !== "");
   const trust = trustPosture(minted.servers || [], minted.tls_spki_pin);
+  const text = minted.qr_payload || JSON.stringify({ v: 1, servers: minted.servers, token: minted.enroll_token });
   return (
     <>
-      <div className="flex flex-wrap items-start gap-5">
+      {paste && (
+        <>
+          <p className={LINE} data-phone-paste>{paste}</p>
+          {left <= 0 && <p className={LINE + " text-warn"} data-code-left>{CODE_SPENT}</p>}
+          <Section title={ENROLL_TEXT_TITLE}>
+            <CopyBox text={text} attr="data-enroll-text" onCopy={() => onCopy(text)} />
+          </Section>
+        </>
+      )}
+      {!paste && <div className="flex flex-wrap items-start gap-5">
         {/* The phone's camera reads the image, so the code stays black on
             white in both themes. */}
         <div className="w-[300px] max-w-full shrink-0 rounded-md border border-border bg-white p-2" data-qr-box>
@@ -243,7 +278,7 @@ function Code({ minted, draw, left, onCopy }: { minted: EnrollTokenAnswer; draw:
               <path d={draw.qr.path} fill="#000000" />
             </svg>
           )}
-          {draw.kind === "toobig" && <p className="p-2 text-[13px] leading-snug text-danger" data-qr-problem>{QR_TOO_BIG}</p>}
+          {draw.kind === "toobig" && <p className="p-2 text-caption leading-snug text-danger" data-qr-problem>{QR_TOO_BIG}</p>}
         </div>
 
         <div className="flex min-w-[220px] flex-1 flex-col gap-4">
@@ -259,33 +294,33 @@ function Code({ minted, draw, left, onCopy }: { minted: EnrollTokenAnswer; draw:
             <CopyBox text={minted.enroll_token} attr="data-enroll-token" onCopy={() => onCopy(minted.enroll_token)} />
           </Section>
         </div>
-      </div>
+      </div>}
 
       {/* The approver app's Enter the code manually takes exactly the text
           the QR would have carried. */}
-      {draw.kind === "toobig" && (
+      {!paste && draw.kind === "toobig" && (
         <Section title={ENROLL_TEXT_TITLE}>
           <CopyBox text={draw.text} attr="data-enroll-text" onCopy={() => onCopy(draw.text)} />
         </Section>
       )}
 
-      <Section title={SERVERS_TITLE}>
+      {operator && <Section title={SERVERS_TITLE}>
         {servers.length === 0 ? (
           <span className={HINT}>{SERVERS_NONE}</span>
         ) : (
-          <ol className="list-inside list-decimal font-mono text-[13px] text-foreground" data-servers>
+          <ol className="list-inside list-decimal font-mono text-caption text-foreground" data-servers>
             {servers.map((s) => <li key={s} className="break-all">{s}</li>)}
           </ol>
         )}
-      </Section>
+      </Section>}
 
-      <Section title={TRUST_TITLE}>
+      {operator && <Section title={TRUST_TITLE}>
         <div className="flex flex-wrap items-center gap-2">
-          <ToneBadge tone={trust.tone} word={trust.word} />
-          {minted.tls_spki_pin && <code className="min-w-0 break-all font-mono text-xs text-text-2" data-pin>{minted.tls_spki_pin}</code>}
+          <Chip tone={trust.tone}>{trust.word}</Chip>
+          {minted.tls_spki_pin && <code className="min-w-0 break-all font-mono text-caption leading-4 text-text-2" data-pin>{minted.tls_spki_pin}</code>}
         </div>
-        <span className={trust.tone === "warn" ? "text-[13px] leading-snug text-warn" : HINT} data-trust-line>{trust.line}</span>
-      </Section>
+        <span className={trust.tone === "warn" ? "text-caption leading-snug text-warn" : HINT} data-trust-line>{trust.line}</span>
+      </Section>}
     </>
   );
 }
@@ -296,7 +331,7 @@ function Code({ minted, draw, left, onCopy }: { minted: EnrollTokenAnswer; draw:
 function CopyBox({ text, attr, onCopy }: { text: string; attr: string; onCopy: () => void }) {
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2">
-      <code className="min-w-0 flex-1 select-all break-all font-mono text-[13px] text-foreground" {...{ [attr]: true }}>{text}</code>
+      <code className="min-w-0 flex-1 select-all break-all font-mono text-caption text-foreground" {...{ [attr]: true }}>{text}</code>
       <Button variant="outline" size="sm" onClick={onCopy}><CopyIcon /> {COPY}</Button>
     </div>
   );

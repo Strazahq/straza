@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
-import { BriefcaseIcon, IdCardIcon, ServerCogIcon, ServerIcon, ShieldCogIcon, UserCheckIcon } from "lucide-react";
-import { KindGlyph, MARKS, type Mark, RoleKindBadge, markOf } from "./role-kind";
+import { BriefcaseBusinessIcon, IdCardIcon, ServerCogIcon, ShieldIcon, UserCheckIcon } from "lucide-react";
+import { KIND_ICON } from "./kind-icon";
+import { KindGlyph, MARKS, type Mark, RoleKindBadge, RoleKindTag, markOf } from "./role-kind";
 
-// One glyph and one tone per kind, and the reading of the two MCP admin
-// kinds off the servers list rather than the name.
+// One glyph per kind, every role kind plain, and the reading of the two
+// MCP admin kinds off the servers list rather than the name.
 
 describe("the kind marks", () => {
-  it.each<[Mark, unknown, string]>([
-    ["application", IdCardIcon, "accent"],
-    ["business", BriefcaseIcon, "teal"],
-    ["approver", UserCheckIcon, "plain"],
-    ["straza", ShieldCogIcon, "plain"],
-    ["server-admin", ServerIcon, "plain"],
-    ["global-admin", ServerCogIcon, "plain"],
-  ])("%s wears its decided glyph and tone", (mark, icon, tone) => {
-    expect(MARKS[mark].icon).toBe(icon);
-    expect(MARKS[mark].tone).toBe(tone);
+  it.each<[Mark, unknown]>([
+    ["application", IdCardIcon],
+    ["business", BriefcaseBusinessIcon],
+    ["approver", UserCheckIcon],
+    ["straza", ShieldIcon],
+    ["server-admin", ServerCogIcon],
+    ["global-admin", ServerCogIcon],
+  ])("%s wears its decided glyph", (mark, icon) => {
+    expect(KIND_ICON[MARKS[mark]]).toBe(icon);
   });
 
   it.each<[string, { kind: string; name?: string }, string[] | null | undefined, Mark]>([
@@ -34,19 +34,12 @@ describe("the kind marks", () => {
     expect(markOf(role, administers)).toBe(want);
   });
 
-  it.each<[Mark, string]>([
-    ["application", "text-link"],
-    ["business", "text-teal"],
-    ["approver", "text-muted-foreground"],
-    ["straza", "text-muted-foreground"],
-    ["server-admin", "text-muted-foreground"],
-    ["global-admin", "text-muted-foreground"],
-  ])("draws the %s glyph hidden from assistive technology, in its tone", (mark, tone) => {
+  it.each<Mark>(["application", "business", "approver", "straza", "server-admin", "global-admin"])("draws the %s glyph hidden from assistive technology, in the muted colour", (mark) => {
     render(<KindGlyph mark={mark} />);
     const svg = document.querySelector('[data-kind-glyph="' + mark + '"]') as SVGElement;
     expect(svg.tagName.toLowerCase()).toBe("svg");
     expect(svg.getAttribute("aria-hidden")).toBe("true");
-    expect(svg.getAttribute("class")).toContain(tone);
+    expect(svg.getAttribute("class")).toContain("text-muted-foreground");
   });
 
   it("puts the glyph inside the kind badge and keeps the kind a word", () => {
@@ -57,12 +50,23 @@ describe("the kind marks", () => {
     expect(badge.querySelector('[data-kind-glyph="server-admin"]')).toBeTruthy();
   });
 
-  it("paints the application badge in the accent and the business badge in teal", () => {
+  it("draws the kind as a round pill for a fact, with no tone, since teal marks an AI agent", () => {
     render(<><RoleKindBadge role={{ kind: "application" }} /><RoleKindBadge role={{ kind: "business" }} /></>);
     const [app, biz] = Array.from(document.querySelectorAll("[data-kind]"));
-    expect(app.getAttribute("class")).toContain("text-link");
+    expect(app.getAttribute("data-tone")).toBeNull();
+    expect(app.className).toContain("rounded-pill");
     expect(app.querySelector('[data-kind-glyph="application"]')).toBeTruthy();
-    expect(biz.getAttribute("class")).toContain("text-teal");
+    expect(biz.getAttribute("data-tone")).toBeNull();
     expect(biz.querySelector('[data-kind-glyph="business"]')).toBeTruthy();
+  });
+
+  it("names a role in a tag with its kind's icon, and plain when its kind is not known", () => {
+    render(<><RoleKindTag name="dev-tools" role={{ kind: "application", name: "dev-tools" }} /><RoleKindTag name="mcp-admin-demo-tools" role={{ kind: "straza", name: "mcp-admin-demo-tools" }} administers={["demo-tools"]} /><RoleKindTag name="gone" /></>);
+    const [app, admin, gone] = Array.from(document.querySelectorAll("[data-role-kind-tag]")) as HTMLElement[];
+    expect(app.textContent).toBe("dev-tools");
+    expect(app.querySelector("svg")?.getAttribute("class")).toContain("lucide-id-card");
+    expect(admin.querySelector("svg")?.getAttribute("class")).toContain("lucide-server-cog");
+    expect(gone.querySelector("svg")).toBeNull();
+    expect(gone.getAttribute("title")).toBe("gone");
   });
 });

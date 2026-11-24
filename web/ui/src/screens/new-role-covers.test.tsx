@@ -5,7 +5,7 @@ import { parse } from "yaml";
 import { NewRole } from "./new-role";
 import type { DraftPublishProps } from "@/components/draft-publish";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ApiError, type AppRow, type Draft, type DraftItemIn, type DraftVerdict, type RoleRow, type ToolRow, appObjects, catalogPreview, getPolicy, listApps, listPacks, listRoles, listTools } from "@/lib/api";
+import { ApiError, type AppRow, type Draft, type DraftItemIn, type DraftVerdict, type RoleRow, type ToolRow, appObjects, catalogPreview, getPolicy, listApps, listRoles, listTools } from "@/lib/api";
 import { checkDraft, createDraft, listDrafts, publishDraft } from "@/lib/drafts-api";
 import { VERDICT } from "@/test/drafts-fixture";
 
@@ -19,7 +19,6 @@ vi.mock("@/lib/api", async (orig) => ({
   listRoles: vi.fn(),
   listApps: vi.fn(),
   listTools: vi.fn(),
-  listPacks: vi.fn(),
   catalogPreview: vi.fn(),
   getPolicy: vi.fn(),
 }));
@@ -46,6 +45,9 @@ const EMPTY: DraftVerdict = { ...VERDICT, refused: [], risks: [], warnings: [], 
 const draftOf = (id: string, items: DraftItemIn[]): Draft => ({ id, revision: 1, state: "open", door: "console", authors: [], items: items.map((i) => ({ ...i, existed: true })), title: "", created_at: "", updated_at: "" });
 const sent = () => (vi.mocked(checkDraft).mock.calls[0][0].items || []) as DraftItemIn[];
 const click = (name: string) => userEvent.click(screen.getByRole("button", { name }));
+// forward presses the button that moves on, whose name says the step it
+// leads to.
+const forward = (step: string) => click("Next: " + step);
 const textOf = (selector: string) => (document.querySelector(selector) as HTMLElement).textContent;
 const landed = () => Array.from(document.querySelectorAll("[data-landed] li")).map((li) => li.textContent || "");
 
@@ -58,7 +60,6 @@ describe("the New role wizard on a server that pins repos", () => {
     vi.mocked(listRoles).mockResolvedValue([]);
     vi.mocked(listApps).mockResolvedValue([ghapp]);
     vi.mocked(listTools).mockResolvedValue(tools);
-    vi.mocked(listPacks).mockResolvedValue([]);
     vi.mocked(catalogPreview).mockResolvedValue({ entries: [] });
     vi.mocked(getPolicy).mockRejectedValue(new ApiError("policy set not found", 404));
     vi.mocked(appObjects).mockResolvedValue({ app: "ghapp", type: "repo", plural: "repos", objects: [], total: 10 });
@@ -75,19 +76,19 @@ describe("the New role wizard on a server that pins repos", () => {
         <NewRole />
       </TooltipProvider>,
     );
-    await screen.findByRole("radio", { name: "kind business" });
-    await userEvent.click(screen.getByRole("radio", { name: "kind business" }));
+    await screen.findByRole("radio", { name: "Business role" });
+    await userEvent.click(screen.getByRole("radio", { name: "Business role" }));
     await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "write");
-    await click("Next");
+    await forward("Compose");
     await userEvent.click(await screen.findByRole("checkbox", { name: "role dev-tools" }));
     await click("Back");
-    await userEvent.click(await screen.findByRole("radio", { name: "kind application" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "Application role" }));
     await userEvent.type(screen.getByRole("textbox", { name: "role name suffix" }), "write");
-    await click("Next");
+    await forward("Access");
     await screen.findByRole("heading", { level: 2, name: "Access" });
     await userEvent.click(screen.getByRole("checkbox", { name: "tool pr_create" }));
     await userEvent.click(screen.getByRole("radio", { name: "Every repo" }));
-    await click("Next");
+    await forward("Review");
     await screen.findByRole("heading", { level: 2, name: "Review" });
     await userEvent.click(screen.getByRole("button", { name: "The same role as strazactl commands" }));
     const commands = (document.querySelector("pre") as HTMLElement).textContent || "";
@@ -103,14 +104,14 @@ describe("the New role wizard on a server that pins repos", () => {
     );
     await waitFor(() => expect(document.querySelector("[data-name-preview]")).toBeTruthy());
     await userEvent.type(screen.getByRole("textbox", { name: "role name suffix" }), "write");
-    await click("Next");
+    await forward("Access");
     await screen.findByRole("heading", { level: 2, name: "Access" });
     await userEvent.click(screen.getByRole("checkbox", { name: "tool pr_create" }));
-    await click("Next");
+    await forward("Review");
     expect(textOf("[data-covers-miss]")).toBe("Say which repos this role covers.");
     expect(screen.queryByRole("heading", { level: 2, name: "Review" })).toBe(null);
     await userEvent.click(screen.getByRole("radio", { name: "Every repo" }));
-    await click("Next");
+    await forward("Review");
     await screen.findByRole("heading", { level: 2, name: "Review" });
     expect(textOf('[data-server-band="ghapp"] [data-review-reach]')).toBe("1 of 2 tools, on every repo, including the repos ghapp lists later");
     expect(landed()[1]).toBe("2Write the new access row: pr_create, on every repo, including the repos ghapp lists later (ghapp)");

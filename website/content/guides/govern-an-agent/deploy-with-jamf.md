@@ -64,7 +64,7 @@ exec "$bin" install --managed --server "$server" $harnesses
 The script changes nothing when a parameter is empty or the pkg's binary is missing, and it says which one in the policy's log. It runs as root outside sudo, so for codex the managed install writes no Straza MCP registration into any person's `config.toml` and says so. The managed codex hooks still govern every codex tool call.
 
 
-Claude Code uses only its highest managed settings source, so on a Mac with a Claude Code profile from Jamf Pro or server-managed settings that lack Straza's hooks, Claude Code skips them with no warning, as [Claude Code skips Straza's hooks under a higher managed source]({{< relref "security/known-limits.md" >}}) in Known limits says.
+Claude Code uses only its highest managed settings source, so on a Mac with a Claude Code profile from Jamf Pro or server-managed settings that lack Straza's hooks, Claude Code skips them with no warning. Put your own Claude Code settings in `managed-settings.d`, or set `managedSourcesBehavior` to `merge` in the profile you send, as [Claude Code]({{< relref "guides/govern-an-agent/claude-code.md#install-the-hook-wiring" >}}) explains.
 
 ## Create the policy
 

@@ -550,7 +550,7 @@ func decideErrorText(err error) string {
 	case errors.Is(err, ErrNotApprover):
 		return "you are not an authorized approver"
 	case errors.Is(err, ErrUnsignedOwnDecision):
-		return "this is your own request, so Slack cannot decide it. Confirm it on your enrolled phone, or on the self-service page under This browser"
+		return "this is your own request, so Slack cannot decide it. Confirm it on your enrolled phone, or under Requests on the self-service page in a browser you have set up to approve"
 	case errors.Is(err, ErrConflict):
 		return "already decided the other way"
 	case errors.Is(err, ErrExpired):

@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 // sort control, hairline rows a click or Enter opens, and an optional
 // checkbox column whose selection lives on the rendered rows only.
 
-export const HEAD = "text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground";
+export const HEAD = "text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground";
 
 // SortHead is a column header that toggles its sort on click and shows the
 // direction it is sorted by.
@@ -103,8 +103,12 @@ type Props<T> = {
   openKey?: string | null;
   // filterBar are the controls of the filter row, left of the count.
   filterBar?: React.ReactNode;
-  // count words the shown rows for the filter row's right side.
-  count: (shown: number) => string;
+  // columnsMenu is false for a small table whose columns are all it has, so
+  // it draws no Columns menu, and no filter row when nothing else is in it.
+  columnsMenu?: boolean;
+  // count words the shown rows for the filter row's right side. A table
+  // whose count sits elsewhere, such as in its tab's label, leaves it out.
+  count?: (shown: number) => string;
   emptyText: string;
   // globalFilter narrows the rows in the browser, for a list the browser
   // holds whole; a paged list filters on the server and leaves it unset.
@@ -118,6 +122,10 @@ type Props<T> = {
   // widths fixes the layout: one width per column id, so the header boxes
   // stay put across every state of the table, folded, open, empty or full.
   widths?: Record<string, string>;
+  // minWidth is the floor of a fixed layout, so the column without a width
+  // keeps room and a narrow window scrolls the table inside its box. A
+  // function answers the floor for the columns that are shown, by their ids.
+  minWidth?: string | ((shown: string[]) => string);
   hiddenByDefault?: string[];
   foot?: React.ReactNode;
   rowClassName?: (row: T) => string;
@@ -154,7 +162,7 @@ function Line<T>({ row, original, name, dataAttr, open, look, canOpen, labels, o
       role={canOpen ? "button" : undefined}
       aria-label={canOpen ? "Open " + name : undefined}
       data-open={open ? "true" : undefined}
-      className={cn("text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50", canOpen && "cursor-pointer", open && "bg-accent-bg", look)}
+      className={cn("text-dense focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50", canOpen && "cursor-pointer", open && "bg-accent-bg", look)}
       onClick={() => onOpen.current?.(original)}
       onKeyDown={(e) => { if (onOpen.current && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen.current(original); } }}
     >
@@ -173,7 +181,7 @@ const StableLine = React.memo(Line, sameLine) as typeof Line;
 
 // DataTable renders one list. Rows are buttons named "Open <rowName>" so a
 // click or Enter opens the row; a checkbox click never does.
-export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr, onOpen, openKey, filterBar, count, emptyText, globalFilter = "", serverSort, defaultSort, selection, groups, widths, hiddenByDefault = [], foot, rowClassName, stableRows }: Props<T>) {
+export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr, onOpen, openKey, filterBar, columnsMenu = true, count, emptyText, globalFilter = "", serverSort, defaultSort, selection, groups, widths, minWidth, hiddenByDefault = [], foot, rowClassName, stableRows }: Props<T>) {
   const [sorting, setSorting] = React.useState<SortingState>(() => (serverSort ? (serverSort.state ? [serverSort.state] : []) : defaultSort || []));
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(() => Object.fromEntries(hiddenByDefault.map((id) => [id, false])));
 
@@ -260,10 +268,10 @@ export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr,
 
   return (
     <div className="flex flex-col gap-3" data-data-table>
-      <div className="flex flex-wrap items-center gap-2">
+      {(columnsMenu || filterBar || count) && <div className="flex flex-wrap items-center gap-2">
         {filterBar}
-        <span className="text-[13px] text-muted-foreground" data-row-count>{count(shown.length)}</span>
-        <DropdownMenu>
+        {count && <span className="text-caption text-muted-foreground" data-row-count>{count(shown.length)}</span>}
+        {columnsMenu && <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="ml-auto h-9">
               <Columns3Icon /> Columns
@@ -278,11 +286,11 @@ export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr,
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+        </DropdownMenu>}
+      </div>}
 
       <div className="overflow-x-auto rounded-md border border-border bg-card">
-        <Table className={widths ? "table-fixed" : undefined}>
+        <Table className={widths ? "table-fixed" : undefined} style={widths && minWidth ? { minWidth: typeof minWidth === "function" ? minWidth(visible.split(",")) : minWidth } : undefined}>
           {widths && (
             <colgroup>
               {table.getVisibleLeafColumns().map((c) => <col key={c.id} style={{ width: widths[c.id] }} />)}
@@ -302,7 +310,7 @@ export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr,
           <TableBody>
             {shown.length === 0 && (
               <TableRow>
-                <TableCell colSpan={cols.length} className="h-16 text-center text-muted-foreground" data-empty-text>{emptyText}</TableCell>
+                <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-16 text-center text-muted-foreground" data-empty-text>{emptyText}</TableCell>
               </TableRow>
             )}
             {shown.map((row, i) => {
@@ -318,7 +326,7 @@ export function DataTable<T>({ rows, columns, labels, rowKey, rowName, dataAttr,
                   {"cell" in groups ? table.getVisibleLeafColumns().map((c) => (
                     <TableCell key={c.id} data-column={c.id} className="py-1.5">{groups.cell(c.id, g, members)}</TableCell>
                   )) : (
-                    <TableCell colSpan={cols.length} className="py-1.5">
+                    <TableCell colSpan={table.getVisibleLeafColumns().length} className="py-1.5">
                       {groups.header(g, members)}
                     </TableCell>
                   )}

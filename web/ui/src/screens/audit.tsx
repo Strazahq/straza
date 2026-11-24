@@ -2,7 +2,7 @@ import * as React from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DownloadIcon, Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,16 +11,19 @@ import { DataTable, plain } from "@/components/data-table";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { PageHead } from "@/components/page-head";
 import { Marked } from "@/components/code-lines";
-import { ToneBadge, RecordSheet } from "@/components/record-sheet";
+import { RecordSheet } from "@/components/record-sheet";
+import { Chip, OutcomeChip, Pill } from "@/components/chip";
+import { Segmented } from "@/components/segmented";
 import { type PickedUser, UserPicker } from "@/components/user-picker";
 import { type ApiError, type AuditRow, listAudit, overview, query, revokeSession } from "@/lib/api";
 import {
-  CHAIN_TIP, CHAIN_UNVERIFIED, CHAIN_WORD, CHECKING_TEXT, CHECKING_TIP, CHECKING_WORD, EMPTY_CHAIN, EMPTY_LENS, EMPTY_LOADING, EMPTY_SEARCH, EMPTY_UNREAD, LENSES, type Row,
-  SEARCH_TIP, SEARCH_WORD, TAIL_KEEP, TAIL_WINDOW, UNREAD_TEXT, UNREAD_WORD, UNVERIFIED_WORD,
-  ceRow, chainBroken, chainVerified, csvOf, effectTone, effectWord, foldAdjacent, jsonlOf, loadedWords,
-  matchWords, recordMissing, revokeBody, revokedWords, searchLine, sevTone, shortType, shownWords, typeMatches,
+  ANY_OUTCOME, CHAIN_TIP, CHAIN_UNVERIFIED, CHAIN_WORD, CHECKING_TEXT, CHECKING_WORD, EMPTY_CHAIN, EMPTY_LENS, EMPTY_LOADING, EMPTY_SEARCH, EMPTY_UNREAD, LENSES, LENS_LABEL,
+  OUTCOME_COLUMN, type Row, SEARCH_PLACEHOLDER, SEARCH_TIP, SEARCH_WORD, TAIL_KEEP, TAIL_WINDOW, UNREAD_TEXT, UNREAD_WORD, UNVERIFIED_WORD,
+  ceRow, chainBroken, chainVerified, csvOf, effectOutcome, effectTone, effectWord, foldAdjacent, jsonlOf, loadedWords,
+  matchWords, recordMissing, revokeBody, revokedWords, rowLabel, searchLine, sentinelWhat, sevTone, shortType, shownWords, typeMatches, typeWord,
 } from "@/lib/audit-words";
 import { canHash, verifyChain } from "@/lib/chain";
+import { OUTCOME_LABEL } from "@/lib/chip-words";
 import { take } from "@/lib/handoff";
 import { cutOf, oneLine } from "@/lib/shell-read";
 import { CUT_CHIP, moreLines } from "@/lib/what-ran-words";
@@ -50,19 +53,22 @@ const TAIL_TICK = 1000;
 // one tail interval. A batch with more records moves several a step.
 const REVEAL_STEPS = 10;
 
-const CAPS = "text-[13px] text-muted-foreground";
+const CAPS = "text-caption text-muted-foreground";
 
-const LABEL: Record<string, string> = { seq: "Seq", time: "Time", who: "Who", type: "Type", effect: "Effect", what: "Action", reason: "Reason" };
+const LABEL: Record<string, string> = { seq: "Seq", time: "Time", who: "Who", type: "Type", effect: OUTCOME_COLUMN, what: "Action", reason: "Reason" };
 
 // WIDTHS fixes the columns, so the table fits a 1280 px viewport and the
 // header boxes stay put while rows arrive. Action and Reason have no width,
 // so they share what is left equally and a long value wraps in its cell.
+// FLOOR keeps both of them about 240 px wide in a narrow window, where the
+// table scrolls inside its box.
 const WIDTHS: Record<string, string> = { seq: "68px", time: "84px", who: "196px", type: "80px", effect: "96px" };
+const FLOOR = "1000px";
 
 const EFFECTS: { key: string; label: string }[] = [
-  { key: "", label: "any effect" },
-  { key: "allow", label: "allow" },
-  { key: "deny", label: "deny" },
+  { key: "", label: ANY_OUTCOME },
+  { key: "allow", label: OUTCOME_LABEL.allowed },
+  { key: "deny", label: OUTCOME_LABEL.denied },
 ];
 
 // Tail is the verified window: the records in ascending order, the head of
@@ -109,8 +115,8 @@ const noteOf = (lensKey: string) => LENSES.find((l) => l.key === lensKey)?.note 
 // explains both on hover.
 function StatusLine({ tone, word, text, tip }: { tone: "ok" | "unknown"; word: string; text: string; tip: string }) {
   return (
-    <div role="status" data-chain-line={tone} title={tip} className="flex flex-wrap items-center gap-2 text-[13px]">
-      <ToneBadge tone={tone}>{word}</ToneBadge>
+    <div role="status" data-chain-line={tone} title={tip || undefined} className="flex flex-wrap items-center gap-2 text-caption">
+      <Chip tone={tone}>{word}</Chip>
       <span className="text-muted-foreground">{text}</span>
     </div>
   );
@@ -129,10 +135,10 @@ function CommandLine({ tool, command, cut }: { tool: string; command: string; cu
   const one = oneLine(bound ? bound.kept : command);
   return (
     <span className="flex min-w-0 items-baseline gap-1.5" data-command-line>
-      {tool && <span className="shrink-0 font-mono text-[13px] font-normal text-muted-foreground">{tool}</span>}
-      <span className="min-w-0 truncate font-mono text-[13px]" title={one.text}><Marked text={one.text} /></span>
-      {one.lines > 1 && <span className="shrink-0 rounded-full border border-border px-1.5 text-xs font-normal text-muted-foreground">{moreLines(one.lines - 1)}</span>}
-      {cut && <span className="shrink-0 rounded-full border border-border px-1.5 text-xs font-normal text-muted-foreground">{CUT_CHIP}</span>}
+      {tool && <span className="shrink-0 font-mono text-caption font-normal text-muted-foreground">{tool}</span>}
+      <span className="min-w-0 truncate font-mono text-caption" title={one.text}><Marked text={one.text} /></span>
+      {one.lines > 1 && <Pill className="shrink-0">{moreLines(one.lines - 1)}</Pill>}
+      {cut && <Pill className="shrink-0">{CUT_CHIP}</Pill>}
     </span>
   );
 }
@@ -181,7 +187,7 @@ function columnsOf(cells: Cells): ColumnDef<Row>[] {
           <Button
             variant="link"
             size="sm"
-            className={cn("h-auto max-w-full justify-start p-0 text-left font-mono text-[13px] whitespace-normal [overflow-wrap:anywhere]", quiet(row.original) ? "text-muted-foreground" : "text-link")}
+            className={cn("h-auto max-w-full justify-start p-0 text-left font-mono text-caption whitespace-normal [overflow-wrap:anywhere]", quiet(row.original) ? "text-muted-foreground" : "text-link")}
             title="Filter by this user"
             onClick={(e) => { e.stopPropagation(); cells.onUser(name); }}
           >
@@ -193,18 +199,20 @@ function columnsOf(cells: Cells): ColumnDef<Row>[] {
     {
       id: "type",
       header: plain("Type"),
-      cell: ({ row }) => <span className="font-mono text-[13px] whitespace-normal text-muted-foreground [overflow-wrap:anywhere]">{shortType(row.original.type)}</span>,
+      cell: ({ row }) => <span className="font-mono text-caption whitespace-normal text-muted-foreground [overflow-wrap:anywhere]">{typeWord(shortType(row.original.type))}</span>,
     },
     {
       id: "effect",
-      header: plain("Effect"),
+      header: plain(OUTCOME_COLUMN),
       cell: ({ row }) => {
         const r = row.original;
-        if (r.sentinel) return <ToneBadge tone={sevTone(r.severity)}>{r.severity}</ToneBadge>;
+        if (r.sentinel) return <Chip tone={sevTone(r.severity)}>{r.severity}</Chip>;
+        const outcome = effectOutcome(r.effect);
+        // The chip may wrap, so "needs approval" stays inside its column.
+        if (outcome) return <OutcomeChip outcome={outcome} className="min-w-15 whitespace-normal" />;
         const tone = effectTone(r.effect);
         if (tone === "plain") return <span className="text-muted-foreground">{effectWord(r.effect)}</span>;
-        // The chip may wrap, so "needs approval" stays inside its column.
-        return <ToneBadge tone={tone} className="min-w-15 whitespace-normal">{effectWord(r.effect)}</ToneBadge>;
+        return <Chip tone={tone} className="min-w-15 whitespace-normal">{effectWord(r.effect)}</Chip>;
       },
     },
     {
@@ -217,13 +225,13 @@ function columnsOf(cells: Cells): ColumnDef<Row>[] {
             {r.sentinel ? (
               <>
                 <b className="font-mono font-semibold text-foreground">{r.detector}</b>{" "}
-                <span className="text-muted-foreground">{"sentinel verdict · evidence ×" + r.evidence}</span>
+                <span className="text-muted-foreground">{sentinelWhat(r.evidence)}</span>
               </>
             ) : (
               r.command ? <CommandLine tool={r.tool} command={r.command} cut={r.commandCut} /> : (
                 <>
-                  {r.tool && <span className="font-mono text-[13px] font-normal text-muted-foreground">{r.tool + " "}</span>}
-                  {r.what}
+                  {r.tool && <span className="font-mono text-caption font-normal text-muted-foreground">{r.tool + " "}</span>}
+                  {rowLabel(r)}
                 </>
               )
             )}
@@ -231,10 +239,10 @@ function columnsOf(cells: Cells): ColumnDef<Row>[] {
               <Button
                 variant="link"
                 size="sm"
-                className="ml-1.5 h-auto p-0 align-baseline text-[13px] text-link"
+                className="ml-1.5 h-auto p-0 align-baseline text-caption text-link"
                 onClick={(e) => { e.stopPropagation(); cells.onFold(r.seq); }}
               >
-                {r.foldOpen ? "collapse" : "×" + r.foldN + " identical · show all"}
+                {r.foldOpen ? "Hide" : r.foldN + " identical · Show"}
               </Button>
             )}
           </div>
@@ -251,7 +259,7 @@ function columnsOf(cells: Cells): ColumnDef<Row>[] {
           <div className="max-w-[44ch] whitespace-normal text-muted-foreground [overflow-wrap:anywhere]">
             {r.reason}
             {critical && (cells.revoked.has(r.session)
-              ? <ToneBadge tone="danger" className="ml-1.5">session revoked</ToneBadge>
+              ? <Chip tone="danger" className="ml-1.5">session revoked</Chip>
               : (
                 <Button
                   variant="outline"
@@ -583,12 +591,12 @@ export function Audit({ preset }: Props) {
   const status: { tone: "ok" | "unknown"; word: string; text: string; tip: string } | null = searching
     ? { tone: "unknown", word: SEARCH_WORD, text: searchLine(q, effect, user?.username || "", hits.rows.length >= TAIL_WINDOW), tip: SEARCH_TIP }
     : !tail.lastRead
-      ? { tone: "unknown", word: tail.problem ? UNREAD_WORD : CHECKING_WORD, text: tail.problem ? UNREAD_TEXT : CHECKING_TEXT, tip: CHECKING_TIP }
+      ? { tone: "unknown", word: tail.problem ? UNREAD_WORD : CHECKING_WORD, text: tail.problem ? UNREAD_TEXT : CHECKING_TEXT, tip: "" }
       : !canHash
-      ? { tone: "unknown", word: UNVERIFIED_WORD, text: CHAIN_UNVERIFIED, tip: CHAIN_UNVERIFIED }
+      ? { tone: "unknown", word: UNVERIFIED_WORD, text: CHAIN_UNVERIFIED, tip: "" }
       : tail.broken
         ? null
-        : { tone: "ok", word: CHAIN_WORD, text: chainVerified(tail.rows.length, tail.head), tip: CHAIN_TIP };
+        : { tone: "ok", word: CHAIN_WORD, text: chainVerified(tail.head), tip: CHAIN_TIP };
   const problem = searching ? hits.problem : tail.problem;
   const lastRead = searching ? hits.lastRead : tail.lastRead;
   const readAt = searching ? hitsReadAt.current : tailReadAt.current;
@@ -621,7 +629,7 @@ export function Audit({ preset }: Props) {
       />
       <div className="flex flex-col gap-3 px-6 py-5">
         {!searching && tail.broken > 0 && (
-          <div role="alert" className="border-l-[3px] border-danger bg-danger-bg px-4 py-3 text-sm leading-relaxed text-foreground">
+          <div role="alert" className="border-l-[3px] border-danger bg-danger-bg px-4 py-3 text-dense leading-relaxed text-foreground">
             {chainBroken(tail.broken)}
           </div>
         )}
@@ -638,35 +646,23 @@ export function Audit({ preset }: Props) {
           onOpen={(r) => setRecord(r)}
           openKey={record ? String(record.seq) : null}
           widths={WIDTHS}
+          minWidth={FLOOR}
           rowClassName={rowLook}
           stableRows
           filterBar={
             <>
               <Select value={lens} onValueChange={setLens}>
-                <SelectTrigger size="sm" aria-label="Lens" className="h-9 min-w-44"><SelectValue /></SelectTrigger>
+                <SelectTrigger size="sm" aria-label={LENS_LABEL} className="h-9 min-w-44"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {LENSES.map((l) => <SelectItem key={l.key} value={l.key}>{l.label}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <span className="inline-flex items-center gap-1">
-                {EFFECTS.map((e) => (
-                  <Button
-                    key={e.label}
-                    variant="outline"
-                    size="sm"
-                    aria-pressed={effect === e.key}
-                    className={cn("h-9", effect === e.key && "border-link bg-accent-bg text-link")}
-                    onClick={() => setEffect(e.key)}
-                  >
-                    {e.label}
-                  </Button>
-                ))}
-              </span>
+              <Segmented label={OUTCOME_COLUMN} value={effect} onChange={setEffect} options={EFFECTS.map((e) => ({ value: e.key, label: e.label }))} />
               <Input
                 value={typed}
                 onChange={(ev) => setTyped(ev.target.value)}
                 aria-label="Search the chain"
-                placeholder="Search the whole chain: command, path, user, rule"
+                placeholder={SEARCH_PLACEHOLDER}
                 className="h-9 w-full max-w-sm"
               />
               <UserPicker value={user} onChange={setUser} label="User" />
@@ -704,13 +700,13 @@ export function Audit({ preset }: Props) {
         <AlertDialogContent className="sm:max-w-[560px]">
           <AlertDialogHeader>
             <AlertDialogTitle>Revoke session?</AlertDialogTitle>
-            <AlertDialogDescription>{ask ? revokeBody(ask.session, ask.detector) : ""}</AlertDialogDescription>
+            <AlertDialogDescription>{ask ? revokeBody(ask.session) : ""}</AlertDialogDescription>
           </AlertDialogHeader>
           {refusal && <RefusedError subject="Revoke session" message={refusal} />}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-danger text-white hover:bg-danger/90"
+              className={DANGER_FILL}
               onClick={(e) => { e.preventDefault(); if (ask) void revoke(ask); }}
             >
               {busy && <Loader2Icon className="animate-spin" />} Revoke session

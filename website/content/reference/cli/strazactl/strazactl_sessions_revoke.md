@@ -2,7 +2,7 @@
 title: strazactl sessions revoke
 description: Revoke a session (kill switch)
 pagetype: reference
-weight: 85
+weight: 79
 draft: false
 sources:
   - cmd/strazactl

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { type Draft, EMPTY_DRAFT, HowStep, nameProblem, pickedNames, reasonDefault, ruleIdOf, ruleOf, secondsOf, todayWords } from "./policy-steps";
+import { CallsStep, type Draft, EMPTY_DRAFT, HowStep, nameProblem, pickedNames, reasonDefault, ruleIdOf, ruleOf, secondsOf, todayWords } from "./policy-steps";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { PreviewEntry, RoleRow } from "@/lib/api";
 import { DEPENDS_ON_ROLE, HOW_TICKET, NOT_REACHED_TODAY, RUNS_TODAY, WHO_TEAM, alreadyToday, reasonApprove, reasonDeny } from "@/lib/policy-words";
@@ -106,6 +106,27 @@ describe("what a tool does today", () => {
     expect(todayWords(null, true, entry("visible"))).toEqual({ text: RUNS_TODAY, muted: false });
     expect(todayWords(null, true, undefined)).toEqual({ text: DEPENDS_ON_ROLE, muted: true });
     expect(todayWords(null, true, entry("approve_gated"))).toEqual({ text: DEPENDS_ON_ROLE, muted: true });
+  });
+});
+
+describe("the Which calls step", () => {
+  const step = () => render(
+    <TooltipProvider>
+      <CallsStep draft={{ ...mcp, role: "midpoint-self-service", app: "midpoint", tools: [] }} servers={["midpoint"]} totalServers={3} tools={["get_user"]} preview={{}} reaches={() => true} registered={["midpoint"]} denials={null} onChange={vi.fn()} />
+    </TooltipProvider>,
+  );
+
+  it("wraps the Today for header inside its cell, breaking a long role name where it must", () => {
+    step();
+    const head = document.querySelector("[data-today-head]") as HTMLElement;
+    expect(head.textContent).toBe("Today for midpoint-self-service");
+    expect(head.className).toContain("whitespace-normal");
+    expect(head.className).toContain("[overflow-wrap:anywhere]");
+  });
+
+  it("says how many servers the role reaches", () => {
+    step();
+    expect((document.querySelector("[data-narrowed]") as HTMLElement).textContent).toBe("midpoint-self-service reaches 1 of 3 servers.");
   });
 });
 

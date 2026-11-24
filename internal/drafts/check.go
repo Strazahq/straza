@@ -49,11 +49,13 @@ type CheckInput struct {
 	// it while admin.secondPerson is off, because nothing reads its risks
 	// then, and who gains at 10,000 users would hold the config mutex on
 	// every write. An agent's draft still reads who gains for the roles the
-	// agent holds, for agent.own-reach. The zero value runs every step.
+	// agent holds, for agent.own-reach, which it refuses. The zero value
+	// runs every step.
 	RefusalsOnly bool
 	// Direct marks a check for a direct admin route, which publishes in
-	// the same request with no review, so an agent's loosening of a set
-	// that binds it stays a refusal there instead of a typed risk.
+	// the same request with no review, so an agent's change of a set that
+	// binds it and an agent's widening of its own reach stay refusals
+	// there instead of typed risks.
 	Direct bool
 }
 
@@ -156,13 +158,14 @@ func (c *check) run() {
 	c.signals(agent)
 }
 
-// signals takes steps 5 to 7: the refusal of an agent's draft that widens
-// the agent's own reach, read over the agent's whole subject, then who
-// gains, with every Rego module left out, what the roles cover, the risks,
-// and the warnings, unchecked, passed and info lines. With RefusalsOnly it
-// stops after the agent's own reach, with the coverage list empty.
+// signals takes steps 5 to 7: on a check nobody reviews, the refusal of an
+// agent's draft that widens the agent's own reach, read over the agent's
+// whole subject, then who gains, with every Rego module left out, what the
+// roles cover, the risks, and the warnings, unchecked, passed and info
+// lines. With RefusalsOnly it stops after the agent's own reach, with the
+// coverage list empty.
 func (c *check) signals(agent bool) {
-	if agent && c.refuse(c.ownReach()) {
+	if agent && c.unreviewed() && c.refuse(c.ownReach()) {
 		return
 	}
 	c.v.Objects = []Coverage{}
@@ -189,6 +192,15 @@ func (c *check) signals(agent bool) {
 	c.v.Risks = append(c.v.Risks, c.risks(rows)...)
 	c.v.Warnings = append(c.v.Warnings, c.warnings(rows, scanned)...)
 	c.notes(len(scanned) == 0)
+}
+
+// unreviewed reports whether no person reviews what the check finds: a
+// direct route publishes in the same request, and a check that stops
+// after its refusals shows no risk. An agent's change of what binds or
+// reaches the agent itself is refused there, and is a risk a person
+// accepts when publishing a draft everywhere else.
+func (c *check) unreviewed() bool {
+	return c.in.Direct || c.in.RefusalsOnly
 }
 
 // newModules answers, sorted, the sets whose Rego module the draft adds or

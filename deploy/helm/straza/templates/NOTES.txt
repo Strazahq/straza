@@ -14,7 +14,7 @@ Approver: {{ .Values.approverTLS.publicUrl }} (dedicated https listener on port 
 {{- end }}
 Push relay: {{ if .Values.pushRelay.enabled }}on ({{ if .Values.pushRelay.url }}{{ .Values.pushRelay.url }}{{ else }}push.straza.ai{{ end }}; pushRelay.enabled=false turns it off){{ else }}off{{ end }}
 {{- if .Values.demoTools.enabled }}
-Demo:     {{ include "straza.fullname" . }}-demo-tools -> http://{{ include "straza.fullname" . }}-demo-tools:3001/mcp (register it as an app; ClusterIP only)
+Demo:     {{ include "straza.fullname" . }}-demo-tools -> http://{{ include "straza.fullname" . }}-demo-tools:3001/mcp (register it as an app; ClusterIP only{{ if not .Values.networkPolicy.enabled }}, no NetworkPolicy{{ end }})
 {{- end }}
 
 {{- if or (include "straza.postgresBundled" .) .Values.postgres.dsn .Values.postgres.existingSecret }}
@@ -38,13 +38,10 @@ bundled instance or bring your own.
 
 WARNING: the enterprise profile signs people in only through an external OIDC
 identity provider. strazad boots without one, but nobody except the
-break-glass admin can sign in. Set oidc.issuer and oidc.clientId.
-{{- end }}
-{{- if and (gt (int (include "straza.maxReplicas" .)) 1) (not .Values.secrets.kekExistingSecret) }}
-
-WARNING: no secrets.kekExistingSecret, so every pod mints its own ephemeral
-KEK, so stored secrets don't survive a restart and replicas cannot read
-each other's. Fine for a smoke, never for production.
+break-glass admin can sign in. Set oidc.issuer and oidc.clientId. On a new
+database the break-glass admin has no password, so its emergency sign-in
+stays closed until you give it one. This prints a new password once:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "straza.fullname" . }} -- /usr/local/bin/strazad break-glass set-password --profile enterprise
 {{- end }}
 {{- end }}
 {{- if .Values.ingress.enabled }}
@@ -69,8 +66,13 @@ boot, so a renewal also needs `kubectl rollout restart`.
 {{- if .Values.demoTools.enabled }}
 
 DEMO UPSTREAM: {{ include "straza.fullname" . }}-demo-tools is a demo MCP server, ClusterIP only:
-give it no ingress and no route; strazad's governed /mcp gateway is the only
-road to it. Turn demoTools.enabled off in real deployments.
+give it no ingress and no route.
+{{- if .Values.networkPolicy.enabled }} The NetworkPolicy of the same name admits
+only the strazad pods, provided your network plugin enforces NetworkPolicy.
+{{- else }} With networkPolicy.enabled=false
+no NetworkPolicy narrows it, so every pod in the cluster can reach it.
+{{- end }}
+Turn demoTools.enabled off in real deployments.
 {{- end }}
 
 Check health:

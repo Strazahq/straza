@@ -62,9 +62,8 @@ func staleFindings(w World, d Draft, changed map[string]LastChange) []Finding {
 		// so an update never clears this. Check again is the one way that
 		// moves the base, keeping what the draft changed.
 		out = append(out, refusal(codeStale, object,
-			fmt.Sprintf("%s changed after this draft was checked%s.", visible(object), clause),
-			"Check the draft again with Check again on the console under Drafts. "+
-				"Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."))
+			fmt.Sprintf("%s changed after this draft was checked%s.", objectWords(object), clause),
+			"Check the draft again with Check again on the console under Drafts."))
 	}
 	return out
 }
@@ -93,7 +92,7 @@ func checkRefusals(w, after World, docsW, docsA map[string]policy.Document, d Dr
 			out = append(out, objectsRefusals(it, w, after)...)
 		case it.Kind == KindApp && it.Op == OpRemove:
 			if _, ok := w.Apps[it.Name]; !ok {
-				out = append(out, refusal(codeAppRemoveMissing, it.Object(), "unknown server",
+				out = append(out, refusal(codeAppRemoveMissing, it.Object(), fmt.Sprintf("No server named %s exists.", visible(it.Name)),
 					"Nothing is removed. List the servers with strazactl apps list, and leave this removal out of the draft."))
 			}
 		case it.Kind == KindRole && it.Op == OpPut:
@@ -275,18 +274,18 @@ func roleRemoveRefusals(it Item, deciders, admins map[string][]string) []Finding
 	object := it.Object()
 	var out []Finding
 	if strings.HasPrefix(strings.ToLower(it.Name), "straza-") {
-		out = append(out, refusal(codeRoleDeleteProduct, object, fmt.Sprintf(
-			"role %q comes with the product and cannot be deleted. To take someone's access away, remove their assignment instead", it.Name), ""))
+		out = append(out, refusal(codeRoleDeleteProduct, object, fmt.Sprintf("The role %s comes with the product and cannot be deleted.", visible(it.Name)),
+			"To take someone's access away, remove their assignment instead."))
 	}
 	if naming := deciders[it.Name]; len(naming) > 0 {
 		out = append(out, refusal(codeRoleDeleteDecider, object, fmt.Sprintf(
-			"role %q is named among the deciders of a live policy (%s): deleting it would leave those approvals to expire unanswered. Remove it from approve.roles and publish the set again, or turn the set off, then delete the role",
-			it.Name, strings.Join(naming, ", ")), ""))
+			"The role %s decides the approvals of %s. Deleting it would leave those approvals to expire unanswered.", visible(it.Name), listWords(naming, "and")),
+			"Remove it from approve.roles and publish the policy again, or turn the policy off, then delete the role."))
 	}
 	if servers := admins[it.Name]; len(servers) > 0 {
 		out = append(out, refusal(codeRoleDeleteAdmin, object, fmt.Sprintf(
-			"role %q is the admin role of server %s and lives as long as the server does. Remove the server instead.",
-			it.Name, strings.Join(servers, ", ")), ""))
+			"The role %s is the admin role of the server %s and lives as long as the server does.", visible(it.Name), listWords(servers, "and")),
+			"Remove the server instead."))
 	}
 	return out
 }
@@ -307,7 +306,7 @@ func decidersOf(docs map[string]policy.Document) map[string][]string {
 			if r.Mode != policy.ModeApprove || r.Approve == nil {
 				continue
 			}
-			line := fmt.Sprintf("set %q rule %q", name, r.ID)
+			line := fmt.Sprintf("rule %s of %s", visible(r.ID), visible(name))
 			for _, role := range r.Approve.Roles {
 				if list := out[role]; len(list) == 0 || list[len(list)-1] != line {
 					out[role] = append(list, line)
@@ -394,7 +393,7 @@ func agentRefusals(w, after World, docsW, docsA map[string]policy.Document, d Dr
 		case KindPolicySet:
 			if recordingChanged(docsW, docsA, it) {
 				out = append(out, refusal(codeAgentCapture, it.Object(),
-					fmt.Sprintf("The policy set %s changes conversation recording, and an agent cannot propose that, because recording decides what Straza keeps of every session the set matches.", visible(it.Name)),
+					fmt.Sprintf("An agent may not change the recording of the policy %s, because recording decides what Straza keeps of every session the policy matches.", visible(it.Name)),
 					"Leave spec.capture as it is. A person changes it."))
 			}
 		}

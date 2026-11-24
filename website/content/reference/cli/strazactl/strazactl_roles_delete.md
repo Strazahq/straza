@@ -2,7 +2,7 @@
 title: strazactl roles delete
 description: Delete a role; its assignments and access rows go with it
 pagetype: reference
-weight: 76
+weight: 70
 draft: false
 sources:
   - cmd/strazactl

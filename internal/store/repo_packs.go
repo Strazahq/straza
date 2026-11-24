@@ -4,144 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"strings"
 )
-
-type packRepo struct{ s *sqlStore }
-
-const packCols = "id, name, version, content, checksum, created_at, updated_at"
-
-func scanPack(row scanner) (KnowledgePack, error) {
-	var p KnowledgePack
-	var ca, ua scanTime
-	if err := row.Scan(&p.ID, &p.Name, &p.Version, &p.Content, &p.Checksum, &ca, &ua); err != nil {
-		return KnowledgePack{}, scanErr(err)
-	}
-	p.CreatedAt, p.UpdatedAt = ca.t, ua.t
-	return p, nil
-}
-
-func (r packRepo) Create(ctx context.Context, p KnowledgePack) (KnowledgePack, error) {
-	p.ID = newID()
-	p.CreatedAt = now()
-	p.UpdatedAt = p.CreatedAt
-	_, err := r.s.exec(ctx, `INSERT INTO knowledge_packs (id, name, version, content, checksum, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		p.ID, p.Name, p.Version, p.Content, p.Checksum, r.s.tArg(p.CreatedAt), r.s.tArg(p.UpdatedAt))
-	if err != nil {
-		return KnowledgePack{}, err
-	}
-	return p, nil
-}
-
-func (r packRepo) GetByID(ctx context.Context, id string) (KnowledgePack, error) {
-	return scanPack(r.s.queryRow(ctx, `SELECT `+packCols+` FROM knowledge_packs WHERE id = $1`, id))
-}
-
-func (r packRepo) GetByName(ctx context.Context, name string) (KnowledgePack, error) {
-	return scanPack(r.s.queryRow(ctx, `SELECT `+packCols+` FROM knowledge_packs WHERE name = $1`, name))
-}
-
-func (r packRepo) List(ctx context.Context) ([]KnowledgePack, error) {
-	return r.packs(ctx, `SELECT `+packCols+` FROM knowledge_packs ORDER BY name`)
-}
-
-func (r packRepo) Update(ctx context.Context, p KnowledgePack) (KnowledgePack, error) {
-	p.UpdatedAt = now()
-	err := mustAffect(r.s.exec(ctx, `UPDATE knowledge_packs SET name = $1, version = $2, content = $3, checksum = $4, updated_at = $5
-		WHERE id = $6`, p.Name, p.Version, p.Content, p.Checksum, r.s.tArg(p.UpdatedAt), p.ID))
-	if err != nil {
-		return KnowledgePack{}, err
-	}
-	return r.GetByID(ctx, p.ID)
-}
-
-// Delete removes a pack that no role is bound to. A bound pack, like a
-// missing id, affects no row and answers ErrNotFound, and the caller reads
-// the bindings to tell the two apart.
-func (r packRepo) Delete(ctx context.Context, id string) error {
-	return r.s.tx(ctx, func(tx *sql.Tx) error {
-		if r.s.d == dialectPostgres {
-			// A bind in flight holds a key share on the pack row, and a
-			// conditional delete that waits on that lock is not checked
-			// again once the lock is granted, so it would cascade the
-			// binding that just committed. Locking the row first makes
-			// the delete read a fresh snapshot that carries the binding.
-			// SQLite serializes writers, so the statement alone holds there.
-			var locked string
-			if err := tx.QueryRowContext(ctx, r.s.q(`SELECT id FROM knowledge_packs WHERE id = $1 FOR UPDATE`), id).Scan(&locked); err != nil {
-				return scanErr(err)
-			}
-		}
-		return mustAffect(tx.ExecContext(ctx, r.s.q(`DELETE FROM knowledge_packs WHERE id = $1
-			AND NOT EXISTS (SELECT 1 FROM pack_bindings WHERE pack_id = $2)`), id, id))
-	})
-}
-
-func (r packRepo) Bind(ctx context.Context, roleID, packID string) error {
-	_, err := r.s.exec(ctx, `INSERT INTO pack_bindings (role_id, pack_id) VALUES ($1, $2)`, roleID, packID)
-	return err
-}
-
-func (r packRepo) Unbind(ctx context.Context, roleID, packID string) error {
-	return mustAffect(r.s.exec(ctx,
-		`DELETE FROM pack_bindings WHERE role_id = $1 AND pack_id = $2`, roleID, packID))
-}
-
-// ListBindings joins role names in one query for the whole packs admin list;
-// packs and roles scale with the org's catalog, not with agent count.
-func (r packRepo) ListBindings(ctx context.Context) ([]PackBinding, error) {
-	rows, err := r.s.query(ctx, `SELECT b.pack_id, b.role_id, r.name
-		FROM pack_bindings b JOIN roles r ON r.id = b.role_id
-		ORDER BY b.pack_id, r.name`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []PackBinding
-	for rows.Next() {
-		var b PackBinding
-		if err := rows.Scan(&b.PackID, &b.RoleID, &b.RoleName); err != nil {
-			return nil, err
-		}
-		out = append(out, b)
-	}
-	return out, rows.Err()
-}
-
-func (r packRepo) ForRoles(ctx context.Context, roleIDs []string) ([]KnowledgePack, error) {
-	if len(roleIDs) == 0 {
-		return nil, nil
-	}
-	ph := make([]string, len(roleIDs))
-	args := make([]any, len(roleIDs))
-	for i, id := range roleIDs {
-		ph[i] = fmt.Sprintf("$%d", i+1)
-		args[i] = id
-	}
-	query := `SELECT DISTINCT p.id, p.name, p.version, p.content, p.checksum, p.created_at, p.updated_at
-		FROM knowledge_packs p JOIN pack_bindings b ON b.pack_id = p.id
-		WHERE b.role_id IN (` + strings.Join(ph, ", ") + `) ORDER BY p.name`
-	return r.packs(ctx, query, args...)
-}
-
-func (r packRepo) packs(ctx context.Context, query string, args ...any) ([]KnowledgePack, error) {
-	rows, err := r.s.query(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []KnowledgePack
-	for rows.Next() {
-		p, err := scanPack(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
-}
 
 type signingKeyRepo struct{ s *sqlStore }
 
@@ -237,6 +100,15 @@ func (r signingKeyRepo) Promote(ctx context.Context, kid string) (bool, error) {
 func (r signingKeyRepo) Retire(ctx context.Context, kid, from string) (bool, error) {
 	res, err := r.s.exec(ctx, `UPDATE signing_keys SET status = 'retired', rotated_at = $1
 		WHERE kid = $2 AND status = $3`, r.s.tArg(now()), kid, from)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+func (r signingKeyRepo) ReplacePrivateKey(ctx context.Context, kid string, from, to []byte) (bool, error) {
+	res, err := r.s.exec(ctx, `UPDATE signing_keys SET private_key = $1 WHERE kid = $2 AND private_key = $3`, to, kid, from)
 	if err != nil {
 		return false, err
 	}

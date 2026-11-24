@@ -46,14 +46,23 @@ func sessionSortValue(key string, s store.Session, names map[string]string) stri
 	return ""
 }
 
+// kindCounts is the count of users of each kind under the request's other
+// filters. Every key is sent, 0 for a kind no user has.
+type kindCounts struct {
+	Person  int `json:"person"`
+	Agent   int `json:"agent"`
+	Service int `json:"service"`
+}
+
 // writeUsersPage answers the paged users lane: the rows enriched
 // with effective roles from the same resolver every admin request runs,
 // the lock rows the kill-switch lanes write, the last seen stamp and the
 // sponsored count, each from one batched read, then the cursor for the row
-// the page ends on. A store fault must not render a locked user as unlocked
-// or a sponsor as sponsoring nobody, so these lanes fail the read rather
-// than degrade to absent. The legacy bare-array lane stays byte-identical.
-func (a *App) writeUsersPage(w http.ResponseWriter, r *http.Request, p pageParams, users []store.User, after *store.User) {
+// the page ends on and kinds, the counts store.UserRepo.KindCounts read.
+// A store fault must not render a locked user as unlocked or a sponsor as
+// sponsoring nobody, so these lanes fail the read rather than degrade to
+// absent. The legacy bare-array lane stays byte-identical.
+func (a *App) writeUsersPage(w http.ResponseWriter, r *http.Request, p pageParams, users []store.User, after *store.User, kinds map[string]int) {
 	ids := make([]string, len(users))
 	names := make([]string, len(users))
 	for i, u := range users {
@@ -97,5 +106,6 @@ func (a *App) writeUsersPage(w http.ResponseWriter, r *http.Request, p pageParam
 	if after != nil {
 		cursor = pageCursor(p, userSortValue(p.sort.Key, *after, lastSeen), after.ID)
 	}
-	writePageCursor(w, out, cursor)
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": cursor, "kind_counts": kindCounts{
+		Person: kinds[store.UserKindPerson], Agent: kinds[store.UserKindAgent], Service: kinds[store.UserKindService]}})
 }

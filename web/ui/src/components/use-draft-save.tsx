@@ -59,7 +59,7 @@ const waitsFor = (err: ApiError) => err.status === 403 || refusalOf(err)?.code =
 // names, where Check again and Discard live.
 export function SaveNoteLine({ note, className }: { note: SaveNote; className?: string }) {
   return (
-    <div role={note.tone === "kept" ? "status" : "alert"} className={cn("m-0 flex flex-col items-start gap-1 border-l-[3px] bg-card px-3 py-2 text-sm leading-relaxed text-text-2", TONE[note.tone], className)} data-save-note={note.tone}>
+    <div role={note.tone === "kept" ? "status" : "alert"} className={cn("m-0 flex flex-col items-start gap-1 border-l-[3px] bg-card px-3 py-2 text-dense leading-relaxed text-text-2", TONE[note.tone], className)} data-save-note={note.tone}>
       {note.lines.map((l) => <p key={l} className="m-0">{l}</p>)}
       {note.draft && (
         <Button variant="link" size="sm" className="h-auto p-0" onClick={() => navigate("drafts", [note.draft as string])}>{openDraft(note.draft)}</Button>

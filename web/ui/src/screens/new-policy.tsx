@@ -21,15 +21,15 @@ import { NEW_ROLE_MISSING, doorNote, newRoleDescription, newRoleName } from "@/l
 import { roleFile } from "@/lib/role-draft";
 import { addRule, docText, newPolicyDoc, openDoc, readSet, ruleView, rulesOf, uniqueId } from "@/lib/policy-model";
 import {
-  BACK, CALLS_MISSING, CANCEL, EDITOR_LABEL, LEAVE, LEAVE_BODY, LEAVE_TITLE, NAME_BAD, NAME_TAKEN, NEXT, STAY, STEP_REASON, STEPS,
-  SUBJECT_POLICIES, SUBJECT_ROLES, SUBJECT_SERVERS, WHO_MISSING, WIZ_LEDE, WIZ_TITLE, WRITE_YAML_LEDE, WRITE_YAML_START, WRITE_YAML_TITLE,
+  BACK, CALLS_MISSING, CANCEL, EDITOR_LABEL, LEAVE, LEAVE_BODY, LEAVE_TITLE, NAME_BAD, NAME_TAKEN, STAY, STEP_REASON, STEPS,
+  SUBJECT_POLICIES, SUBJECT_ROLES, SUBJECT_SERVERS, WHO_MISSING, WIZ_TITLE, WRITE_YAML_LEDE, WRITE_YAML_START, WRITE_YAML_TITLE,
   probeCall, savedToast, sentence, subjectWords, suggestedName,
 } from "@/lib/policy-words";
 import { notify } from "@/lib/notify";
 import { take, put } from "@/lib/handoff";
-import { navigate } from "@/lib/router";
-import { routeByKey } from "@/lib/routes";
-import { SAVE_DRAFT, SAVE_PUBLISH } from "@/lib/save-words";
+import { navigate, setLeaveGuard } from "@/lib/router";
+import { type RouteKey, routeByKey } from "@/lib/routes";
+import { CRUMB_NEW, SAVE_DRAFT, SAVE_PUBLISH, nextTo } from "@/lib/save-words";
 import { checkFailed, readFailed, refused } from "@/lib/say";
 import { matchesTool } from "@/lib/words";
 
@@ -43,10 +43,6 @@ const route = routeByKey("policies");
 // VALIDATE_MS lets the typing settle before the server is asked what it
 // makes of the document.
 const VALIDATE_MS = 400;
-
-// HOLDERS is how many holders are read for the review's Applies to fact;
-// the sentence names two of them.
-const HOLDERS = 3;
 
 type StepKey = "what" | "who" | "calls" | "how" | "review";
 
@@ -82,7 +78,9 @@ export function NewPolicy() {
   const [refusal, setRefusal] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [publishing, setPublishing] = React.useState(false);
-  const [leaving, setLeaving] = React.useState(false);
+  // leaving holds the departure the leave question waits on, from Cancel or
+  // from the router's guard.
+  const [leaving, setLeaving] = React.useState<{ go: () => void } | null>(null);
   const [yamlOpen, setYamlOpen] = React.useState(false);
   const [yamlText, setYamlText] = React.useState(WRITE_YAML_START);
   const [yamlRefusal, setYamlRefusal] = React.useState<string | null>(null);
@@ -190,12 +188,13 @@ export function NewPolicy() {
     return () => { alive = false; };
   }, [previewKey, draft.app, draft.role, bindings, preview]);
 
-  // The review names who holds the role today.
+  // The publish dialog's test call is made by one holder of the role, read
+  // once the review opens.
   React.useEffect(() => {
     if (step !== "review" || !draft.role || people) return;
     let alive = true;
-    listUsers(query({ role: draft.role, limit: HOLDERS })).then(
-      (page) => { if (alive) setPeople((page.items || []).map((u) => u.username).slice(0, 2)); },
+    listUsers(query({ role: draft.role, limit: 1 })).then(
+      (page) => { if (alive) setPeople((page.items || []).map((u) => u.username).slice(0, 1)); },
       () => undefined,
     );
     return () => { alive = false; };
@@ -265,8 +264,25 @@ export function NewPolicy() {
     return () => clearTimeout(timer);
   }, [step, text]);
 
+  // heldBy is how many hold the role today, from the role list, and
+  // priority is the policy's number as the server's check answered it,
+  // else as the document writes it.
+  const roleRow = draft.role ? allRoles.find((r) => r.name === draft.role) : undefined;
+  const heldBy = roleRow && typeof roleRow.holder_count === "number" ? roleRow.holder_count : null;
+  const docPriority = React.useMemo(() => {
+    try {
+      return text ? readSet(openDoc(text)).priority : null;
+    } catch {
+      return null;
+    }
+  }, [text]);
+  const priority = verdict && "ok" in verdict && typeof verdict.ok.priority === "number" ? verdict.ok.priority : docPriority;
+
   const steps: StepKey[] = draft.intent === "allow" ? ["what", "who", "calls", "review"] : ["what", "who", "calls", "how", "review"];
   const at = Math.max(0, steps.indexOf(step));
+  // label is a step's name in the strip: a denial's fourth step asks for
+  // its reason.
+  const label = (s: StepKey) => (s === "how" && draft.intent === "deny" ? STEP_REASON : STEPS[s]);
   const taken = sets.map((s) => s.name);
   const named = pickedNames(filled);
   const hasCalls = draft.lane === "net" || (draft.lane === "mcp" ? !!draft.app && (draft.wholeServer || named.length > 0) : named.length > 0);
@@ -299,6 +315,10 @@ export function NewPolicy() {
     return true;
   };
 
+  // away leaves the wizard past its guard, once the person chose to leave
+  // or a save landed.
+  const away = (key: RouteKey, rest: string[] = []) => { setLeaveGuard(null); navigate(key, rest); };
+
   // saveTo is Save draft for a document named name. A set that exists
   // keeps it as that set's saved edit through the policy route, as the
   // set's page does, and a new set joins the person's working draft, so no
@@ -311,7 +331,7 @@ export function NewPolicy() {
     try {
       await applyPolicy(doc);
       notify.ok(savedToast(name, row.status === "active"));
-      navigate("policies", [name]);
+      away("policies", [name]);
     } catch (e) {
       const err = e as ApiError;
       if (err.status !== 401) refuse(refused(err));
@@ -361,7 +381,20 @@ export function NewPolicy() {
   }, [filled, probeUser, draft.lane, draft.app, toolNames]);
 
   const dirty = at > 0 || draft.role !== undefined || named.length > 0;
-  const leave = () => { if (dirty) setLeaving(true); else navigate("policies"); };
+  const leave = () => { if (dirty) setLeaving({ go: () => away("policies") }); else navigate("policies"); };
+
+  // While Cancel would ask, every other door out asks the same question: the
+  // router's guard covers the breadcrumb, the rail, the header and the
+  // palette. A Save draft that landed opens its draft, which passes.
+  const savingDraft = reviewSave.busy === "draft" || yamlSave.busy === "draft";
+  React.useEffect(() => {
+    if (!dirty) return;
+    setLeaveGuard((next, go) => {
+      if (savingDraft && next.kind === "route" && next.key === "drafts") { go(); return; }
+      setLeaving({ go });
+    });
+    return () => setLeaveGuard(null);
+  }, [dirty, savingDraft]);
 
   const spin = <Loader2Icon className="animate-spin" />;
 
@@ -406,7 +439,9 @@ export function NewPolicy() {
         draft={filled}
         taken={taken}
         exists={exists}
-        people={people}
+        holders={heldBy}
+        onMachine={onMachine}
+        priority={priority}
         yaml={text}
         verdict={verdict}
         nameBox={nameBox}
@@ -419,14 +454,15 @@ export function NewPolicy() {
   return (
     <div className="flex min-h-full flex-col">
       <PageHead
-        label={route.label}
+        label={CRUMB_NEW}
+        crumbs={[{ label: route.label, to: "policies" }]}
         title={WIZ_TITLE}
-        description={WIZ_LEDE}
+        description=""
         actions={<Button variant="ghost" onClick={leave}>{CANCEL}</Button>}
       />
       <div className="flex flex-1 flex-col gap-5 px-6 pt-5 pb-6">
-        <StepStrip labels={steps.map((s) => (s === "how" && draft.intent === "deny" ? STEP_REASON : STEPS[s]))} at={at} />
-        {fromDoor && step !== "review" && <p className="max-w-[90ch] rounded-md border border-link/40 bg-accent-bg px-3 py-2 text-sm text-text-2" data-door-note>{doorNote(draft.lane === "mcp" ? draft.app : "", draft.tools)}</p>}
+        <StepStrip labels={steps.map(label)} at={at} />
+        {fromDoor && step !== "review" && <p className="max-w-[90ch] rounded-md border border-link/40 bg-accent-bg px-3 py-2 text-dense text-text-2" data-door-note>{doorNote(draft.lane === "mcp" ? draft.app : "", draft.tools)}</p>}
         {setsProblem && <FetchError subject={SUBJECT_POLICIES} detail={setsProblem} />}
         {catalogProblem && step === "calls" && <FetchError subject={SUBJECT_SERVERS} detail={catalogProblem} />}
         <div ref={body}>{inner}</div>
@@ -441,9 +477,9 @@ export function NewPolicy() {
           {step === "review" && <Button variant="outline" onClick={() => void saveDraft()} disabled={saving || reviewSave.busy !== null}>{(saving || reviewSave.busy) && spin}{SAVE_DRAFT}</Button>}
           {step === "review"
             ? <Button onClick={() => { if (!nameBlocked()) { setMiss(null); setPublishing(true); } }} data-open-publish>{SAVE_PUBLISH}</Button>
-            : <Button onClick={next}>{NEXT}</Button>}
+            : <Button onClick={next}>{nextTo(label(steps[Math.min(at + 1, steps.length - 1)]))}</Button>}
         </div>
-        {miss && <p className="text-right text-[13px] text-danger" data-missing>{miss}</p>}
+        {miss && <p className="text-right text-caption text-danger" data-missing>{miss}</p>}
       </div>
 
       <PolicyPublish
@@ -458,14 +494,14 @@ export function NewPolicy() {
         extra={roleItems}
         onDone={(result) => {
           put("policies-proof", { name: result.name, snapshot: result.snapshot, at: new Date().toISOString() });
-          navigate("policies", [result.name]);
+          away("policies", [result.name]);
         }}
       />
 
       <Sheet open={yamlOpen} onOpenChange={setYamlOpen}>
         <SheetContent className="w-full gap-0 p-0 sm:max-w-[680px]" data-write-yaml>
           <SheetHeader className="border-b border-border pr-12">
-            <SheetTitle className="text-lg leading-snug">{WRITE_YAML_TITLE}</SheetTitle>
+            <SheetTitle className="text-section leading-snug">{WRITE_YAML_TITLE}</SheetTitle>
             <SheetDescription>{WRITE_YAML_LEDE}</SheetDescription>
           </SheetHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
@@ -474,7 +510,7 @@ export function NewPolicy() {
               spellCheck={false}
               value={yamlText}
               onChange={(e) => setYamlText(e.target.value)}
-              className="h-[420px] resize-none whitespace-pre font-mono text-[13px]"
+              className="h-[420px] resize-none whitespace-pre font-mono text-caption"
             />
             {yamlRefusal && <RefusedError subject={SAVE_DRAFT} message={yamlRefusal} />}
             {yamlSave.note && <SaveNoteLine note={yamlSave.note} />}
@@ -486,7 +522,7 @@ export function NewPolicy() {
         </SheetContent>
       </Sheet>
 
-      <AlertDialog open={leaving} onOpenChange={setLeaving}>
+      <AlertDialog open={!!leaving} onOpenChange={(o) => { if (!o) setLeaving(null); }}>
         <AlertDialogContent className="sm:max-w-[560px]" data-leave-dialog>
           <AlertDialogHeader>
             <AlertDialogTitle>{LEAVE_TITLE}</AlertDialogTitle>
@@ -496,7 +532,7 @@ export function NewPolicy() {
             <AlertDialogCancel>{STAY}</AlertDialogCancel>
             <AlertDialogAction
               className="border border-danger/40 bg-transparent text-danger shadow-xs hover:bg-danger-bg"
-              onClick={() => navigate("policies")}
+              onClick={() => { const go = leaving?.go; setLeaving(null); go?.(); }}
             >
               {LEAVE}
             </AlertDialogAction>

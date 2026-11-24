@@ -759,64 +759,6 @@ func TestSessionsCloseStartedBefore(t *testing.T) {
 	})
 }
 
-func TestPacksAndBindings(t *testing.T) {
-	forEachStore(t, func(t *testing.T, s Store) {
-		ctx := context.Background()
-		r1, _ := s.Roles().Create(ctx, Role{Name: "dev"})
-		r2, _ := s.Roles().Create(ctx, Role{Name: "ops"})
-
-		p1, err := s.Packs().Create(ctx, KnowledgePack{Name: "golang-style", Version: "1", Content: "use gofmt", Checksum: "c1"})
-		if err != nil {
-			t.Fatalf("Packs.Create: %v", err)
-		}
-		p2, _ := s.Packs().Create(ctx, KnowledgePack{Name: "infra-runbook", Version: "1", Content: "restart with care", Checksum: "c2"})
-
-		if err := s.Packs().Bind(ctx, r1.ID, p1.ID); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.Packs().Bind(ctx, r2.ID, p1.ID); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.Packs().Bind(ctx, r2.ID, p2.ID); err != nil {
-			t.Fatal(err)
-		}
-
-		// p1 bound via both roles must appear once (DISTINCT).
-		packs, err := s.Packs().ForRoles(ctx, []string{r1.ID, r2.ID})
-		if err != nil || len(packs) != 2 {
-			t.Fatalf("ForRoles = %d packs, %v", len(packs), err)
-		}
-		packs, _ = s.Packs().ForRoles(ctx, []string{r1.ID})
-		if len(packs) != 1 || packs[0].Name != "golang-style" {
-			t.Errorf("ForRoles(r1) = %v", packs)
-		}
-		if packs, _ := s.Packs().ForRoles(ctx, nil); packs != nil {
-			t.Errorf("ForRoles(nil) = %v, want nil", packs)
-		}
-
-		p1.Content = "use gofmt always"
-		if _, err := s.Packs().Update(ctx, p1); err != nil {
-			t.Fatal(err)
-		}
-		if got, _ := s.Packs().GetByName(ctx, "golang-style"); got.Content != "use gofmt always" {
-			t.Errorf("content = %q", got.Content)
-		}
-
-		if err := s.Packs().Unbind(ctx, r2.ID, p1.ID); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.Packs().Unbind(ctx, r2.ID, p2.ID); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.Packs().Delete(ctx, p2.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := s.Packs().GetByID(ctx, p2.ID); !errors.Is(err, ErrNotFound) {
-			t.Errorf("deleted pack still visible: %v", err)
-		}
-	})
-}
-
 // TestUsersSoftDeleteEndsAssignments pins the store half of the user delete:
 // the soft delete and the removal of the subject's assignment rows are one
 // transaction that returns the removed rows, a subject without grants gets

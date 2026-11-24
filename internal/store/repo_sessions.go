@@ -131,7 +131,7 @@ func (r deviceRepo) SpendProof(ctx context.Context, thumbprint, jti string, unti
 
 type sessionRepo struct{ s *sqlStore }
 
-const sessionCols = "id, user_id, device_id, harness_name, harness_version, attestation_level, attestation_hashes, status, started_at, last_seen, client_version, client_commit"
+const sessionCols = "id, user_id, device_id, harness_name, harness_version, attestation_level, attestation_hashes, status, started_at, last_seen, client_version, client_commit, host, folder"
 
 // clientCommitMax is the most bytes of a client-sent commit a session keeps.
 // A git commit id is 40 or 64 hex characters, so nothing longer is one.
@@ -154,7 +154,7 @@ func scanSession(row scanner) (Session, error) {
 	var s Session
 	var sa, ls scanTime
 	if err := row.Scan(&s.ID, &s.UserID, &s.DeviceID, &s.HarnessName, &s.HarnessVersion,
-		&s.AttestationLevel, &s.AttestationHashes, &s.Status, &sa, &ls, &s.ClientVersion, &s.ClientCommit); err != nil {
+		&s.AttestationLevel, &s.AttestationHashes, &s.Status, &sa, &ls, &s.ClientVersion, &s.ClientCommit, &s.Host, &s.Folder); err != nil {
 		return Session{}, scanErr(err)
 	}
 	s.StartedAt, s.LastSeen = sa.t, ls.t
@@ -177,10 +177,10 @@ func (r sessionRepo) Create(ctx context.Context, s Session) (Session, error) {
 		s.AttestationHashes = "{}"
 	}
 	s.ClientCommit = cutClientCommit(s.ClientCommit)
-	_, err := r.s.exec(ctx, `INSERT INTO sessions (id, user_id, device_id, harness_name, harness_version, attestation_level, attestation_hashes, status, started_at, last_seen, client_version, client_commit)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+	_, err := r.s.exec(ctx, `INSERT INTO sessions (id, user_id, device_id, harness_name, harness_version, attestation_level, attestation_hashes, status, started_at, last_seen, client_version, client_commit, host, folder)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		s.ID, s.UserID, s.DeviceID, s.HarnessName, s.HarnessVersion,
-		s.AttestationLevel, s.AttestationHashes, s.Status, r.s.tArg(s.StartedAt), r.s.tArg(s.LastSeen), s.ClientVersion, s.ClientCommit)
+		s.AttestationLevel, s.AttestationHashes, s.Status, r.s.tArg(s.StartedAt), r.s.tArg(s.LastSeen), s.ClientVersion, s.ClientCommit, s.Host, s.Folder)
 	if err != nil {
 		return Session{}, err
 	}
@@ -226,8 +226,9 @@ var sessionSortKeys = map[string]sortKey{
 var sessionColsQualified = "s." + strings.ReplaceAll(sessionCols, ", ", ", s.")
 
 // Page is the keyset window over sessions in the order srt names,
-// narrowed by status and/or user; c is the row the page continues after.
-func (r sessionRepo) Page(ctx context.Context, status, userID string, srt Sort, c Cursor, limit int) ([]Session, error) {
+// narrowed by f; c is the row the page continues after. The sort by user
+// and the search read the owner's username through one join on users.
+func (r sessionRepo) Page(ctx context.Context, f SessionFilter, srt Sort, c Cursor, limit int) ([]Session, error) {
 	key, ok := sessionSortKeys[srt.Key]
 	if !ok {
 		return nil, ErrBadSort
@@ -238,15 +239,20 @@ func (r sessionRepo) Page(ctx context.Context, status, userID string, srt Sort, 
 		return "$" + strconv.Itoa(len(args))
 	}
 	q := `SELECT ` + sessionColsQualified + ` FROM sessions s`
-	if srt.Key == "user" {
+	if srt.Key == "user" || f.Q != "" {
 		q += ` LEFT JOIN users u ON u.id = s.user_id AND u.deleted_at IS NULL`
 	}
 	var conds []string
-	if status != "" {
-		conds = append(conds, "s.status = "+ph(status))
+	if f.Status != "" {
+		conds = append(conds, "s.status = "+ph(f.Status))
 	}
-	if userID != "" {
-		conds = append(conds, "s.user_id = "+ph(userID))
+	if f.UserID != "" {
+		conds = append(conds, "s.user_id = "+ph(f.UserID))
+	}
+	if f.Q != "" {
+		needle := likeEscape(strings.ToLower(f.Q))
+		conds = append(conds, `(lower(COALESCE(u.username, '')) LIKE `+ph("%"+needle+"%")+` ESCAPE '\'`+
+			` OR lower(s.id) LIKE `+ph(needle+"%")+` ESCAPE '\')`)
 	}
 	where, order, err := r.s.keyset(key, "s.id", srt, c, ph)
 	if err != nil {

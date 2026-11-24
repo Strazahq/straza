@@ -37,7 +37,9 @@ type savedSessions struct {
 // savedSession is one held session as the sessions file keeps it: the
 // window, the server session and its token, the revocation, and what the
 // window's next decision and start need. Its push stream and its last
-// renewal are not kept.
+// renewal are not kept. A file saved before folders were kept reads back
+// with an empty Folder, and the knowledge packs an older client saved are
+// dropped on read.
 type savedSession struct {
 	Harness        localapi.Harness `json:"harness"`
 	ID             string           `json:"session_id"`
@@ -54,8 +56,8 @@ type savedSession struct {
 	SnapshotID     string           `json:"snapshot_id,omitempty"`
 	PolicyRefused  string           `json:"policy_refused,omitempty"`
 	PolicyDeadline time.Time        `json:"policy_deadline,omitzero"`
-	Packs          []localapi.Pack  `json:"packs,omitempty"`
 	StartText      *string          `json:"start_text,omitempty"`
+	Folder         string           `json:"folder,omitempty"`
 }
 
 // saveSessions writes a's held sessions to its sessions file. Every change
@@ -84,7 +86,8 @@ func (s *credStore) writeSessions(a *account) {
 		saved.Sessions = append(saved.Sessions, savedSession{
 			Harness: v.Harness, ID: v.ID, Token: hs.token, Revoked: hs.revoked, IssuedAt: v.IssuedAt, ExpiresAt: v.ExpiresAt,
 			User: v.User, Roles: v.Roles, Attestation: v.Attestation, UserType: v.UserType, AgencyMode: v.AgencyMode, SwarmID: v.SwarmID,
-			SnapshotID: v.SnapshotID, PolicyRefused: v.PolicyRefused, PolicyDeadline: v.PolicyDeadline, Packs: v.Packs, StartText: v.StartText,
+			SnapshotID: v.SnapshotID, PolicyRefused: v.PolicyRefused, PolicyDeadline: v.PolicyDeadline, StartText: v.StartText,
+			Folder: v.Folder,
 		})
 	}
 	raw, err := json.Marshal(saved)
@@ -141,7 +144,8 @@ func (s *credStore) loadSessions(a *account, rec enrollment) {
 			UID: a.uid, Harness: v.Harness, ServerURL: rec.ServerURL, ID: v.ID, User: v.User, Roles: v.Roles,
 			Attestation: v.Attestation, UserType: v.UserType, AgencyMode: v.AgencyMode, SwarmID: v.SwarmID,
 			SnapshotID: v.SnapshotID, IssuedAt: v.IssuedAt, ExpiresAt: v.ExpiresAt,
-			PolicyRefused: v.PolicyRefused, PolicyDeadline: v.PolicyDeadline, Packs: v.Packs, StartText: v.StartText,
+			PolicyRefused: v.PolicyRefused, PolicyDeadline: v.PolicyDeadline, StartText: v.StartText,
+			Folder: v.Folder,
 		}}
 		a.sessions[sessKey{v.Harness.Name, v.Harness.Session}] = hs
 		if hs.revoked == "" && hs.token != "" && now.Before(hs.s.ExpiresAt) {

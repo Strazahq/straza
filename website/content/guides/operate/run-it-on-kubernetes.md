@@ -136,7 +136,7 @@ helm install straza deploy/helm/straza \
 ```
 {{< /command >}}
 
-{{< see >}}The release status `deployed`, followed by the chart's notes. They name the release `straza-straza`, the image `ghcr.io/strazahq/straza:2.2.0` or your own tag, the profile `standalone`, one replica, the public address `http://127.0.0.1:18420`, embedded per-pod events and a per-pod SQLite store.{{< /see >}}
+{{< see >}}The release status `deployed`, followed by the chart's notes. They name the release `straza-straza`, the image `ghcr.io/strazahq/straza:2.3.0` or your own tag, the profile `standalone`, one replica, the public address `http://127.0.0.1:18420`, embedded per-pod events and a per-pod SQLite store.{{< /see >}}
 
 Each value has a reason:
 
@@ -237,7 +237,7 @@ The address of the sign-in page is the `publicUrl` from the install, and that is
 {{< cli >}}
 `strazactl` has no sign-in of its own. It runs on an admin API token that you mint in the console.
 
-{{< clicks "Settings" "API tokens" "New API token" >}}
+{{< clicks "Settings" "Mint a token" >}}
 
 Name it `admin-terminal`, pick `expires in 30 days` and the job **Full root**, press **Mint token**, and copy the token from the sheet that follows, because it is shown only once. Then give it and the server address to `strazactl`. Paste the token at the `read` line and press Enter. `read -rs` reads the pasted token without showing it and keeps it out of the shell history.
 
@@ -267,7 +267,7 @@ Now ask the server what it would decide for a command, before any agent is enrol
 1. Under **Who**, pick `admin`. The starter policy applies to everyone, so the admin can stand in for the person who calls.
 2. Pick **Shell command**, type `rm -rf /tmp/x` in **The command line**, and press **Test**.
 
-{{< see >}}**Denied**, decided by rule `block-recursive-delete` in policy `standalone-starter`, with the rule's reason.{{< /see >}}
+{{< see >}}The answer **denied**, decided by policy rule `block-recursive-delete` in policy `standalone-starter`, with the rule's reason.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}

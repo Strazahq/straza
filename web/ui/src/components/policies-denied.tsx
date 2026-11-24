@@ -3,12 +3,15 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { HEAD } from "@/components/data-table";
 import { FetchError } from "@/components/error-state";
+import { HelpTip } from "@/components/help-tip";
+import { ToolChip } from "@/components/chip";
+import { KindTile } from "@/components/kind-icon";
 import { type PolicyDoor, openNewPolicy } from "@/components/policies-by-role";
 import { type ApiError, type DefaultDenials, type DeniedTool, listDefaultDenials } from "@/lib/api";
 import { mayWritePolicy } from "@/lib/access-read";
 import { put } from "@/lib/handoff";
 import {
-  DENIED_COLUMN, DENIED_CUT, DENIED_FOOT, DENIED_LEDE, DENIED_NONE, DENIED_SERVERS, DENIED_SERVERS_LINE, DENIED_TOOLS, DENIED_TOOLS_LINE, NAMELESS_HELP, NAMELESS_TOOL,
+  DENIED_COLUMN, DENIED_CUT, DENIED_HELP, DENIED_NONE, DENIED_SERVERS, DENIED_TOOLS, DENIED_VIEW, NAMELESS_HELP, NAMELESS_TOOL,
   OPEN_RECORD, SUBJECT_DENIED, WRITE_RULE, harnessWords, openRecord, writeRuleFor,
 } from "@/lib/harness-words";
 import { navigate } from "@/lib/router";
@@ -20,8 +23,8 @@ import { absTime } from "@/lib/words";
 // A row opens the New policy wizard with Which calls answered, and names
 // the newest record, which Audit shows to a seat that may read it.
 
-const WIDTHS = ["34%", "18%", "10%", "16%", "22%"];
-const CHIP = "inline-flex items-center rounded-md border border-border bg-background px-1.5 py-px font-mono text-[13px] whitespace-nowrap";
+// WIDTHS gives Last denied the room of its whole stamp at the 1000 px floor.
+const WIDTHS = ["30%", "18%", "10%", "20%", "22%"];
 
 // openInAudit hands Audit the record's sequence number and goes there.
 function openInAudit(seq: number) {
@@ -33,7 +36,7 @@ type RowProps = { name: React.ReactNode; label: string; runs: string[]; count: n
 
 function DeniedRow({ name, label, runs, count, lastSeq, lastTime, door }: RowProps) {
   return (
-    <TableRow className="text-sm" data-denied={label}>
+    <TableRow className="text-dense" data-denied={label}>
       <TableCell className="align-top whitespace-normal">{name}</TableCell>
       <TableCell className="align-top text-text-2">{harnessWords(runs)}</TableCell>
       <TableCell className="text-right align-top font-mono tabular-nums">{count}</TableCell>
@@ -48,11 +51,11 @@ function DeniedRow({ name, label, runs, count, lastSeq, lastTime, door }: RowPro
   );
 }
 
-function Group({ title, line }: { title: string; line: string }) {
+function Group({ title }: { title: string }) {
   return (
     <TableRow className="bg-muted/40 hover:bg-muted/40">
       <TableCell colSpan={5} className="whitespace-normal">
-        <span className="font-semibold text-foreground">{title}</span> <span className="text-[13px] text-muted-foreground">{line}</span>
+        <span className="font-semibold text-foreground">{title}</span>
       </TableCell>
     </TableRow>
   );
@@ -81,15 +84,20 @@ export function PoliciesDenied({ needle }: { needle: string }) {
 
   return (
     <div className="flex flex-col gap-2" data-denied-view>
-      <p className="max-w-[90ch] text-sm text-text-2">{DENIED_LEDE}</p>
+      <div className="flex items-center gap-1.5">
+        <h2 className="text-body font-semibold text-foreground">{DENIED_VIEW}</h2>
+        <HelpTip label={DENIED_VIEW} text={DENIED_HELP} />
+      </div>
       {problem && <FetchError subject={SUBJECT_DENIED} detail={problem} />}
-      {denials && denials.truncated && <p className="text-[13px] text-warn" data-denied-cut>{DENIED_CUT}</p>}
+      {denials && denials.truncated && <p className="text-caption text-warn" data-denied-cut>{DENIED_CUT}</p>}
       {denials && servers.length + tools.length === 0 && (
-        <p className="rounded-md border border-border bg-card px-4 py-3 text-sm text-muted-foreground" data-denied-none>{DENIED_NONE}</p>
+        <p className="rounded-md border border-border bg-card px-4 py-3 text-dense text-muted-foreground" data-denied-none>{DENIED_NONE}</p>
       )}
       {servers.length + tools.length > 0 && (
         <div className="overflow-x-auto rounded-md border border-border bg-card">
-          <Table className="table-fixed">
+          {/* The floor keeps the full stamp of Last denied and the two doors
+              inside their cells; below it the table scrolls in its box. */}
+          <Table className="min-w-[1000px] table-fixed" data-denied-table>
             <colgroup>{WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -101,15 +109,18 @@ export function PoliciesDenied({ needle }: { needle: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {servers.length > 0 && <Group title={DENIED_SERVERS} line={DENIED_SERVERS_LINE} />}
+              {servers.length > 0 && <Group title={DENIED_SERVERS} />}
               {servers.map((s) => (
                 <DeniedRow
                   key={"server:" + s.server}
                   label={s.server}
                   name={(
                     <span className="flex flex-col gap-1">
-                      <span className="font-mono font-semibold text-foreground">{s.server}</span>
-                      <span className="flex flex-wrap gap-1">{s.tools.map((t) => <span key={t.name} className={CHIP}>{t.name}</span>)}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <KindTile kind="local-server" />
+                        <span className="min-w-0 font-mono font-semibold [overflow-wrap:anywhere] text-foreground">{s.server}</span>
+                      </span>
+                      <span className="flex flex-wrap gap-1">{s.tools.map((t) => <ToolChip key={t.name} outcome="denied">{t.name}</ToolChip>)}</span>
                     </span>
                   )}
                   runs={s.harnesses}
@@ -119,14 +130,14 @@ export function PoliciesDenied({ needle }: { needle: string }) {
                   door={{ lane: "mcp", app: s.server, tools: s.tools.map((t) => t.name) }}
                 />
               ))}
-              {tools.length > 0 && <Group title={DENIED_TOOLS} line={DENIED_TOOLS_LINE} />}
+              {tools.length > 0 && <Group title={DENIED_TOOLS} />}
               {tools.map((t) => (
                 <DeniedRow
                   key={"tool:" + t.name}
                   label={t.name || NAMELESS_TOOL}
                   name={t.name
                     ? <span className="font-mono font-semibold text-foreground">{t.name}</span>
-                    : <span className="flex flex-col gap-1"><span className="text-foreground">{NAMELESS_TOOL}</span><span className="text-[13px] text-muted-foreground">{NAMELESS_HELP}</span></span>}
+                    : <span className="flex flex-col gap-1"><span className="text-foreground">{NAMELESS_TOOL}</span><span className="text-caption text-muted-foreground">{NAMELESS_HELP}</span></span>}
                   runs={t.harnesses}
                   count={t.count}
                   lastSeq={t.lastSeq}
@@ -138,7 +149,6 @@ export function PoliciesDenied({ needle }: { needle: string }) {
           </Table>
         </div>
       )}
-      <p className="max-w-[100ch] text-[13px] text-muted-foreground">{DENIED_FOOT}</p>
     </div>
   );
 }

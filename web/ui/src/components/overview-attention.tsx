@@ -2,7 +2,7 @@ import * as React from "react";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { type ChainRead, Door, oldestPending, Panel } from "@/components/overview-parts";
-import { type ApiError, type AppRow, type ApprovalRow, type OverviewAnswer, type SinkRow, replaySink } from "@/lib/api";
+import { type ApiError, type AppRow, type ApprovalRow, type EntraStatus, type OverviewAnswer, type RoleRow, type SinkRow, replaySink } from "@/lib/api";
 import {
   ATTENTION_HELP,
   ATTENTION_TITLE,
@@ -17,11 +17,13 @@ import {
   draftsLine,
   failedLine,
   relaxedLine,
+  REPLAY,
   replayWord,
   replayedWords,
   sinkLine,
   waitingLine,
 } from "@/lib/config-words";
+import { CERT_CODE, staleLine, stateWord } from "@/lib/entra-words";
 import type { SigningKeyRow } from "@/lib/keys-api";
 import { certExpiredLine, certExpiringLine, stagedWaitingLine } from "@/lib/keys-words";
 import { KEYS_TAB } from "@/lib/settings-words";
@@ -65,6 +67,23 @@ function keyItems(keys: SigningKeyRow[] | null | undefined, entra: boolean): { d
   return out;
 }
 
+// entraItems are the lines of the role groups in Entra while the sync is
+// on: reads of Entra that fail, with the door to the certificate's tab
+// when Entra refused the certificate and to Roles otherwise, and each role
+// whose removals wait for an admin, with the door to its page.
+function entraItems(read: EntraStatus | null | undefined, held: RoleRow[] | null | undefined): Item[] {
+  if (!read || !read.enabled) return [];
+  const out: Item[] = [];
+  const since = read.last_good || read.stale_since;
+  if (read.stale_since && since) {
+    out.push({ key: "entra:stale", tone: "warn", text: staleLine(since, read.error), ...((read.error || "").includes(CERT_CODE) ? KEYS_DOOR : { to: "roles" as RouteKey }) });
+  }
+  for (const r of held || []) {
+    if (r.entra?.state === "held") out.push({ key: "entra:held:" + r.id, tone: "warn", text: r.entra.error || stateWord("held"), to: "roles", rest: [r.id], label: r.name });
+  }
+  return out;
+}
+
 // Waiting is the drafts that wait for review, from one page of the list:
 // how many, whether the page was full, and the oldest one's proposer and
 // when it was drafted.
@@ -85,6 +104,10 @@ type Props = {
   // entra is false when the providers say none uses Entra, which drops the
   // certificate lines. It is true when that is not known.
   entra?: boolean;
+  // entraRead is the state of the read of Entra, and held the roles whose
+  // group holds removals. Each is null when not read.
+  entraRead?: EntraStatus | null;
+  held?: RoleRow[] | null;
   push: OverviewAnswer["push"];
   sinks: SinkRow[] | null;
   relaxed: ConfigRow[];
@@ -95,9 +118,9 @@ type Props = {
 
 // attentionItems is the list in the order a person should read it: the
 // broken chain first, then servers and signing keys, danger before warn,
-// waiting calls, waiting drafts, the push lane, parked events, and the
-// relaxed settings last.
-export function attentionItems({ chain, apps, approvals, drafts, keys, entra = true, push, sinks, relaxed }: Props): Item[] {
+// the role groups in Entra, waiting calls, waiting drafts, the push lane,
+// parked events, and the relaxed settings last.
+export function attentionItems({ chain, apps, approvals, drafts, keys, entra = true, entraRead, held, push, sinks, relaxed }: Props): Item[] {
   const items: Item[] = [];
   if (chain.word === "broken") items.push({ key: "chain", tone: "danger", text: chainBrokenLine(chain.seq), to: "audit" });
   const failed = (apps || []).filter((a) => a.status === "failed").map((a) => a.name);
@@ -107,6 +130,7 @@ export function attentionItems({ chain, apps, approvals, drafts, keys, entra = t
   const degraded = (apps || []).filter((a) => a.status === "degraded").map((a) => a.name);
   if (degraded.length) items.push({ key: "degraded", tone: "warn", text: degradedLine(degraded.length, degraded), to: "servers" });
   items.push(...keyLines.warn);
+  items.push(...entraItems(entraRead, held));
   if (approvals && approvals.length) {
     const oldest = oldestPending(approvals);
     items.push({ key: "waiting", tone: "warn", text: waitingLine(approvals.length, oldest || undefined, oldest ? relTimeText(oldest.createdAt) : ""), to: "approvals" });
@@ -117,7 +141,9 @@ export function attentionItems({ chain, apps, approvals, drafts, keys, entra = t
     const stream = (s.streams || []).find((x) => x.last_error);
     items.push({ key: "sink:" + s.name, tone: "warn", text: sinkLine(s, clockOf(stream && stream.last_error_at)), sink: s.name });
   }
-  if (relaxed.length) items.push({ key: "relaxed", tone: "warn", text: relaxedLine(relaxed), to: "settings" });
+  // The relaxed line opens the Configuration tab, on the row itself when it
+  // names one setting.
+  if (relaxed.length) items.push({ key: "relaxed", tone: "warn", text: relaxedLine(relaxed), to: "settings", rest: relaxed.length === 1 ? ["configuration", relaxed[0].id] : ["configuration"] });
   return items;
 }
 
@@ -147,11 +173,11 @@ function Replay({ name }: { name: string }) {
 
   return (
     <>
-      <Button variant="outline" size="sm" className="ml-auto" disabled={busy} onClick={() => void run()} data-replay={name}>
+      <Button variant="outline" size="sm" className="ml-auto" disabled={busy} onClick={() => void run()} aria-label={replayWord(name)} data-replay={name}>
         {busy && <Loader2Icon className="animate-spin" />}
-        {replayWord(name)}
+        {REPLAY}
       </Button>
-      {problem && <p className="w-full text-[13px] leading-relaxed text-danger" data-replay-refused={name}>{problem}</p>}
+      {problem && <p className="w-full text-caption leading-relaxed text-danger" data-replay-refused={name}>{problem}</p>}
     </>
   );
 }
@@ -163,7 +189,7 @@ export function Attention(props: Props) {
   const incomplete = props.incomplete || !props.apps || !props.approvals || props.drafts === null || !props.sinks || props.push?.lane_up === undefined || ["unknown", "seat", "unverified"].includes(props.chain.word);
   if (props.compact && items.length === 0) return <section data-panel="attention" aria-label={ATTENTION_TITLE}>
     <span className="sr-only" data-attention-count>{incomplete ? COUNT_WORD.partial : COUNT_WORD.none}</span>
-    <div className="flex items-start gap-2.5 text-sm text-text-2" data-attention-none><span className={cn("mt-1.5 size-2 shrink-0 rounded-full", incomplete ? "bg-unknown" : DOT.ok)} aria-hidden="true" /><span>{incomplete ? PARTIAL_CHECKS : NOTHING_TO_DO}</span></div>
+    <div className="flex items-start gap-2.5 text-dense text-text-2" data-attention-none><span className={cn("mt-1.5 size-2 shrink-0 rounded-full", incomplete ? "bg-unknown" : DOT.ok)} aria-hidden="true" /><span>{incomplete ? PARTIAL_CHECKS : NOTHING_TO_DO}</span></div>
     {props.onDetails && <Button variant="link" size="sm" className="overview-text-button mt-2 ml-4" onClick={props.onDetails}>{VIEW_CHECKS}</Button>}
   </section>;
   return (
@@ -171,17 +197,17 @@ export function Attention(props: Props) {
       name="attention"
       title={ATTENTION_TITLE}
       help={ATTENTION_HELP}
-      lead={<span className="font-mono text-[12px] font-normal text-muted-foreground" data-attention-count>{items.length || (incomplete ? COUNT_WORD.partial : COUNT_WORD.none)}</span>}
+      lead={<span className="font-mono text-caption font-normal text-muted-foreground" data-attention-count>{items.length || (incomplete ? COUNT_WORD.partial : COUNT_WORD.none)}</span>}
       flush
     >
       {items.length === 0 ? (
-        <div className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-text-2" data-attention-none>
+        <div className="flex items-center gap-2.5 px-3.5 py-2.5 text-dense text-text-2" data-attention-none>
           <span className={cn("size-2 shrink-0 rounded-full", incomplete ? "bg-unknown" : DOT.ok)} aria-hidden="true" />
           <span>{incomplete ? PARTIAL_CHECKS : NOTHING_TO_DO}</span>
         </div>
       ) : (
         items.map((i) => (
-          <div key={i.key} data-attention={i.key} className="flex flex-wrap items-center gap-2.5 border-b border-border px-3.5 py-2.5 text-sm text-foreground last:border-b-0">
+          <div key={i.key} data-attention={i.key} className="flex flex-wrap items-center gap-2.5 border-b border-border px-3.5 py-2.5 text-dense text-foreground last:border-b-0">
             <span className={cn("size-2 shrink-0 rounded-full", DOT[i.tone])} aria-hidden="true" />
             <span className="min-w-0 flex-1">{i.text}</span>
             {i.sink ? <Replay name={i.sink} /> : i.to ? <Door to={i.to} rest={i.rest} label={i.label} className="ml-auto" /> : null}

@@ -235,10 +235,32 @@ func (s *scenarioRun) httpStep(ctx context.Context, args, want map[string]any, b
 			}
 		}
 	}
+	if fields, ok := want["bodyAfter"].(map[string]any); ok && a.ok {
+		for _, p := range sortedKeys(fields) {
+			got, _ := lookup(body, p)
+			if !laterThan(got, fields[p]) {
+				a.ok, a.detail = false, fmt.Sprintf("%s %s: body.%s = %s, want a time later than %s", method, path, p, asString(got), asString(fields[p]))
+				break
+			}
+		}
+	}
 	if sub, ok := want["bodyContains"].(string); ok && a.ok && !strings.Contains(string(resp), sub) {
 		a.ok, a.detail = false, fmt.Sprintf("%s %s: the answer does not contain %q: %s", method, path, sub, trim(redact(string(resp))))
 	}
 	return a, nil
+}
+
+// laterThan reports whether got and than are both RFC 3339 times and got is
+// the later one. A value that is not such a time is never later.
+func laterThan(got, than any) bool {
+	g, ok1 := got.(string)
+	t, ok2 := than.(string)
+	if !ok1 || !ok2 {
+		return false
+	}
+	gt, err1 := time.Parse(time.RFC3339Nano, g)
+	tt, err2 := time.Parse(time.RFC3339Nano, t)
+	return err1 == nil && err2 == nil && gt.After(tt)
 }
 
 // requestURL joins the server base with a step path, encoding the query the

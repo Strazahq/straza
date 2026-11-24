@@ -2,7 +2,7 @@
 title: strazactl roles list
 description: List roles
 pagetype: reference
-weight: 81
+weight: 75
 draft: false
 sources:
   - cmd/strazactl

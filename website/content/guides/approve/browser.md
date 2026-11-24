@@ -1,9 +1,9 @@
 ---
 title: Approve in the browser
-description: A person who is not an admin enables their own browser on the self-service page and decides the requests routed to them, each decision signed by a key that never leaves that browser.
+description: A person who is not an admin sets up their own browser on the self-service page and decides the requests routed to them, each decision signed by a key that never leaves that browser.
 summary: >-
   A person who is not an admin decides the held calls routed to them on the self-service page,
-  in a browser they enabled once. Enabling makes a signing key that never leaves that browser,
+  in a browser they set up once. The setup makes a signing key that never leaves that browser,
   so every decision is signed and nobody can decide for them from a copied link. The person
   needs the role `straza-enroll-browser`.
 pagetype: how-to
@@ -11,18 +11,18 @@ weight: 15
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: A throwaway standalone server on Linux. The approver lena signed in on the self-service page in headless Chromium, enabled the browser and approved alice's held kubectl apply, which her machine then ran through the Claude Code hook. That sign-in was the code sign-in of its time, and the browser sign-in that replaced it was written from the code on 2026-10-22 and not walked. The strip sentence and the approved toast of a hook hold were reworded from the code on 2026-11-03 and not walked
+  platform: A throwaway standalone server on Linux. The approver lena signed in on the self-service page in headless Chromium, enabled the browser and approved alice's held kubectl apply, which her machine then ran through the Claude Code hook. That sign-in was the code sign-in of its time, and the browser sign-in that replaced it was written from the code on 2026-10-22 and not walked. The strip sentence and the approved toast of a hook hold were reworded from the code on 2026-11-03 and not walked. Home, Devices, the setup dialog and the request dialog were rewritten from the code on 2026-11-15 and not walked
   date: 2026-10-06
-  except: the browser sign-in, written from the code and not walked
+  except: the browser sign-in and the screens rebuilt on 2026-11-15, written from the code and not walked
 applies_to: both
 who: The approver, after an admin gives them the role
 where: Self-service page
 steps: true
-keywords: approve browser self-service enable this browser approver device requests decide straza-enroll-browser signed decision
+keywords: approve browser self-service set up this browser devices approver device requests decide straza-enroll-browser signed decision
 ---
 
 
-The self-service page is the part of Straza for any signed-in person, at `/self-service/` on your server, where the root address also leads. Its **Requests** tab lists the approval requests that are yours to decide. A person who is not an admin decides there from a browser they enabled once. Enabling makes a signing key that stays in that browser, so every decision is signed by that browser, and nobody can decide for the person from a copied link. Admins can decide the same requests in the console, as [Approve in the console]({{< relref "guides/approve/console.md" >}}) shows.
+The self-service page is the part of Straza for any signed-in person, at `/self-service/` on your server, where the root address also leads. Its **Requests** tab lists the approval requests that are yours to decide. A person who is not an admin decides there from a browser they set up once. The setup makes a signing key that stays in that browser, so every decision is signed by that browser, and nobody can decide for the person from a copied link. Admins can decide the same requests in the console, as [Approve in the console]({{< relref "guides/approve/console.md" >}}) shows.
 
 ## Before you start {.nostep}
 
@@ -34,7 +34,7 @@ The self-service page is the part of Straza for any signed-in person, at `/self-
 ## Give the person the browser role
 
 
-Only a person who holds `straza-enroll-browser`, or `straza-admin`, may enable a browser. When your identity manager feeds Straza over SCIM, assign the role there. Otherwise, as the admin, assign it in the console or from a terminal.
+Only a person who holds `straza-enroll-browser`, or `straza-admin`, may set up a browser. When your identity manager feeds Straza over SCIM, assign the role there. Otherwise, as the admin, assign it in the console or from a terminal.
 
 {{< clicks "Roles" "straza-enroll-browser" "Assign to a user" "Assign role" >}}
 
@@ -55,36 +55,36 @@ The person opens `/self-service/` on the server, for example `http://127.0.0.1:8
 
 {{< shot name="selfservice-signin" caption="The self-service page before sign-in, with **Sign in** at the top right." >}}
 
-Before the browser is enabled, **Requests** lists nothing and says why.
+Before the browser is set up, **Home** shows the card `Set up this browser to approve`. A request that waits for you already shows on **Home** and under **Requests**, but only a device that is set up answers it. With nothing waiting, **Requests** says why it is empty.
 
-{{< see >}}`This browser is not enrolled to decide.` and `Enable this browser under This browser to see what waits for you.`{{< /see >}}
+{{< see >}}`Nothing waits for you` and `To answer a request, set up this browser.`{{< /see >}}
 
-## Enable this browser
+## Set up this browser
 
 
-{{< clicks "This browser" "Enable this browser" >}}
+{{< clicks "Home" "Set up this browser" >}}
 
-{{< shot name="selfservice-enable" caption="The sheet that enables the browser, with **Name for this browser** and **Enable**." >}}
+{{< shot name="selfservice-enable" caption="The dialog that sets up the browser, with **Name for this browser** and **Set up**." >}}
 
-The tab says `Deciding means signing with a key that stays in this browser, so nobody can decide for you from a copied link.` The sheet opens with `A key is made here and never leaves this browser. You sign in once to prove who it belongs to.`
+The dialog opens with `Straza makes a key that stays in this browser and cannot be copied out. Your approvals are signed with it.`
 
-Give the browser a name under **Name for this browser**, such as `lena-laptop`. Your administrators see it in their list of approver devices, so pick one you recognise when you need to revoke it. Press **Enable**.
+Give the browser a name under **Name for this browser**, such as `lena-laptop`. You see it on **Devices**, and your administrators see it in their list of approver devices, so pick one you recognise. Where the browser can receive notifications, the box `Notify me in this browser when a request waits` is ticked, and the browser asks its permission once. Press **Set up**.
 
-{{< see >}}`Enabled. This browser decides as lena.`{{< /see >}}
+{{< see >}}`Set up. This browser approves as lena.`{{< /see >}}
 
-The tab now lists the browser as a device, marked `this browser`, with its key as `software key` and the line `normal for a browser`. Its credential renews itself at every check-in, so it has no expiry to act on.
+**Devices** now lists the browser, marked `this browser`, with a line such as `Approves as lena. Notifications on. Set up just now.` Its credential renews itself at every check-in, so it has no expiry to act on.
 
-**Notified** says whether Straza pushes each request to this browser. Where the deployment sends browser push, **Turn on** asks the browser's permission once. Otherwise it reads `this deployment sends no push notifications to browsers`, and the browser sees requests while the page is open. [Push delivery and connectivity]({{< relref "guides/approve/push-and-connectivity.md" >}}) sets up push.
+**Turn on notifications** and **Turn off notifications** on that row switch whether Straza pushes each request to this browser. Where the deployment sends no browser push, the help icon beside the line says `Straza is not set up to send browser notifications.`, and the browser sees requests while the page is open. [Push delivery and connectivity]({{< relref "guides/approve/push-and-connectivity.md" >}}) sets up push.
 
 {{< fails >}}
-`Your account holds no enrollment role. Enrollment roles are assigned in your identity manager.`
+`Your account has no role that lets it approve. Ask your administrator for one.`
 : The account lacks `straza-enroll-browser`. Ask your admin for it, as the step before shows.
 
-`This browser will not let the page store a key, so deciding cannot be enabled here. Use a normal window, or decide from the Straza approver app on your phone.`
+`This browser does not let the page keep a key, so it cannot be set up to approve. Use a normal window, or approve from the Straza approver app on your phone.`
 : The browser refuses site storage, as some private windows do. Open the page in a normal window.
 
-`Your account may enroll a phone, not a browser. Add your phone with Add a phone under This browser, and it sees what waits for you.`
-: The account holds `straza-enroll-mobile` only. Use **Add a phone**, as [Approve on a phone]({{< relref "guides/approve/phone.md" >}}) shows, or ask for the browser role.
+`Answer in the Straza approver app on your phone.`
+: The account holds `straza-enroll-mobile` only. Use **Add a phone** on **Devices**, as [Approve on a phone]({{< relref "guides/approve/phone.md" >}}) shows, or ask for the browser role.
 {{< /fails >}}
 
 ## Decide a request
@@ -92,33 +92,33 @@ The tab now lists the browser as a device, marked `this browser`, with its key a
 
 {{< clicks "Requests" "Waiting" >}}
 
-{{< shot name="selfservice-requests" caption="A waiting request marked `yours`, with **Deny** and **Approve** on its row." >}}
+{{< shot name="selfservice-requests" caption="A waiting request with **Deny** and **Approve** on its row." >}}
 
-Each waiting request shows who asked, the call, who decides and how long is left. A row that is yours to decide is marked `yours` and carries **Deny** and **Approve**. The line under the list says which rows those are: `Deny and Approve appear on the rows that are yours to decide: your own agent's calls, the calls of the agents you sponsor, and the calls routed to a role you hold.`
+Each waiting request shows when it was asked, who asked, the call and the time left. A row that is yours to decide carries **Deny** and **Approve**, and both open the request, as the row does. On a phone each request is a card.
 
-Select the row to read the request before you decide. The sheet titled **Approval request** shows the call, the time left, what happens if you approve and if you deny, and **Who can decide**, such as `You, as a holder of release-approvers. The first to answer decides.` A hold the agent's hook raised says `The agent was told to retry the call after your answer.`, and when the time runs out the call is denied.
+The request opens in a dialog whose title says who asks for what, such as `alice wants to run a command`. It shows the call, the time left, what happens if you approve and if you deny, and **Who can decide**, such as `You, as a holder of release-approvers. The first to answer decides.` A hold the agent's hook raised says `The agent was told to retry the call after your answer.`, and when the time runs out the call is denied.
 
-Press **Approve**, or **Deny**. The question names the call and the person, such as `Approve kubectl apply -f deploy/app.yaml for alice?` Type an optional reason under **Reason, optional**. The agent and the audit record read it. Then press **Approve request** or **Deny request**.
+Type an optional reason under **Reason, optional** at the foot of the dialog. The agent and the audit record read it. Then press **Approve** or **Deny** in the dialog.
 
 {{< see >}}`Approved. kubectl apply -f deploy/app.yaml runs for alice if the agent retries it soon.`{{< /see >}}
 
-The agent's retry of the same call then runs. Deciding needs no sign-in once the browser is enabled, because the browser's key signs each decision.
+The agent's retry of the same call then runs. Deciding needs no sign-in once the browser is set up, because the browser's key signs each decision.
 
 {{< fails >}}
-`This request was already approved, so there is nothing left to decide here.`
+`This request was already approved.`
 : Another person who may decide answered first. Nothing more is needed.
 
-`This request expired before the decision landed, so there is nothing left to decide here.`
+`This request expired before the decision landed.`
 : Its window closed and the call was denied. A new try by the agent raises a new request.
 
-`The server refused this browser's credential, so nothing was decided. Revoke this browser under This browser, then enable it again.`
-: The server no longer knows this browser, for example after a restore from backup. Revoke it on the **This browser** tab and enable it again.
+`Straza no longer accepts this browser's key, so nothing was decided. Remove this browser under Devices, then set it up again.`
+: The server no longer knows this browser, for example after a restore from backup. Remove it on **Devices** and set it up again.
 {{< /fails >}}
 
 ## Check the record
 
 
-The decision lands on the audit chain as an approval record with the channel `browser`, the device that signed it and the reason. An admin finds it in the console under Audit with the lens `approvals`, or with `strazactl audit tail`.
+The decision lands on the audit chain as an approval record with the channel `browser`, the device that signed it and the reason. An admin picks **Approvals** under **Kind of record** on the console's Audit, or runs `strazactl audit tail`.
 
 {{< details summary="Recorded output, the resolution record" >}}
 ```text
@@ -126,10 +126,10 @@ The decision lands on the audit chain as an approval record with the channel `br
 ```
 {{< /details >}}
 
-## Revoke the browser
+## Remove the browser
 
 
-On the **This browser** tab, **Revoke** asks first and says what follows, `You can no longer approve from it. The key is deleted now and Straza forgets the device.` The person's other devices are untouched. **Sign out** only ends the signed-in session, and the browser still decides as its person afterwards. On a shared machine, do both, and sign out at the identity provider too.
+On **Devices**, **Remove** on the browser's row asks first and says what follows, `You can no longer approve from this browser. Its key is deleted now and Straza forgets the device.` The person's other devices are untouched, and **Devices** removes them the same way. **Sign out**, in the menu under the person's name at the top right, only ends the signed-in session, and the browser still decides as its person afterwards. On a shared machine, do both, and sign out at the identity provider too.
 
 An admin revokes a lost browser in the console under **Approvals**, on the **Approver devices** tab, or with `strazactl approvers revoke <device-id>`.
 

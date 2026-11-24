@@ -56,7 +56,7 @@ describe("What ran", () => {
   it("marks hidden characters in both views and names each with its line", async () => {
     show({ tool: "shell.exec", command: "git commit -m \"Bump it​\"" });
     const notice = document.querySelector("[data-notice=\"hidden\"]") as HTMLElement;
-    expect(notice.textContent).toBe("This command holds 2 characters that do not show on screen.U+00A0 no-break space on line 1, U+200B zero-width space on line 1. They can make the text read differently from what ran. Both views mark them.");
+    expect(notice.textContent).toBe("This command holds 2 characters that do not show on screen.U+00A0 no-break space on line 1, U+200B zero-width space on line 1. They can make the text read differently from what ran.");
     expect([...document.querySelectorAll("[data-step-line] [data-hidden-char]")].map((e) => e.textContent)).toEqual(["U+00A0", "U+200B"]);
     await userEvent.click(screen.getByRole("tab", { name: "Raw" }));
     expect([...document.querySelectorAll("[data-raw] [data-hidden-char]")].map((e) => e.textContent)).toEqual(["U+00A0", "U+200B"]);
@@ -65,7 +65,7 @@ describe("What ran", () => {
   it("says how much of a cut command Straza kept, and ends the open here-document where the record does", () => {
     const hash = "bd53865339da0eb15964543359e8be8955d56b4ecffbe4f1945a624d3b29c49b";
     show({ tool: "shell.exec", command: "cat > f.json <<'EOF'\n{\"a\":1,... (921600 bytes, sha256 " + hash + ")" });
-    expect(document.querySelector("[data-notice=\"cut\"]")?.textContent).toBe("Straza kept the first 28 characters of this command.The whole command was 921,600 bytes. Its SHA-256 is " + hash + ", so a copy the client kept can be checked against it.");
+    expect(document.querySelector("[data-notice=\"cut\"]")?.textContent).toBe("Straza kept the first 28 characters of this command.The whole command was 921,600 bytes. Its SHA-256 is " + hash + ".");
     const doc = document.querySelector("[data-heredoc]") as HTMLElement;
     expect(doc.getAttribute("data-heredoc")).toBe("json");
     expect(doc.textContent).toContain("cut here by the record bound");
@@ -75,7 +75,7 @@ describe("What ran", () => {
   it("reads the client's own cut of a long command from its fields", () => {
     const hash = "a4344ec075b85974ac02a0f87dd0179284ec3074a832468f4559979cf0d8b608";
     show({ tool: "shell.exec", command: "cat > f.json <<'EOF'\n{\"a\":1,", commandTruncated: true, commandHash: "sha256:" + hash });
-    expect(document.querySelector("[data-notice=\"cut\"]")?.textContent).toBe("Straza kept the first 28 characters of this command.The whole command's SHA-256 is " + hash + ", so a copy the client kept can be checked against it.");
+    expect(document.querySelector("[data-notice=\"cut\"]")?.textContent).toBe("Straza kept the first 28 characters of this command.The whole command's SHA-256 is " + hash + ".");
     expect(document.querySelector("[data-cut-end]")).toBeTruthy();
   });
 

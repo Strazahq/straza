@@ -28,7 +28,7 @@ import (
 // 130 KB gzipped on its own and one file the browser caches once for both
 // pages, so the self-service budget is that chunk plus the page's own
 // shell, and its tabs load on first use outside the entry.
-var Budgets = map[string]int{"index.html": 226 << 10, "self-service.html": 180 << 10}
+var Budgets = map[string]int{"index.html": 242 << 10, "self-service.html": 180 << 10}
 
 // Base is the URL prefix the app is served under, which Vite writes in front
 // of every asset reference.

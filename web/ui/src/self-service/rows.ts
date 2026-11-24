@@ -1,6 +1,6 @@
 // The approver lane's rows read through the console's record shape. The
-// Requests tab, the request dialog and the decide dialog are the Approvals
-// area's components, which read an ApprovalRow; the approver API answers a
+// Requests tab and the request dialog are the Approvals area's components,
+// which read an ApprovalRow; the approver API answers a
 // different shape (approverRow in internal/server/approver_queue.go), so
 // this is the one mapping between the two. A row the person may decide
 // carries a challenge, which is the server's only signal of that.

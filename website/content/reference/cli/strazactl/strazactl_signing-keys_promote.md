@@ -2,7 +2,7 @@
 title: strazactl signing-keys promote
 description: Make a staged client assertion key the signing key
 pagetype: reference
-weight: 90
+weight: 84
 draft: false
 sources:
   - cmd/strazactl

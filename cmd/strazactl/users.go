@@ -51,7 +51,7 @@ func usersCmd(client func() *ctl.Client) *cobra.Command {
 
 	users.AddCommand(&cobra.Command{
 		Use:   "enable <username>",
-		Short: "Enable a disabled user: the status goes back to active, the user's revocations are lifted, and a device still enrolled needs no new enrollment",
+		Short: "Enable a disabled user: the status goes back to active, the disable is lifted, a lock stays until `strazactl users unlock`, and a device still enrolled needs no new enrollment",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u, err := client().UserByUsername(cmd.Context(), args[0])
@@ -65,10 +65,17 @@ func usersCmd(client func() *ctl.Client) *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s is already active. A lock is lifted with `strazactl users unlock %s`\n", args[0], args[0])
 				return nil
 			}
-			if _, err := client().SetUserStatus(cmd.Context(), u.ID, "active"); err != nil {
+			enabled, err := client().SetUserStatus(cmd.Context(), u.ID, "active")
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "enabled %s. The status is active and the user's revocations are lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or the sign-in it enrolled with grew older than governance.signInMaxAge meanwhile. Such a device needs straza enroll again\n", args[0])
+			// The server's notice says why the user is still refused, such as
+			// a lock, and what lifts it.
+			if enabled.Notice != "" {
+				fmt.Fprintln(cmd.OutOrStdout(), enabled.Notice)
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "enabled %s. The status is active and the disable is lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or the sign-in it enrolled with grew older than governance.signInMaxAge meanwhile. Such a device needs straza enroll again\n", args[0])
 			return nil
 		},
 	})

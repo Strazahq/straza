@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -92,10 +93,46 @@ func TestManifestViewsSwitch(t *testing.T) {
 	}
 }
 
-// goldenToolsHash is the drift hash of goldenTools as Straza computed it
-// before views existed. A server with no view links keeps it, with the
-// switch off and on alike, so turning views on drifts no such server.
-const goldenToolsHash = "c387d9a81e7da68595fccf4542cec409d18d7a22d1bd14982ea374c34171dbcc"
+// goldenToolsHash is the drift hash of goldenTools alone. A server with no
+// marks, hints or view links keeps it, with the switch off and on alike, so
+// turning views on drifts no such server.
+const goldenToolsHash = "c1f7094bd3cf723b823896979020f456e236b5379799838e95ea5535d4df46ae"
+
+// TestWithoutViewLinks pins the _meta a tool keeps without its view links:
+// both link keys go whole, every other key stays, the input is never
+// written, and a _meta with neither key comes back as the same map.
+func TestWithoutViewLinks(t *testing.T) {
+	t.Parallel()
+	rows := []struct {
+		name      string
+		meta      mcp.Meta
+		want      mcp.Meta
+		sameMap   bool
+		inputKeys int
+	}{
+		{"no _meta", nil, nil, true, 0},
+		{"no link key", mcp.Meta{"com.example/flag": true}, mcp.Meta{"com.example/flag": true}, true, 1},
+		{"both link keys and another key", mcp.Meta{
+			"ui": map[string]any{"resourceUri": "ui://a/panel", "prefersBorder": true}, "ui/resourceUri": "ui://a/legacy", "com.example/flag": true,
+		}, mcp.Meta{"com.example/flag": true}, false, 3},
+		{"the flat key alone", mcp.Meta{"ui/resourceUri": "ui://a/legacy"}, mcp.Meta{}, false, 1},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			got := WithoutViewLinks(row.meta)
+			if !reflect.DeepEqual(got, row.want) {
+				t.Errorf("WithoutViewLinks = %v, want %v", got, row.want)
+			}
+			if same := reflect.ValueOf(got).Pointer() == reflect.ValueOf(row.meta).Pointer(); same != row.sameMap {
+				t.Errorf("answered the input map itself = %v, want %v", same, row.sameMap)
+			}
+			if len(row.meta) != row.inputKeys {
+				t.Errorf("the input has %d keys after the call, want its %d untouched", len(row.meta), row.inputKeys)
+			}
+		})
+	}
+}
 
 func goldenTools(meta mcp.Meta) []*mcp.Tool {
 	return []*mcp.Tool{

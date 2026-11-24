@@ -4,10 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/strazahq/straza/internal/agentguard/localapi"
@@ -209,18 +207,4 @@ type SessionInfo struct {
 	// StartText is the governance paragraph the server wrote at check-in.
 	// Nil means the server sent none, and an empty text turns it off.
 	StartText *string
-}
-
-// PackContext renders knowledge packs as a single additional-context string
-// for injection at session start.
-func PackContext(packs []localapi.Pack) string {
-	if len(packs) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("# Straza knowledge packs (delivered by role)\n\n")
-	for _, p := range packs {
-		fmt.Fprintf(&b, "## %s (v%s)\n\n%s\n\n", p.Name, p.Version, p.Content)
-	}
-	return b.String()
 }

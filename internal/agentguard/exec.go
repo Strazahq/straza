@@ -53,12 +53,12 @@ func Exec(ctx context.Context, argv []string, errOut io.Writer) int {
 	// or reuses its session first. The service reuses the caller's newest
 	// live exec-wrapper session and checks in only when none is live.
 	svc := NewServiceClient()
-	if _, err := svc.StartSession(ctx, localapi.SessionRequest{Harness: localapi.Harness{Name: execHarness}}); err != nil {
+	cwd, _ := os.Getwd()
+	if _, err := svc.StartSession(ctx, localapi.SessionRequest{Harness: localapi.Harness{Name: execHarness}, Folder: sessionFolder(cwd)}); err != nil {
 		fmt.Fprintf(errOut, "%s Refusing to run.\n", endSentence(denyLine(serviceSentence(err, outcomeNotRun))))
 		return execDenyExit
 	}
 
-	cwd, _ := os.Getwd()
 	n := Normalized{
 		HarnessName: execHarness,
 		Event: policy.Event{
