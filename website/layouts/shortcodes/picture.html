@@ -1,0 +1,26 @@
+{{- /* A picture the console screenshot pipeline does not make, such as a
+screen of another product:
+{{< picture src="pictures/entra-role-groups/groups-list.png" alt="..." caption="..." >}}
+A console screen in both themes names dark and light in place of src, and
+site.css shows the one that matches the theme. A file that is missing, or a
+picture without alt, fails the build. */ -}}
+{{- $dark := .Get "dark" | default (.Get "src") -}}
+{{- $light := .Get "light" -}}
+{{- $alt := .Get "alt" -}}
+{{- if not $dark }}{{ errorf "%s: picture has neither src nor dark. Name the file under website/static." .Position }}{{ end -}}
+{{- if not $alt }}{{ errorf "%s: picture %q has no alt. Say what the picture shows." .Position $dark }}{{ end -}}
+{{- range slice $dark $light -}}
+  {{- if and . (not (fileExists (printf "static/%s" .))) }}{{ errorf "%s: picture names website/static/%s, which does not exist." $.Position . }}{{ end -}}
+{{- end -}}
+{{- $size := images.Config (printf "static/%s" $dark) -}}
+<figure class="shot">
+  <div class="frame">
+    <img{{ if $light }} class="sd"{{ end }} src="{{ $dark | relURL }}" alt="{{ $alt }}" width="{{ $size.Width }}" height="{{ $size.Height }}" loading="lazy" decoding="async">
+    {{- with $light }}
+    <img class="sl" src="{{ . | relURL }}" alt="{{ $alt }}" width="{{ $size.Width }}" height="{{ $size.Height }}" loading="lazy" decoding="async">
+    {{- end }}
+  </div>
+  {{- with .Get "caption" }}
+  <figcaption><span class="shot-cap">{{ $.Page.RenderString . }}</span></figcaption>
+  {{- end }}
+</figure>

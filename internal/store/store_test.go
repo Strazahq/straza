@@ -69,6 +69,10 @@ func forEachStoreFrom(t *testing.T, fresh bool, fn func(t *testing.T, s Store)) 
 		// Fresh schema per test: down (tolerates empty) then up. Postgres
 		// tests must not run in parallel; they share one database.
 		sq := s.(*sqlStore)
+		// Each migrator keeps one pooled connection until the store closes,
+		// and a test steps through more migrations than the pool of a
+		// 2-core machine holds, so the pool gets room for them.
+		sq.db.SetMaxOpenConns(32)
 		if err := sq.migrateDown(); err != nil {
 			t.Fatalf("migrateDown: %v", err)
 		}
