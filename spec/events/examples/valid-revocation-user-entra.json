@@ -1,0 +1,12 @@
+{
+  "specversion": "1.0",
+  "id": "01a1e8b0-1a01-7c40-8d11-2a3b4c5d6e24",
+  "type": "straza.revocation.user",
+  "source": "strazad",
+  "time": "2026-11-17T10:19:40.951Z",
+  "data": {
+    "user": "01a1e8b0-1a01-7c40-8d11-2a3b4c5d6e30",
+    "reason": "the account is disabled in Entra",
+    "origin": "entra"
+  }
+}

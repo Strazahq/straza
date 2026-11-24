@@ -1,24 +1,21 @@
 import * as React from "react";
-import { PlusIcon } from "lucide-react";
+import { ArrowRightIcon, CopyIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { HelpTip } from "@/components/help-tip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Section } from "@/components/sheet-parts";
 import {
-  ADD_ROW,
   ADD_ROW_HINT,
-  CHANGE_TO,
+  CHANGE_NOW,
   CLOSE,
   COPY_FRAGMENT,
   type ConfigRow,
   DRAFT_CHANGES,
   DRAFT_DEPLOY,
   DRAFT_EMPTY,
-  DRAFT_FRAGMENT_HELP,
   DRAFT_LEDE,
-  DRAFT_ROWS_HELP,
   DRAFT_TITLE,
   ENV_LABEL,
   FILE_LABEL,
@@ -26,6 +23,7 @@ import {
   FRAGMENT_TITLE,
   MISSING_VALUE,
   NO_ENV_LINE,
+  PICK_LABEL,
   VALUES_LABEL,
   VALUE_PLACEHOLDER,
   consequenceOf,
@@ -33,14 +31,14 @@ import {
   valueLabel,
   valuesOf,
 } from "@/lib/config-words";
-import { configFragment, draftScalar, draftValueError } from "@/lib/config-export";
+import { configFragment, draftScalar, draftValueError, shellValue } from "@/lib/config-export";
 import { copyText } from "@/lib/clipboard";
 
-// The Write a config change sheet of the Configuration tab: pick the rows to
+// The Prepare a change sheet of the Configuration tab: pick the rows to
 // change, read what each one costs, and
-// take the fragment for the config file, the chart values or the
+// take the lines for the config file, the chart values or the
 // environment. Nothing here reaches the server; the deployment applies the
-// change its own way.
+// change its own way. The lines show once a picked row has a value.
 
 // CHART_KEY is the chart value that carries the whole strazad config file
 // (deploy/helm/straza/values.yaml configYaml), so the chart fragment is the
@@ -50,6 +48,10 @@ const CHART_KEY = "configYaml";
 // Drafted is one drafted change: the row's id, the value the person picked or
 // typed, and whether the row is in the fragment.
 type Drafted = { id: string; value: string; include: boolean };
+
+// View is the tab of the lines that shows, the one Copy takes.
+type View = "file" | "chart" | "env";
+const VIEW_LABEL: Record<View, string> = { file: FILE_LABEL, chart: VALUES_LABEL, env: ENV_LABEL };
 
 type Props = {
   open: boolean;
@@ -61,11 +63,6 @@ type Props = {
 // row has a closed set that holds it, the first allowed value when it does
 // not, and empty when the row takes free text, since the value on screen
 // is a reading in words and not what the config file takes.
-// POSIX shell fragment: quote metacharacters and preserve literal single quotes.
-function shellValue(value: string): string {
-  return /^[a-zA-Z0-9_./:@+-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\"'\"'") + "'";
-}
-
 function firstValue(r: ConfigRow): string {
   const values = valuesOf(r);
   if (!values.length) return "";
@@ -80,6 +77,7 @@ export function DraftSheet({ open, rows: sourceRows, onClose }: Props) {
   ] : [row]);
   const [picks, setPicks] = React.useState<Drafted[]>([]);
   const [missing, setMissing] = React.useState<string | null>(null);
+  const [view, setView] = React.useState<View>("file");
 
   const settable = rows.filter((r) => r.key && !r.key.includes(","));
   const rowOf = (id: string) => rows.find((r) => r.id === id) as ConfigRow;
@@ -106,6 +104,7 @@ export function DraftSheet({ open, rows: sourceRows, onClose }: Props) {
       return variable ? variable + "=" + shellValue(p.value.trim()) : NO_ENV_LINE(key);
     })
     .join("\n");
+  const blocks: Record<View, string> = { file, chart, env };
 
   const copy = () => {
     // The primary stays clickable: an empty value focuses its field and
@@ -117,7 +116,7 @@ export function DraftSheet({ open, rows: sourceRows, onClose }: Props) {
       if (field instanceof HTMLElement) field.focus();
       return;
     }
-    copyText(file, FRAGMENT_COPIED);
+    copyText(blocks[view], FRAGMENT_COPIED);
   };
 
   return (
@@ -128,14 +127,15 @@ export function DraftSheet({ open, rows: sourceRows, onClose }: Props) {
           <SheetDescription className="max-w-[70ch]">{DRAFT_LEDE}</SheetDescription>
         </SheetHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">
-          <Section title={DRAFT_CHANGES} action={<HelpTip label={DRAFT_CHANGES} text={DRAFT_ROWS_HELP} />}>
-            {picks.length === 0 && <p className="text-sm text-text-2" data-draft-empty>{DRAFT_EMPTY}</p>}
+          <Section title={DRAFT_CHANGES}>
+            {picks.length === 0 && <p className="text-dense text-text-2" data-draft-empty>{DRAFT_EMPTY}</p>}
             {picks.map((p) => (
               <DraftRow key={p.id} row={rowOf(p.id)} pick={p} missing={missing === p.id} onValue={setValue} onInclude={setInclude} />
             ))}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="draft-add" className="text-caption font-medium text-text-2">{PICK_LABEL}</label>
               <Select value="" onValueChange={add}>
-                <SelectTrigger id="draft-add" aria-label={ADD_ROW} className="h-8 w-[280px]">
+                <SelectTrigger id="draft-add" className="h-8 w-[280px] max-w-full">
                   <PlusIcon className="size-3.5 text-muted-foreground" />
                   <SelectValue placeholder={ADD_ROW_HINT} />
                 </SelectTrigger>
@@ -148,36 +148,32 @@ export function DraftSheet({ open, rows: sourceRows, onClose }: Props) {
             </div>
           </Section>
 
-          <Section title={FRAGMENT_TITLE} action={<HelpTip label={FRAGMENT_TITLE} text={DRAFT_FRAGMENT_HELP} />}>
-            {lines.length === 0
-              ? <p className="text-sm text-text-2" data-fragment-empty>{DRAFT_EMPTY}</p>
-              : (
-                <div className="flex flex-col gap-3">
-                  <Block label={FILE_LABEL} text={file} />
-                  <Block label={VALUES_LABEL} text={chart} />
-                  <Block label={ENV_LABEL} text={env} />
-                  <p className="max-w-[70ch] text-[13px] text-muted-foreground">{DRAFT_DEPLOY}</p>
-                </div>
-              )}
-          </Section>
+          {lines.length > 0 && (
+            <Section title={FRAGMENT_TITLE}>
+              <div className="flex flex-col gap-3">
+                <Tabs value={view} onValueChange={(v) => setView(v as View)}>
+                  <div className="border-b border-border">
+                    <TabsList variant="line">
+                      {(Object.keys(VIEW_LABEL) as View[]).map((v) => <TabsTrigger key={v} value={v}>{VIEW_LABEL[v]}</TabsTrigger>)}
+                    </TabsList>
+                  </div>
+                  {(Object.keys(VIEW_LABEL) as View[]).map((v) => (
+                    <TabsContent key={v} value={v}>
+                      <pre className="overflow-x-auto rounded-md border border-border bg-card px-3 py-2 font-mono text-caption leading-relaxed text-foreground" data-fragment={VIEW_LABEL[v]}>{blocks[v]}</pre>
+                    </TabsContent>
+                  ))}
+                </Tabs>
+                <p className="max-w-[70ch] text-caption text-muted-foreground">{DRAFT_DEPLOY}</p>
+              </div>
+            </Section>
+          )}
         </div>
         <SheetFooter className="flex-row justify-end border-t border-border">
           <Button variant="outline" onClick={onClose}>{CLOSE}</Button>
-          <Button onClick={copy}>{COPY_FRAGMENT}</Button>
+          <Button onClick={copy}><CopyIcon /> {COPY_FRAGMENT}</Button>
         </SheetFooter>
       </SheetContent>
     </Sheet>
-  );
-}
-
-// Block is one labelled fragment: the file it belongs to over the lines
-// themselves.
-function Block({ label, text }: { label: string; text: string }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground">{label}</span>
-      <pre className="overflow-x-auto rounded-md border border-border bg-card px-3 py-2 font-mono text-[13px] leading-relaxed text-foreground" data-fragment={label}>{text}</pre>
-    </div>
   );
 }
 
@@ -196,7 +192,7 @@ function DraftRow({ row, pick, missing, onValue, onInclude }: RowProps) {
   const values = valuesOf(row);
   const key = row.key.split(",")[0].trim();
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border border-border px-3 py-2.5 text-sm" data-draft-row={row.id}>
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-border px-3 py-2.5 text-dense" data-draft-row={row.id}>
       <input
         type="checkbox"
         className="size-4 accent-primary"
@@ -206,31 +202,37 @@ function DraftRow({ row, pick, missing, onValue, onInclude }: RowProps) {
       />
       <span className="flex min-w-0 flex-1 basis-[200px] flex-col">
         <b className="font-medium text-foreground">{row.name}</b>
-        <span className="truncate font-mono text-[13px] text-muted-foreground">{key}</span>
+        <span className="truncate font-mono text-caption text-muted-foreground">{key}</span>
       </span>
-      <span className="font-mono text-[13px] text-muted-foreground">{row.value}</span>
-      <span className="text-[13px] text-muted-foreground">{CHANGE_TO}</span>
-      {values.length > 0 ? (
-        <Select value={pick.value} onValueChange={(v) => onValue(row.id, v)}>
-          <SelectTrigger id={"draft-value-" + row.id} aria-label={valueLabel(row.name)} className="h-8 w-[180px] font-mono"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {values.map((v) => <SelectItem key={v} value={v} className="font-mono">{v}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      ) : (
-        <Input
-          id={"draft-value-" + row.id}
-          aria-label={valueLabel(row.name)}
-          placeholder={VALUE_PLACEHOLDER}
-          value={pick.value}
-          onChange={(e) => onValue(row.id, e.target.value)}
-          aria-invalid={missing || undefined}
-          aria-describedby={missing ? "draft-miss-" + row.id : undefined}
-          className="h-8 w-[180px] font-mono"
-        />
-      )}
-      <span className="basis-full text-[13px] leading-relaxed text-text-2" data-draft-why={row.id}>{consequenceOf(row)}</span>
-      {missing && <span id={"draft-miss-" + row.id} className="basis-full text-[13px] text-danger">{draftValueError(row.id, pick.value.trim()) || MISSING_VALUE}</span>}
+      {/* The current value and its new one wrap as one group, so "now" stays beside the value it leads. */}
+      <span className="flex min-w-0 flex-wrap items-center gap-3" data-draft-change={row.id}>
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className="text-caption text-muted-foreground">{CHANGE_NOW}</span>
+          <span className="font-mono text-caption break-all text-foreground">{row.value}</span>
+        </span>
+        <ArrowRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        {values.length > 0 ? (
+          <Select value={pick.value} onValueChange={(v) => onValue(row.id, v)}>
+            <SelectTrigger id={"draft-value-" + row.id} aria-label={valueLabel(row.name)} className="h-8 w-[180px] font-mono"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {values.map((v) => <SelectItem key={v} value={v} className="font-mono">{v}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input
+            id={"draft-value-" + row.id}
+            aria-label={valueLabel(row.name)}
+            placeholder={VALUE_PLACEHOLDER}
+            value={pick.value}
+            onChange={(e) => onValue(row.id, e.target.value)}
+            aria-invalid={missing || undefined}
+            aria-describedby={missing ? "draft-miss-" + row.id : undefined}
+            className="h-8 w-[180px] font-mono"
+          />
+        )}
+      </span>
+      <span className="basis-full text-caption leading-relaxed text-text-2" data-draft-why={row.id}>{consequenceOf(row)}</span>
+      {missing && <span id={"draft-miss-" + row.id} className="basis-full text-caption text-danger">{draftValueError(row.id, pick.value.trim()) || MISSING_VALUE}</span>}
     </div>
   );
 }

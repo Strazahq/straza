@@ -259,11 +259,17 @@ func changedViews(prev, next []View) []string {
 }
 
 // driftDetail words a drift for the server's health reason: the tools added
-// and removed, else the views that changed, else a change of the views the
+// and removed, with the tools that changed beside them, else the tools that
+// changed, else the views that changed, else a change of the views the
 // tools link, else the bare lists.
-func driftDetail(added, removed, views []string, links bool) string {
+func driftDetail(added, removed []string, changed []toolChange, views []string, links bool) string {
 	switch {
 	case len(added) > 0 || len(removed) > 0:
+		if len(changed) > 0 {
+			return fmt.Sprintf("inventory drift: +%v -%v, changed %s", added, removed, changedWords(changed))
+		}
+	case len(changed) > 0:
+		return "inventory drift: the server changed " + changedWords(changed)
 	case len(views) > 0:
 		return "inventory drift: the server changed the views " + strings.Join(views, ", ")
 	case links:
@@ -365,10 +371,7 @@ func servedMeta(meta mcp.Meta, served []View, on bool) (mcp.Meta, bool) {
 		return meta, false
 	}
 	if !on {
-		out := maps.Clone(meta)
-		delete(out, uiKey)
-		delete(out, flatLinkKey)
-		return out, true
+		return WithoutViewLinks(meta), true
 	}
 	var out mcp.Meta
 	if hasFlat && !isServed(flat, served) {
@@ -389,6 +392,22 @@ func servedMeta(meta mcp.Meta, served []View, on bool) (mcp.Meta, bool) {
 		return meta, false
 	}
 	return out, true
+}
+
+// WithoutViewLinks answers a tool's _meta without the two keys a tool links
+// views by, ui and ui/resourceUri, each removed whole. It never writes
+// meta: it answers meta itself when neither key is present, and a copy
+// otherwise.
+func WithoutViewLinks(meta mcp.Meta) mcp.Meta {
+	_, hasUI := meta[uiKey]
+	_, hasFlat := meta[flatLinkKey]
+	if !hasUI && !hasFlat {
+		return meta
+	}
+	out := maps.Clone(meta)
+	delete(out, uiKey)
+	delete(out, flatLinkKey)
+	return out
 }
 
 // isServed reports whether link is the address of a view in served, which is

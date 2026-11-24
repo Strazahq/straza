@@ -65,7 +65,7 @@ for anything remote.
 
 strazactl has no sign-in of its own. It runs on an admin API token that a
 person mints in the console. Open `http://127.0.0.1:8420/console/`, sign in as
-`admin` with the password, open Settings, then API tokens, and press New API
+`admin` with the password, open Settings, then API tokens, and press Mint a
 token. Name it `admin-terminal`, pick `expires in 30 days` and the job Full
 root, press Mint token and copy the token, which is shown once.
 

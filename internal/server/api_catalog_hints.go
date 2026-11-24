@@ -72,6 +72,36 @@ func hintNotRunning(status, detail string) string {
 	}
 }
 
+// The hint sentences of a tool on a server on a person's machine. No access
+// row exists for such a server, so they name only what policy decides.
+
+// hintMachineAllowed names the policy rule that allows the tool. A rule
+// always does, because a call of a server Straza does not serve runs only
+// when a rule allows it. A classify rule's allow holds for a call the
+// classifier passes, and the sentence says so.
+func hintMachineAllowed(d policy.Decision) string {
+	hint := fmt.Sprintf("allowed on the person's machine by %s, policy rule %s", d.SetName, d.RuleID)
+	if d.Classify {
+		hint += ", when the classifier passes the call"
+	}
+	return hint
+}
+
+// hintMachineApproval names the policy rule that makes the tool need
+// approval and who decides.
+func hintMachineApproval(d policy.Decision) string {
+	return fmt.Sprintf("needs approval by %s on the person's machine: %s, policy rule %s", approvePool(d), d.SetName, d.RuleID)
+}
+
+// hintMachineDenied is the decision's own reason when it states one, else
+// the policy rule that denies the tool.
+func hintMachineDenied(d policy.Decision) string {
+	if d.Reason != "" {
+		return d.Reason
+	}
+	return fmt.Sprintf("denied on the person's machine by %s, policy rule %s", d.SetName, d.RuleID)
+}
+
 // roleLaneSubject resolves the preview's role lane the way the user lane
 // does: every named role that exists expands through the implication
 // closure, so asking for a business role sees what its application roles

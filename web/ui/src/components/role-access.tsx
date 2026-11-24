@@ -1,12 +1,14 @@
 import * as React from "react";
 import { Loader2Icon, PencilIcon, Trash2Icon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Button, DANGER_FILL } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { RefusedError } from "@/components/error-state";
+import { OutcomeChip } from "@/components/chip";
 import { HelpTip } from "@/components/help-tip";
+import { KindTile } from "@/components/kind-icon";
 import { AccessEditor } from "@/components/access-editor";
 import { type Built, RoleSaves, liveExport } from "@/components/role-saves";
 import { coversKey, coversOf, listed, partial, pinnedOf, uncovered } from "@/lib/access-covers";
@@ -27,7 +29,6 @@ import { NOTHING_SAVED, REMOVE_SET, removeSetBody, removeSetTitle, savedEdit } f
 import {
   ACCESS_HEAD,
   CANCEL,
-  EDITOR_LEDE,
   EDIT_ACCESS,
   NOTHING_CHANGED,
   NO_SERVER_ROLE,
@@ -35,6 +36,7 @@ import {
   OPEN_IN_AUDIT,
   PICK_A_TOOL,
   POLICY_HELP,
+  type PolicyCounts,
   READING_POLICY,
   REMOVE_ACCESS,
   REMOVE_ACCESS_HELP,
@@ -72,7 +74,20 @@ import { relTimeText } from "@/lib/words";
 // saves the row and the role's own set as one draft, so
 // a row and its gate go live together.
 
-const DESTRUCTIVE = "bg-danger text-white hover:bg-danger/90";
+// PolicyCell is the Policy cell of an access row: one outcome chip with a
+// count per outcome, needs approval first, or the word of a cell with no
+// counts. The needs approval chip's hover splits holds from tickets, names
+// the policies, and gives each held tool's window and who decides.
+function PolicyCell({ summary, kinds }: { summary: string | PolicyCounts; kinds: Parameters<typeof heldTitle>[1] }) {
+  if (typeof summary === "string") return <span className="text-text-2" data-policy-cell>{summary}</span>;
+  return (
+    <span className="flex flex-wrap items-center gap-1" data-policy-cell>
+      {summary.approval > 0 && <OutcomeChip outcome="approval" count={summary.approval} title={heldTitle(summary.approvalTitle, kinds) || undefined} />}
+      {summary.denied > 0 && <OutcomeChip outcome="denied" count={summary.denied} title={summary.deniedTitle || undefined} />}
+      {summary.allowed > 0 && <OutcomeChip outcome="allowed" count={summary.allowed} />}
+    </span>
+  );
+}
 
 // FirstCallRow is the line under a server's row after a grant lands: the
 // audit log's own witness that the grant is real.
@@ -85,18 +100,18 @@ function FirstCallRow({ app, since, cols }: { app: string; since: number; cols: 
   };
   return (
     <TableRow data-first-call={call.state}>
-      <TableCell colSpan={cols} className="whitespace-normal text-[13px] leading-snug text-text-2">
+      <TableCell colSpan={cols} className="whitespace-normal text-caption leading-snug text-text-2">
         {call.state === "watching" && <>{dot}{firstCallWatching(app)}</>}
         {call.state === "hit" && call.rec && (
           <>
             {firstCallHit(app, call.rec.username, call.rec.tool, relTimeText(call.rec.time), outcomeWords(call.rec.effect, call.rec.setName, call.rec.ruleId))}{" "}
-            <Button variant="link" size="sm" className="h-auto p-0 text-[13px]" onClick={() => openAudit(call.rec?.seq)}>{OPEN_IN_AUDIT}</Button>
+            <Button variant="link" size="sm" className="h-auto p-0 text-caption" onClick={() => openAudit(call.rec?.seq)}>{OPEN_IN_AUDIT}</Button>
           </>
         )}
         {call.state === "stopped" && (
           <>
             {dot}{firstCallStopped(app)}{" "}
-            <Button variant="link" size="sm" className="h-auto p-0 text-[13px]" onClick={() => openAudit()}>{OPEN_AUDIT}</Button>
+            <Button variant="link" size="sm" className="h-auto p-0 text-caption" onClick={() => openAudit()}>{OPEN_AUDIT}</Button>
           </>
         )}
         {call.state === "off" && firstCallOff(app)}
@@ -375,7 +390,8 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
   return (
     <div className="flex flex-col gap-3" data-role-access={role.name}>
       <div className="rounded-md border border-border">
-        <Table className="table-fixed">
+        {/* The floor keeps the open Policy column wide enough for its widest chip, 2 needs approval, beside the fixed columns. */}
+        <Table className={cn("table-fixed", pinnedFirst ? "min-w-[960px]" : "min-w-[640px]")}>
           <colgroup>
             <col className="w-[18%]" />
             <col className="w-[30%]" />
@@ -410,21 +426,24 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
               return (
                 <React.Fragment key={b.id}>
                   <TableRow data-access={b.app}>
-                    <TableCell className="truncate">
-                      {app ? (
-                        <Button variant="link" size="sm" className="h-auto p-0 font-mono text-[13px]" onClick={() => navigate("servers", [app.id])}>{b.app}</Button>
-                      ) : (
-                        <span className="font-mono text-[13px]">{b.app}</span>
-                      )}
+                    <TableCell className="overflow-hidden">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <KindTile kind="server" />
+                        {app ? (
+                          <Button variant="link" size="sm" className="h-auto min-w-0 shrink p-0 font-mono text-caption" title={b.app} onClick={() => navigate("servers", [app.id])}><span className="truncate">{b.app}</span></Button>
+                        ) : (
+                          <span className="truncate font-mono text-caption" title={b.app}>{b.app}</span>
+                        )}
+                      </span>
                     </TableCell>
                     <TableCell className="truncate" title={matchersTitle(b.tools)}>{toolsWords(b.tools, known)}</TableCell>
                     {pinnedFirst && (
                       <TableCell className="whitespace-normal" data-covers-cell>
                         {pinned && <span className={covers ? "text-foreground" : "text-warn"}>{coversCell(nounsOf(pinned), covers)}</span>}
-                        {pinned && covers && !partial(covers) && counts[b.app] !== undefined && <div className="text-[13px] text-muted-foreground" data-covers-count>{todayCount(counts[b.app], nounsOf(pinned))}</div>}
+                        {pinned && covers && !partial(covers) && counts[b.app] !== undefined && <div className="text-caption text-muted-foreground" data-covers-count>{todayCount(counts[b.app], nounsOf(pinned))}</div>}
                       </TableCell>
                     )}
-                    <TableCell className="truncate text-text-2" title={heldTitle(summary, kinds)} data-policy-cell>{summary}</TableCell>
+                    <TableCell className="whitespace-normal"><PolicyCell summary={summary} kinds={kinds} /></TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -449,14 +468,13 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
       </div>
 
       <Sheet open={open} onOpenChange={(o) => { if (!o && !saving) close(); }}>
-        <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" data-access-sheet={editing ? editing.app.name : ""}>
+        <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" aria-describedby={undefined} data-access-sheet={editing ? editing.app.name : ""}>
           <SheetHeader className="border-b border-border pr-12">
-            <SheetTitle className="text-lg leading-snug">{editing ? editTitle(role.name, editing.app.name) : ""}</SheetTitle>
-            <SheetDescription>{EDITOR_LEDE}</SheetDescription>
+            <SheetTitle className="text-section leading-snug">{editing ? editTitle(role.name, editing.app.name) : ""}</SheetTitle>
           </SheetHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
-            {saved && <p role="alert" className="m-0 max-w-[75ch] text-[13px] text-danger" data-saved-edit>{savedEdit(ownName)}</p>}
-            {current && !read && <p role="status" className="m-0 text-[13px] text-muted-foreground" data-reading>{READING_POLICY}</p>}
+            {saved && <p role="alert" className="m-0 max-w-[75ch] text-caption text-danger" data-saved-edit>{savedEdit(ownName)}</p>}
+            {current && !read && <p role="status" className="m-0 text-caption text-muted-foreground" data-reading>{READING_POLICY}</p>}
             {current && read && (
               <AccessEditor
                 role={role.name}
@@ -476,9 +494,9 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
               />
             )}
             {note ? (
-              <p role="status" className="m-0 text-[13px] text-danger" data-save-note>{note}</p>
+              <p role="status" className="m-0 text-caption text-danger" data-save-note>{note}</p>
             ) : sameRow && read && !sameCalls && !retiring ? (
-              <p role="status" className="m-0 text-[13px] text-muted-foreground" data-save-note>{UNCHANGED_TOOLS}</p>
+              <p role="status" className="m-0 text-caption text-muted-foreground" data-save-note>{UNCHANGED_TOOLS}</p>
             ) : null}
           </div>
           <SheetFooter className="mt-0 border-t border-border">
@@ -495,7 +513,7 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>{CANCEL}</AlertDialogCancel>
-                      <AlertDialogAction className={DESTRUCTIVE} onClick={confirm}>{REMOVE_SET}</AlertDialogAction>
+                      <AlertDialogAction className={DANGER_FILL} onClick={confirm}>{REMOVE_SET}</AlertDialogAction>
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
@@ -525,7 +543,7 @@ export function RoleAccess({ role, bindings, apps, tools, sheetOpen, onSheetOpen
               {askProblem && <RefusedError subject={STEP_SUBJECT.remove} message={askProblem} />}
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={busy}>{CANCEL}</AlertDialogCancel>
-                <AlertDialogAction className={DESTRUCTIVE} disabled={busy} onClick={(e) => { e.preventDefault(); void remove(); }}>
+                <AlertDialogAction className={DANGER_FILL} disabled={busy} onClick={(e) => { e.preventDefault(); void remove(); }}>
                   {busy && <Loader2Icon className="animate-spin" />}
                   {REMOVE_ACCESS}
                 </AlertDialogAction>

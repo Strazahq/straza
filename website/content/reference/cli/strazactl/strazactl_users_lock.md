@@ -2,7 +2,7 @@
 title: strazactl users lock
 description: 'Lock a user: a revocation that an identity manager cannot lift by enabling the user; the status stays as it is'
 pagetype: reference
-weight: 113
+weight: 107
 draft: false
 sources:
   - cmd/strazactl

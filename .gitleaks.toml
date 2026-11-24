@@ -175,6 +175,19 @@ regexes = [
 regexTarget = "match"
 condition = "AND"
 
+[[allowlists]]
+description = """The stand-in for an AI agent's Ed25519 public key in the jsdom \
+test of the console's Register key dialog. A public key is public by design: \
+the server stores it in clear and the console shows its fingerprint to every \
+administrator. The value is typed into the field and read back from the \
+mocked setKey, and nothing else reads it. It has been in the history since \
+the first test of that dialog, inline, and the generic key rule fired only \
+once the test gave it the name KEY."""
+paths = ['''web/ui/src/components/user-key\.test\.tsx''']
+regexes = ['''bo9pMuhh0gS0qLSCTMmpEJMzHbG3uJ6rXR2n5WZP0aM=''']
+regexTarget = "line"
+condition = "AND"
+
 # --- eval-stack demo credentials -------------------------------------------
 
 [[allowlists]]
@@ -305,5 +318,31 @@ curl in that match carries -u or --user of its own, and every host in it is \
 example.com, so it holds no login."""
 paths = ['''internal/classifier/heuristic_test\.go''']
 regexes = ['''review 4c sudo -u from fetch''']
+regexTarget = "match"
+condition = "AND"
+
+# --- pinned finding keys of the draft check's tests --------------------------
+
+[[allowlists]]
+description = """The pinned keys of TestFindingFieldsLeaveKeysAlone. Each \
+value is Finding.Key, the SHA-256 of a test finding's code, object and words, \
+written down so the test fails if a new field ever enters the key. The \
+generic key rule fires where the map key ends in the policy name dev-access. \
+The values are hashes of text that stands in the same test file, so they \
+hold no credential."""
+paths = ['''internal/drafts/finding_fields_test\.go''']
+regexes = ['''dev-access": "[0-9a-f]{64}"''']
+regexTarget = "match"
+condition = "AND"
+
+[[allowlists]]
+description = """The stand-in client assertion of the Microsoft Graph client's \
+tests. Its three parts decode to the header {"alg":"RS256","x5t#S256":"thumb"}, \
+the payload {"sub":"service"} and the bytes cert-signature in place of a \
+signature, so no key signed it and no server accepts it. The tests look for \
+this exact text in errors and logs to prove the client never leaks an \
+assertion."""
+paths = ['''internal/entragraph/helpers_test\.go''']
+regexes = ['''eyJhbGciOiJSUzI1NiIsIng1dCNTMjU2IjoidGh1bWIifQ\.eyJzdWIiOiJzZXJ2aWNlIn0\.Y2VydC1zaWduYXR1cmU''']
 regexTarget = "match"
 condition = "AND"

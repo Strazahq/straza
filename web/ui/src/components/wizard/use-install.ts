@@ -2,6 +2,7 @@ import * as React from "react";
 import { type ApiError, type AppRow, listApps, recheckApp, setListingCredential, setSecret } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { checkRow, notListed, publishRow } from "@/lib/save-words";
+import { didNotRun } from "@/lib/server-words";
 import { type HealthRead, healthRead, probeSay } from "@/lib/words";
 import type { Problem, Row, RowState } from "./parts";
 
@@ -12,9 +13,12 @@ export type Landed = { rows: Row[]; app: AppRow | null; read: HealthRead | null;
 
 export type InstallArgs = { name: string; url: string; secret: string | null; onSecretTried: () => void };
 
-const SECRET_UNREACHABLE = "strazad is unreachable, so the secret may or may not be stored. Check the server's Credential tab before setting it again.";
-export const CHECK_UNREACHABLE = "The check did not reach strazad. Check the connection, then Recheck.";
-const RECHECK_UNREACHABLE = "The recheck did not reach strazad. Check the connection, then try again.";
+// SECRET_UNSURE heads a secret store Straza never answered, which may have
+// landed or not.
+const SECRET_UNSURE = "The secret may not be stored.";
+const SECRET_UNREACHABLE = "Straza did not answer. Check Server authentication on the server's Overview before setting it again.";
+export const CHECK_UNREACHABLE = "Straza did not answer. Check the connection, then Recheck.";
+const RECHECK_UNREACHABLE = "Straza did not answer. Check the connection, then try again.";
 
 const stateOf = (read: HealthRead): RowState => (read.kind === "running" ? "done" : read.kind === "refused" ? "refused" : "failed");
 const bare = (message: string) => message.replace(/\.$/, "");
@@ -104,10 +108,10 @@ export function useInstall() {
   const [problem, setProblem] = React.useState<Problem | null>(null);
   const [busy, setBusy] = React.useState(false);
 
-  const refuse = (subject: string, err: ApiError, unreachable: string, lead: string) => {
+  const refuse = (subject: string, err: ApiError, unreachable: string, lead: string, heading = didNotRun(subject)) => {
     if (err.status === 401) return;
-    setProblem(problemOf(subject, err, unreachable));
-    notify.failed(err.unreachable ? unreachable : lead + bare(err.message) + ".");
+    setProblem({ ...problemOf(subject, err, unreachable), heading });
+    notify.failed(err.unreachable ? heading + " " + unreachable : lead + bare(err.message) + ".");
   };
 
   // afterPublish answers true once the published server is found, so the
@@ -127,10 +131,10 @@ export function useInstall() {
     };
     const failed = (step: "list" | "secret" | "listing" | "check", err?: ApiError) => {
       if (step === "list" || !err) {
-        setProblem({ subject: "Check", unreachable: false, text: notListed(name) });
+        setProblem({ subject: "Check", unreachable: true, text: notListed(name) });
         notify.failed(notListed(name));
       } else if (step === "secret") {
-        refuse("Secret", err, SECRET_UNREACHABLE, "Storing the secret was refused: ");
+        refuse("Secret", err, SECRET_UNREACHABLE, "Storing the secret was refused: ", SECRET_UNSURE);
       } else {
         refuse("Check", err, CHECK_UNREACHABLE, "The check was refused: ");
       }

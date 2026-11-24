@@ -92,6 +92,20 @@ check-in starts a session, and a Postgres store cannot hold that character
 in text or jsonb, so the server refuses it in every check-in, a refresh
 included, rather than strip it. A straza client never adds the character itself.
 
+A check-in may say where its session runs. `host` is the host name of the
+machine the straza service runs on. `folder` is the folder the session
+started in. A straza client writes the user's home directory at the start
+of the folder as `~`, because a path under a home directory carries the
+person's account name, cuts a folder over 1024 bytes and keeps its end, and
+cuts a host name over 256 bytes. The server records both on the session a
+check-in starts and ignores them on a refresh, so a session keeps the
+folder of the window that started it. Nothing verifies either value and no
+decision reads it: like `client`, they are self-reported. The server sends
+them only in the sessions answers of the admin API, and no event carries
+them. A `host` over 256 bytes, a `folder` over 1024 bytes, or a NUL
+character in either is refused with 400 at the same point and in the same
+way as the bounds above, on every lane, a refresh included.
+
 ## Key lane
 
 A device can enroll with an Ed25519 key instead of a device token (openapi
@@ -450,6 +464,22 @@ Changes to this artifact follow the additive-change rule in the spec README:
 schema + fixtures + CHANGELOG + version bump in the same PR.
 
 ## Changelog
+- **v1beta1** (2026-11-15, machine and folder): the request may carry
+  `host`, the host name of the machine the straza service runs on, at most
+  256 bytes, and `folder`, the folder the session started in with the home
+  directory written as `~`, at most 1024 bytes. The server records both on
+  the session a check-in starts, ignores them on a refresh, and sends them
+  as `host` and `folder` in the sessions answers of the admin API (openapi
+  0.169.0). Nothing verifies them and no event carries them. A longer value
+  or a NUL character in either answers 400 with a sentence that names the
+  field, as the text bounds of 2026-10-31 and the NUL rule of 2026-11-04 do.
+  Additive: older clients send neither field, an older server ignores both,
+  and the earlier examples replay as before. A request that carried a field
+  of one of these names before had it ignored, and no straza client sent
+  one. The example `checkin-valid-where.json` pins a check-in with both
+  fields and `checkin-invalid-folder-long.json` a folder of 1025 bytes
+  (derived from this document and the server's checkinTextRefusal, not
+  captured from a live wire: [doc]).
 - **v1beta1** (2026-11-08, max_age of the browser sign-in): the straza
   client's authorization request carries `max_age=600` instead of
   `max_age=0` (section Person sign-in at key enrollment). Microsoft Entra

@@ -12,7 +12,6 @@ import {
   ADD_LATER,
   CANCEL,
   CLOSE,
-  GO_LISTING,
   STORE_LISTING,
   againHint,
   enterListingOr,
@@ -35,7 +34,6 @@ import {
   notStored,
   notStoredText,
   openLive,
-  publishGo,
   publishedToast,
   publishingTitle,
   retryHint,
@@ -61,8 +59,8 @@ import type { HealthRead } from "@/lib/words";
 // lives in the dialog's state until the publish lands and is then sent
 // once.
 
-const FIELD = "h-8 w-80 max-w-full font-mono text-sm";
-const LABEL = "text-sm font-semibold text-foreground";
+const FIELD = "h-8 w-80 max-w-full font-mono text-dense";
+const LABEL = "text-dense font-semibold text-foreground";
 
 // Field is one value the section asks: a server's secret or its listing
 // credential, keyed apart in the dialog's state.
@@ -76,18 +74,15 @@ export const fieldsOf = (asks: SecretAsk[]): Field[] =>
     ...(a.listing ? [{ key: a.name + "/listing", ask: a, kind: "listing" as const }] : []),
   ]);
 
-// askState is what the section asks of the button: its label, which counts
-// every value to store as a secret, and the line that names the first
-// field nobody answered, or "".
-export function askState(fields: Field[], values: Record<string, string>, later: Record<string, boolean>): { label: string; need: string } {
-  const asked = fields.filter((f) => !later[f.key]);
-  const empty = asked.find((f) => !values[f.key]);
-  const label = asked.length === 1 && asked[0].kind === "listing" ? GO_LISTING : publishGo(asked.length);
-  return { label, need: !empty ? "" : empty.kind === "listing" ? enterListingOr(empty.ask.name) : enterOr(empty.ask.name) };
+// askState is what the section asks before the button: the line that
+// names the first field nobody answered, or "".
+export function askState(fields: Field[], values: Record<string, string>, later: Record<string, boolean>): { need: string } {
+  const empty = fields.find((f) => !later[f.key] && !values[f.key]);
+  return { need: !empty ? "" : empty.kind === "listing" ? enterListingOr(empty.ask.name) : enterOr(empty.ask.name) };
 }
 
-// leadOf says what is missing and that the dialog stores it: one sentence
-// for servers that miss only their secret, else one per server.
+// leadOf says what is missing: one sentence for servers that miss only
+// their secret, else one per server.
 function leadOf(asks: SecretAsk[]): string {
   if (asks.every((a) => !a.listing)) return secretsLead(asks.map((a) => a.name));
   return asks.map((a) => (!a.listing ? secretsLead([a.name]) : a.secret ? leadBoth(a.name, a.listing) : leadListing(a.name, a.listing))).join(" ");
@@ -112,8 +107,8 @@ export function SecretFields({ asks, agent, values, later, onValue, onLater }: F
   const head = secretsHead(fields.length);
   return (
     <section aria-label={head} className="flex flex-col gap-3 rounded-md border border-border bg-background px-3.5 py-3" data-secrets>
-      <p className="m-0 text-[13px] font-semibold text-muted-foreground">{head}</p>
-      <p className="m-0 text-sm leading-relaxed text-text-2">{leadOf(asks)}</p>
+      <p className="m-0 text-caption font-semibold text-muted-foreground">{head}</p>
+      <p className="m-0 text-dense leading-relaxed text-text-2">{leadOf(asks)}</p>
       {fields.map((f, i) => {
         const field = id + "-" + i;
         const off = !!later[f.key];
@@ -122,13 +117,13 @@ export function SecretFields({ asks, agent, values, later, onValue, onLater }: F
           <div key={f.key} className="flex flex-col gap-1.5" data-secret={f.key}>
             <label htmlFor={field} className={LABEL}>{pin ? listingLabel(f.ask.name) : secretLabel(f.ask.name)}</label>
             <Input id={field} type="password" value={values[f.key] || ""} onChange={(e) => onValue(f.key, e.target.value)} disabled={off} autoComplete="off" spellCheck={false} aria-describedby={field + "-say"} className={FIELD} />
-            <p id={field + "-say"} className={cn(HINT, "m-0 max-w-[75ch]")}>{pin ? listingHint(f.ask.name, pin, agent) : secretHint(agent)}</p>
-            <label className="flex items-center gap-2 text-sm text-text-2">
+            <p id={field + "-say"} className={cn(HINT, "m-0 max-w-[75ch]")}>{pin ? listingHint(pin, agent) : secretHint(agent)}</p>
+            <label className="flex items-center gap-2 text-dense text-text-2">
               <input type="checkbox" checked={off} onChange={(e) => onLater(f.key, e.target.checked)} className="size-4 shrink-0 accent-primary" />
               {ADD_LATER}
             </label>
             {off && (
-              <p className="m-0 max-w-[75ch] rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-[13px] leading-snug text-text-2" data-later>
+              <p className="m-0 max-w-[75ch] rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-caption leading-snug text-text-2" data-later>
                 {pin ? laterListing(f.ask.name, pin) : laterLine(f.ask.name)}
               </p>
             )}
@@ -332,10 +327,10 @@ function Outcome({ id, r, run }: { id: string; r: Run; run: SecretRun }) {
   let check: React.ReactNode = null;
   if (!lost && r.read && r.read.kind === "running") check = <HealthBox read={r.read} />;
   else if (!lost && r.check) check = <ProblemBlock problem={problemOf("Check", r.check, CHECK_UNREACHABLE)} />;
-  else if (!lost && r.read) check = <>{r.stored && <p className="m-0 text-sm text-text-2" data-stored-not-passed>{storedNotPassed(name)}</p>}<HealthBox read={r.read} /></>;
+  else if (!lost && r.read) check = <>{r.stored && <p className="m-0 text-dense text-text-2" data-stored-not-passed>{storedNotPassed(name)}</p>}<HealthBox read={r.read} /></>;
   let listing: React.ReactNode = null;
   if (pin && !r.listing) listing = <p className={cn(HINT, "m-0")} data-later>{laterListing(name, pin)}</p>;
-  else if (pin && r.listed && stateIs(r, "listing", "done")) listing = <p className="m-0 text-sm text-text-2" data-lists-soon>{listsSoon(name, pin)}</p>;
+  else if (pin && r.listed && stateIs(r, "listing", "done")) listing = <p className="m-0 text-dense text-text-2" data-lists-soon>{listsSoon(name, pin)}</p>;
   else if (pin && r.list) {
     listing = r.list.unreachable
       ? <FetchError subject={name} heading={listingMaybeStored(name)} detail={listingMaybeText(id, name)} />
@@ -397,7 +392,7 @@ export function SecretRunView({ id, run, onClose }: { id: string; run: SecretRun
           {runs.map((r) => (
             <section key={r.ask.name} aria-label={r.ask.name} className="flex flex-col gap-2 rounded-md border border-border px-3 py-2.5" data-run={r.ask.name}>
               <div className="flex flex-wrap items-center gap-2.5">
-                <span className="font-mono text-sm font-semibold text-foreground">{r.ask.name}</span>
+                <span className="font-mono text-dense font-semibold text-foreground">{r.ask.name}</span>
                 {passed(r) && <Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={() => openServer(r.app)}>{openLive(r.ask.name)}</Button>}
               </div>
               {waits(r) ? (

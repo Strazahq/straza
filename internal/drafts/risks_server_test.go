@@ -1,7 +1,6 @@
 package drafts
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
@@ -15,8 +14,8 @@ import (
 // that the risk of a rule which names harness tools reads as those tools.
 func TestUnregisteredServerRisks(t *testing.T) {
 	t.Parallel()
-	const tail = ", whose tools are denied until a rule allows them."
-	const managed = " on managed machines, where this deployment denies it by default."
+	const tail = " and denies by default."
+	const managed = " on managed machines. This deployment denies those calls by default."
 	rule := func(id, body string) string { return "    - id: " + id + "\n      events: [tool.pre]\n" + body }
 	hold := "      mode: approve\n      effect: allow\n      approve: { roles: [sec-approvers] }\n"
 	cases := []struct {
@@ -30,23 +29,23 @@ func TestUnregisteredServerRisks(t *testing.T) {
 	}{
 		{"an allow of named tools on a server that is not registered", false,
 			rule("allow-chrome", "      tools: [mcp.call]\n      apps: [claude-in-chrome]\n      toolNames: { allow: [navigate, form_input] }\n      effect: allow\n"), codeLocalAllow,
-			"Rule allow-chrome of dev-access allows navigate and form_input of claude-in-chrome, an MCP server Straza has not registered" + tail, "allow-chrome: claude-in-chrome"},
+			"Rule allow-chrome of dev-access allows navigate and form_input of claude-in-chrome, which Straza has not registered" + tail, "allow-chrome: claude-in-chrome"},
 		{"an allow of every tool of such a server", false, rule("allow-chrome", "      tools: [mcp.call]\n      apps: [claude-in-chrome]\n      effect: allow\n"), codeLocalAllow,
-			"Rule allow-chrome of dev-access allows every tool of claude-in-chrome, an MCP server Straza has not registered" + tail, "allow-chrome: claude-in-chrome"},
+			"Rule allow-chrome of dev-access allows every tool of claude-in-chrome, which Straza has not registered" + tail, "allow-chrome: claude-in-chrome"},
 		{"an allow of MCP tools that names no server", false, rule("allow-mcp", "      tools: [mcp.call]\n      effect: allow\n"), codeLocalAllow,
-			"Rule allow-mcp of dev-access allows every tool of every MCP server, also of the servers Straza has not registered" + tail, "allow-mcp: every MCP server"},
+			"Rule allow-mcp of dev-access allows every tool of every MCP server, including the servers Straza has not registered" + tail, "allow-mcp: every MCP server"},
 		{"an allow on a registered server", false, rule("allow-github", "      tools: [mcp.call]\n      apps: [github]\n      effect: allow\n"), codeLocalAllow, "", ""},
 		{"an allow on the built-in server", false, rule("allow-straza", "      tools: [mcp.call]\n      apps: [straza]\n      effect: allow\n"), codeLocalAllow, "", ""},
 		{"an approval that names such a server", false, rule("hold-chrome", "      tools: [mcp.call]\n      apps: [claude-in-chrome]\n      toolNames: { allow: [navigate] }\n"+hold), codeGuardrail,
-			"Rule hold-chrome of dev-access lets navigate of claude-in-chrome run once a person approves it, although claude-in-chrome is an MCP server Straza has not registered" + tail,
+			"Rule hold-chrome of dev-access lets navigate of claude-in-chrome run once a person approves it, although Straza has not registered claude-in-chrome and denies its tools by default.",
 			" on claude-in-chrome"},
 		{"an approval of an MCP tool that names no server", false, rule("hold-any", "      tools: [mcp.call]\n      toolNames: { allow: [push_files] }\n"+hold), codeGuardrail, "", ""},
 		{"a server check of an MCP tool that names no server", false,
 			rule("check-any", "      tools: [mcp.call]\n      toolNames: { allow: [navigate] }\n      mode: serverCheck\n      effect: allow\n"), codeGuardrail,
-			"Rule check-any of dev-access lets navigate of every MCP server run once the server allows it, also of the servers Straza has not registered" + tail, " on every MCP server"},
+			"Rule check-any of dev-access lets navigate of every MCP server run once the server allows it, including the servers Straza has not registered" + tail, " on every MCP server"},
 		{"a classifier of an MCP tool that names no server", false,
 			rule("scan-any", "      tools: [mcp.call]\n      toolNames: { allow: [navigate] }\n      mode: classify\n      effect: allow\n"), codeGuardrail,
-			"Rule scan-any of dev-access lets navigate of every MCP server run once a classifier allows it, also of the servers Straza has not registered" + tail, " on every MCP server"},
+			"Rule scan-any of dev-access lets navigate of every MCP server run once a classifier allows it, including the servers Straza has not registered" + tail, " on every MCP server"},
 		{"an allow of one harness tool", true, rule("allow-lsp", "      tools: [other]\n      toolNames: { allow: [LSP] }\n      effect: allow\n"), codeLocalAllow,
 			"Rule allow-lsp of dev-access allows the harness tool LSP" + managed, "allow-lsp: other"},
 		{"an allow of two harness tools", true, rule("allow-two", "      tools: [other]\n      toolNames: { allow: [LSP, FutureTool] }\n      effect: allow\n"), codeLocalAllow,
@@ -83,12 +82,13 @@ func TestUnregisteredServerRisks(t *testing.T) {
 	}
 }
 
-// TestAgentCannotOpenAServerItRegisters pins that an agent's draft is
-// refused when it opens an MCP server a harness runs itself by a way the
-// draft check could miss: a gate that names a server the same draft
-// registers, and a gate by tool name that no person decides. A gate by
-// tool name that a person decides stays a change the agent may make, and
-// a person's draft that registers the server it gates carries no risk.
+// TestAgentCannotOpenAServerItRegisters pins that an agent's draft raises
+// agent.guardrail, which a direct route refuses, when it opens an MCP
+// server a harness runs itself by a way the draft check could miss: a
+// gate that names a server the same draft registers, and a gate by tool
+// name that no person decides. A gate by tool name that a person decides
+// raises nothing, and a person's draft that registers the server it gates
+// carries no risk.
 func TestAgentCannotOpenAServerItRegisters(t *testing.T) {
 	t.Parallel()
 	gate := func(id, body string) string {
@@ -97,17 +97,16 @@ func TestAgentCannotOpenAServerItRegisters(t *testing.T) {
 	named := gate("hold-chrome", "      apps: [claude-in-chrome]\n      mode: approve\n      approve: { roles: [sec-approvers] }\n")
 	chrome := map[string]App{"claude-in-chrome": {Name: "claude-in-chrome", Status: "running", Runtime: "remote", URL: "https://chrome.example.com", Credential: CredentialNone, Exposure: []string{"*"}}}
 	tools := func() (map[string]string, error) { return map[string]string{"Bash": policy.ToolShellExec}, nil }
-	widens := func(id string) []string { return []string{guardRefusal("agent-guardrails", "adds or widens rule "+id)} }
 	for _, tc := range []struct {
-		name    string
-		rule    string
-		apps    map[string]App
-		refused []string
+		name   string
+		rule   string
+		apps   map[string]App
+		widens string
 	}{
-		{"a gate that names a server the same draft registers", named, chrome, widens("hold-chrome")},
-		{"a server check by tool name", gate("check-nav", "      toolNames: { allow: [navigate] }\n      mode: serverCheck\n"), nil, widens("check-nav")},
-		{"a classifier by tool name", gate("scan-nav", "      toolNames: { allow: [navigate] }\n      mode: classify\n"), nil, widens("scan-nav")},
-		{"an approval by tool name", gate("hold-nav", "      toolNames: { allow: [navigate] }\n      mode: approve\n      approve: { roles: [sec-approvers] }\n"), nil, []string{}},
+		{"a gate that names a server the same draft registers", named, chrome, "hold-chrome"},
+		{"a server check by tool name", gate("check-nav", "      toolNames: { allow: [navigate] }\n      mode: serverCheck\n"), nil, "check-nav"},
+		{"a classifier by tool name", gate("scan-nav", "      toolNames: { allow: [navigate] }\n      mode: classify\n"), nil, "scan-nav"},
+		{"an approval by tool name", gate("hold-nav", "      toolNames: { allow: [navigate] }\n      mode: approve\n      approve: { roles: [sec-approvers] }\n"), nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := guardWorld()
@@ -115,9 +114,20 @@ func TestAgentCannotOpenAServerItRegisters(t *testing.T) {
 			if tc.apps != nil {
 				items = append([]Item{appPut("claude-in-chrome")}, items...)
 			}
-			v := Check(w, agentDraftOf(w, items...), CheckInput{Proposer: ciBot, Now: checkNow, HarnessTools: tools, Apps: tc.apps})
-			if got := only(findingLines(v.Refused), codeAgentGuardrail); len(got)+len(tc.refused) > 0 && !reflect.DeepEqual(got, tc.refused) {
-				t.Errorf("Refused\n got %q\nwant %q", got, tc.refused)
+			var risks, refused []string
+			if tc.widens != "" {
+				risks = []string{guardLoosened("agent-guardrails", "adds or widens rule "+tc.widens)}
+				refused = []string{guardRefusal("agent-guardrails", "adds or widens rule "+tc.widens)}
+			}
+			in := CheckInput{Proposer: ciBot, Now: checkNow, HarnessTools: tools, Apps: tc.apps}
+			acceptedWhereRefused(t, w, agentDraftOf(w, items...), in)
+			v := Check(w, agentDraftOf(w, items...), in)
+			if got := only(riskLines(v.Risks), codeAgentGuardrail); len(only(findingLines(v.Refused), codeAgentGuardrail)) > 0 || !sameLines(got, risks) {
+				t.Errorf("refused %q, risks\n got %q\nwant %q", findingLines(v.Refused), got, risks)
+			}
+			in.Direct = true
+			if got := only(findingLines(Check(w, agentDraftOf(w, items...), in).Refused), codeAgentGuardrail); !sameLines(got, refused) {
+				t.Errorf("Refused on a direct route\n got %q\nwant %q", got, refused)
 			}
 		})
 	}

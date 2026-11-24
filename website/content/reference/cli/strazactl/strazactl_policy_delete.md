@@ -2,7 +2,7 @@
 title: strazactl policy delete
 description: Delete a PolicySet that is off (turn a live one off first)
 pagetype: reference
-weight: 68
+weight: 62
 draft: false
 sources:
   - cmd/strazactl

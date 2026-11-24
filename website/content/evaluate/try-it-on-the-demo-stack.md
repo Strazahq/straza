@@ -93,7 +93,7 @@ Open the console at `http://localhost:8420/console/` and press **Sign in**. Keyc
 
 `strazactl` has no sign-in of its own. It runs on an admin API token that alice mints in the console.
 
-{{< clicks "Settings" "API tokens" "New API token" >}}
+{{< clicks "Settings" "Mint a token" >}}
 
 Name it `alice-terminal`, pick `expires in 30 days` and the job **Full root**, and press **Mint token**. Copy the token, because the sheet shows it once. Paste it at the `read` line below and press Enter, which keeps it off the screen and out of the shell history.
 
@@ -143,11 +143,11 @@ Straza: approval ticket 01a19df2-a1b3-7bcf-9326-5aaae4171f10 is pending. A perso
 
 The ticket goes to sam's sponsor alice and to every holder of the approver role `sec-approvers`, and the first answer counts. In the console:
 
-{{< clicks "Approvals" "Requests" "Approve" "Approve request" >}}
+{{< clicks "Approvals" "Requests" "Approve" "Approve" >}}
 
-The row reads `./deploy prod` for `sam-sre-agent`, decided by `alice or sec-approvers`, with about 24 hours left. The dialog says the next such call by sam within the grant window runs once.
+The row reads `./deploy prod` for `sam-sre-agent`, decided by `alice or sec-approvers`, with about 24 hours left. Its **Approve** opens the request, which says the next such call by sam within the grant window runs once. Press **Approve** in the request.
 
-{{< see >}}`Approved. ./deploy prod may run once within the grant window for sam-sre-agent.`{{< /see >}}
+{{< see >}}`Approved. ./deploy prod may run once for sam-sre-agent.`{{< /see >}}
 
 {{< cli >}}
 
@@ -199,9 +199,9 @@ midPoint answers with no body and sends the change to Straza over SCIM, where St
 
 {{< console >}}
 
-On **Users**, set the **Status** filter to `disabled`, open `sam-sre-agent`, and press **open** after **Audit trail**.
+On **Users**, set the **Status** filter to `disabled`, open `sam-sre-agent`, and press **Audit chain of sam-sre-agent** at the foot of the **Access** tab.
 
-{{< see >}}sam's row reads `disabled` and `locked`, and the sheet says `Locked by Straza. deactivated via SCIM`. The audit trail holds `user.killed` with the reason `deactivated via SCIM`, and the refused `login` with `user is disabled`.{{< /see >}}
+{{< see >}}sam's row reads `disabled`, and sam's page carries a strip that says `by your identity manager` beside **Enable**. The audit trail holds `user.killed` with the reason `deactivated via SCIM`, and the refused `login` with `user is disabled`.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}

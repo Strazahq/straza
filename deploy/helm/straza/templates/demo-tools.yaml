@@ -2,8 +2,10 @@
 # The eval stack's demo MCP upstream (protocol reference server, upstream
 # package "server-everything"), so a fresh install has something to
 # register, police, and approve against.
-# ClusterIP ONLY and no ingress, ever: the single road to it is strazad's
-# governed /mcp gateway (no ungoverned surfaces). Register it by hand from the
+# It gets a ClusterIP Service and never an ingress. The demo-tools policy in
+# networkpolicy.yaml admits only the strazad pods while networkPolicy.enabled
+# is on and the CNI enforces NetworkPolicy. With networkPolicy.enabled=false
+# any pod in the cluster can reach it. Register it by hand from the
 # console, or declaratively via apps.manifests pointing at
 # http://{{ include "straza.fullname" . }}-demo-tools:3001/mcp.
 apiVersion: v1

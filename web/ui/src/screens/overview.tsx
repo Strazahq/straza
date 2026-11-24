@@ -24,6 +24,8 @@ import {
   type RoleRow,
   type SessionRow,
   type SinkRow,
+  type EntraStatus,
+  entraStatus,
   getConfig,
   listApprovals,
   listApps,
@@ -56,6 +58,7 @@ import {
   SUBJECT_SERVERS,
   SUBJECT_SESSIONS,
   SUBJECT_SINKS,
+  STALE_WHAT,
   type SetupStep,
   VALUE_UNAVAILABLE,
   configRows,
@@ -63,11 +66,13 @@ import {
   readLine,
   refreshFailed,
   seatLine,
+  staleLine,
   summaryLastRead,
   summaryUnread,
 } from "@/lib/config-words";
 import { ASSERTION_PURPOSE, type SigningKeyRow, entraBlueprints, listSigningKeys, usesEntra } from "@/lib/keys-api";
 import { SUBJECT_KEYS } from "@/lib/keys-words";
+import { SUBJECT_ENTRA } from "@/lib/entra-words";
 import { version as readVersion } from "@/lib/public";
 import { routeByKey } from "@/lib/routes";
 import { readFailed } from "@/lib/say";
@@ -176,6 +181,10 @@ type State = {
   // blueprints are the providers' Entra blueprints, read with the keys,
   // and null when not known.
   blueprints: string[] | null;
+  // entra is the state of the read of Entra, and held the roles whose
+  // group in Entra holds removals, read only while one does.
+  entra: EntraStatus | null;
+  held: RoleRow[] | null;
   apps: AppRow[] | null;
   sinks: SinkRow[] | null;
   sessions: SessionRow[] | null;
@@ -199,6 +208,8 @@ const START: State = {
   drafts: null,
   keys: null,
   blueprints: null,
+  entra: null,
+  held: null,
   apps: null,
   sinks: null,
   sessions: null,
@@ -248,7 +259,7 @@ export function Overview() {
   const readAll = React.useCallback(async () => {
     const changeQuery = (type: string) => listAudit(query({ order: "desc", limit: CHANGE_SCAN, q: typeNeedle(type) }));
     const full = adminAreas() === null;
-    const [ovR, cfgR, apR, chainR, sinkR, sessR, appsR, adminR, identityR, policyR, draftsR, keysR, blueprintsR] = await Promise.allSettled([
+    const [ovR, cfgR, apR, chainR, sinkR, sessR, appsR, adminR, identityR, policyR, draftsR, keysR, blueprintsR, entraR] = await Promise.allSettled([
       overview(),
       getConfig(),
       listApprovals("pending"),
@@ -262,7 +273,13 @@ export function Overview() {
       listDrafts("state=open&limit=200"),
       full ? listSigningKeys() : Promise.resolve(null),
       full ? entraBlueprints() : Promise.resolve(null),
+      entraStatus(),
     ]);
+    // The roles are read only while a role's group holds removals, to name
+    // each one.
+    const entraRead = fold(entraR, SUBJECT_ENTRA);
+    const heldR = (await Promise.allSettled([entraRead.value && entraRead.value.enabled && entraRead.value.held > 0 ? listRoles() : Promise.resolve(null)]))[0];
+    const held = fold(heldR, SUBJECT_ROLES);
 
     const ov = fold(ovR, SUBJECT_OVERVIEW);
     const cfg = fold(cfgR, SUBJECT_CONFIG);
@@ -286,6 +303,8 @@ export function Overview() {
       { subject: SUBJECT_CHANGES, detail: changes.problem },
       { subject: SUBJECT_DRAFTS, detail: drafts.problem },
       { subject: SUBJECT_KEYS, detail: keys.problem },
+      { subject: SUBJECT_ENTRA, detail: entraRead.problem },
+      { subject: SUBJECT_ROLES, detail: held.problem },
     ].filter((p) => p.detail);
 
     setState((prev) => ({
@@ -297,6 +316,8 @@ export function Overview() {
       drafts: drafts.value ? waitingOf(drafts.value) : drafts.denied ? null : prev.drafts,
       keys: keys.value ? keys.value.filter((k) => k.purpose === ASSERTION_PURPOSE) : keys.denied ? null : prev.keys,
       blueprints: blueprintsR.status === "fulfilled" ? blueprintsR.value : null,
+      entra: keep(prev.entra, entraRead),
+      held: held.value ? held.value.filter((r) => r.entra?.state === "held") : held.denied || (entraRead.value && !entraRead.value.held) ? null : prev.held,
       apps: keep(prev.apps, apps),
       sinks: keep(prev.sinks, sinks),
       sessions: sessions.value ? sessions.value.items || [] : sessions.denied ? null : prev.sessions,
@@ -371,7 +392,7 @@ export function Overview() {
       const err = e as ApiError;
       if (err.status === 401) return;
       setHour((prev) => prev && (err.status === 403
-        ? { ...HOUR_START, note: seatLine(DECIDED_PANEL, "config:read") }
+        ? { ...HOUR_START, note: seatLine(DECIDED_PANEL, "config") }
         : { ...prev, note: LAST_HOUR_UNREAD, problem: readFailed(SUBJECT_LAST_HOUR, err) }));
     }
   }, []);
@@ -425,7 +446,7 @@ export function Overview() {
   const fresh = live.rows && live.base !== null ? live.rows.filter((r) => r.seq > (live.base as number)).length : 0;
   const stale = (subject: string) => state.problems.some((p) => p.subject === subject) && state.readTimes[subject]
     ? relTimeText(state.readTimes[subject].toISOString()) : undefined;
-  const attentionProps = { chain: state.chain, apps: state.apps, approvals: state.approvals, drafts: state.drafts, keys: state.keys, entra: usesEntra(state.blueprints), push: answer?.push, sinks: state.sinks, relaxed: [] };
+  const attentionProps = { chain: state.chain, apps: state.apps, approvals: state.approvals, drafts: state.drafts, keys: state.keys, entra: usesEntra(state.blueprints), entraRead: state.entra, held: state.held, push: answer?.push, sinks: state.sinks, relaxed: [] };
   const hasAttention = attentionItems(attentionProps).length > 0;
   const attention = <Attention {...attentionProps} compact onDetails={tab === "system" ? undefined : openSystem} incomplete={!rows || rows.some((r) => r.value === VALUE_UNAVAILABLE) || problems.length > 0} />;
 
@@ -433,7 +454,7 @@ export function Overview() {
     return (
       <>
         <PageHead label={route.label} description="" />
-        <p className="px-6 py-5 text-sm text-muted-foreground">{READING_OVERVIEW}</p>
+        <p className="px-6 py-5 text-dense text-muted-foreground">{READING_OVERVIEW}</p>
       </>
     );
   }
@@ -459,9 +480,9 @@ export function Overview() {
             {tab === "system" ? <div className="overview-system">
               {attention}
               <Tiles answer={answer} approvals={state.approvals} approvalsDenied={state.approvalsDenied} chain={state.chain} denied={state.answerDenied} stale={{ summary: stale(SUBJECT_OVERVIEW), approvals: stale(SUBJECT_APPROVALS), chain: stale(SUBJECT_CHAIN) }} />
-              {stale(SUBJECT_CONFIG) && <p className="overview-stale">Configuration last read {stale(SUBJECT_CONFIG)}. Values may be outdated.</p>}
+              {stale(SUBJECT_CONFIG) && <p className="overview-stale">{staleLine(STALE_WHAT.config, stale(SUBJECT_CONFIG) || "")}</p>}
               <Posture rows={rows} denied={state.configDenied} expanded />
-              {stale(SUBJECT_SESSIONS) && <p className="overview-stale">Sessions last read {stale(SUBJECT_SESSIONS)}. Values may be outdated.</p>}
+              {stale(SUBJECT_SESSIONS) && <p className="overview-stale">{staleLine(STALE_WHAT.sessions, stale(SUBJECT_SESSIONS) || "")}</p>}
               <SignedIn rows={state.sessions} denied={state.sessionsDenied} serverCommit={serverCommit} expanded />
             </div> : tab === "activity" ? <div className="overview-activity">
               {state.chain.word === "broken" && attention}
@@ -473,7 +494,7 @@ export function Overview() {
               {showSetup && <Setup marks={marks} />}
               <div className="overview-monitor">
                 <div>
-                  {stale(SUBJECT_OVERVIEW) && <p className="overview-stale">Decision counts last read {stale(SUBJECT_OVERVIEW)}.</p>}
+                  {stale(SUBJECT_OVERVIEW) && <p className="overview-stale">{staleLine(STALE_WHAT.decisions, stale(SUBJECT_OVERVIEW) || "")}</p>}
                   <Decisions block={answer?.decisions || null} denied={state.answerDenied} hour={hour} onHour={(on) => setHour((prev) => (on ? prev || HOUR_START : null))} />
                 </div>
                 <div className="overview-monitor-side">

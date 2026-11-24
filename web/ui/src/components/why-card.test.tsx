@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Outcome, WhyCard, decidersLine, wireLine } from "./why-card";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Decision } from "@/lib/api";
-import { ENGINE_FIELDS } from "@/lib/policy-words";
+import { ENGINE_FIELDS, SPONSOR_DECIDES } from "@/lib/policy-words";
 
 // The four readings a decision can have, in the shapes the simulate route
 // answers them: a refusal by a rule, a call a rule allows, a call no rule
@@ -35,44 +35,44 @@ const openFields = () => userEvent.click(screen.getByRole("button", { name: ENGI
 describe("the why card", () => {
   it("reads a refusal by a rule, with the rule and the policy in the sentence", async () => {
     card({ effect: "deny", ruleId: "no-env", setName: "dev-guardrails", reason: "Straza: reading the environment is refused." });
-    expect(word().textContent).toBe("Denied");
+    expect(word().textContent).toBe("denied");
     expect(word().className).toContain("text-danger");
-    expect(box().textContent).toContain("Decided by rule no-env in policy dev-guardrails: Straza: reading the environment is refused.");
+    expect(box().textContent).toContain("Decided by policy rule no-env in policy dev-guardrails: Straza: reading the environment is refused.");
     await openFields();
     expect(box().textContent).toContain("effect=deny · ruleId=no-env · setName=dev-guardrails · snapshot=7c1e9a2b (live)");
   });
 
   it("reads a call a rule allows", () => {
     card({ effect: "allow", ruleId: "dev-mcp-reads", setName: "dev-guardrails" });
-    expect(word().textContent).toBe("Allowed");
+    expect(word().textContent).toBe("allowed");
     expect(word().className).toContain("text-ok");
-    expect(box().textContent).toContain("Decided by rule dev-mcp-reads in policy dev-guardrails.");
+    expect(box().textContent).toContain("Decided by policy rule dev-mcp-reads in policy dev-guardrails.");
   });
 
   it("reads a call no rule matched, allowed by role access", async () => {
     card({ effect: "allow", reason: "allowed by role access" });
-    expect(word().textContent).toBe("Allowed");
-    expect(box().textContent).toContain("No policy matched this call. Allowed by role access. No policy rule gates this tool.");
+    expect(word().textContent).toBe("allowed");
+    expect(box().textContent).toContain("No policy matched this call. Allowed by role access. No policy rule decides this tool.");
     await openFields();
     expect(box().textContent).toContain("effect=allow · ruleId=none · setName=none · snapshot=7c1e9a2b (live)");
   });
 
   it("reads a call no rule matched, refused by the enterprise default", () => {
     card({ effect: "deny" });
-    expect(word().textContent).toBe("Denied");
-    expect(box().textContent).toContain("No policy matched this call. Denied by the enterprise profile default: a call nothing allows is denied.");
+    expect(word().textContent).toBe("denied");
+    expect(box().textContent).toContain("No policy matched this call. Denied by default. On the enterprise profile a call that nothing allows is denied.");
   });
 
   it("keeps the generic default sentence when the profile was not read", () => {
     card({ effect: "deny" }, "");
-    expect(box().textContent).toContain("No policy matched this call. Denied by the profile default: no policy allowed this call.");
+    expect(box().textContent).toContain("No policy matched this call. Denied by default. No policy allowed this call.");
   });
 
   it("reads a call that waits for a person, and names who decides", async () => {
     card({ effect: "allow", ruleId: "dev-mcp-env-ticket", setName: "dev-guardrails", approve: { class: "ticket", deciders: ["sponsor"] } });
-    expect(word().textContent).toBe("Needs approval");
-    expect(word().className).toContain("text-foreground");
-    expect(box().textContent).toContain("The person behind the agent decides.");
+    expect(word().textContent).toBe("needs approval");
+    expect(word().className).toContain("text-warn");
+    expect(box().textContent).toContain(SPONSOR_DECIDES);
     await openFields();
     expect(box().textContent).toContain("effect=allow · mode=approve · class=ticket · ruleId=dev-mcp-env-ticket · setName=dev-guardrails · snapshot=7c1e9a2b (live)");
   });
@@ -81,14 +81,14 @@ describe("the why card", () => {
     expect(decidersLine({ effect: "allow", approve: { roles: ["sec-approvers"] } })).toBe("The approver role sec-approvers decides.");
     expect(decidersLine({ effect: "allow", approve: { roles: ["sec-approvers", "ops-approvers"] } })).toBe("The approver roles sec-approvers or ops-approvers decide.");
     expect(decidersLine({ effect: "allow", approve: { roles: ["sec-approvers", "straza-admin"], deciders: ["sponsor"] } }))
-      .toBe("The person behind the agent or the approver roles sec-approvers or straza-admin decide.");
+      .toBe("The agent's sponsor or the approver roles sec-approvers or straza-admin decide.");
     expect(decidersLine({ effect: "allow", ruleId: "r" })).toBe("");
   });
 
   it("reads a call the requester confirms", async () => {
     const d = { effect: "allow", ruleId: "dev-confirm", setName: "dev-guardrails", approve: {}, confirm: true } as Decision;
     card(d);
-    expect(word().textContent).toBe("Needs approval");
+    expect(word().textContent).toBe("needs approval");
     expect(box().textContent).toContain("The requester confirms on their own device.");
     await openFields();
     expect(box().textContent).toContain("mode=confirm");
@@ -130,6 +130,6 @@ describe("the why card", () => {
     const d = { effect: "deny", ruleId: "no-env", setName: "dev-guardrails", reason: "Straza: refused." };
     render(<TooltipProvider><WhyCard d={d} profile="enterprise" mark="live" head={<Outcome d={d} />} gate={{ lead: "The repo check refused this call before any policy ran.", reason: "x" }} /></TooltipProvider>);
     expect(document.querySelector("[data-gate]")).toBeNull();
-    expect(box().textContent).toContain("Decided by rule no-env in policy dev-guardrails: Straza: refused.");
+    expect(box().textContent).toContain("Decided by policy rule no-env in policy dev-guardrails: Straza: refused.");
   });
 });

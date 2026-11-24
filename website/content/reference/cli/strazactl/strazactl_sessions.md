@@ -2,7 +2,7 @@
 title: strazactl sessions
 description: Inspect and revoke sessions
 pagetype: reference
-weight: 83
+weight: 77
 draft: false
 sources:
   - cmd/strazactl

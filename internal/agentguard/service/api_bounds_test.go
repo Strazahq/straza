@@ -71,6 +71,35 @@ func TestAPIHarnessFieldBounds(t *testing.T) {
 	}
 }
 
+// TestAPISessionFolder pins that the service treats a session start's
+// folder as any local process may send it: a folder over the bound is cut
+// to its last localapi.FolderMax bytes, one with a NUL character is
+// dropped, and the session starts either way.
+func TestAPISessionFolder(t *testing.T) {
+	long := "/" + strings.Repeat("a", 1999)
+	cases := []struct {
+		name, body, want string
+	}{
+		{"a folder", `{"harness":{"name":"claude-code"},"folder":"~/src/app"}`, "~/src/app"},
+		{"no folder, as from an older thin client", `{"harness":{"name":"claude-code"}}`, ""},
+		{"2000 bytes", `{"harness":{"name":"claude-code"},"folder":"` + long + `"}`, long[len(long)-localapi.FolderMax:]},
+		{"a NUL character", `{"harness":{"name":"claude-code"},"folder":"~/a\u0000b"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &apiDouble{session: liveSession(), engine: apiEngine(t, apiOfflineDoc, 900)}
+			a, _ := testAPI(f, false)
+			w := serveAs(a, "1000", http.MethodPost, localapi.RouteSessions, tc.body)
+			if w.Code != http.StatusOK {
+				t.Fatalf("answer = %d %q, want the session started", w.Code, w.Body.String())
+			}
+			if c := f.sessionCalls; len(c) != 1 || !c[0].start || c[0].folder != tc.want {
+				t.Fatalf("calls = %+v, want one start with the folder %q", c, tc.want)
+			}
+		})
+	}
+}
+
 // jsonReq is a POST of v as JSON to route.
 func jsonReq(route string, v any) *http.Request {
 	raw, _ := json.Marshal(v)

@@ -105,10 +105,11 @@ Revoke the token when the client is retired. `strazactl api-token revoke <token 
 
 ## What a certifier sees
 
-A group read is what a certifier reviews: `displayName` is the role, `members` are the direct holders, and the extension carries `roleKind`, `plane`, `description` and the computed `apps`, `tools` and `policies`. The `tools` list above is the same access `strazactl catalog preview --user <username>` shows as `visible` for any holder. A user read carries the direct assignments under `groups`, the `userType`, `agencyMode` and `sponsor` the identity manager writes, and Straza's own `kind`, `origin` and `locked`.
+A group read is what a certifier reviews: `displayName` is the role, `members` are the direct holders apart from those that a role group in Entra gave, and the extension carries `roleKind`, `plane`, `description` and the computed `apps`, `tools` and `policies`. The `tools` list above is the same access `strazactl catalog preview --user <username>` shows as `visible` for any holder. A user read carries the direct assignments under `groups`, the `userType`, `agencyMode` and `sponsor` the identity manager writes, and Straza's own `kind`, `origin` and `locked`.
 
 ## Caveats
 
 - A token with `scim:write` can assign `straza-admin`, because Straza roles render as groups like every other role and a members add on that group is an assignment. The token deserves the protection of an admin credential, and the approval on those memberships in the identity manager is your guard.
 - Straza never removes an account the identity manager created. The cost is a list of disabled rows that only an administrator's delete clears.
+- Where `identity.entra.read` lists `people`, Microsoft Entra ID owns every person, and a create, PUT, PATCH or DELETE of a person answers `403` with a detail that names that setting. Reads, group membership and agents work as before, as `identity/entra-role-groups.md` says. Where it lists `agentUsers` or `agentIdentities`, Entra owns the agents that are in Entra, and a create, PUT, PATCH or DELETE of an agent of the origin `entra` or one that carries an `entraAgentId` answers `403` the same way. Other agents and services work as before.
 - The PUT of a user leaves absent typology attributes untouched, so a client that maps only the core attributes cannot wipe `userType`, `agencyMode` or `sponsor` on a reconciliation. Clearing one is an explicit PATCH `remove`.

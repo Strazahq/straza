@@ -17,9 +17,13 @@ const (
 	blockCount = "count"
 )
 
-// agentLoosenCode is the risk of an agent's draft that loosens a set binding
-// that same agent, which a person accepts when they publish.
-const agentLoosenCode = "agent.guardrail"
+// agentLoosenCode is the risk of an agent's draft that changes a set binding
+// that same agent, and agentReachCode the risk of one that widens the
+// agent's own reach. A person accepts each when they publish.
+const (
+	agentLoosenCode = "agent.guardrail"
+	agentReachCode  = "agent.own-reach"
+)
 
 // confirmBlock is one thing a publisher confirms. lines are the risks it
 // confirms in the verdict's order, expect is the text to type, empty for a
@@ -87,11 +91,11 @@ func confirmBlocks(risks []ctl.DraftFinding) []confirmBlock {
 	return blocks
 }
 
-// loosens reports whether the block holds an agent's loosening of a set
-// that binds it, which a person accepts rather than confirms.
-func (b confirmBlock) loosens() bool {
+// accepted reports whether the block holds an agent's change of its own
+// access, which a person accepts rather than confirms.
+func (b confirmBlock) accepted() bool {
 	for _, f := range b.lines {
-		if f.Code == agentLoosenCode {
+		if f.Code == agentLoosenCode || f.Code == agentReachCode {
 			return true
 		}
 	}
@@ -99,9 +103,9 @@ func (b confirmBlock) loosens() bool {
 }
 
 // verb is what typing the block's text does: accept it for an agent's
-// self-loosening, confirm for every other block.
+// change of its own access, confirm for every other block.
 func (b confirmBlock) verb() string {
-	if b.loosens() {
+	if b.accepted() {
 		return "accept it"
 	}
 	return "confirm"
@@ -121,7 +125,7 @@ func (b confirmBlock) hint() string {
 	}
 	verb := b.verb()
 	switch {
-	case b.loosens():
+	case b.accepted():
 	case len(b.lines) == 1:
 		verb += " it"
 	default:

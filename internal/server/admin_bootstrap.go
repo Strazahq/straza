@@ -3,11 +3,15 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/strazahq/straza/internal/authn"
+	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -19,19 +23,24 @@ import (
 // interactive login as it is alarmed on the audit chain.
 const BreakGlassUsername = "break-glass"
 
+// breakGlassNoPasswordMsg is the WARN line of every enterprise boot that
+// finds the break-glass admin without a password.
+const breakGlassNoPasswordMsg = "BREAK-GLASS: the emergency sign-in is closed, because the break-glass admin has no password yet. " +
+	"An admin can set one over the admin API with `strazactl users set-password break-glass --password <new password>`, " +
+	"or an operator on the server host can run `strazad break-glass set-password` with the settings strazad serve runs with"
+
 // ensureBreakGlass creates the break-glass admin when missing, on fresh
-// AND upgraded stores, both profiles. Password printed once at creation,
-// never persisted in clear. A row that carries an external link is left as
-// it is and warned about on every boot. A row another replica creates in
-// the same instant is used as if this boot had found it. A row this boot
-// finds without straza-admin gets the role back.
+// AND upgraded stores, both profiles. Standalone prints the password once
+// at creation, never persisted in clear. Enterprise creates the admin with
+// no password and logs breakGlassNoPasswordMsg once on every boot while it
+// has none. A row that carries an external link is left as it is and
+// warned about on every boot. A row another replica creates in the same
+// instant is used as if this boot had found it. A row this boot finds
+// without straza-admin gets the role back.
 func (a *App) ensureBreakGlass(ctx context.Context) error {
 	u, err := a.store.Users().GetByUsername(ctx, BreakGlassUsername)
 	if errors.Is(err, store.ErrNotFound) {
-		var created bool
-		if u, created, err = a.createBreakGlass(ctx); created {
-			return nil
-		}
+		u, err = a.createBreakGlass(ctx)
 	} else if err == nil {
 		err = a.repairBreakGlassRole(ctx, u)
 	}
@@ -44,18 +53,26 @@ func (a *App) ensureBreakGlass(ctx context.Context) error {
 		a.log.Warn("BREAK-GLASS: the emergency admin is linked to an external identity. Sign-in through the link is refused, but someone may have signed in through it before this version: "+
 			"check the audit chain for actions by break-glass and rotate its password with `strazactl users set-password break-glass`", "externalId", u.ExternalID)
 	}
+	if u.PasswordHash == "" && a.cfg.Profile == config.ProfileEnterprise {
+		a.log.Warn(breakGlassNoPasswordMsg, "username", BreakGlassUsername)
+	}
 	return nil
 }
 
 // createBreakGlass creates the break-glass admin with its straza-admin
-// assignment and prints the password once. It answers created false with
-// the row when another replica created the admin in the same instant: that
-// replica assigns the role and prints the password.
-func (a *App) createBreakGlass(ctx context.Context) (store.User, bool, error) {
-	password := authn.RandomPassword()
-	hash, err := authn.HashPassword(password)
-	if err != nil {
-		return store.User{}, false, err
+// assignment. Outside enterprise it gives the admin a password and prints
+// it once. On enterprise the admin starts with no password, which the
+// issuer refuses, so no credential ever reaches the log. It answers the row
+// another replica created in the same instant, and that replica assigns
+// the role and prints any password.
+func (a *App) createBreakGlass(ctx context.Context) (store.User, error) {
+	var password, hash string
+	if a.cfg.Profile != config.ProfileEnterprise {
+		password = authn.RandomPassword()
+		var err error
+		if hash, err = authn.HashPassword(password); err != nil {
+			return store.User{}, err
+		}
 	}
 	u, peer, err := adoptPeerRow(a.log, "the break-glass admin", func() (store.User, error) {
 		return a.store.Users().Create(ctx, store.User{Username: BreakGlassUsername, Display: "Break-glass admin", PasswordHash: hash})
@@ -63,14 +80,66 @@ func (a *App) createBreakGlass(ctx context.Context) (store.User, bool, error) {
 		return a.store.Users().GetByUsername(ctx, BreakGlassUsername)
 	})
 	if err != nil || peer {
-		return u, false, err
+		return u, err
 	}
 	if _, err := a.assignBreakGlassAdmin(ctx, u); err != nil {
-		return store.User{}, false, err
+		return store.User{}, err
 	}
-	a.log.Warn("break-glass admin created. Store this password in your vault now, it will not be shown again; rotate on-box via `strazactl users set-password break-glass`",
-		"username", BreakGlassUsername, "password", password)
-	return u, true, nil
+	if password != "" {
+		a.log.Warn("break-glass admin created. Store this password in your vault now, it will not be shown again; rotate on-box via `strazactl users set-password break-glass`",
+			"username", BreakGlassUsername, "password", password)
+	}
+	return u, nil
+}
+
+// reasonHostSetPassword is the reason on the user.update record of a
+// break-glass password set on the server host.
+const reasonHostSetPassword = "set on the server host with strazad break-glass set-password" // #nosec G101 -- an audit reason, not a credential
+
+// SetBreakGlassPassword stores the hash of a new generated password on the
+// break-glass admin in users and answers the password, for the command an
+// operator runs on the server host. It replaces a password the admin has.
+// The hash and one straza.audit.admin user.update record with no actor and
+// reasonHostSetPassword are written in one transaction, which a running
+// strazad's relay chains. A store with no break-glass admin, and a write
+// the database refuses, are answered with a sentence and nothing changes.
+func SetBreakGlassPassword(ctx context.Context, users store.UserRepo) (string, error) {
+	u, err := users.GetByUsername(ctx, BreakGlassUsername)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", errors.New("the database holds no break-glass admin, because strazad serve has not booted on it yet, so nothing changed. " +
+			"Start strazad serve once with these settings, which creates the admin, then run the command again")
+	}
+	if err != nil {
+		return "", err
+	}
+	// The emergency sign-in refuses a row that is not an active person
+	// whatever its password, so a password set on one could never be used.
+	switch {
+	case !personUser(u):
+		return "", fmt.Errorf("the break-glass admin is stored as %s, and the emergency sign-in signs in a person only, so nothing changed. "+
+			"Make it a person again: an admin sends PATCH /v1/admin/users/%s with the body {\"user_type\": \"\"}, "+
+			"or, when no admin can sign in, empty the user_type column of the break-glass row in the users table. Then run the command again", userTypeWord(u), u.ID)
+	case u.Status != store.UserActive:
+		return "", fmt.Errorf("the break-glass admin has the status %s, and the emergency sign-in signs in an active account only, so nothing changed. "+
+			"Set the status column of the break-glass row in the users table to active, then run the command again", u.Status)
+	}
+	password := authn.RandomPassword()
+	hash, err := authn.HashPassword(password)
+	if err != nil {
+		return "", err
+	}
+	ev, err := newCloudEvent("strazad/"+uuid.NewString(), "straza.audit.admin", map[string]any{
+		"action": actionUserUpdate, "target": u.ID, "user": u.ID, "username": u.Username,
+		"changed": []string{"password"}, "reason": reasonHostSetPassword,
+	})
+	if err != nil {
+		return "", err
+	}
+	if err := users.SetPasswordHash(ctx, u.ID, hash, ev); err != nil {
+		return "", fmt.Errorf("the database refused the new break-glass password and its audit record (%w), so nothing changed. "+
+			"Check that the database is reachable with the settings strazad serve runs with, then run the command again", err)
+	}
+	return password, nil
 }
 
 // repairBreakGlassRole assigns straza-admin to the break-glass row u when u
@@ -399,6 +468,7 @@ func (a *App) maybeBootstrapAdmin(r *http.Request, u store.User) {
 		return
 	}
 	a.identityChanged(r, "straza.identity.updated", u.ID)
+	a.pushRolesNudge(u.ID)
 	a.log.Warn("assigned straza-admin via oidc.bootstrapAdmin. Remove the knob once your identity manager manages the role",
 		"user", u.Username)
 }

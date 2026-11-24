@@ -187,7 +187,7 @@ func TestClientAssertionKeyLifecycle(t *testing.T) {
 	if _, _, err := keys.Retire(ctx, time.Now(), "no-such-kid"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("Retire of an unknown kid = %v, want ErrNotFound", err)
 	}
-	sessions, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	sessions, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,18 +481,27 @@ func TestSigningKeyLoadersRefuseOtherPurposes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sealedSeed := func(purpose, kid string) []byte {
+		out, err := sealSeed(sharedSealer(), purpose, kid, priv.Seed())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
 	records := map[string]store.SigningKey{
-		store.KeyPurposeSession:         {KID: "ses", Purpose: store.KeyPurposeSession, Status: store.KeyActive, PrivateKey: priv.Seed(), PublicKey: pub},
-		store.KeyPurposeSnapshot:        {KID: "snap", Purpose: store.KeyPurposeSnapshot, Status: store.KeyActive, PrivateKey: priv.Seed(), PublicKey: pub},
+		store.KeyPurposeSession: {KID: "ses", Purpose: store.KeyPurposeSession, Status: store.KeyActive,
+			PrivateKey: sealedSeed(store.KeyPurposeSession, "ses"), PublicKey: pub},
+		store.KeyPurposeSnapshot: {KID: "snap", Purpose: store.KeyPurposeSnapshot, Status: store.KeyActive,
+			PrivateKey: sealedSeed(store.KeyPurposeSnapshot, "snap"), PublicKey: pub},
 		store.KeyPurposeClientAssertion: sealedKey(t, sealer, "ca", store.KeyActive, rsaKey),
 	}
 	loaders := map[string]func(store.SigningKeyRepo) error{
 		store.KeyPurposeSession: func(r store.SigningKeyRepo) error {
-			_, err := NewTokenService(context.Background(), r, "https://straza.local", 0)
+			_, err := NewTokenService(context.Background(), r, sharedSealer(), "https://straza.local", 0)
 			return err
 		},
 		store.KeyPurposeSnapshot: func(r store.SigningKeyRepo) error {
-			_, err := NewSnapshotKeys(context.Background(), r)
+			_, err := NewSnapshotKeys(context.Background(), r, sharedSealer())
 			return err
 		},
 		store.KeyPurposeClientAssertion: func(r store.SigningKeyRepo) error {
@@ -589,7 +598,7 @@ func TestSignAssertion(t *testing.T) {
 		t.Error("two assertions share a jti, so the provider would refuse the second as a replay")
 	}
 
-	sessions, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	sessions, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

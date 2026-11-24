@@ -41,13 +41,13 @@ The Okta console steps below follow Okta's SCIM integration settings and were no
 Okta presents an admin API token on `/scim/v2`. Its scope carries `scim:read` for the imports and `scim:write` for the pushes. Straza shows the value once and keeps only a hash.
 
 {{< console >}}
-{{< clicks "Settings" "API tokens" "New API token" >}}
+{{< clicks "Settings" "Mint a token" >}}
 
 Enter a name such as `okta-prod` under **Name** and pick a **Lifetime**. Under **The job**, pick **Custom** and set **scim** to **read and write**. Press **Mint token**.
 
 {{< see >}}The sheet `okta-prod is minted`, with the token and a **Copy** button.{{< /see >}}
 
-The console's lifetime starts at `expires in 90 days`, and Okta's provisioning stops once the token expires.
+The console's lifetime starts at `90 days`, and Okta's provisioning stops once the token expires.
 {{< /console >}}
 
 {{< cli >}}
@@ -158,7 +158,7 @@ A `DELETE` answers `204` and deactivates as well. Straza never removes a row the
 ## Link Okta groups to Straza roles
 
 
-Straza exposes each role as a SCIM group. Its `displayName` is the role name, and its `members` are the direct holders. Create the role in Straza first, because Straza refuses a group that Okta tries to create. The example role `scout-tools-readers` comes from [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}).
+Straza exposes each role as a SCIM group. Its `displayName` is the role name, and its `members` are the direct holders, apart from those that a role group in Entra gave. Create the role in Straza first, because Straza refuses a group that Okta tries to create. The example role `scout-tools-readers` comes from [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}).
 
 Okta documents Group Linking to existing target groups through its Push Groups workflow, where the integration supports it. See [Okta's Group Linking instructions](https://help.okta.com/en-us/content/topics/users-groups-profiles/usgp-configure-enhanced-group-push.htm). The Okta group-linking setup was not verified against a tenant for this page, so check the integration's linking and membership behavior before you rely on it for assignments.
 
@@ -178,7 +178,7 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" -H 'Content-Type: applicatio
 {"displayName":"scout-tools-readers","members":["tom-hall"]}
 ```
 
-Straza ignores the `displayName` in the document, so the group keeps its role name. A `PUT` converges the whole set, so a member the document leaves out loses the assignment, whatever wrote it. Straza also accepts the remove that names one member in the path, `members[value eq "<id>"]`, as [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md#read-a-role-and-write-its-membership" >}}) shows.
+Straza ignores the `displayName` in the document, so the group keeps its role name. A `PUT` converges the whole set, so a member the document leaves out loses the assignment that SCIM or an admin wrote. An assignment from a role group in Entra stays. Straza also accepts the remove that names one member in the path, `members[value eq "<id>"]`, as [Generic SCIM]({{< relref "guides/connect-identity/generic-scim.md#read-a-role-and-write-its-membership" >}}) shows.
 
 
 Okta is meant to be the only writer of membership for the roles it pushes. A role you grant a person in the console or with `strazactl assign` works at once, but it is drift. The console badges it, and the next `PUT` of the group, or a `PATCH` that replaces its members, removes it.
@@ -198,9 +198,9 @@ Check that the people Okta pushed arrived, and what their roles give them.
 {{< console >}}
 {{< clicks "Users" >}}
 
-{{< see >}}Each Okta-born account with the origin badge **SCIM**.{{< /see >}}
+{{< see >}}Each Okta-born account with `Identity manager` under **Source**.{{< /see >}}
 
-The console previews what a role reaches, never what one person reaches. That check runs with `strazactl catalog preview --user`.
+A row opens the person's page, whose **Access** tab lists the servers and tools that person reaches. `strazactl catalog preview --user` runs the same check.
 {{< /console >}}
 
 {{< cli >}}
@@ -220,7 +220,7 @@ strazactl catalog preview --user <username>
 Revoking the token stops provisioning at once.
 
 {{< console >}}
-{{< clicks "Settings" "API tokens" "Revoke" "Revoke token" >}}
+{{< clicks "Settings" "Revoke" "Revoke token" >}}
 
 Press **Revoke** on the token's row, then **Revoke token**.
 {{< /console >}}

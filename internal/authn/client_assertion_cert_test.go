@@ -160,7 +160,7 @@ func TestPromote(t *testing.T) {
 		t.Errorf("the first key is %q after the promotion, want retiring", rec.Status)
 	}
 
-	sessions, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	sessions, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestClientAssertionCertificate(t *testing.T) {
 		t.Errorf("Certificate of a key a peer just staged = %+v, %v, want it served", c.KID, err)
 	}
 
-	sessions, err := NewTokenService(ctx, repo, "https://straza.local", 0)
+	sessions, err := NewTokenService(ctx, repo, sharedSealer(), "https://straza.local", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

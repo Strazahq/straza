@@ -1,11 +1,13 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Door, Panel, PanelNote, ToneBadge } from "@/components/overview-parts";
+import { Chip } from "@/components/chip";
+import { Door, Panel, PanelNote } from "@/components/overview-parts";
 import type { SessionRow } from "@/lib/api";
 import {
   ADMIN_CLIENT,
   NOT_MEASURED_ADMIN,
   NO_GOVERNED,
   CLIENT_BUILD_DIFFERS,
+  HOOK_WORD,
   SESSIONS_UNREAD,
   SIGNED_IN_COLUMN,
   SIGNED_IN_HELP,
@@ -16,16 +18,18 @@ import {
   WIRING_NOT_REPORTED,
   seatLine,
 } from "@/lib/config-words";
-import { WIRING_TITLE, shortID, wiringTone } from "@/lib/session-words";
+import { WIRING_TITLE, shortID } from "@/lib/session-words";
 import { NONE, absTime, relTimeText } from "@/lib/words";
 
 // Who is signed in: the active sessions, newest first and
-// capped at ten, with one line of fleet posture in the header. The
-// wiring word and its hue are the ones the Sessions screen uses, so a box
-// reads the same on both screens.
+// capped at ten, with one line of fleet posture in the header. A session's
+// hook configuration state reads in words, in a plain chip.
 
-const TH = "px-3.5 py-2 text-left align-bottom text-[13px] font-semibold tracking-[.06em] text-muted-foreground uppercase";
+const TH = "px-3.5 py-2 text-left align-bottom text-caption font-semibold tracking-[.06em] text-muted-foreground uppercase";
 const TD = "px-3.5 py-2 align-middle whitespace-nowrap";
+// SIGNED_IN_FLOOR is the table's floor: the Hook configuration column, a
+// fifth of it less the cell's padding, holds the widest hook word's chip.
+const SIGNED_IN_FLOOR = "780px";
 
 type Props = {
   // rows is the active sessions the screen read, null when the read did
@@ -71,7 +75,7 @@ function Client({ row, serverCommit }: { row: SessionRow; serverCommit: string }
       {clientDiffers(row, serverCommit) && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="block cursor-default truncate text-[13px] text-warn" data-build-differs>{CLIENT_BUILD_DIFFERS}</span>
+            <span className="block cursor-default truncate text-caption text-warn" data-build-differs>{CLIENT_BUILD_DIFFERS}</span>
           </TooltipTrigger>
           <TooltipContent>{buildsTitle(row.client_commit || "", serverCommit.slice(0, Math.max(8, (row.client_commit || "").length)))}</TooltipContent>
         </Tooltip>
@@ -103,12 +107,12 @@ export function SignedIn({ rows, denied, serverCommit, expanded }: Props) {
       flush={!!rows && list.length > 0}
     >
       {!rows ? (
-        <PanelNote>{denied ? seatLine(SIGNED_IN_TITLE, "sessions:read") : SESSIONS_UNREAD}</PanelNote>
+        <PanelNote>{denied ? seatLine(SIGNED_IN_TITLE, "sessions") : SESSIONS_UNREAD}</PanelNote>
       ) : list.length === 0 ? (
         <PanelNote>{NO_GOVERNED}</PanelNote>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm">
+          <table className="w-full table-fixed text-dense" style={{ minWidth: SIGNED_IN_FLOOR }}>
             <colgroup>
               <col style={{ width: "24%" }} />
               <col style={{ width: "18%" }} />
@@ -135,8 +139,8 @@ export function SignedIn({ rows, denied, serverCommit, expanded }: Props) {
                   <td className={TD}><Client row={r} serverCommit={serverCommit} /></td>
                   <td className={TD}>
                     {r.wiring_status
-                      ? <ToneBadge tone={wiringTone(r.wiring_status)} word={r.wiring_status} title={WIRING_TITLE[r.wiring_status]} />
-                      : <span className="text-[13px] text-muted-foreground">{isAdminHarness(r.harness) ? NOT_MEASURED_ADMIN : NONE}</span>}
+                      ? <Chip tone="plain" title={WIRING_TITLE[r.wiring_status]} data-hook={r.wiring_status}>{HOOK_WORD[r.wiring_status] || r.wiring_status}</Chip>
+                      : <span className="text-caption text-muted-foreground">{isAdminHarness(r.harness) ? NOT_MEASURED_ADMIN : NONE}</span>}
                   </td>
                   <td className={TD}>
                     <Tooltip>

@@ -1,145 +1,253 @@
 // The sentences of the self-service page that are not the Approvals
-// area's own: the shell, the two new tabs and this browser. The queue,
-// the request dialog and the decide dialog speak lib/approval-words.ts.
+// area's own: the shell, Home, Devices and the setup of this browser. The
+// queue and the request dialog speak lib/approval-words.ts.
+import { REFUSED_BY, bare } from "@/lib/say";
 import type { SelfTab } from "./router";
 
 // ---- the shell ----
 
 export const PAGE_TITLE = "Self-service";
 export const DOC_TITLE = "Straza self-service";
-export const PAGE_DESC = "Your approval requests, server credentials and approval devices.";
+export const MENU = "Menu";
+export const DISMISS = "Dismiss";
 export const TABS: { key: SelfTab; label: string }[] = [
+  { key: "home", label: "Home" },
   { key: "requests", label: "Requests" },
   { key: "credentials", label: "Credentials" },
-  { key: "browser", label: "This browser" },
+  { key: "devices", label: "Devices" },
 ];
+// TAB_HEAD is the title that opens each tab.
+export const TAB_HEAD: Record<SelfTab, string> = {
+  home: "Self-service",
+  requests: "Requests",
+  credentials: "Credentials",
+  devices: "Devices",
+};
 export const BRAND = "Straza";
 export const OPEN_CONSOLE = "Open the console";
 export const SIGN_IN = "Sign in";
 export const SIGN_OUT = "Sign out";
-export const signedInAs = (user: string) => "Signed in as " + user;
-export const ENABLE_BROWSER = "Enable this browser";
 export const RESUMING = "Resuming the session.";
 export const OPENING = "Opening the tab.";
+export const TRY_AGAIN = "Try again";
+export const CONTINUE = "Continue";
 
 // The page-level notices.
-export const REVOKED_BY_ADMIN = "This browser was revoked by an administrator, so its key has been destroyed here. Enable this browser again to enroll a new one.";
-export const STORAGE_BROKEN = (why: string) => "This browser's storage could not be opened (" + why + "), so an enrollment cannot be kept here.";
-export const SIGNED_OUT_ENROLLED = "Signed out. This browser still decides as its enrolled person; deciding needs no sign-in.";
+export const REVOKED = "This browser was removed from your devices, so its key was deleted here. Set it up again to approve from it.";
+export const STORAGE_BROKEN = (why: string) => "This browser's storage could not be opened (" + why + "). Close other Straza tabs, then reload.";
+export const SIGNED_OUT_ENROLLED = "Signed out. This browser still approves as you.";
 export const SIGNED_OUT = "Signed out.";
-export const SIGN_OUT_UNCONFIRMED = "Signed out in this browser. The server could not be reached to end the session; it expires on its own within minutes.";
+export const SIGN_OUT_UNCONFIRMED = "Signed out here. Straza was not reached, and the session ends on its own within minutes.";
 
-// The queue when this browser cannot read it yet.
-export const NOT_ENROLLED_TITLE = "This browser is not enrolled to decide.";
-export const NOT_ENROLLED_SIGN_IN = "Sign in, then enable this browser under This browser to see what waits for you.";
-export const NOT_ENROLLED_ENABLE = "Enable this browser under This browser to see what waits for you.";
-export const NOT_ENROLLED_PHONE = "Your account may enroll a phone, not a browser. Add your phone with Add a phone under This browser, and it sees what waits for you.";
-export const NOT_ENROLLED_NO_ROLE = "Your account holds no enrollment role. Enrollment roles are assigned in your identity manager.";
+// The requests while no device of this browser can sign and nothing waits.
+// WAITS_SHOW_HERE names a phone, which WAITS_SHOW_HERE_BROWSER leaves out
+// for an account that may not add one.
+export const SIGN_IN_FOR_REQUESTS = "Sign in to see what waits for you";
+export const SIGN_IN_FOR_REQUESTS_BODY = "To answer a request, set up this browser or add a phone.";
+export const WAITS_SHOW_HERE = SIGN_IN_FOR_REQUESTS_BODY;
+export const WAITS_SHOW_HERE_BROWSER = "To answer a request, set up this browser.";
+export const WAITS_SHOW_HERE_DEVICE = "Answer on your other device, or set up this browser.";
+export const WAITS_SHOW_HERE_PHONE = "Answer in the Straza approver app on your phone.";
+export const NOT_ENROLLED_NO_ROLE = "Your account has no role that lets it approve. Ask your administrator for one.";
 
-// ---- the Requests tab ----
+// ---- the Requests tab and the home view ----
 
-// WHOSE_TO_DECIDE is the line under the queue. The console's ROW_HINT says
-// that a row opens the request; this says where the two buttons come from,
-// since the page holds the requests a person raised beside the ones they
-// decide.
-export const WHOSE_TO_DECIDE = "Deny and Approve appear on the rows that are yours to decide: your own agent's calls, the calls of the agents you sponsor, and the calls routed to a role you hold.";
+export const WAITING_HEAD = "Waiting";
+export const DECIDED_HEAD = "Decided lately";
+export const ALL_REQUESTS = "All requests";
+export const NOTHING_WAITS = "Nothing waits for you.";
 
-// credentialRejected is the remedy when the server no longer knows this
-// browser's credential, the state a restored backup or a reborn eval volume
-// leaves behind. Nothing local is destroyed by that answer, so the remedy is
-// the person's own. It reads inside the console's failed-read sentence, so
-// it opens in lower case and carries no closing stop.
-export const credentialRejected = (why: string) => "the server rejected this browser's credential (" + why + "). Revoke this browser under This browser, then enable it again";
+// What a failed read says to a person.
+export const NO_ANSWER = "Straza did not answer. Try again in a moment. If this keeps happening, tell your administrator.";
+export const readProblem = (why: string) => "Your requests could not be read: " + why + ". Try again in a moment. If this keeps happening, tell your administrator.";
+// readSaid is what a failed read says. A message of the server that is a
+// whole sentence of its own, one that opens with a capital letter and ends
+// in a full stop, is shown as it is. Any other message goes inside the
+// page's own sentence, which wrap makes.
+export const readSaid = (message: string, wrap: (why: string) => string) =>
+  /^[A-Z][\s\S]*\.$/.test(message.trim()) ? message.trim() : wrap(bare(message));
+// keyRejected is the remedy when the server no longer knows this browser's
+// key, the state a restored backup or a reborn eval volume leaves behind.
+// Nothing local is destroyed by that answer, so the remedy is the person's
+// own.
+export const keyRejected = (why: string) => "Straza no longer accepts this browser's key (" + why + "). Remove this browser under Devices, then set it up again.";
+export const lastRead = (at: string) => "Last read at " + at + ".";
 
-// The refusals of a decision on this lane, each already a sentence: the
-// approver surface answers a machine code where the admin API answers words.
-export const REASON_TOO_LONG = "The reason is over 500 bytes. Shorten it; details belong in a ticket.";
-export const SIGNATURE_REFUSED = "The server would not accept this browser's signature, even after a fresh attempt. Reload the page and try again.";
-export const CREDENTIAL_REFUSED = "The server refused this browser's credential, so nothing was decided. Revoke this browser under This browser, then enable it again.";
-export const NOT_ENROLLED_NOW = "This browser is no longer enrolled to decide, so nothing was sent.";
-export const REQUEST_GONE = "This request is gone from the server, so there is nothing left to decide here.";
+// failedWhy is the sentence of a write that failed, under a heading that
+// says what did not happen. A write Straza did not answer reads as
+// NO_ANSWER. A refusal gives Straza's reason, and a bare HTTP status,
+// which carries none, says only that Straza refused it.
+export function failedWhy(err: { message: string; unreachable?: boolean }): string {
+  if (err.unreachable) return NO_ANSWER;
+  const why = /^HTTP \d+$/.test(err.message) ? "" : bare(err.message);
+  return "Straza refused it" + (why ? ": " + why : "") + ". If this keeps happening, tell your administrator.";
+}
+
+// The refusals of a decision, each already a sentence.
+export const REASON_TOO_LONG = "The reason is too long. Shorten it.";
+export const SIGNATURE_REFUSED = "Straza did not accept this browser's signature, even on a second try. Reload the page and try again.";
+export const CREDENTIAL_REFUSED = "Straza no longer accepts this browser's key, so nothing was decided. Remove this browser under Devices, then set it up again.";
+export const NOT_ENROLLED_NOW = "This browser is no longer set up to approve, so nothing was sent.";
+export const REQUEST_GONE = "This request is gone.";
+// decideRefused opens with REFUSED_BY, which the block folds into its
+// heading, so the block says refused once.
+export const decideRefused = (why: string) => REFUSED_BY + why + ". Try again, and tell your administrator if it keeps happening.";
+export const DECIDE_UNCONFIRMED = "Straza did not answer, so it is not known whether your answer landed. Look at the request again before you try once more.";
 
 // alreadySettled ends the question when the record resolved before this
 // decision landed. The lane answers the final state and no sentence, so the
 // state is what the sentence has to work from.
 const SETTLED_LINE: Record<string, string> = {
-  approved: "This request was already approved, so there is nothing left to decide here.",
-  denied: "This request was already denied, so there is nothing left to decide here.",
-  expired: "This request expired before the decision landed, so there is nothing left to decide here.",
+  approved: "This request was already approved.",
+  denied: "This request was already denied.",
+  expired: "This request expired before the decision landed.",
 };
-export const alreadySettled = (state: string) => SETTLED_LINE[state] || "This request was already decided, so there is nothing left to decide here.";
+export const alreadySettled = (state: string) => SETTLED_LINE[state] || "This request was already decided.";
 
-// ---- the This browser tab ----
+// ---- the setup card, on Home and on Devices ----
 
-// The device row of this browser, in the Approvals area's columns. The
-// words the console already has stay in lib/approval-words.ts; these are
-// the ones only a page about one's own browser needs.
+export const SETUP_HEAD = "Set up this browser to approve";
+export const SETUP_SIGN_IN = "Sign in first.";
+export const SETUP_BROWSER = "Set up this browser";
+export const NO_STORAGE = "This browser does not let the page keep a key, so it cannot be set up to approve. Use a normal window, or approve from the Straza approver app on your phone.";
+export const ELIGIBILITY_UNREAD = "Straza did not say what your account may set up.";
+
+// ---- Home's three cards ----
+
+export const waitsForYou = (n: number) => (n === 1 ? "1 request waits for you" : n + " requests wait for you");
+// firstWaiting is the sentence of the first waiting request: who, the verb
+// of the request, the call and the time left.
+export const firstWaiting = (who: string, verb: string, call: string, left: string) =>
+  who + " " + verb + " " + call + ". " + left + ".";
+export const REVIEW = "Review";
+export const NOTHING_WAITS_CARD = "Nothing waits for you";
+export const REQUESTS_UNREAD_CARD = "Your requests could not be read";
+export const NO_ROLE_TITLE = "You cannot approve yet";
+
+export const needsCredential = (n: number) => (n === 1 ? "1 server needs a credential" : n + " servers need a credential");
+// The sentence of the first credential that waits, by what is missing.
+export const noTokenFromYou = (app: string) => app + " has no token from you, so your agents cannot call it as you.";
+export const noSignInFromYou = (app: string) => app + " has no sign-in from you, so your agents cannot call it as you.";
+export const tokenExpired = (app: string, who: string) => (who ? who + "'s token" : "Your token") + " for " + app + " has expired, so calls with it are refused.";
+export const agentNoToken = (who: string, app: string) => who + " has no token for " + app + ", so its calls are refused.";
+export const OPEN_CREDENTIALS = "Open Credentials";
+export const CREDENTIALS_SET = "No server needs a credential";
+export const CREDENTIALS_SIGN_IN = "Sign in to see your credentials";
+export const CREDENTIALS_UNREAD = "Your credentials could not be read";
+
+export const APPROVE_FROM_HERE = "You approve from this browser";
+export const hereLine = (name: string, push: "on" | "off" | "none") =>
+  name + ". " + (push === "on" ? "Notifications are on." : push === "off" ? "Notifications are off, so you see a request only while this page is open." : "This browser shows a request only while this page is open.");
+export const MANAGE = "Manage";
+export const NOT_SET_UP = "This browser is not set up";
+export const NO_PHONE_YET = "No phone yet";
+export const PHONE_APPROVES = "You approve from the Straza approver app on a phone.";
+
+// ---- the Devices tab ----
+
 export const THIS_BROWSER_BADGE = "this browser";
-export const SEEN_NOW = "now";
-export const SEEN_UNKNOWN = "unknown";
-export const SUBJECT_THIS_BROWSER = "This browser's enrollment";
-export const NO_EXPIRY_LINE = "The key stays in this browser and its credential renews itself on every check-in, so there is no expiry to act on.";
-export const SIGN_OUT_VS_REVOKE = "Sign out (top right) ends your signed-in session. Revoke destroys the deciding key. On a shared machine, do both, and also sign out at the identity provider.";
+export const deviceLine = (user: string, push: "on" | "off" | "none", ago: string) =>
+  "Approves as " + user + ". " + (push === "on" ? "Notifications on." : push === "off" ? "Notifications off." : "No notifications in this browser.") + " Set up " + ago + ".";
+export const TURN_ON = "Turn on notifications";
+export const TURN_OFF = "Turn off notifications";
+export const REMOVE = "Remove";
+export const removeName = (name: string) => "Remove " + name;
+export const DEVICES_FOOT = "Signing out does not remove a device.";
+// otherDeviceLine is the line under a device that is not this browser. It
+// says where the key is only when the platform attested it.
+export const otherDeviceLine = (hardware: boolean, notifies: boolean, seen: string) =>
+  (hardware ? "Key in the phone's secure hardware. " : "") + (notifies ? "Notifications on." : "Notifications off.") + (seen ? " Last seen " + seen + "." : " Not seen yet.");
+export const removeOtherBody = (name: string) => "You can no longer approve from " + name + ".";
+export const removedOtherToast = (name: string) => "Removed. You can no longer approve from " + name + ".";
+export const DEVICE_NOT_REMOVED = "Device not removed.";
+export const DEVICES_UNREAD = "Your other devices could not be read.";
+export const SIGN_IN_FOR_DEVICES = "Sign in to see your other devices.";
 
-// The tab before this browser is enrolled: one sentence of consequence, then
-// the honest next step for the account that is looking at it.
-export const DECIDING_MEANS = "Deciding means signing with a key that stays in this browser, so nobody can decide for you from a copied link.";
-export const ENABLE_SIGN_IN_FIRST = "Sign in with your organization account first, then enable this browser.";
-export const ENABLE_HERE = "Your account may enroll this browser: use Enable this browser above.";
-export const ENABLE_PHONE_ONLY = "Your account may enroll a phone, not a browser: use Add a phone above.";
-export const ELIGIBILITY_UNREAD = "Straza could not say what your account may enroll, so nothing is offered here.";
-export const TRY_AGAIN = "Try again";
-export const KEY_MECHANICS = "The key is made by the browser itself and cannot be exported or read by anything else. The server keeps only its public half. You sign in once to prove who the key belongs to, and every decision lands in the audit chain signed by it.";
-export const NO_STORAGE = "This browser will not let the page store a key, so deciding cannot be enabled here. Use a normal window, or decide from the Straza approver app on your phone.";
+// What Home's third card says of the person's devices.
+export const approveFrom = (n: number) => (n === 1 ? "You approve from 1 device" : "You approve from " + n + " devices");
+export const devicesSetUp = (n: number) => (n === 1 ? "1 device is set up" : n + " devices are set up");
+// devicesLine names the devices and says whether requests reach them all.
+export const devicesLine = (names: string[], silent: string[]) =>
+  (names.length <= 1 ? names.join("") : names.slice(0, -1).join(", ") + " and " + names[names.length - 1]) + ". " +
+  (silent.length === 0 ? (names.length === 1 ? "Notifications are on." : names.length === 2 ? "Notifications are on for both." : "Notifications are on for all of them.")
+    : "Notifications are off on " + (silent.length <= 1 ? silent.join("") : silent.slice(0, -1).join(", ") + " and " + silent[silent.length - 1]) + ".");
+export const THIS_BROWSER_NAME = "This browser";
+export const NO_DEVICE_YET = "No device yet";
 
-// Enable this browser, the sheet and its run.
-export const ENABLE_SUB = "A key is made here and never leaves this browser. You sign in once to prove who it belongs to.";
+// Requests before this browser is set up. The lines that name a phone have
+// a twin without it for an account that may not add one.
+export const SETUP_TO_ANSWER = "set up a device to answer";
+export const ANSWER_ON_DEVICE = "answer on your device";
+export const ANSWER_NEEDS_DEVICE = "Set up this browser or add a phone under Devices to answer.";
+export const ANSWER_NEEDS_BROWSER = "Set up this browser to answer.";
+export const ANSWER_ON_DEVICE_LINE = WAITS_SHOW_HERE_DEVICE;
+export const answerAfterSetup = (who: string, verb: string, call: string) =>
+  who + " " + verb + " " + call + ". Set up this browser or a phone to answer.";
+export const answerAfterBrowser = (who: string, verb: string, call: string) =>
+  who + " " + verb + " " + call + ". Set up this browser to answer.";
+// A person whose role lets them approve from a phone only is never offered
+// the setup of a browser: they answer on the phone, or add one first.
+export const ANSWER_ON_PHONE = "answer on your phone";
+export const ADD_PHONE_TO_ANSWER = "add a phone to answer";
+export const ANSWER_ON_PHONE_LINE = "Answer this in the Straza approver app on your phone.";
+export const ANSWER_NEEDS_PHONE = "Add a phone under Devices to answer.";
+export const answerOnPhone = (who: string, verb: string, call: string) =>
+  who + " " + verb + " " + call + ". Answer it in the Straza approver app on your phone.";
+export const answerAfterPhone = (who: string, verb: string, call: string) =>
+  who + " " + verb + " " + call + ". Add a phone to answer.";
+export const answerOnDevice = (who: string, verb: string, call: string) =>
+  who + " " + verb + " " + call + ". Answer on a device you have set up, or set this browser up.";
+export const ABOUT_NOTIFICATIONS = "About notifications in this browser";
+
+// Removing this browser.
+export const removeTitle = (name: string) => "Remove " + name + "?";
+export const REMOVE_BODY = "You can no longer approve from this browser. Its key is deleted now and Straza forgets the device.";
+export const REMOVE_DEVICE = "Remove device";
+export const REMOVED_TOAST = "Removed. This browser no longer approves.";
+export const REMOVE_UNCONFIRMED = "This browser's key is gone, but Straza did not confirm it forgot the device. If it is still listed under Devices, remove it there.";
+
+// Notifications. Each reason they cannot be offered is a sentence behind
+// the help icon beside the device's line.
+export const PUSH_OFF_DEPLOYMENT = "Straza is not set up to send browser notifications.";
+export const PUSH_OFF_PLATFORM = "This browser cannot receive notifications, so it shows a request only while this page is open.";
+export const PUSH_OFF_PRIVATE = "Notifications are not offered in a private window.";
+export const PUSH_OFF_BLOCKED = "Notifications are blocked for this site. Allow them in the browser's site settings first.";
+export const CONSENT_TITLE = "Turn on notifications in this browser?";
+export const CONSENT_BODY = "Your browser asks next, and only once. A no can be undone only in its site settings.";
+export const CONSENT_HELP = "A notification names the tool and who asked. It never carries the command or its parameters.";
+export const NOTIFY_ON_TOAST = "Notifications on.";
+export const NOTIFY_OFF_TOAST = "Notifications off. This browser shows a request only while this page is open.";
+export const NOTIFY_DECLINED = "You did not allow notifications, so none are sent to this browser.";
+export const WORKER_SLOW = "this browser did not start the worker that receives notifications";
+export const notifyFailed = (why: string) => "Notifications could not be turned on: " + why + ". Reload the page and try again.";
+export const notifyRemovedLocally = (why: string) => "Notifications are off in this browser. Straza could not be told (" + why + ") and stops sending soon.";
+export const pushLost = (why: string) => "Notifications stopped in this browser and could not be renewed (" + why + "). Turn them on again.";
+
+// ---- the setup dialog ----
+
+export const SETUP_SUB = "Straza makes a key that stays in this browser and cannot be copied out. Your approvals are signed with it.";
 export const DEVICE_NAME_LABEL = "Name for this browser";
-export const DEVICE_NAME_HINT = "Your administrators see it in the approver device list, so pick one you will recognise when you need to revoke it.";
-export const DEVICE_NAME_REQUIRED = "A name is required, so your administrators can tell this browser from your others.";
-export const ENABLE = "Enable";
-export const SIGN_IN_AND_ENABLE = "Sign in and enable";
-export const PRIVATE_WINDOW = "This looks like a private window: its storage is thrown away when it closes, and the key goes with it. You can still enable deciding, but you redo it next time.";
-export const OUTLOOK_UNKNOWN = "This browser may clear the key without warning. If this is a private window, deciding here ends when the window closes.";
-export const SHEET_SIGN_IN = "Your session ended while this sheet was open. Sign in again and the sheet carries on with the name you gave.";
-export const STEP_CHANNELS = "Checking what your account may enroll.";
-export const STEP_MINT = "Asking the server for a one-time token.";
-export const STEP_KEY = "Making the key that stays in this browser.";
-export const cooldownLine = (seconds: number) => "Straza is rate limiting enrollment tokens for your account. Try again in " + seconds + " seconds.";
-export const ELIGIBILITY_FAILED = "Straza could not say what your account may enroll, so nothing was attempted. Try again.";
-// storeRefused is the one outcome that leaves a device on the server this
-// browser cannot use, so it names the device an administrator has to revoke.
-export const storeRefused = (why: string, name: string) => "This browser refused to store the enrollment (" + why + "), so the device named " + name + " exists on the server but cannot be used here. Ask an administrator to revoke it.";
-export const enabledToast = (user: string) => "Enabled. This browser decides as " + user + ".";
+export const DEVICE_NAME_HINT = "Shown under Devices.";
+export const DEVICE_NAME_REQUIRED = "Give this browser a name.";
+export const NOTIFY_ME = "Notify me in this browser when a request waits";
+export const NOTIFY_HINT = "Your browser asks for permission once.";
+export const SET_UP = "Set up";
+export const PRIVATE_WINDOW = "This looks like a private window. The key is lost when it closes.";
+export const OUTLOOK_UNKNOWN = "This browser may clear the key without warning.";
+export const SHEET_SIGN_IN = "Your session ended. Sign in again to finish the setup.";
+export const SETTING_UP = "Setting up this browser.";
+export const cooldownLine = (seconds: number) => "Too many tries in a row. Try again in " + seconds + " seconds.";
+export const ELIGIBILITY_FAILED = "Straza did not say what your account may set up. Try again.";
+export const KEY_FAILED = "This browser could not make the key. Use a normal window of a current browser.";
+export const SETUP_FAILED = "Setup did not finish.";
+// storeRefused is the one outcome that leaves a device at Straza which this
+// browser cannot use, so it names the device to remove under Devices.
+export const storeRefused = (why: string, name: string) => "This browser could not keep the key (" + why + "). Remove " + name + " under Devices, then set up again in a normal window.";
+export const setUpToast = (user: string) => "Set up. This browser approves as " + user + ".";
 
-// Revoke this browser.
-export const REVOKE_BODY = "You can no longer approve from it. The key is deleted now and Straza forgets the device.";
-export const REVOKE_BROWSER_HELP = "A browser enrolls again from this page. Other devices of the same person are untouched.";
-export const REVOKED_TOAST = "Revoked. This browser no longer decides.";
-export const REVOKE_UNCONFIRMED = "This browser's key is gone. The device row may remain on the server, and an administrator can revoke it.";
-
-// The push lane. Each reason the control cannot be offered is one line in
-// the Notified cell, in the register of the column's other lines, because a
-// control that is simply missing reads as broken.
-export const PUSH_OFF_DEPLOYMENT = "this deployment sends no push notifications to browsers";
-export const PUSH_OFF_PLATFORM = "this browser has no service worker or Push API, so it sees requests only while the page is open";
-export const PUSH_OFF_PRIVATE = "a private window throws the subscription away when it closes, so this is not offered here";
-export const PUSH_OFF_BLOCKED = "notifications are blocked for this site: allow them in the browser's own settings first";
-export const PUSH_UNAVAILABLE = "unavailable";
-export const TURN_ON = "Turn on";
-export const TURN_OFF = "Turn off";
-export const CONSENT_TITLE = "Turn on push notifications in this browser?";
-export const CONSENT_BODY = "Your browser asks for permission next, and asks only once. A no there can be undone only in the browser's own site settings.";
-export const CONSENT_HELP = "What arrives names the tool that waits and who asked. The message Straza sends carries only a reference, never the command or its parameters; this browser fetches the rest itself, signed in as this device.";
-export const CONTINUE = "Continue";
-export const NOTIFY_ON_TOAST = "Notifications on. Straza sends each request to this browser.";
-export const NOTIFY_OFF_TOAST = "Notifications off. This browser sees requests only while the page is open.";
-export const NOTIFY_DECLINED = "You did not allow notifications, so this browser will not be sent any. Nothing was registered.";
-export const WORKER_SLOW = "this browser did not start the background worker that receives notifications";
-export const notifyFailed = (why: string) => "Notifications could not be turned on: " + why + ".";
-export const notifyRemovedLocally = (why: string) => "This browser is unsubscribed, but Straza could not be told (" + why + "). It stops sending the first time a message bounces off this browser.";
-export const pushLost = (why: string) => "This browser's subscription is gone and could not be renewed (" + why + "), so notifications are off until you turn them on again.";
-
-// ---- Add a phone on the self-service page ----
+// ---- Add a phone ----
 
 export const ADD_PHONE = "Add a phone";
+// PHONE_PASTE stands in for the QR code when the page is open on the phone
+// itself.
+export const PHONE_PASTE = "This page is open on a phone, so there is no code to scan. In the Straza approver app, choose Enter the code manually and paste this text.";

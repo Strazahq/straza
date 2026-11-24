@@ -1,0 +1,15 @@
+{
+  "specversion": "1.0",
+  "id": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e42",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-11-17T20:31:09.402Z",
+  "data": {
+    "action": "entra.group.update",
+    "role": "finance-readers",
+    "roleId": "0198a1b0-4c11-7e02-9a55-0000000000b1",
+    "group": "5d2a7c1e-9b40-4f6e-8a11-3c0d5e7f9a21",
+    "name": "Straza: finance-readers",
+    "description": "Members of this group hold the Straza role finance-readers. Read access to the finance reports. Straza created this group and manages it. Do not rename or delete it."
+  }
+}

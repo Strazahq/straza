@@ -223,7 +223,7 @@ func TestWaive(t *testing.T) {
 			for i, f := range got {
 				if f.Class == ClassWarning {
 					warned = append(warned, f)
-				} else if f != fs[i] {
+				} else if !reflect.DeepEqual(f, fs[i]) {
 					t.Errorf("finding %d changed from %+v to %+v", i, fs[i], f)
 				}
 			}

@@ -153,10 +153,10 @@ describe("the Add role sheet of a server", () => {
   it("fixes the server's prefix and previews the stored name as the suffix is typed", async () => {
     mount();
     expect(screen.getByText("Add a role of demo-tools")).toBeTruthy();
-    expect(screen.getByText("It reaches this server only. Your identity manager decides who holds it.")).toBeTruthy();
-    expect(preview().textContent).toBe("Application role, stored as demo-tools-. An IGA imports it as AR:demo-tools-.strazactl roles create demo-tools- --app demo-tools --tools …");
+    expect(screen.getByText("It reaches this server only.")).toBeTruthy();
+    expect(preview().textContent).toBe("Application role, stored as demo-tools-. Your identity manager imports it as AR:demo-tools-.strazactl roles create demo-tools- --app demo-tools --tools …");
     await userEvent.type(screen.getByLabelText("role name suffix"), "Read Only");
-    expect(preview().textContent).toBe("Application role, stored as demo-tools-read-only. An IGA imports it as AR:demo-tools-read-only.strazactl roles create demo-tools-read-only --app demo-tools --tools …");
+    expect(preview().textContent).toBe("Application role, stored as demo-tools-read-only. Your identity manager imports it as AR:demo-tools-read-only.strazactl roles create demo-tools-read-only --app demo-tools --tools …");
     await userEvent.click(tick("echo"));
     expect(preview().textContent).toContain("strazactl roles create demo-tools-read-only --app demo-tools --tools echo");
   });
@@ -183,7 +183,7 @@ describe("the Add role sheet of a server", () => {
   it("publishes a new role as one Role document naming this server, its tools and description, and no set when no rule is asked", async () => {
     mount();
     await userEvent.type(screen.getByLabelText("role name suffix"), "readers");
-    await userEvent.type(screen.getByLabelText("Description"), "Read-only tools of demo-tools for analysts.");
+    await userEvent.type(screen.getByLabelText("Description (optional)"), "Read-only tools of demo-tools for analysts.");
     await userEvent.click(tick("echo"));
     await userEvent.click(tick("add"));
     await press("Save and publish");
@@ -266,7 +266,7 @@ describe("the Add role sheet of a server", () => {
   it("puts a new role and its own set in one draft when a call requires approval", async () => {
     mount();
     await readersWithEcho();
-    await userEvent.click(within(toolRow("echo")).getByRole("radio", { name: "require approval" }));
+    await userEvent.click(within(toolRow("echo")).getByRole("radio", { name: "Needs approval" }));
     await press("Save and publish");
     await waitFor(() => expect(publishDraft).toHaveBeenCalled());
     expect(kinds()).toEqual(["Role/demo-tools-readers:put", "PolicySet/demo-tools-readers-access:put"]);
@@ -281,7 +281,7 @@ describe("the Add role sheet of a server", () => {
     await press("Save draft");
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("drafts", ["39"]));
     expect(createDraft).toHaveBeenCalledWith({ items: sentItems(), working: true });
-    expect(notify.ok).toHaveBeenCalledWith("Saved to your draft 39. Nothing changes until you publish it under Drafts.");
+    expect(notify.ok).toHaveBeenCalledWith("Saved to your draft 39.");
     expect(publishDraft).not.toHaveBeenCalled();
     expect(done).not.toHaveBeenCalled();
   });
@@ -291,6 +291,9 @@ describe("the Add role sheet of a server", () => {
     expect(screen.getByText("Edit the access of demo-tools-readers")).toBeTruthy();
     expect(screen.getByText("The name cannot change. Its tools can, until someone holds it.")).toBeTruthy();
     expect(screen.queryByLabelText("role name suffix")).toBeNull();
+    const name = document.querySelector("[data-role-name]") as HTMLElement;
+    expect(name.textContent).toBe("demo-tools-readers");
+    expect(name.querySelector("svg")?.getAttribute("class")).toContain("lucide-id-card");
     await editorOpen();
     expect((tick("echo") as HTMLInputElement).checked).toBe(true);
     await userEvent.click(tick("get-sum"));
@@ -326,13 +329,13 @@ describe("the Add role sheet of a server", () => {
     await press("Cancel");
     let ask = await screen.findByRole("alertdialog");
     expect(within(ask).getByRole("heading", { name: "Close without saving?" })).toBeTruthy();
-    expect(ask.textContent).toContain("The changes in this sheet are not stored anywhere. Save draft or Save and publish keeps them, and closing drops them.");
+    expect(ask.textContent).toContain("Your changes are lost.");
     await userEvent.click(within(ask).getByRole("button", { name: "Keep editing" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(onOpenChange).not.toHaveBeenCalled();
     await press("Cancel");
     ask = await screen.findByRole("alertdialog");
-    await userEvent.click(within(ask).getByRole("button", { name: "Close and drop the changes" }));
+    await userEvent.click(within(ask).getByRole("button", { name: "Discard changes" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -424,8 +427,8 @@ describe("the Add role sheet of a server", () => {
     vi.mocked(createDraft).mockResolvedValue({ draft: draftOf("50", []), verdict: VERDICT });
     mount(readers, binding);
     await editorOpen();
-    await userEvent.click(within(toolRow("echo")).getByRole("radio", { name: "require approval" }));
-    expect((document.querySelector("[data-save-note]") as HTMLElement).textContent).toBe("The tools stay as they are, and saving changes only the rules.");
+    await userEvent.click(within(toolRow("echo")).getByRole("radio", { name: "Needs approval" }));
+    expect((document.querySelector("[data-save-note]") as HTMLElement).textContent).toBe("Only the policy rules change.");
     await press("Save and publish");
     const dialog = await waitFor(() => document.querySelector("[data-stub-publish]") as HTMLElement);
     expect(dialog.getAttribute("data-title")).toBe("Publish this change to demo-tools-readers?");
@@ -441,12 +444,12 @@ describe("the Add role sheet of a server", () => {
     vi.mocked(catalogPreview).mockResolvedValue({ entries: [{ app: "demo-tools", tool: "echo", status: "approve_gated", reason: "", setName: "demo-tools-readers-access", ruleId: "demo-tools-approve" }] });
     mount(readers, binding);
     await editorOpen();
-    expect(within(toolRow("echo")).getByRole("radio", { name: "require approval" }).getAttribute("aria-checked")).toBe("true");
-    await userEvent.click(within(toolRow("echo")).getByRole("radio", { name: "allow" }));
+    expect(within(toolRow("echo")).getByRole("radio", { name: "Needs approval" }).getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(within(toolRow("echo")).getByRole("radio", { name: "Allowed" }));
     await press("Save and publish");
     let ask = await screen.findByRole("alertdialog");
     expect(within(ask).getByRole("heading", { name: "Remove demo-tools-readers-access with this change?" })).toBeTruthy();
-    expect(ask.textContent).toContain("No rule is left in it, so publishing this change removes it, and calls demo-tools-readers makes to demo-tools then run with no approval or deny from it.");
+    expect(ask.textContent).toContain("No rule is left in it, so publishing removes it. Calls from holders of demo-tools-readers to demo-tools then get no approval or deny from it.");
     await userEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(checkDraft).not.toHaveBeenCalled();
@@ -464,10 +467,10 @@ describe("the Add role sheet of a server", () => {
     vi.mocked(catalogPreview).mockRejectedValue(new ApiError("the catalog preview is not in this session's grants", 403));
     mount({ ...readers, tools: ["echo", "get-sum"] }, { ...binding, tools: ["echo", "get-sum"] });
     await editorOpen();
-    expect((document.querySelector("[data-read-only]") as HTMLElement).textContent).toBe("You may change which tools demo-tools-readers reaches, but your session cannot read demo-tools-readers-access or the other policies that decide its calls, so the Policy column cannot say what a call does. An administrator who may read policies sees them under Policies.");
+    expect((document.querySelector("[data-read-only]") as HTMLElement).textContent).toBe("You may change which tools demo-tools-readers reaches. Your session cannot read demo-tools-readers-access or the other policies that decide its calls, so the Policy column cannot say what a call does.");
     expect((document.querySelector('[data-policy-word="get-sum"]') as HTMLElement).textContent).toBe("not readable here");
     expect((document.querySelector('[data-policy-word="echo"]') as HTMLElement).textContent).toBe("not readable here");
-    expect(within(toolRow("add")).getAllByRole("cell")[3].textContent).toBe("not reached");
+    expect(within(toolRow("add")).getAllByRole("cell")[3].textContent).toBe("no access");
     expect(document.body.textContent).not.toContain("allowed");
   });
 
@@ -475,22 +478,22 @@ describe("the Add role sheet of a server", () => {
     mount();
     await userEvent.click(tick("echo"));
     const sentence = () => (document.querySelector("[data-grant-sentence]") as HTMLElement).textContent;
-    expect(sentence()).toBe("Type the rest of the role's name above to see what its holders reach and the rules this writes.");
-    await userEvent.click(within(toolRow("echo")).getByRole("radio", { name: "require approval" }));
-    expect(screen.queryByRole("button", { name: /rules? this writes/ })).toBeNull();
+    expect(sentence()).toBe("Type the rest of the role's name above to see what its holders reach and the policy rules this writes.");
+    await userEvent.click(within(toolRow("echo")).getByRole("radio", { name: "Needs approval" }));
+    expect(document.querySelector("[data-rules-yaml]")).toBeNull();
     expect(document.body.textContent).not.toContain("demo-tools--access");
     await userEvent.type(screen.getByLabelText("role name suffix"), "readers");
     expect(sentence()).toMatch(/^Holders of demo-tools-readers reach 1 of 3 tools of demo-tools\./);
-    expect(screen.getByRole("button", { name: "The rule this writes, in demo-tools-readers-access" })).toBeTruthy();
+    expect(document.querySelector("[data-yaml-fold] summary")?.textContent).toBe("View as YAMLThe policy rule this writes, in demo-tools-readers-access");
   });
 
   it("folds the rules as Edit tools would store them in the role's own set", async () => {
     vi.mocked(getPolicy).mockResolvedValue({ name: "demo-tools-readers-access", status: "active", yaml: OWN.replace("        timeoutSeconds: 120\n", "        timeoutSeconds: 120\n        binding: call\n") });
     mount({ ...readers, tools: ["echo", "get-sum"] }, { ...binding, tools: ["echo", "get-sum"] });
     await editorOpen();
-    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "require approval" }));
-    await userEvent.click(screen.getByRole("button", { name: "The rule this writes, in demo-tools-readers-access" }));
-    const fold = (document.querySelector("[data-access-editor] pre") as HTMLElement).textContent || "";
+    await userEvent.click(within(toolRow("get-sum")).getByRole("radio", { name: "Needs approval" }));
+    expect(document.querySelector("[data-yaml-fold] summary")?.textContent).toBe("View as YAMLThe policy rule this writes, in demo-tools-readers-access");
+    const fold = (document.querySelector("[data-access-editor] [data-rules-yaml]") as HTMLElement).textContent || "";
     expect(fold).toContain("- id: demo-tools-approve");
     expect(fold).toContain("allow: [echo, get-sum]");
     expect(fold).toContain("binding: call");
@@ -502,7 +505,7 @@ describe("the Add role sheet of a server", () => {
     vi.mocked(catalogPreview).mockResolvedValue({ entries: [{ app: "demo-tools", tool: "echo", status: "approve_gated", reason: "", setName: "demo-tools-readers-access", ruleId: "demo-tools-approve" }] });
     mount(readers, binding);
     await editorOpen();
-    expect((document.querySelector("[data-read-only]") as HTMLElement).textContent).toBe("You may change which tools demo-tools-readers reaches, but your session cannot read demo-tools-readers-access, the role's own rules, so the Policy column cannot say what a call does. An administrator who may read policies sees them under Policies.");
+    expect((document.querySelector("[data-read-only]") as HTMLElement).textContent).toBe("You may change which tools demo-tools-readers reaches. Your session cannot read demo-tools-readers-access, the role's own policy rules, so the Policy column cannot say what a call does.");
     expect((document.querySelector('[data-fixed="echo"]') as HTMLElement).textContent).toBe("needs approval (demo-tools-readers-access)");
     expect(screen.queryByRole("radiogroup", { name: "On a call" })).toBeNull();
     expect(listRoles).not.toHaveBeenCalled();

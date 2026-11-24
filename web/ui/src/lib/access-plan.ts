@@ -81,7 +81,7 @@ export type OwnRead = {
   fixed: Record<string, FixedRule>;
 };
 
-// SPONSOR is the default decider: the person behind the agent, which the
+// SPONSOR is the default decider: the agent's sponsor, which the
 // policy engine spells as a decider rather than a role.
 export const SPONSOR = "sponsor";
 
@@ -346,8 +346,8 @@ const noRead = (): OwnRead => ({ plan: { call: "allow", choice: {}, shape: defau
 // is fixed. Without one, any owned rule makes the call "per": the setting
 // most tools hold is the server's (the earliest rule on a tie), the other
 // held tools keep their own. A tool named twice takes the earlier rule and
-// a deny wins. A tool the server no longer offers leaves the plan while
-// its rule stays owned, so a save removes it. Every other rule touching
+// a deny wins. A tool the server does not list leaves the plan while its
+// rule stays owned, and a save keeps that name. Every other rule touching
 // the server is fixed, the strongest per tool. A set that does not parse
 // reads as saying nothing, and the save refuses it.
 export function readOwnRules(yaml: string | null, app: string, tools: string[]): OwnRead {
@@ -546,9 +546,10 @@ const reachOnly = (p: SentenceParts) => planSentenceParts({ ...p, call: "per", a
 
 // planSentence is the one sentence under the editor: what the access row
 // reaches, with clause, the covers line in words, joined to it, and what a
-// call does, the approval shape named.
+// call does, the approval shape named. It leaves out what a new tool does,
+// since the warning under On a call already says it.
 export function planSentence(plan: Plan, app: string, tools: string[], role: string, clause = ""): string {
-  const p = sentenceParts(plan, app, tools, role);
+  const p = { ...sentenceParts(plan, app, tools, role), newToolsRun: false };
   const full = planSentenceParts(p);
   const reach = reachOnly(p);
   if (!clause || (p.reach === "tick" && !p.ticked) || !full.startsWith(reach)) return full;

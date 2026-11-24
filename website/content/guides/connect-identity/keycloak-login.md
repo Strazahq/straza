@@ -112,7 +112,7 @@ Keep Keycloak usernames equal to the `userName` your identity manager provisions
 Clients never hardcode the identity provider. They ask strazad where to sign in, read the realm's discovery document, and open the browser at the realm's sign-in page.
 
 {{< console >}}
-Open your strazad address followed by `/console/` and press **Sign in**. The line above the button names the realm's host, such as `You sign in at your identity provider, localhost:8480, and come back to this page.` The tab goes to Keycloak. Sign in as yourself, and Keycloak sends the tab back to the console, which says `Signing you in`. When the browser is still signed in at Keycloak, it can send you straight back without asking for your password. The console admits a person who holds an admin role, and anyone else lands on the self-service page.
+Open your strazad address followed by `/console/` and press **Sign in**. The line above the button names the realm's host, such as `You sign in at localhost:8480.` The tab goes to Keycloak. Sign in as yourself, and Keycloak sends the tab back to the console, which says `Signing you in`. When the browser is still signed in at Keycloak, it can send you straight back without asking for your password. The console admits a person who holds an admin role, and anyone else lands on the self-service page.
 
 {{< shot name="signin" caption="The console's sign-in card, taken on a standalone server, where the line names the server's own sign-in page." >}}
 
@@ -130,7 +130,7 @@ curl -s http://localhost:8420/.well-known/straza/idp.json
 
 strazactl has no sign-in of its own. It runs on an admin API token that a person mints in the console, so sign in at `http://localhost:8420/console/` as the console form of this step shows, then open the mint sheet:
 
-{{< clicks "Settings" "API tokens" "New API token" >}}
+{{< clicks "Settings" "Mint a token" >}}
 
 Pick `expires in 30 days`, then **Custom** under **The job**, and set the `identity` area to read, which the next step needs. [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) walks the sheet. Copy the token, which is shown once, and hand it to strazactl in your terminal:
 
@@ -164,7 +164,7 @@ Your Keycloak sign-in found your Straza account.
 {{< console >}}
 {{< clicks "Users" "alice" >}}
 
-{{< see >}}Your own account's sheet. The console admitted you because your verified sign-in found that account and it holds an admin role.{{< /see >}}
+{{< see >}}Your own account's page. The console admitted you because your verified sign-in found that account and it holds an admin role.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -190,7 +190,7 @@ Signing out ends the console's session, and revoking the token ends what strazac
 `unset STRAZA_API_TOKEN` takes the token out of your terminal. Then revoke it in the console, because the token holds no right to revoke itself:
 {{< /cli >}}
 
-{{< clicks "Settings" "API tokens" "Revoke" "Revoke token" >}}
+{{< clicks "Settings" "Revoke" "Revoke token" >}}
 
 Press **Revoke** on the token's row, then **Revoke token**. The next call on it is refused.
 

@@ -2,7 +2,7 @@
 title: strazactl roles export
 description: Print the role's canonical VCS document (spec/objects kind Role) to stdout
 pagetype: reference
-weight: 77
+weight: 71
 draft: false
 sources:
   - cmd/strazactl

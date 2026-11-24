@@ -22,7 +22,7 @@ var waivable = map[string]bool{codeSecretValue: true, codeBundleNameChars: true,
 // introduces such a value or name is still refused, and a waived value is
 // still masked wherever the scan flagged it.
 func Waive(w World, d Draft, fs []Finding) []Finding {
-	waived := map[Finding]Finding{}
+	waived := map[waiveKey]Finding{}
 	for i, it := range d.Items {
 		for f, warned := range liveNamed(w, i+1, it) {
 			waived[f] = warned
@@ -36,12 +36,28 @@ func Waive(w World, d Draft, fs []Finding) []Finding {
 	}
 	out := make([]Finding, len(fs))
 	for i, f := range fs {
-		if warned, ok := waived[f]; ok {
+		if warned, ok := waived[keyOf(f)]; ok {
 			f = warned
 		}
 		out[i] = f
 	}
 	return out
+}
+
+// waiveKey is a finding as Waive matches it, word for word: every field
+// but the lists, which no intake refusal carries.
+type waiveKey struct {
+	code, object, sentence, fix, before, after, typed, group, rule, server string
+	class                                                                  Class
+	ack                                                                    Ack
+	document                                                               int
+	binds                                                                  bool
+}
+
+// keyOf is the waiveKey of f.
+func keyOf(f Finding) waiveKey {
+	return waiveKey{code: f.Code, object: f.Object, sentence: f.Sentence, fix: f.Fix, before: f.Before, after: f.After, typed: f.Typed, group: f.Group,
+		rule: f.Rule, server: f.Server, class: f.Class, ack: f.Ack, document: f.Document, binds: f.BindsProposer}
 }
 
 // Waivable reports whether fs holds only findings Waive may downgrade, so
@@ -63,7 +79,7 @@ func Waivable(fs []Finding) bool {
 // word as intake wrote it. The agent rule names the item's own name first,
 // and only that finding is waived, because a name the document introduces
 // is new text.
-func liveNamed(w World, n int, it Item) map[Finding]Finding {
+func liveNamed(w World, n int, it Item) map[waiveKey]Finding {
 	word := secretKindWords[it.Kind]
 	switch it.Kind {
 	case KindApp:
@@ -77,7 +93,7 @@ func liveNamed(w World, n int, it Item) map[Finding]Finding {
 	default:
 		return nil
 	}
-	out := map[Finding]Finding{}
+	out := map[waiveKey]Finding{}
 	stored := fmt.Sprintf("and the stored name of that %s already holds it, so the change goes ahead under the stored name.", word)
 	fix := "Nothing needs to change. A plain name takes a removal and a new object under the new name."
 	if words, invisible := nameFault(it.Name); words != "" {
@@ -87,7 +103,7 @@ func liveNamed(w World, n int, it Item) map[Finding]Finding {
 		}
 		for _, f := range itemIntake(n, it, map[string]int{}) {
 			if f.Code == codeBundleNameChars {
-				out[f] = Finding{Code: f.Code, Class: ClassWarning, Object: f.Object, Document: f.Document,
+				out[keyOf(f)] = Finding{Code: f.Code, Class: ClassWarning, Object: f.Object, Document: f.Document,
 					Sentence: fmt.Sprintf("The name of document %d %s, %s", cmp.Or(it.Number, n), words, same), Fix: fix}
 			}
 		}
@@ -95,7 +111,7 @@ func liveNamed(w World, n int, it Item) map[Finding]Finding {
 	if !plainName(it.Name) {
 		for _, f := range agentItem(it, nil) {
 			if f.Code == codeAgentASCIIName {
-				out[f] = Finding{Code: f.Code, Class: ClassWarning, Object: f.Object,
+				out[keyOf(f)] = Finding{Code: f.Code, Class: ClassWarning, Object: f.Object,
 					Sentence: fmt.Sprintf("The name %s holds a character outside a-z, A-Z, 0-9, hyphen, dot and underscore, %s", visible(it.Name), stored), Fix: fix}
 				break
 			}
@@ -112,7 +128,7 @@ func liveNamed(w World, n int, it Item) map[Finding]Finding {
 // for word as intake wrote it. A place that holds two values in either
 // document is never waived. The warning names no server, because the scan
 // withholds a name that looks like a secret.
-func liveValued(w World, it Item) map[Finding]Finding {
+func liveValued(w World, it Item) map[waiveKey]Finding {
 	live, ok := w.Apps[it.Name]
 	if it.Kind != KindApp || it.Op != OpPut || !ok || strings.TrimSpace(it.Doc) == "" {
 		return nil
@@ -121,13 +137,13 @@ func liveValued(w World, it Item) map[Finding]Finding {
 	s.places = map[string][]string{}
 	s.read(set)
 	stored := secretPlaces(live.Manifest)
-	out := map[Finding]Finding{}
+	out := map[waiveKey]Finding{}
 	for _, h := range s.kept() {
 		held, kept := s.places[h.where], stored[h.where]
 		if h.f.Code != codeSecretValue || len(held) != 1 || len(kept) != 1 || held[0] != kept[0] {
 			continue
 		}
-		out[h.f] = Finding{Code: h.f.Code, Class: ClassWarning, Object: h.f.Object,
+		out[keyOf(h.f)] = Finding{Code: h.f.Code, Class: ClassWarning, Object: h.f.Object,
 			Sentence: fmt.Sprintf("In %s, %s %s. The server's stored manifest already holds the same value there, so the draft exposes nothing new.", s.noun, h.where, h.what),
 			Fix:      "If it is a secret, " + strings.ToLower(h.f.Fix[:1]) + h.f.Fix[1:] + " If it is not a secret, nothing needs to change."}
 	}

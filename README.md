@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <strong>Straza is under heavy development.</strong> v2.2.0 is the latest release. Read the release
+  <strong>Straza is under heavy development.</strong> v2.3.0 is the latest release. Read the release
   notes before you upgrade, and the <a href="https://docs.straza.ai/project/roadmap/">roadmap</a>
   for what comes next.
 </p>
@@ -41,7 +41,7 @@ proxies model traffic.
 
 | Straza provides | How |
 |---|---|
-| Identity from your IGA | People, AI agents and role membership arrive over SCIM 2.0. Disabling a user there revokes every session of that user. |
+| Identity from your IGA or Entra | People, AI agents and role membership arrive over SCIM 2.0 / REST, or from Microsoft Entra ID over Microsoft Graph. Disabling a user there revokes every session of that user. |
 | Role-based access per MCP server, tool and object | A role grants named tools on one MCP server. It can also cover only some of that server's objects, such as one database or one repository, named by an argument of the call. |
 | A decision before each action | Each shell command, file write, network fetch and MCP tool call that reaches Straza is allowed, denied with a reason the model can read, or held for a person, against signed policy. |
 | An MCP gateway that holds the credentials | A session sees only the tools its roles list, and the gateway adds each server's credential to an allowed call, so the agent never holds it. |
@@ -51,12 +51,12 @@ proxies model traffic.
 
 Straza is for a company that runs AI agents against real systems and wants each agent's actions to
 follow the roles it already governs. Its enterprise profile takes people, agents and role
-membership from your IGA over SCIM 2.0, and a standalone profile runs on one machine with its own
-sign-in, so you can try it without an IGA. Roles are made in Straza, and your IGA, or an admin on
-standalone, assigns them.
+membership from your IGA over SCIM 2.0 / REST, or from Microsoft Entra ID, and a standalone profile
+runs on one machine with its own sign-in. Roles are made in Straza and assigned by your IGA, your
+Entra admin or a Straza admin.
 
-The MCP gateway is a security boundary for a server the agent cannot call directly. A hook
-installed for the user, on a machine the agent controls, is advisory.
+The MCP gateway is a security boundary for a server the agent cannot call directly, and a managed
+install's hook is one against an agent without root. A hook the user installed is advisory.
 [What each lane stops](https://docs.straza.ai/evaluate/what-each-lane-stops/) says how to test
 each one.
 
@@ -151,28 +151,24 @@ Claude Code tool call, and
 <details>
 <summary><strong>What each lane stops, and how to test it</strong></summary>
 
-Read this before you test or review Straza. A lane is one place where Straza checks an
-agent's actions, and only some lanes are a security boundary. If you report on Straza, say
-which lane you tested.
+Read this before you test or review Straza. A lane is one place where Straza checks an agent's
+actions. The gateway, the hook of a managed install and `straza exec` in the sandbox image are
+security boundaries. If you report on Straza, say which lane you tested.
 
 Getting a denied call, an unlisted tool or a server's credential through the MCP gateway is a
-real finding. So is editing or removing the hook of a managed install without root.
+real finding. So is switching off or going around the hook of a managed install without root.
 
 A way around a user-mode hook, `straza exec` outside the sandbox image or a command rule is
-documented behavior and not a finding. So are an MCP server a person adds to their own harness
-and what an interpreter computes inside its own process. This quickstart runs in user mode.
+documented behavior and not a finding. So is what an interpreter computes inside its own
+process. This quickstart runs in user mode.
 
 | Lane | What it stops | What it does not stop | How to test it |
 |---|---|---|---|
-| MCP gateway | A call that policy denies, a tool outside the session's roles, and any use of a server's credential by the agent. The decision, the tool list and the credential stay on the server. | Anything that does not go through MCP, and a server a person adds to their own harness. | Register a server, call a tool without its role and read the refusal. The credential never appears on the agent's side. |
-| Managed hook | A harness tool call that policy denies, on a machine where the hook sits in root-owned files that strazad checks when a session starts. | An agent with root on that machine, and what an interpreter computes inside its own process. | Install with `sudo straza install --managed`, then try to edit the hook's files as the user. |
-| User-mode hook | Mistakes. It tells a cooperating agent what policy says before it acts. | An agent that decides to skip it. This lane is advisory by design. By default the enterprise profile, the one for an organization, starts sessions only from a managed install. | Do not test it as a boundary. Use it to try policy on one laptop. |
-| `straza exec` in the sandbox image | Every program the agent starts, except its own interpreter and the binaries on the image's allowlist. | Computation inside the interpreter. On an open machine it is as advisory as a user-mode hook. | Run the image and start a binary that is not on the allowlist. |
+| MCP gateway | A call that policy denies, a tool outside the session's roles, and any use of a server's credential by the agent. The decision, the tool list and the credential stay on the server. | Anything that does not go through MCP. The hook decides the calls of a server a person adds to their own harness. | Register a server, call a tool without its role and read the refusal. The credential never appears on the agent's side. |
+| Managed hook | Every harness tool call that policy denies, a call to an MCP server outside the gateway included. The hook sits in files only root or an administrator can change, and an agent that runs as the person cannot switch it off. | An agent with root on that machine, and what a permitted command or interpreter does after it starts. Codex CLI and Gemini CLI run a call when the hook process fails. | With the Straza package installed, run `sudo straza install --managed --server https://straza.example.com claude-code`, then try to edit the hook's files as the user. |
+| User-mode hook | A denied call, as long as the agent leaves the hook alone. | An agent that removes the hook from its own settings. This lane is advisory by design, and by default an enterprise server gives a user-mode install no session. | Do not test it as a boundary. Use it to try policy on one laptop. |
+| `straza exec` in the sandbox image | Every program the agent starts, except its own interpreter and the binaries on the image's allowlist. | Computation inside the interpreter. Outside the image nothing makes an agent use it. | Run the image and start a binary that is not on the allowlist. |
 | Command rules and the classifier | The spellings a rule names, and commands with a clear sign of hidden intent, such as a download piped into a shell. | Every other spelling of the same act. A command rule is a convenience on top of the lanes above and never the boundary. | `strazactl policy simulate` with the command you want to check. |
-
-The starter policy holds one sample rule that denies commands that start with `rm -rf`. It
-shows what a deny looks like. It is not a delete guard, and another spelling of the same act
-is not a bypass.
 
 [SECURITY.md](SECURITY.md) says what is in scope and where to report a finding.
 

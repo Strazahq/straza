@@ -246,16 +246,16 @@ const RESUME_KEY = "straza.signin.resume";
 
 // Pending is the sign-in this tab started: the PKCE verifier, the state and
 // the nonce the answer must match, where to redeem it, where the person
-// started, and the browser name an Enable this browser sheet carries over.
+// started, and the browser name a Set up this browser dialog carries over.
 type Pending = { state: string; verifier: string; nonce: string; tokenUrl: string; clientId: string; back: string; started: number; sheet?: string };
 
-export const PLAIN_HTTP = "This page is served over plain HTTP from a network address, so the browser will not run the sign-in. Serve Straza over HTTPS, or open it at 127.0.0.1 on the server.";
+export const PLAIN_HTTP = "This page is served over plain HTTP from a network address, so the browser will not run the sign-in. Serve Straza over HTTPS, or open it at 127.0.0.1 on the strazad host.";
 export const NO_STORAGE = "This browser does not let Straza keep the sign-in in this tab. Allow site data for this address, then press Sign in.";
 export const NO_ANSWER = "The sign-in did not come back from your identity provider. If it showed an error about a redirect address, your administrator must add ";
 const STALE = "This sign-in answer was not started in this tab, or it is more than 10 minutes old, so Straza did not use it. Press Sign in to start again.";
 const USED = "Your identity provider says the sign-in answer expired or was already used. Press Sign in to start again.";
-const OUTAGE = "Straza is temporarily unavailable, try again in a moment (the sign-in itself succeeded, nothing on your side needs fixing).";
-const DOWN = "strazad is unreachable, state unknown. Check the server, then press Sign in again.";
+const OUTAGE = "Straza is not available right now. Your sign-in worked. Press Sign in again in a moment.";
+export const DOWN = "Straza did not answer. Check that it is running, then press Sign in again.";
 
 function redirectURI(): string {
   return window.location.origin + SIGNIN_PATH;
@@ -415,8 +415,8 @@ export function takeSignInProblem(): string | null {
   return Date.now() - pending.started <= PENDING_MS ? noAnswer() : null;
 }
 
-// hasResume reports whether a finished sign-in left an Enable this browser
-// sheet to resume, and takeResume returns its browser name, once.
+// hasResume reports whether a finished sign-in left a Set up this browser
+// dialog to resume, and takeResume returns its browser name, once.
 export function hasResume(): boolean {
   return readJSON<string>(RESUME_KEY) != null;
 }

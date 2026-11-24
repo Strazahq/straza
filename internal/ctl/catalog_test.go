@@ -235,3 +235,27 @@ func TestCatalogPreviewObjectWire(t *testing.T) {
 		t.Errorf("entries = %+v", p.Entries)
 	}
 }
+
+// TestRenderCatalogPreviewRefused pins the refused line: a disabled or
+// revoked user's preview says the gateway refuses every call, and a preview
+// without the member prints no such line.
+func TestRenderCatalogPreviewRefused(t *testing.T) {
+	for _, tc := range []struct{ refused, want string }{
+		{"", ""},
+		{"disabled", "refused: Straza refuses every call of this user, because the user is disabled. The rows say what the roles give once the user is enabled.\n"},
+		{"revoked", "refused: Straza refuses every call of this user, because the user is revoked. The rows say what the roles give once the revocation is lifted.\n"},
+	} {
+		var out strings.Builder
+		if err := RenderCatalogPreview(&out, CatalogPreview{Subject: CatalogSubject{User: "bob"}, Refused: tc.refused}); err != nil {
+			t.Fatalf("RenderCatalogPreview: %v", err)
+		}
+		lines := strings.SplitAfter(out.String(), "\n")
+		got := ""
+		if strings.HasPrefix(lines[1], "refused:") {
+			got = lines[1]
+		}
+		if got != tc.want {
+			t.Errorf("refused %q: line = %q, want %q", tc.refused, got, tc.want)
+		}
+	}
+}

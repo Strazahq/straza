@@ -57,14 +57,27 @@ describe("the app header", () => {
     expect(el.closest("[data-health]")?.getAttribute("data-health")).toBe(state);
   });
 
+  it("names the failing components on hover while degraded", async () => {
+    stubReadyz(() => json({ status: "degraded", components: { db: "dial tcp: refused", events: "ok" } }, 503));
+    mount();
+    await userEvent.hover(await screen.findByText("Degraded"));
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Failing: db.");
+  });
+
+  it("has no hover while healthy", async () => {
+    mount();
+    await userEvent.hover(await screen.findByText("Healthy"));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
   it("flips every absolute stamp between the UTC suffix and the local offset", async () => {
     mount();
     expect(screen.getByText("2026-09-10 10:00:00 UTC")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "UTC" }));
-    expect(screen.getByRole("button", { name: "local" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Local" })).toBeTruthy();
     const stamp = document.querySelector("[data-stamp]")?.textContent || "";
     expect(stamp).toMatch(/ [+-]\d{2}:\d{2}$/);
-    await userEvent.click(screen.getByRole("button", { name: "local" }));
+    await userEvent.click(screen.getByRole("button", { name: "Local" }));
     expect(screen.getByText("2026-09-10 10:00:00 UTC")).toBeTruthy();
   });
 
@@ -113,7 +126,7 @@ describe("the header's link to your draft (mock steer CD-14)", () => {
   it("names the open working draft by its changes and opens it", async () => {
     header({ id: "39", changes: 1 });
     const link = screen.getByRole("button", { name: "Your draft · 1 change" });
-    expect(link.getAttribute("title")).toBe("Your open draft");
+    expect(link.getAttribute("title")).toBeNull();
     await userEvent.click(link);
     expect(navigate).toHaveBeenCalledWith("drafts", ["39"]);
     document.body.innerHTML = "";

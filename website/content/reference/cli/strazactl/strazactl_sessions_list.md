@@ -2,7 +2,7 @@
 title: strazactl sessions list
 description: List sessions
 pagetype: reference
-weight: 84
+weight: 78
 draft: false
 sources:
   - cmd/strazactl

@@ -168,7 +168,7 @@ var nativeStrazaTools = []nativeTool{
 	{
 		Name:        nativeToolWhoami,
 		Title:       "Who am I",
-		Description: "Read who this session acts as and what it may do: its roles, whether it is recorded, its knowledge packs, and every tool it can call, with whether a person approves each call first and which objects it may touch. Takes no input and has no side effects.",
+		Description: "Read who this session acts as and what it may do: its roles, whether it is recorded, and every tool it can call, with whether a person approves each call first and which objects it may touch. Takes no input and has no side effects.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,

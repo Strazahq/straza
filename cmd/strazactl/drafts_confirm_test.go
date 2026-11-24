@@ -135,6 +135,8 @@ func TestBlockHint(t *testing.T) {
 		{"two lines typed by one name", twice, "Type legacy-desk to confirm them when you publish the draft in the console under Drafts."},
 		{"a count", blockSets, "Type 3 to confirm them when you publish the draft in the console under Drafts."},
 		{"an agent's loosening", loosen, "Type agent-guardrails to accept it when you publish the draft in the console under Drafts."},
+		{"an agent's own reach", []ctl.DraftFinding{{Key: "k-reach", Code: agentReachCode, Ack: "typed", Object: "App/jira", Typed: "jira"}},
+			"Type jira to accept it when you publish the draft in the console under Drafts."},
 		{"a line cut for the reader", []ctl.DraftFinding{{Key: "k-cut", Ack: "typed"}}, "Only someone who can read what this line names can confirm it, so ask an admin who can read it to publish this draft."},
 		{"a tick", blockWider, ""},
 	}

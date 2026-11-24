@@ -13,17 +13,13 @@ import {
   COPY_NOW,
   DEFAULT_LIFETIME,
   GRANTS_MISSING,
-  GRANTS_PLACEHOLDER,
   LEVEL_WRITE,
   LIFETIMES,
   LIFETIME_HINT,
-  MINT_LEDE,
-  NAME_FREE,
   NAME_MISSING,
   NEVER_WARN,
   ROOT_WARN,
   SHOWN_ONCE,
-  WRITE_LINE,
   areaHint,
   curlLine,
   expiresLine,
@@ -71,14 +67,13 @@ describe("the mint sheet", () => {
 
   it("opens on the 90 day lifetime with no job picked and no scope to send", () => {
     mount();
-    expect(screen.getByRole("combobox", { name: "Lifetime" }).textContent).toBe("expires in 90 days");
-    expect(screen.getByText(GRANTS_PLACEHOLDER)).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Lifetime" }).textContent).toBe("90 days");
+    expect(sheet().querySelector("[data-grant-pills]")).toBe(null);
     expect(sheet().querySelector("[data-scope]")).toBe(null);
   });
 
-  it("says what a token is for, and when to pick the shortest lifetime", () => {
+  it("says when to pick the shortest lifetime", () => {
     mount();
-    expect(within(sheet()).getByText(MINT_LEDE)).toBeTruthy();
     expect(within(sheet()).getByText(LIFETIME_HINT)).toBeTruthy();
   });
 
@@ -86,7 +81,7 @@ describe("the mint sheet", () => {
     mount();
     await userEvent.click(screen.getByRole("combobox", { name: "Lifetime" }));
     const offered = (await screen.findAllByRole("option")).map((o) => o.textContent);
-    expect(offered).toEqual(["expires in 1 day", "expires in 7 days", "expires in 30 days", "expires in 90 days", "expires in 1 year", "never expires"]);
+    expect(offered).toEqual(["1 day", "7 days", "30 days", "90 days", "1 year", "Never"]);
     expect(offered).toEqual(LIFETIMES.map((l) => l.label));
   });
 
@@ -96,7 +91,7 @@ describe("the mint sheet", () => {
     expect(screen.getByText(nameTaken("midpoint"))).toBeTruthy();
     await userEvent.clear(name());
     await userEvent.type(name(), "sailpoint");
-    expect(screen.getByText(NAME_FREE)).toBeTruthy();
+    expect(screen.queryByText(nameTaken("sailpoint"))).toBe(null);
   });
 
   it("stays clickable with an empty name and says which field is missing", async () => {
@@ -183,12 +178,9 @@ describe("the mint sheet", () => {
     }
   });
 
-  it("says under the area table that write includes read", async () => {
+  it("offers none, read, and read and write for each area", async () => {
     mount();
     await pick("Custom");
-    const areas = sheet().querySelector("[data-section='Areas']") as HTMLElement;
-    expect(within(areas).getByText(WRITE_LINE)).toBeTruthy();
-    expect(WRITE_LINE).toBe("Write includes read here: each area offers none, read, or read and write.");
     expect(within(screen.getByRole("radiogroup", { name: "audit access" })).getAllByRole("radio").map((r) => r.textContent)).toEqual(["none", "read", "read and write"]);
   });
 
@@ -207,10 +199,10 @@ describe("the mint sheet", () => {
   it("warns when never is picked as the lifetime, and takes the warning back", async () => {
     mount();
     await userEvent.click(screen.getByRole("combobox", { name: "Lifetime" }));
-    await userEvent.click(await screen.findByRole("option", { name: "never expires" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Never" }));
     expect(screen.getByText(NEVER_WARN)).toBeTruthy();
     await userEvent.click(screen.getByRole("combobox", { name: "Lifetime" }));
-    await userEvent.click(await screen.findByRole("option", { name: "expires in 90 days" }));
+    await userEvent.click(await screen.findByRole("option", { name: "90 days" }));
     expect(screen.queryByText(NEVER_WARN)).toBe(null);
   });
 
@@ -235,7 +227,7 @@ describe("the mint sheet", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  const short: [string, number][] = [["expires in 1 day", 86400], ["expires in 7 days", 604800]];
+  const short: [string, number][] = [["1 day", 86400], ["7 days", 604800]];
   it.each(short)("mints with %s as %i seconds", async (label, seconds) => {
     mount();
     await userEvent.type(name(), "alice-terminal-once");

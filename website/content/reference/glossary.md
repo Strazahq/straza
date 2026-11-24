@@ -4,7 +4,7 @@ description: Each word the docs use, in one sentence, with a link to the page th
 pagetype: reference
 weight: 70
 draft: false
-keywords: glossary terms definitions IGA identity provider role access row view server endpoint enroll token change feed client assertion client credentials draft knowledge pack sentinel key enrollment dpop proof sign-in deadline custody straza service background service
+keywords: glossary terms definitions IGA identity provider role access row view server endpoint enroll token change feed client assertion client credentials draft sentinel key enrollment dpop proof sign-in deadline custody straza service background service
 ---
 
 
@@ -26,7 +26,8 @@ When a definition here and a specification disagree, the specification wins and 
 | [identity typology]({{< relref "concepts/identities.md" >}}) | What your IGA, or an admin on standalone, records about the kind of a user: user type, agency mode, swarm ID, sponsor and ephemeral. | |
 | [IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}) | The identity governance and administration system, such as midPoint or Okta, that decides who exists, who holds which role and who sponsors whom. | Any SCIM 2.0 system can play the part. On standalone an admin does its job. |
 | [identity provider]({{< relref "evaluate/identity-and-your-iga.md#sign-in-at-your-identity-provider" >}}) | The OpenID Connect system where people sign in on the enterprise profile, such as Entra ID, Okta or Keycloak. | On standalone strazad signs people in itself. |
-| [Entra agent identity]({{< relref "guides/serve-mcp-apps/caller-credentials.md#entra-agent-identity" >}}) | The identity Microsoft Entra keeps for one AI agent, whose client id Straza stores on the agent's record and as which the gateway gets the agent's token at a server that trusts Entra. | Your IGA writes it over SCIM as `entraAgentId`, or an admin sets it with `strazactl users entra-agent-id set`. Only an agent holds one, and no two agents share one. |
+| [Entra agent identity]({{< relref "guides/serve-mcp-apps/caller-credentials.md#entra-agent-identity" >}}) | The identity Microsoft Entra keeps for one AI agent, whose client id Straza stores on the agent's record and as which the gateway gets the agent's token at a server that trusts Entra. | Your IGA writes it over SCIM as `entraAgentId`, an admin sets it with `strazactl users entra-agent-id set`, or Straza takes it from Entra for an agent in a role group there. Only an agent holds one, and no two agents share one. |
+| [Entra agent user]({{< relref "guides/connect-identity/entra-role-groups.md#agents-from-entra" >}}) | An optional user account of an agent in Microsoft Entra, for things that need a user, such as a mailbox. | Straza treats it and the agent identity as one agent. |
 | [Entra agent blueprint]({{< relref "guides/serve-mcp-apps/caller-credentials.md#entra-agent-identity" >}}) | The Entra object that holds the credential for a group of agent identities, from which Straza gets each agent identity's token. | It holds the certificate of Straza's client assertion key, and `oauth.providers.<name>.clientCredentials.entraBlueprint` names it. Give Straza a blueprint of its own. |
 | [bootstrap admin]({{< relref "evaluate/identity-and-your-iga.md#the-first-admin-on-enterprise" >}}) | How the first administrator comes to exist on a fresh server. | Standalone prints the password of `admin` once. Enterprise uses the break-glass admin or `oidc.bootstrapAdmin`. |
 | [break-glass admin]({{< relref "evaluate/identity-and-your-iga.md#the-first-admin-on-enterprise" >}}) | The local emergency admin that exists on every server, for when nobody else can sign in. | Signs in at strazad's own emergency page, never at the identity provider. |
@@ -93,7 +94,6 @@ When a definition here and a specification disagree, the specification wins and 
 | [gateway]({{< relref "concepts/mcp-apps-and-the-gateway.md" >}}) | The part of strazad in front of your MCP servers, which decides each call, adds the server's credential and records the decision. | |
 | [server endpoint]({{< relref "concepts/mcp-apps-and-the-gateway.md" >}}) | One MCP server's own address on the gateway, `/mcp/` and the server's name, where its tools keep their own names. | The combined endpoint `/mcp` puts each server's name in front of its tools. |
 | [view]({{< relref "guides/serve-mcp-apps/show-views.md" >}}) | An HTML screen that an MCP server links from a tool, which a chat app can show beside the tool's result. | |
-| [knowledge pack]({{< relref "guides/govern-an-agent/knowledge-packs.md" >}}) | Text bound to a role that every agent session of its holders starts with in its context. | It tells the agent things and enforces nothing. |
 | [native tools]({{< relref "concepts/mcp-apps-and-the-gateway.md#how-an-agent-connects" >}}) | The tools of `straza`, the gateway's built-in server, which let an agent ask for an approval, wait for it and propose a draft. | |
 
 ## Objects
@@ -193,7 +193,7 @@ When a definition here and a specification disagree, the specification wins and 
 
 | Term | Definition | Detail |
 |---|---|---|
-| [hook lane]({{< relref "evaluate/how-it-works.md#how-a-tool-call-is-decided" >}}) | The path on the agent's machine, where a coding tool's hook asks the Straza service before a local tool runs. | Advisory, because an agent that can run anything can skip it. |
+| [hook lane]({{< relref "evaluate/how-it-works.md#how-a-tool-call-is-decided" >}}) | The path on the agent's machine, where a coding tool's hook asks the Straza service before a local tool runs. | Holds against an agent without root on a managed install. Advisory on a user-mode install, where an agent can remove the hook. |
 | [gateway lane]({{< relref "evaluate/how-it-works.md#how-a-tool-call-is-decided" >}}) | The path where strazad decides each call to an MCP server at the gateway, and can hold it for a person. | Where Straza holds a boundary. |
 | [PDP]({{< relref "evaluate/how-it-works.md" >}}) | The policy decision point, the code that computes a verdict from the verified snapshot. | |
 | [harness]({{< relref "evaluate/what-straza-is.md#where-straza-decides" >}}) | The coding tool or agent runtime Straza governs, such as Claude Code, Codex CLI, Gemini CLI or a Python agent. | |
@@ -217,16 +217,16 @@ When a definition here and a specification disagree, the specification wins and 
 
 | Term | Definition | Detail |
 |---|---|---|
-| [strazad]({{< relref "evaluate/what-straza-is.md#who-straza-is-for" >}}) | The Straza server: decision service, gateway, SCIM endpoint, console and self-service page in one static binary. | |
+| [strazad]({{< relref "evaluate/what-straza-is.md#what-you-run" >}}) | The Straza server: decision service, gateway, SCIM endpoint, console and self-service page in one static binary. | |
 | [strazactl]({{< relref "reference/cli/strazactl/_index.md" >}}) | The operator's command line, which runs on an admin API token and does what the console does. | It cannot decide a request or publish a draft, because each takes a person. |
 | [straza]({{< relref "reference/cli/straza/_index.md" >}}) | The client binary on the agent's machine, with commands such as `enroll`, `hook`, `mcp`, `exec` and `service`. | |
 | [straza service]({{< relref "concepts/machines-and-sessions.md#the-machine-key" >}}) | The Straza background service on an agent's machine, which holds the machine's key and every Straza session there. | |
-| [profile]({{< relref "evaluate/what-straza-is.md#who-straza-is-for" >}}) | Which of two shapes strazad runs in: `standalone` for one host or a small team, or `enterprise` with your identity provider, IGA and Postgres. | |
+| [profile]({{< relref "evaluate/what-straza-is.md#what-you-run" >}}) | Which of two shapes strazad runs in: `standalone` for one host or a small team, or `enterprise` with your identity provider, IGA and Postgres. | |
 | [store]({{< relref "reference/standalone-and-enterprise.md" >}}) | The database of record, SQLite on standalone or Postgres on enterprise. | |
 | [event bus]({{< relref "guides/operate/enterprise-shape.md" >}}) | NATS JetStream, which carries the audit stream and control events such as revocations between strazad replicas. | |
 | [key-encryption key (KEK)]({{< relref "concepts/credentials.md#where-it-is-kept-and-who-can-see-it" >}}) | The key that seals every stored credential at rest. | |
 | [console]({{< relref "guides/console/_index.md" >}}) | The web administration that strazad serves at `/console/`, over the same admin API as strazactl. | |
-| [self-service page]({{< relref "guides/approve/browser.md" >}}) | The page at `/self-service/` where a person decides requests in a browser, stores their own credentials and enables the browser as an approver device. | |
+| [self-service page]({{< relref "guides/approve/browser.md" >}}) | The page at `/self-service/` where a person decides requests in a browser, stores their own credentials and sets up the browser and their phones as approver devices. | |
 | [change feed]({{< relref "guides/connect-identity/midpoint.md" >}}) | The ordered list of changes to users, roles, MCP servers, tools and access rows that your IGA's connector reads to stay in step. | |
 | [enterprise demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}) | The one-command enterprise demonstration, with Keycloak, midPoint, strazad and governed agents, seeded. | |
 

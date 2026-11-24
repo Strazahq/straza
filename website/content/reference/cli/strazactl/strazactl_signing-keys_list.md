@@ -2,7 +2,7 @@
 title: strazactl signing-keys list
 description: List every signing key with its purpose and status
 pagetype: reference
-weight: 89
+weight: 83
 draft: false
 sources:
   - cmd/strazactl

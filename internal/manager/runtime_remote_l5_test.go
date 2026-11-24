@@ -117,7 +117,7 @@ func TestRemoteRuntimeToolsEndsByTheDeadline(t *testing.T) {
 				t.Errorf("the error has a line break: %q", err)
 			}
 			r.mu.Lock()
-			_, kept := r.pool[""]
+			kept := r.sessionAt(poolKey{}) != nil
 			r.mu.Unlock()
 			if kept {
 				t.Error("the session whose listing ran out of time is still pooled, want it evicted")

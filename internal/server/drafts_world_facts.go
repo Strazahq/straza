@@ -221,37 +221,6 @@ func (a *App) readCredentialFacts(ctx context.Context, w *drafts.World, d drafts
 	return nil
 }
 
-// readPacks reads, sorted, the names of the knowledge packs bound to each
-// role into w.Roles, which must hold the roles.
-func (a *App) readPacks(ctx context.Context, w *drafts.World) error {
-	bindings, err := a.store.Packs().ListBindings(ctx)
-	if err != nil || len(bindings) == 0 {
-		return err
-	}
-	packs, err := a.store.Packs().List(ctx)
-	if err != nil {
-		return err
-	}
-	names := make(map[string]string, len(packs))
-	for _, p := range packs {
-		names[p.ID] = p.Name
-	}
-	bound := map[string][]string{}
-	for _, b := range bindings {
-		if name, ok := names[b.PackID]; ok {
-			bound[b.RoleName] = append(bound[b.RoleName], name)
-		}
-	}
-	for role, list := range bound {
-		if ro, ok := w.Roles[role]; ok {
-			sort.Strings(list)
-			ro.Packs = list
-			w.Roles[role] = ro
-		}
-	}
-	return nil
-}
-
 // pushLaneConfigured reports whether the approval service builds a push
 // lane from p, by the service's own test: FCM on, an allowlist of push
 // hosts, a WebPush key, an APNs key, or the relay on.

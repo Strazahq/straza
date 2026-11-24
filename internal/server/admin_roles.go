@@ -50,6 +50,14 @@ type rolePayload struct {
 	// global role.
 	Server string   `json:"server,omitempty"`
 	Tools  []string `json:"tools,omitempty"`
+	// CreatedAt is when the role was made, and UpdatedAt when it last
+	// changed: every publish that changes the role moves it. Both are
+	// absent on the create's answer, which reads no row back.
+	CreatedAt time.Time `json:"created_at,omitzero"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	// Entra is the role's security group in Entra, absent on a role that
+	// has none; the list alone fills it.
+	Entra *roleEntraPayload `json:"entra,omitempty"`
 }
 
 // holderCounts folds the assignment pairs in force through the implication
@@ -156,13 +164,15 @@ func (a *App) handleRolesList(w http.ResponseWriter, r *http.Request) {
 			implies[imp.RoleID] = append(implies[imp.RoleID], name)
 		}
 	}
+	groups := a.entraGroupsByRole(ctx)
 	out := make([]rolePayload, len(roles))
 	for i, role := range roles {
 		sort.Strings(implies[role.ID])
 		row := rolePayload{ID: role.ID, Name: role.Name, Description: role.Description,
 			Kind: wireRoleKind(role), AssignedCount: counts[role.ID], HolderCount: holders[role.ID],
 			Implies: implies[role.ID], Areas: a.roleAreas(role),
-			Server: appNames[role.OwnerAppID], Tools: tools[role.ID]}
+			Server: appNames[role.OwnerAppID], Tools: tools[role.ID], CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
+			Entra: groups[role.ID]}
 		if row.Kind == store.RoleKindApprover {
 			pools, err := a.activeApprovePools(ctx, role.Name)
 			if err != nil {
@@ -334,7 +344,7 @@ func (a *App) handleRolesUpdate(w http.ResponseWriter, r *http.Request) {
 	server, tools := a.ownedRoleFields(r.Context(), updated)
 	writeJSON(w, http.StatusOK, rolePayload{ID: updated.ID, Name: updated.Name,
 		Description: updated.Description, Kind: wireRoleKind(updated), AssignedCount: counts[updated.ID],
-		Server: server, Tools: tools})
+		Server: server, Tools: tools, CreatedAt: updated.CreatedAt, UpdatedAt: updated.UpdatedAt})
 }
 
 // roleDeleted is the answer of a role's deletion: the status, and the

@@ -308,7 +308,6 @@ func (s *sqlStore) Users() UserRepo                 { return userRepo{s} }
 func (s *sqlStore) Roles() RoleRepo                 { return roleRepo{s} }
 func (s *sqlStore) Devices() DeviceRepo             { return deviceRepo{s} }
 func (s *sqlStore) Sessions() SessionRepo           { return sessionRepo{s} }
-func (s *sqlStore) Packs() PackRepo                 { return packRepo{s} }
 func (s *sqlStore) Apps() AppRepo                   { return appRepo{s} }
 func (s *sqlStore) ToolBindings() ToolBindingRepo   { return toolBindingRepo{s} }
 func (s *sqlStore) Credentials() CredentialRepo     { return credentialRepo{s} }

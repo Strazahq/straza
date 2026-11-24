@@ -474,6 +474,7 @@ func seedRemovableServer(t *testing.T, s Store) {
 	if err := s.Roles().AddImplication(ctx, lead.ID, readers.ID); err != nil {
 		t.Fatal(err)
 	}
+	seedUserIDs(t, s, "u-admin", "u-reader")
 	for subject, role := range map[string]string{"u-admin": demo.AdminRoleID, "u-reader": readers.ID} {
 		if _, err := s.Roles().Assign(ctx, RoleAssignment{SubjectKind: SubjectUser, SubjectID: subject, RoleID: role}); err != nil {
 			t.Fatal(err)
@@ -598,6 +599,7 @@ func TestPublishWritesRoles(t *testing.T) {
 				if err := s.Roles().AddImplication(ctx, lead.ID, dev.ID); err != nil {
 					t.Fatal(err)
 				}
+				seedUserIDs(t, s, "u-1", "u-2")
 				for _, u := range []string{"u-1", "u-2"} {
 					if _, err := s.Roles().Assign(ctx, RoleAssignment{SubjectKind: SubjectUser, SubjectID: u, RoleID: dev.ID}); err != nil {
 						t.Fatal(err)

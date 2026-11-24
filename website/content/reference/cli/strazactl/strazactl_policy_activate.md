@@ -2,7 +2,7 @@
 title: strazactl policy activate
 description: Publish one PolicySet's stored text after the server's checks, leaving every other set as published
 pagetype: reference
-weight: 65
+weight: 59
 draft: false
 sources:
   - cmd/strazactl

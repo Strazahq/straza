@@ -286,6 +286,40 @@ func TestIdentityWritesChainAdminRecords(t *testing.T) {
 	}
 }
 
+// TestUserCreateRecordReason pins that a user.create record carries the
+// reason its writer gave, and no reason key when the writer gave none, so
+// the records of the admin and SCIM lanes keep their shape.
+func TestUserCreateRecordReason(t *testing.T) {
+	t.Parallel()
+	app, _ := testApp(t)
+	ada := mkHuman(t, app, "ada")
+	ctx := context.Background()
+	const why = "a member of a role's group in Entra"
+	for _, tc := range []struct {
+		name  string
+		write func()
+		want  map[string]any
+	}{
+		{"a create without a reason", func() { app.auditUserCreate(ctx, ada, store.OriginAdmin) },
+			map[string]any{"action": "user.create", "target": ada.ID, "user": ada.ID, "username": "ada", "kind": "human", "origin": "admin"}},
+		{"a create with a reason", func() { app.auditUserCreateWithReason(ctx, ada, store.OriginEntra, why) },
+			map[string]any{"action": "user.create", "target": ada.ID, "user": ada.ID, "username": "ada", "kind": "human", "origin": "entra", "reason": why}},
+	} {
+		before := len(adminAuditEvents(t, app))
+		tc.write()
+		events := adminAuditEvents(t, app)
+		if len(events) != before+1 {
+			t.Errorf("%s: chained %d admin records, want exactly one: %v", tc.name, len(events)-before, events[before:])
+			continue
+		}
+		gotJSON, _ := json.Marshal(events[len(events)-1])
+		wantJSON, _ := json.Marshal(tc.want)
+		if string(gotJSON) != string(wantJSON) {
+			t.Errorf("%s: record\n got %s\nwant %s", tc.name, gotJSON, wantJSON)
+		}
+	}
+}
+
 // TestUserChangesNamesPathsNeverValues pins the changed[] list of a
 // user.update record: one wire name per field whose value changed, in the
 // request's field order, a password listed whenever the request carries

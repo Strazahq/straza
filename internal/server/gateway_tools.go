@@ -201,7 +201,9 @@ func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, c
 	timeout := a.upstreamTimeout(target.app)
 	callCtx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	res, err := a.manager.Call(callCtx, target.app, target.tool, callArgs, secret, objectMeta(gate))
+	// handleMCP refused a malformed label before the body was read.
+	conn, _ := connLabel(r)
+	res, err := a.manager.Call(callCtx, claims.Session, conn, target.app, target.tool, callArgs, secret, objectMeta(gate))
 	if errors.Is(err, manager.ErrCredentialEcho) {
 		a.withholdEcho(w, r, req, rec, srv)
 		return
@@ -210,10 +212,7 @@ func (a *App) callTool(w http.ResponseWriter, r *http.Request, req rpcRequest, c
 		a.rpcFail(w, r, req.ID, -32000, callFailedMsg(callCtx, target.app, timeout, credentialFix(target.app, resolved.Source, sub), err), err)
 		return
 	}
-	if srv != nil {
-		res = withoutUpstreamSlot(res)
-	}
-	writeRPCResult(w, req.ID, res)
+	writeRPCResult(w, req.ID, withoutUpstreamSlot(res))
 }
 
 // The JSON-RPC error messages of a call on /mcp that did not reach a result.
@@ -243,10 +242,11 @@ const (
 // status says it did not run: a refused credential names who renews it,
 // credFix, a 429 offers the bounded retry, and any other status says the
 // same call gets the same answer. Any other failure names its cause and the
-// bounded retry.
+// bounded retry. A call refused with manager.BusyError answers its sentence
+// alone, which says when to call again.
 func callFailedMsg(callCtx context.Context, app string, timeout time.Duration, credFix string, err error) string {
 	switch {
-	case errors.Is(err, manager.ErrMayHaveRun):
+	case errors.Is(err, manager.ErrMayHaveRun), errors.As(err, new(*manager.BusyError)):
 		return "Straza: " + sentenceOf(err) + "."
 	case errors.Is(callCtx.Err(), context.DeadlineExceeded):
 		return fmt.Sprintf(mayHaveRunMsg, app, "did not answer the call within "+timeout.String())
@@ -337,11 +337,11 @@ func (a *App) nativeCall(ctx context.Context, tool string, args json.RawMessage,
 	case nativeToolApprovalRequest:
 		ticket, msg := a.describeApprovalRequest(ctx, args, claims, sub)
 		if msg != "" {
-			// The record keeps the sentence whole. Each name it quotes is
-			// cut by cutUnresolved, but the schema check's refusal quotes
-			// up to 512 bytes of the described call's arguments, which
-			// this record does not withhold yet.
-			return nil, nativeRefusal{text: msg, reason: msg}
+			// The record keeps the sentence whole, each name in it cut by
+			// cutUnresolved. The schema check's refusal quotes the described
+			// call's arguments in its detail, so its record leaves the
+			// detail out (mismatchRecord).
+			return nil, nativeRefusal{text: msg, reason: mismatchRecord(msg)}
 		}
 		return func() *mcp.CallToolResult { return a.openApprovalTicket(ctx, ticket) }, nativeRefusal{}
 	case nativeToolApprovalAwait:
@@ -388,7 +388,8 @@ func refusedDecision(d policy.Decision, reason string) policy.Decision {
 	return policy.Decision{Effect: policy.EffectDeny, RuleID: d.RuleID, SetName: d.SetName, Default: d.Default, Reason: reason}
 }
 
-// appRPS returns the per-app rate limit from the manifest (0 = unlimited).
+// appRPS returns the per-app rate limit, the manifest's or the remote
+// default (0 = unlimited).
 // Narrow accessor, not manager.View: a full AppView glob-matches the whole
 // tool inventory per call, which is wasted work on the hot path.
 func (a *App) appRPS(appName string) float64 {

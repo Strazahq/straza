@@ -203,7 +203,7 @@ func grantAdmin(t *testing.T, app *App, userID string) {
 }
 
 // TestAdminCRUDFlow pins the admin loop: create role → assign → list via the API,
-// plus authz, packs, sessions, and the disable-user revocation path.
+// plus authz, sessions, and the disable-user revocation path.
 func TestAdminCRUDFlow(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -286,29 +286,6 @@ func TestAdminCRUDFlow(t *testing.T) {
 	if code := adminReq(t, "POST", base+"/v1/admin/roles/"+devRole.ID+"/implications", idToken,
 		map[string]string{"implies_role_id": role.ID}, nil); code != http.StatusConflict {
 		t.Fatalf("cycle implication = %d, want 409", code)
-	}
-
-	// Packs: create + bind + delivered at checkin.
-	var pack packAdminPayload
-	if code := adminReq(t, "POST", base+"/v1/admin/packs", idToken,
-		map[string]string{"name": "finance-rules", "version": "1", "content": "no wire transfers"}, &pack); code != http.StatusCreated {
-		t.Fatalf("create pack = %d", code)
-	}
-	if code := adminReq(t, "POST", base+"/v1/admin/packs/"+pack.ID+"/bindings", idToken,
-		map[string]string{"role_id": role.ID}, nil); code != http.StatusCreated {
-		t.Fatalf("bind pack = %d", code)
-	}
-	_, checkin = postJSON(t, base+"/v1/checkin", map[string]any{
-		"id_token":    idToken,
-		"harness":     map[string]string{"name": "console", "version": "dev"},
-		"attestation": map[string]any{"managed": false, "hashes": map[string]string{}},
-	})
-	packNames := []string{}
-	for _, p := range checkin["knowledge_packs"].([]any) {
-		packNames = append(packNames, p.(map[string]any)["name"].(string))
-	}
-	if !strings.Contains(strings.Join(packNames, ","), "finance-rules") {
-		t.Fatalf("packs = %v, want finance-rules", packNames)
 	}
 
 	// Sessions list + revoke kills the session token.

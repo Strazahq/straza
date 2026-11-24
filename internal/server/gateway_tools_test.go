@@ -479,6 +479,8 @@ func TestCallFailedMsg(t *testing.T) {
 		{"the server is down", alive, errors.New("the connection to MCP server pg failed: dial tcp: connection refused. An administrator checks that the server runs."),
 			"Straza: the call to the MCP server pg failed: the connection to MCP server pg failed: dial tcp: connection refused. An administrator checks that the server runs. " +
 				"Try the call once more in a minute. If it fails again, tell the user."},
+		{"the session runs a call on each of its connections at the cap", alive, &manager.BusyError{Server: "pg"},
+			"Straza: this session already runs 64 calls at once on the MCP server pg, each on its own connection. Wait for one to finish, then call again."},
 	}
 	refusal := func(status int) error {
 		return fmt.Errorf("calling: %w", &manager.RefusedError{Server: "pg", Status: status})

@@ -41,18 +41,19 @@ Some addresses Straza never dials, whatever the network allows: a link-local add
 {{< console >}}
 {{< clicks "MCP servers" "Add MCP server" >}}
 
-{{< shot name="server-add-server" caption="The Server step with the name `scout-tools`, the card **A server you run, over HTTP** and the address Straza dials." >}}
+{{< shot name="server-add-server" caption="The Server step with the address Straza dials, the name `scout-tools` and its description." >}}
 
-The wizard has four steps: Server, Credential, Review and Check. On Server, type the name, then pick how Straza reaches the server:
+The wizard has four steps: Server, Credential, Review and Check. On Server, enter the server's address first. Until you type in the name box, the name follows the address: `https://mcp.github.com/mcp` gives `github`, and `http://demo-tools:3001/mcp` gives `demo-tools`. Type `scout-tools` over it here. The name cannot change later, because agents see its tools under it, such as `scout-tools__echo`.
 
-| Card | What the card says |
+The step offers only the ways this server can use. When HTTP is the only one, as under the enterprise profile on a host without docker, the step shows the address alone. Otherwise a row for each way sits above the address:
+
+| Way | Its line |
 |---|---|
-| A server you run, over HTTP | Straza proxies streamable HTTP to it and checks health with an MCP ping. |
-| A command Straza starts | A process Straza starts on its own host as its own user. It can read Straza's keys and data, so use it only for code you trust. |
-| A container Straza runs | An image Straza runs with docker on the strazad host, restarted with backoff. |
-| A registry server.json | Paste the MCP registry record. Straza converts it the way strazactl apps import does and fills the cards above. |
+| A server you run, over HTTP | None. |
+| A command Straza starts | Runs on the strazad host and can read Straza's keys. Only for code you trust. |
+| A container Straza runs | Straza runs its image with docker on the strazad host. |
 
-For a server you run, enter its address. The step checks the manifest it writes on the server as you type. Under the enterprise profile the command card is off and reads `Not available on this server: the enterprise profile does not run servers inside Straza. Run it as its own service or pod and pick HTTP.`
+The fold **Other ways to run a server** names each way this server cannot use and why, such as `Not available: the enterprise profile does not run servers inside Straza.` The step checks the manifest it writes on the server as you type.
 {{< /console >}}
 
 
@@ -101,27 +102,29 @@ The name becomes part of every tool name, such as `scout-tools__echo`, so a serv
 
 
 {{< console >}}
-On Credential, pick one of four cards. Each card has one line, and the chosen card's fields open in a box below them:
+On Credential, pick one of four rows. Each row says its fact in a pill at the right, and the picked row opens its fields right under it, after one short sentence:
 
-| Card | Its line |
+| Row | Pill | Sentence under the picked row |
+|---|---|---|
+| None | no credential | Straza's audit still names who called. |
+| One shared secret | one identity | Straza stores it encrypted and adds it to every call. |
+| Each person's own token | each person | Each person pastes their own token once, on their self-service page. |
+| Each person's own sign-in | each person | Each person signs in once through keycloak. Your provider's name stands in place of keycloak. |
+
+{{< shot name="server-add-credential" caption="**One shared secret** picked, with the secret and how it is sent under the row." >}}
+
+For one shared secret, type the secret in **Secret** and pick how it travels in **Sent as**. The line under them shows what each call sends, such as `Authorization: Bearer <secret>`. On a command or container server the one way is an environment variable, which shows as a fact, and you name the variable in **Variable name**.
+
+A row that is not available keeps its place, says `not available`, and gives its reason under it. On a command or container server the two rows of each person's own credential read `Not on a container or command server, because one process has one identity. Use one shared secret, or run the server yourself and add it over HTTP.` When strazad has no identity provider set up, the sign-in row reads `Straza has no identity provider. Add one under oauth.providers in the strazad config, or pick another choice.` When the list of identity providers could not be read, it reads `The identity providers could not be read. Reload the page, or pick another choice.`
+
+The two rows of each person's own credential also ask what agents with no token or sign-in of their own run on:
+
+| Row | Choices for agents |
 |---|---|
-| None | The server takes no credential. Straza's audit still says who called. |
-| One shared secret for this server | One secret for everyone, kept sealed by Straza. The server sees one identity. |
-| Each caller's own token | People paste their own vendor token once. The server sees each person. |
-| Each caller's own sign-in | People sign in once through keycloak. The server sees each person. Your provider's name stands in place of keycloak. |
+| Each person's own token | `Refused`, the default, `Run on their sponsor's token` and `Use this server's shared secret` |
+| Each person's own sign-in | `Refused`, `Run on their sponsor's sign-in`, the default, and `Use a shared account` |
 
-{{< shot name="server-add-credential" caption="**One shared secret for this server** picked, with the box for the secret under the cards." >}}
-
-For one shared secret, type the secret in the box. On a command or container server the two caller cards are off and read `Not on a command or container server: one process is one identity.` When strazad has no identity provider configured, the sign-in card is off and reads `No identity provider is configured on this server, so nobody can sign in through one yet. Add oauth.providers.<name> to the strazad config first, or use one shared secret.`
-
-The two caller cards also ask what agents with no token or sign-in of their own run on:
-
-| Card | Choices for agents |
-|---|---|
-| Each caller's own token | `Get nothing`, the default, `Run on their sponsor's token` and `Use this server's shared secret` |
-| Each caller's own sign-in | `Get nothing`, `Run on their sponsor's sign-in`, the default, and `Use a shared account` |
-
-A fold under the cards, `More about this choice`, holds the long form of the chosen card and of each agent choice.
+A fold under the rows, `How this works`, holds the long form of the picked choice and of each agent choice.
 {{< /console >}}
 
 {{< cli >}}
@@ -134,7 +137,7 @@ Your manifest declares its credential in `straza.credential`: one shared secret,
 
 
 {{< console >}}
-On Review, read the summary of what the console sends, then press **Save and publish**. The console publishes the server, stores the secret you typed and checks the connection. **Save draft** adds the server to your working draft instead. When your choice needs a secret, the step then says `Save draft keeps the manifest only. A secret never goes into a draft, so store it on the server's page once the draft is published.` Once the server is published, leaving the wizard does not remove it.
+On Review, read the server's facts on the card **The server** and Straza's verdict, such as the chip `accepted`, then press **Save and publish**. **View as YAML** under them holds the manifest the console sends. The console publishes the server, stores the secret you typed and checks the connection. **Save draft** adds the server to your working draft instead. When your choice needs a secret, the step then says `Save draft keeps no secret. Set it on the server's page after publishing.` Once the server is published, leaving the wizard does not remove it.
 
 {{< shot name="server-add-review" caption="The foot of Review, with what will happen and the buttons **Save draft** and **Save and publish**." >}}
 {{< /console >}}
@@ -162,7 +165,7 @@ A manifest whose credential is each caller's own sign-in, through a provider str
 
 
 {{< console >}}
-The Check step shows what landed and what the server answered. If authentication was refused, correct the credential. If the address is unreachable, check it and the network path, then press **Recheck**. You can leave and finish later on the server's own page:
+When the server does not run, the Check step shows what landed and what the server answered. If authentication was refused, correct the credential. If the address is unreachable, check it and the network path, then press **Recheck**. You can leave and finish later on the server's own page:
 
 {{< clicks "MCP servers" "scout-tools" "Recheck" >}}
 
@@ -215,13 +218,13 @@ A server that has never answered a probe has no tool list to serve, so its tools
 
 
 {{< console >}}
-Once the server runs, the Check step says `Nobody reaches scout-tools yet.` and offers one button:
+Once the server runs and lists its tools, the wizard ends on **What next**, under a line such as `scout-tools is live. Straza reached it and read 14 tools.` with your own count. Its tiles are **Give access to it**, **Write a policy for it** and **Open scout-tools**, each shown when your account may open that area.
 
-{{< clicks "Create a role for scout-tools" >}}
+{{< clicks "Give access to it" >}}
 
-{{< shot name="server-add-check" caption="The Check step once the server runs, with the tools it found, the line `Nobody reaches scout-tools yet.` and the button." >}}
+{{< shot name="server-add-check" caption="The end of the wizard once the server runs, with the line that scout-tools is live and the tiles of **What next**." >}}
 
-New role opens on Application role with `scout-tools` picked. Type the word that completes the role's name after the server's name, then tick the tools on the Access step and say which calls need a person's approval. The fold `The same as commands` under the button holds the same role as one `strazactl roles create` line.
+New role opens on Application role with `scout-tools` picked. Type the word that completes the role's name after the server's name, then tick the tools on the Access step and say which calls need a person's approval. The fold `As a strazactl command` under the tiles holds the same role as one `strazactl roles create` line.
 {{< /console >}}
 
 {{< cli >}}
@@ -240,7 +243,10 @@ An application role that reaches a server belongs to that server, so the identit
 Straza reads each server's tool list at every health check, every 20 seconds by default, and at once when you press **Recheck** or run `strazactl apps recheck scout-tools`. It does not act on a server's own notice that its tool list changed, so a tool that a server adds, removes or changes shows up in Straza within one health check. A remote server is checked each time, and a command or container server while its process runs. `apps.healthInterval` in the config file sets the pace.
 
 
-Straza compares the names, descriptions, input schemas and `ai.straza/` marks of the tools with the last list it read. When anything differs, the server reads `degraded` until the next health check, with a reason that starts `inventory drift:` and names the tools added and removed, and Straza records `straza.apps.drift`. Calls to the server go on meanwhile, and it reads `running` again at the next check that finds no further change.
+Straza takes in a tool only when its input schema is a JSON object of type `object`, as MCP requires, and it fills in that type where the schema or its type is missing. Straza leaves out a tool with any other input schema as if the server had not listed it, so no session sees the tool and a call to it gets the unknown-tool answer. Each time the set of left-out tools changes, strazad logs one warning line that starts `manager: tools of an MCP server are not listed` and names the server and the tools.
+
+
+Straza compares the names, descriptions, input schemas, `ai.straza/` marks and annotation hints of the tools with the last list it read. The hints are `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`. When anything differs, the server reads `degraded` until the next health check, with a reason that starts `inventory drift:`, and Straza records `straza.apps.drift`. The reason names the tools added and removed. It also names up to 10 tools that changed and what changed in each, such as `inventory drift: the server changed delete_repo (readOnlyHint is now true), list_repos (description)`. Calls to the server go on meanwhile, and it reads `running` again at the next check that finds no further change. A changed title, output schema or `_meta` key that is not a mark raises no alarm, and Straza only rebuilds the tool lists.
 
 
 The gateway builds each session's tool list from the new list at once, and within about a second it tells every open session that its list changed. A removed tool leaves every tool list, and a call to it gets the unknown-tool answer. A new tool reaches a session only when the manifest's exposure lets it through, as `tools: ["*"]` does, and an access row of one of the session's roles names it, as a row on every tool and tools added later does.
@@ -249,7 +255,7 @@ The gateway builds each session's tool list from the new list at once, and withi
 `straza mcp` on the agent's machine lists again at a random moment within 5 seconds of that notice, so a fleet of sessions does not list all at once. It then changes its own tool list, which tells the coding tool that the list changed, and a coding tool that acts on that notice shows the change in the running session. A notice can be lost on a slow connection, so `straza mcp` also lists again every 10 to 11 minutes.
 
 
-On a server that pins its objects, as [Pin the objects a server reaches](#objects) explains, a changed tool can also narrow who may call it. A new tool that the pinned copy does not name reads as reaching every object, so only a role on every object may call it until a person pins again. A tool whose mark or input schema no longer matches its pinned reach is refused to roles on some objects, with a sentence such as `pr_create on ghapp changed how it names its repo since an admin pinned it, so roles on some repos cannot use it until an admin publishes the change. Ask an admin to review ghapp's Repos tab.` Roles on every object keep calling it. The server's object tab and `strazactl apps objects ghapp` then say `ghapp's marks differ from the pinned repos. Draft the change with strazactl apps objects draft ghapp.`
+On a server that pins its objects, as [Pin the objects a server reaches](#objects) explains, a changed tool can also narrow who may call it. A new tool that the pinned copy does not name reads as reaching every object, so only a role on every object may call it until a person pins again. A tool whose mark or input schema no longer matches its pinned reach is refused to roles on some objects, with a sentence such as `pr_create on ghapp changed how it names its repo since an admin pinned it, so roles on some repos cannot use it until an admin publishes the change. Ask an admin to review ghapp's Repos tab.` Roles on every object keep calling it. The server's object tab says `ghapp now describes its repos differently from what is pinned. Draft the change with strazactl apps objects draft ghapp.`, and `strazactl apps objects ghapp` says `ghapp's marks differ from the pinned repos. Draft the change with strazactl apps objects draft ghapp.`
 
 ## Pin the objects a server reaches {#objects .nostep}
 
@@ -322,12 +328,12 @@ A `command` server is a process of strazad itself, on strazad's host and as stra
 `remote.auth` is `inject` unless you set it, and the gateway then adds the credential that `straza.credential` declares. `passthrough` is reserved for a later token exchange and today means that the gateway adds no credential. In both modes the gateway never forwards the agent's own `Authorization` header, because it carries the Straza session token.
 
 
-`exposure.tools` caps what exists in any catalog, `["*"]` by default, and a role's access row narrows it further. `limits.rps` bounds the calls of one session to the server at the gateway. `limits.timeoutSeconds` caps one upstream call, and without it the server-wide `apps.upstreamTimeout` applies, 30 seconds by default. `limits.cpu` and `limits.mem` are parsed and stored, and nothing enforces them yet. strazad checks each server's health and compares its tools with the last list every `apps.healthInterval`, 20 seconds by default. Both server-wide settings live in the strazad config file, and [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#mcp-servers" >}}) lists them with the other intervals.
+`exposure.tools` caps what exists in any catalog, `["*"]` by default, and a role's access row narrows it further. `limits.rps` bounds the calls of one session to the server at the gateway. A remote server without it gets 20 calls a second for each session, so set a higher number for a server that one session calls faster, and a server on another runtime without it has no limit. All sessions of one person or agent together get five times the rate of one session, which is 100 calls a second on a remote server without `limits.rps`. Raising `limits.rps` raises both limits. `limits.timeoutSeconds` caps one upstream call, and without it the server-wide `apps.upstreamTimeout` applies, 30 seconds by default. `limits.cpu` and `limits.mem` are parsed and stored, and nothing enforces them yet. strazad checks each server's health and compares its tools with the last list every `apps.healthInterval`, 20 seconds by default. Both server-wide settings live in the strazad config file, and [Lifetimes and timeouts]({{< relref "reference/lifetimes-and-timeouts.md#mcp-servers" >}}) lists them with the other intervals.
 
 ## Import a registry record {.nostep}
 
 
-`strazactl apps import` turns an MCP Registry entry, its `server.json`, into a manifest without touching the server. Its first `streamable-http` remote becomes a `remote` runtime, a stdio container package becomes `oci`, an npm or PyPI package becomes `command`, and exactly one secret header or variable becomes the credential declaration, a static credential. A record with two secrets is refused. When a record offers several, the remote wins, then the container, then npm, then PyPI. `--runtime remote`, `--runtime oci` or `--runtime command` restricts the choice to one kind, and the import fails with a sentence such as `registry import: no stdio oci package in server.json` when the record has none. Under the enterprise profile, a record whose only package is npm or PyPI converts to a `command` server, which the install then refuses. In the console, the card `A registry server.json` runs the same conversion and fills the wizard's cards.
+`strazactl apps import` turns an MCP Registry entry, its `server.json`, into a manifest without touching the server. Its first `streamable-http` remote becomes a `remote` runtime, a stdio container package becomes `oci`, an npm or PyPI package becomes `command`, and exactly one secret header or variable becomes the credential declaration, a static credential. A record with two secrets is refused. When a record offers several, the remote wins, then the container, then npm, then PyPI. `--runtime remote`, `--runtime oci` or `--runtime command` restricts the choice to one kind, and the import fails with a sentence such as `registry import: no stdio oci package in server.json` when the record has none. Under the enterprise profile, a record whose only package is npm or PyPI converts to a `command` server, which the install then refuses. In the console, **Import a registry record** beside the Server step's heading runs the same conversion and fills in the step's fields.
 
 {{< command terminal="Terminal" purpose="administration" >}}
 ```sh

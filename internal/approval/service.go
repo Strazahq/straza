@@ -184,10 +184,10 @@ func (s *Service) List(ctx context.Context, state string) ([]Record, error) {
 }
 
 // PageByState is the admin keyset window over records: state "" = all,
-// beforeID "" = the newest page. Returns up to limit records newest-first
-// plus the next cursor id ("" = last page).
-func (s *Service) PageByState(ctx context.Context, state, beforeID string, limit int) ([]Record, string, error) {
-	rows, err := s.st.Approvals().PageByState(ctx, state, beforeID, limit+1)
+// userID "" = every user's, beforeID "" = the newest page. Returns up to
+// limit records newest-first plus the next cursor id ("" = last page).
+func (s *Service) PageByState(ctx context.Context, state, userID, beforeID string, limit int) ([]Record, string, error) {
+	rows, err := s.st.Approvals().PageByState(ctx, state, userID, beforeID, limit+1)
 	if err != nil {
 		return nil, "", err
 	}

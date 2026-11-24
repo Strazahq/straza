@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { type AuditRow, listAudit, listUsers, overview, revokeSession } from "@/lib/api";
 import { chainBroken, chainVerified, loadedWords, policyQuery, recordMissing, revokeBody, searchLine } from "@/lib/audit-words";
 import { notify } from "@/lib/notify";
+import { absTime } from "@/lib/words";
 
 // The Audit screen over a chain whose hashes really verify: every fixture
 // is linked the way internal/audit.Link writes it, hash = sha256(prevHash
@@ -133,13 +134,15 @@ describe("the Audit screen", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Audit");
     expect(vi.mocked(listAudit).mock.calls[0][0]).toBe("order=desc&limit=200");
     expect(rows()).toEqual(["4219", "4218", "4215", "4214", "4213", "4212", "4211"]);
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Chain verified" + chainVerified(9, HEAD)));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Chain verified" + chainVerified(HEAD)));
     expect(screen.getByRole("status").getAttribute("data-chain-line")).toBe("ok");
     expect(screen.getByText(loadedWords(9, HEAD))).toBeTruthy();
     expect(screen.getByText("7 rows shown")).toBeTruthy();
     expect(cell(4214, SEQ)).toBe("4214");
     expect(cell(4214, TIME)).toBe("10:45:01");
-    expect(cell(4214, TYPE)).toBe("tool");
+    expect(cell(4214, TYPE)).toBe("tool call");
+    expect(cell(4219, TYPE)).toBe("admin change");
+    expect(cell(4215, TYPE)).toBe("sentinel alert");
     // A refusal and a critical verdict wear the danger edge; an allowance does not.
     expect(document.querySelector("[data-seq=\"4214\"]")?.className).toContain("border-l-danger");
     expect(document.querySelector("[data-seq=\"4215\"]")?.className).toContain("border-l-danger");
@@ -159,8 +162,8 @@ describe("the Audit screen", () => {
   });
 
   it.each([
-    { seq: 4218, kind: "an allowance", tone: "ok", word: "allow" },
-    { seq: 4214, kind: "a refusal", tone: "danger", word: "deny" },
+    { seq: 4218, kind: "an allowance", tone: "ok", word: "allowed" },
+    { seq: 4214, kind: "a refusal", tone: "danger", word: "denied" },
     { seq: 4213, kind: "a held call", tone: "warn", word: "needs approval" },
     { seq: 4211, kind: "an approval", tone: "ok", word: "approved" },
     { seq: 4215, kind: "a critical verdict", tone: "danger", word: "critical" },
@@ -210,7 +213,7 @@ describe("the Audit screen", () => {
     expect(screen.queryByText(/Chain verified/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Open 4214" }));
     const sheet = await screen.findByRole("dialog");
-    expect(within(sheet).getByText("Not verified in this browser. See the audit chain status for details.")).toBeTruthy();
+    expect(within(sheet).getByText("Not verified in this browser.")).toBeTruthy();
     expect(within(sheet).queryByText("Hash matches the loaded chain.")).toBeNull();
   });
 
@@ -229,42 +232,42 @@ describe("the Audit screen", () => {
   it("renders an approval as its verdict and decider, and falls back to the rule id when a decision carries no reason", async () => {
     mount();
     await screen.findByRole("button", { name: "Open 4211" });
-    expect(cell(4211, WHAT)).toBe("joe-java-developer-agent's assign role in midpoint approved by judy (rule iga-writes)");
+    expect(cell(4211, WHAT)).toBe("joe-java-developer-agent's assign role in midpoint approved by judy (policy rule iga-writes)");
     expect(cell(4211, EFFECT)).toBe("approved");
     expect(cell(4211, REASON)).toBe("reviewed the target, fine");
     expect(cell(4213, EFFECT)).toBe("needs approval");
-    expect(cell(4213, REASON)).toBe("rule iga-writes");
-    expect(cell(4214, EFFECT)).toBe("deny");
+    expect(cell(4213, REASON)).toBe("policy rule iga-writes");
+    expect(cell(4214, EFFECT)).toBe("denied");
     expect(cell(4214, REASON)).toBe("Straza: destructive delete is refused for role dev");
   });
 
   it("renders a capture record as its reference row and never the text it witnessed", async () => {
     mount();
     await screen.findByRole("button", { name: "Open 4212" });
-    expect(cell(4212, WHAT)).toBe("content 412 B · redact · 8f43c1a09b2e…");
+    expect(cell(4212, WHAT)).toBe("content 412 B · masked · 8f43c1a09b2e…");
     expect(document.body.textContent).not.toContain("AKIAIOSFODNN7EXAMPLE");
   });
 
   it("narrows the tail to the chosen lens, renders its note, and says so when the lens hides everything", async () => {
     mount();
     await screen.findByRole("button", { name: "Open 4219" });
-    await userEvent.click(screen.getByRole("combobox", { name: "Lens" }));
-    await userEvent.click(screen.getByRole("option", { name: "recording" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Kind of record" }));
+    await userEvent.click(screen.getByRole("option", { name: "Recording" }));
     expect(rows()).toEqual(["4212"]);
-    expect(screen.getByText("recording = type prompt and reply: conversation witnesses, size and hash only, never the text")).toBeTruthy();
-    await userEvent.click(screen.getByRole("combobox", { name: "Lens" }));
-    await userEvent.click(screen.getByRole("option", { name: "policy" }));
+    expect(screen.getByText("One record per recorded prompt and reply, with its size and hash and never its text.")).toBeTruthy();
+    await userEvent.click(screen.getByRole("combobox", { name: "Kind of record" }));
+    await userEvent.click(screen.getByRole("option", { name: "Policy" }));
     expect(rows()).toEqual([]);
-    expect(screen.getByText(/Nothing in the loaded tail under this lens/)).toBeTruthy();
+    expect(screen.getByText(/No loaded record of this kind/)).toBeTruthy();
   });
 
   it("folds a run of identical rows into one and shows every row of the run when it is expanded", async () => {
     mount();
     await screen.findByRole("button", { name: "Open 4218" });
-    expect(cell(4218, WHAT)).toContain("×3 identical · show all");
-    await userEvent.click(screen.getByRole("button", { name: "×3 identical · show all" }));
+    expect(cell(4218, WHAT)).toContain("3 identical · Show");
+    await userEvent.click(screen.getByRole("button", { name: "3 identical · Show" }));
     expect(rows()).toEqual(["4219", "4218", "4217", "4216", "4215", "4214", "4213", "4212", "4211"]);
-    await userEvent.click(screen.getByRole("button", { name: "collapse" }));
+    await userEvent.click(screen.getByRole("button", { name: "Hide" }));
     expect(rows()).toEqual(["4219", "4218", "4215", "4214", "4213", "4212", "4211"]);
   });
 
@@ -297,7 +300,7 @@ describe("the Audit screen", () => {
     await waitFor(() => expect(screen.getByText(loadedWords(250, 250))).toBeTruthy());
     expect(vi.mocked(listAudit).mock.calls.filter((c) => c[0].startsWith("after=") && !c[0].endsWith("limit=1000")).map((c) => c[0])).toEqual(["after=0&limit=50"]);
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByRole("status").textContent).toBe("Chain verified" + chainVerified(250, 250));
+    expect(screen.getByRole("status").textContent).toBe("Chain verified" + chainVerified(250));
     expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
   });
 
@@ -347,14 +350,14 @@ describe("the Audit screen", () => {
     expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
     expect(screen.getByText("1 match")).toBeTruthy();
 
-    await userEvent.click(screen.getByRole("button", { name: "deny" }));
+    await userEvent.click(screen.getByRole("button", { name: "Denied" }));
     await waitFor(() => expect(vi.mocked(listAudit).mock.calls.some((c) => c[0] === "order=desc&limit=200&q=rm%20-rf&effect=deny")).toBe(true));
-    expect(screen.getByRole("button", { name: "deny" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Denied" }).getAttribute("aria-pressed")).toBe("true");
 
-    await userEvent.click(screen.getByRole("button", { name: "any effect" }));
+    await userEvent.click(screen.getByRole("button", { name: "Any outcome" }));
     await userEvent.clear(box);
     await waitFor(() => expect(rows()).toEqual(["4219", "4218", "4215", "4214", "4213", "4212", "4211"]));
-    expect(screen.getByRole("status").textContent).toBe("Chain verified" + chainVerified(9, HEAD));
+    expect(screen.getByRole("status").textContent).toBe("Chain verified" + chainVerified(HEAD));
   });
 
   it("sets the user filter from a name in the Who column and sends it to the server", async () => {
@@ -373,15 +376,15 @@ describe("the Audit screen", () => {
     vi.mocked(revokeSession).mockRejectedValueOnce(failure("session 0199cf12 is already revoked", 409));
     mount();
     await screen.findByRole("button", { name: "Open 4215" });
-    expect(cell(4215, WHAT)).toBe("burst-deny sentinel verdict · evidence ×9");
+    expect(cell(4215, WHAT)).toBe("burst-deny sentinel alert · 9 records of evidence");
     await userEvent.click(screen.getByRole("button", { name: "Revoke session" }));
     const ask = await screen.findByRole("alertdialog");
     expect(within(ask).getByRole("heading", { name: "Revoke session?" })).toBeTruthy();
-    expect(ask.textContent).toContain(revokeBody(SESSION, "burst-deny"));
+    expect(ask.textContent).toContain(revokeBody(SESSION));
 
     await userEvent.click(within(ask).getByRole("button", { name: "Revoke session" }));
     const refusal = await within(ask).findByRole("alert");
-    expect(refusal.textContent).toBe("Revoke session refused. The server refused it: session 0199cf12 is already revoked. Fix what it names, then try again.");
+    expect(refusal.textContent).toBe("Revoke session refused: session 0199cf12 is already revoked. Fix what it names, then try again.");
     expect(screen.queryByText("session revoked")).toBeNull();
 
     await userEvent.click(within(ask).getByRole("button", { name: "Revoke session" }));
@@ -434,7 +437,7 @@ describe("the Audit screen", () => {
     await screen.findByRole("button", { name: "Open 4219" });
     vi.mocked(listAudit).mockRejectedValueOnce(failure("unreachable", 0, true));
     await userEvent.click(screen.getByRole("button", { name: "Reload the chain" }));
-    await waitFor(() => expect(document.querySelector("[data-fetch-error]")?.textContent).toContain("The audit chain could not be read because strazad did not answer."));
+    await waitFor(() => expect(document.querySelector("[data-fetch-error]")?.textContent).toContain("The audit chain could not be read because Straza did not answer."));
     expect(rows()).toEqual(["4219", "4218", "4215", "4214", "4213", "4212", "4211"]);
   });
 
@@ -453,8 +456,60 @@ describe("the Audit screen", () => {
     expect(lines.length).toBe(10);
     expect(lines[0]).toBe("seq,time,user,session,type,effect,what,reason");
     expect(lines[1]).toBe("4219,2026-09-12T10:51:07Z,alice,,straza.audit.admin,,user.unlock carol,");
-    expect(lines[2]).toBe("4218,2026-09-12T10:49:52Z," + JOE + "," + SESSION + ",straza.audit.tool,allow,src/main/java/Billing.java,rule dev-reads");
-    expect(lines[9]).toBe("4211,2026-09-12T10:31:45Z," + JOE + ",,straza.audit.approval,approved,joe-java-developer-agent's assign role in midpoint approved by judy (rule iga-writes),\"reviewed the target, fine\"");
+    expect(lines[2]).toBe("4218,2026-09-12T10:49:52Z," + JOE + "," + SESSION + ",straza.audit.tool,allow,src/main/java/Billing.java,policy rule dev-reads");
+    expect(lines[9]).toBe("4211,2026-09-12T10:31:45Z," + JOE + ",,straza.audit.approval,approved,joe-java-developer-agent's assign role in midpoint approved by judy (policy rule iga-writes),\"reviewed the target, fine\"");
+  });
+
+  // CHANGES are an admin, an identity and a policy record that carry a
+  // dotted action, and a gateway call to a server named policy, linked
+  // after the window.
+  const CHANGES = chain(HEAD + 1, [
+    { ce: { type: "straza.audit.admin", time: "2026-09-12T10:52:00Z", data: { action: "user.killed", user: USER_ID } }, username: "alice" },
+    { ce: { type: "straza.identity", time: "2026-09-12T10:52:01Z", data: { action: "identity.created", user: USER_ID } }, username: "alice" },
+    { ce: { type: "straza.policy", time: "2026-09-12T10:52:02Z", data: { action: "policy.activate" } }, username: "alice" },
+    { ce: { type: "straza.audit.mcp", time: "2026-09-12T10:52:03Z", data: { session: SESSION, user: USER_ID, app: "policy", toolName: "delete", effect: "allow", ruleId: "dev-reads", setName: "dev-guardrails" } }, username: JOE },
+  ], WINDOW[WINDOW.length - 1].hash);
+
+  it("reads a change's action and type in words, keeps a call as recorded, and exports both raw", async () => {
+    let blob: Blob | null = null;
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: (b: Blob) => { blob = b; return "#"; } });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => {} });
+    vi.mocked(listAudit).mockImplementation((q: string) => {
+      const p = new URLSearchParams(q);
+      if (p.get("order") === "desc") return Promise.resolve(WINDOW.concat(CHANGES).reverse());
+      return Promise.resolve([]);
+    });
+    vi.mocked(overview).mockResolvedValue({ audit: { head_seq: HEAD + 4 } });
+    mount();
+    await screen.findByRole("button", { name: "Open 4223" });
+    expect(cell(4220, WHAT)).toBe("Cut off a user's access");
+    expect(cell(4221, WHAT)).toBe("Created a user");
+    expect(cell(4222, WHAT)).toBe("Turned on a policy");
+    expect(cell(4223, WHAT)).toBe("policy.delete");
+    expect([4220, 4221, 4222, 4223].map((seq) => cell(seq, TYPE))).toEqual(["admin change", "identity change", "policy change", "MCP call"]);
+    await userEvent.click(screen.getByRole("button", { name: "Export loaded rows" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "CSV" }));
+    await waitFor(() => expect(blob).not.toBeNull());
+    const lines = (await (blob as unknown as Blob).text()).trim().split("\n");
+    expect(lines.slice(1, 5)).toEqual([
+      "4223,2026-09-12T10:52:03Z," + JOE + "," + SESSION + ",straza.audit.mcp,allow,policy.delete,policy rule dev-reads",
+      "4222,2026-09-12T10:52:02Z,alice,,straza.policy,,policy.activate,",
+      "4221,2026-09-12T10:52:01Z,alice,,straza.identity,,identity.created,",
+      "4220,2026-09-12T10:52:00Z,alice,,straza.audit.admin,,user.killed,",
+    ]);
+  });
+
+  it("titles the record sheet with the record's type in words", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Open 4219" }));
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByRole("heading", { name: "Record 4219 admin change" })).toBeTruthy();
+  });
+
+  it("keeps the Action and Reason columns room with a floor, so a narrow window scrolls the table", async () => {
+    mount();
+    await screen.findByRole("button", { name: "Open 4219" });
+    expect((document.querySelector("table") as HTMLElement).style.minWidth).toBe("1000px");
   });
 });
 
@@ -504,7 +559,7 @@ describe("the Audit tail", () => {
     mount();
     await loaded(9);
     expect(rows()[0]).toBe("4219");
-    expect(screen.getByRole("status").getAttribute("title")).toBe("Every loaded record was re-hashed in this browser and linked to its predecessor. Live tail, polled every second.");
+    expect(screen.getByRole("status").getAttribute("title")).toBe("Every loaded record was re-hashed in this browser and linked to its predecessor.");
     expect(reads("after=")).toBe(0);
     await tick(999);
     expect(reads("after=")).toBe(0);
@@ -514,7 +569,7 @@ describe("the Audit tail", () => {
     expect(reads("after=4219&limit=1000")).toBe(2);
 
     // A search stops the tail reads and is read again every three seconds.
-    fireEvent.click(screen.getByRole("button", { name: "deny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Denied" }));
     await until(() => !!screen.queryByText("No record in the chain matches this search."));
     expect(reads("order=desc&limit=200&effect=deny")).toBe(1);
     await tick(2999);
@@ -544,7 +599,7 @@ describe("the Audit tail", () => {
     vi.mocked(listAudit).mockRejectedValue(failure("unreachable", 0, true));
     await tick(1000);
     await until(() => !!document.querySelector("[data-fetch-error]"));
-    expect(document.querySelector("[data-fetch-error]")?.textContent).toContain("last successful read " + answered.toLocaleTimeString([], { hour12: false }) + ".");
+    expect(document.querySelector("[data-fetch-error]")?.textContent).toContain("Last good read: " + absTime(answered.toISOString()).slice(11) + ".");
     expect(answered.getTime() - new Date("2026-09-12T10:52:00Z").getTime()).toBeGreaterThanOrEqual(3000);
   });
 
@@ -559,7 +614,7 @@ describe("the Audit tail", () => {
     await tick(1000);
     await loaded(9 + n);
     // The batch is checked and counted when it lands. Its rows follow.
-    expect(screen.getByRole("status").textContent).toBe("Chain verified" + chainVerified(9 + n, HEAD + n));
+    expect(screen.getByRole("status").textContent).toBe("Chain verified" + chainVerified(HEAD + n));
     expect(arrived()).toBe(step);
     expect(rows()[0]).toBe(String(HEAD + step));
     await tick(gap - 1);

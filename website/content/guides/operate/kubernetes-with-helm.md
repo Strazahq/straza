@@ -42,7 +42,7 @@ At the identity provider, Straza's client, `oidc.clientId`, takes two redirects.
 
 The chart takes those two as the values `oidc.clientId`, `straza` by default, and `oidc.loopbackPort`, 0 by default, beside `oidc.issuer`. `oidc.jitProvision` has no chart value, and the enterprise profile, the chart's default, already sets it to false, so put it in `configYaml` only to state it.
 
-The key-encryption key seals stored credentials, and every replica needs the same one, so the chart mounts it at `/etc/straza/secret.key`. Without it each pod mints an ephemeral key in its own empty data directory, and secrets stop surviving a restart. Create the namespace and three Secrets first, the third holding the password of the bundled database at the data key `password`.
+The key-encryption key seals strazad's signing keys and every stored credential, and every replica needs the same one, so the chart mounts it at `/etc/straza/secret.key`. The chart refuses to render the enterprise profile without it, because a key a pod made for itself would be lost at the next restart, and strazad would then refuse to start. Create the namespace and three Secrets first, the third holding the password of the bundled database at the data key `password`.
 
 {{< command terminal="Terminal" purpose="kubectl against the cluster" >}}
 ```sh
@@ -56,7 +56,21 @@ kubectl -n straza create secret generic straza-db-password --from-literal=passwo
 
 `tls.crt` and `tls.key` are your certificate and its key for the name in `publicUrl`. strazad refuses to start on a key-encryption key of any length other than 32 bytes.
 
-{{< now title="Keep a copy of kek.bin, then delete it here" >}}Keep a copy where you keep backups, then delete it from the working directory. No stored credential can be opened without it.{{< /now >}}
+{{< now title="Keep a copy of kek.bin, then delete it here" >}}Keep the copy somewhere other than the database backups, because a backup that holds both the database and the key protects nothing. Then delete it from the working directory. No stored credential can be opened without the key, and once the store holds signing keys strazad does not start without it.{{< /now >}}
+
+
+When the key Secret is gone or holds other bytes, a new pod does not start, and the pods that already run keep serving until they restart.
+
+{{< fails >}}
+`MountVolume.SetUp failed for volume "kek" : secret "straza-kek" not found`
+: The Secret is gone. `kubectl describe pod` shows this event, the pod stays in `ContainerCreating`, and `kubectl logs` only says that the container is waiting to start. Create the Secret again from your copy of `kek.bin`, and the pods start without another command.
+
+`does not open: it was sealed under another secret.key or changed in the database`
+: The Secret holds other bytes than the key this database was sealed with, the pod restarts in a loop, and strazad has changed nothing. Put the right bytes back with `kubectl -n straza create secret generic straza-kek --from-file=kek=kek.bin --dry-run=client -o yaml | kubectl -n straza apply -f -`, then run `kubectl -n straza rollout restart deployment/straza-straza`. The restart is faster than waiting: in a test on kind, a pod in its restart loop picked up the right bytes only 106 seconds after the fix.
+
+`must be exactly 32 bytes`
+: The Secret holds text, such as the base64 form of a key. Put the key's 32 raw bytes in it with `--from-file`, as above.
+{{< /fails >}}
 
 The password is hex because the chart writes it into the database address, where some other characters would need escaping. The chart can also generate the password, but a Secret you created survives `helm uninstall`, which deletes a generated one.
 
@@ -101,7 +115,7 @@ The Deployment is where the runtime footprint is decided. Trimmed to the lines t
         runAsUser: 65532
       containers:
         - name: strazad
-          image: ghcr.io/strazahq/straza:2.2.0
+          image: ghcr.io/strazahq/straza:2.3.0
           args: ["serve", "--profile", "enterprise", "--listen", "0.0.0.0:8420"]
           env:
             - name: STRAZA_PUBLIC_URL
@@ -131,7 +145,7 @@ The Deployment is where the runtime footprint is decided. Trimmed to the lines t
 ```
 
 
-The pod runs as user 65532 with a read-only root filesystem and every capability dropped. Its data directory `/var/lib/straza` is an emptyDir on purpose. Under the enterprise profile the store is Postgres and the event stream is NATS, so the directory holds only three things: the apps directory, the push relay token strazad mints at each start and, when you skip the key Secret, an ephemeral key-encryption key.
+The pod runs as user 65532 with a read-only root filesystem and every capability dropped. Its data directory `/var/lib/straza` is an emptyDir on purpose. Under the enterprise profile the store is Postgres and the event stream is NATS, so the directory holds only two things: the apps directory and the push relay token strazad mints at each start.
 
 - The persistent volume claims belong to the bundled backends, 5Gi for NATS and 20Gi for Postgres by default.
 - Until you pin `image.tag`, the image tag is the chart's `appVersion`, the release the chart ships with.
@@ -162,7 +176,7 @@ During a database outage in the enterprise profile, each server decision can wai
 | `postgres.storage` | The size of the bundled database's volume claim. The default is `20Gi`. |
 | `nats.enabled` | Runs the bundled NATS server with JetStream under the enterprise profile, and setting `nats.url` replaces it. With neither, each pod runs its own bus, so the chart refuses more than one replica. The default is `true`. |
 | `nats.storage` | The size of the bundled broker's volume claim. The default is `5Gi`. |
-| `networkPolicy.enabled` | Renders a NetworkPolicy for each bundled backend that admits the strazad pods alone. Your network plugin must enforce NetworkPolicy, and a cluster that runs flannel alone accepts the objects and ignores them. The default is `true`. |
+| `networkPolicy.enabled` | Renders a NetworkPolicy for each bundled backend that admits the strazad pods alone. While `demoTools.enabled` is on, it renders one more with the same rule for the demo MCP server. Your network plugin must enforce NetworkPolicy, and a cluster that runs flannel alone accepts the objects and ignores them. The default is `true`. |
 | `approverTLS.enabled` | Runs the dedicated approver listener on `approverTLS.port`, 8443, with its own Service port. The render fails unless `approverTLS.existingSecret` and `approverTLS.publicUrl` are set too. The default is `false`. |
 | `pushRelay.url` | The relay strazad registers with. Empty means the Straza relay at `https://push.straza.ai`, so set it only for a relay you run. Empty by default. |
 | `service.type` | The type of the strazad Service. The default is `ClusterIP`. |
@@ -170,11 +184,13 @@ During a database outage in the enterprise profile, each server decision can wai
 | `ingress.className` | The ingress class of the rule that `ingress.enabled` renders. Empty by default. |
 | `ingress.host` | The host of that rule. While `ingress.enabled` is on and `publicUrl` is empty, the chart builds `publicUrl` from it, with https when `ingress.tls` is on. The default is `straza.example.com`. |
 | `ingress.tls` | Adds TLS to the rule with the certificate in the Secret `<release>-straza-tls`, which you or cert-manager create. The default is `false`. |
-| `demoTools.enabled` | Runs the demo MCP server of the demo stack as its own pod that only strazad reaches, so a fresh install has a server to register. Leave it off in a real deployment. The default is `false`. |
+| `demoTools.enabled` | Runs the demo MCP server of the demo stack as its own pod, so a fresh install has a server to register. While `networkPolicy.enabled` is on, a NetworkPolicy admits only the strazad pods to it, if your network plugin enforces NetworkPolicy. With `networkPolicy.enabled` set to false, every pod in the cluster can reach it. Leave it off in a real deployment. The default is `false`. |
 | `demoTools.package` | The npm package and version the demo pod fetches at every start, so the node needs to reach npm. The default is `@modelcontextprotocol/server-everything@2026.7.4`. |
 
 
 Two of the chart's render guards cover replicas. Scaling the standalone profile past one replica fails, because each pod would own its own SQLite store. An enterprise render with more than one replica and no shared NATS fails too.
+
+An enterprise render without `secrets.kekExistingSecret` fails at any replica count, because a key a pod made for itself would be lost at its next restart. Its message starts `straza: profile=enterprise needs secrets.kekExistingSecret, a Secret with a 32-byte key at the data key kek.` and ends with the commands that create the Secret.
 
 The dedicated approver listener is off by default on Kubernetes. Turning it on requires your own certificate Secret and the public URL the phone dials, because the chart never mints the pair, as [TLS and exposure]({{< relref "guides/operate/tls-and-exposure.md" >}}) explains. On a cluster with an ingress that serves `/v1/approver/*` under a publicly trusted certificate, set `server.approverPublicUrl` in `configYaml` instead.
 
@@ -215,42 +231,123 @@ Two replicas, the default, can start together on a new database. The store keeps
 ## Upgrade and roll back {.nostep}
 
 
-`helm upgrade` with a newer chart or `image.tag` rolls the Deployment, and each new pod migrates the store at start, as [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md" >}}) describes. The chart keeps the default rolling update, so for a moment an old pod and a new pod serve side by side.
+`helm upgrade` with a newer chart or `image.tag` rolls the Deployment, and each new pod migrates the store at start, as [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md" >}}) describes. The chart keeps the default rolling update, so for a moment an old pod and a new pod serve side by side. The upgrade from 2.2.0 to 2.3.0 is the exception. A 2.2.0 pod crashes on the signing keys a 2.3.0 pod has sealed, so stop every 2.2.0 pod before the first 2.3.0 pod starts, as [its upgrade steps]({{< relref "guides/operate/backup-and-upgrade.md#upgrade-from-220-to-230" >}}) say. Run these commands from a clone of the 2.3.0 release, with the values of your install.
 
-
-A rollback moves the schema down with the newer image before the older one starts, because an older strazad refuses a database that a newer one migrated. Set the shell variable `TARGET` to the newest migration of the release you return to. This release carries migrations 37 to 42, and [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md#roll-back" >}}) lists what each step down gives up. A release older than migration 37 comes back only through a restore of the database.
-
-Take three steps:
-
-1. Scale the Deployment to zero.
-2. Run `strazad migrate --to "$TARGET"` once in a pod built from the release's own pod spec, so that it reads the same database settings and passes the same NetworkPolicy.
-3. Roll the release back.
 
 {{< command terminal="Terminal" purpose="kubectl and helm against the cluster" >}}
 ```sh
 kubectl -n straza scale deployment/straza-straza --replicas=0
 kubectl -n straza wait --for=delete pod -l app.kubernetes.io/name=straza,app.kubernetes.io/instance=straza --timeout=2m
-kubectl -n straza get deployment straza-straza -o json \
-  | jq --arg to "$TARGET" '{apiVersion: "v1", kind: "Pod",
-         metadata: {name: "straza-migrate", labels: .spec.template.metadata.labels},
-         spec: (.spec.template.spec | .restartPolicy = "Never"
-           | .containers[0].args = ["migrate", "--to", $to, "--profile", "enterprise"]
-           | del(.containers[0].readinessProbe, .containers[0].livenessProbe))}' \
-  | kubectl -n straza apply -f -
-kubectl -n straza wait --for=jsonpath='{.status.phase}'=Succeeded pod/straza-migrate --timeout=2m
-kubectl -n straza logs pod/straza-migrate
-kubectl -n straza delete pod straza-migrate
-helm -n straza rollback straza
+helm upgrade straza deploy/helm/straza --namespace straza \
+  --set publicUrl=https://straza.example.com \
+  --set oidc.issuer=https://idp.example.com/realms/prod \
+  --set secrets.kekExistingSecret=straza-kek \
+  --set tls.existingSecret=straza-tls \
+  --set postgres.passwordSecret=straza-db-password
+kubectl -n straza rollout status deployment/straza-straza --timeout=3m
 ```
 {{< /command >}}
 
-{{< see >}}The migrate pod's log names the migration the database is at now and the release to start.{{< /see >}}
+{{< see >}}`deployment "straza-straza" successfully rolled out`. No pod answers between the scale and the first ready 2.3.0 pod, 12 seconds in a test with two replicas.{{< /see >}}
+
+`helm upgrade` sets the replica count back from `replicaCount`. With `autoscaling.enabled` the Deployment carries no replica count, so it stays at zero, and the autoscaler does not scale up a Deployment at zero. Scale it back to `autoscaling.minReplicas` yourself, with `kubectl -n straza scale deployment/straza-straza --replicas=2` for the default of two.
+
+A plain `helm upgrade` without the scale to zero also ends with a sealed database and the same keys. Each 2.2.0 pod that is still running at its next key reload, which comes every 30 seconds, crashes with `panic: ed25519: bad seed length`, and the rollout finishes by itself. In three such upgrades with two replicas, clients saw between 0 and 6 seconds of refused connections. More replicas were not tested.
+
+
+A rollback moves the schema down with the newer image before the older one starts, because an older strazad refuses a database that a newer one migrated. This release carries migrations 37 to 47, and [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md#roll-back" >}}) lists what each step down gives up. A release older than migration 37 comes back only through a restore of the database.
+
+The commands set two shell variables. `NEW_IMAGE` is the image you upgraded to. `REVISION` is the Helm revision that ran the release you return to, and `helm -n straza history straza` lists the revisions, while `helm -n straza get values straza --revision 1` shows the values of one, `image.tag` included when you set it. The loop names each migration to step down to, newest first, and from 2.3.0 back to 2.2.0 those are 46, 45, 44, 43 and 42.
+
+Take three steps:
+
+1. Scale the Deployment to zero.
+2. Run `strazad migrate --to` once per migration in a pod built from the release's own pod spec, so that it reads the same database settings and passes the same NetworkPolicy.
+3. Roll the release back to the named revision.
+
+{{< command terminal="Terminal" purpose="kubectl and helm against the cluster" >}}
+```sh
+NEW_IMAGE=ghcr.io/strazahq/straza:2.3.0
+REVISION=1
+kubectl -n straza scale deployment/straza-straza --replicas=0
+kubectl -n straza wait --for=delete pod -l app.kubernetes.io/name=straza,app.kubernetes.io/instance=straza --timeout=2m
+for TARGET in 46 45 44 43 42; do
+  kubectl -n straza get deployment straza-straza -o json \
+    | jq --arg to "$TARGET" --arg image "$NEW_IMAGE" '{apiVersion: "v1", kind: "Pod",
+           metadata: {name: "straza-migrate", labels: .spec.template.metadata.labels},
+           spec: (.spec.template.spec | .restartPolicy = "Never"
+             | .containers[0].image = $image
+             | .containers[0].args = ["migrate", "--to", $to, "--profile", "enterprise"]
+             | del(.containers[0].readinessProbe, .containers[0].livenessProbe))}' \
+    | kubectl -n straza apply -f -
+  kubectl -n straza wait --for=jsonpath='{.status.phase}'=Succeeded pod/straza-migrate --timeout=2m || break
+  kubectl -n straza logs pod/straza-migrate
+  kubectl -n straza delete pod straza-migrate
+done
+helm -n straza rollback straza "$REVISION"
+```
+{{< /command >}}
+
+{{< see >}}One log line per run that names the migration the database is at now. The first run adds a line that starts `Opened` and counts the signing keys it stored unsealed for the older server.{{< /see >}}
+
+`NEW_IMAGE` goes into the pod itself, because after a `helm rollback` that ran too early the Deployment holds the older image, whose migrate refuses with `knows migrations up to 42`. `REVISION` goes into the rollback, because `helm rollback` without one returns to the previous revision, and after any later `helm upgrade` that is a 2.3.0 revision, whose pods migrate the database back up and seal the keys again.
 
 The scale returns before the old pods exit, so the first `wait` holds the migrate pod back until no strazad pod serves. Its label selector matches the strazad pods only, since the bundled backends carry the names `straza-nats` and `straza-postgres`. The pod carries the template's labels, which the NetworkPolicy admits, and no ReplicaSet adopts it, because it lacks the hash label a ReplicaSet selects on.
 
-The command moves one migration per run. When the newer release added more than one, the first run refuses before it changes anything, and its log names the step to run first, so run the pod once for each step. When the command refuses, the pod fails and `kubectl wait` runs out of time. The log then names what to fix before you delete the pod and run it again.
+Each run moves one migration, so the loop runs one pod for each step. When a run refuses, the pod fails, `kubectl wait` runs out of time and the loop stops with the pod in place. `kubectl -n straza logs pod/straza-migrate` then names what to fix. Delete the pod, fix the cause, and run the loop again with its list starting at the migration the log names.
 
-`helm rollback` with no revision returns to the previous one, which brings back the older image and the replica count. With `autoscaling.enabled` the Deployment carries no replica count, and the autoscaler does not scale a Deployment at zero. Scale it back to `autoscaling.minReplicas` yourself, with `kubectl -n straza scale deployment/straza-straza --replicas=2` for the default of two. [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md" >}}) compares this way back with a restore.
+Rolling back to the named revision brings back the older image and the replica count. With `autoscaling.enabled` the Deployment carries no replica count, and the autoscaler does not scale a Deployment at zero. Scale it back to `autoscaling.minReplicas` yourself, with `kubectl -n straza scale deployment/straza-straza --replicas=2` for the default of two. [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md" >}}) compares this way back with a restore.
+
+{{< fails >}}
+`no migration found for version 47`
+: A 2.2.0 pod started on the database that 2.3.0 migrated, usually because `helm rollback` ran before the migrate pods. That pod restarts in a loop and changes nothing. The 2.3.0 pods keep serving, because the rolling update keeps them until a new pod is ready, so the rollout never finishes. Take the three steps above. The loop names the newer image, so it works while the Deployment holds the older one.
+{{< /fails >}}
+
+## Replace the key-encryption key {.nostep}
+
+
+The replacement on [Keys, certificates and tokens]({{< relref "security/keys-certificates-and-tokens.md#back-up-and-rotate-by-procedure" >}}) moves the signing keys to a new key with `strazad reseal-signing-keys` while no replica runs. On Kubernetes that command runs in a pod built from the Deployment's own pod spec, with the old key at its usual path and the new key from a second Secret beside it.
+
+{{< command terminal="Terminal" purpose="kubectl against the cluster" >}}
+```sh
+kubectl -n straza scale deployment/straza-straza --replicas=0
+kubectl -n straza wait --for=delete pod -l app.kubernetes.io/name=straza,app.kubernetes.io/instance=straza --timeout=2m
+head -c 32 /dev/urandom > kek-new.bin
+kubectl -n straza create secret generic straza-kek-new --from-file=kek=kek-new.bin
+kubectl -n straza get deployment straza-straza -o json \
+  | jq '{apiVersion: "v1", kind: "Pod",
+         metadata: {name: "straza-reseal", labels: .spec.template.metadata.labels},
+         spec: (.spec.template.spec | .restartPolicy = "Never"
+           | .containers[0].args = ["reseal-signing-keys", "--new-kek-file", "/etc/straza/secret.key.new", "--profile", "enterprise"]
+           | .containers[0].volumeMounts += [{name: "kek-new", mountPath: "/etc/straza/secret.key.new", subPath: "kek", readOnly: true}]
+           | .volumes += [{name: "kek-new", secret: {secretName: "straza-kek-new"}}]
+           | del(.containers[0].readinessProbe, .containers[0].livenessProbe))}' \
+  | kubectl -n straza apply -f -
+kubectl -n straza wait --for=jsonpath='{.status.phase}'=Succeeded pod/straza-reseal --timeout=2m
+kubectl -n straza logs pod/straza-reseal
+kubectl -n straza delete pod straza-reseal
+```
+{{< /command >}}
+
+```text
+Sealed 2 signing keys under the key in /etc/straza/secret.key.new.
+Put that file in place of /etc/straza/secret.key on every replica, then start strazad.
+```
+
+{{< see >}}Both lines. The count is every signing key a start opens, two on a database without a client assertion key.{{< /see >}}
+
+Then put the new key into the same Secret, delete the second one and start the replicas. The same Secret name keeps every Helm revision pointing at the key the database is sealed with, so a later `helm rollback` cannot mount an old key.
+
+{{< command terminal="Terminal" purpose="kubectl against the cluster" >}}
+```sh
+kubectl -n straza create secret generic straza-kek --from-file=kek=kek-new.bin --dry-run=client -o yaml | kubectl -n straza apply -f -
+kubectl -n straza delete secret straza-kek-new
+kubectl -n straza scale deployment/straza-straza --replicas=2
+kubectl -n straza rollout status deployment/straza-straza --timeout=3m
+```
+{{< /command >}}
+
+`kubectl apply` warns that the Secret is missing the `kubectl.kubernetes.io/last-applied-configuration` annotation, because `kubectl create` made it, and adds the annotation. Scale to your own `replicaCount`, or to `autoscaling.minReplicas` with the autoscaler on. The pods start on the same signing keys, so `/.well-known/straza/jwks.json` and `/.well-known/straza/snapshot-keys.json` serve the same documents as before, and in a test with two replicas no pod served for 17 seconds. Keep a copy of `kek-new.bin` apart from the database backups, delete it here, and set every stored secret again, as steps 6 and 7 of that procedure say.
 
 ## Undo {.nostep}
 

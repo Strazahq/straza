@@ -9,9 +9,17 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
+	"github.com/strazahq/straza/internal/secrets"
 	"github.com/strazahq/straza/internal/store"
 )
+
+// rawSeedSchema is at or above the newest migration of every strazad release
+// that reads the session and snapshot signing seeds raw. A database moved to
+// it or below is on its way to such a release, so the command opens the
+// sealed seeds.
+const rawSeedSchema = 46
 
 // schemaMover is the one store method the migrate command needs, declared
 // here so that the Store interface does not grow for one command.
@@ -37,7 +45,9 @@ they hold.
 
 A rollback to an older strazad release runs this command with the newer
 binary first, since only the newer binary has the steps that undo its own
-migrations, and then starts the older binary on the same database.
+migrations, and then starts the older binary on the same database. The step
+to migration 46 also stores the signing keys the way the older releases read
+them, unsealed, for which it needs the secret.key of this database.
 
 Stop every strazad replica first. The command cannot see other replicas,
 and a replica that keeps serving writes to the tables the move changes.
@@ -69,13 +79,32 @@ that strazad serve runs with, so that it finds the same database.`,
 					"Report it with the output of strazad version", cfg.Store.Driver)
 			}
 			n, err := mover.MigrateTo(cmd.Context(), to)
-			switch {
-			case errors.Is(err, store.ErrSchemaUnchanged):
-				fmt.Fprintf(cmd.OutOrStdout(), "The database is at migration %d already. Nothing changed.\n", n)
-			case err != nil:
+			unchanged := errors.Is(err, store.ErrSchemaUnchanged)
+			if err != nil && !unchanged {
 				return err
+			}
+			opened := 0
+			if n <= rawSeedSchema {
+				if opened, err = openSealedSeeds(cmd.Context(), cfg, st); err != nil {
+					state := "now"
+					if unchanged {
+						state = "already"
+					}
+					return fmt.Errorf("the database is at migration %d %s, but its signing keys are still sealed, and a strazad for migration %d or below cannot read them: %w. "+
+						"Put the secret.key of this database back where secrets.kekFile or the data directory points, then run the command again. "+
+						"Start no older strazad on this database before that", n, state, rawSeedSchema, err)
+				}
+			}
+			switch {
+			case unchanged && opened == 0:
+				fmt.Fprintf(cmd.OutOrStdout(), "The database is at migration %d already. Nothing changed.\n", n)
+			case unchanged:
+				fmt.Fprintf(cmd.OutOrStdout(), "The database is at migration %d already.\n", n)
 			default:
 				fmt.Fprintf(cmd.OutOrStdout(), "The database is at migration %d now. Start the strazad release whose newest migration is %d.\n", n, n)
+			}
+			if opened > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "Opened %d signing keys, because a strazad for migration %d or below cannot read sealed ones.\n", opened, rawSeedSchema)
 			}
 			return nil
 		},
@@ -83,6 +112,22 @@ that strazad serve runs with, so that it finds the same database.`,
 	flags.bind(cmd)
 	cmd.Flags().UintVar(&to, "to", 0, "the migration version to move the database to")
 	return cmd
+}
+
+// openSealedSeeds stores the session and snapshot signing seeds raw again and
+// answers how many it changed. It reads the KEK only when the key file
+// exists, so the command never creates one, and a database with no sealed
+// seed needs none.
+func openSealedSeeds(ctx context.Context, cfg config.Config, st store.Store) (int, error) {
+	var sealer authn.KeySealer
+	if _, err := os.Stat(cfg.KEKFile()); err == nil {
+		kek, err := secrets.LoadOrCreateKEK(cfg.KEKFile())
+		if err != nil {
+			return 0, err
+		}
+		sealer = kek
+	}
+	return authn.UnsealSeeds(ctx, st.SigningKeys(), sealer)
 }
 
 // sqliteExists refuses a sqlite database file that is missing or cannot be
@@ -96,12 +141,12 @@ func sqliteExists(path string) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, fs.ErrNotExist):
-		return errors.New("the store driver is sqlite, and no database file exists where the store settings point, so nothing moved. " + fix)
+		return errors.New("the store driver is sqlite, and no database file exists where the store settings point, so nothing changed. " + fix)
 	}
 	cause := err
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {
 		cause = pathErr.Err
 	}
-	return fmt.Errorf("the store driver is sqlite, and the database file where the store settings point cannot be read (%v), so nothing moved. "+fix, cause)
+	return fmt.Errorf("the store driver is sqlite, and the database file where the store settings point cannot be read (%v), so nothing changed. "+fix, cause)
 }

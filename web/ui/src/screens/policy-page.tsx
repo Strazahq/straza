@@ -1,12 +1,13 @@
 import * as React from "react";
 import { FileXIcon, MoreHorizontalIcon, PlayIcon, PlusIcon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/empty-state";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
+import { KindTile } from "@/components/kind-icon";
 import { OriginLine } from "@/components/origin-line";
 import { PageHead } from "@/components/page-head";
 import { PolicyDecisions, openPolicyAudit } from "@/components/policy-decisions";
@@ -18,12 +19,12 @@ import { PolicyRules } from "@/components/policy-rules";
 import { PolicyTest } from "@/components/policy-test";
 import { PolicyUnpublished } from "@/components/policy-unpublished";
 import { PolicyYaml } from "@/components/policy-yaml";
-import { WordBadge } from "@/components/users-table";
+import { Chip } from "@/components/chip";
 import { type ApiError, type EventSupport, type PolicyDoc, type RoleRow, activatePolicy, applyPolicy, deactivatePolicy, deletePolicy, eventSupport, getPolicy, listApps, listRoles, validatePolicy } from "@/lib/api";
 import { type Doc, type Plain, addRule, docProblems, docText, openDoc, posturesOf, posturesOfRules, proposeRuleId, readSet, removeRule, splitRule } from "@/lib/policy-model";
 import {
   ADD_RULE, CANCEL, DELETE, DELETE_BODY, DELETE_LIVE_TITLE, DRAFT, DRAFT_TITLE, EDITED, EDITED_TITLE, LEAVE, LEAVE_BODY, LEAVE_TITLE,
-  LIVE, LIVE_TITLE, MENU, META, MISSING_BODY, MISSING_TITLE, MORE, NOT_PARSED_PAGE, OFF_HELP, OFF_KEEPS, ON_BODY, OPEN_POLICIES,
+  LIVE, LIVE_TITLE, MENU, META, MISSING_TITLE, MORE, NOT_PARSED_PAGE, OFF_HELP, OFF_KEEPS, ON_BODY, OPEN_POLICIES,
   READING_POLICY, SAVE, STAY, SUBJECT_POLICY, SUBJECT_ROLES, TAB, TEST_A_CALL, TOUCHED, TURN_OFF, TURN_ON,
   deleteTitle, deletedToast, metaRules, missingPolicy, movedOut, offBody, offTitle, offToast, onTitle, onToast, policyFileName, savedToast,
 } from "@/lib/policy-words";
@@ -32,8 +33,7 @@ import { notify } from "@/lib/notify";
 import { navigate, setLeaveGuard } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
 import { readFailed, refused } from "@/lib/say";
-import { agoWord } from "@/lib/settings-words";
-import { absTime } from "@/lib/words";
+import { absTime, agoWord } from "@/lib/words";
 import { downloadText } from "@/lib/utils";
 
 // One policy's page. The page owns the working text: every row, fact
@@ -42,6 +42,8 @@ import { downloadText } from "@/lib/utils";
 // Publish.
 
 const route = routeByKey("policies");
+const CRUMBS = [{ label: route.label, to: "policies" as const }];
+const TILE = <KindTile kind="policy-set" size="lg" />;
 const TABS = ["rules", "yaml", "decisions"] as const;
 
 type Props = { name: string; tab?: string };
@@ -160,11 +162,11 @@ export function PolicyPage({ name, tab }: Props) {
     setChanges((c) => (c.includes(TOUCHED.text) ? c : [...c, TOUCHED.text]));
   }, []);
 
-  if (state.kind === "loading") return <PageHead label={route.label} title={name} description={READING_POLICY} />;
+  if (state.kind === "loading") return <PageHead label={name} crumbs={CRUMBS} tile={TILE} description={READING_POLICY} />;
   if (state.kind === "error") {
     return (
       <>
-        <PageHead label={route.label} title={name} description={READING_POLICY} />
+        <PageHead label={name} crumbs={CRUMBS} tile={TILE} description={READING_POLICY} />
         <div className="flex flex-col gap-3 px-6 py-5"><FetchError subject={SUBJECT_POLICY} detail={state.message} /></div>
       </>
     );
@@ -172,7 +174,7 @@ export function PolicyPage({ name, tab }: Props) {
   if (state.kind === "missing") {
     return (
       <>
-        <PageHead label={route.label} title={MISSING_TITLE} description={MISSING_BODY} />
+        <PageHead label={name} crumbs={CRUMBS} description="" />
         <EmptyState icon={FileXIcon} title={MISSING_TITLE} action={<Button variant="outline" onClick={() => navigate("policies")}>{OPEN_POLICIES}</Button>}>
           {missingPolicy(name)}
         </EmptyState>
@@ -191,6 +193,18 @@ export function PolicyPage({ name, tab }: Props) {
   // the name says what is stored, and the bar says what the edits change.
   const livePostures = posturesOf(summary?.postures);
   const capture = view ? view.capture : (summary?.capture === "redact" ? "redact" : summary?.capture ? "verbatim" : null);
+  // The Turn off dialog names only the lanes the policy holds: whether it
+  // gates MCP calls, and the local lanes it allows. A rule on every lane, or
+  // one that names mcp.call among other tools, gates MCP calls too. The
+  // stored counts stand in while the text does not parse.
+  const lanes = summary?.lanes || {};
+  const onMcp = (r: (typeof rules)[number]) => r.lane === "mcp" || r.lane === "all" || (r.lane === "tools" && Array.isArray(r.raw.tools) && r.raw.tools.includes("mcp.call"));
+  const gatesMcp = view
+    ? rules.some((r) => r.bucket !== "allow" && onMcp(r))
+    : Object.entries(lanes.mcp || {}).some(([k, n]) => k !== "allow" && n > 0);
+  const allowsLocal = view
+    ? rules.filter((r) => r.lane !== "mcp" && r.bucket === "allow").map((r) => r.lane)
+    : Object.keys(lanes).filter((l) => l !== "mcp" && (lanes[l].allow || 0) > 0);
   const description = (view ? view.description : summary?.description) || "";
 
   const discard = () => {
@@ -290,14 +304,14 @@ export function PolicyPage({ name, tab }: Props) {
 
   const badges = (
     <>
-      <WordBadge word={live ? LIVE : DRAFT} tone={live ? "ok" : "plain"} title={live ? LIVE_TITLE : DRAFT_TITLE} attr="data-policy-status" />
-      {stored.drift && <WordBadge word={EDITED} tone="warn" title={EDITED_TITLE} attr="data-drift" />}
+      <Chip tone={live ? "ok" : "plain"} title={live ? LIVE_TITLE : DRAFT_TITLE} data-policy-status={live ? LIVE : DRAFT}>{live ? LIVE : DRAFT}</Chip>
+      {stored.drift && <Chip tone="warn" title={EDITED_TITLE} data-drift={EDITED}>{EDITED}</Chip>}
       <RecChip capture={capture} />
     </>
   );
 
   const meta = (
-    <span className="flex basis-full flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground" data-meta>
+    <span className="flex basis-full flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground" data-meta>
       <span>{metaRules(livePostures, summary?.rules || 0)}</span>
       <span aria-hidden="true">·</span>
       <span title={absTime(stored.updated_at)}>{META.updated + " " + agoWord(stored.updated_at)}</span>
@@ -335,8 +349,10 @@ export function PolicyPage({ name, tab }: Props) {
 
   return (
     <>
+      {/* The head scrolls away, so the unpublished bar, which sticks to the
+          top, never covers the title. */}
       <div className="contents [&_h1]:font-mono">
-        <PageHead label={route.label} title={name} titleExtra={badges} description={description} descriptionExtra={meta} actions={actions} />
+        <PageHead label={name} crumbs={CRUMBS} tile={TILE} titleExtra={badges} description={description} descriptionExtra={meta} actions={actions} sticky={false} />
       </div>
 
       <div className="flex flex-col gap-4 px-6 py-5">
@@ -347,7 +363,7 @@ export function PolicyPage({ name, tab }: Props) {
         <Tabs value={current} onValueChange={(v) => navigate("policies", [name, v], true)}>
           <div className="flex items-center border-b border-border">
             <TabsList variant="line">
-              <TabsTrigger value="rules">{TAB.rules} <span className="font-mono text-xs text-muted-foreground">{ruleCount}</span></TabsTrigger>
+              <TabsTrigger value="rules">{TAB.rules} <span className="font-mono text-caption leading-4 text-muted-foreground">{ruleCount}</span></TabsTrigger>
               <TabsTrigger value="yaml">{TAB.yaml}</TabsTrigger>
               <TabsTrigger value="decisions">{TAB.decisions}</TabsTrigger>
             </TabsList>
@@ -380,8 +396,8 @@ export function PolicyPage({ name, tab }: Props) {
               </>
             ) : (
               <div className="flex flex-col gap-1.5" data-not-parsed>
-                <p className="max-w-[75ch] text-sm leading-relaxed text-text-2">{NOT_PARSED_PAGE}</p>
-                {parsed.problems.map((p) => <p key={p} className="font-mono text-[13px] leading-relaxed text-danger">{p}</p>)}
+                <p className="max-w-[75ch] text-dense leading-relaxed text-text-2">{NOT_PARSED_PAGE}</p>
+                {parsed.problems.map((p) => <p key={p} className="font-mono text-caption leading-relaxed text-danger">{p}</p>)}
               </div>
             )}
           </TabsContent>
@@ -429,9 +445,9 @@ export function PolicyPage({ name, tab }: Props) {
         <AlertDialogContent className="sm:max-w-[560px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{offTitle(name)}</AlertDialogTitle>
-            <AlertDialogDescription>{offBody(postures, appliesTo, capture !== null)}</AlertDialogDescription>
+            <AlertDialogDescription>{offBody(postures, appliesTo, capture !== null, gatesMcp, allowsLocal)}</AlertDialogDescription>
           </AlertDialogHeader>
-          <p className="flex items-center gap-1.5 text-sm leading-relaxed text-text-2">
+          <p className="flex items-center gap-1.5 text-dense leading-relaxed text-text-2">
             {OFF_KEEPS}
             <HelpTip label={TURN_OFF} text={OFF_HELP} />
           </p>
@@ -471,7 +487,7 @@ export function PolicyPage({ name, tab }: Props) {
           {refusal?.subject === DELETE && <RefusedError subject={DELETE} message={refusal.message} />}
           <AlertDialogFooter>
             <AlertDialogCancel>{CANCEL}</AlertDialogCancel>
-            <AlertDialogAction className="bg-danger text-white hover:bg-danger/90" onClick={(e) => { e.preventDefault(); void remove(); }}>{DELETE}</AlertDialogAction>
+            <AlertDialogAction className={DANGER_FILL} onClick={(e) => { e.preventDefault(); void remove(); }}>{DELETE}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

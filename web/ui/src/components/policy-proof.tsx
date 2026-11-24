@@ -71,7 +71,7 @@ export function PolicyProof({ name, snapshot, at }: { name: string; snapshot?: s
 
   const when = clockOf(at);
   return (
-    <div role="status" className="flex flex-col gap-1 rounded-md border border-ok/40 bg-ok-bg px-3 py-2 text-sm leading-relaxed text-text-2" data-proof={name}>
+    <div role="status" className="flex flex-col gap-1 rounded-md border border-ok/40 bg-ok-bg px-3 py-2 text-dense leading-relaxed text-text-2" data-proof={name}>
       <span>{snapshot ? liveSince(when, snapshot.slice(0, VERSION_CHARS)) : liveSinceNoVersion(when)} {REEVALUATE}</span>
       <span className="flex flex-wrap items-center gap-2" data-watch={watch.kind}>
         {watch.kind === "watching" && WATCHING}

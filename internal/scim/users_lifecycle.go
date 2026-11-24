@@ -13,6 +13,47 @@ import (
 	"github.com/strazahq/straza/internal/store"
 )
 
+// The 403 details of a write of a user Microsoft Entra owns:
+// entraOwnsPersonMsg for a person and entraOwnsAgentMsg for an agent.
+const (
+	entraOwnsPersonMsg = "Straza did not accept this person, because it takes people from Microsoft Entra ID: identity.entra.read lists people. " +
+		"Stop provisioning people to Straza in your identity manager, or take people out of identity.entra.read."
+	entraOwnsAgentMsg = "Straza did not accept this agent, because it takes agents that are in Microsoft Entra ID from Entra: identity.entra.read lists agentUsers or agentIdentities. " +
+		"Stop provisioning this agent to Straza in your identity manager, or take both kinds out of identity.entra.read."
+)
+
+// entraOwned writes the refusal and answers true when Microsoft Entra owns
+// any of users, so the write must not go on. A replace or a patch passes
+// the stored row and the row it would write, so a write that turns an agent
+// into a person, or that gives an agent an Entra agent id, is refused too.
+func (s *Server) entraOwned(w http.ResponseWriter, users ...store.User) bool {
+	for _, u := range users {
+		if detail := s.entraOwnsDetail(u); detail != "" {
+			writeError(w, http.StatusForbidden, "", detail)
+			return true
+		}
+	}
+	return false
+}
+
+// entraOwnsDetail answers the 403 detail of a write of u when Microsoft
+// Entra owns u, or "" when SCIM may write u. Entra owns every person while
+// Deps.EntraOwns owns people. While it owns agents, Entra owns only an agent
+// of origin entra or one that holds an Entra agent id, so an identity
+// manager still provisions the agents that are not in Entra.
+func (s *Server) entraOwnsDetail(u store.User) string {
+	kind := u.Kind()
+	switch {
+	case s.deps.EntraOwns == nil || !s.deps.EntraOwns(kind):
+		return ""
+	case kind == store.UserKindPerson:
+		return entraOwnsPersonMsg
+	case kind == store.UserKindAgent && (u.Origin == store.OriginEntra || u.EntraAgentID != ""):
+		return entraOwnsAgentMsg
+	}
+	return ""
+}
+
 // reviveDeactivated turns a create that conflicts with a DEACTIVATED
 // SCIM-origin row of the same userName into an in-place revive. SCIM DELETE
 // is deliberately a deactivate (handleUserDelete: the kill-switch keeps
@@ -28,6 +69,11 @@ import (
 func (s *Server) reviveDeactivated(ctx context.Context, u store.User) (store.User, bool) {
 	existing, err := s.deps.Store.Users().GetByUsername(ctx, u.Username)
 	if err != nil || existing.Status != store.UserDisabled || existing.Origin != store.OriginSCIM {
+		return store.User{}, false
+	}
+	// A deactivated person or agent that Entra owns is not revived, whatever
+	// the create asks for, so the create keeps its 409.
+	if s.entraOwnsDetail(existing) != "" {
 		return store.User{}, false
 	}
 	u.ID = existing.ID
@@ -82,11 +128,14 @@ func (s *Server) handleUserReplace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 		return
 	}
+	if s.entraOwned(w, before, u) {
+		return
+	}
 	if !s.applyManager(w, r, &u, doc.managerWrite()) || s.refuseEntraAgentID(w, r, before, u) {
 		return
 	}
 	clearNonPersonPassword(&u)
-	updated, err := s.deps.Store.Users().Update(r.Context(), u)
+	updated, moved, err := s.writeUser(r.Context(), u)
 	if errors.Is(err, store.ErrConflict) {
 		if u.EntraAgentID != "" && s.refuseEntraAgentID(w, r, before, u) {
 			return
@@ -101,12 +150,14 @@ func (s *Server) handleUserReplace(w http.ResponseWriter, r *http.Request) {
 	updated, err = s.applyActive(r.Context(), updated, active)
 	if err != nil {
 		s.userUpdated(r.Context(), before, u)
+		s.sponsorsMoved(r.Context(), moved)
 		s.writeActiveError(w, r, active, err)
 		return
 	}
 	u.Status = activeStatus(u.Status, active)
 	s.deps.IdentityChanged(r.Context(), "straza.identity.updated", updated.ID)
 	s.userUpdated(r.Context(), before, u)
+	s.sponsorsMoved(r.Context(), moved)
 	writeSCIM(w, http.StatusOK, s.userResourceCtx(r.Context(), updated))
 }
 
@@ -135,12 +186,15 @@ func (s *Server) handleUserPatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	activeTarget := patch.active
+	if s.entraOwned(w, before, u) {
+		return
+	}
 	if !s.applyManager(w, r, &u, patch.manager) || s.refuseEntraAgentID(w, r, before, u) {
 		return
 	}
 
 	clearNonPersonPassword(&u)
-	updated, err := s.deps.Store.Users().Update(r.Context(), u)
+	updated, moved, err := s.writeUser(r.Context(), u)
 	if errors.Is(err, store.ErrConflict) {
 		if u.EntraAgentID != "" && s.refuseEntraAgentID(w, r, before, u) {
 			return
@@ -155,20 +209,51 @@ func (s *Server) handleUserPatch(w http.ResponseWriter, r *http.Request) {
 	updated, err = s.applyActive(r.Context(), updated, activeTarget)
 	if err != nil {
 		s.userUpdated(r.Context(), before, u)
+		s.sponsorsMoved(r.Context(), moved)
 		s.writeActiveError(w, r, activeTarget, err)
 		return
 	}
 	u.Status = activeStatus(u.Status, activeTarget)
 	s.deps.IdentityChanged(r.Context(), "straza.identity.updated", updated.ID)
 	s.userUpdated(r.Context(), before, u)
+	s.sponsorsMoved(r.Context(), moved)
 	writeSCIM(w, http.StatusOK, s.userResourceCtx(r.Context(), updated))
+}
+
+// writeUser stores u, the row a replace or a patch writes, and answers the
+// row read back and the ids of the agents whose sponsor moved. It goes
+// through Users().UpdateRenaming, which points every agent the stored name
+// sponsors at the name written, in the transaction of the write and under
+// its lock. So no agent passes to whoever gets the old name later, a write
+// that fails moves none, and a write that races a rename leaves no agent
+// on a name nobody holds.
+func (s *Server) writeUser(ctx context.Context, u store.User) (store.User, []string, error) {
+	return s.deps.Store.Users().UpdateRenaming(ctx, u)
+}
+
+// sponsorsMoved reports each of the agents ids whose sponsor a rename
+// pointed at the new name, with the identity event and an update of the
+// sponsor through Deps.UserWritten. An agent that cannot be read back is
+// reported by its id alone, so its record is never lost.
+func (s *Server) sponsorsMoved(ctx context.Context, ids []string) {
+	for _, id := range ids {
+		agent, err := s.deps.Store.Users().GetByID(ctx, id)
+		if err != nil {
+			s.deps.Log.Error("scim: an agent whose sponsor a rename moved was not read back", "user", id, "err", err)
+			agent = store.User{ID: id}
+		}
+		s.deps.IdentityChanged(ctx, "straza.identity.updated", id)
+		if s.deps.UserWritten != nil {
+			s.deps.UserWritten(ctx, UserUpdated, agent, []string{"sponsor"})
+		}
+	}
 }
 
 // handleUserDelete deactivates (spec/scim-profile §1: SCIM never hard-deletes
 // Straza identities).
 func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.userByID(w, r)
-	if !ok {
+	if !ok || s.entraOwned(w, u) {
 		return
 	}
 	if _, err := s.applyActive(r.Context(), u, false); err != nil {

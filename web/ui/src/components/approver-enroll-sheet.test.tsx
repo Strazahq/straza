@@ -172,9 +172,7 @@ describe("the console's Add a phone sheet", () => {
     await waitFor(() => expect(create().disabled).toBe(false));
     await typist.click(create());
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain(MINT_VERB + " refused.");
-    expect(alert.textContent).toContain(sentence);
-    expect(alert.textContent).toContain("Fix what it names, then try again.");
+    expect(alert.textContent).toBe(MINT_VERB + " refused: " + sentence + ". Fix what it names, then try again.");
     expect(create()).toBeTruthy();
     expect(screen.queryByRole("img", { name: QR_LABEL })).toBe(null);
   });
@@ -247,9 +245,62 @@ describe("Add a phone on the self-service page", () => {
     expect(document.querySelector("[data-self-phone]")?.getAttribute("data-self-phone")).toBe("alice");
     expect(screen.queryByText(FOR_OTHERS_TITLE)).toBe(null);
     expect(readSelf).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Create the QR code" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create QR code" }));
     await screen.findByText("set_self_1");
     expect(mint).toHaveBeenCalledTimes(1);
     expect(selfEnrollToken).not.toHaveBeenCalled();
+    // The addresses and the transport are the operator's to fix, so the
+    // self-service page shows neither.
+    expect(document.querySelector("[data-servers]")).toBe(null);
+    expect(document.querySelector("[data-trust-line]")).toBe(null);
+  });
+});
+
+describe("Add a phone when the page is open on a phone", () => {
+  const PASTE = "Paste this text in the approver app.";
+  const self = { username: "alice", mint: async () => answer() };
+  // phone answers the media queries a phone answers: a coarse pointer and a
+  // window under the sm breakpoint.
+  const phone = (on: boolean) => vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+    matches: on && query.includes("pointer: coarse"), media: query, onchange: null,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+  }) as MediaQueryList);
+
+  beforeEach(() => {
+    vi.mocked(readSelf).mockReset().mockResolvedValue(alice);
+    vi.mocked(selfEnrollToken).mockReset().mockResolvedValue(answer());
+    vi.mocked(copyText).mockClear();
+  });
+  afterEach(() => vi.mocked(window.matchMedia).mockRestore());
+
+  it("draws the QR code on a wide screen", async () => {
+    phone(false);
+    render(<EnrollSheet open onOpenChange={() => {}} self={self} phonePaste={PASTE} />);
+    await userEvent.click(screen.getByRole("button", { name: CREATE_QR }));
+    expect(await screen.findByRole("img", { name: QR_LABEL })).toBeTruthy();
+    expect(document.querySelector("[data-phone-paste]")).toBe(null);
+  });
+
+  it("hands over the text to paste in place of the QR code on a phone", async () => {
+    phone(true);
+    const typist = userEvent.setup();
+    render(<EnrollSheet open onOpenChange={() => {}} self={self} phonePaste={PASTE} />);
+    await typist.click(screen.getByRole("button", { name: CREATE_QR }));
+    expect((await waitFor(() => box("[data-phone-paste]"))).textContent).toBe(PASTE);
+    expect(screen.queryByRole("img", { name: QR_LABEL })).toBe(null);
+    expect(document.querySelector("[data-qr-box]")).toBe(null);
+    expect(box("[data-enroll-text]").textContent).toBe(answer().qr_payload);
+    await typist.click(screen.getByRole("button", { name: /Copy/ }));
+    expect(copyText).toHaveBeenCalledWith(answer().qr_payload, COPIED);
+    // The self-service page shows no addresses and no transport.
+    expect(document.querySelector("[data-servers]")).toBe(null);
+  });
+
+  it("keeps the QR code on a phone for the console, which names no sentence", async () => {
+    phone(true);
+    const typist = userEvent.setup();
+    mount();
+    await mintFor(typist);
+    expect(document.querySelector("[data-phone-paste]")).toBe(null);
   });
 });

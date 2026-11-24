@@ -5,7 +5,7 @@ import { parse } from "yaml";
 import { RolePage } from "./role-page";
 import type { DraftPublishProps } from "@/components/draft-publish";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ApiError, type AppRow, type BindingRow, type Draft, type DraftItemIn, type DraftVerdict, type PackRow, type PoliciesAnswer, type RoleRow, catalogPreview, deleteRole, exportRole, listApps, listBindings, listImplications, listPacks, listPolicies, listRoles, listTools, listUsers, updateRole } from "@/lib/api";
+import { ApiError, type AppRow, type BindingRow, type Draft, type DraftItemIn, type DraftVerdict, type PoliciesAnswer, type RoleRow, catalogPreview, deleteRole, exportRole, listApps, listBindings, listImplications, listPolicies, listRoles, listTools, listUsers, updateRole } from "@/lib/api";
 import { checkDraft, createDraft, getDraft, listDrafts, publishDraft, updateDraft } from "@/lib/drafts-api";
 import { notify } from "@/lib/notify";
 import { navigate, pathFor } from "@/lib/router";
@@ -54,7 +54,6 @@ const bindings: BindingRow[] = [
   { id: "b3", app: "demo-tools", role: "demo-tools-readers", tools: ["echo", "add"] },
 ];
 const sets = { items: [{ name: "dev-guardrails", status: "active", summary: { rules: 11, postures: { allow: 4, hold: 3 } } }] } as PoliciesAnswer;
-const packs: PackRow[] = [{ id: "p1", name: "house-rules", version: "3", bindings: [{ id: "pb1", role_id: "r-dev-tools" }] }];
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
@@ -64,7 +63,6 @@ vi.mock("@/lib/api", async (orig) => ({
   listApps: vi.fn(),
   listImplications: vi.fn(),
   listPolicies: vi.fn(),
-  listPacks: vi.fn(),
   listUsers: vi.fn(),
   catalogPreview: vi.fn(),
   updateRole: vi.fn(),
@@ -85,7 +83,8 @@ vi.mock("@/components/draft-publish", () => ({
 vi.mock("@/components/origin-line", () => ({ OriginLine: ({ object }: { object: string }) => <div data-origin-stub={object} /> }));
 
 // EXPORT is dev-tools' live export, the document the description's Role
-// put starts from.
+// put starts from, with the retired packs field an older export still
+// wrote.
 const EXPORT = ["apiVersion: straza.dev/v1beta1", "kind: Role", "metadata:", "    name: dev-tools", "spec:", "    kind: application", "    description: Tool reach for the developer seat.", "    bindings:", "        - app: demo-tools", "          tools:", "            - '*'", "    packs:", "        - house-rules", ""].join("\n");
 const EMPTY: DraftVerdict = { ...VERDICT, refused: [], risks: [], warnings: [], unchecked: [], passed: [], info: [], gains: [], needs: [], risk_digest: "" };
 const draftOf = (id: string, items: DraftItemIn[]): Draft => ({ id, revision: 1, state: "open", door: "console", authors: [], items: items.map((i) => ({ ...i, existed: true })), title: "", created_at: "", updated_at: "" });
@@ -105,7 +104,6 @@ describe("a role's page", () => {
     vi.mocked(listApps).mockResolvedValue([]);
     vi.mocked(listImplications).mockResolvedValue([]);
     vi.mocked(listPolicies).mockResolvedValue(sets);
-    vi.mocked(listPacks).mockResolvedValue([]);
     vi.mocked(listUsers).mockResolvedValue({ items: [], next_cursor: "" });
     vi.mocked(catalogPreview).mockResolvedValue({ entries: [] });
     vi.mocked(navigate).mockClear();
@@ -126,8 +124,22 @@ describe("a role's page", () => {
     await screen.findByRole("heading", { level: 1, name: "dev-tools" });
     expect(screen.getByText("Tool reach for the developer seat.")).toBeTruthy();
     expect((document.querySelector("[data-kind]") as HTMLElement).textContent).toBe("application role");
+    expect(screen.getByRole("button", { name: "Help: application role" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Change the description" })).toBeTruthy();
     expect(actions()).toEqual([DELETE_ROLE, EXPORT_YAML, EDIT_ACCESS]);
+  });
+
+  it("heads the page with Roles as a link above the role's own name and the role's kind tile", async () => {
+    mount("r-dev-tools");
+    await screen.findByRole("heading", { level: 1, name: "dev-tools" });
+    const head = document.querySelector("[data-page-head]") as HTMLElement;
+    const crumbs = within(head).getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumbs).getAllByRole("link").map((a) => a.textContent)).toEqual(["Straza", "Roles"]);
+    expect(within(crumbs).getByRole("link", { name: "Roles" }).getAttribute("href")).toBe(pathFor("roles"));
+    expect((crumbs.querySelector('[aria-current="page"]') as HTMLElement).textContent).toBe("dev-tools");
+    const tile = head.querySelector('[data-kind-icon="role-application"]') as Element;
+    expect(tile.closest("span")?.className).toContain("size-10");
+    expect(tile.compareDocumentPosition(head.querySelector("h1") as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("puts the origin line of the role above its tabs", async () => {
@@ -141,7 +153,7 @@ describe("a role's page", () => {
     await screen.findByRole("heading", { level: 1, name: "straza-admin" });
     expect(actions()).toEqual([EXPORT_YAML, PRIMARY.straza]);
     // The reason sits behind the kind badge's help icon, beside the title.
-    await userEvent.hover(screen.getByRole("button", { name: "Help: straza" }));
+    await userEvent.hover(screen.getByRole("button", { name: "Help: Straza role" }));
     expect((await screen.findAllByText(new RegExp(PRODUCT_ROLE.replace(".", "\\.")))).length).toBeGreaterThan(0);
   });
 
@@ -171,7 +183,10 @@ describe("a role's page", () => {
     const row = document.querySelector('[data-administers="finance/jira"]') as HTMLElement;
     expect(row.textContent).toBe("finance/jira");
     expect(screen.queryByText("finance/db")).toBeNull();
-    expect(screen.getByText(ADMINISTERS_HINT)).toBeTruthy();
+    expect(row.querySelector('[data-kind-icon="server"]')).toBeTruthy();
+    expect(screen.queryByText(ADMINISTERS_HINT)).toBeNull();
+    await userEvent.hover(screen.getByRole("button", { name: "Help: " + TAB.administers }));
+    expect((await screen.findAllByText(ADMINISTERS_HINT)).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: OPEN_SERVER }));
     expect(navigate).toHaveBeenCalledWith("servers", ["app-jira"]);
   });
@@ -181,7 +196,7 @@ describe("a role's page", () => {
     mount("r-m-jira");
     await screen.findByRole("heading", { level: 1, name: "mcp-admin-finance-jira" });
     expect(actions()).toEqual([EXPORT_YAML, PRIMARY.straza]);
-    await userEvent.hover(screen.getByRole("button", { name: "Help: straza" }));
+    await userEvent.hover(screen.getByRole("button", { name: "Help: Straza role" }));
     expect((await screen.findAllByText(new RegExp(mintedRole("finance/jira").replace(/[.]/g, "\\.")))).length).toBeGreaterThan(0);
   });
 
@@ -226,7 +241,7 @@ describe("a role's page", () => {
     mount("r-fresh");
     await screen.findByRole("heading", { level: 1, name: "qa-demo-tools" });
     expect(actions()).toEqual([DELETE_ROLE, EXPORT_YAML]);
-    expect((await screen.findByText(NO_SERVER_ROLE)).textContent).toBe("This role reaches no MCP server and is matched by policy rules only. A role for a server is made in New role or on the server's page.");
+    expect((await screen.findByText(NO_SERVER_ROLE)).textContent).toBe("This role reaches no MCP server.");
   });
 
   it("carries the tab in the address, and falls back to the first on an unknown one", async () => {
@@ -243,17 +258,14 @@ describe("a role's page", () => {
     expect(screen.getByRole("tab", { selected: true }).textContent).toContain(TAB.access);
   });
 
-  it("shows the Packs tab only where a pack exists", async () => {
-    const view = mount("r-dev-tools");
-    await screen.findByRole("heading", { level: 1, name: "dev-tools" });
-    expect(tabs().some((t) => t.startsWith(TAB.packs))).toBe(false);
-    view.unmount();
-
-    vi.mocked(listPacks).mockResolvedValue(packs);
+  // Knowledge packs left the product, so a bookmarked address of their old
+  // tab is an unknown tab and lands on the first one.
+  it("lands an old Knowledge packs address on the first tab", async () => {
     mount("r-dev-tools", "packs");
     await screen.findByRole("heading", { level: 1, name: "dev-tools" });
-    await waitFor(() => expect(tabs().some((t) => t === TAB.packs + " 1")).toBe(true));
-    expect(await screen.findByText("house-rules")).toBeTruthy();
+    expect(tabs()).toEqual([TAB.access + " 1", TAB.holders + " 2", TAB.policies + " 1"]);
+    expect(screen.getByRole("tab", { selected: true }).textContent).toContain(TAB.access);
+    expect(document.querySelector("[data-fetch-error]")).toBeNull();
   });
 
   // openDescription opens the description dialog on dev-tools and types text.
@@ -273,8 +285,9 @@ describe("a role's page", () => {
     await waitFor(() => expect(publishDraft).toHaveBeenCalledWith("50", { revision: 1, risk_digest: "", ticked: [], typed: {} }));
     expect(exportRole).toHaveBeenCalledWith("r-dev-tools");
     expect(sentItems().map((i) => i.kind + "/" + i.name + ":" + i.op)).toEqual(["Role/dev-tools:put"]);
-    // Every other field goes back as the export has it, the pack included.
-    expect(parse(sentItems()[0].doc || "").spec).toEqual({ kind: "application", description: "Reach for the developer seat.", bindings: [{ app: "demo-tools", tools: ["*"] }], packs: ["house-rules"] });
+    // Every other field goes back as the export has it, and the retired
+    // packs field goes.
+    expect(parse(sentItems()[0].doc || "").spec).toEqual({ kind: "application", description: "Reach for the developer seat.", bindings: [{ app: "demo-tools", tools: ["*"] }] });
     expect(createDraft).toHaveBeenCalledWith({ items: sentItems() });
     expect(vi.mocked(notify.undo).mock.calls[0].slice(0, 2)).toEqual(["dev-tools is live with your change.", "Undo"]);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -361,13 +374,13 @@ describe("a role's page", () => {
     expect(navigate).toHaveBeenCalledWith("roles");
   });
 
-  it("names in the toast the policy set the delete turned off", async () => {
+  it("names in the toast the policy the delete turned off", async () => {
     vi.mocked(deleteRole).mockResolvedValue({ status: "deleted", sets_off: ["dev-tools-access"] });
     mount("r-dev-tools");
     await screen.findByRole("heading", { level: 1, name: "dev-tools" });
     await userEvent.click(screen.getByRole("button", { name: DELETE_ROLE }));
     await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: DELETE_ROLE }));
-    await waitFor(() => expect(notify.ok).toHaveBeenCalledWith("dev-tools is deleted, and its policy set dev-tools-access is turned off."));
+    await waitFor(() => expect(notify.ok).toHaveBeenCalledWith("dev-tools is deleted, and its policy dev-tools-access is turned off."));
   });
 
   it("keeps the delete dialog open on a refusal and quotes the server", async () => {
@@ -387,6 +400,7 @@ describe("a role's page", () => {
     mount("r-gone");
     expect(await screen.findByText(missingRole("r-gone"))).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open Roles" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to Roles" }).hasAttribute("data-back-link")).toBe(true);
   });
 
   it("keeps the page when a read beside the role fails, and names what failed", async () => {
@@ -394,7 +408,16 @@ describe("a role's page", () => {
     mount("r-dev-tools");
     await screen.findByRole("heading", { level: 1, name: "dev-tools" });
     const block = document.querySelector("[data-fetch-error]") as HTMLElement;
-    expect(block.textContent).toContain("Access could not be read because strazad did not answer");
+    expect(block.textContent).toContain("Access could not be read because Straza did not answer");
     expect(tabs()).toEqual([TAB.access + " 0", TAB.holders + " 2", TAB.policies + " 1"]);
+  });
+
+  it("names the area, and offers no reload, where the server refuses the MCP servers read", async () => {
+    vi.mocked(listApps).mockRejectedValue(new ApiError("forbidden: grant required", 403));
+    mount("r-dev-tools");
+    await screen.findByRole("heading", { level: 1, name: "dev-tools" });
+    expect((document.querySelector("[data-side-refused]") as HTMLElement).textContent).toBe("Access is not shown, because your role does not include MCP servers.");
+    expect(document.querySelector("[data-fetch-error]")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Reload to try again/);
   });
 });

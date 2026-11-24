@@ -1,5 +1,7 @@
-import { DraftChip, type ChipTone, NameChips } from "@/components/draft-checks";
+import { Chip, OutcomeChip } from "@/components/chip";
+import { NameChips } from "@/components/draft-checks";
 import type { DraftCoverage, DraftGain, GainOutcome } from "@/lib/api";
+import type { Outcome as ChipOutcome } from "@/lib/chip-words";
 import { type AccessGroup, accessGroups, coverageNouns, objectsMove } from "@/lib/drafts-access";
 import { gainMark } from "@/lib/drafts-model";
 import {
@@ -28,8 +30,10 @@ import {
 // server left rows out for this reader (hidden), the section says so and
 // claims nothing about the whole table.
 
-const TONE: Record<GainOutcome, ChipTone> = { runs: "ok", "needs-approval": "warn", denied: "danger", "not-reachable": "plain", unknown: "unknown" };
-const TH = "px-3 py-2 text-left text-[13px] font-semibold text-muted-foreground";
+// GAIN_OUTCOME reads a gain's outcome as one of the four outcomes. unknown
+// is none of them and keeps its own chip.
+const GAIN_OUTCOME: Partial<Record<GainOutcome, ChipOutcome>> = { runs: "allowed", "needs-approval": "approval", denied: "denied", "not-reachable": "none" };
+const TH = "px-3 py-2 text-left text-caption font-semibold text-muted-foreground";
 const TD = "px-3 py-2 align-top";
 
 type Props = {
@@ -55,15 +59,15 @@ export function DraftGains({ gains, objects, toolsOf, isNew, hidden }: Props) {
   return (
     <div className="flex flex-col gap-3">
       {hidden && (
-        <div className="flex max-w-[75ch] flex-col gap-1 border border-l-[3px] border-border border-l-link bg-card px-3.5 py-2.5 text-[15px] leading-relaxed text-text-2" data-gains-hidden>
+        <div className="flex max-w-[75ch] flex-col gap-1 border border-l-[3px] border-border border-l-link bg-card px-3.5 py-2.5 text-body leading-relaxed text-text-2" data-gains-hidden>
           <b className="font-semibold text-foreground">{GAINS_HIDDEN}</b>
           <span>{hidden}</span>
         </div>
       )}
-      {!groups.length && !hidden && <p className="m-0 max-w-[75ch] text-[15px] text-text-2" data-no-gains>{NO_GAINS}</p>}
+      {!groups.length && !hidden && <p className="m-0 max-w-[75ch] text-body text-text-2" data-no-gains>{NO_GAINS}</p>}
       {groups.length > 0 && (
         <div className="overflow-x-auto rounded-md border border-border bg-card">
-          <table className="w-full table-fixed border-collapse text-sm">
+          <table className="w-full table-fixed border-collapse text-dense" style={{ minWidth: 520 }}>
             <colgroup><col style={{ width: "34%" }} /><col /><col /></colgroup>
             <thead className="border-b border-border">
               <tr><th className={TH}>{GAIN_COLUMN.tool}</th><th className={TH}>{GAIN_COLUMN.now}</th><th className={TH}>{GAIN_COLUMN.after}</th></tr>
@@ -74,12 +78,15 @@ export function DraftGains({ gains, objects, toolsOf, isNew, hidden }: Props) {
           </table>
         </div>
       )}
-      {foot.length > 0 && <div className="flex flex-col gap-0.5 text-[13px] text-muted-foreground" data-gains-foot>{foot.map((l) => <p key={l} className="m-0">{l}</p>)}</div>}
+      {foot.length > 0 && <div className="flex flex-col gap-0.5 text-caption text-muted-foreground" data-gains-foot>{foot.map((l) => <p key={l} className="m-0">{l}</p>)}</div>}
     </div>
   );
 }
 
-const Outcome = ({ o, words }: { o: GainOutcome; words?: string }) => <DraftChip word={OUTCOME[o] || o} tone={TONE[o] || "unknown"} title={words} attr="data-outcome" />;
+const Outcome = ({ o, words }: { o: GainOutcome; words?: string }) => {
+  const outcome = GAIN_OUTCOME[o];
+  return outcome ? <OutcomeChip outcome={outcome} title={words} /> : <Chip tone="unknown" title={words} data-outcome={OUTCOME[o] || o}>{OUTCOME[o] || o}</Chip>;
+};
 
 // line words the group's head: the role, on its server when named, who
 // holds it, the objects it covers when no row shows them, and the tools and
@@ -104,7 +111,7 @@ function GroupRows({ group: g, named }: { group: AccessGroup; named: boolean }) 
   return (
     <>
       <tr className="border-b border-border bg-secondary/40" data-gain-group={g.role} data-gain-server={g.server}>
-        <td colSpan={3} className="px-3 py-1.5 text-[13px] font-semibold text-foreground">{line(g, named)}</td>
+        <td colSpan={3} className="px-3 py-1.5 text-caption font-semibold text-foreground">{line(g, named)}</td>
       </tr>
       {c && m && m.changed && !g.isNew && <ObjectsRow c={c} />}
       {g.rows.map((r) => {
@@ -113,9 +120,9 @@ function GroupRows({ group: g, named }: { group: AccessGroup; named: boolean }) 
         const gate = gainMark(r) === "gate";
         return (
           <tr key={r.tool} className="border-b border-border last:border-b-0" data-gain={r.tool}>
-            <td className={TD + " break-all font-mono text-[13px] text-foreground"}>{r.tool}</td>
-            <td className={TD}><Outcome o={r.before} words={r.before_words} />{gate && r.before_words && <span className="mt-1 block text-[13px] text-muted-foreground">{r.before_words}</span>}</td>
-            <td className={TD}><Outcome o={r.after} words={r.after_words} />{gate && r.after_words && <span className="mt-1 block text-[13px] text-muted-foreground">{r.after_words}</span>}</td>
+            <td className={TD + " break-all font-mono text-caption text-foreground"}>{r.tool}</td>
+            <td className={TD}><Outcome o={r.before} words={r.before_words} />{gate && r.before_words && <span className="mt-1 block text-caption text-muted-foreground">{r.before_words}</span>}</td>
+            <td className={TD}><Outcome o={r.after} words={r.after_words} />{gate && r.after_words && <span className="mt-1 block text-caption text-muted-foreground">{r.after_words}</span>}</td>
           </tr>
         );
       })}
@@ -123,7 +130,7 @@ function GroupRows({ group: g, named }: { group: AccessGroup; named: boolean }) 
         <tr className="border-b border-border last:border-b-0" data-gain-same={g.role}>
           <td colSpan={3} className={TD}>
             <details>
-              <summary className="cursor-pointer text-sm text-link">{sameFold(g.same.length)}</summary>
+              <summary className="cursor-pointer text-dense text-link">{sameFold(g.same.length)}</summary>
               <div className="mt-1.5"><NameChips names={g.same} /></div>
             </details>
           </td>
@@ -138,7 +145,7 @@ function GroupRows({ group: g, named }: { group: AccessGroup; named: boolean }) 
 // names the ones added.
 function ObjectsRow({ c }: { c: DraftCoverage }) {
   const w = coverageNouns(c);
-  const cell = (every: boolean, names: string[]) => (every ? <DraftChip word={everyType(w)} tone="accent" /> : names.length ? <NameChips names={names} /> : <span className="text-muted-foreground">{NOTHING}</span>);
+  const cell = (every: boolean, names: string[]) => (every ? <Chip tone="accent">{everyType(w)}</Chip> : names.length ? <NameChips names={names} /> : <span className="text-muted-foreground">{NOTHING}</span>);
   return (
     <tr className="border-b border-border last:border-b-0" data-gain-objects={c.role}>
       <td className={TD + " text-foreground"}>{objectsLabel(w)}</td>

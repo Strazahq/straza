@@ -26,7 +26,7 @@ The table lists which system answers each question and where it runs.
 On the standalone profile, Straza answers every question itself. strazad signs people in with a password, and an admin creates people and agents and sets their roles and sponsors.
 
 
-Straza leaves sign-in and provisioning to your systems because your IGA already runs the joiner, mover and leaver processes and the certification campaigns. A second directory would create offboarding gaps. An enterprise server that gets no users over SCIM or the admin API therefore has nobody to govern.
+Straza leaves sign-in and provisioning to your systems because your IGA already runs the joiner, mover and leaver processes and the certification campaigns. A second directory would create offboarding gaps. An enterprise server that gets no users over SCIM, the admin API or Entra therefore has nobody to govern.
 
 ## Sign-in at your identity provider
 
@@ -37,12 +37,16 @@ strazad trusts one identity provider over OpenID Connect. It reads the provider'
 Straza verifies the token and then looks the person up among its own users, the same way for every provider. By default, a sign-in on enterprise creates no user, so Straza refuses a person your IGA has not sent yet.
 
 
-Disabling a person at the identity provider only blocks their next sign-in. Their enrolled machines keep checking in with the machine key until the enrollment expires, by default seven days after the sign-in that created it. Only the deactivation from your IGA ends their sessions, so a leaver flow needs both.
+Disabling a person at the identity provider only blocks their next sign-in. Their enrolled machines keep checking in with the machine key until the enrollment expires, by default seven days after the sign-in that created it. Only the deactivation from your IGA ends their sessions, so a leaver flow needs both. Where Entra owns people, a disable there ends them too.
 
 ## Provisioning from your IGA
 
 
 Your IGA sends people, agents, sponsors and role membership to strazad over SCIM 2.0, using an admin API token that an admin mints for it. [midPoint]({{< relref "guides/connect-identity/midpoint.md" >}}) sends people and AI agents, and [Okta]({{< relref "guides/connect-identity/okta.md" >}}) sends people and their role membership. [Any other SCIM 2.0 system]({{< relref "guides/connect-identity/generic-scim.md" >}}) can do the same. Provisioning does not depend on which identity provider checks sign-in, Entra ID included.
+
+{{< details summary="People from Entra instead of SCIM" >}}
+Straza can also take people from Microsoft Entra ID over Microsoft Graph, through the [role groups in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}). Entra then owns every person: Straza creates a member of a role's group, a disable in Entra ends the person's sessions, and SCIM writes no person. Your IGA still sends agents and role membership.
+{{< /details >}}
 
 
 A deactivation over SCIM triggers the [kill switch]({{< relref "concepts/machines-and-sessions.md#the-kill-switch" >}}). Straza revokes every session of that user on every machine and deletes the user's own credentials on MCP servers. A SCIM delete only deactivates the user.
@@ -52,7 +56,7 @@ A deactivation over SCIM triggers the [kill switch]({{< relref "concepts/machine
 
 Straza defines the roles, and your IGA assigns them. SCIM refuses a request to create or delete a role, and the error says roles are made in Straza. Each role appears in your IGA as a SCIM group, and group membership is the role assignment.
 
-The group also carries a read-only block that says what the role covers: its kind, the servers and tools it reaches, the [objects]({{< relref "concepts/objects.md" >}}) it covers on each server, and the [policies]({{< relref "concepts/policy-model.md" >}}) that name it. A certifier reads it beside the members, so a review shows what the role grants and who holds it.
+The group also carries a read-only block that says what the role covers: its kind, the servers and tools it reaches, the [objects]({{< relref "concepts/objects.md" >}}) it covers on each server, and the [policies]({{< relref "concepts/policy-model.md" >}}) that name it. A certifier reads it beside the members, so a review shows what the role grants and who holds it. A holder that [a role group in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}) gave is not among those members.
 
 
 Your IGA masters membership of every role, straza-admin included, so its token can make anyone an admin. Control who may assign straza-admin in your IGA, where role assignment is decided. The break-glass admin, a local emergency account on every server, is not exposed over SCIM, so no reconciliation can disable it or remove its role.
@@ -63,7 +67,7 @@ Your IGA masters membership of every role, straza-admin included, so its token c
 On a new enterprise server, nobody signs in until your IGA has sent them, and your IGA needs a token that only an admin can mint. You set up the first admin once, from the break-glass account or `oidc.bootstrapAdmin`.
 
 
-The first start creates the break-glass admin and prints its password once in strazad's log. Sign in with it under Emergency sign-in on the console's sign-in card, which opens Straza's own sign-in page for this account only.
+The first start creates the break-glass admin with no password, and `strazad break-glass set-password` on the server host prints one once on your terminal. Sign in with it under Emergency sign-in on the console's sign-in card, which opens Straza's own sign-in page for this account only.
 
 
 Alternatively, set `oidc.bootstrapAdmin` to your own username at the identity provider before strazad starts. Your first sign-in there then makes you an admin and creates your user if your IGA has not sent it yet. The setting acts only on a sign-in the identity provider checked, and only while the break-glass admin alone holds straza-admin. Once another admin exists, it does nothing.
@@ -75,7 +79,7 @@ Next, mint the token for your IGA and connect it, and from then on your IGA deci
 Straza first looks for a user with the token's subject, but no user carries it yet unless your IGA sent it as `externalId`. When none does, Straza matches the token's `preferred_username` to the `userName` your IGA sent and records the subject on that user. A user bound to another subject is refused, and the refusal and its audit record name the user. That stops a second account at the provider with the same name from taking it over. An account named break-glass at the identity provider is refused on every sign-in, because the name belongs to the local emergency admin.
 
 
-When strazad's issuer is one Entra ID tenant's v2.0 issuer, Straza looks for the person's object ID, the token's `oid`, before the subject, and records the object ID when it links a user. Entra's own SCIM provisioning sends `mailNickname` as `externalId` by default, so set it to send the object ID instead, as the [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}) guide shows.
+When strazad's issuer is one Entra ID tenant's v2.0 issuer, Straza looks for the person's object ID, the token's `oid`, before the subject, and records the object ID when it links a user. A user it finds by the subject gets the object ID in place of the subject, with one audit record. Entra's own SCIM provisioning sends `mailNickname` as `externalId` by default, so set it to send the object ID instead, as the [Entra ID login]({{< relref "guides/connect-identity/entra-login.md" >}}) guide shows.
 {{< /details >}}
 
 {{< details summary="What protects the break-glass admin" >}}

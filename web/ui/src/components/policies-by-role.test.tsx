@@ -6,7 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import type { BindingRow, PolicySetRow, RoleRow } from "@/lib/api";
 import { take } from "@/lib/handoff";
 import { navigate } from "@/lib/router";
-import { CATEGORY, DOOR_APPROVE, DOOR_APPROVE_EVERYONE_TITLE, DOOR_DENY, EVERYONE, NO_ALLOW_EVERYONE, NO_ALLOW_ROLE, NO_RECORDING, NO_ROLE_POLICY, REC, ROLE_FOOT, doorDenyTitle } from "@/lib/policy-words";
+import { CATEGORY, DOOR_APPROVE, DOOR_APPROVE_EVERYONE_TITLE, DOOR_DENY, DRAFT, EDITED, EVERYONE, NO_ALLOW, NO_RECORDING, NO_ROLE_POLICY, REC, doorDenyTitle } from "@/lib/policy-words";
 
 // The six fixture policies, as the list envelope answers them.
 const sets: PolicySetRow[] = [
@@ -86,12 +86,20 @@ describe("the By role view", () => {
     expect(rows).toEqual([EVERYONE, "dev-tools", "sre-tools", "finance-tools", "auditor-tools"]);
     expect(chips(EVERYONE)).toEqual(["org-baseline"]);
     expect(count(EVERYONE, "deny").textContent).toBe("3");
-    expect(count(EVERYONE, "deny").getAttribute("title")).toBe("org-baseline (live): 3 deny");
+    expect(count(EVERYONE, "deny").getAttribute("title")).toBe("org-baseline (live): 3 denied");
     expect(within(line(EVERYONE)).getByRole("button", { name: DOOR_APPROVE }).getAttribute("title")).toBe(DOOR_APPROVE_EVERYONE_TITLE);
     expect(count(EVERYONE, "allow").textContent).toBe("0");
-    expect(count(EVERYONE, "allow").getAttribute("title")).toBe(NO_ALLOW_EVERYONE);
+    expect(count(EVERYONE, "allow").getAttribute("title")).toBe(NO_ALLOW);
     expect(within(line(EVERYONE)).getByText(NO_RECORDING)).toBeTruthy();
-    expect(screen.getByText(ROLE_FOOT)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Help: Role" })).toBeTruthy();
+  });
+
+  it("keeps a floor under the table and wraps the policy chips inside their cell", () => {
+    mount();
+    expect((document.querySelector("[data-by-role-table]") as HTMLElement).className).toContain("min-w-[1000px]");
+    const cell = line("dev-tools").querySelector("[data-policies-cell]") as HTMLElement;
+    expect(cell.className).toContain("whitespace-normal");
+    expect(cell.querySelectorAll("[data-set]").length).toBe(3);
   });
 
   it("sums a role's own live policies, names the set that is off and the floor in the hovers, and says what it records", () => {
@@ -100,8 +108,8 @@ describe("the By role view", () => {
     expect(count("dev-tools", "deny").textContent).toBe("3");
     expect(count("dev-tools", "hum").textContent).toBe("6");
     expect(count("dev-tools", "allow").textContent).toBe("4");
-    expect(count("dev-tools", "deny").getAttribute("title")).toBe("dev-guardrails (live): 2 deny\ndev-tools-access (live): 1 deny\norg-baseline's 3 denials apply to this role too");
-    expect(count("dev-tools", "hum").getAttribute("title")).toBe("dev-guardrails (live): 3 holds · 2 day-scale tickets\ndev-tools-access (live): 1 hold\nrelease-window (off)");
+    expect(count("dev-tools", "deny").getAttribute("title")).toBe("dev-guardrails (live): 2 denied\ndev-tools-access (live): 1 denied\n3 denials of org-baseline apply here too");
+    expect(count("dev-tools", "hum").getAttribute("title")).toBe("dev-guardrails (live): 3 holds · 2 tickets\ndev-tools-access (live): 1 hold\nrelease-window (off)");
     expect(within(line("dev-tools")).getByText(REC)).toBeTruthy();
     expect(within(line("dev-tools")).getByText("word for word")).toBeTruthy();
     expect(within(line("finance-tools")).getByText("masked")).toBeTruthy();
@@ -111,7 +119,7 @@ describe("the By role view", () => {
   it("says when no policy names a role, and opens the wizard from the empty cell with the role picked", async () => {
     mount();
     expect(within(line("auditor-tools")).getByText(NO_ROLE_POLICY)).toBeTruthy();
-    expect(count("auditor-tools", "allow").getAttribute("title")).toBe(NO_ALLOW_ROLE);
+    expect(count("auditor-tools", "allow").getAttribute("title")).toBe(NO_ALLOW);
     const deny = within(line("auditor-tools")).getByRole("button", { name: DOOR_DENY });
     expect(deny.getAttribute("title")).toBe(doorDenyTitle("auditor-tools"));
     await userEvent.click(deny);
@@ -126,6 +134,25 @@ describe("the By role view", () => {
     expect(count("dev-tools", "allow").textContent).toBe("0");
     await userEvent.click(within(line("auditor-tools")).getByRole("button", { name: DOOR_APPROVE }));
     expect(take("policies-new")).toEqual({ role: "auditor-tools", intent: "approve", lane: "shell" });
+  });
+
+  it("leads a role's row with its kind tile, names each policy as a tag, and marks only a policy that is off or waits on a draft", () => {
+    mount();
+    expect(line("dev-tools").querySelector('td [data-kind-icon="role-application"]')).toBeTruthy();
+    expect(line(EVERYONE).querySelector("[data-kind-icon]")).toBeNull();
+    const set = (role: string, name: string) => line(role).querySelector('[data-set="' + name + '"]') as HTMLElement;
+    for (const [role, name] of [["dev-tools", "dev-guardrails"], ["finance-tools", "finance-agents"], ["dev-tools", "release-window"]]) {
+      expect(set(role, name).querySelector("svg")?.getAttribute("class")).toContain("lucide-file-check");
+      expect(set(role, name).querySelector('[data-tone="ok"]')).toBeNull();
+    }
+    expect(set("dev-tools", "dev-guardrails").querySelector("[data-policy-status]")).toBeNull();
+    expect(set("finance-tools", "finance-agents").querySelector("[data-policy-status]")?.textContent).toBe(EDITED);
+    expect(set("dev-tools", "release-window").querySelector("[data-policy-status]")?.textContent).toBe(DRAFT);
+    // The hover names the policy, whose name the tag may cut, and then its state.
+    expect(set("finance-tools", "finance-agents").getAttribute("title")).toBe("finance-agents. Live. A saved edit waits as a draft.");
+    expect(set("dev-tools", "release-window").getAttribute("title")).toBe("release-window. Off: decides nothing until it is turned on.");
+    // A role's name, which its cell may cut, is whole on hover.
+    expect(line("dev-tools").querySelector("[data-role-name]")?.getAttribute("title")).toBe("dev-tools");
   });
 
   it("opens a policy from its chip", async () => {

@@ -2,7 +2,7 @@
 title: strazactl roles implications
 description: List the roles this role composes (holding it also holds these)
 pagetype: reference
-weight: 78
+weight: 72
 draft: false
 sources:
   - cmd/strazactl

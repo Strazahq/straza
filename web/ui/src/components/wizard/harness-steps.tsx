@@ -66,16 +66,16 @@ export function MachineTools({ lane, denied, picked, whole, onPick }: ToolsProps
           </TableHeader>
           <TableBody>
             {denied.length === 0 && (
-              <TableRow><TableCell colSpan={cols} className="whitespace-normal text-sm text-muted-foreground">{lane === "harness" ? NO_TOOL_SEEN : NOTHING_SEEN}</TableCell></TableRow>
+              <TableRow><TableCell colSpan={cols} className="whitespace-normal text-dense text-muted-foreground">{lane === "harness" ? NO_TOOL_SEEN : NOTHING_SEEN}</TableCell></TableRow>
             )}
             {denied.map((t) => (
-              <TableRow key={t.name} data-tool={t.name} className="text-sm">
+              <TableRow key={t.name} data-tool={t.name} className="text-dense">
                 <TableCell className="px-2">
                   <input type="checkbox" aria-label={t.name} checked={whole || picked.includes(t.name)} disabled={whole} onChange={() => toggle(t.name)} className="size-4 accent-primary" />
                 </TableCell>
-                <TableCell className="truncate font-mono text-[13px] text-foreground">{t.name}</TableCell>
-                {lane === "harness" && <TableCell className="truncate text-[13px] text-text-2">{harnessWords(t.harnesses)}</TableCell>}
-                <TableCell className="whitespace-normal text-[13px] text-muted-foreground" data-today={t.name}>{TODAY_DENIED(t.count)}</TableCell>
+                <TableCell className="truncate font-mono text-caption text-foreground">{t.name}</TableCell>
+                {lane === "harness" && <TableCell className="truncate text-caption text-text-2">{harnessWords(t.harnesses)}</TableCell>}
+                <TableCell className="whitespace-normal text-caption text-muted-foreground" data-today={t.name}>{TODAY_DENIED(t.count)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -86,7 +86,7 @@ export function MachineTools({ lane, denied, picked, whole, onPick }: ToolsProps
           {typed.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5" data-typed-tools>
               {typed.map((n) => (
-                <span key={n} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-px font-mono text-[13px]">
+                <span key={n} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-px font-mono text-caption">
                   {n}
                   <button type="button" aria-label={removePick(n)} className="text-muted-foreground hover:text-foreground" onClick={() => onPick(picked.filter((x) => x !== n))}>
                     <XIcon className="size-3" aria-hidden="true" />
@@ -107,7 +107,7 @@ export function MachineTools({ lane, denied, picked, whole, onPick }: ToolsProps
             <Button variant="outline" size="sm" onClick={add}>{ADD_TOOL}</Button>
           </div>
           <span className={HINT}>{lane === "harness" ? HARNESS_NAME_HINT : MCP_NAME_HINT}</span>
-          {problem && <p className="text-[13px] text-danger" data-name-problem>{problem}</p>}
+          {problem && <p className="text-caption text-danger" data-name-problem>{problem}</p>}
         </>
       )}
     </div>
@@ -125,7 +125,7 @@ export function NewRoleName({ name, taken, onName }: { name: string; taken: stri
     <div className="flex max-w-[560px] flex-col gap-1" data-new-role>
       <label htmlFor="new-role-name" className={CAPS}>{NEW_ROLE_NAME}</label>
       <Input id="new-role-name" value={name} spellCheck={false} onChange={(e) => onName(e.target.value)} className="font-mono" />
-      {problem && <span className="text-[13px] text-danger" data-role-problem={problem}>{problem === "taken" ? NEW_ROLE_TAKEN : NAME_BAD}</span>}
+      {problem && <span className="text-caption text-danger" data-role-problem={problem}>{problem === "taken" ? NEW_ROLE_TAKEN : NAME_BAD}</span>}
       <span className={HINT}>{NEW_ROLE_HINT}</span>
     </div>
   );

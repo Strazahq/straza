@@ -102,6 +102,7 @@ describe("the Access tab of a role on a server that pins repos", () => {
     if (count) await waitFor(() => expect(cell.querySelector("[data-covers-count]")?.textContent).toBe(count));
     else expect(appObjects).not.toHaveBeenCalled();
     expect(cell.firstChild?.textContent).toBe(line);
+    expect((cell.closest("table") as HTMLElement).className).toContain("min-w-[960px]");
   });
 
   it("leaves today's count out when the list could not be read", async () => {

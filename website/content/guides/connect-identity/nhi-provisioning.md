@@ -38,7 +38,7 @@ The identity manager cuts an agent the way it cuts a person. Once the record is 
 
 - `strazactl` with `STRAZA_SERVER` and an admin API token in `STRAZA_API_TOKEN`, or a console session that holds the identity area. The steps mint another token, which takes `tokens:write`, a root-equivalent grant, so mint a **Full root** token for 30 days in the console as [Mint an admin API token]({{< relref "guides/console/settings.md#mint-an-admin-api-token" >}}) shows, and revoke it when you are done.
 - The `straza` binary on the agent's machine.
-- An admin API token in `ADMIN_API_TOKEN`, for the SCIM request and the two admin API reads below. Mint it with `strazactl api-token create --name idm-agents --scope scim:read,scim:write,identity:read`. In the console, mint it under **Settings**, **API tokens**, **New API token** with the job **Custom**, **scim** set to **read and write** and **identity** set to **read**.
+- An admin API token in `ADMIN_API_TOKEN`, for the SCIM request and the two admin API reads below. Mint it with `strazactl api-token create --name idm-agents --scope scim:read,scim:write,identity:read`. In the console, mint it under **Settings**, **API tokens**, **Mint a token** with the job **Custom**, **scim** set to **read and write** and **identity** set to **read**.
 
 The command examples ran against a standalone server at `http://localhost:8420`, with the agent's side on the same host. The console steps and the midPoint notes describe the [demo stack]({{< relref "evaluate/try-it-on-the-demo-stack.md" >}}).
 
@@ -78,9 +78,9 @@ In midPoint the persona archetype and a sponsor reference on the user produce th
 {{< console >}}
 {{< clicks "Users" >}}
 
-{{< shot name="demo-users" caption="Users on the demo stack, where the agents carry the badge **AI agent** and the origin `SCIM`." >}}
+{{< shot name="demo-users" caption="Users on the demo stack, where the agents carry the teal tile of an AI agent and `Identity manager` under **Source**." >}}
 
-{{< see >}}A `scout-bot` row with the kind badge **AI agent** and the origin badge **SCIM**.{{< /see >}}
+{{< see >}}A `scout-bot` row with the teal tile of an AI agent and `Identity manager` under **Source**.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -132,16 +132,16 @@ Then enroll headless:
 Register the public half on the identity, as the admin. One key belongs to each identity, so registering again rotates it, and Straza refuses a key for a human identity.
 
 {{< console >}}
-{{< clicks "Users" "scout-bot" "Register key" >}}
+{{< clicks "Users" "scout-bot" "Devices and keys" "Register key" >}}
 
-{{< shot name="agent-key-register" caption="The **Assertion key** section with the public key pasted and **Register key**." >}}
+{{< shot name="agent-key-register" caption="The **Assertion key** fact with the public key pasted and **Register key**." >}}
 
-The **Assertion key** section shows only on an AI agent. Paste the key under **Public key, base64, 32 bytes** and press **Register key**.
+The **Devices and keys** tab shows the **Assertion key** only on an AI agent. Paste the key under **Public key, base64, 32 bytes** and press **Register key**.
 
-{{< see >}}The badge **registered** with the key's fingerprint.{{< /see >}}
+{{< see >}}The chip **registered** with the key's fingerprint.{{< /see >}}
 
 {{< fails >}}
-`Paste the public key. The server refuses anything that is not exactly a 32-byte Ed25519 key.`
+`Paste the public key. Straza refuses anything that is not exactly a 32-byte Ed25519 key.`
 : The field was empty. Paste the whole value from the `Public key:` line, with its closing `=`.
 {{< /fails >}}
 {{< /console >}}
@@ -215,7 +215,7 @@ An administrator's view of the identity shows every fact in one record.
 {{< console >}}
 {{< clicks "Users" "scout-bot" >}}
 
-{{< see >}}**Origin** that starts `your identity manager, over SCIM`, **Agency** `autonomous`, **Sponsor** `alice`, the role `scout-tools-readers`, and the **Assertion key** badge **registered**.{{< /see >}}
+{{< see >}}The sentence under the name, `Autonomous agent, from your identity manager. Sponsored by alice.`, the role `scout-tools-readers` under **Roles** on the **Access** tab, and the chip **registered** beside **Assertion key** on the **Devices and keys** tab.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -237,7 +237,7 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost:8420/v1/adm
 Revoking the key is the cut for the credential, and the next enrollment attempt fails at once. It also ends every session of the agent that is running. The service still holds the agent's last ID token, but the server refuses it, because that token names the removed key, so no new session starts with it. Registering a different key ends the running sessions the same way.
 
 {{< console >}}
-{{< clicks "Users" "scout-bot" "Revoke key" "Revoke key" >}}
+{{< clicks "Users" "scout-bot" "Devices and keys" "Revoke key" "Revoke key" >}}
 
 {{< shot name="user-agent-key" caption="A registered key with its fingerprint, **Rotate key** and **Revoke key**." >}}
 

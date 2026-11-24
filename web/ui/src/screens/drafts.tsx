@@ -2,10 +2,11 @@ import * as React from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { FilePenLineIcon, Loader2Icon } from "lucide-react";
 import { DataTable, plain } from "@/components/data-table";
-import { DraftChip } from "@/components/draft-checks";
+import { Chip } from "@/components/chip";
 import { EmptyState } from "@/components/empty-state";
 import { FetchError } from "@/components/error-state";
 import { PageHead } from "@/components/page-head";
+import { Segmented } from "@/components/segmented";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,7 +21,6 @@ import {
   EMPTY_SEARCH,
   FILTER_LABEL,
   FILTER_PLACEHOLDER,
-  LEGEND,
   LOAD_MORE,
   NOTHING_TO_ACK,
   NOT_CHECKED_HELP,
@@ -46,9 +46,7 @@ import { usePagedList } from "@/lib/paged";
 import { navigate } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
 import { snapshot } from "@/lib/session";
-import { agoWord } from "@/lib/settings-words";
-import { absTime } from "@/lib/words";
-import { cn } from "@/lib/utils";
+import { absTime, agoWord } from "@/lib/words";
 
 // The Drafts queue, built like the Approvals
 // queue: the tab in the address, a Mine and All toggle, a filter over the
@@ -75,14 +73,14 @@ function Stamp({ iso }: { iso: string | undefined }) {
 // revision on the row was not checked yet.
 function ChecksCell({ r }: { r: DraftSummary }) {
   const c = r.checks;
-  if (!c || c.revision !== r.revision) return <DraftChip word={NOT_CHECKED_YET} tone="unknown" title={NOT_CHECKED_HELP} />;
+  if (!c || c.revision !== r.revision) return <Chip tone="unknown" title={NOT_CHECKED_HELP}>{NOT_CHECKED_YET}</Chip>;
   return (
     <span className="flex flex-wrap gap-1">
-      {c.refused > 0 && <DraftChip word={refusedCount(c.refused)} tone="danger" />}
-      {c.risks > 0 && <DraftChip word={widenCount(c.risks)} tone="warn" />}
-      {!c.refused && !c.risks && <DraftChip word={NOTHING_TO_ACK} tone="plain" />}
-      {c.warnings > 0 && <DraftChip word={warningCount(c.warnings)} tone="plain" />}
-      {c.unchecked > 0 && <DraftChip word={uncheckedCount(c.unchecked)} tone="unknown" />}
+      {c.refused > 0 && <Chip tone="danger">{refusedCount(c.refused)}</Chip>}
+      {c.risks > 0 && <Chip tone="warn">{widenCount(c.risks)}</Chip>}
+      {!c.refused && !c.risks && <Chip tone="plain">{NOTHING_TO_ACK}</Chip>}
+      {c.warnings > 0 && <Chip tone="plain">{warningCount(c.warnings)}</Chip>}
+      {c.unchecked > 0 && <Chip tone="unknown">{uncheckedCount(c.unchecked)}</Chip>}
     </span>
   );
 }
@@ -125,7 +123,7 @@ export function Drafts({ tab }: { tab?: string }) {
         return (
           <div className="min-w-0 whitespace-normal">
             <div className="truncate font-semibold text-foreground">{w.name}</div>
-            {w.line && <div className="text-[12.5px] text-muted-foreground">{w.line}</div>}
+            {w.line && <div className="text-caption text-muted-foreground">{w.line}</div>}
           </div>
         );
       },
@@ -137,7 +135,7 @@ export function Drafts({ tab }: { tab?: string }) {
       cell: ({ row }) => (
         <div className="whitespace-normal text-text-2">
           {doorWords(row.original.door)}
-          {row.original.source && <div className="truncate font-mono text-[12.5px] text-muted-foreground">{fileOf(row.original.source)}</div>}
+          {row.original.source && <div className="truncate font-mono text-caption text-muted-foreground">{fileOf(row.original.source)}</div>}
         </div>
       ),
     },
@@ -162,20 +160,7 @@ export function Drafts({ tab }: { tab?: string }) {
 
   const filters = (
     <>
-      <div role="group" aria-label={WHOSE_LABEL} className="flex items-center">
-        {(["all", "mine"] as const).map((k) => (
-          <Button
-            key={k}
-            variant="outline"
-            size="sm"
-            aria-pressed={whose === k}
-            onClick={() => setWhose(k)}
-            className={cn("-ml-px h-9 rounded-none first:ml-0 first:rounded-l-md last:rounded-r-md", whose === k && "bg-accent-bg text-foreground")}
-          >
-            {WHOSE[k]}
-          </Button>
-        ))}
-      </div>
+      <Segmented label={WHOSE_LABEL} value={whose} onChange={setWhose} options={(["all", "mine"] as const).map((k) => ({ value: k, label: WHOSE[k] }))} />
       <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={FILTER_PLACEHOLDER} aria-label={FILTER_LABEL} className="h-9 w-full max-w-sm" />
     </>
   );
@@ -186,7 +171,7 @@ export function Drafts({ tab }: { tab?: string }) {
   const empty = whose === "mine" ? EMPTY_MINE : EMPTY[current];
 
   let body: React.ReactNode;
-  if (ls.kind === "loading") body = <p className="text-sm text-muted-foreground">{READING_LIST}</p>;
+  if (ls.kind === "loading") body = <p className="text-dense text-muted-foreground">{READING_LIST}</p>;
   else if (ls.kind === "error") body = <FetchError subject={SUBJECT_LIST} detail={ls.message} />;
   else if (!rows.length && !searching) {
     body = (
@@ -212,7 +197,7 @@ export function Drafts({ tab }: { tab?: string }) {
         widths={WIDTHS}
         foot={
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <span className="text-[13px] text-muted-foreground">{loadedLine(rows.length)}</span>
+            <span className="text-caption text-muted-foreground">{loadedLine(rows.length)}</span>
             {ls.more && (
               <Button variant="outline" size="sm" onClick={() => void list.loadMore()} disabled={list.busy}>
                 {list.busy && <Loader2Icon className="animate-spin" />} {LOAD_MORE}
@@ -233,7 +218,7 @@ export function Drafts({ tab }: { tab?: string }) {
             <TabsList variant="line">
               {TABS.map((t) => (
                 <TabsTrigger key={t.key} value={t.key} data-tab={t.key}>
-                  {t.label} {t.key === "waiting" && waiting && <span className="font-mono text-xs text-muted-foreground" data-count>{waiting}</span>}
+                  {t.label} {t.key === "waiting" && waiting && <span className="font-mono text-caption leading-4 text-muted-foreground" data-count>{waiting}</span>}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -241,7 +226,6 @@ export function Drafts({ tab }: { tab?: string }) {
         </Tabs>
         {ls.kind === "ready" && ls.problem && <FetchError subject={SUBJECT_LIST} detail={ls.problem} lastRead={ls.lastRead} />}
         {body}
-        <p className="m-0 max-w-[75ch] text-[13px] text-muted-foreground">{LEGEND}</p>
       </div>
     </>
   );

@@ -1,9 +1,7 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -43,9 +41,9 @@ func resultMeta(t *testing.T, res map[string]any, raw []byte) map[string]any {
 }
 
 // TestGatewayServerDropsUpstreamSlot pins that an upstream cannot speak for
-// Straza on a server endpoint: its own decision slot is dropped from a call
-// that ran, with views on and off, while its other _meta stays and /mcp
-// passes the result through unchanged.
+// Straza on any gateway endpoint: its own decision slot is dropped from a
+// call that ran, on a server endpoint with views on and off and on /mcp,
+// while its other _meta stays.
 func TestGatewayServerDropsUpstreamSlot(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -74,8 +72,8 @@ spec:
 		}
 	}
 	_, res, raw := mcpCall(t, base, tok, "tools/call", map[string]any{"name": "forgeon__forge"})
-	if got := resultMeta(t, res, raw); got[decisionSlotKey] == nil || got["x/kept"] != "yes" {
-		t.Errorf("/mcp result _meta = %v, want the upstream's result unchanged", got)
+	if got := resultMeta(t, res, raw); !reflect.DeepEqual(got, map[string]any{"x/kept": "yes"}) {
+		t.Errorf("/mcp result _meta = %v, want the upstream's slot dropped and x/kept kept", got)
 	}
 }
 
@@ -109,42 +107,6 @@ func TestGatewayServerCredentialRefusal(t *testing.T) {
 	res = second(mcpCall(t, base, tok, "tools/call", map[string]any{"name": "tokapp__plain"}))
 	if code, msg := rpcErrorOf(t, res, nil); code != -32000 || !strings.HasPrefix(msg, "Straza: the call was not sent to the MCP server tokapp: "+need) {
 		t.Errorf("/mcp answer = %d %q, want the JSON-RPC error that says the call was not sent and how to connect", code, msg)
-	}
-}
-
-// postNotification posts one JSON-RPC message with no id to url and returns
-// the status and body.
-func postNotification(t *testing.T, url, token, method string) (int, []byte) {
-	t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader([]byte(`{"jsonrpc":"2.0","method":"`+method+`"}`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, body
-}
-
-// TestGatewayServerNotificationRefusal pins that a notification on a server
-// endpoint answers 202 with no body for every name, so the answer neither
-// breaks the transport nor tells which servers exist.
-func TestGatewayServerNotificationRefusal(t *testing.T) {
-	t.Parallel()
-	app, base := testApp(t)
-	seedGatewayUser(t, app, "kim", "dev")
-	installViewsApp(t, app, startViewsUpstream(t), "viewapp", false, 0)
-	tok, _ := gatewaySession(t, base, "kim")
-	for _, c := range []struct{ server, method string }{
-		{"viewapp", "notifications/initialized"},
-		{"nope", "notifications/initialized"},
-		{"nope", "tools/list"},
-	} {
-		if code, body := postNotification(t, base+"/mcp/"+c.server, tok, c.method); code != http.StatusAccepted || len(bytes.TrimSpace(body)) != 0 {
-			t.Errorf("%s without an id on %s = %d %q, want 202 and no body", c.method, c.server, code, body)
-		}
 	}
 }
 

@@ -38,9 +38,100 @@ func withShell(w World) World {
 // shellUsers is the set of withShell.
 var shellUsers = gainSet("shell-users", "{ roles: [shell] }", "    - id: allow-shell\n      tools: [shell.exec]\n      effect: allow\n")
 
-// ownReach is the agent.own-reach refusal of words.
+// ownReach is the agent.own-reach refusal of words, which a check nobody
+// reviews answers.
 func ownReach(words string) string {
 	return "This draft would let you " + words + ", which widens your own reach. An agent's draft may not."
+}
+
+// ownReachRisks is the agent.own-reach risks of a draft for which a check
+// nobody reviews answers the refusal lines refused, as riskLines spells
+// them: one risk for each object, typed by the server's name, with one
+// sentence for each line and the lines' words, said of the agent, as its
+// after words.
+func ownReachRisks(refused []string) []string {
+	var objects []string
+	said, after := map[string][]string{}, map[string][]string{}
+	for _, line := range refused {
+		object, sentence, _ := strings.Cut(strings.TrimPrefix(line, codeAgentOwnReach+" "), " ")
+		words := strings.TrimSuffix(strings.TrimPrefix(sentence, "This draft would let you "), ", which widens your own reach. An agent's draft may not.")
+		words = strings.ReplaceAll(words, "your roles", "its roles")
+		if _, seen := said[object]; !seen {
+			objects = append(objects, object)
+		}
+		said[object] = append(said[object], "This draft lets the agent that wrote it "+words+".")
+		after[object] = append(after[object], words)
+	}
+	slices.Sort(objects)
+	out := []string{}
+	for _, object := range objects {
+		typed := nativeApp
+		if object != "" {
+			typed = strings.TrimPrefix(object, "App/")
+		}
+		slices.Sort(after[object])
+		out = append(out, codeAgentOwnReach+" "+object+" (typed "+typed+") "+strings.Join(said[object], " ")+" | - | "+strings.Join(after[object], "; "))
+	}
+	return out
+}
+
+// acceptedWhereRefused checks the bar of an agent's draft d against the
+// direct route, which publishes with no review and so refuses what a person
+// accepts on a draft: the reviewed draft is never refused for the agent's
+// own access, every other refusal of the direct route still refuses it, and
+// for each agent.guardrail or agent.own-reach refusal of the direct route it
+// holds a risk of the same code and object, typed by a name, unless it is
+// refused for another reason.
+func acceptedWhereRefused(t *testing.T, w World, d Draft, in CheckInput) {
+	t.Helper()
+	own := func(f Finding) bool { return f.Code == codeAgentGuardrail || f.Code == codeAgentOwnReach }
+	in.Direct, in.RefusalsOnly = false, false
+	draft := Check(w, d, in)
+	in.Direct = true
+	direct := Check(w, d, in)
+	if slices.ContainsFunc(draft.Refused, own) {
+		t.Errorf("a reviewed draft is refused for the agent's own access: %q", findingLines(draft.Refused))
+	}
+	for _, f := range direct.Refused {
+		switch {
+		case !own(f):
+			if !slices.Contains(findingLines(draft.Refused), findingLines([]Finding{f})[0]) {
+				t.Errorf("a reviewed draft lost the refusal %q of the direct route, and refuses %q", findingLines([]Finding{f})[0], findingLines(draft.Refused))
+			}
+		case len(draft.Refused) > 0:
+		case !slices.ContainsFunc(draft.Risks, func(r Finding) bool {
+			return r.Code == f.Code && r.Object == f.Object && r.Ack == AckTyped && r.Typed != ""
+		}):
+			t.Errorf("a reviewed draft holds no typed risk %s on %q, which the direct route refuses: risks %q", f.Code, f.Object, riskLines(draft.Risks))
+		}
+	}
+}
+
+// ownReachBothWays checks agent.own-reach of one draft on both kinds of
+// check. A check nobody reviews, a direct route or one that stops after
+// its refusals, refuses with the lines refused. A reviewed draft is not
+// refused and raises the risks ownReachRisks answers for them.
+func ownReachBothWays(t *testing.T, w World, d Draft, in CheckInput, refused []string) {
+	t.Helper()
+	acceptedWhereRefused(t, w, d, in)
+	draft := Check(w, d, in)
+	if len(draft.Refused) > 0 {
+		t.Errorf("a reviewed draft: refused %q", findingLines(draft.Refused))
+	}
+	if got, want := only(riskLines(draft.Risks), codeAgentOwnReach), ownReachRisks(refused); !sameLines(got, want) {
+		t.Errorf("a reviewed draft: risks\n got %q\nwant %q", got, want)
+	}
+	for _, unreviewed := range []func(*CheckInput){func(in *CheckInput) { in.Direct = true }, func(in *CheckInput) { in.RefusalsOnly = true }} {
+		direct := in
+		unreviewed(&direct)
+		v := Check(w, d, direct)
+		if got := findingLines(v.Refused); !sameLines(got, refused) {
+			t.Errorf("Direct %v, RefusalsOnly %v: refused\n got %q\nwant %q", direct.Direct, direct.RefusalsOnly, got, refused)
+		}
+		if got := only(riskLines(v.Risks), codeAgentOwnReach); len(got) > 0 {
+			t.Errorf("Direct %v, RefusalsOnly %v: risks %q, want the refusal alone", direct.Direct, direct.RefusalsOnly, got)
+		}
+	}
 }
 
 // sentences answers the sentences of fs whose code is code.
@@ -64,18 +155,14 @@ func TestRequireRulesDoNotHideWidening(t *testing.T) {
 	if !slices.Contains(codesOf(person.Risks), codeUngated) {
 		t.Errorf("a person's widening raised %q, want access.ungated", codesOf(person.Risks))
 	}
-	want := []string{"Straza read who gains what for a session that meets every require predicate of posture, the widest reach a holder can have, so a session that does not meet them reaches less."}
+	want := []string{"Straza read who gains what for a session that meets every require predicate of posture."}
 	if got := sentences(person.Unchecked, codeUncheckedRequire); !reflect.DeepEqual(got, want) {
 		t.Errorf("unchecked.require = %q, want %q", got, want)
 	}
 	items := []Item{gainRole("engineering", "    kind: business\n    implies: [dev, jira-tickets]\n"),
 		gainRole("jira-tickets", "    kind: application\n    server: jira\n    bindings:\n        - app: jira\n          tools: [create_issue]\n")}
-	for _, refusalsOnly := range []bool{false, true} {
-		v := Check(w, agentDraftOf(w, items...), CheckInput{Proposer: ciBot, Now: checkNow, RefusalsOnly: refusalsOnly})
-		if got := sentences(v.Refused, codeAgentOwnReach); !reflect.DeepEqual(got, []string{ownReach("run create_issue on jira with no approval")}) {
-			t.Errorf("RefusalsOnly %v: agent.own-reach = %q", refusalsOnly, got)
-		}
-	}
+	ownReachBothWays(t, w, agentDraftOf(w, items...), CheckInput{Proposer: ciBot, Now: checkNow},
+		[]string{"agent.own-reach App/jira " + ownReach("run create_issue on jira with no approval")})
 }
 
 // TestAgentOwnReachReadsTheAgentsWholeSubject pins that an agent's own
@@ -87,12 +174,8 @@ func TestAgentOwnReachReadsTheAgentsWholeSubject(t *testing.T) {
 	t.Parallel()
 	w := withSet(gainWorld(), "a-fast", gainSet("a-fast", "{ roles: [readers] }", "    - id: fast-push\n      tools: [mcp.call]\n      apps: [github]\n      toolNames: { allow: [push_files] }\n"+
 		"      mode: approve\n      approve: { deciders: [sponsor], class: ticket }\n"))
-	for _, refusalsOnly := range []bool{false, true} {
-		v := Check(w, agentDraftOf(w, gainRole("engineering", "    kind: business\n    implies: [dev, readers]\n")), CheckInput{Proposer: ciBot, Now: checkNow, RefusalsOnly: refusalsOnly})
-		if got := findingLines(v.Refused); !reflect.DeepEqual(got, []string{"agent.own-reach App/github " + ownReach("reach push_files on github under a looser approval")}) {
-			t.Errorf("RefusalsOnly %v: refused %q", refusalsOnly, got)
-		}
-	}
+	ownReachBothWays(t, w, agentDraftOf(w, gainRole("engineering", "    kind: business\n    implies: [dev, readers]\n")), CheckInput{Proposer: ciBot, Now: checkNow},
+		[]string{"agent.own-reach App/github " + ownReach("reach push_files on github under a looser approval")})
 }
 
 // fastShell is an added gate that the engine picks before dev-access's
@@ -102,7 +185,8 @@ const fastShell = "    - id: fast-shell\n      tools: [shell.exec]\n      mode: 
 
 // TestAddedGateThatTakesOverALooserOneWidens pins that an added approve
 // rule that the engine picks before a stricter live gate on the same calls
-// loosens it, so an agent is refused and a person reads a gate change.
+// loosens it, so an agent's draft raises it for a person to accept, a
+// direct route refuses the agent, and a person reads a gate change.
 func TestAddedGateThatTakesOverALooserOneWidens(t *testing.T) {
 	t.Parallel()
 	w := gainWorld()
@@ -110,21 +194,21 @@ func TestAddedGateThatTakesOverALooserOneWidens(t *testing.T) {
 	w.Policies["dev-access"] = Policy{Name: "dev-access", Text: live}
 	newSet := Item{Kind: KindPolicySet, Name: "a-fast", Op: OpPut, Doc: gainSet("a-fast", "{ roles: [dev] }", fastShell)}
 	inserted := Item{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: strings.Replace(live, "    - id: hold-push\n", fastShell+"    - id: hold-push\n", 1)}
-	for _, tc := range []struct {
-		item Item
-		want string
-	}{
-		{newSet, "a-fast applies to you, and this draft adds or widens rule fast-shell. An agent's draft may not change what binds the agent."},
-		{inserted, "dev-access applies to you, and this draft adds or widens rule fast-shell. An agent's draft may not change what binds the agent."},
-	} {
-		v := Check(w, agentDraftOf(w, tc.item), CheckInput{Proposer: ciBot, Now: checkNow})
-		if got := sentences(v.Refused, codeAgentGuardrail); !reflect.DeepEqual(got, []string{tc.want}) {
-			t.Errorf("%s: agent.guardrail = %q", tc.item.Name, got)
+	for _, item := range []Item{newSet, inserted} {
+		in := CheckInput{Proposer: ciBot, Now: checkNow}
+		v := Check(w, agentDraftOf(w, item), in)
+		if want := []string{guardLoosened(item.Name, "adds or widens rule fast-shell")}; len(v.Refused) > 0 || !reflect.DeepEqual(only(riskLines(v.Risks), codeAgentGuardrail), want) {
+			t.Errorf("%s: refused %q, agent.guardrail risks %q, want %q", item.Name, findingLines(v.Refused), only(riskLines(v.Risks), codeAgentGuardrail), want)
+		}
+		in.Direct = true
+		direct := Check(w, agentDraftOf(w, item), in)
+		if want := []string{guardRefusal(item.Name, "adds or widens rule fast-shell")}; !reflect.DeepEqual(findingLines(direct.Refused), want) {
+			t.Errorf("%s on a direct route: refused %q, want %q", item.Name, findingLines(direct.Refused), want)
 		}
 	}
 	p := Check(w, stamped(w, newSet), CheckInput{Proposer: Holder{Username: "carol", UserType: "human"}, Now: checkNow})
 	want := []string{"Rule fast-shell of a-fast will gate shell.exec in place of rule hold-shell of dev-access, with a ticket good for 1 day, " +
-		"decided by the person behind the agent where today it is a hold, up to 90 seconds, decided by sec-approvers."}
+		"decided by the agent's sponsor where today it is a hold, up to 90 seconds, decided by sec-approvers."}
 	if got := sentences(p.Risks, codeGuardrail); !reflect.DeepEqual(got, want) {
 		t.Errorf("a person's policy.guardrail-changed = %q, want %q", got, want)
 	}
@@ -132,14 +216,21 @@ func TestAddedGateThatTakesOverALooserOneWidens(t *testing.T) {
 
 // TestSetThatStartsToBindTheAgentIsJudged pins that a set that starts to
 // apply to the agent through its own roles is judged as a set the draft
-// creates, so an allow rule in it is refused.
+// creates, so an allow rule in it is a risk a person accepts, typed by
+// the set's name, and a refusal on a direct route.
 func TestSetThatStartsToBindTheAgentIsJudged(t *testing.T) {
 	t.Parallel()
 	w := withShell(gainWorld())
-	v := Check(w, agentDraftOf(w, gainRole("engineering", "    kind: business\n    implies: [dev, shell]\n")), CheckInput{Proposer: ciBot, Now: checkNow})
-	want := []string{"shell-users applies to you, and this draft adds or widens rule allow-shell. An agent's draft may not change what binds the agent."}
-	if got := sentences(v.Refused, codeAgentGuardrail); !reflect.DeepEqual(got, want) {
-		t.Errorf("agent.guardrail = %q, want %q", got, want)
+	d := agentDraftOf(w, gainRole("engineering", "    kind: business\n    implies: [dev, shell]\n"))
+	v := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow})
+	want := []string{"agent.guardrail PolicySet/shell-users (typed shell-users) shell-users binds the agent that wrote this draft, and this draft adds or widens rule allow-shell. | - | adds or widens rule allow-shell"}
+	if got := only(riskLines(v.Risks), codeAgentGuardrail); len(v.Refused) > 0 || !reflect.DeepEqual(got, want) {
+		t.Errorf("refused %q, agent.guardrail risks %q, want %q", findingLines(v.Refused), got, want)
+	}
+	direct := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow, Direct: true})
+	want = []string{"shell-users applies to you, and this draft adds or widens rule allow-shell. An agent's draft may not change what binds the agent."}
+	if got := sentences(direct.Refused, codeAgentGuardrail); !reflect.DeepEqual(got, want) {
+		t.Errorf("on a direct route agent.guardrail = %q, want %q", got, want)
 	}
 }
 
@@ -149,7 +240,7 @@ func TestSetThatStartsToBindTheAgentIsJudged(t *testing.T) {
 func TestLocalAllowReadsAWiderMatch(t *testing.T) {
 	t.Parallel()
 	w := withShell(gainWorld())
-	want := []string{"Rule allow-shell of shell-users allows shell.exec on managed machines, where this deployment denies it by default."}
+	want := []string{"Rule allow-shell of shell-users allows shell commands on managed machines. This deployment denies those calls by default."}
 	for _, match := range []string{"  match: { roles: [shell, dev] }\n", "  match: {}\n"} {
 		doc := strings.Replace(shellUsers, "  match: { roles: [shell] }\n", match, 1)
 		v := Check(w, stamped(w, Item{Kind: KindPolicySet, Name: "shell-users", Op: OpPut, Doc: doc}), CheckInput{Proposer: Holder{Username: "carol", UserType: "human"}, Now: checkNow})
@@ -186,7 +277,8 @@ func TestAgentViewAnswersNothingAboutANamedPerson(t *testing.T) {
 
 // TestAgentOwnReachSeesTheBuiltInApp pins that a set that opens the
 // built-in straza app's tools to the agent by username widens the agent's
-// own reach.
+// own reach: a risk with no object, which a person accepts by typing
+// straza, and a refusal on a direct route.
 func TestAgentOwnReachSeesTheBuiltInApp(t *testing.T) {
 	t.Parallel()
 	w := gainWorld()
@@ -197,9 +289,15 @@ func TestAgentOwnReachSeesTheBuiltInApp(t *testing.T) {
 	d := agentDraftOf(w, Item{Kind: KindPolicySet, Name: "helper", Op: OpPut, Doc: set})
 	d.Authors[0].Username = bot.Username
 	v := Check(w, d, CheckInput{Proposer: bot, Now: checkNow})
-	want := []string{ownReach("reach approval_await and approval_request of the built-in straza MCP server with an approval")}
-	if got := sentences(v.Refused, codeAgentOwnReach); !reflect.DeepEqual(got, want) {
-		t.Errorf("agent.own-reach = %q, want %q", got, want)
+	want := []string{"agent.own-reach  (typed straza) This draft lets the agent that wrote it reach approval_await and approval_request of the built-in straza MCP server with an approval. " +
+		"| - | reach approval_await and approval_request of the built-in straza MCP server with an approval"}
+	if got := only(riskLines(v.Risks), codeAgentOwnReach); len(v.Refused) > 0 || !reflect.DeepEqual(got, want) {
+		t.Errorf("refused %q, agent.own-reach risks %q, want %q", findingLines(v.Refused), got, want)
+	}
+	direct := Check(w, d, CheckInput{Proposer: bot, Now: checkNow, Direct: true})
+	want = []string{ownReach("reach approval_await and approval_request of the built-in straza MCP server with an approval")}
+	if got := sentences(direct.Refused, codeAgentOwnReach); !reflect.DeepEqual(got, want) {
+		t.Errorf("on a direct route agent.own-reach = %q, want %q", got, want)
 	}
 }
 
@@ -217,8 +315,9 @@ func TestAServerThatDoesNotRunHidesNoWidening(t *testing.T) {
 		d := agentDraftOf(w, widenReaders(w).Items...)
 		d.Authors[0].Username = bot.Username
 		v := Check(w, d, CheckInput{Proposer: bot, Now: checkNow})
-		if got := sentences(v.Refused, codeAgentOwnReach); !reflect.DeepEqual(got, []string{ownReach("run delete_repo and push_files on github with no approval")}) {
-			t.Errorf("github %s: agent.own-reach = %q", status, got)
+		want := ownReachRisks([]string{"agent.own-reach App/github " + ownReach("run delete_repo and push_files on github with no approval")})
+		if got := only(riskLines(v.Risks), codeAgentOwnReach); !reflect.DeepEqual(got, want) {
+			t.Errorf("github %s: agent.own-reach risks %q, want %q", status, got, want)
 		}
 	}
 }

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { PolicyRules } from "./policy-rules";
 import { ON_MACHINES } from "@/lib/harness-words";
 import { openDoc, rulesOf } from "@/lib/policy-model";
+import { OUTCOME_WORD } from "@/lib/chip-words";
 import { BUCKET_WORD, EVERY_WORD, MARK, NO_REASON_YET, NO_RULE_MATCH, RESTATES_ACCESS, RULES_SEARCH, WHERE_WORD, howLine, openRule, rulesMatch } from "@/lib/policy-words";
 
 // One set with the rule shapes the table has to read: a whole server, one
@@ -65,13 +66,23 @@ const ids = () => Array.from(document.querySelectorAll("[data-rule]")).map((e) =
 const count = () => (document.querySelector("[data-rules]") as HTMLElement).getAttribute("data-rules");
 
 describe("the rules table", () => {
+  it("keeps a floor under the table, names a server by its kind and wears a tool's outcome on its chip", () => {
+    mount({ registered: ["demo-tools"] });
+    expect((row("env-approval").closest("table") as HTMLElement).className).toContain("min-w-[880px]");
+    expect(row("env-approval").querySelector('[data-tag="demo-tools"] svg.lucide-server')).toBeTruthy();
+    expect(row("whole-server").querySelector('[data-tag="ledger-mcp"] svg.lucide-laptop')).toBeTruthy();
+    const tool = row("env-approval").querySelector("td:nth-child(2) [data-outcome]") as HTMLElement;
+    expect([tool.textContent, tool.getAttribute("data-outcome")]).toEqual(["get-env", "approval"]);
+    expect(row("no-rm-rf").querySelector("td:nth-child(2) [data-outcome]")).toBeNull();
+  });
+
   it("reads one row per rule: where, which calls, what happens and why", () => {
     mount();
     expect(count()).toBe("5");
     const c = cells("env-approval");
     expect(c[0]).toBe("demo-tools");
     expect(c[1]).toBe("get-env");
-    expect(c[2]).toContain(BUCKET_WORD.hum);
+    expect(c[2]).toContain(OUTCOME_WORD.approval);
     expect(c[2]).toContain(howLine(ruleOf("env-approval")));
     expect(c[3]).toContain("Straza: reading the environment needs approval");
     expect(c[4]).toContain("env-approval");
@@ -116,6 +127,15 @@ describe("the rules table", () => {
     expect(count()).toBe("2");
     expect(document.querySelector("[data-rules-filter]")?.getAttribute("data-rules-filter")).toBe("deny");
     expect(screen.getByRole("button", { name: BUCKET_WORD.deny }).getAttribute("aria-pressed")).toBe("true");
+    // The filter has a name of its own; What happens names the rule sheet's outcome.
+    expect(screen.getByRole("group", { name: "Filter by outcome" }).getAttribute("data-rules-filter")).toBe("deny");
+    expect(screen.queryByRole("group", { name: "What happens" })).toBeNull();
+  });
+
+  it("names the call types in words", () => {
+    mount();
+    expect(cells("no-rm-rf")[0]).toBe("shell command");
+    expect(cells("secrets-denied")[0]).toBe("file");
   });
 
   it("searches the ids, the reasons, the calls and the servers", async () => {

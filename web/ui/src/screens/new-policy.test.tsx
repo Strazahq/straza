@@ -1,6 +1,6 @@
 import { parse } from "yaml";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NewPolicy } from "./new-policy";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -13,10 +13,11 @@ import {
   ALSO_CREATES, HARNESS_HINT, NEW_ROLE_MISSING, NEW_ROLE_NAME, NEW_ROLE_TAKEN, WHO_NEW, alsoCreates, doorNote, newRoleDescription, newRoleName,
 } from "@/lib/harness-words";
 import {
-  CALLS_MISSING, CALLS_Q, HOW_HOLD, HOW_Q, HOW_TICKET, INTENT, LANE_LABEL, NAME_BAD, NAME_FREE, NAME_TAKEN, NEXT, REASON, RECORDING_NOTE, REVIEW_FACT, REVIEW_NAME,
+  CALLS_MISSING, CALLS_Q, DENY_Q, HOW_HOLD, HOW_Q, HOW_TICKET, INTENT, LANE_LABEL, NAME_BAD, NAME_FREE, NAME_TAKEN, REASON, REASON_HINT_DENY, REVIEW_FACT, REVIEW_NAME,
   RUNS_TODAY, SERVER, STEP_REASON, STEPS, WHAT_Q, WHO_EVERYONE, WHO_MISSING, WHO_Q, WHO_ROLE, WHO_SPONSOR, WHO_TEAM, WHOLE_SERVER, W1, alreadyToday, pickedCount,
-  publishTitle, reasonApprove, removePick, roleCount, searchRoles, serversNarrowed, unitWord, validWords, VALID_NOW, addToExisting,
-  existingSet, PICK_ALL_TITLE, WRITE_YAML, WRITE_YAML_START,
+  publishTitle, reasonApprove, reasonDeny, removePick, roleCount, searchRoles, serversNarrowed, unitWord, validPills, addToExisting,
+  existingSet, PICK_ALL_TITLE, WRITE_YAML, WRITE_YAML_START, ticketFact, waitWords,
+  LEAVE, LEAVE_TITLE,
 } from "@/lib/policy-words";
 import { navigate } from "@/lib/router";
 import { snapshot } from "@/lib/session";
@@ -106,7 +107,7 @@ const WRITTEN = `apiVersion: straza.dev/v1beta1
 kind: PolicySet
 metadata:
   name: dev-tools-approvals
-  description: write-file and delete-file on demo-tools need approval by the person behind the agent within 2 minutes.
+  description: write-file and delete-file on demo-tools need approval by the agent's sponsor within 2 minutes.
 spec:
   priority: 150
   match:
@@ -152,16 +153,22 @@ const stepLabels = () =>
 const attr = (selector: string, name: string) => (document.querySelector(selector) as HTMLElement).getAttribute(name);
 const textOf = (selector: string) => (document.querySelector(selector) as HTMLElement).textContent || "";
 const yaml = () => textOf("[data-policy-yaml]");
+// forward presses the foot's button that moves on, whose name says the
+// step it leads to.
+const forward = () => userEvent.click(foot().getByRole("button", { name: /^Next: / }));
+// fact is the value of one row of the review's facts, by its label.
+const fact = (label: string) => document.querySelector('[data-fact="' + label + '"]') as HTMLElement | null;
+const factLabels = () => [...document.querySelectorAll("[data-review-facts] dt")].map((d) => d.textContent);
 
 // toCalls answers What and Who the way the journey does and lands on
 // Which calls with demo-tools open.
 async function toCalls() {
   mount();
   await heading(WHAT_Q);
-  await click(NEXT);
+  await forward();
   await pick(WHO_ROLE);
   await pick("dev-tools");
-  await click(NEXT);
+  await forward();
   await heading(CALLS_Q);
   await screen.findByRole("checkbox", { name: "write-file" });
 }
@@ -172,9 +179,9 @@ async function toReview() {
   await toCalls();
   await tick("write-file");
   await tick("delete-file");
-  await click(NEXT);
+  await forward();
   await heading(HOW_Q);
-  await click(NEXT);
+  await forward();
   await screen.findByRole("textbox", { name: REVIEW_NAME });
 }
 
@@ -227,11 +234,10 @@ describe("the New policy wizard", () => {
     expect(screen.getByRole("radio", { name: "dev-tools" }).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("offers the three intents, the recording note and the YAML door", async () => {
+  it("offers the three intents and the YAML door", async () => {
     mount();
     await heading(WHAT_Q);
     for (const intent of [INTENT.approve, INTENT.deny, INTENT.allow]) expect(screen.getByRole("radio", { name: intent.title })).toBeTruthy();
-    expect(screen.getByText(RECORDING_NOTE, { exact: false })).toBeTruthy();
     expect(screen.getByRole("button", { name: WRITE_YAML })).toBeTruthy();
   });
 
@@ -248,9 +254,9 @@ describe("the New policy wizard", () => {
   it("asks for Everyone or a role, and says what is missing when neither is picked", async () => {
     mount();
     await heading(WHAT_Q);
-    await click(NEXT);
+    await forward();
     await heading(WHO_Q);
-    await click(NEXT);
+    await forward();
     expect(foot().getByText(WHO_MISSING)).toBeTruthy();
     await pick(WHO_ROLE);
     const card = screen.getByRole("radio", { name: "dev-tools" });
@@ -265,7 +271,7 @@ describe("the New policy wizard", () => {
     vi.mocked(listRoles).mockResolvedValue(many as RoleRow[]);
     mount();
     await heading(WHAT_Q);
-    await click(NEXT);
+    await forward();
     await pick(WHO_ROLE);
     const search = await screen.findByRole("textbox", { name: searchRoles(14) });
     expect(textOf("[data-role-count]")).toBe(roleCount(12, 14));
@@ -284,7 +290,7 @@ describe("the New policy wizard", () => {
   it("keeps the role cards in order when selecting by mouse and arrow key", async () => {
     mount();
     await heading(WHAT_Q);
-    await click(NEXT);
+    await forward();
     await pick(WHO_ROLE);
     const group = within(screen.getByRole("radiogroup", { name: WHO_ROLE }));
     const names = () => group.getAllByRole("radio").map((r) => r.getAttribute("aria-label"));
@@ -350,9 +356,9 @@ describe("the New policy wizard", () => {
     await toCalls();
     await tick("write-file");
     await userEvent.click(screen.getByRole("switch", { name: WHOLE_SERVER }));
-    await click(NEXT);
+    await forward();
     await heading(HOW_Q);
-    await click(NEXT);
+    await forward();
     await screen.findByRole("textbox", { name: REVIEW_NAME });
     expect(yaml()).toContain("apps: [demo-tools]");
     expect(yaml()).not.toContain("toolNames:");
@@ -363,7 +369,7 @@ describe("the New policy wizard", () => {
     await toCalls();
     await tick("write-file");
     await tick("delete-file");
-    await click(NEXT);
+    await forward();
     await heading(HOW_Q);
     expect(screen.getByRole("radio", { name: WHO_SPONSOR }).getAttribute("aria-checked")).toBe("true");
     expect((screen.getByRole("spinbutton", { name: HOW_HOLD }) as HTMLInputElement).value).toBe("2");
@@ -372,13 +378,13 @@ describe("the New policy wizard", () => {
   });
 
   it.each([
-    ["one tool, whose name keeps its case", false, "write-file on demo-tools will need approval. Say who decides, and for how long."],
-    ["the whole server, which opens with a word", true, "Every tool on demo-tools will need approval. Say who decides, and for how long."],
+    ["one tool, whose name keeps its case", false, "write-file on demo-tools will need approval."],
+    ["the whole server, which opens with a word", true, "Every tool on demo-tools will need approval."],
   ])("opens the How step's lede on %s", async (_, whole, lede) => {
     await toCalls();
     await tick("write-file");
     if (whole) await userEvent.click(screen.getByRole("switch", { name: WHOLE_SERVER }));
-    await click(NEXT);
+    await forward();
     await heading(HOW_Q);
     expect(screen.getByText(lede)).toBeTruthy();
   });
@@ -386,7 +392,7 @@ describe("the New policy wizard", () => {
   it("reads a window of one in the singular", async () => {
     await toCalls();
     await tick("write-file");
-    await click(NEXT);
+    await forward();
     await heading(HOW_Q);
     await pick(HOW_TICKET);
     expect(screen.getByRole("combobox", { name: HOW_TICKET + " unit" }).textContent).toBe(unitWord(1, "days"));
@@ -395,7 +401,7 @@ describe("the New policy wizard", () => {
   it("warns when an approver team is paged on a hold under two minutes", async () => {
     await toCalls();
     await tick("write-file");
-    await click(NEXT);
+    await forward();
     await heading(HOW_Q);
     await pick(WHO_TEAM);
     const box = screen.getByRole("spinbutton", { name: HOW_HOLD });
@@ -441,7 +447,7 @@ describe("the New policy wizard", () => {
   it("asks the server to check the document and reads its verdict back", async () => {
     await toReview();
     await waitFor(() => expect(validatePolicy).toHaveBeenCalledWith(WRITTEN), { timeout: 2000 });
-    await waitFor(() => expect(textOf('[data-verdict="ok"]')).toContain(validWords({ rules: 1, matchRoles: ["dev-tools"] }, VALID_NOW)));
+    await waitFor(() => expect(textOf('[data-verdict="ok"]')).toBe(validPills({ rules: 1, matchRoles: ["dev-tools"] }).join("")));
   });
 
   it("saves a new set to the working draft, stores no set and opens the draft", async () => {
@@ -475,19 +481,168 @@ describe("the New policy wizard", () => {
     mount();
     await heading(WHAT_Q);
     await pick(INTENT.allow.title);
-    await click(NEXT);
+    await forward();
     await pick(WHO_ROLE);
     await pick("dev-tools");
-    await click(NEXT);
+    await forward();
     await heading(CALLS_Q);
     await screen.findByRole("checkbox", { name: "write-file" });
     await tick("write-file");
-    await click(NEXT);
+    await forward();
     await screen.findByRole("textbox", { name: REVIEW_NAME });
     expect(yaml()).toContain("effect: allow");
     expect(yaml()).not.toContain("reason:");
-    expect(textOf("[data-review-facts]")).toContain(REVIEW_FACT.allowed);
+    expect(fact(REVIEW_FACT.outcome)?.querySelector("[data-outcome]")?.getAttribute("data-outcome")).toBe("allowed");
+    expect(factLabels()).toEqual([REVIEW_FACT.applies, REVIEW_FACT.calls, REVIEW_FACT.outcome, REVIEW_FACT.order]);
     expect(textOf("[data-review-facts]")).not.toContain(REVIEW_FACT.reason);
+  });
+
+  it("opens under a crumb back to Policies, and names on Next the step it leads to", async () => {
+    mount();
+    await heading(WHAT_Q);
+    const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(crumbs.textContent).toBe("Straza/Policies/New");
+    expect(within(crumbs).getByRole("link", { name: "Policies" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("New policy");
+    expect(foot().getByRole("button", { name: "Next: " + STEPS.who })).toBeTruthy();
+    await forward();
+    await pick(WHO_ROLE);
+    await pick("dev-tools");
+    expect(foot().getByRole("button", { name: "Next: " + STEPS.calls })).toBeTruthy();
+    await forward();
+    await heading(CALLS_Q);
+    await screen.findByRole("checkbox", { name: "write-file" });
+    await tick("write-file");
+    expect(foot().getByRole("button", { name: "Next: " + STEPS.how })).toBeTruthy();
+    await forward();
+    await heading(HOW_Q);
+    expect(foot().getByRole("button", { name: "Next: " + STEPS.review })).toBeTruthy();
+    await forward();
+    await screen.findByRole("textbox", { name: REVIEW_NAME });
+    expect(foot().queryByRole("button", { name: /^Next/ })).toBeNull();
+  });
+
+  it.each([
+    ["a denial asks for its reason", INTENT.deny.title, "Next: " + STEP_REASON],
+    ["an allow goes on to Review", INTENT.allow.title, "Next: " + STEPS.review],
+  ])("names the step after Which calls when %s", async (_case, intent, label) => {
+    mount();
+    await heading(WHAT_Q);
+    await pick(intent);
+    await forward();
+    await pick(WHO_ROLE);
+    await pick("dev-tools");
+    await forward();
+    await heading(CALLS_Q);
+    expect(foot().getByRole("button", { name: label })).toBeTruthy();
+  });
+
+  describe("the facts on Review", () => {
+    it("says who holds the role, which calls, the outcome, who decides, how long, the reason and the order of a hold", async () => {
+      await toReview();
+      await waitFor(() => expect(validatePolicy).toHaveBeenCalled(), { timeout: 2000 });
+      expect(screen.getByRole("heading", { level: 2, name: "write-file and delete-file on demo-tools need approval by the agent's sponsor within 2 minutes." }).className).toContain("text-section");
+      expect(factLabels()).toEqual([REVIEW_FACT.applies, REVIEW_FACT.calls, REVIEW_FACT.outcome, REVIEW_FACT.who, REVIEW_FACT.how, REVIEW_FACT.reason, REVIEW_FACT.order]);
+      expect(fact(REVIEW_FACT.applies)?.textContent).toBe("dev-tools2 holders");
+      expect(fact(REVIEW_FACT.applies)?.querySelector("svg.lucide-id-card")).toBeTruthy();
+      expect(fact(REVIEW_FACT.calls)?.textContent).toBe("demo-toolswrite-filedelete-file");
+      expect(fact(REVIEW_FACT.calls)?.querySelector("svg.lucide-server")).toBeTruthy();
+      expect(fact(REVIEW_FACT.outcome)?.textContent).toBe("needs approval");
+      expect(fact(REVIEW_FACT.who)?.textContent).toBe(WHO_SPONSOR);
+      expect(fact(REVIEW_FACT.how)?.textContent).toBe(waitWords(120));
+      expect(fact(REVIEW_FACT.how)?.textContent).toBe("Waits up to 2 minutes, then denied.");
+      expect(fact(REVIEW_FACT.reason)?.textContent).toBe(reasonApprove(SUBJECT, false));
+      expect(fact(REVIEW_FACT.order)?.textContent).toBe("150");
+      expect(within(fact(REVIEW_FACT.order) as HTMLElement).getByRole("button", { name: "Help: " + REVIEW_FACT.order })).toBeTruthy();
+    });
+
+    it("reads the order the server's check answers before the document's", async () => {
+      vi.mocked(validatePolicy).mockResolvedValue({ ok: true, rules: 1, matchRoles: ["dev-tools"], priority: 175 });
+      await toReview();
+      await waitFor(() => expect(fact(REVIEW_FACT.order)?.textContent).toBe("175"), { timeout: 2000 });
+    });
+
+    it("says a ticket's two windows, and an approver role in the words of its option", async () => {
+      await toCalls();
+      await tick("write-file");
+      await forward();
+      await heading(HOW_Q);
+      await pick(HOW_TICKET);
+      await pick(WHO_TEAM);
+      await forward();
+      await screen.findByRole("textbox", { name: REVIEW_NAME });
+      expect(fact(REVIEW_FACT.how)?.textContent).toBe(ticketFact(86400, 3600));
+      expect(fact(REVIEW_FACT.how)?.textContent).toBe("Granted within a day, then an hour to run.");
+      expect(fact(REVIEW_FACT.who)?.textContent).toBe(WHO_TEAM + "sec-approvers");
+      expect(fact(REVIEW_FACT.who)?.querySelector("svg.lucide-user-check")).toBeTruthy();
+    });
+
+    it("says a denial's outcome and reason, and no one who decides", async () => {
+      mount();
+      await heading(WHAT_Q);
+      await pick(INTENT.deny.title);
+      await forward();
+      await pick(WHO_ROLE);
+      await pick("dev-tools");
+      await forward();
+      await heading(CALLS_Q);
+      await screen.findByRole("checkbox", { name: "write-file" });
+      await tick("write-file");
+      await forward();
+      await heading(DENY_Q);
+      expect(screen.getByText(REASON_HINT_DENY)).toBeTruthy();
+      await forward();
+      await screen.findByRole("textbox", { name: REVIEW_NAME });
+      expect(factLabels()).toEqual([REVIEW_FACT.applies, REVIEW_FACT.calls, REVIEW_FACT.outcome, REVIEW_FACT.reason, REVIEW_FACT.order]);
+      expect(fact(REVIEW_FACT.outcome)?.querySelector("[data-outcome]")?.getAttribute("data-outcome")).toBe("denied");
+      expect(fact(REVIEW_FACT.reason)?.textContent).toBe(reasonDeny("write-file on demo-tools", true));
+    });
+
+    it("says Everyone for a policy on every session, and every tool for a whole server", async () => {
+      mount();
+      await heading(WHAT_Q);
+      await forward();
+      await pick(WHO_EVERYONE);
+      await forward();
+      await heading(CALLS_Q);
+      await userEvent.click(await screen.findByRole("switch", { name: WHOLE_SERVER }));
+      await forward();
+      await heading(HOW_Q);
+      await forward();
+      await screen.findByRole("textbox", { name: REVIEW_NAME });
+      expect(fact(REVIEW_FACT.applies)?.textContent).toBe(WHO_EVERYONE);
+      expect(fact(REVIEW_FACT.calls)?.textContent).toBe("demo-toolsevery tool");
+      expect(fact(REVIEW_FACT.order)?.textContent).toBe("100");
+    });
+
+    it("names the role alone when the role list gives no count, and nobody for none", async () => {
+      vi.mocked(listRoles).mockResolvedValue(roles.map((r) => (r.name === "dev-tools" ? { ...r, holder_count: undefined } : r)));
+      await toReview();
+      expect(fact(REVIEW_FACT.applies)?.textContent).toBe("dev-tools");
+      expect(document.querySelector("[data-holders]")).toBeNull();
+    });
+
+    it("keeps the document under a closed View as YAML line, in the page", async () => {
+      await toReview();
+      const fold = document.querySelector("[data-yaml-fold]") as HTMLDetailsElement;
+      expect(fold.open).toBe(false);
+      expect(fold.querySelector("summary")?.textContent).toBe("View as YAMLThe policy as it will be stored");
+      await waitFor(() => expect(yaml()).toBe(WRITTEN));
+      expect(document.querySelector('[aria-label="Line numbers"]')).toBeNull();
+    });
+
+    it("sets the server's verdict as one banner under the facts, ok or bad", async () => {
+      await toReview();
+      const ok = await waitFor(() => {
+        const el = document.querySelector('[data-verdict="ok"]') as HTMLElement;
+        expect(el).not.toBeNull();
+        return el;
+      }, { timeout: 2000 });
+      expect(ok.textContent).toBe("valid1 policy ruleapplies to dev-tools");
+      expect(ok.querySelector("svg.lucide-check")).toBeTruthy();
+      const facts = document.querySelector("[data-review-facts]") as HTMLElement;
+      expect(facts.compareDocumentPosition(ok) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
   });
 
   describe("tools on people's machines", () => {
@@ -502,10 +657,10 @@ describe("the New policy wizard", () => {
     it("opens a door from a denied call on What, and Which calls is answered after Everyone", async () => {
       await fromDoor();
       expect(textOf("[data-door-note]")).toBe(doorNote("claude-in-chrome", ["navigate", "form_input"]));
-      await click(NEXT);
+      await forward();
       await heading(WHO_Q);
       await pick(WHO_EVERYONE);
-      await click(NEXT);
+      await forward();
       await heading(CALLS_Q);
       expect(screen.getByRole("combobox", { name: SERVER }).textContent).toContain("claude-in-chrome");
       expect(attr("[data-machine-tools]", "data-machine-tools")).toBe("mcp");
@@ -514,11 +669,11 @@ describe("the New policy wizard", () => {
 
     it("keeps the server and its tools when Who is answered again", async () => {
       await fromDoor();
-      await click(NEXT);
+      await forward();
       await pick(WHO_EVERYONE);
       await pick(WHO_ROLE);
       await pick("dev-tools");
-      await click(NEXT);
+      await forward();
       await heading(CALLS_Q);
       expect(screen.getByRole("combobox", { name: SERVER }).textContent).toContain("claude-in-chrome");
       expect(ticked()).toEqual([["navigate", true], ["form_input", true]]);
@@ -527,7 +682,7 @@ describe("the New policy wizard", () => {
     it("offers a new role to a full grant, named after the server, and refuses a name a role carries", async () => {
       vi.mocked(snapshot).mockReturnValue(FULL);
       await fromDoor();
-      await click(NEXT);
+      await forward();
       await heading(WHO_Q);
       await pick(WHO_NEW);
       const box = screen.getByRole("textbox", { name: NEW_ROLE_NAME }) as HTMLInputElement;
@@ -535,9 +690,23 @@ describe("the New policy wizard", () => {
       await userEvent.clear(box);
       await userEvent.type(box, "dev-tools");
       expect(textOf("[data-role-problem]")).toBe(NEW_ROLE_TAKEN);
-      await click(NEXT);
+      await forward();
       expect(foot().getByText(NEW_ROLE_MISSING)).toBeTruthy();
       expect(document.querySelector('[data-step="who"]')).toBeTruthy();
+    });
+
+    it("leads Calls on the review with the server on a person's machine", async () => {
+      await fromDoor();
+      await forward();
+      await pick(WHO_EVERYONE);
+      await forward();
+      await heading(CALLS_Q);
+      await forward();
+      await heading(HOW_Q);
+      await forward();
+      await screen.findByRole("textbox", { name: REVIEW_NAME });
+      expect(fact(REVIEW_FACT.calls)?.textContent).toBe("claude-in-chromenavigateform_input");
+      expect(fact(REVIEW_FACT.calls)?.querySelector("svg.lucide-laptop")).toBeTruthy();
     });
 
     it("makes the role with the policy, in the same draft and before it", async () => {
@@ -545,11 +714,11 @@ describe("the New policy wizard", () => {
       const role = newRoleName("claude-in-chrome");
       await fromDoor();
       await pick(INTENT.allow.title);
-      await click(NEXT);
+      await forward();
       await pick(WHO_NEW);
-      await click(NEXT);
+      await forward();
       await heading(CALLS_Q);
-      await click(NEXT);
+      await forward();
       const name = await screen.findByRole("textbox", { name: REVIEW_NAME }) as HTMLInputElement;
       expect(name.value).toBe(role + "-access");
       expect(textOf("[data-review-facts]")).toContain(ALSO_CREATES + alsoCreates(role));
@@ -571,7 +740,7 @@ describe("the New policy wizard", () => {
     ])("offers no new role with %s", async (_, session) => {
       vi.mocked(snapshot).mockReturnValue(session);
       await fromDoor();
-      await click(NEXT);
+      await forward();
       await heading(WHO_Q);
       expect(screen.queryByRole("radio", { name: WHO_NEW })).toBeNull();
     });
@@ -582,15 +751,48 @@ describe("the New policy wizard", () => {
       expect(screen.getByText(HARNESS_HINT)).toBeTruthy();
       expect(attr("[data-machine-tools]", "data-machine-tools")).toBe("harness");
       expect(ticked()).toEqual([["LSP", false], ["NotebookEdit", false]]);
-      await click(NEXT);
+      await forward();
       expect(foot().getByText(CALLS_MISSING)).toBeTruthy();
       await tick("LSP");
-      await click(NEXT);
+      await forward();
       await heading(HOW_Q);
-      await click(NEXT);
+      await forward();
       await screen.findByRole("textbox", { name: REVIEW_NAME });
       expect(yaml()).toContain("      tools: [other]\n      toolNames:\n        allow: [LSP]\n");
       expect(yaml()).not.toContain("apps:");
+    });
+  });
+
+  describe("a door out of the wizard", () => {
+    // The breadcrumb, the rail, the header and the palette call the
+    // router's own navigate, which asks the guard the wizard registers.
+    let router: typeof import("@/lib/router");
+    beforeEach(async () => {
+      router = await vi.importActual<typeof import("@/lib/router")>("@/lib/router");
+      router.replaceAddress(router.pathFor("policies", ["new"]));
+    });
+
+    it("passes while nothing is answered", async () => {
+      mount();
+      await heading(WHAT_Q);
+      act(() => router.navigate("users"));
+      expect(window.location.pathname).toBe(router.pathFor("users"));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    });
+
+    it("asks Cancel's question once a step is answered, and goes on its confirm without asking again", async () => {
+      mount();
+      await heading(WHAT_Q);
+      await forward();
+      await heading(WHO_Q);
+      act(() => router.navigate("users"));
+      const dialog = await screen.findByRole("alertdialog");
+      expect(dialog.textContent).toContain(LEAVE_TITLE);
+      expect(window.location.pathname).toBe(router.pathFor("policies", ["new"]));
+      await userEvent.click(within(dialog).getByRole("button", { name: LEAVE }));
+      expect(window.location.pathname).toBe(router.pathFor("users"));
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+      expect(navigate).not.toHaveBeenCalled();
     });
   });
 });

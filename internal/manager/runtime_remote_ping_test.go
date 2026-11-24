@@ -45,9 +45,9 @@ func shortPings(mgr *Manager, name string) {
 	mgr.mu.RUnlock()
 	rt.ConnectTimeout = shortPing
 	rt.mu.Lock()
-	for key, s := range rt.pool {
+	for key, p := range rt.pool {
 		delete(rt.pool, key)
-		_ = s.Close()
+		_ = p.s.Close()
 	}
 	rt.mu.Unlock()
 }
@@ -98,15 +98,23 @@ func TestRemoteRuntimePingEachSession(t *testing.T) {
 			if err := r.Ping(ctx, app); err != nil {
 				t.Fatalf("warm ping: %v", err)
 			}
+			// Each caller calls for a Straza session of its own, and the
+			// app-level session serves none.
+			key := func(s *Secret) poolKey {
+				if s == app {
+					return sessionKey("", s)
+				}
+				return sessionKey("ses-"+s.ID, s)
+			}
 			for _, c := range callers {
-				if _, err := r.Call(ctx, CallInput{Tool: "echo", Secret: c}); err != nil {
+				if _, err := r.Call(ctx, CallInput{Tool: "echo", Session: "ses-" + c.ID, Secret: c}); err != nil {
 					t.Fatalf("warm call as %s: %v", c.ID, err)
 				}
 			}
 			r.mu.Lock()
 			sessions := map[string]*mcp.ClientSession{}
 			for _, s := range append([]*Secret{app}, callers...) {
-				sessions[s.ID] = r.pool[sessionKey(s)]
+				sessions[s.ID] = r.sessionAt(key(s))
 			}
 			r.mu.Unlock()
 			switch tc.hang {
@@ -142,7 +150,7 @@ func TestRemoteRuntimePingEachSession(t *testing.T) {
 			}
 			r.mu.Lock()
 			for _, s := range append([]*Secret{app}, callers...) {
-				kept := r.pool[sessionKey(s)] == sessions[s.ID]
+				kept := r.sessionAt(key(s)) == sessions[s.ID]
 				if kept == (s.ID == tc.wantEvicted) {
 					t.Errorf("session of %s kept = %v, want %v", s.ID, kept, !kept)
 				}
@@ -293,8 +301,8 @@ func TestHealthCheckMovesPastAStalledServer(t *testing.T) {
 // TestRemoteRuntimePingPassBounds pins what a health ping pass waits for. It
 // never waits for a tool call still running on a session it evicts, and one
 // eviction writes one ring line although the call then fails on the same
-// session. It never waits for calls queued on the runtime lock whose own
-// deadline passed, and a pass whose wait for the lock outlasted its deadline
+// session. It never waits for calls queued behind a dial whose own
+// deadline passed, and a pass whose wait behind it outlasted its deadline
 // answers a sentence instead of dialing. A call with a rotated credential
 // never waits for a call still running on the superseded session. The
 // handshake and the ping each get ConnectTimeout, so a slow server that
@@ -319,7 +327,7 @@ func TestRemoteRuntimePingPassBounds(t *testing.T) {
 				t.Fatalf("warm call: %v", err)
 			}
 			r.mu.Lock()
-			s := r.pool[sessionKey(caller)]
+			s := r.sessionAt(sessionKey("", caller))
 			r.mu.Unlock()
 			up.hangSession(s.ID())
 			up.hangPings(t, s.ID())
@@ -336,14 +344,14 @@ func TestRemoteRuntimePingPassBounds(t *testing.T) {
 					t.Error("the call on the stalled session answered nil")
 				}
 				r.mu.Lock()
-				kept := r.pool[sessionKey(caller)] == s
+				kept := r.sessionAt(sessionKey("", caller)) == s
 				r.mu.Unlock()
 				if kept {
 					t.Error("the pool still holds the session whose ping timed out")
 				}
 			}
 		}, time.Second, "", 1},
-		{"calls wait on the lock behind a dial to a stalled server", func(t *testing.T, r *RemoteRuntime, up *methodUpstream) (*Secret, func()) {
+		{"calls wait behind a dial to a stalled server", func(t *testing.T, r *RemoteRuntime, up *methodUpstream) (*Secret, func()) {
 			up.stall(t)
 			for i := 0; i < 2; i++ {
 				go func() {
@@ -366,7 +374,7 @@ func TestRemoteRuntimePingPassBounds(t *testing.T) {
 				t.Fatalf("warm call: %v", err)
 			}
 			r.mu.Lock()
-			s := r.pool[sessionKey(old)]
+			s := r.sessionAt(sessionKey("", old))
 			r.mu.Unlock()
 			up.hangSession(s.ID())
 			go func() {
@@ -482,12 +490,12 @@ func TestRemoteRuntimeCloseIgnoresDeleteRedirect(t *testing.T) {
 	r := besideRuntime("up", RemoteSpec{URL: up.URL}, nil)
 	r.ConnectTimeout = shortPing
 	t.Cleanup(r.Stop)
-	s, _, err := r.session(context.Background(), nil)
+	p, _, err := r.session(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	up.redirectDeletes(t)
-	within(t, 2*time.Second, "Close", func() { _ = s.Close() })
+	within(t, 2*time.Second, "Close", func() { _ = p.s.Close() })
 	if n := up.count(http.MethodDelete); n != 1 {
 		t.Errorf("DELETEs the upstream saw = %d, want 1", n)
 	}

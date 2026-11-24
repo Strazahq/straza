@@ -75,7 +75,6 @@ func (c *countingStore) Users() store.UserRepo       { c.bump("users"); return c
 func (c *countingStore) Roles() store.RoleRepo       { c.bump("roles"); return c.inner.Roles() }
 func (c *countingStore) Devices() store.DeviceRepo   { c.bump("devices"); return c.inner.Devices() }
 func (c *countingStore) Sessions() store.SessionRepo { c.bump("sessions"); return c.inner.Sessions() }
-func (c *countingStore) Packs() store.PackRepo       { c.bump("packs"); return c.inner.Packs() }
 func (c *countingStore) Apps() store.AppRepo         { c.bump("apps"); return c.inner.Apps() }
 func (c *countingStore) ToolBindings() store.ToolBindingRepo {
 	c.bump("tool_bindings")
@@ -125,6 +124,15 @@ func (c *countingStore) ObjectLists() store.ObjectListRepo {
 	c.bump("object_lists")
 	return c.inner.ObjectLists()
 }
+func (c *countingStore) Leases() store.LeaseRepo { c.bump("leases"); return c.inner.Leases() }
+func (c *countingStore) EntraGroups() store.EntraGroupRepo {
+	c.bump("entra_groups")
+	return c.inner.EntraGroups()
+}
+func (c *countingStore) EntraAgents() store.EntraAgentRepo {
+	c.bump("entra_agents")
+	return c.inner.EntraAgents()
+}
 
 // repoLane says where a repo is allowed to be touched.
 type repoLane int
@@ -159,7 +167,6 @@ var storeRepoLanes = map[string]repoRule{
 	"roles":              {laneForbidden, "the role set rides the cached subject and keys the precomputed catalog"},
 	"devices":            {laneForbidden, "device posture is settled at check-in, not per request"},
 	"sessions":           {laneForbidden, "session validity is the locally-verified token plus the in-memory denylist (background owner: the 1-minute idle-session janitor, closeIdleSessions)"},
-	"packs":              {laneForbidden, "knowledge packs are compiled into the snapshot"},
 	"apps":               {laneForbidden, "app rows are compiled into the manager's in-memory view"},
 	"tool_bindings":      {laneForbidden, "bindings are refreshed into []gwBinding on control-plane events (refreshBindings)"},
 	"credentials":        {laneForbidden, "credentials resolve from the in-memory broker cache and never reach the agent"},
@@ -172,6 +179,9 @@ var storeRepoLanes = map[string]repoRule{
 	"conversations":      {laneForbidden, "capture is a read model written by the spine consumer and read by admin surfaces only"},
 	"approvers":          {laneForbidden, "approver devices and push targets belong to the enrol/notify lanes"},
 	"object_lists":       {laneForbidden, "object lists load into memory on the objects loop's own tick, and a request reads only that copy"},
+	"leases":             {laneForbidden, "a background job takes its lease on its own tick, and no request reads or writes one"},
+	"entra_groups":       {laneForbidden, "the Entra sync and the admin plane read a role's group link, and no request on a decision path does"},
+	"entra_agents":       {laneForbidden, "the Entra sync and the admin plane read what Entra says about an agent, and no request on a decision path does"},
 	"drafts":             {laneForbidden, "a decision never reads a draft, and the drafting tools read and write their own rows by id on their own calls, named at the call site like the approve lane"},
 	// approvals is forbidden on every plain lane. The approve escalation lane
 	// is the one documented exception and names itself at the call site; see
@@ -274,7 +284,7 @@ func testAppCounting(t *testing.T, mutators ...func(*config.Config)) (*App, stri
 	app.gateway.notify.SetDelay(0)
 	base := "http://" + app.Addr()
 	app.cfg.Server.PublicURL = base
-	tokens, err := authn.NewTokenService(ctx, app.store.SigningKeys(), base, 0)
+	tokens, err := authn.NewTokenService(ctx, app.store.SigningKeys(), app.kek, base, 0)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -349,8 +359,8 @@ func TestCountingStoreInstrumentsEveryRepo(t *testing.T) {
 			t.Errorf("storeRepoLanes classifies %q but store.Store has no such repo getter (stale entry)", repo)
 		}
 	}
-	if len(seen) != 21 {
-		t.Errorf("instrumented %d repos, store.Store carried 21 at the last re-baseline; update this pin deliberately", len(seen))
+	if len(seen) != 23 {
+		t.Errorf("instrumented %d repos, store.Store carried 23 at the last re-baseline; update this pin deliberately", len(seen))
 	}
 }
 

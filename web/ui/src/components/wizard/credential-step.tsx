@@ -1,16 +1,20 @@
 import type * as React from "react";
 import { Controller, type Control, type FieldErrors } from "react-hook-form";
+import { Pill } from "@/components/chip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ManifestFold } from "@/components/yaml-fold";
 import type { ProviderRow } from "@/lib/api";
-import { type Form, HTTP_SENT, SENT_AS, TOKEN_SENT, sentFor } from "@/lib/manifest";
-import { AGENT_ROWS, CALLER_OFF_SHORT, CREDENTIAL_MORE, ENV_WARNING, ENV_WARNING_SHORT, credentialCards, oauthMore, sentShort } from "@/lib/words";
-import { CAPS, CardGroup, ERROR, Field, Fold, HINT, ManifestFold, OptionCard, TWO } from "./parts";
+import { type Form, HTTP_SENT, TOKEN_SENT, injectFor, sentFor } from "@/lib/manifest";
+import {
+  AGENTS_SECRET_HINT, AGENT_ROWS, CHANGE_ON_PAGE, CREDENTIAL_CHOICES, CREDENTIAL_MORE, ENV_WARNING, ENV_WARNING_SHORT, HOW_THIS_WORKS, SECRET_HINT, STORED_NOW,
+  STORE_AGAIN_LINE, injectPill, oauthMore,
+} from "@/lib/words";
+import { AgentsPicker, CredentialRows, Sends, SentAs, SentName, credentialOff } from "./credential-parts";
+import { ERROR, FILL, Fold, HINT, LAB } from "./parts";
 import { DryLine } from "./server-step";
 import type { Dry } from "./use-dry-run";
 import type { FieldFn, SetFn } from "./use-wizard-form";
-
-const NO_PROVIDER = "No identity provider is configured on this server, so nobody can sign in through one yet. Add oauth.providers.<name> to the strazad config first, or use one shared secret.";
 
 type Props = {
   f: Form;
@@ -27,20 +31,18 @@ type Props = {
 const say = (id: string, error?: string, hint?: React.ReactNode) =>
   error ? <p id={id} className={ERROR}>{error}</p> : hint ? <p id={id} className={HINT}>{hint}</p> : null;
 
-// CredentialStep asks whose credential Straza adds to each call: four
-// cards with one line each, the chosen card's fields in one box below
-// them, the long form of the choice under a fold, and the manifest fold.
-// installed names the server once it exists, so the step says a second
-// store replaces the sealed value.
+// CredentialStep asks whose credential Straza adds to each call: one row
+// per choice with its fact as a pill, the picked row's fields under it,
+// the long form of the choice under a fold, and the manifest fold.
+// installed names the server once it exists. The installed choice then
+// stands as facts, and the step asks only for the secret it stores again.
 export function CredentialStep({ f, errors, control, field, set, providers, installed, dry, yaml }: Props) {
   const http = f.runtime === "remote";
   const sent = sentFor(f);
   const provs = providers || [];
   const prov = provs.find((p) => p.name === f.provider) || provs[0];
   const redirect = (prov && prov.redirect_uri) || "the redirect URI";
-  const offLine = (kind: string) => (kind !== "token" && kind !== "oauth" ? "" : !http ? CALLER_OFF_SHORT : kind === "oauth" && Array.isArray(providers) && providers.length === 0 ? NO_PROVIDER : "");
-  const cards = credentialCards(f.provider || (prov ? prov.name : ""));
-  const chosen = cards.find((c) => c.kind === f.cred) || cards[0];
+  const offLine = (kind: string) => credentialOff(kind, http, providers);
 
   const pick = (kind: string) => {
     if (kind === f.cred || offLine(kind)) return;
@@ -55,85 +57,98 @@ export function CredentialStep({ f, errors, control, field, set, providers, inst
     set({ cred: kind });
   };
 
-  const secretBox = (hint: string) => (
-    <Field id="mw-secret" label="secret" error={errors.secret?.message} hint={hint}>
+  const secretBox = (label: string, hint: string) => (
+    <div className="flex flex-col gap-1">
+      <label htmlFor="mw-secret" className={LAB}>{label}</label>
       <Input id="mw-secret" type="password" autoComplete="off" spellCheck={false} aria-label="secret" className="font-mono"
         aria-invalid={!!errors.secret || undefined} aria-describedby="mw-secret-say" {...field("secret")} />
-    </Field>
+      {say("mw-secret-say", errors.secret?.message, hint)}
+    </div>
   );
+  const agentsSecret = () => secretBox("Secret for agents", AGENTS_SECRET_HINT);
+  const sends = <Sends sent={sent} cred={f.cred} headerName={f.headerName} envName={f.envName} />;
 
+  // The installed choice stands as facts. A change of choice goes through
+  // the server's page, since storing the secret again publishes nothing.
+  if (installed) {
+    const choice = CREDENTIAL_CHOICES.find((c) => c.kind === f.cred) || CREDENTIAL_CHOICES[0];
+    const inject = injectFor(f);
+    return (
+      <div className="flex flex-col gap-4">
+        <p className={HINT}>{STORE_AGAIN_LINE}</p>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-md border border-border bg-card px-3 py-2 text-dense" data-installed-choice>
+            <span className="font-semibold text-foreground">{choice.label}</span>
+            <Pill>{choice.fact}</Pill>
+            <Pill>{injectPill(inject.as, inject.name)}</Pill>
+          </div>
+          <p className={HINT}>{CHANGE_ON_PAGE}</p>
+        </div>
+        <div className="flex flex-col gap-3.5 rounded-md border border-border bg-background px-4 py-3.5" data-credential-box>
+          <div className={FILL}>{f.cred === "token" ? agentsSecret() : secretBox("Secret", SECRET_HINT)}</div>
+          {sends}
+        </div>
+        <ManifestFold yaml={yaml} />
+      </div>
+    );
+  }
+
+  // sentAs is the Sent as picker, the name a header or a variable needs,
+  // both in the grid of the picked row's fields.
   const sentAs = (keys: string[]) => {
     const env = sent === "env";
     const named = env ? "envName" : "headerName";
-    const error = (sent === "header" || env) ? errors[named]?.message : undefined;
     return (
-      <div className="flex flex-col gap-1">
-        <span className={CAPS}>sent as</span>
-        <Select value={sent} onValueChange={(v) => set({ sentAs: v })}>
-          <SelectTrigger aria-label="sent as" className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>{keys.map((k) => <SelectItem key={k} value={k}>{SENT_AS[k].label}</SelectItem>)}</SelectContent>
-        </Select>
-        {(sent === "header" || env) && (
-          <Input aria-label={env ? "variable name" : "header name"} placeholder={env ? "API_TOKEN" : "X-Api-Key"} spellCheck={false} className="font-mono"
-            aria-invalid={!!error || undefined} aria-describedby="mw-sent-say" {...field(named)} />
-        )}
-        {say("mw-sent-say", error, sentShort(sent, f.cred, f.headerName))}
-      </div>
+      <>
+        <SentAs keys={keys} value={sent} onPick={(v) => set({ sentAs: v })} />
+        {(sent === "header" || env) && <SentName id={env ? "mw-envname" : "mw-header"} env={env} error={errors[named]?.message} input={field(named)} />}
+      </>
     );
   };
-
-  const agents = (kind: "token" | "oauth") => (
-    <div className="flex flex-col gap-1.5">
-      <span className={CAPS}>{"agents with no " + (kind === "token" ? "token" : "sign-in") + " of their own"}</span>
-      <CardGroup label="agents" value={f.agents} onPick={(v) => set({ agents: v })} className="gap-1.5">
-        {AGENT_ROWS[kind].map((r) => (
-          <OptionCard key={r.value} row value={r.value} label={"agents " + r.value} name={r.name} tag={"agents: " + r.value} line={r.line} on={f.agents === r.value} />
-        ))}
-      </CardGroup>
-    </div>
-  );
 
   let fields: React.ReactNode = null;
   if (f.cred === "static") {
     fields = (
       <>
-        <div className={TWO}>{secretBox("Stored sealed. Never shown again.")}{sentAs(http ? HTTP_SENT : ["env"])}</div>
-        {sent === "env" && <p className="rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-[13px] leading-snug text-foreground">{ENV_WARNING_SHORT}</p>}
+        <div className={FILL}>{secretBox("Secret", SECRET_HINT)}{sentAs(http ? HTTP_SENT : ["env"])}</div>
+        {sends}
+        {sent === "env" && <p className="m-0 rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-caption leading-snug text-foreground">{ENV_WARNING_SHORT}</p>}
       </>
     );
   } else if (f.cred === "token") {
     fields = (
       <>
-        <div className={TWO}>
-          {sentAs(TOKEN_SENT)}
-          <div className="flex flex-col gap-1">
-            <span className={CAPS}>what the wizard stores</span>
-            <p className={HINT}>Nothing yet. People paste their own token on the Credentials tab of their self-service page after install.</p>
-          </div>
+        <div className={FILL}>{sentAs(TOKEN_SENT)}</div>
+        {sends}
+        <div className="flex flex-col gap-1">
+          <span className={LAB}>{STORED_NOW.label}</span>
+          <div className="flex flex-wrap gap-2">{STORED_NOW.pills.map((p) => <Pill key={p} className="max-w-full max-sm:whitespace-normal">{p}</Pill>)}</div>
         </div>
-        {agents("token")}
-        {f.agents === "shared" && secretBox("Stored sealed after install. Only agents use it.")}
+        <AgentsPicker kind="token" value={f.agents} onPick={(v) => set({ agents: v })} />
+        {f.agents === "shared" && agentsSecret()}
       </>
     );
   } else if (f.cred === "oauth") {
     fields = (
       <>
-        <div className={TWO}>
+        <div className={FILL}>
           <div className="flex flex-col gap-1">
-            <span className={CAPS}>provider</span>
+            <span className={LAB}>Provider</span>
             <Controller control={control} name="provider" render={({ field: p }) => (
               <Select value={p.value} onValueChange={(v) => { p.onChange(v); const q = provs.find((x) => x.name === v); set({ scopes: ((q && q.scopes) || []).join(" ") }); }}>
                 <SelectTrigger ref={p.ref} aria-label="provider" className="w-full" aria-invalid={!!errors.provider || undefined} aria-describedby="mw-provider-say"><SelectValue /></SelectTrigger>
                 <SelectContent>{provs.map((q) => <SelectItem key={q.name} value={q.name}>{q.name}</SelectItem>)}</SelectContent>
               </Select>
             )} />
-            {say("mw-provider-say", errors.provider?.message, <>Register <code className="font-mono text-foreground">{redirect}</code>{" at " + (f.provider || "the provider") + "."}</>)}
+            {say("mw-provider-say", errors.provider?.message, <>Register <code className="font-mono text-foreground [overflow-wrap:anywhere]">{redirect}</code>{" at " + (f.provider || "the provider") + "."}</>)}
           </div>
-          <Field id="mw-scopes" label="scopes" hint="The provider's default, editable. Space-separated.">
+          <div className="flex flex-col gap-1">
+            <label htmlFor="mw-scopes" className={LAB}>Scopes</label>
             <Input id="mw-scopes" aria-label="scopes" spellCheck={false} className="font-mono" aria-describedby="mw-scopes-say" {...field("scopes")} />
-          </Field>
+            <p id="mw-scopes-say" className={HINT}>The provider's default, editable. Space-separated.</p>
+          </div>
         </div>
-        {agents("oauth")}
+        <AgentsPicker kind="oauth" value={f.agents} onPick={(v) => set({ agents: v })} />
       </>
     );
   }
@@ -143,19 +158,12 @@ export function CredentialStep({ f, errors, control, field, set, providers, inst
 
   return (
     <div className="flex flex-col gap-4">
-      {installed && <p className={HINT}>{installed + " is installed. Storing the secret again replaces the sealed value, then the check runs under it."}</p>}
-      <CardGroup label="credential" value={f.cred} onPick={pick} className="grid-cols-2">
-        {cards.map((c) => (
-          <OptionCard key={c.kind} value={c.kind} label={"credential " + c.kind} name={c.name} tag={"kind: " + c.kind} line={offLine(c.kind) || c.line}
-            on={f.cred === c.kind} off={!!offLine(c.kind)} />
-        ))}
-      </CardGroup>
-      {fields
-        ? <div className="flex flex-col gap-3.5 rounded-md border border-border bg-card px-4 py-3" data-credential-box><div className="font-semibold text-foreground">{chosen.name}</div>{fields}</div>
-        : <p className={HINT}>Nothing to set for this choice.</p>}
+      <CredentialRows value={f.cred} onPick={pick} off={offLine} provider={f.provider || (prov ? prov.name : "")}>
+        {fields && <div className="grid gap-3.5 [&>*]:min-w-0" data-credential-box>{fields}</div>}
+      </CredentialRows>
       {dry.state === "refused" && <DryLine dry={dry} />}
-      <Fold title="More about this choice">
-        <div className="flex max-w-[80ch] flex-col gap-2 px-3.5 py-2.5 text-sm leading-relaxed text-text-2">
+      <Fold title={HOW_THIS_WORKS}>
+        <div className="flex max-w-[80ch] flex-col gap-2 px-3.5 py-2.5 text-dense leading-relaxed text-text-2">
           <p>{more}</p>
           {caller && (
             <ul className="m-0 flex list-none flex-col gap-1 p-0">

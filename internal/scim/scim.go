@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/strazahq/straza/internal/membership"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -89,6 +90,11 @@ type Deps struct {
 	// that reached the route, so the server logs and records it. A request
 	// refused at the token check is not reported. nil means no consumer.
 	WriteRefused func(r *http.Request, ref Refusal)
+	// EntraOwns reports whether Microsoft Entra owns users of this kind, so
+	// SCIM does not write them: every person, and of the agents those of
+	// origin entra or with an Entra agent id. The kind is a store.UserKind
+	// word. nil means false.
+	EntraOwns func(kind string) bool
 	// ProtectedUsername names the break-glass local admin (revision 12).
 	// That account is invisible to this surface end to end: never
 	// rendered, never a member, and every id-addressed op answers as if
@@ -103,20 +109,13 @@ type Deps struct {
 }
 
 // MembershipChange is one (user, role) assignment a Group write started or
-// ended: the row id, the role, the user, the row's origin and the
-// direction, MembershipAssign or MembershipUnassign.
-type MembershipChange struct {
-	AssignmentID string
-	RoleID       string
-	UserID       string
-	Origin       string
-	Action       string
-}
+// ended.
+type MembershipChange = membership.Change
 
 // Membership change directions reported through Deps.MembershipChanged.
 const (
-	MembershipAssign   = "assign"
-	MembershipUnassign = "unassign"
+	MembershipAssign   = membership.Assign
+	MembershipUnassign = membership.Unassign
 )
 
 // User write actions reported through Deps.UserWritten.

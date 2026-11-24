@@ -225,7 +225,7 @@ func TestWhoamiStartTextSentence(t *testing.T) {
 func TestWhoamiText(t *testing.T) {
 	t.Parallel()
 	head := func(who string) string {
-		return who + "\nRoles: dev.\nRecording: the prompts and responses of this session are not recorded.\nKnowledge packs for this session's roles: none.\n"
+		return who + "\nRoles: dev.\nRecording: the prompts and responses of this session are not recorded.\n"
 	}
 	tools := "Tools this session can call, by server. Each call is still checked when it is made, so a rule on its arguments can deny it.\n"
 	for _, tc := range []struct {
@@ -236,11 +236,11 @@ func TestWhoamiText(t *testing.T) {
 		{"a person with no tools", whoamiAnswer{User: "alice", Kind: "person", Harness: "claude-code/2.1.0", Roles: []string{"dev"}},
 			head(`This session acts as "alice", a person, through claude-code/2.1.0.`) +
 				"Tools: none. Ask an administrator for a role that grants the tools you need.\n"},
-		{"an agent with a sponsor, recorded, with packs", whoamiAnswer{User: "build-agent", Kind: "agent", Sponsor: "alice", Roles: []string{"dev", "readers"},
-			Recorded: true, Recording: policy.CaptureModeRedact, Packs: []whoamiPack{{"golang-style", "1"}, {"review", "2"}}},
+		{"an agent with a sponsor, recorded", whoamiAnswer{User: "build-agent", Kind: "agent", Sponsor: "alice", Roles: []string{"dev", "readers"},
+			Recorded: true, Recording: policy.CaptureModeRedact},
 			`This session acts as "build-agent", an AI agent sponsored by "alice".` + "\nRoles: dev, readers.\n" +
 				"Recording: the prompts and responses of this session are recorded with secrets masked in the audit log.\n" +
-				"Knowledge packs for this session's roles: golang-style version 1, review version 2.\nTools: none. Ask an administrator for a role that grants the tools you need.\n"},
+				"Tools: none. Ask an administrator for a role that grants the tools you need.\n"},
 		{"a service account", whoamiAnswer{User: "nightly", Kind: "service", Roles: []string{"dev"}},
 			head(`This session acts as "nightly", a service account.`) +
 				"Tools: none. Ask an administrator for a role that grants the tools you need.\n"},

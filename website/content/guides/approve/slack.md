@@ -105,7 +105,7 @@ Every channel has a row with its status, the server's own detail line, who it re
 
 ```table
 CHANNEL   STATUS           DETAIL                                                                  REACHES                            LAST DELIVERY
-console   always on        always available: approvers check it themselves, nothing is delivered   everyone with the approvals area   nothing to deliver
+console   always on        always available: approvers check it themselves, nothing is delivered   approvals admins                   nothing to deliver
 slack     not configured   not configured (approval.channels.slack)                                nobody                             never
 ```
 

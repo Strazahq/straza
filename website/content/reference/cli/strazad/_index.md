@@ -13,7 +13,9 @@ keywords: strazad
 
 ## Commands
 
+* [strazad break-glass](/reference/cli/strazad/strazad_break-glass/): Work on the break-glass admin from the server host
 * [strazad migrate](/reference/cli/strazad/strazad_migrate/): Move the database schema to one migration version
+* [strazad reseal-signing-keys](/reference/cli/strazad/strazad_reseal-signing-keys/): Seal the signing keys under a new key-encryption key
 * [strazad serve](/reference/cli/strazad/strazad_serve/): Run the platform server
 * [strazad version](/reference/cli/strazad/strazad_version/): Print version information
 

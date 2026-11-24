@@ -1,6 +1,6 @@
 {
   "name": "straza",
-  "description": "One skill for operating Straza, the control plane between your identity manager and your AI agents.",
+  "description": "One skill for operating Straza, the control plane between your IGA and your AI agents.",
   "owner": { "name": "Straza" },
   "plugins": [
     {

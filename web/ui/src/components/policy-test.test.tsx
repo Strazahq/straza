@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PolicyTest, type PolicyTestPrefill } from "./policy-test";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, type AppRow, type BindingRow, type ObjectsAnswer, type SimulateAnswer, type ToolRow, type UserRow, appObjects, listApps, listBindings, listTools, listUsers, simulate } from "@/lib/api";
 import { version } from "@/lib/public";
-import { ENGINE_FIELDS, LIVE_NOW, TEST_EVERY_SERVER, TEST_MISSING_WHAT, TEST_MISSING_WHO, TEST_SERVERS_HINT, WITH_EDITS, WITH_EDITS_LINE } from "@/lib/policy-words";
+import { ENGINE_FIELDS, LIVE_NOW, SPONSOR_DECIDES, TEST_EVERY_SERVER, TEST_MISSING_WHAT, TEST_MISSING_WHO, TEST_SERVERS_HINT, WITH_EDITS } from "@/lib/policy-words";
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
@@ -85,16 +85,29 @@ describe("the Test a call sheet", () => {
     vi.mocked(version).mockReset().mockResolvedValue({ version: "t", commit: "t", go: "g", profile: "enterprise" });
   });
 
+  it("runs onClosed once the sheet is gone, so the page can put the focus back", async () => {
+    const onClosed = vi.fn();
+    const view = render(<TooltipProvider><PolicyTest open onOpenChange={() => {}} onClosed={onClosed} /></TooltipProvider>);
+    await screen.findByRole("dialog");
+    view.rerender(<TooltipProvider><PolicyTest open={false} onOpenChange={() => {}} onClosed={onClosed} /></TooltipProvider>);
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("opens on the MCP lane, and each other lane brings its own field", async () => {
     mount();
     expect(screen.getByRole("heading", { name: "Test a call" })).toBeTruthy();
-    expect(screen.getByText("Answers for now, against the policy version live right now. It writes nothing and records nothing.")).toBeTruthy();
-    const lanes = within(document.querySelector("[data-lanes]") as HTMLElement).getAllByRole("button");
+    expect(screen.getByText("Tests against the live policy version. Writes and records nothing.")).toBeTruthy();
+    const group = document.querySelector("[data-lanes]") as HTMLElement;
+    expect(group.getAttribute("role")).toBe("group");
+    const lanes = within(group).getAllByRole("button");
     expect(lanes.map((b) => [b.textContent, b.getAttribute("aria-pressed")]))
       .toEqual([["MCP tool", "true"], ["Shell command", "false"], ["File path", "false"], ["Network", "false"]]);
     expect(await screen.findByRole("combobox", { name: "Server" })).toBeTruthy();
 
     await lane("Shell command");
+    expect(screen.getByRole("button", { name: "Shell command" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "MCP tool" }).getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByRole("textbox", { name: "The command line" })).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: "Server" })).toBeNull();
 
@@ -103,7 +116,7 @@ describe("the Test a call sheet", () => {
     expect(screen.getByText("Tested as a file write.")).toBeTruthy();
 
     await lane("Network");
-    expect(screen.getByText("Every network fetch: the rule matches the lane, not a host.")).toBeTruthy();
+    expect(screen.getByText("Every network fetch. The policy rule matches the call type, not a host.")).toBeTruthy();
     expect(screen.queryByRole("textbox", { name: "The path" })).toBeNull();
   });
 
@@ -127,8 +140,7 @@ describe("the Test a call sheet", () => {
     expect(lastBody()).toEqual({ event: { kind: "tool.pre", tool: "mcp.call", app: "demo-tools", toolName: "get-env" }, subject: { user: "u-joe" } });
     expect("draft" in lastBody()).toBe(false);
     expect(screen.getByText("joe holds dev and dev-tools.")).toBeTruthy();
-    expect(card("live").textContent).toContain("Denied");
-    expect(card("live").textContent).toContain("Decided under the policy version live right now.");
+    expect(card("live").textContent).toContain("denied");
     await openFields("live");
     expect(card("live").textContent).toContain("effect=deny · ruleId=no-env · setName=dev-guardrails · snapshot=7c1e9a2b (live)");
   });
@@ -156,7 +168,7 @@ describe("the Test a call sheet", () => {
   it("sends the page's unpublished text and answers twice", async () => {
     answers({ active: held, draft: { effect: "allow", ruleId: "dev-mcp-env-ticket", setName: "dev-guardrails" }, subject: { user: "u-joe" } });
     mount({ draft: DRAFT });
-    expect(screen.getByText("Answers for now, against the policy version live right now and the edits on this page. It writes nothing and records nothing.")).toBeTruthy();
+    expect(screen.getByText("Tests against the live policy version and the edits on this page. Writes and records nothing.")).toBeTruthy();
     await pickWho();
     await choose("Server", "demo-tools");
     await choose("Tool", "get-env");
@@ -164,13 +176,12 @@ describe("the Test a call sheet", () => {
     await screen.findAllByRole("status");
     expect(lastBody().draft).toBe(DRAFT.yaml);
     expect(within(card("live")).getByText(LIVE_NOW)).toBeTruthy();
-    expect(card("live").textContent).toContain("Needs approval");
-    expect(card("live").textContent).toContain("The person behind the agent decides.");
+    expect(card("live").textContent).toContain("needs approval");
+    expect(card("live").textContent).toContain(SPONSOR_DECIDES);
     await openFields("live");
     expect(card("live").textContent).toContain("effect=allow · mode=approve · class=ticket · ruleId=dev-mcp-env-ticket · setName=dev-guardrails · snapshot=7c1e9a2b (live)");
     expect(within(card("draft")).getByText(WITH_EDITS)).toBeTruthy();
-    expect(card("draft").textContent).toContain("Allowed");
-    expect(card("draft").textContent).toContain(WITH_EDITS_LINE);
+    expect(card("draft").textContent).toContain("allowed");
     expect(card("draft").textContent).not.toContain("snapshot=");
     await openFields("draft");
     expect(card("draft").textContent).toContain("snapshot=(draft)");
@@ -193,7 +204,7 @@ describe("the Test a call sheet", () => {
     expect(lastBody()).toEqual({ event: { kind: "tool.pre", tool: "shell.exec", command: "rm -rf ./build" }, subject: { user: "u-joe" } });
     expect((screen.getByRole("textbox", { name: "The command line" }) as HTMLInputElement).value).toBe("rm -rf ./build");
     expect(screen.getByText("joe")).toBeTruthy();
-    expect(card("live").textContent).toContain("Denied");
+    expect(card("live").textContent).toContain("denied");
   });
 
   it("keeps the last answer on screen when the next test is refused", async () => {
@@ -207,9 +218,8 @@ describe("the Test a call sheet", () => {
     vi.mocked(simulate).mockRejectedValue(new ApiError("no such user", 404));
     await test();
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Test a call refused.");
-    expect(alert.textContent).toContain("The server refused it: no such user. Fix what it names, then try again.");
-    expect(card("live").textContent).toContain("Decided by rule dev-reads in policy dev-guardrails.");
+    expect(alert.textContent).toContain("Test a call refused: no such user. Fix what it names, then try again.");
+    expect(card("live").textContent).toContain("Decided by policy rule dev-reads in policy dev-guardrails.");
   });
 });
 

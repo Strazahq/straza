@@ -32,8 +32,9 @@ type RoleDocMeta struct {
 
 // RoleDocSpec is the role itself. Kind is the wire kind, straza for a role on
 // the control plane. Server names the server that owns an owned role.
-// Bindings holds the role's one access row, and Packs is read and never
-// applied, because knowledge packs are bound directly.
+// Bindings holds the role's one access row. Packs is read and ignored,
+// because knowledge packs were removed from Straza. The strict parser keeps
+// the field, so stored drafts, reverts and older exports still read.
 type RoleDocSpec struct {
 	Kind        string        `yaml:"kind"`
 	Description string        `yaml:"description,omitempty"`
@@ -168,7 +169,7 @@ func RoleDocOf(w World, name string) (RoleDoc, bool) {
 		Kind:       string(KindRole),
 		Metadata:   RoleDocMeta{Name: name},
 		Spec: RoleDocSpec{Kind: wireKind(ro), Description: ro.Description, Server: ro.Owner,
-			Implies: sortedCopy(w.Implies[name]), Packs: sortedCopy(ro.Packs)},
+			Implies: sortedCopy(w.Implies[name])},
 	}
 	// A row stored before the document parser refused a repeated tool keeps
 	// each tool once here, so the document of every live role parses.

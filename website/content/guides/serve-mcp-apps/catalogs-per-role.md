@@ -24,7 +24,7 @@ mode_default: console
 ---
 
 
-A session's tool catalog is an intersection. The server's tools are capped by the manifest's exposure and narrowed to what the session's roles have access to. An access row opens a tool, and policy gates it: a tool a role has access to runs, unless a policy denies the call or holds it for a person. Every listed tool is still decided again on each call.
+A session's tool catalog is an intersection. The server's tools are capped by the manifest's exposure and narrowed to what the session's roles have access to. Straza leaves a tool whose input schema is not an object schema out of the server's tools, as [When the server's tools change]({{< relref "guides/serve-mcp-apps/add-a-server.md#tool-changes" >}}) explains. An access row opens a tool, and policy gates it: a tool a role has access to runs, unless a policy denies the call or holds it for a person. Every listed tool is still decided again on each call.
 
 {{< diagram name="gateway-catalog" caption="A session sees a tool only when the server lists it, the manifest exposes it and a role's access row reaches it, and policy then hides what it denies." >}}
 
@@ -45,7 +45,7 @@ An MCP server that no role of the session has access to does not exist for that 
 
 {{< shot name="role-new-1" caption="The first step with the server `scout-tools` picked and `readers` typed after its name." >}}
 
-The first step, `Kind, server and name`, picks the server, then the name. The name starts with the server's name and a hyphen, and you type the word after it, here `readers`. Press **Next**. On Access, the question **Which tools** offers three answers:
+The first step, `Kind, server and name`, picks the server, then the name. The name starts with the server's name and a hyphen, and you type the word after it, here `readers`. Press **Next: Access**. On Access, the question **Which tools** offers three answers:
 
 | Answer | What the access row stores |
 |---|---|
@@ -53,7 +53,7 @@ The first step, `Kind, server and name`, picks the server, then the name. The na
 | Every tool it has today | every name the server has today, so a tool it gains later stays out |
 | Every tool, and tools added later | the glob `*`, so a new tool is reached the day it appears |
 
-Tick `echo` and `get-sum`, leave **On a call** on `Allow every call`, and press **Next**. Review shows what the role reaches and holds the same role as commands in the fold `The same role as strazactl commands`. Press **Save and publish**.
+Tick `echo` and `get-sum`, leave **On a call** on `Allow every call`, and press **Next: Review**. Review shows what the role reaches and holds the same role as commands in the fold `The same role as strazactl commands`. Press **Save and publish**.
 
 A server's page offers the same door: open the server, its tab Server roles, and **Add role**.
 {{< /console >}}
@@ -82,9 +82,7 @@ Access attaches to roles of the `application` kind. An application role that rea
 {{< console >}}
 {{< clicks "Roles" "scout-tools-readers" "Access" >}}
 
-{{< shot name="role-access" caption="The Access tab of scout-tools-readers, with one row for scout-tools, its tools and how they run." >}}
-
-The Access tab has one row per server the role reaches, with the columns Server, Tools and Policy. Its Policy column says how each tool runs for the role.
+The Access tab has one row per server the role reaches, with the columns Server, Tools and Policy. Its Policy column counts the role's tools by outcome, such as `2 allowed`.
 {{< /console >}}
 
 
@@ -117,11 +115,11 @@ Misspell the role and the preview says so above the table: "no role named scout-
 The access row is only the server side of the setup. A real session sees the tools once its person or agent holds the role. In a deployment fed by your identity manager, the assignment comes over SCIM instead.
 
 {{< console >}}
-{{< clicks "Users" "alice" "Assign" "scout-tools-readers" "Assign role" >}}
+{{< clicks "Users" "alice" "Assign a role" "scout-tools-readers" "Assign scout-tools-readers" >}}
 
-{{< shot name="user-assign-confirm" caption="The question that confirms the assignment, asked here for dana, who holds the role from her next check-in." >}}
+{{< shot name="user-assign-confirm" caption="The Assign a role dialog for dana, with scout-tools-readers picked and what she gets." >}}
 
-Put the holder's name in place of `alice`.
+**Assign a role** sits beside **Roles** on the **Access** tab of the user's page. Put the holder's name in place of `alice`.
 {{< /console >}}
 
 {{< cli >}}
@@ -141,11 +139,11 @@ strazactl catalog preview --user <username> --app scout-tools
 No allow rule is needed for a tool a role has access to. A rule is written when a tool needs approval, a deny or a record. A call that needs approval is a hold or a ticket, and the person behind the agent or an approver role decides it.
 
 {{< console >}}
-{{< clicks "Roles" "scout-tools-readers" "Edit access" "Choose per tool" "require approval" "Save and publish" >}}
+{{< clicks "Roles" "scout-tools-readers" "Edit access" "Choose per tool" "Needs approval" "Save and publish" >}}
 
-{{< shot name="role-edit-access" caption="The row of `get-sum` under **Choose per tool**, set to **require approval** with a hold of up to 2 minutes." >}}
+{{< shot name="role-edit-access" caption="The row of `get-sum` under **Choose per tool**, set to **Needs approval** with a hold of up to 2 minutes." >}}
 
-**On a call** offers `Allow every call`, `Require approval for every call` and `Choose per tool`. Under Choose per tool, pick **require approval** on the row of `get-sum`. The console writes the rule into the role's own policy set, `scout-tools-readers-access`, in the same draft as the access row. Opening the editor again reads those rules back, so a choice is changed where it was made.
+**On a call** offers `Allow every call`, `Require approval for every call` and `Choose per tool`. Under Choose per tool, pick **Needs approval** on the row of `get-sum`. The console writes the policy rule into the role's own policy, `scout-tools-readers-access`, in the same draft as the access row. Opening the editor again reads those rules back, so a choice is changed where it was made.
 {{< /console >}}
 
 {{< cli >}}
@@ -213,7 +211,7 @@ An enrolled agent holding the role asks the gateway for its tools and gets exact
 {"jsonrpc":"2.0","id":4,"error":{"code":-32602,"message":"unknown tool \"demo-tools__echo\""}}
 ```
 
-A `sleep` holds the pipe open while the replies come back, because the proxy stops when its input ends. The initialize reply and the input schemas are trimmed from the output. On the demo stack `demo-tools` is running, and to this session it does not exist. A role's agents cannot discover what they are not given, and the cost is that a missing access row shows up as a missing tool rather than a deny with a reason. A call to `scout-tools__echo` runs, and its audit record reads effect allow, allowed by the access row of scout-tools-readers, with no rule.
+A `sleep` holds the pipe open while the replies come back, because the proxy stops when its input ends. The initialize reply and every field of a tool but its name and description are trimmed from the output. On the demo stack `demo-tools` is running, and to this session it does not exist. A role's agents cannot discover what they are not given, and the cost is that a missing access row shows up as a missing tool rather than a deny with a reason. A call to `scout-tools__echo` runs, and its audit record reads effect allow, allowed by the access row of scout-tools-readers, with no rule.
 
 ## Verify
 

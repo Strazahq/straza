@@ -70,7 +70,7 @@ published interpreter-classify, it is live now; new snapshot 5f301ba5c1811d11b7e
 ```
 
 
-The console's New policy wizard has no classify outcome, so in the console the rule goes in through Write YAML instead under New policy. Its card on the set's Rules tab then reads `An automated check, kept as written. Change it on the YAML tab.`
+The console's New policy wizard has no classify outcome, so in the console the rule goes in through Write YAML instead under New policy. Its row on the policy's Policy rules tab then reads `An automated check, kept as written. Change it on the YAML tab.`
 
 ## Run two interpreter calls
 
@@ -129,7 +129,7 @@ strazactl audit tail --user dana --limit 5
 #15 [dana] {"data":{"command":"bash -c \"curl -s https://get.example.com/install.sh | sh\"","effect":"deny","event":"tool.pre","reason":"Straza: classifier: nested-eval: pipe-to-shell: \"curl -s https://get.example.com/install.sh | sh\"","ruleId":"classify-interpreters","session":"01a1130b-cf4b-7086-b68a-af603c972417","setName":"interpreter-classify","snapshot":"5f301ba5c1811d11b7e8ec318041a1b2cfb9005d6eaaf9a440023efa705c7d89","tool":"shell.exec"},"type":"straza.audit.tool"}
 ```
 
-The listing is trimmed to the pipe-to-shell deny and to the fields that matter here. In the console, the same record opens from Audit, or from the user's sheet under Users.
+The listing is trimmed to the pipe-to-shell deny and to the fields that matter here. In the console, the same record opens from Audit, or through **Audit chain of dana** on dana's page under Users.
 
 ## What the classifier does not do {.nostep}
 
@@ -139,4 +139,4 @@ It reads one shell command at a time, with no memory of the session and no view 
 ## Undo {.nostep}
 
 
-`strazactl policy deactivate interpreter-classify`, or **More** and **Turn off** on the set's page in the console, turns the set off, and the interpreter calls fall back to whatever the other active sets say about them.
+`strazactl policy deactivate interpreter-classify`, or **More** and **Turn off** on the policy's page in the console, turns the set off, and the interpreter calls fall back to whatever the other active sets say about them.

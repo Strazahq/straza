@@ -76,25 +76,18 @@ func (s *credStore) drainLoop(a *account) {
 // forgetLapsed drops a's sessions whose expiry passed more than forgetAfter
 // ago, revoked or not, on disk too, and ends any push stream they still
 // hold. A forgotten window answers the no-session refusal, and its next
-// session start checks in again. A kept session past refreshRefusedAfter
-// loses its knowledge packs, because only a start that reuses a live
-// window reads them and the re-acquire it is due brings them back, so a
-// week of windows does not grow every save.
+// session start checks in again.
 func (s *credStore) forgetLapsed(a *account) {
 	now := s.now()
 	var gone []*heldSession
-	slimmed := false
 	a.mu.Lock()
 	for k, hs := range a.sessions {
-		switch {
-		case now.Sub(hs.s.ExpiresAt) > forgetAfter:
+		if now.Sub(hs.s.ExpiresAt) > forgetAfter {
 			delete(a.sessions, k)
 			gone = append(gone, hs)
-		case now.Sub(hs.s.ExpiresAt) > refreshRefusedAfter && hs.s.Packs != nil:
-			hs.s.Packs, slimmed = nil, true
 		}
 	}
-	if len(gone) > 0 || slimmed {
+	if len(gone) > 0 {
 		s.saveSessions(a)
 	}
 	a.mu.Unlock()

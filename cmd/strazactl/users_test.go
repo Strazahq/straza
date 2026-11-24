@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,10 +12,11 @@ import (
 
 // usersServer is the admin surface the status verbs walk: the users list
 // with one user in the status the case sets, and the status PATCH, whose
-// bodies it records.
+// bodies it records and which answers with notice when the case sets one.
 type usersServer struct {
 	mu      sync.Mutex
 	status  string
+	notice  string
 	patches []string // "<id> <body>"
 }
 
@@ -30,8 +32,12 @@ func (s *usersServer) start(t *testing.T) *httptest.Server {
 		s.mu.Lock()
 		s.patches = append(s.patches, r.PathValue("id")+" "+strings.TrimSpace(string(body)))
 		s.mu.Unlock()
+		answer := map[string]string{"id": "u-joe", "username": "joe", "status": "active"}
+		if s.notice != "" {
+			answer["notice"] = s.notice
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"u-joe","username":"joe","status":"active"}`))
+		_ = json.NewEncoder(w).Encode(answer)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -39,12 +45,15 @@ func (s *usersServer) start(t *testing.T) *httptest.Server {
 }
 
 // TestUsersStatusVerbs pins enable and disable: the status each one writes,
-// the no-op when the user is already active, the unknown username, and the
-// line that says what happened and what lifts it.
+// the no-op when the user is already active, the unknown username, the
+// line that says what happened and what lifts it, and the server's notice
+// in its place when a lock still refuses the user.
 func TestUsersStatusVerbs(t *testing.T) {
+	const locked = `joe is enabled and the disable is lifted, but Straza still refuses every check-in of joe, because joe is locked. An administrator locked joe with the reason "SOC hold". If the lock should end, run strazactl users unlock joe or press Unlock on joe's page in the console.`
 	tests := []struct {
 		name        string
 		status      string
+		notice      string
 		args        []string
 		wantPatches []string
 		wantOut     string
@@ -55,7 +64,15 @@ func TestUsersStatusVerbs(t *testing.T) {
 			status:      "disabled",
 			args:        []string{"users", "enable", "joe"},
 			wantPatches: []string{`u-joe {"status":"active"}`},
-			wantOut:     "enabled joe. The status is active and the user's revocations are lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or the sign-in it enrolled with grew older than governance.signInMaxAge meanwhile. Such a device needs straza enroll again\n",
+			wantOut:     "enabled joe. The status is active and the disable is lifted. Sessions revoked earlier stay ended. A device the user enrolled starts a new session at its next check-in with no new enrollment, unless it was revoked on its own or the sign-in it enrolled with grew older than governance.signInMaxAge meanwhile. Such a device needs straza enroll again\n",
+		},
+		{
+			name:        "enable a disabled user a lock still refuses",
+			status:      "disabled",
+			notice:      locked,
+			args:        []string{"users", "enable", "joe"},
+			wantPatches: []string{`u-joe {"status":"active"}`},
+			wantOut:     locked + "\n",
 		},
 		{
 			name:    "enable an active user writes nothing",
@@ -79,7 +96,7 @@ func TestUsersStatusVerbs(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s := &usersServer{status: tc.status}
+			s := &usersServer{status: tc.status, notice: tc.notice}
 			srv := s.start(t)
 			t.Setenv("STRAZA_SERVER", "")
 			stdout, _, err := runCLI(t, onToken(t, srv.URL), tc.args...)

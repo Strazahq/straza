@@ -74,12 +74,12 @@ describe("a server admin on their server's Roles tab", () => {
     expect(tab.getAttribute("aria-selected")).toBe("true");
     expect(tab.textContent).toBe("Server roles 1");
 
-    expect(await screen.findByText("1 role of this server")).toBeTruthy();
+    expect(await screen.findByText("No holders. Assign AR:demo-tools-readers in your identity manager.")).toBeTruthy();
     const row = document.querySelector('[data-owned-role="demo-tools-readers"]') as HTMLElement;
     const reach = within(row).getAllByRole("cell")[1];
     expect(reach.textContent).toBe("2 of 3toolsechoadd");
     expect(Array.from(reach.querySelectorAll("[data-tool-names] > *"), (c) => c.textContent)).toEqual(["echo", "add"]);
-    expect(screen.getByText("Nobody holds it yet. Your IGA assigns it as AR:demo-tools-readers, within a sync cycle.")).toBeTruthy();
+    expect(screen.getByText("No holders. Assign AR:demo-tools-readers in your identity manager.")).toBeTruthy();
 
     expect(document.querySelector("[data-refused-error]")).toBeNull();
     expect(screen.queryByText(/HTTP \d/)).toBeNull();

@@ -15,6 +15,7 @@ import {
   type RoleRow,
   type SessionRow,
   type SinkRow,
+  entraStatus,
   getConfig,
   listApprovals,
   listApps,
@@ -27,7 +28,7 @@ import {
 } from "@/lib/api";
 import {
   ALL_STRICT,
-  CHAIN_INTACT,
+  CHAIN_SCOPE,
   CHAIN_SEAT,
   CHANGED_TITLE,
   DECIDED_NONE,
@@ -76,6 +77,7 @@ import { version as readVersion } from "@/lib/public";
 import { SUMMARY } from "@/test/drafts-fixture";
 import { readFailed, refused } from "@/lib/say";
 import { absTime, relTimeText } from "@/lib/words";
+import { pathFor } from "@/lib/router";
 
 // The Overview screen over seven fixture scenes: the open
 // page, a quiet morning, a bad day, day zero, the live tail, the strip
@@ -177,6 +179,7 @@ const EVAL_CONFIG: ConfigAnswer = {
   oidc: { external_issuer: "http://localhost:8080/realms/straza", jit_provision: false },
   governance: { min_attestation: "none", offline_grace_ttl_seconds: 300, local_tool_default: "deny", audit_backpressure: "block" },
   approval: { gateway_hold_seconds: 120, unsigned_own_decisions: false },
+  admin: { second_person: false },
   apps: { gitops_dir_enabled: true, upstream_timeout_seconds: 30 },
   capture: { policy_sets: 1, mode: "verbatim", retention_hours: 720, body_store: "inline" },
 };
@@ -239,6 +242,7 @@ vi.mock("@/lib/api", async (orig) => ({
   listApps: vi.fn(),
   listRoles: vi.fn(),
   replaySink: vi.fn(),
+  entraStatus: vi.fn(async () => ({ enabled: false, held: 0 })),
 }));
 vi.mock("@/lib/public", async (orig) => ({ ...(await orig<typeof import("@/lib/public")>()), version: vi.fn() }));
 vi.mock("@/lib/keys-api", async (orig) => ({ ...(await orig<typeof import("@/lib/keys-api")>()), listSigningKeys: vi.fn(), entraBlueprints: vi.fn() }));
@@ -288,6 +292,7 @@ describe("the Overview screen", () => {
     vi.mocked(listDrafts).mockResolvedValue({ items: [], next_cursor: "" });
     vi.mocked(listSigningKeys).mockClear();
     vi.mocked(entraBlueprints).mockReset().mockResolvedValue(["76568ffa-de8d-4d35-986d-4efe2a9f8787"]);
+    vi.mocked(entraStatus).mockResolvedValue({ enabled: false, held: 0 });
     window.localStorage.clear();
   });
 
@@ -309,6 +314,23 @@ describe("the Overview screen", () => {
     expect(attention()).toEqual([waitingLine(1, WAITING[0], relTimeText(WAITING[0].createdAt))]);
   });
 
+  it("names a role whose group in Entra holds removals, reading the roles only while one does", async () => {
+    const held = "Entra's group lists 14 of this role's 20 holders from Entra no longer.";
+    vi.mocked(entraStatus).mockResolvedValue({ enabled: true, held: 1 });
+    vi.mocked(listRoles).mockClear().mockResolvedValue([...ROLES, { id: "r-gh", name: "github-dev", kind: "application", entra: { group_id: "g", state: "held", error: held } }]);
+    mount();
+    await settled();
+    await waitFor(() => expect(attention()).toEqual([held, waitingLine(1, WAITING[0], relTimeText(WAITING[0].createdAt))]));
+    expect(within(panel("attention")).getByRole("link", { name: /github-dev/ }).getAttribute("href")).toBe(pathFor("roles", ["r-gh"]));
+    document.body.innerHTML = "";
+    vi.mocked(listRoles).mockClear();
+    vi.mocked(entraStatus).mockResolvedValue({ enabled: true, held: 0 });
+    mount();
+    await settled();
+    await waitFor(() => expect(attention()).toEqual([waitingLine(1, WAITING[0], relTimeText(WAITING[0].createdAt))]));
+    expect(listRoles).not.toHaveBeenCalled();
+  });
+
   it("keeps the summary compact and preserves complete activity and system details behind tabs", async () => {
     mount();
     await settled();
@@ -325,7 +347,7 @@ describe("the Overview screen", () => {
     expect(panel("live")).toBeNull();
 
     // The six tiles, each a door to its area.
-    await userEvent.click(screen.getByRole("button", { name: "Review settings" }));
+    await userEvent.click(within(document.querySelector('[data-steer="OV-02"]') as HTMLElement).getByRole("button", { name: "System details" }));
     expect(document.activeElement).toBe(screen.getByRole("tab", { name: "System details" }));
     expect(Array.from(document.querySelectorAll("[data-tile]")).map((t) => t.getAttribute("data-tile")))
       .toEqual(["sessions", "users", "servers", "policies", "approvals", "audit"]);
@@ -337,7 +359,7 @@ describe("the Overview screen", () => {
     expect(tileDetail("policies")).toBe(offDetail(2, 1));
     expect(tileValue("approvals")).toBe("1waiting");
     expect(tileValue("audit")).toBe("Verified");
-    expect(tileDetail("audit")).toBe(CHAIN_INTACT);
+    expect(tileDetail("audit")).toBe(CHAIN_SCOPE);
 
     // The strip: the three totals as labels over 24 bars, and the catalog
     // reads counted apart from the tool calls.
@@ -345,13 +367,13 @@ describe("the Overview screen", () => {
     const strip = panel("decisions");
     const total = (word: string) => (strip.querySelector('[data-total="' + word + '"] b') as HTMLElement).textContent;
     expect(total("allowed")).toBe(sum(HOURS).toLocaleString("en-US"));
-    expect(strip.querySelector('[data-total="allowed"]')?.textContent).toContain("Tool calls allowed");
-    expect(total("needed approval")).toBe(String(sum(HELD)));
+    expect(strip.querySelector('[data-total="allowed"]')?.textContent).toContain("Allowed");
+    expect(total("needs approval")).toBe(String(sum(HELD)));
     expect(total("denied")).toBe(String(sum(REFUSED)));
-    expect(strip.querySelector('[data-total="catalog"]')?.textContent).toBe("220Catalog reads, counted apart");
+    expect(strip.querySelector('[data-total="catalog"]')?.textContent).toBe("220Tool list reads");
     expect(strip.querySelectorAll("[data-bucket]").length).toBe(24);
     expect(strip.querySelector("[data-bucket]")?.getAttribute("aria-label"))
-      .toBe("12:00 to 13:00 UTC: 12 allowed, 0 needed approval, 0 denied");
+      .toBe("12:00 to 13:00 UTC: 12 allowed, 0 needs approval, 0 denied");
 
     // What was stopped, biggest first, each row a door to Audit.
     expect(Array.from(panel("stopped").querySelectorAll("[data-stopped]")).map((r) => r.getAttribute("data-stopped")))
@@ -419,7 +441,7 @@ describe("the Overview screen", () => {
     expect(panel("posture").querySelectorAll("[data-relaxed]").length).toBe(0);
     expect((panel("posture").querySelector("[data-strict-line]") as HTMLElement).textContent)
       .toBe(strictLine(postureOf(configRows(STRICT_CONFIG)).strictWords));
-    expect(tileDetail("approvals")).toBe("No pending requests");
+    expect(tileDetail("approvals")).toBe("No waiting requests");
   });
 
   it("stacks the bad day at the top, each line in its trust colour with its door", async () => {
@@ -447,7 +469,7 @@ describe("the Overview screen", () => {
       failedLine(1, ["scout-tools"]),
       degradedLine(1, ["midpoint"]),
       waitingLine(1, WAITING[0], relTimeText(WAITING[0].createdAt)),
-      "The push lane is down, so every daemon polls for revocations and approvals every 30 s instead of hearing them at once.",
+      "Live updates are off. Clients check for revocations and approvals every 30 s. Check that clients can reach the live update address.",
       sinkLine(PARKED, absTime(PARKED.streams[0].last_error_at).slice(11, 16)),
     ]);
     await showTab("Activity");
@@ -477,7 +499,7 @@ describe("the Overview screen", () => {
     expect(panel("attention")).toBeNull();
     expect(Array.from(panel("setup").querySelectorAll("[data-setup]")).map((s) => s.getAttribute("data-setup")))
       .toEqual(["server", "role", "policy", "approver", "floor"]);
-    await waitFor(() => expect((panel("setup").querySelector("[data-setup-progress]") as HTMLElement).textContent).toBe(setupProgress(1, 5)));
+    await waitFor(() => expect((panel("setup").querySelector("[data-setup-progress]") as HTMLElement).textContent).toBe(setupProgress(1, 4)));
     expect(panel("setup").querySelector('[data-setup="policy"][data-done="true"]')).toBeTruthy();
     expect(panel("setup").querySelector('[data-setup="approver"] [aria-hidden="true"]')?.tagName).toBe("SPAN");
     expect(within(panel("decisions")).getByText(DECIDED_UNREAD)).toBeTruthy();
@@ -515,7 +537,7 @@ describe("the Overview screen", () => {
     await userEvent.click(screen.getByRole("switch", { name: "Follow" }));
     await waitFor(() => expect(panel("live").querySelectorAll("[data-live]").length).toBe(5));
     expect(panel("live").querySelector("[data-pulse]")).toBeTruthy();
-    expect(within(panel("live")).getAllByText("deny").length).toBe(1);
+    expect(within(panel("live")).getAllByText("denied").length).toBe(1);
     expect(window.localStorage.getItem("straza.overview.live")).toBe("on");
     await showTab("System details");
     await showTab("Activity");
@@ -550,10 +572,10 @@ describe("the Overview screen", () => {
     await settled();
 
     await showTab("Activity");
-    expect(within(panel("changed")).getByText(seatLine(CHANGED_TITLE, "audit:read"))).toBeTruthy();
+    expect(within(panel("changed")).getByText(seatLine(CHANGED_TITLE, "audit"))).toBeTruthy();
     await showTab("System details");
     expect(tileValue("approvals")).toBe(NOT_READ);
-    expect(tileDetail("approvals")).toBe(lacksGrant("approvals:read"));
+    expect(tileDetail("approvals")).toBe(lacksGrant("approvals"));
     expect(tileDetail("audit")).toBe(CHAIN_SEAT);
     // The tiles that do not need those grants still read, and no line
     // claims a waiting call or a broken chain.
@@ -563,7 +585,7 @@ describe("the Overview screen", () => {
 
     await showTab("Activity");
     await userEvent.click(screen.getByRole("switch", { name: "Follow" }));
-    await waitFor(() => expect(within(panel("live")).getByText(seatLine(LIVE_TITLE, "audit:read"))).toBeTruthy());
+    await waitFor(() => expect(within(panel("live")).getByText(seatLine(LIVE_TITLE, "audit"))).toBeTruthy());
   });
 
   it("blanks no tile when the overview answer carries only some of its fields", async () => {
@@ -605,7 +627,7 @@ describe("the Overview screen", () => {
       vi.mocked(overview).mockRejectedValue(failure("unreachable", 0, true));
       vi.setSystemTime(new Date("2026-09-21T10:01:00Z"));
       act(() => poll());
-      await waitFor(() => expect(document.querySelector("[data-fetch-error]")?.textContent).toContain("last successful read " + firstRead.toLocaleTimeString([], { hour12: false })));
+      await waitFor(() => expect(document.querySelector("[data-fetch-error]")?.textContent).toContain("Last good read: " + absTime(firstRead.toISOString()).slice(11)));
       expect(tileValue("users")).toBe("9of 12");
       expect(tileDetail("users")).toContain("Last read 1 m ago");
       expect(document.querySelector("[data-read-line]")?.textContent).toContain("Summary last read 1 m ago");
@@ -618,8 +640,8 @@ describe("the Overview screen", () => {
       await showTab("Summary");
       expect(document.querySelector('[data-inventory="users"]')?.textContent).toContain("Permission required");
       expect(document.querySelector('[data-inventory="users"]')?.textContent).not.toContain("9");
-      expect(within(panel("decisions")).getByText(seatLine(DECIDED_PANEL, "config:read"))).toBeTruthy();
-      expect(within(panel("stopped")).getByText(seatLine(STOPPED_TITLE, "config:read"))).toBeTruthy();
+      expect(within(panel("decisions")).getByText(seatLine(DECIDED_PANEL, "config"))).toBeTruthy();
+      expect(within(panel("stopped")).getByText(seatLine(STOPPED_TITLE, "config"))).toBeTruthy();
     } finally {
       view.unmount();
       interval.mockRestore();
@@ -651,19 +673,19 @@ describe("the Overview screen", () => {
       await waitFor(() => expect(strip.querySelectorAll("[data-bucket]")).toHaveLength(60));
       expect(hourReads()).toBe(1);
       expect(pressed()).toEqual(["Last 24 hours:false", "Last hour:true"]);
-      expect(total("allowed")).toBe("120Tool calls allowed");
+      expect(total("allowed")).toBe("120Allowed");
       expect(total("denied")).toBe("2Denied");
-      expect(total("needed approval")).toBe("1Required approval");
-      expect(total("catalog")).toBe("3Catalog reads, counted apart");
+      expect(total("needs approval")).toBe("1Needs approval");
+      expect(total("catalog")).toBe("3Tool list reads");
       expect(within(strip).getByRole("group", { name: "Calls decided per minute over the last hour" })).toBeTruthy();
-      expect(lastBar()).toBe("11:59 to 12:00 UTC, so far: 4 allowed, 0 needed approval, 0 denied");
+      expect(lastBar()).toBe("11:59 to 12:00 UTC, so far: 4 allowed, 0 needs approval, 0 denied");
 
       // Five seconds on the newest bar has grown. A hidden page skips its read.
       minutes = MINUTES.map((m, i) => (i === 59 ? { ...m, allowed: 9 } : m));
       await act(async () => { vi.advanceTimersByTime(5000); });
       expect(hourReads()).toBe(2);
-      await waitFor(() => expect(lastBar()).toBe("11:59 to 12:00 UTC, so far: 9 allowed, 0 needed approval, 0 denied"));
-      expect(total("allowed")).toBe("125Tool calls allowed");
+      await waitFor(() => expect(lastBar()).toBe("11:59 to 12:00 UTC, so far: 9 allowed, 0 needs approval, 0 denied"));
+      expect(total("allowed")).toBe("125Allowed");
       Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
       await act(async () => { vi.advanceTimersByTime(5000); });
       expect(hourReads()).toBe(2);
@@ -683,7 +705,7 @@ describe("the Overview screen", () => {
       // Back on the day the totals are the day's again and the reads stop.
       await userEvent.click(within(strip).getByRole("button", { name: "Last 24 hours" }));
       expect(strip.querySelectorAll("[data-bucket]")).toHaveLength(24);
-      expect(total("allowed")).toBe(sum(HOURS).toLocaleString("en-US") + "Tool calls allowed");
+      expect(total("allowed")).toBe(sum(HOURS).toLocaleString("en-US") + "Allowed");
       await act(async () => { vi.advanceTimersByTime(15000); });
       expect(hourReads()).toBe(3);
     } finally {
@@ -721,7 +743,7 @@ describe("the Overview screen", () => {
       expect(document.querySelector("[data-fetch-error]")).toBeNull();
       vi.mocked(overview).mockImplementation((window?: "hour") => (window ? Promise.reject(unreachable) : Promise.resolve(NORMAL)));
       await act(async () => { vi.advanceTimersByTime(5000); });
-      await waitFor(() => expect(document.querySelector("[data-fetch-error]")?.textContent).toContain(readFailed(SUBJECT_LAST_HOUR, unreachable) + " last successful read "));
+      await waitFor(() => expect(document.querySelector("[data-fetch-error]")?.textContent).toContain(readFailed(SUBJECT_LAST_HOUR, unreachable) + " Last good read: "));
       expect(strip.querySelectorAll("[data-bucket]")).toHaveLength(60);
       expect(within(strip).queryByText(LAST_HOUR_UNREAD)).toBeNull();
     } finally {
@@ -740,7 +762,7 @@ describe("the Overview screen", () => {
     expect(document.body.textContent).not.toMatch(/apps running/i);
     expect(TILE.audit.help).toContain("newest 25");
     expect(TILE.audit.help).toContain("strazactl audit verify");
-    expect(tileDetail("audit")).toBe(CHAIN_INTACT);
+    expect(tileDetail("audit")).toBe(CHAIN_SCOPE);
     // The server's own version belongs to the sidebar. The only place it
     // appears here is a box's client build, inside the fleet table.
     expect(document.body.textContent).not.toContain("strazad");
@@ -770,7 +792,7 @@ describe("the Overview screen", () => {
     expect(tileDetail("servers")).toBe(serversDetail(NORMAL.apps));
     expect(tileDetail("policies")).toBe(offDetail(2, 1));
     expect(tileDetail("approvals")).toBe("Oldest request: " + relTimeText(WAITING[0].createdAt));
-    expect(tileDetail("audit")).toBe(CHAIN_INTACT);
+    expect(tileDetail("audit")).toBe(CHAIN_SCOPE);
   });
 
   it("reads the strict line as one sentence when nothing is relaxed and nothing is strict", async () => {

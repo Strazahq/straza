@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -201,10 +202,16 @@ func (r roleRepo) Assign(ctx context.Context, a RoleAssignment) (RoleAssignment,
 	if a.Origin == "" {
 		a.Origin = OriginAdmin
 	}
-	_, err := r.s.exec(ctx, `INSERT INTO role_assignments (id, subject_kind, subject_id, role_id, valid_from, valid_to, origin, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+	// The insert carries its own check of the subject, so an id that names
+	// no user, or a deleted one, writes nothing and affects no row.
+	err := mustAffect(r.s.exec(ctx, `INSERT INTO role_assignments (id, subject_kind, subject_id, role_id, valid_from, valid_to, origin, created_at)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8
+		WHERE EXISTS (SELECT 1 FROM users WHERE id = $9 AND deleted_at IS NULL)`,
 		a.ID, a.SubjectKind, a.SubjectID, a.RoleID,
-		r.s.tArgPtr(a.ValidFrom), r.s.tArgPtr(a.ValidTo), a.Origin, r.s.tArg(a.CreatedAt))
+		r.s.tArgPtr(a.ValidFrom), r.s.tArgPtr(a.ValidTo), a.Origin, r.s.tArg(a.CreatedAt), a.SubjectID))
+	if errors.Is(err, ErrNotFound) {
+		return RoleAssignment{}, fmt.Errorf("%w: no user has the id %q", ErrNotFound, a.SubjectID)
+	}
 	if err != nil {
 		return RoleAssignment{}, err
 	}
@@ -239,9 +246,15 @@ func (r roleRepo) ApplyMembership(ctx context.Context, roleID string, add []Role
 		if a.Origin == "" {
 			a.Origin = OriginAdmin
 		}
+		// A holder has at most one row the Entra sync wrote and one row of
+		// any other origin, each under its own partial unique key.
+		side := "origin <> 'entra'"
+		if a.Origin == OriginEntra {
+			side = "origin = 'entra'"
+		}
 		made, err := r.txAssignments(ctx, tx, `INSERT INTO role_assignments (id, subject_kind, subject_id, role_id, valid_from, valid_to, origin, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			ON CONFLICT (subject_kind, subject_id, role_id) DO NOTHING
+			ON CONFLICT (subject_kind, subject_id, role_id) WHERE `+side+` DO NOTHING
 			RETURNING `+assignmentCols,
 			a.ID, a.SubjectKind, a.SubjectID, a.RoleID,
 			r.s.tArgPtr(a.ValidFrom), r.s.tArgPtr(a.ValidTo), a.Origin, r.s.tArg(a.CreatedAt))
@@ -308,7 +321,7 @@ func (r roleRepo) ListAllAssignments(ctx context.Context) ([]RoleAssignment, err
 }
 
 func (r roleRepo) AssignmentCountsByRole(ctx context.Context) (map[string]int, error) {
-	rows, err := r.s.query(ctx, `SELECT role_id, COUNT(*) FROM role_assignments GROUP BY role_id`)
+	rows, err := r.s.query(ctx, `SELECT role_id, COUNT(DISTINCT subject_id) FROM role_assignments GROUP BY role_id`)
 	if err != nil {
 		return nil, err
 	}

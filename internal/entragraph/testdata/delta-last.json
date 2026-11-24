@@ -1,0 +1,5 @@
+{
+ "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#groups",
+ "@odata.deltaLink": "https://graph.microsoft.com/v1.0/groups/delta?$deltatoken=TEST-DELTATOKEN-1",
+ "value": []
+}

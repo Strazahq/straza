@@ -12,7 +12,6 @@ import {
   NOT_SET,
   SENSITIVE,
   TOKEN_ELIDED,
-  TOKEN_KIND,
   areaHint,
   expiresWord,
   headerLine,
@@ -43,7 +42,6 @@ describe("a token's sheet", () => {
   it("names the credential and its facts, with the relative reading beside each stamp", () => {
     mount();
     expect(within(sheet()).getByText("midpoint")).toBeTruthy();
-    expect(within(sheet()).getByText(TOKEN_KIND)).toBeTruthy();
     const facts = sheet().querySelector("[data-facts]") as HTMLElement;
     expect(facts.textContent).toContain(MINTED_BY);
     expect(facts.textContent).toContain("alice");

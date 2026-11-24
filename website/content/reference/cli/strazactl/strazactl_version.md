@@ -2,7 +2,7 @@
 title: strazactl version
 description: Print version information
 pagetype: reference
-weight: 119
+weight: 113
 draft: false
 sources:
   - cmd/strazactl

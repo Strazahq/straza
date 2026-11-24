@@ -43,7 +43,7 @@ describe("the six tiles", () => {
   it("degrades the approvals tile alone when this seat may not read it", () => {
     render(<TooltipProvider><Tiles answer={ANSWER} approvals={null} approvalsDenied chain={{ word: "intact", seq: 120 }} /></TooltipProvider>);
     expect(value("approvals")).toBe(NOT_READ);
-    expect(detail("approvals")).toBe(lacksGrant("approvals:read"));
+    expect(detail("approvals")).toBe(lacksGrant("approvals"));
     expect(value("users")).toBe("3of 4");
   });
 

@@ -87,6 +87,7 @@ func probeKillSwitch(ctx context.Context, dataDir, natsDir string, clients, revo
 		if pods > 1 {
 			o.pgDSN = dsn
 			o.issuer = issuer
+			o.kekFile = filepath.Join(dataDir, "secret.key")
 		}
 		if err := os.MkdirAll(o.dataDir, 0o700); err != nil {
 			return failed(name, err)

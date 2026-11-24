@@ -43,16 +43,15 @@ type cachedSubject struct {
 
 // sessionFacts is what check-in records beside a session's subject, which
 // policy.Subject does not carry: whether the user is a person by userKind,
-// the name of the harness the session checked in with, and the knowledge
-// packs check-in delivered, and the Entra agent id of an agent that holds
-// one, read from the user row check-in loaded. The drafting tools read the
-// first two (native_drafts.go), whoami reads the person, the packs and the
-// Entra agent id, and forToken compares the Entra agent id with the token's
-// eai claim. The zero value reads as not a person, the stricter reading.
+// the name of the harness the session checked in with, and the Entra agent
+// id of an agent that holds one, read from the user row check-in loaded.
+// The drafting tools read the first two (native_drafts.go), whoami reads
+// the person and the Entra agent id, and forToken compares the Entra agent
+// id with the token's eai claim. The zero value reads as not a person, the
+// stricter reading.
 type sessionFacts struct {
 	person       bool
 	harness      string
-	packs        []whoamiPack
 	entraAgentID string
 }
 

@@ -20,7 +20,6 @@ import {
   SOFTWARE_PHONE,
   SUBJECT_DEVICES,
   attestedWords,
-  chipWords,
   devicesTotal,
   groupDevices,
   hideDevices,
@@ -82,9 +81,13 @@ describe("the approver devices tab", () => {
     mount();
     await waitFor(() => expect(row("Pixel 8")).toBeTruthy());
     expect(within(row("Pixel 8")).getByText("Pixel 8")).toBeTruthy();
-    expect(row("Pixel 8").querySelector("[data-device-kind]")?.textContent).toBe("phone · android");
+    expect(row("Pixel 8").querySelector("[data-device-kind]")?.textContent).toBe("phone · Android");
     expect(row("Firefox on Windows").querySelector("[data-device-kind]")?.textContent).toBe("browser");
-    expect(row("iPhone 15").querySelector("[data-device-kind]")?.textContent).toBe("phone · ios");
+    expect(row("iPhone 15").querySelector("[data-device-kind]")?.textContent).toBe("phone · iOS");
+    // The kind is a fact, so a pill, never the toned chip of a state.
+    const kind = row("iPhone 15").querySelector("[data-device-kind]") as HTMLElement;
+    expect(kind.className).toContain("rounded-pill");
+    expect(kind.hasAttribute("data-tone")).toBe(false);
     expect(within(row("Pixel 8")).getByText(shortID(pixel.id))).toBeTruthy();
     expect(within(row("Pixel 8")).getByText("alice")).toBeTruthy();
     // A row the server answered with no username still names its owner.
@@ -120,25 +123,34 @@ describe("the approver devices tab", () => {
     expect(row("iPhone 15").querySelector("[data-last-seen]")?.textContent).toBe(SEEN_NEVER);
   });
 
-  it("says what would be here when no device is enrolled, and keeps the legend either way", async () => {
+  it("says what would be here when no device is enrolled", async () => {
     vi.mocked(listApproverDevices).mockResolvedValue([]);
     mount();
     expect(await screen.findByText(DEVICES_EMPTY_TITLE)).toBeTruthy();
     expect(screen.getByText(DEVICES_EMPTY_BODY)).toBeTruthy();
-    expect(screen.getByText(DEVICES_LEGEND)).toBeTruthy();
   });
 
-  it("says the legend beside a full table too", async () => {
+  it("keeps the legend behind the tab's help icon, off the page", async () => {
     mount();
     await waitFor(() => expect(row("Pixel 8")).toBeTruthy());
-    expect(screen.getByText(DEVICES_LEGEND)).toBeTruthy();
+    expect(screen.queryByText(DEVICES_LEGEND)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Help: Approver devices" }));
+    expect((await screen.findAllByText(DEVICES_LEGEND)).length).toBeGreaterThan(0);
+  });
+
+  it("leads each row with its kind's tile and keeps the Notified column room with a floor", async () => {
+    mount();
+    await waitFor(() => expect(row("Pixel 8")).toBeTruthy());
+    expect(row("Pixel 8").querySelector("[data-kind-icon]")?.getAttribute("data-kind-icon")).toBe("phone");
+    expect(row("Firefox on Windows").querySelector("[data-kind-icon]")?.getAttribute("data-kind-icon")).toBe("browser");
+    expect((row("Pixel 8").closest("table") as HTMLElement).style.minWidth).toBe("880px");
   });
 
   it("says what could not be read when the first read never arrives", async () => {
     vi.mocked(listApproverDevices).mockRejectedValue(new ApiError("unreachable", 0, true));
     mount();
     const block = await screen.findByRole("status");
-    expect(block.textContent).toContain(SUBJECT_DEVICES + ": unreachable, state unknown.");
+    expect(block.textContent).toContain(SUBJECT_DEVICES + " could not be read because Straza did not answer.");
     expect(block.textContent).toContain("Check that it is running, then reload.");
   });
 
@@ -187,9 +199,7 @@ describe("the approver devices tab", () => {
     await userEvent.click(screen.getByRole("button", { name: "Revoke Pixel 8" }));
     await userEvent.click(within(ask()).getByRole("button", { name: REVOKE_DEVICE }));
     const alert = await within(ask()).findByRole("alert");
-    expect(alert.textContent).toContain(REVOKE_DEVICE + " refused.");
-    expect(alert.textContent).toContain("no such approver device");
-    expect(alert.textContent).toContain("Fix what it names, then try again.");
+    expect(alert.textContent).toBe(REVOKE_DEVICE + " refused: no such approver device. Fix what it names, then try again.");
     expect(within(ask()).getByRole("button", { name: REVOKE_DEVICE })).toBeTruthy();
     expect(notify.ok).not.toHaveBeenCalled();
   });
@@ -225,14 +235,16 @@ describe("the approver devices tab", () => {
     vi.mocked(listApproverDevices).mockResolvedValue(rows);
     mount();
     await waitFor(() => expect(document.querySelectorAll("[data-device]").length).toBe(50));
-    expect((document.querySelector("[data-devices-total]") as HTMLElement).textContent).toBe(devicesTotal(60));
-    expect(chip("phones").textContent).toBe(chipWords("phones", 45));
-    expect(chip("browsers").textContent).toBe(chipWords("browsers", 15));
-    expect(chipWords("browsers", 1)).toBe("1 browser");
-    expect(chipWords("phones", 1)).toBe("1 phone");
-    expect(chipWords("mustcheck", 1)).toBe("1 must check");
-    expect(chip("mustcheck").textContent).toBe(chipWords("mustcheck", 20));
-    expect(chip("stale").textContent).toBe(chipWords("stale", 4));
+    expect(document.querySelector("[data-devices-total]")).toBe(null);
+    expect(count()).toBe(devicesTotal(60));
+    // One single choice: each option a label with its count, and no option
+    // in a warning tone.
+    const strip = screen.getByRole("group", { name: "Which devices to show" });
+    expect(within(strip).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "All 60", "Phones 45", "Browsers 15", "Must check 20", "Software key, phone 6", "Quiet for 30 days 4",
+    ]);
+    expect(chip("all").getAttribute("aria-pressed")).toBe("true");
+    expect(within(strip).getAllByRole("button").some((b) => b.className.includes("warn"))).toBe(false);
     expect(count()).toBe(matchWords(60, 60));
     await userEvent.click(chip("mustcheck"));
     expect(chip("mustcheck").getAttribute("aria-pressed")).toBe("true");

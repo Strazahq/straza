@@ -116,7 +116,9 @@ const areaRefusalNoGrants = "requires role " + AdminRole + ", " + MCPAdminRole +
 	"The admin role of a server opens that server's own routes only."
 
 // areaAllows checks the principal's grants against the route's area,
-// fail closed: a route outside adminRouteArea never passes on grants.
+// fail closed: a route outside adminRouteArea never passes on grants. Such
+// a route's refused read logs a WARN line here, and the refusal watch logs
+// a refused write.
 func (a *App) areaAllows(p adminPrincipal, r *http.Request) (bool, string) {
 	if p.root {
 		return true, ""
@@ -129,10 +131,14 @@ func (a *App) areaAllows(p adminPrincipal, r *http.Request) (bool, string) {
 	case allowed:
 		return true, ""
 	case !mapped && p.roles == nil:
-		a.log.Warn("route missing from adminRouteArea, api-token refused (fail closed)", "pattern", r.Pattern)
+		if !watched(r) {
+			a.log.Warn("route missing from adminRouteArea, api-token refused (fail closed)", "pattern", r.Pattern)
+		}
 		return false, "route is not covered by the token's scopes"
 	case !mapped:
-		a.log.Warn("route missing from adminRouteArea, delegated admin refused (fail closed)", "pattern", r.Pattern)
+		if !watched(r) {
+			a.log.Warn("route missing from adminRouteArea, delegated admin refused (fail closed)", "pattern", r.Pattern)
+		}
 		return false, "route is not covered by the admin role's scopes"
 	case p.roles == nil:
 		return false, "token lacks scope " + needed
@@ -151,13 +157,16 @@ const codingHarnessRefusal = "this session belongs to the coding harness %q, and
 // the agent in that harness runs as the user and holds that session token.
 // A login token, an admin API token and the sessions of the human clients
 // in adminHarnesses pass. The harness name is the one the client declared
-// at check-in.
+// at check-in. A refused read logs one WARN line here, and the refusal
+// watch logs a refused write.
 func (a *App) refuseCodingHarness(w http.ResponseWriter, r *http.Request, p adminPrincipal) bool {
 	if p.harness == "" || adminHarnesses[p.harness] {
 		return false
 	}
-	a.log.Warn("coding-harness session refused on an admin route",
-		"user", p.actor.ID, "harness", p.harness, "path", r.URL.Path)
+	if !watched(r) {
+		a.log.Warn("coding-harness session refused on an admin route",
+			"user", p.actor.ID, "harness", p.harness, "path", r.URL.Path)
+	}
 	apiError(w, http.StatusForbidden, fmt.Sprintf(codingHarnessRefusal, p.harness))
 	return true
 }
@@ -170,13 +179,17 @@ func (a *App) refuseCodingHarness(w http.ResponseWriter, r *http.Request, p admi
 // a coding harness checked in is refused before any grant is read. The
 // authenticated principal lands in the request context as the audit actor:
 // every straza.audit.admin event emitted downstream names it (emitEventCtx),
-// so admin mutations are never anonymous in the chain.
+// so admin mutations are never anonymous in the chain. A change refused
+// with 403 after the caller is authenticated, here or in the handler, writes
+// one admin.refused record (watchRefusals).
 func (a *App) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := a.authenticateAdmin(w, r)
 		if !ok {
 			return
 		}
+		w, r, report := a.watchRefusals(w, r, p.actor)
+		defer report()
 		if a.refuseCodingHarness(w, r, p) {
 			return
 		}
@@ -204,6 +217,8 @@ func (a *App) requireFullAdmin(next http.HandlerFunc) http.HandlerFunc {
 		if !ok {
 			return
 		}
+		w, r, report := a.watchRefusals(w, r, p.actor)
+		defer report()
 		if !p.root {
 			apiError(w, http.StatusForbidden, fullAdminRefusal)
 			return
@@ -226,6 +241,8 @@ func (a *App) requireServerAdmin(next http.HandlerFunc) http.HandlerFunc {
 		if !ok {
 			return
 		}
+		w, r, report := a.watchRefusals(w, r, p.actor)
+		defer report()
 		if a.refuseCodingHarness(w, r, p) {
 			return
 		}
@@ -346,7 +363,9 @@ func (a *App) serverAdminTarget(w http.ResponseWriter, r *http.Request, st admin
 		}
 		return row, true
 	}
-	a.log.Warn("route under requireServerAdmin names an object of no known family, refused (fail closed)", "pattern", r.Pattern)
+	if !watched(r) {
+		a.log.Warn("route under requireServerAdmin names an object of no known family, refused (fail closed)", "pattern", r.Pattern)
+	}
 	apiError(w, http.StatusForbidden, "route is not covered by the admin role's scopes")
 	return store.App{}, false
 }

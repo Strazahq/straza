@@ -1,0 +1,47 @@
+{
+ "responses": [
+  {
+   "id": "2",
+   "status": 404,
+   "headers": {
+    "Cache-Control": "no-cache",
+    "x-ms-resource-unit": "1",
+    "OData-Version": "4.0",
+    "Content-Type": "application/json;odata.metadata=minimal;odata.streaming=true;IEEE754Compatible=false;charset=utf-8"
+   },
+   "body": {
+    "error": {
+     "code": "Request_ResourceNotFound",
+     "message": "Resource '3b3b3b3b-cccc-4ccc-8ccc-cccccccccccc' does not exist or one of its queried reference-property objects are not present.",
+     "innerError": {
+      "date": "2026-11-17T14:36:16",
+      "request-id": "dddddddd-4444-4444-8444-dddddddddddd",
+      "client-request-id": "dddddddd-4444-4444-8444-dddddddddddd"
+     }
+    }
+   }
+  },
+  {
+   "id": "1",
+   "status": 200,
+   "headers": {
+    "Cache-Control": "no-cache",
+    "x-ms-resource-unit": "1",
+    "OData-Version": "4.0",
+    "Content-Type": "application/json;odata.metadata=minimal;odata.streaming=true;IEEE754Compatible=false;charset=utf-8"
+   },
+   "body": {
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals/microsoft.graph.agentIdentity(id,displayName,accountEnabled,sponsors(id))/$entity",
+    "id": "3a3a3a3a-6666-4666-8666-666666666666",
+    "displayName": "demo-agent",
+    "accountEnabled": true,
+    "sponsors": [
+     {
+      "@odata.type": "#microsoft.graph.user",
+      "id": "1c1c1c1c-7777-4777-8777-777777777777"
+     }
+    ]
+   }
+  }
+ ]
+}

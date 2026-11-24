@@ -2,7 +2,7 @@
 title: strazactl roles update
 description: Update a role's description (the name and the kind are fixed at create)
 pagetype: reference
-weight: 82
+weight: 76
 draft: false
 sources:
   - cmd/strazactl

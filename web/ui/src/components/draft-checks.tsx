@@ -1,40 +1,50 @@
 import * as React from "react";
-import { CheckIcon, CircleHelpIcon, CircleXIcon, InfoIcon, Loader2Icon, type LucideIcon, TriangleAlertIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, CircleHelpIcon, CircleXIcon, ClockIcon, InfoIcon, Loader2Icon, type LucideIcon, TriangleAlertIcon } from "lucide-react";
+import { Chip, Pill, Tag, type Tone } from "@/components/chip";
 import { RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { ApiError, DraftDetail, DraftFinding, DraftVerdict, FindingClass } from "@/lib/api";
-import { holdersOfRole } from "@/lib/drafts-access";
-import { COVERS_WIDER_CODE, type ConfirmBlock, UNLISTED_CODE, askedLine, confirmBlocks, findingGroups, objectOf, remoteApp, secretAsks } from "@/lib/drafts-model";
-import { CONTACT, CONTACT_FAILED, CONTACT_HELP, GROUP, NOTHING_TO_CONFIRM, SECRET_CHECKS_LINE, STRIP_LABEL, ackWords, answered, holdsWords, nowAfter, riskTail, stripJump, stripWord } from "@/lib/drafts-words";
+import { Ack, WidensBody } from "@/components/draft-widens";
+import type { ApiError, DraftDetail, DraftFinding, FindingClass } from "@/lib/api";
+import { type ConfirmBlock, UNLISTED_CODE, agentAccepts, askedLine, confirmBlocks, findingGroups, objectOf, remoteApp, secretAsks } from "@/lib/drafts-model";
+import { foldedWarnings, printed, widensOf } from "@/lib/drafts-widens";
+import {
+  CHECKS_TITLE,
+  CONTACT,
+  CONTACT_FAILED,
+  CONTACT_HELP,
+  GROUP,
+  HIDE,
+  NOTHING_TO_ACK,
+  NOT_CHECKED_AGAIN,
+  NO_STORED_CHECK,
+  RISK_TAIL,
+  SECRET_CHECKS_LINE,
+  SHOW,
+  STORED_WHEN,
+  answered,
+  notesCount,
+  nowAfter,
+  passedCount,
+  refusedCount,
+  revisionPill,
+  toConfirm,
+  uncheckedCount,
+  warningCount,
+  widenCount,
+} from "@/lib/drafts-words";
 import { cn } from "@/lib/utils";
+import { absTime, agoWord } from "@/lib/words";
 
-// The verdict of a draft as the review page draws it: the strip that counts
-// the classes that hold a line, and the lines of every class in the
-// server's own words, an empty class left out and Passed folded. A line
-// renders by the class of the list it came in, so a code this console does
-// not know still shows.
+// The checks of a draft as its page draws them: a heading row of counts,
+// what widens access as rows where the verdict carries them, and the lines
+// of every class in the server's own words, an empty class left out. The
+// lines that stand between the reader and Publish are always open, and the
+// passed lines and the notes open on demand. A line renders by the class
+// of the list it came in, so a code this console does not know still
+// shows.
 
-export type ChipTone = "danger" | "warn" | "unknown" | "accent" | "ok" | "plain";
-
-const TONE: Record<ChipTone, string> = {
-  danger: "bg-danger-bg text-danger border-danger/40",
-  warn: "bg-warn-bg text-warn border-warn/40",
-  unknown: "bg-unknown-bg text-unknown border-unknown/40",
-  accent: "bg-accent-bg text-link border-link/40",
-  ok: "bg-ok-bg text-ok border-ok/40",
-  plain: "",
-};
-
-// DraftChip is one word of the drafts vocabulary in its trust hue, with
-// violet for what cannot be known, which the users table's badge lacks.
-export function DraftChip({ word, tone, title, attr }: { word: string; tone: ChipTone; title?: string; attr?: string }) {
-  const data = attr ? { [attr]: word } : {};
-  return <Badge variant="outline" title={title} className={cn("rounded-md px-2 text-[13px] font-normal", TONE[tone])} {...data}>{word}</Badge>;
-}
-
-// NameChips lists tool and object names as chips that wrap, the role chip's
+// NameChips lists tool and object names as tags that wrap, the role chip's
 // look. A name marked added reads in the ok tone with its mark.
 export function NameChips({ names, added, mark }: { names: string[]; added?: Set<string>; mark?: (name: string) => string }) {
   return (
@@ -42,58 +52,91 @@ export function NameChips({ names, added, mark }: { names: string[]; added?: Set
       {names.map((n) => {
         const plus = !!added?.has(n);
         return (
-          <span key={n} data-name={n} data-added={plus || undefined} className={cn("inline-block rounded-md border px-1.5 py-px font-mono text-[13px]", plus ? "border-ok text-ok" : "border-border bg-background text-text-2")}>
+          <Tag key={n} data-name={n} data-added={plus || undefined} className={plus ? "border-ok text-ok" : undefined}>
             {plus && mark ? mark(n) : n}
-          </span>
+          </Tag>
         );
       })}
     </span>
   );
 }
 
-const STRIP: { cls: "refused" | "risk" | "warning" | "unchecked"; list: keyof DraftVerdict; hue: string }[] = [
-  { cls: "refused", list: "refused", hue: "text-danger" },
-  { cls: "risk", list: "risks", hue: "text-warn" },
-  { cls: "warning", list: "warnings", hue: "text-foreground" },
-  { cls: "unchecked", list: "unchecked", hue: "text-unknown" },
-];
+// CLASS_LOOK is the icon, the hue of a line's icon and the tone of a count
+// chip of each class of line.
+export const CLASS_LOOK: Record<FindingClass, { icon: LucideIcon; hue: string; tone: Tone }> = {
+  refused: { icon: CircleXIcon, hue: "text-danger", tone: "danger" },
+  risk: { icon: TriangleAlertIcon, hue: "text-warn", tone: "warn" },
+  warning: { icon: TriangleAlertIcon, hue: "text-warn", tone: "warn" },
+  unchecked: { icon: CircleHelpIcon, hue: "text-unknown", tone: "unknown" },
+  passed: { icon: CheckIcon, hue: "text-ok", tone: "ok" },
+  info: { icon: InfoIcon, hue: "text-muted-foreground", tone: "plain" },
+};
 
-// VerdictStrip counts the lines a person must read, each count a door to
-// the checks below. A class with no line is left out, and a verdict with
-// none says there is nothing to confirm.
-export function VerdictStrip({ verdict, onJump }: { verdict: DraftVerdict; onJump: () => void }) {
-  const shown = STRIP.map((s) => ({ ...s, n: ((verdict[s.list] as DraftFinding[] | null) || []).length })).filter((s) => s.n > 0);
+// FOLDED are the classes that open on demand.
+const FOLDED: FindingClass[] = ["passed", "info"];
+
+const Count = ({ cls, children }: { cls: FindingClass; children: string }) => <Chip tone={CLASS_LOOK[cls].tone} icon={CLASS_LOOK[cls].icon} data-checks-count={cls}>{children}</Chip>;
+
+type HeadProps = {
+  detail: DraftDetail;
+  // omit are the keys of notes the page already says elsewhere.
+  omit: string[];
+  more: boolean;
+  onMore: () => void;
+};
+
+// ChecksHead is the row beside the Checks heading. An open draft counts
+// what the reader confirms, the band's count, then the lines of each other
+// class its check holds, a warning folded into a row left out, says how
+// long ago it was checked, and opens its passed lines and notes on Show. A
+// decided draft counts the lines of the check the server stored for its
+// revision, which is never run again.
+export function ChecksHead({ detail, omit, more, onMore }: HeadProps) {
+  const d = detail.draft;
+  const v = detail.verdict;
+  if (d.state !== "open") {
+    const state = d.state;
+    const stored = detail.checks;
+    const help = <HelpTip label={CHECKS_TITLE} text={NOT_CHECKED_AGAIN[state]} />;
+    if (!stored) return <><Pill data-checks-stored="none">{NO_STORED_CHECK}</Pill>{help}</>;
+    const counts = [
+      stored.refused ? <Count key="refused" cls="refused">{refusedCount(stored.refused)}</Count> : null,
+      stored.risks ? <Count key="risk" cls="risk">{widenCount(stored.risks)}</Count> : null,
+      stored.warnings ? <Count key="warning" cls="warning">{warningCount(stored.warnings)}</Count> : null,
+      stored.unchecked ? <Count key="unchecked" cls="unchecked">{uncheckedCount(stored.unchecked)}</Count> : null,
+    ].filter(Boolean);
+    return (
+      <>
+        {counts.length ? counts : <Pill>{NOTHING_TO_ACK}</Pill>}
+        <Pill>{revisionPill(stored.revision)}</Pill>
+        <Pill icon={ClockIcon}>{absTime(stored.checked_at)}</Pill>
+        <Pill data-checks-stored={state}>{STORED_WHEN[state]}</Pill>
+        {help}
+      </>
+    );
+  }
+  const left = new Set([...omit, ...foldedWarnings(v).keys()]);
+  const n = (list: DraftFinding[] | null | undefined) => (list || []).filter((f) => !left.has(f.key)).length;
+  const notes = n(v.info);
+  const passed = n(v.passed);
+  const blocks = confirmBlocks((v.risks || []).filter((f) => !left.has(f.key))).length;
   return (
-    <div role="group" aria-label={STRIP_LABEL} className="flex flex-wrap gap-2" data-verdict-strip>
-      {!shown.length && <DraftChip word={NOTHING_TO_CONFIRM} tone="plain" attr="data-strip-none" />}
-      {shown.map(({ cls, hue, n }) => {
-        const word = stripWord[cls](n);
-        return (
-          <button
-            key={cls}
-            type="button"
-            aria-label={stripJump(n, word)}
-            onClick={onJump}
-            data-strip={cls}
-            className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-text-2 outline-none hover:bg-secondary/60 focus-visible:ring-2 focus-visible:ring-ring/50"
-          >
-            <b className={cn("font-mono text-[17px] leading-none font-semibold", hue)}>{n}</b>
-            {word}
-          </button>
-        );
-      })}
-    </div>
+    <>
+      {n(v.refused) > 0 && <Count cls="refused">{refusedCount(n(v.refused))}</Count>}
+      {blocks > 0 && <Count cls="risk">{toConfirm(blocks)}</Count>}
+      {n(v.warnings) > 0 && <Count cls="warning">{warningCount(n(v.warnings))}</Count>}
+      {n(v.unchecked) > 0 && <Count cls="unchecked">{uncheckedCount(n(v.unchecked))}</Count>}
+      {notes > 0 && <Count cls="info">{notesCount(notes)}</Count>}
+      {passed > 0 && <Count cls="passed">{passedCount(passed)}</Count>}
+      <Pill icon={ClockIcon} title={absTime(v.checked_at)}>{agoWord(v.checked_at)}</Pill>
+      {(passed > 0 || notes > 0) && (
+        <Button variant="ghost" size="xs" aria-expanded={more} onClick={onMore} data-checks-more>
+          {more ? HIDE : SHOW}<ChevronDownIcon className={cn("transition-transform", more && "rotate-180")} aria-hidden="true" />
+        </Button>
+      )}
+    </>
   );
 }
-
-const ICON: Record<FindingClass, { icon: LucideIcon; hue: string }> = {
-  refused: { icon: CircleXIcon, hue: "text-danger" },
-  risk: { icon: TriangleAlertIcon, hue: "text-warn" },
-  warning: { icon: TriangleAlertIcon, hue: "text-warn" },
-  unchecked: { icon: CircleHelpIcon, hue: "text-unknown" },
-  passed: { icon: CheckIcon, hue: "text-ok" },
-  info: { icon: InfoIcon, hue: "text-muted-foreground" },
-};
 
 type Props = {
   detail: DraftDetail;
@@ -102,9 +145,11 @@ type Props = {
   onContact?: (object: string) => Promise<void>;
   // omit are the keys of lines the page already says elsewhere.
   omit?: string[];
+  // more opens the passed lines and the notes.
+  more?: boolean;
 };
 
-export function DraftChecks({ detail, onContact, omit }: Props) {
+export function DraftChecks({ detail, onContact, omit, more }: Props) {
   const [contacting, setContacting] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState<Record<string, string>>({});
   const open = detail.draft.state === "open";
@@ -131,17 +176,15 @@ export function DraftChecks({ detail, onContact, omit }: Props) {
     }
   };
 
-  // Each risk says how the publish dialog asks for it, by the confirm block
-  // that holds it, so a grouped line names the count to type.
-  const blockOf = new Map<string, ConfirmBlock>();
-  for (const b of confirmBlocks(detail.verdict.risks || [])) for (const f of b.lines) blockOf.set(f.key, b);
-  const left = new Set(omit || []);
-  // holds is the client's holders sentence after a covers widening, whose
-  // own sentence never counts people.
-  const holds = (f: DraftFinding) => {
-    const n = f.code === COVERS_WIDER_CODE && f.object ? holdersOfRole(detail.verdict, f.object.replace(/^Role\//, "")) : null;
-    return n ? " " + holdsWords(n) : "";
-  };
+  // An agent's change a person accepts says how on its own line, the first
+  // of its block, and every other block says it once under the section.
+  const blocks = confirmBlocks(detail.verdict.risks || []);
+  const agentAck = new Map<string, ConfirmBlock>();
+  for (const b of blocks) {
+    const first = b.lines.find(agentAccepts);
+    if (first) agentAck.set(first.key, b);
+  }
+  const left = new Set([...(omit || []), ...foldedWarnings(detail.verdict).keys()]);
   // fixOf is a line's fix. On an open draft the publish dialog asks for a
   // server's secret and listing credential, so their warnings say that in
   // place of the fix that names strazactl, or of none.
@@ -151,27 +194,25 @@ export function DraftChecks({ detail, onContact, omit }: Props) {
   return (
     <div className="flex flex-col gap-3" data-checks>
       {findingGroups(detail.verdict).map(({ cls, lines: all }) => {
+        if (FOLDED.includes(cls) && !more) return null;
         const lines = all.filter((f) => !left.has(f.key));
         if (!lines.length) return null;
-        const { icon: Icon, hue } = ICON[cls];
-        const head = (
-          <>
-            {GROUP[cls]}
-            <span className="font-mono text-[12px] font-normal text-muted-foreground">{lines.length}</span>
-            {cls === "risk" && <span className="text-[13px] font-normal text-muted-foreground">{"· " + riskTail(lines.length)}</span>}
-          </>
-        );
-        const body = lines.map((f) => {
-          const block = blockOf.get(f.key);
+        const { icon: Icon, hue } = CLASS_LOOK[cls];
+        const widens = cls === "risk" ? widensOf(detail, lines) : null;
+        const body = (widens ? widens.lines : lines).map((f) => {
+          const agent = agentAck.get(f.key);
           const fix = fixOf(f);
+          // A fingerprint shows under Details alone, so its Now and After
+          // stay off the line.
+          const words = printed(f) ? "" : nowAfter(f.before || "", f.after || "");
           return (
             <div key={f.key} className="flex gap-2.5 border-b border-border px-3.5 py-2 last:border-b-0" data-finding={f.code}>
               <Icon className={cn("mt-0.5 size-4 shrink-0", hue)} aria-hidden="true" />
-              <div className="flex min-w-0 max-w-[75ch] flex-col gap-1 text-[15px] leading-relaxed text-text-2">
-                <span className="text-foreground">{f.sentence + holds(f)}</span>
+              <div className="flex min-w-0 max-w-[75ch] flex-col gap-1 text-body leading-relaxed text-text-2">
+                <span className="text-foreground">{f.sentence}</span>
                 {fix && <span>{fix}</span>}
-                {(f.before || f.after) && <span className="text-sm">{nowAfter(f.before || "", f.after || "")}</span>}
-                {cls === "risk" && block && <span className="text-[13px] text-muted-foreground" data-ack-words>{ackWords(block)}</span>}
+                {words && <span className="min-w-0 text-dense [overflow-wrap:anywhere]">{words}</span>}
+                {agent && <span className="text-caption text-muted-foreground"><Ack b={agent} /></span>}
                 {contactable(f) && (
                   <span className="flex items-center gap-1.5">
                     <Button variant="outline" size="sm" onClick={() => void contact(f.object as string)} disabled={!!contacting}>
@@ -185,19 +226,13 @@ export function DraftChecks({ detail, onContact, omit }: Props) {
             </div>
           );
         });
-        const H = "flex items-center gap-2 border-b border-border px-3.5 py-2 text-sm font-semibold text-foreground";
-        if (cls === "passed") {
-          return (
-            <details key={cls} aria-label={GROUP[cls]} className="group rounded-md border border-border bg-card" data-group={cls}>
-              <summary className={cn(H, "cursor-pointer border-b-0 group-open:border-b")}>{head}</summary>
-              {body}
-            </details>
-          );
-        }
         return (
           <section key={cls} aria-label={GROUP[cls]} className="rounded-md border border-border bg-card" data-group={cls}>
-            <h3 className={H}>{head}</h3>
-            {body}
+            <h3 className="flex flex-wrap items-center gap-x-2 border-b border-border px-3.5 py-2 text-dense font-semibold text-foreground">
+              {GROUP[cls]}
+              {widens ? <span className="text-caption font-normal text-muted-foreground">{"· " + RISK_TAIL}</span> : <span className="font-mono text-caption font-normal text-muted-foreground">{lines.length}</span>}
+            </h3>
+            {widens ? <WidensBody detail={detail} w={widens} blocks={blocks}>{body}</WidensBody> : body}
           </section>
         );
       })}

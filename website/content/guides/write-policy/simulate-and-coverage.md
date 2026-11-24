@@ -37,7 +37,7 @@ A simulation asks the live engine what one call would do for one subject, withou
 {{< console >}}
 {{< clicks "Policies" "Test a call" >}}
 
-Under Who, pick `dana`. Under What, pick **Shell command**, type `rm -rf /home/dana/work/build` under The command line, and press **Test**. The answer names the outcome, the rule and the set that decided, and the roles dana holds.
+Under Who, pick `dana`. Under What, pick **Shell command**, type `rm -rf /home/dana/work/build` under The command line, and press **Test**. The answer names the outcome, the policy rule and the policy that decided, and the roles dana holds.
 
 {{< shot name="test-answer" caption="The same sheet on a standalone server, asking about alice: the starter policy's rule denies the call." >}}
 {{< /console >}}
@@ -92,7 +92,7 @@ The output is trimmed to the verdict lines. The subject, snapshot and wire lines
 Some servers pin an object type in their manifest, such as ghapp with its repos, and each role on them covers every repo or a named list. A simulation of a call to such a server runs the gateway's object check first. When the check refuses the call, its sentence is the answer and no policy runs.
 
 {{< console >}}
-Under What, pick **MCP tool**, then the server and a tool whose calls name a repo, such as `pr_create` on ghapp. A picker for the repo appears, with `Search repos by name` and the line `Pick the repo the call works on. Test a call sends it in the argument repo, as the agent would.` Pick a repo from ghapp's list, and the preview under it shows the arguments the test sends, such as `args {"repo":"Strazahq/pay-api"}`. Pressing **Test** with no repo picked answers `Pick the repo this call works on.` A server's own Test a call asks the same way.
+Under What, pick **MCP tool**, then the server and a tool whose calls name a repo, such as `pr_create` on ghapp. A picker for the repo appears, with `Search repos by name` and the line `Pick the repo the call works on.` Pick a repo from ghapp's list, and the preview under it shows the arguments the test sends, such as `args {"repo":"Strazahq/pay-api"}`. Pressing **Test** with no repo picked answers `Pick the repo this call works on.` A server's own Test a call asks the same way.
 
 A covered call names the first role by name that covers it, such as `ghapp-write-payments covers Strazahq/pay-api, id 101.` with the repo's own id. For a repo the list does not hold yet, only a role on every repo covers the call, and the line reads like `ghapp-write covers every repo, Strazahq/pay-new included.` When the check refuses the call, the answer reads `The repo check refused this call before any policy ran.`, then the sentence the agent would read. **Test this call** on an audit record fills in the repo the call named and answers at once. A record that cut a long value fills in no repo, so pick one and press **Test** again.
 {{< /console >}}
@@ -198,11 +198,11 @@ What comes back is today's answer, against the current snapshot, and not a repla
 
 {{< shot name="policies-by-role" caption="The **By role** view, with `Everyone` first and a link in place of each empty count." >}}
 
-Switch the View from Sets to **By role**. The table has one row per application role, `Everyone` above them as the floor under every role, and an `Outside roles` row below when a policy is scoped by user or identity instead. Its six columns are `Role`, `Policies`, `Denied`, `Needs approval`, `Allowed` and `Recording`. The Policies cell lists the policies that name the row as one chip each, and a chip's hover says whether it is live, live with a draft that edits it, or off and gating nothing.
+Open the **By role** tab under the page's header. The table has one row per application role, `Everyone` above them, which applies under every role, and an `Outside roles` row below when a policy is scoped by user or identity instead. Its six columns are `Role`, `Policies`, `Denied`, `Needs approval`, `Allowed` and `Recording`. The Policies cell lists the policies that name the row as one chip each, and a chip's hover says whether it is live, live with a saved edit that waits as a draft, or off and deciding nothing.
 
-Each of the three counts sums the row's own live policies, because a policy that is off governs nothing. The `Everyone` floor is not added to a role's number. It is named in the hover of that role's `Denied` count instead. An empty `Allowed` cell is normal under the enterprise profile, and its hover says so, because a local tool that nothing allows is denied there anyway.
+Each of the three counts sums the row's own live policies, because a policy that is off governs nothing. The `Everyone` floor is not added to a role's number. It is named in the hover of that role's `Denied` count instead. An empty `Allowed` cell is normal under the enterprise profile, because a local tool that nothing allows is denied there anyway.
 
-Hover a count for the split behind the word. A `Needs approval` hover gives one line per policy, each naming the policy and then its split, such as `4 holds · 1 day-scale ticket · 2 checked before it runs`, so an automated check reads apart from a call a person decides. An empty `Denied` or `Needs approval` cell shows a link instead of a zero. It reads `Denied…` or `Needs approval…` and opens the New policy wizard with that role already picked, and with the call type too when the Call type filter names one.
+Hover a count for the split behind the word. A `Needs approval` hover gives one line per policy, each naming the policy and then its split, such as `4 holds · 1 ticket · 2 checked before it runs`, so an automated check reads apart from a call a person decides. An empty `Denied` or `Needs approval` cell shows a link instead of a zero. It reads `Denied…` or `Needs approval…` and opens the New policy wizard with that role already picked, and with the call type too when the Call type filter names one.
 
 ## Limits {.nostep}
 

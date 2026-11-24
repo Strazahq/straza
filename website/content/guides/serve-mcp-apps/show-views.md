@@ -56,7 +56,7 @@ The demo stack ships two servers with views on. `views-demo`, the official MCP A
 ## Connect a chat app to the server's own endpoint
 
 
-Straza's combined endpoint, `/mcp`, names every tool after its server, as `views-demo__get-time`, while a view calls its tools by the server's own names. Views are therefore served only on the server's own endpoint, `/mcp/views-demo`. That endpoint lists the server's tools under their own names with their view links, applies the same rules, holds and records as `/mcp`, and lists none of the built-in straza tools.
+Straza's combined endpoint, `/mcp`, names every tool after its server, as `views-demo__get-time`, while a view calls its tools by the server's own names. Views are therefore served only on the server's own endpoint, `/mcp/views-demo`. On `/mcp` a tool keeps the rest of its `_meta` but loses the view link keys `ui` and `ui/resourceUri`. The server's own endpoint lists the server's tools under their own names with their view links, applies the same rules, holds and records as `/mcp`, and lists none of the built-in straza tools.
 
 
 `straza mcp views-demo` connects a chat app to that endpoint over stdio, on a machine whose `straza service`, the Straza background service, holds your enrollment. On a Mac that service comes from the Straza package for macOS, as [Install]({{< relref "guides/operate/install.md#install-the-service-on-macos" >}}) shows, and `/usr/local/bin/straza` is the package's link to its binary. Claude Desktop on macOS reads the entry from `~/Library/Application Support/Claude/claude_desktop_config.json`, with the path of your own `straza` binary, after a restart:
@@ -97,7 +97,7 @@ When a policy holds a click for a person's approval, the gateway keeps the call 
 {"v":1,"decision":"held","audited":true,"reason":"This action waits for a person's approval. Once it is approved, do it again.","ref":"01a0f68f-0ad0-7efe-992c-08177822dedd","expiresAt":"2026-10-01T08:32:44Z","source":"Straza"}
 ```
 
-A Straza hold never runs the call later on its own. Once the approver says yes, the person clicks again, and that call runs once. A refused call carries `"decision":"denied"` with the reason, for example "Approval denied by alice (ref 01a0f691-2bd3-75f8-8de4-aa70d77bf30a)". Straza removes the same field from a server's own answers on this endpoint, so a server cannot pass a call that ran as a hold or a refusal.
+A Straza hold never runs the call later on its own. Once the approver says yes, the person clicks again, and that call runs once. A refused call carries `"decision":"denied"` with the reason, for example "Approval denied by alice (ref 01a0f691-2bd3-75f8-8de4-aa70d77bf30a)". Straza removes the same field from a server's own answers, on this endpoint and on `/mcp` alike, so a server cannot pass a call that ran as a hold or a refusal.
 
 ## What Straza records {.nostep}
 

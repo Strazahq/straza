@@ -6,7 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import type { DraftSaveOptions, SaveNote } from "@/components/use-draft-save";
 import { ApiError, type DraftPublished, type PolicySetRow, type SessionRow, type UserRow, listPolicies, listSessions, listUsers, simulate } from "@/lib/api";
 import type { SaveItem } from "@/lib/draft-save";
-import { PUBLISH, PROBE_ORIGIN, PUBLISH_DRAFT_NOTE, STRIP, VERDICT, blastSentence, publishTitle, rulesStrip, savedToast, whatChanges } from "@/lib/policy-words";
+import { PUBLISH, PUBLISH_DRAFT_NOTE, STRIP, VERDICT, blastSentence, publishTitle, rulesStrip, savedToast, whatChanges } from "@/lib/policy-words";
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
@@ -113,12 +113,12 @@ describe("the publish dialog", () => {
   it("says what a new policy changes", async () => {
     mount();
     expect(await screen.findByText(publishTitle("dev-tools-approvals"))).toBeTruthy();
-    expect(screen.getByText(whatChanges(1, [], [], ["dev-tools"], true, false))).toBeTruthy();
+    expect(screen.getByText(whatChanges(1, [], [], ["dev-tools"]))).toBeTruthy();
   });
 
   it("says what a replacement changes", async () => {
     mount({ text: REPLACEMENT, baseText: BASE_TEXT, wasLive: true });
-    expect(await screen.findByText(whatChanges(1, ["keep-one"], ["goes-away"], ["dev-tools"], false, true))).toBeTruthy();
+    expect(await screen.findByText(whatChanges(1, ["keep-one"], ["goes-away"], ["dev-tools"]))).toBeTruthy();
   });
 
   it("reads the call before and after, and the rule counts for the role", async () => {
@@ -126,7 +126,6 @@ describe("the publish dialog", () => {
     await waitFor(() => expect(textOf("[data-verdict-now]")).toBe(VERDICT.allow));
     expect(textOf("[data-verdict-after]")).toBe(VERDICT.hum);
     expect(textOf("[data-publish-strip]")).toContain(STRIP.rules + " dev-tools");
-    expect(textOf("[data-publish-strip]")).toContain(PROBE_ORIGIN);
     await waitFor(() => expect(textOf("[data-rules-now]")).toBe(rulesStrip({ deny: 3, hum: 6, allow: 4, hold: 5, ticket: 1, confirm: 0, check: 0 })));
     expect(textOf("[data-rules-after]")).toBe(rulesStrip({ deny: 3, hum: 7, allow: 4, hold: 6, ticket: 1, confirm: 0, check: 0 }));
   });
@@ -208,13 +207,13 @@ describe("the publish dialog", () => {
     await userEvent.click(screen.getByRole("button", { name: PUBLISH }));
     expect(save.publish).toHaveBeenCalledWith(put(REPLACEMENT, "off"));
     expect(save.opts?.toast).toBe(savedToast("dev-tools-approvals", false));
-    expect(save.opts?.toast).toBe("dev-tools-approvals is saved. It is off, so it gates nothing until it is turned on.");
+    expect(save.opts?.toast).toBe("dev-tools-approvals is saved. It is off, so it decides nothing until it is turned on.");
   });
 
   it("opens Test a call on the document that is about to be stored", async () => {
     mount();
     await screen.findByText(publishTitle("dev-tools-approvals"));
-    await userEvent.click(screen.getByRole("button", { name: "Test a call first" }));
+    await userEvent.click(screen.getByRole("button", { name: "Test a call" }));
     await waitFor(() => expect(document.querySelector("[data-test-sheet]")).toBeTruthy());
     const sheet = document.querySelector("[data-test-sheet]") as HTMLElement;
     expect(sheet.getAttribute("data-test-sheet")).toBe("dev-tools-approvals");

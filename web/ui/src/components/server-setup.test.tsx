@@ -84,8 +84,8 @@ describe("the setup card on a server's Overview", () => {
   // Each case is a server's shape and the card it shows before the pin, in
   // that server's own words.
   it.each([
-    ["ghapp", GHAPP, "ghapp's tools work on repos. Pin them so roles can pick repos and Straza can list them.", "1Pin repos. You see what gets pinned before anything changes.Pin repos", "2Give Straza the listing credential, a second token that ghapp accepts for repo_list only. After step 1."],
-    ["postgres", POSTGRES, "postgres's tools work on databases. Pin them so roles can pick databases and Straza can list them.", "1Pin databases. You see what gets pinned before anything changes.Pin databases", "2Give Straza the listing credential, a second token that postgres accepts for list_databases only. After step 1."],
+    ["ghapp", GHAPP, "ghapp's tools work on repos. Pin them so roles can pick repos and Straza can list them.", "1Pin repos.Pin repos", "2Give Straza the listing credential, a second token that ghapp accepts for repo_list only. After step 1."],
+    ["postgres", POSTGRES, "postgres's tools work on databases. Pin them so roles can pick databases and Straza can list them.", "1Pin databases.Pin databases", "2Give Straza the listing credential, a second token that postgres accepts for list_databases only. After step 1."],
   ])("shows both steps for %s while the tools declare a type and nothing is pinned", (_name, s, lead, one, two) => {
     mount(appOf(s), unpinned(s));
     expect((card() as HTMLElement).querySelector("p")?.textContent).toBe(lead);
@@ -97,7 +97,7 @@ describe("the setup card on a server's Overview", () => {
 
   it("shows step 1 alone for a server that takes no credential", () => {
     mount(appOf(GHAPP, "none"), unpinned(GHAPP));
-    expect(steps()).toEqual(["1Pin repos. You see what gets pinned before anything changes.Pin repos"]);
+    expect(steps()).toEqual(["1Pin repos.Pin repos"]);
   });
 
   it("marks step 1 done and opens the field from step 2 once the type is pinned", async () => {
@@ -128,8 +128,8 @@ describe("the Pin dialog", () => {
   });
 
   it.each([
-    ["ghapp", GHAPP, "Pin repos on ghapp?", "Straza will check every call against the repos the caller's role covers. Nobody's access changes when you pin: roles made before keep every repo.", "repo (repos)", "the repo argument, on 16 of 17 tools", "repo_list, which reaches every repo"],
-    ["postgres", POSTGRES, "Pin databases on postgres?", "Straza will check every call against the databases the caller's role covers. Nobody's access changes when you pin: roles made before keep every database.", "database (databases)", "the database argument, on 14 of 15 tools", "list_databases, which reaches every database"],
+    ["ghapp", GHAPP, "Pin repos on ghapp?", "Straza will check every call against the repos the caller's role covers. Nobody's access changes when you pin: roles made before keep every repo.", "repo", "the repo argument, on 16 of 17 tools", "repo_list, which reaches every repo"],
+    ["postgres", POSTGRES, "Pin databases on postgres?", "Straza will check every call against the databases the caller's role covers. Nobody's access changes when you pin: roles made before keep every database.", "database", "the database argument, on 14 of 15 tools", "list_databases, which reaches every database"],
   ])("says what pinning does and shows the declared facts in the words of %s", async (_name, s, title, body, type, from, list) => {
     mount(appOf(s), unpinned(s), s.total);
     const d = await openPin(s);
@@ -138,8 +138,8 @@ describe("the Pin dialog", () => {
     expect(dd(d, "Object type")).toBe(type);
     expect(dd(d, "Read from")).toBe(from);
     expect(dd(d, "Listed by")).toBe(list);
-    expect(d.querySelector("[data-pin-foot]")?.textContent).toBe("All of it comes from " + s.name + "'s own tool marks.");
-    expect(await tip("tool marks")).toBe("If " + s.name + " later changes a mark, Straza keeps the pinned one and refuses that tool to roles on some " + s.plural + " until a person pins again.");
+    expect(d.querySelector("[data-pin-foot]")?.textContent).toBe("");
+    expect(await tip("what the tools say")).toBe("If " + s.name + " later changes what a tool says, Straza keeps what is pinned and refuses that tool to roles limited to some " + s.plural + " until a person pins again.");
     expect(within(d).getAllByRole("button").map((b) => b.textContent).filter(Boolean)).toEqual(["Cancel", "Save draft", "Pin and publish"]);
     if (s === POSTGRES) expect(d.textContent).not.toMatch(/repo/);
   });
@@ -156,7 +156,7 @@ describe("the Pin dialog", () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("drafts", ["318"]));
     expect(draftAppObjects).toHaveBeenCalledWith("app-ghapp");
     expect(publishDraft).not.toHaveBeenCalled();
-    expect(notify.ok).toHaveBeenCalledWith("Saved to your draft 318. Nothing changes until you publish it under Drafts.");
+    expect(notify.ok).toHaveBeenCalledWith("Saved to your draft 318.");
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
@@ -194,7 +194,7 @@ describe("the Pin dialog", () => {
     await userEvent.click(screen.getByRole("button", { name: "Pin and publish" }));
     await userEvent.click(await screen.findByRole("button", { name: "Cancel the stub" }));
     expect(document.querySelector("[data-publish-stub]")).toBeNull();
-    expect(notify.warn).toHaveBeenCalledWith("Draft 318 holds this change. It waits under Drafts until someone who may publish it does.");
+    expect(notify.warn).toHaveBeenCalledWith("Draft 318 holds this change, under Drafts.");
     expect(onPublished).not.toHaveBeenCalled();
   });
 

@@ -81,13 +81,17 @@ type clientStamp struct {
 }
 
 // keyCheckinBody is the key-lane check-in of /v1/checkin: no token, and
-// the device's next counter, which the proof signs as ctr.
+// the device's next counter, which the proof signs as ctr. Host and Folder
+// name the machine and the folder the session started in, and each is left
+// out when empty.
 type keyCheckinBody struct {
 	DeviceID    string                 `json:"device_id"`
 	Counter     int64                  `json:"counter"`
 	Harness     harnessBody            `json:"harness"`
 	Attestation agentguard.Attestation `json:"attestation"`
 	Client      clientStamp            `json:"client"`
+	Host        string                 `json:"host,omitempty"`
+	Folder      string                 `json:"folder,omitempty"`
 }
 
 // errStopping ends a key check-in whose answer arrived after the service
@@ -107,8 +111,8 @@ var errNoSessionToken = errors.New("the server's check-in answer carried no sess
 // arrival time until its answer. After an attempt that was sent and got no
 // answer, the key's next check-in waits until that attempt's nonce has
 // expired, and a check-in inside the wait is refused with the waiting
-// sentence.
-func (s *credStore) keyCheckin(ctx context.Context, a *account, h localapi.Harness) (agentguard.CheckinResponse, error) {
+// sentence. Every attempt carries folder and the service's host.
+func (s *credStore) keyCheckin(ctx context.Context, a *account, h localapi.Harness, folder string) (agentguard.CheckinResponse, error) {
 	rec, api, err := a.ready()
 	if err != nil {
 		return agentguard.CheckinResponse{}, err
@@ -131,6 +135,7 @@ func (s *credStore) keyCheckin(ctx context.Context, a *account, h localapi.Harne
 		ans, err := postJSON(withAttempt(ctx, att), api, "/v1/checkin", keyCheckinBody{
 			DeviceID: rec.DeviceID, Counter: n, Harness: harnessBody{Name: h.Name, Version: h.Version},
 			Attestation: measureAttestation(h.Name), Client: clientStamp{Version: version.Version, Commit: version.Commit},
+			Host: s.host, Folder: folder,
 		})
 		if s.ctx.Err() != nil {
 			return agentguard.CheckinResponse{}, errStopping

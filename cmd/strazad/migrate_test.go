@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -10,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
+	"github.com/strazahq/straza/internal/secrets"
 	"github.com/strazahq/straza/internal/store"
 	"github.com/strazahq/straza/internal/store/storetest"
 )
@@ -190,13 +193,13 @@ func TestMigrateCommandCreatesNothingAndNamesNoPassword(t *testing.T) {
 		{
 			name: "a Postgres DSN read by the sqlite driver",
 			args: func(string) []string { return []string{"--store-dsn", dsn} },
-			want: "the store driver is sqlite, and no database file exists where the store settings point, so nothing moved. " +
+			want: "the store driver is sqlite, and no database file exists where the store settings point, so nothing changed. " +
 				"Give the command the same --config, --profile, --data-dir and --store-dsn that strazad serve runs with",
 		},
 		{
 			name: "a mistyped sqlite path",
 			args: func(dir string) []string { return []string{"--store-dsn", filepath.Join(dir, "typo", "straza.db")} },
-			want: "the store driver is sqlite, and no database file exists where the store settings point, so nothing moved",
+			want: "the store driver is sqlite, and no database file exists where the store settings point, so nothing changed",
 		},
 		{
 			name: "a Postgres DSN with serve's --profile",
@@ -227,5 +230,101 @@ func TestMigrateCommandCreatesNothingAndNamesNoPassword(t *testing.T) {
 				t.Errorf("the command left %s in its working directory", e.Name())
 			}
 		})
+	}
+}
+
+// TestMigrateCommandOpensSealedSeeds pins the rollback to a strazad that
+// reads only raw signing seeds: the step that moves the database to that
+// release's newest migration stores every session and snapshot seed raw
+// again. Without the KEK it says so, creates no key file and leaves the seeds
+// sealed, and a second run with the KEK back finishes the step.
+func TestMigrateCommandOpensSealedSeeds(t *testing.T) {
+	path, head := migratedStore(t)
+	if head != rawSeedSchema+1 {
+		t.Skipf("the newest migration is %d, so one step down does not reach migration %d", head, rawSeedSchema)
+	}
+	dir := filepath.Dir(path)
+	kekFile := filepath.Join(dir, "secret.key")
+	kek, err := secrets.LoadOrCreateKEK(kekFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	st, err := store.Open(config.Config{Store: config.Store{Driver: config.DriverSQLite, DSN: path}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authn.NewTokenService(ctx, st.SigningKeys(), kek, "https://straza.local", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authn.NewSnapshotKeys(ctx, st.SigningKeys(), kek); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	rawSeeds := func() int {
+		t.Helper()
+		st, err := store.Open(config.Config{Store: config.Store{Driver: config.DriverSQLite, DSN: path}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = st.Close() }()
+		raw := 0
+		for _, purpose := range []string{store.KeyPurposeSession, store.KeyPurposeSnapshot} {
+			recs, err := st.SigningKeys().ListByPurpose(ctx, purpose)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, rec := range recs {
+				if len(rec.PrivateKey) == ed25519.SeedSize {
+					raw++
+				}
+			}
+		}
+		return raw
+	}
+	target := strconv.Itoa(rawSeedSchema)
+
+	out, err := runStrazad(t, "migrate", "--to", strconv.Itoa(head), "--data-dir", dir)
+	if err != nil || rawSeeds() != 0 {
+		t.Fatalf("a run that stays at the newest migration: %q, %v, %d raw seeds, want the seeds sealed", out, err, rawSeeds())
+	}
+
+	held := kekFile + ".held"
+	if err := os.Rename(kekFile, held); err != nil {
+		t.Fatal(err)
+	}
+	_, err = runStrazad(t, "migrate", "--to", target, "--data-dir", dir)
+	if err == nil {
+		t.Fatal("the step down without the KEK succeeded")
+	}
+	for _, want := range []string{"is at migration " + target + " now", "still sealed", "secret.key", "run the command again"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal %q does not say %q", err, want)
+		}
+	}
+	if _, statErr := os.Stat(kekFile); !os.IsNotExist(statErr) {
+		t.Error("the command created a key file")
+	}
+	if got := rawSeeds(); got != 0 {
+		t.Errorf("%d seeds are raw after the refused step, want 0", got)
+	}
+
+	if err := os.Rename(held, kekFile); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runStrazad(t, "migrate", "--to", target, "--data-dir", dir)
+	if err != nil {
+		t.Fatalf("the second run with the KEK back: %v", err)
+	}
+	want := "The database is at migration " + target + " already.\n" +
+		"Opened 2 signing keys, because a strazad for migration " + target + " or below cannot read sealed ones.\n"
+	if out != want {
+		t.Errorf("printed %q, want %q", out, want)
+	}
+	if got := rawSeeds(); got != 2 {
+		t.Errorf("%d seeds are raw after the step, want 2", got)
+	}
+	if got := schemaVersionAt(t, path); got != rawSeedSchema {
+		t.Errorf("the database is at migration %d, want %d", got, rawSeedSchema)
 	}
 }

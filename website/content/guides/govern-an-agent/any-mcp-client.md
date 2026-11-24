@@ -11,7 +11,7 @@ weight: 50
 draft: false
 tested:
   version: v1.1.0
-  platform: A Linux container against the demo stack, as a person who holds the seeded developer and demo-tools-readers roles, with a script that signed the approval the way an enabled browser does. The standalone notes come from an earlier run against a standalone server
+  platform: A Linux container against the demo stack, as a person who holds the seeded developer and demo-tools-readers roles, with a script that signed the approval the way a browser set up to approve does. The standalone notes come from an earlier run against a standalone server
   date: 2026-09-28
 applies_to: both
 who: The person at the machine where the MCP client runs
@@ -65,7 +65,7 @@ A short exchange over stdin shows the handshake and the catalog without a client
 {"jsonrpc":"2.0","id":2,"result":{"tools":[{"description":"Echoes back the input string",...,"name":"demo-tools__echo"},...,{"description":"Returns the sum of two numbers",...,"name":"demo-tools__get-sum"},...]}}
 ```
 
-The `tools/list` reply is trimmed here. In full, it lists the tools of every MCP server these roles reach, and a tool a policy denies is absent from it.
+The `tools/list` reply is trimmed here. In full, it lists the tools of every MCP server these roles reach, and a tool a policy denies is absent from it. Each tool keeps the title, description and annotations its server sent, its output schema when that is a plain object schema with no references and no patterns, and its `_meta` without the view link keys `ui` and `ui/resourceUri`.
 
 
 With no MCP servers installed on a standalone server, the second line is `{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}`. The two calls below then need an MCP server you install and give a role access to first, because neither `demo-tools` nor its approval rule exists outside the demo stack.
@@ -135,11 +135,11 @@ curl -s --max-time 130 -X POST http://127.0.0.1:8420/mcp \
 ```
 
 
-While the command waits, open `/self-service/` on the same server in a browser you enabled under **This browser**, and approve the request.
+While the command waits, open `/self-service/` on the same server in a browser you set up to approve, and approve the request. The row's **Approve** opens the request, and **Approve** in it decides.
 
-{{< clicks "Requests" "Waiting" "Approve" "Approve request" >}}
+{{< clicks "Requests" "Waiting" "Approve" "Approve" >}}
 
-[Approve in the browser]({{< relref "guides/approve/browser.md" >}}) shows how to enable the browser, and an enrolled phone shows the same request.
+[Approve in the browser]({{< relref "guides/approve/browser.md" >}}) shows how to set up the browser, and an enrolled phone shows the same request.
 
 {{< see >}}The call returns the moment you decide, with the tool's result.{{< /see >}}
 
@@ -147,7 +147,7 @@ While the command waits, open `/self-service/` on the same server in a browser y
 {"id":4,"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"The sum of 2 and 3 is 5."}]}}
 ```
 
-In the example, a script enrolled a key the way **Enable this browser** does and signed the approval. The request's record then named the person as the decider and `browser` as the channel, with the reason given.
+In the example, a script enrolled a key the way **Set up this browser** does and signed the approval. The request's record then named the person as the decider and `browser` as the channel, with the reason given.
 
 The console refuses a decision on your own request, because an agent on your machine could make the same call. Only a device that signs confirms it, unless the operator sets `approval.unsignedOwnDecisions`. [Approve in the console]({{< relref "guides/approve/console.md" >}}) covers each place a person decides.
 
@@ -176,6 +176,9 @@ curl -s --max-time 15 -X POST http://127.0.0.1:8420/mcp \
 ```
 
 A revoked token is refused too. When a token's attestation is below the configured minimum, the gateway refuses it with the level it needs. Because the upstream credential stays on the server, the gateway governs the call itself, so it holds even for a client you do not control.
+
+
+A request whose `Origin` header names a web page at any address but Straza's own gets 403 before its token is read, so a page in a browser cannot call the gateway. A client that sends no `Origin` header, such as `curl` or `straza mcp`, passes. An `MCP-Protocol-Version` header other than `2025-06-18`, `2025-03-26` or `2024-11-05` gets 400 on every request but `initialize`. A message without an `id`, or with a null one, is never run, not even a `tools/call`, and the gateway answers it with 202 and an empty body.
 
 ## Next {.nostep}
 

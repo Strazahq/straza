@@ -23,7 +23,8 @@ const wantAdminEnrollRefusal = "Straza enrolls an approver phone or browser only
 // user, or does not parse. Each such request chains exactly one
 // enroll-token.refused record, which names the user only when the body
 // names one that exists. A token whose scope lacks the approvals area keeps
-// the admin plane's refusal and chains no record. The self route stays the
+// the admin plane's refusal and chains its one admin.refused record and no
+// enroll-token.refused record. The self route stays the
 // one mint: it binds the token to the caller whatever user the body names,
 // and the store then holds that one enroll token and no other.
 func TestAdminEnrollTokenRefusesEveryCaller(t *testing.T) {
@@ -34,7 +35,7 @@ func TestAdminEnrollTokenRefusesEveryCaller(t *testing.T) {
 	lin := mkHuman(t, app, "lin", EnrollMobileRole)
 	session, _ := checkinToken(t, app, base)
 	tokenID, token := mintConnectToken(t, base, session, "iga-pull", "approvals:write")
-	_, auditor := mintConnectToken(t, base, session, "auditor", "audit:read")
+	auditorID, auditor := mintConnectToken(t, base, session, "auditor", "audit:read")
 
 	reason := "only the person enrolls their own approver phone or browser"
 	record := func(actor, actorID, via string, named ...string) map[string]any {
@@ -66,10 +67,13 @@ func TestAdminEnrollTokenRefusesEveryCaller(t *testing.T) {
 		{"a body naming no user", session, `{}`, refusal, byKim()},
 		{"a body naming an unknown username", session, `{"username":"ghost"}`, refusal, byKim()},
 		{"a malformed body", session, `{"username":"lin"`, refusal, byKim()},
-		{"a token without the approvals area", auditor, `{"username":"lin"}`, "token lacks scope approvals:write", nil},
+		{"a token without the approvals area", auditor, `{"username":"lin"}`, "token lacks scope approvals:write",
+			map[string]any{"action": "admin.refused", "route": "POST /v1/admin/approvers/enroll-token", "httpStatus": 403,
+				"reason": "token lacks scope approvals:write", "actor": "auditor", "actorId": auditorID, "actorVia": "api-token"}},
 	}
+	everyRecord := func(map[string]any) bool { return true }
 	for _, row := range rows {
-		before := len(adminAuditEvents(t, app))
+		since := outboxSince(t, app)
 		code, raw, _ := adminBytes(t, http.MethodPost, base+"/v1/admin/approvers/enroll-token", row.bearer, "application/json", []byte(row.body))
 		var resp map[string]any
 		if err := json.Unmarshal(raw, &resp); err != nil {
@@ -81,18 +85,18 @@ func TestAdminEnrollTokenRefusesEveryCaller(t *testing.T) {
 		if _, minted := resp["enroll_token"]; minted {
 			t.Errorf("%s: the refusal carries an enroll token: %v", row.name, resp)
 		}
-		events := adminAuditEvents(t, app)
+		events := since("straza.audit.admin", everyRecord)
 		if row.want == nil {
-			if len(events) != before {
-				t.Errorf("%s: chained %d admin records, want none: %v", row.name, len(events)-before, events[before:])
+			if len(events) != 0 {
+				t.Errorf("%s: chained %d admin records, want none: %v", row.name, len(events), events)
 			}
 			continue
 		}
-		if len(events) != before+1 {
-			t.Errorf("%s: chained %d admin records, want exactly one: %v", row.name, len(events)-before, events[before:])
+		if len(events) != 1 {
+			t.Errorf("%s: chained %d admin records, want exactly one: %v", row.name, len(events), events)
 			continue
 		}
-		gotJSON, _ := json.Marshal(events[len(events)-1])
+		gotJSON, _ := json.Marshal(events[0])
 		wantJSON, _ := json.Marshal(row.want)
 		if string(gotJSON) != string(wantJSON) {
 			t.Errorf("%s: record\n got %s\nwant %s", row.name, gotJSON, wantJSON)
@@ -101,7 +105,7 @@ func TestAdminEnrollTokenRefusesEveryCaller(t *testing.T) {
 
 	// The self route ignores the user fields of its body and mints for the
 	// caller, and its record names the caller.
-	before := len(adminAuditEvents(t, app))
+	since := outboxSince(t, app)
 	var mint selfMintResponse
 	if code := adminReq(t, http.MethodPost, base+"/v1/approvals/self/enroll-token", session,
 		map[string]any{"channel": "mobile", "user_id": lin.ID, "username": "lin"}, &mint); code != http.StatusOK {
@@ -110,11 +114,13 @@ func TestAdminEnrollTokenRefusesEveryCaller(t *testing.T) {
 	if mint.User.ID != kim.ID || mint.EnrollToken == "" {
 		t.Errorf("self mint bound to %q, want the caller %q: %+v", mint.User.ID, kim.ID, mint)
 	}
-	events := adminAuditEvents(t, app)
+	events := since("straza.audit.admin", everyRecord)
 	want := map[string]any{"action": "enroll-token.create", "target": kim.ID, "user": kim.ID, "username": "kim",
 		"channel": "mobile", "self": true, "actor": "kim", "actorId": kim.ID, "actorVia": "session"}
-	if gotJSON, wantJSON := mustJSON(events[len(events)-1]), mustJSON(want); len(events) != before+1 || string(gotJSON) != string(wantJSON) {
-		t.Errorf("self mint chained %d records, want one\n got %s\nwant %s", len(events)-before, gotJSON, wantJSON)
+	if len(events) != 1 {
+		t.Errorf("self mint chained %d records, want one: %v", len(events), events)
+	} else if gotJSON, wantJSON := mustJSON(events[0]), mustJSON(want); string(gotJSON) != string(wantJSON) {
+		t.Errorf("self mint record\n got %s\nwant %s", gotJSON, wantJSON)
 	}
 
 	// The store holds the self route's token and nothing the refusals made.

@@ -11,10 +11,11 @@ import (
 )
 
 // TestRecheckWhoseRequestEndsSaysWhy pins the reason a recheck records when
-// the request that asked for it ends while a dial to a stopped remote server
-// holds the runtime lock: a sentence that says what failed, why and what to
-// do next, never the bare context error. A recheck whose request stays keeps
-// the sentence of a pass that waited too long to be checked.
+// the request that asked for it ends while another dial to a stopped remote
+// server is in flight: a sentence that says what failed, why and what to
+// do next, never the bare context error. A recheck whose request stays, or
+// ends only after the pass's own deadline, keeps the sentence of a pass that
+// waited too long to be checked.
 func TestRecheckWhoseRequestEndsSaysWhy(t *testing.T) {
 	t.Parallel()
 	ended := regexp.MustCompile(`^the health check of the MCP server a-stopped ended after [0-9.]+m?s with no answer from the server, ` +
@@ -28,7 +29,7 @@ func TestRecheckWhoseRequestEndsSaysWhy(t *testing.T) {
 		leaveAfter time.Duration
 		wantEnded  bool
 	}{
-		{"the request ends after the pass's own deadline", time.Second, true},
+		{"the request ends after the pass's own deadline", time.Second, false},
 		{"the request ends before the pass's own deadline", 100 * time.Millisecond, true},
 		{"the request stays", 0, false},
 	}
@@ -47,8 +48,9 @@ func TestRecheckWhoseRequestEndsSaysWhy(t *testing.T) {
 			mgr.mu.RUnlock()
 			up.stall(t)
 
-			// A call dials the stopped server and holds the runtime lock for
-			// the handshake's bound, the SDK's cancel notice and the DELETE.
+			// A call dials the stopped server on the key the pass pings, and
+			// its dial stays in flight for the handshake's bound, the SDK's
+			// cancel notice and the DELETE.
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()

@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { AlertDialog as AlertDialogPrimitive } from "radix-ui"
 
 import { buttonVariants } from "@/components/ui/button"
+import { useReturnFocus } from "@/lib/return-focus"
 
 function AlertDialog({
   ...props
@@ -46,22 +47,34 @@ function AlertDialogOverlay({
   )
 }
 
-function AlertDialogContent({
-  className,
-  ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
+function AlertDialogContent(props: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
   return (
     <AlertDialogPortal>
       <AlertDialogOverlay />
-      <AlertDialogPrimitive.Content
-        data-slot="alert-dialog-content"
-        className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
-          className
-        )}
-        {...props}
-      />
+      <AlertDialogBody {...props} />
     </AlertDialogPortal>
+  )
+}
+
+// AlertDialogBody is the content itself. The portal draws it only while
+// the dialog is open, so on close it gives the focus back to what held it
+// when the dialog opened.
+function AlertDialogBody({
+  className,
+  onCloseAutoFocus,
+  ...props
+}: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
+  const returnFocus = useReturnFocus(onCloseAutoFocus)
+  return (
+    <AlertDialogPrimitive.Content
+      data-slot="alert-dialog-content"
+      className={cn(
+        "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-md border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+        className
+      )}
+      {...props}
+      onCloseAutoFocus={returnFocus}
+    />
   )
 }
 
@@ -101,7 +114,7 @@ function AlertDialogTitle({
   return (
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
-      className={cn("text-lg font-semibold", className)}
+      className={cn("text-section leading-7 font-semibold", className)}
       {...props}
     />
   )
@@ -114,7 +127,7 @@ function AlertDialogDescription({
   return (
     <AlertDialogPrimitive.Description
       data-slot="alert-dialog-description"
-      className={cn("text-sm text-muted-foreground", className)}
+      className={cn("text-dense text-muted-foreground", className)}
       {...props}
     />
   )

@@ -54,6 +54,9 @@ type User struct {
 	// EntraAgentID is the Entra agent identity an agent acts as at Entra,
 	// empty when it holds none.
 	EntraAgentID string `json:"entra_agent_id,omitempty"`
+	// Notice is the server's sentence when an enable left the user refused,
+	// such as by a lock, and empty otherwise.
+	Notice string `json:"notice,omitempty"`
 }
 
 // Role is the admin API role representation.
@@ -74,14 +77,6 @@ type Assignment struct {
 	SubjectID   string `json:"subject_id"`
 	RoleID      string `json:"role_id"`
 	Origin      string `json:"origin"`
-}
-
-// Pack is the admin API knowledge-pack representation.
-type Pack struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Content string `json:"content"`
 }
 
 // Session is the admin API session representation.

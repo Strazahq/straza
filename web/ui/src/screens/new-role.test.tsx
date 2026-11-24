@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { parse } from "yaml";
 import { NewRole } from "./new-role";
 import type { DraftPublishProps } from "@/components/draft-publish";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ApiError, type AppRow, type Draft, type DraftItemIn, type DraftVerdict, type PackRow, type RoleRow, type ToolRow, activatePolicy, addImplication, applyPolicy, bindPack, catalogPreview, createBinding, createRole, deleteRole, exportRole, getPolicy, listApps, listPacks, listRoles, listTools } from "@/lib/api";
+import { ApiError, type AppRow, type Draft, type DraftItemIn, type DraftVerdict, type RoleRow, type ToolRow, activatePolicy, addImplication, applyPolicy, catalogPreview, createBinding, createRole, exportRole, getPolicy, listApps, listRoles, listTools } from "@/lib/api";
 import { checkDraft, createDraft, listDrafts, publishDraft } from "@/lib/drafts-api";
 import { put } from "@/lib/handoff";
 import { notify } from "@/lib/notify";
@@ -18,7 +18,6 @@ vi.mock("@/lib/api", async (orig) => ({
   listRoles: vi.fn(),
   listApps: vi.fn(),
   listTools: vi.fn(),
-  listPacks: vi.fn(),
   catalogPreview: vi.fn(),
   createRole: vi.fn(),
   createBinding: vi.fn(),
@@ -26,9 +25,7 @@ vi.mock("@/lib/api", async (orig) => ({
   applyPolicy: vi.fn(),
   activatePolicy: vi.fn(),
   addImplication: vi.fn(),
-  bindPack: vi.fn(),
   exportRole: vi.fn(),
-  deleteRole: vi.fn(),
 }));
 vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: vi.fn(), undo: vi.fn() } }));
@@ -66,7 +63,6 @@ const tools: ToolRow[] = [
   { id: "t4", app: "demo-tools", app_id: "app-2", name: "get-sum", description: "Adds two numbers." },
 ];
 
-const pack: PackRow = { id: "p-1", name: "onboarding", version: "3" };
 const made: RoleRow = { id: "r-new", name: "scout-tools-role", kind: "application", server: "scout-tools" };
 
 const EMPTY: DraftVerdict = { ...VERDICT, refused: [], risks: [], warnings: [], unchecked: [], passed: [], info: [], gains: [], needs: [], risk_digest: "" };
@@ -93,7 +89,12 @@ const steps = () =>
     .getAllByRole("listitem")
     .map((li) => (li.textContent || "").replace(/^[0-9]/, ""));
 const rail = (server: string) => screen.getByRole("radio", { name: "server " + server });
-const pick = (kind: string) => userEvent.click(screen.getByRole("radio", { name: "kind " + kind }));
+// KIND_CARD is each kind card's own name, which is its radio's name.
+const KIND_CARD: Record<string, string> = { application: "Application role", business: "Business role", approver: "Approver role" };
+const pick = (kind: string) => userEvent.click(screen.getByRole("radio", { name: KIND_CARD[kind] }));
+// forward presses the foot's button that moves on, whose name says the
+// step it leads to.
+const forward = () => userEvent.click(foot().getByRole("button", { name: /^Next: / }));
 const landed = () => Array.from(document.querySelectorAll("[data-landed] li")).map((li) => li.textContent || "");
 // nameBox is the free name of a business or an approver role, suffixBox
 // the word an application role's name takes after its server's prefix.
@@ -109,7 +110,7 @@ async function open() {
       <NewRole />
     </TooltipProvider>,
   );
-  await screen.findByRole("radio", { name: "kind application" });
+  await screen.findByRole("radio", { name: "Application role" });
   await waitFor(() => expect(document.querySelector("[data-name-preview], [data-no-server]")).toBeTruthy());
 }
 
@@ -123,7 +124,7 @@ async function named(word = "role") {
 // toAccess walks an application role to its Access step.
 async function toAccess(word = "role") {
   await named(word);
-  await click("Next");
+  await forward();
   await heading("Access");
 }
 
@@ -132,7 +133,7 @@ const tick = (tool: string) => userEvent.click(screen.getByRole("checkbox", { na
 
 // hold asks for approval on one tool of the open server.
 const hold = (tool: string) =>
-  userEvent.click(within(document.querySelector('[data-tool="' + tool + '"]') as HTMLElement).getByRole("radio", { name: "require approval" }));
+  userEvent.click(within(document.querySelector('[data-tool="' + tool + '"]') as HTMLElement).getByRole("radio", { name: "Needs approval" }));
 
 describe("the New role wizard", () => {
   beforeEach(() => {
@@ -140,7 +141,6 @@ describe("the New role wizard", () => {
     vi.mocked(listRoles).mockResolvedValue(roles);
     vi.mocked(listApps).mockResolvedValue(apps);
     vi.mocked(listTools).mockResolvedValue(tools);
-    vi.mocked(listPacks).mockResolvedValue([]);
     vi.mocked(catalogPreview).mockResolvedValue({ entries: [] });
     vi.mocked(createRole).mockResolvedValue(made);
     vi.mocked(createBinding).mockResolvedValue({ id: "b-1", app: "scout-tools", role: "scout-role", tools: ["search"] });
@@ -148,7 +148,6 @@ describe("the New role wizard", () => {
     vi.mocked(applyPolicy).mockResolvedValue({ name: "scout-role-access", status: "draft" });
     vi.mocked(activatePolicy).mockResolvedValue({});
     vi.mocked(addImplication).mockResolvedValue({ role_id: "r-new", implies_role_id: "r-1" });
-    vi.mocked(bindPack).mockResolvedValue({});
     vi.mocked(exportRole).mockResolvedValue("kind: Role\n");
     vi.mocked(listDrafts).mockResolvedValue({ items: [], next_cursor: "" });
     vi.mocked(checkDraft).mockResolvedValue({ items: [], verdict: EMPTY });
@@ -159,9 +158,10 @@ describe("the New role wizard", () => {
   it("draws each kind card with the kind's own glyph, hidden from assistive technology", async () => {
     await open();
     for (const kind of ["application", "business", "approver"]) {
-      const glyph = screen.getByRole("radio", { name: "kind " + kind }).querySelector('[data-kind-glyph="' + kind + '"]') as HTMLElement;
+      const glyph = screen.getByRole("radio", { name: KIND_CARD[kind] }).querySelector('[data-kind-glyph="' + kind + '"]') as HTMLElement;
       expect(glyph).toBeTruthy();
       expect(glyph.getAttribute("aria-hidden")).toBe("true");
+      expect(screen.getByRole("radio", { name: KIND_CARD[kind] }).querySelector(".font-mono")).toBeNull();
     }
   });
 
@@ -169,21 +169,44 @@ describe("the New role wizard", () => {
     await open();
     expect(steps()).toEqual(["Kind, server and name", "Access", "Review", "Done"]);
     expect(screen.getByRole("heading", { level: 2, name: "Kind, server and name" })).toBeTruthy();
-    expect(screen.getByText("Pick the kind, then the server, then the name. None of them can change later.")).toBeTruthy();
-    expect(screen.getByRole("radio", { name: "kind application" }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.queryByRole("radio", { name: "kind straza" })).toBeNull();
+    expect(screen.getByText("Kind, server and name cannot change later.")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Application role" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByRole("radio", { name: "Straza role" })).toBeNull();
     expect(screen.getByText("Straza roles are not made here.")).toBeTruthy();
 
     await pick("business");
-    expect(steps()).toEqual(["Name and kind", "Compose", "Review", "Done"]);
-    expect(screen.getByText("Pick the kind, then the name. It cannot be renamed later.")).toBeTruthy();
+    expect(steps()).toEqual(["Kind and name", "Compose", "Review", "Done"]);
+    expect(screen.getByText("The name cannot change later.")).toBeTruthy();
     await pick("approver");
-    expect(steps()).toEqual(["Name and kind", "Review", "Done"]);
+    expect(steps()).toEqual(["Kind and name", "Review", "Done"]);
 
     await userEvent.type(nameBox(), "sec-approvers-2");
-    await click("Next");
+    await forward();
     await heading("Review");
-    expect(textOf("[data-approver-next]")).toBe("Name it in a policy's approve.roles; your identity manager assigns who holds it.");
+    expect(textOf("[data-approver-next]")).toBe("Next, name it as the decider in a policy that needs approval.");
+  });
+
+  it("opens under a crumb back to Roles, and names on Next the step it leads to for each kind", async () => {
+    await open();
+    const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(crumbs.textContent).toBe("Straza/Roles/New");
+    await userEvent.click(within(crumbs).getByRole("link", { name: "Roles" }));
+    expect(navigate).toHaveBeenCalledWith("roles", undefined);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("New role");
+    expect(foot().getByRole("button", { name: "Next: Access" })).toBeTruthy();
+    await pick("business");
+    expect(foot().getByRole("button", { name: "Next: Compose" })).toBeTruthy();
+    await pick("approver");
+    expect(foot().getByRole("button", { name: "Next: Review" })).toBeTruthy();
+    await pick("application");
+    await userEvent.type(suffixBox(), "role");
+    await userEvent.click(foot().getByRole("button", { name: "Next: Access" }));
+    await heading("Access");
+    expect(foot().getByRole("button", { name: "Next: Review" })).toBeTruthy();
+    await tick("search");
+    await forward();
+    await heading("Review");
+    expect(foot().queryByRole("button", { name: /^Next/ })).toBeNull();
   });
 
   it("stops on a free name the server already has and offers to open it", async () => {
@@ -193,7 +216,7 @@ describe("the New role wizard", () => {
     expect(textOf('[data-name-check="error"]')).toContain("A role named dev-tools already exists.");
     await click("Open it");
     await screen.findByRole("alertdialog");
-    await click("Discard the answers");
+    await click("Discard");
     expect(navigate).toHaveBeenCalledWith("roles", ["r-1"]);
   });
 
@@ -213,13 +236,13 @@ describe("the New role wizard", () => {
 
     await userEvent.clear(nameBox());
     await userEvent.type(nameBox(), "scout-seat");
-    expect(textOf('[data-name-check="free"]')).toBe("Name available.");
+    expect(textOf('[data-name-check="free"]')).toBe("Name available");
   });
 
   it("keeps Next clickable and names the answer it is missing, checking the stored name", async () => {
     vi.mocked(listRoles).mockResolvedValue(roles.concat({ id: "r-6", name: "scout-tools-readers", kind: "application", server: "scout-tools" }));
     await open();
-    const next = foot().getByRole("button", { name: "Next" });
+    const next = foot().getByRole("button", { name: "Next: Access" });
     expect(next.hasAttribute("disabled")).toBe(false);
     await userEvent.click(next);
     expect(screen.getByText("Name the role.")).toBeTruthy();
@@ -228,7 +251,7 @@ describe("the New role wizard", () => {
 
     await userEvent.type(suffixBox(), "readers");
     expect(textOf('[data-name-check="error"]')).toContain("A role named scout-tools-readers already exists.");
-    await userEvent.click(foot().getByRole("button", { name: "Next" }));
+    await userEvent.click(foot().getByRole("button", { name: "Next: Access" }));
     expect(screen.getByText("Pick another name.")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "Kind, server and name" })).toBeTruthy();
   });
@@ -244,7 +267,7 @@ describe("the New role wizard", () => {
     expect(document.querySelector("[data-switch-warning]")).toBeNull();
 
     await userEvent.type(suffixBox(), "role");
-    await click("Next");
+    await forward();
     await heading("Access");
     await tick("search");
     await click("Back");
@@ -256,31 +279,30 @@ describe("the New role wizard", () => {
     // The other server's ticks are not shown as a count and not granted,
     // and the first step says so under the servers.
     expect(rail("scout-tools").textContent).toContain("3 tools");
-    expect(textOf('[data-switch-warning="scout-tools"]')).toBe("An application role reaches one server: the 1 tool ticked on scout-tools is not given while demo-tools is picked.");
+    expect(textOf('[data-switch-warning="scout-tools"]')).toBe("1 tool ticked on scout-tools is not saved while demo-tools is picked.");
     expect(textOf("[data-name-prefix]")).toBe("demo-tools-");
     await userEvent.click(rail("scout-tools"));
     expect(document.querySelector("[data-switch-warning]")).toBeNull();
-    await click("Next");
+    await forward();
     await heading("Access");
     expect((screen.getByRole("checkbox", { name: "tool search" }) as HTMLInputElement).checked).toBe(true);
   });
 
   it("names the picked server on the Access step and lists no server there", async () => {
     await toAccess();
-    expect(textOf("[data-access-server]")).toBe("scout-tools-role reaches scout-tools. To pick another server, go back to the first step.");
-    expect(screen.getByText("Tick the tools, then pick what policy does on a call.")).toBeTruthy();
+    expect(textOf("[data-access-server]")).toBe("To pick another server, go back to the first step.");
     expect(screen.queryByRole("radio", { name: /^server / })).toBeNull();
     expect(document.querySelector('[data-access-editor="scout-tools"]')).toBeTruthy();
   });
 
   it("stops Next on the Access step while no tool is given, and moves on once one is", async () => {
     await toAccess();
-    await click("Next");
+    await forward();
     expect(textOf("[data-access-miss]")).toBe("Tick at least one tool.");
     expect(screen.getByRole("heading", { level: 2, name: "Access" })).toBeTruthy();
     await userEvent.click(screen.getByRole("radio", { name: "Every tool, and tools added later" }));
     expect(document.querySelector("[data-access-miss]")).toBeNull();
-    await click("Next");
+    await forward();
     await heading("Review");
   });
 
@@ -291,11 +313,11 @@ describe("the New role wizard", () => {
     await click("Back");
     await heading("Kind, server and name");
     await userEvent.click(rail("demo-tools"));
-    expect(textOf('[data-switch-warning="scout-tools"]')).toContain("the 2 tools ticked on scout-tools are not given while demo-tools is picked.");
-    await click("Next");
+    expect(textOf('[data-switch-warning="scout-tools"]')).toBe("2 tools ticked on scout-tools are not saved while demo-tools is picked.");
+    await forward();
     await heading("Access");
     await tick("get-sum");
-    await click("Next");
+    await forward();
     await heading("Review");
 
     expect(document.querySelectorAll("[data-server-band]").length).toBe(1);
@@ -321,9 +343,9 @@ describe("the New role wizard", () => {
   it("says so on the first step when no server serves a tool, and stops Next there", async () => {
     vi.mocked(listTools).mockResolvedValue([]);
     await open();
-    expect(textOf("[data-no-server]")).toContain("No MCP server is running with tools.");
+    expect(textOf("[data-no-server]")).toBe("No MCP server with tools is running. Add one under MCP servers first.");
     await userEvent.type(suffixBox(), "role");
-    await click("Next");
+    await forward();
     expect(textOf("[data-server-miss]")).toBe("Pick the server to give access to.");
     expect(screen.getByRole("heading", { level: 2, name: "Kind, server and name" })).toBeTruthy();
   });
@@ -336,11 +358,11 @@ describe("the New role wizard", () => {
     await pick("business");
     await userEvent.clear(nameBox());
     await userEvent.type(nameBox(), "dev-seat");
-    await click("Next");
+    await forward();
     await heading("Compose");
-    await click("Next");
+    await forward();
     await heading("Review");
-    expect(landed()).toEqual(["1Create the role dev-seat"]);
+    expect(landed()).toEqual(["1Create dev-seat"]);
     await publish();
     await waitFor(() => expect(checkDraft).toHaveBeenCalled());
     expect(specOf(0)).toEqual({ kind: "business" });
@@ -357,7 +379,7 @@ describe("the New role wizard", () => {
     await open();
     await pick("business");
     await userEvent.type(nameBox(), "dev-seat");
-    await click("Next");
+    await forward();
     await heading("Compose");
     expect(screen.getAllByRole("checkbox").map((b) => b.getAttribute("aria-label"))).toEqual(["role dev-tools"]);
     expect(screen.getByText("Nothing yet. Compose an application role and its servers appear here.")).toBeTruthy();
@@ -367,7 +389,7 @@ describe("the New role wizard", () => {
     expect(textOf('[data-reach-pill="demo-tools"]')).toContain("2 tools via dev-tools");
     expect(textOf('[data-reach-pill="midpoint"]')).toContain("1 tool via dev-tools");
 
-    await click("Next");
+    await forward();
     await heading("Review");
     expect(textOf("[data-composes]")).toBe("dev-tools");
   });
@@ -377,7 +399,7 @@ describe("the New role wizard", () => {
     await open();
     await pick("business");
     await userEvent.type(nameBox(), "jira-team");
-    await click("Next");
+    await forward();
     await heading("Compose");
     expect(screen.getAllByRole("checkbox").map((b) => b.getAttribute("aria-label"))).toEqual(["role dev-tools", "role mcp-admin-finance-jira"]);
 
@@ -385,29 +407,9 @@ describe("the New role wizard", () => {
     // A role that carries no tool is never asked what its sessions reach, so
     // the step says nothing about a tool set it could not read.
     expect(catalogPreview).not.toHaveBeenCalled();
-    await click("Next");
+    await forward();
     await heading("Review");
     expect(textOf("[data-composes]")).toBe("mcp-admin-finance-jira");
-  });
-
-  it("has no Packs step without a pack", async () => {
-    await toAccess();
-    expect(steps()).toEqual(["Kind, server and name", "Access", "Review", "Done"]);
-    expect(screen.queryByRole("switch", { name: /^pack / })).toBeNull();
-  });
-
-  it("adds the Packs step and a Packs row on Review when a pack exists", async () => {
-    vi.mocked(listPacks).mockResolvedValue([pack]);
-    await toAccess();
-    await tick("search");
-    await waitFor(() => expect(steps()).toEqual(["Kind, server and name", "Access", "Knowledge packs", "Review", "Done"]));
-    await click("Next");
-    await heading("Knowledge packs");
-    await userEvent.click(screen.getByRole("switch", { name: "pack onboarding" }));
-    expect(screen.getByText("version 3")).toBeTruthy();
-    await click("Next");
-    await heading("Review");
-    expect(textOf("[data-packs-row]")).toBe("onboarding");
   });
 
   it("reviews the reach per server, the numbered rows and the one-line command", async () => {
@@ -415,7 +417,7 @@ describe("the New role wizard", () => {
     await tick("search");
     await tick("summarize");
     await hold("summarize");
-    await click("Next");
+    await forward();
     await heading("Review");
 
     expect(textOf('[data-server-band="scout-tools"]')).toBe("scout-tools2 of 3 tools");
@@ -427,7 +429,7 @@ describe("the New role wizard", () => {
     expect(landed()).toEqual([
       "1Create scout-tools-role, owned by scout-tools",
       "2Write the new access row: search and summarize (scout-tools)",
-      "3Publish scout-tools-role-access: 1 tool is allowed. 1 needs approval by the person behind the agent within 2 minutes.",
+      "3Publish scout-tools-role-access: 1 tool is allowed. 1 needs approval by the agent's sponsor within 2 minutes.",
     ]);
 
     expect(screen.queryByText(/strazactl roles create/)).toBeNull();
@@ -447,9 +449,9 @@ describe("the New role wizard", () => {
     await click("Back");
     await heading("Kind, server and name");
     await userEvent.type(screen.getByRole("textbox", { name: "Description (optional)" }), "Scout seat.");
-    await click("Next");
+    await forward();
     await heading("Access");
-    await click("Next");
+    await forward();
     await heading("Review");
     expect(textOf('[data-server-band="scout-tools"]')).toBe("scout-toolsevery tool (3), and tools added later");
     expect(document.querySelector("[data-every]")).toBeNull();
@@ -458,45 +460,32 @@ describe("the New role wizard", () => {
     expect(screen.getByText(/strazactl roles create/).textContent).toBe("strazactl roles create scout-tools-role --app scout-tools --tools '*' --description \"Scout seat.\"");
   });
 
-  // withPack walks an application role with summarize held for approval
-  // to its Review, with the onboarding pack picked.
-  const withPack = async () => {
-    vi.mocked(listPacks).mockResolvedValue([pack]);
+  // toReview walks an application role with summarize held for approval
+  // to its Review.
+  const toReview = async () => {
     await toAccess();
     await tick("summarize");
     await hold("summarize");
-    await waitFor(() => expect(steps()).toContain("Knowledge packs"));
-    await click("Next");
-    await heading("Knowledge packs");
-    await userEvent.click(screen.getByRole("switch", { name: "pack onboarding" }));
-    await click("Next");
+    await forward();
     await heading("Review");
   };
 
-  it("publishes the role owned by its server, its row and its rules as one draft, then binds the packs, exports and opens the role", async () => {
-    const order: string[] = [];
-    vi.mocked(publishDraft).mockImplementation(async (id) => { order.push("publishDraft"); return { draft: { ...draftOf(id, []), state: "published" }, snapshot: "3be0a1", servers: [], next: [] }; });
-    vi.mocked(bindPack).mockImplementation(async () => { order.push("bindPack"); return {}; });
-    await withPack();
-    expect(textOf("[data-packs-after]")).toBe("A draft never binds a knowledge pack, so Save and publish binds these once the role is live. After Save draft, bind them on the role's page once the draft is published.");
+  it("publishes the role owned by its server, its row and its rules as one draft, then exports and opens the role", async () => {
+    await toReview();
     await publish();
     await heading("Done");
 
-    await waitFor(() => expect(order).toEqual(["publishDraft", "bindPack"]));
+    expect(publishDraft).toHaveBeenCalledTimes(1);
     expect(kinds()).toEqual(["Role/scout-tools-role:put", "PolicySet/scout-tools-role-access:put"]);
-    // The Role document names its server and no pack: a draft never
-    // applies one.
     expect(specOf(0)).toEqual({ kind: "application", server: "scout-tools", bindings: [{ app: "scout-tools", tools: ["summarize"] }] });
     expect(sent()[1].doc).toContain("- id: scout-tools-approve");
     expect(createDraft).toHaveBeenCalledWith({ items: sent() });
-    expect(bindPack).toHaveBeenCalledWith("p-1", "r-new");
     expect(vi.mocked(notify.undo).mock.calls[0].slice(0, 2)).toEqual(["scout-tools-role is live.", "Undo"]);
     for (const call of direct()) expect(call).not.toHaveBeenCalled();
     await waitFor(() => expect(landed()).toEqual([
       "doneCreate scout-tools-role, owned by scout-tools",
       "doneWrite the new access row: summarize (scout-tools)",
-      "donePublish scout-tools-role-access: 1 needs approval by the person behind the agent within 2 minutes.",
-      "doneBind pack onboarding",
+      "donePublish scout-tools-role-access: 1 needs approval by the agent's sponsor within 2 minutes.",
     ]));
     expect(textOf("[data-live-role]")).toContain("scout-tools-role is live.");
 
@@ -508,14 +497,13 @@ describe("the New role wizard", () => {
     expect(navigate).toHaveBeenCalledWith("roles", ["r-new"]);
   });
 
-  it("adds the role to the working draft with Save draft, and leaves its packs for the role's page", async () => {
-    await withPack();
+  it("adds the role to the working draft with Save draft", async () => {
+    await toReview();
     await click("Save draft");
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("drafts", ["39"]));
     expect(createDraft).toHaveBeenCalledWith({ items: sent(), working: true });
     expect(kinds()).toEqual(["Role/scout-tools-role:put", "PolicySet/scout-tools-role-access:put"]);
     expect(publishDraft).not.toHaveBeenCalled();
-    expect(bindPack).not.toHaveBeenCalled();
   });
 
   // A name that became a live role after the first step read the roles is
@@ -524,7 +512,7 @@ describe("the New role wizard", () => {
     vi.mocked(checkDraft).mockResolvedValue({ items: [{ kind: "Role", name: "scout-tools-role", op: "put", doc: "", existed: true }], verdict: EMPTY });
     await toAccess();
     await tick("search");
-    await click("Next");
+    await forward();
     await heading("Review");
     await click(button);
     await waitFor(() => expect(document.querySelector('[data-save-note="refused"]')).toBeTruthy());
@@ -538,41 +526,16 @@ describe("the New role wizard", () => {
     await open();
     expect(textOf("[data-from-server]")).toBe("Access opens on demo-tools, the server you just added.");
     expect(screen.getByRole("heading", { level: 2, name: "Kind, server and name" })).toBeTruthy();
-    expect(screen.getByRole("radio", { name: "kind application" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Application role" }).getAttribute("aria-checked")).toBe("true");
     expect(rail("demo-tools").getAttribute("aria-checked")).toBe("true");
     expect(rail("scout-tools").getAttribute("aria-checked")).toBe("false");
     expect(textOf("[data-name-prefix]")).toBe("demo-tools-");
     await userEvent.type(suffixBox(), "sum");
-    expect(textOf("[data-name-preview]")).toBe("Application role, stored as demo-tools-sum. An IGA imports it as AR:demo-tools-sum.");
-    await click("Next");
+    expect(textOf("[data-name-stored]")).toBe("stored as demo-tools-sum");
+    expect(textOf("[data-name-iga]")).toBe("identity manager: AR:demo-tools-sum");
+    await forward();
     await heading("Access");
-    expect(textOf("[data-access-server]")).toBe("demo-tools-sum reaches demo-tools. To pick another server, go back to the first step.");
-  });
-
-  it("keeps the published role when a pack is refused, and says where to finish it", async () => {
-    vi.mocked(listPacks).mockResolvedValue([pack]);
-    vi.mocked(bindPack).mockRejectedValue(new ApiError("pack onboarding is retired", 409));
-
-    await toAccess();
-    await tick("search");
-    await waitFor(() => expect(steps()).toContain("Knowledge packs"));
-    await click("Next");
-    await heading("Knowledge packs");
-    await userEvent.click(screen.getByRole("switch", { name: "pack onboarding" }));
-    await click("Next");
-    await heading("Review");
-    await publish();
-    await heading("Done");
-
-    await waitFor(() => expect(landed()).toEqual([
-      "doneCreate scout-tools-role, owned by scout-tools",
-      "doneWrite the new access row: search (scout-tools)",
-      "failedBind pack onboarding",
-    ]));
-    expect(textOf("[data-half-landed]")).toBe("The role exists. 2 of 3 steps landed. Finish under Packs on the role's page.");
-    expect(textOf("[data-refused-error]")).toContain("Binding the pack refused. The server refused it: pack onboarding is retired.");
-    expect(deleteRole).not.toHaveBeenCalled();
-    expect(foot().getByRole("button", { name: "Open scout-tools-role" })).toBeTruthy();
+    expect(textOf("[data-access-server]")).toBe("To pick another server, go back to the first step.");
   });
 
   it("asks before discarding the answers and names what would be lost", async () => {
@@ -580,8 +543,8 @@ describe("the New role wizard", () => {
     await tick("search");
     await click("Cancel");
     const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText("Discard these answers?")).toBeTruthy();
-    expect(within(dialog).getByText("Nothing has been created yet. Discarding loses the name scout-tools-role and the tools ticked on scout-tools.")).toBeTruthy();
+    expect(within(dialog).getByText("Discard the new role?")).toBeTruthy();
+    expect(within(dialog).getByText("Discarding loses the name scout-tools-role and the tools ticked on scout-tools.")).toBeTruthy();
 
     await click("Keep editing");
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
@@ -590,7 +553,7 @@ describe("the New role wizard", () => {
 
     await click("Cancel");
     await screen.findByRole("alertdialog");
-    await click("Discard the answers");
+    await click("Discard");
     expect(navigate).toHaveBeenCalledWith("roles", []);
   });
 
@@ -599,5 +562,43 @@ describe("the New role wizard", () => {
     await click("Cancel");
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(navigate).toHaveBeenCalledWith("roles", []);
+  });
+
+  describe("a door out of the wizard", () => {
+    // The breadcrumb, the rail, the header and the palette call the
+    // router's own navigate, which asks the guard the wizard registers.
+    let router: typeof import("@/lib/router");
+    beforeEach(async () => {
+      router = await vi.importActual<typeof import("@/lib/router")>("@/lib/router");
+      router.replaceAddress(router.pathFor("roles", ["new"]));
+    });
+
+    it("passes while nothing is answered", async () => {
+      await open();
+      act(() => router.navigate("users"));
+      expect(window.location.pathname).toBe(router.pathFor("users"));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    });
+
+    it("asks Cancel's question once a name is typed, and goes on its confirm without asking again", async () => {
+      await named();
+      act(() => router.navigate("users"));
+      const dialog = await screen.findByRole("alertdialog");
+      expect(within(dialog).getByText("Discard the new role?")).toBeTruthy();
+      expect(window.location.pathname).toBe(router.pathFor("roles", ["new"]));
+      await userEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+      expect(window.location.pathname).toBe(router.pathFor("users"));
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it("asks Cancel's question when the back link is pressed with a name typed", async () => {
+      await named();
+      vi.mocked(navigate).mockImplementationOnce(router.navigate);
+      await userEvent.click(screen.getByRole("link", { name: "Back to Roles" }));
+      const dialog = await screen.findByRole("alertdialog");
+      expect(within(dialog).getByText("Discard the new role?")).toBeTruthy();
+      expect(window.location.pathname).toBe(router.pathFor("roles", ["new"]));
+    });
   });
 });

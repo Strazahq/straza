@@ -62,12 +62,12 @@ func TestAccessRisks(t *testing.T) {
 	}{
 		{"a held role reaches tools that run with no gate", "", []Item{gainRole("readers", "    kind: application\n    bindings:\n        - app: github\n          tools: ['*']\n")}, []string{
 			"access.tools-later Role/readers (tick) readers will reach every tool on github, including tools the server adds later. | get_me | *",
-			"access.ungated Role/readers (typed readers) delete_repo and push_files on github will run for holders of readers with no rule gating it. | github/delete_repo, github/push_files | github/delete_repo, github/push_files"}},
+			"access.ungated Role/readers (typed readers) delete_repo and push_files on github will run with no approval for holders of readers. | github/delete_repo, github/push_files | github/delete_repo, github/push_files"}},
 		{"a role nobody holds raises nothing", "", []Item{gainRole("github-writers", "    kind: application\n    server: github\n    bindings:\n        - app: github\n          tools: ['*']\n")}, []string{}},
 		{"a held role reaches a gated tool", "", []Item{gainRole("readers", "    kind: application\n    bindings:\n        - app: github\n          tools: [get_me, push_files]\n"),
 			{Kind: KindPolicySet, Name: "readers-access", Op: OpPut, Doc: gainSet("readers-access", "{ roles: [readers] }",
 				"    - id: hold-push\n      tools: [mcp.call]\n      toolNames: { allow: [push_files] }\n      mode: approve\n      approve: { roles: [sec-approvers] }\n")}}, []string{
-			"access.gated Role/readers (tick) readers will reach push_files on github, each call a hold, up to 90 seconds, decided by sec-approvers. | - | github/push_files=a hold, up to 90 seconds, decided by sec-approvers"}},
+			"access.gated Role/readers (tick) readers will reach push_files on github, and each call needs approval. | - | github/push_files=a hold, up to 90 seconds, decided by sec-approvers"}},
 		{"a gate grows looser for every holder", "", []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: ticket}}, []string{
 			"policy.guardrail-changed PolicySet/dev-access (tick) Rule hold-push of dev-access will gate mcp.call with a ticket good for 1 day, decided by sec-approvers where today it is " + hold + ". | " +
 				refOf(t, devAccess, "hold-push") + " | " + refOf(t, ticket, "hold-push"),
@@ -76,10 +76,10 @@ func TestAccessRisks(t *testing.T) {
 		{"a deny that goes away", "", []Item{devAccessWith("    - id: no-delete\n      tools: [mcp.call]\n      toolNames: { deny: [delete_repo] }\n", "")}, []string{
 			"policy.guardrail-changed PolicySet/dev-access (typed dev-access) dev-access will stop denying mcp.call as rule no-delete does today, because this draft changes the rule. | " +
 				refOf(t, devAccess, "no-delete") + " | no-delete@removed",
-			"access.deny-removed Role/dev (tick) No rule will refuse delete_repo on github for dev any more. It will run. | github/delete_repo=denied by rule no-delete of dev-access | github/delete_repo",
-			"access.ungated Role/dev (typed dev) delete_repo on github will run for holders of dev with no rule gating it, where today denied by rule no-delete of dev-access. | github/delete_repo=denied by rule no-delete of dev-access | github/delete_repo",
-			"access.deny-removed Role/engineering (tick) No rule will refuse delete_repo on github for engineering any more. It will run. | github/delete_repo=denied by rule no-delete of dev-access | github/delete_repo",
-			"access.ungated Role/engineering (typed engineering) delete_repo on github will run for holders of engineering with no rule gating it, where today denied by rule no-delete of dev-access. | github/delete_repo=denied by rule no-delete of dev-access | github/delete_repo"}},
+			"access.deny-removed Role/dev (tick) No rule will deny delete_repo on github for dev. After publishing, each call runs. | github/delete_repo=denied by rule no-delete of dev-access | github/delete_repo",
+			"access.ungated Role/dev (typed dev) delete_repo on github will run with no approval for holders of dev, where today each call is denied by rule no-delete of dev-access. | github/delete_repo=denied by rule no-delete of dev-access | github/delete_repo",
+			"access.deny-removed Role/engineering (tick) No rule will deny delete_repo on github for engineering. After publishing, each call runs. | github/delete_repo=denied by rule no-delete of dev-access | github/delete_repo",
+			"access.ungated Role/engineering (typed engineering) delete_repo on github will run with no approval for holders of engineering, where today each call is denied by rule no-delete of dev-access. | github/delete_repo=denied by rule no-delete of dev-access | github/delete_repo"}},
 		{"a requester who may approve their own call", "", []Item{devAccessWith("timeoutSeconds: 120", "timeoutSeconds: 120, selfApproval: true")}, []string{
 			"policy.guardrail-changed PolicySet/dev-access (typed dev-access) Rule hold-push of dev-access will gate mcp.call with " + hold + " or the requester where today it is " + hold + ". | " +
 				refOf(t, devAccess, "hold-push") + " | " + refOf(t, strings.Replace(devAccess, "timeoutSeconds: 120", "timeoutSeconds: 120, selfApproval: true", 1), "hold-push"),
@@ -141,10 +141,10 @@ func TestServerRisks(t *testing.T) {
 				"server.new-host App/github (tick) github will be reached at api.githubcopilot.com, a host no server uses today. | api.github.com/mcp | api.githubcopilot.com/mcp"}},
 		{"a new server at a metadata address", appItem("meta"), remote("http://169.254.169.254/latest"), []string{
 			"server.new-host App/meta (tick) meta will be reached at 169.254.169.254, a host no server uses today. | - | 169.254.169.254/latest",
-			"server.unusual-host App/meta (typed 169.254.169.254) meta is reached at 169.254.169.254, a cloud metadata address, where Straza's own requests reach what they should not. Straza does not dial such an address, so the server would stay degraded until its address changes. | - | 169.254.169.254 cloud metadata"}},
+			"server.unusual-host App/meta (typed 169.254.169.254) meta is reached at 169.254.169.254, a cloud metadata address that Straza's own requests should not reach. Straza does not dial such an address, so the server would stay degraded until its address changes. | - | 169.254.169.254 cloud metadata"}},
 		{"a new server at a punycode name", appItem("puny"), remote("https://xn--mnchen-3ya.de/mcp"), []string{
 			"server.new-host App/puny (tick) puny will be reached at xn--mnchen-3ya.de, a host no server uses today. | - | xn--mnchen-3ya.de/mcp",
-			"server.unusual-host App/puny (typed xn--mnchen-3ya.de) puny is reached at xn--mnchen-3ya.de, a name with a punycode label that reads m\u00fcnchen.de, where Straza's own requests reach what they should not. | - | xn--mnchen-3ya.de punycode"}},
+			"server.unusual-host App/puny (typed xn--mnchen-3ya.de) puny is reached at xn--mnchen-3ya.de, a name with a punycode label that reads m\u00fcnchen.de. | - | xn--mnchen-3ya.de punycode"}},
 		{"a path moved on the same host", appItem("github"), github(func(a *App) { a.URL = "https://api.github.com:8443/v2/mcp" }), []string{
 			"server.new-host App/github (tick) The address of github moves to :8443/v2/mcp on the same host. | api.github.com/mcp | api.github.com:8443/v2/mcp"}},
 		{"agents use the shared account", appItem("github"), github(func(a *App) { a.Credential, a.Agents = CredentialToken, AgentsShared }), []string{
@@ -159,7 +159,7 @@ func TestServerRisks(t *testing.T) {
 				"server.exposure-wider App/jira (tick) jira will offer more of its tools, among them delete_issue. | create_issue | *"}},
 		{"a caller's own token becomes a shared account", appItem("jira"),
 			with(remote("https://jira.example.com/mcp"), func(a *App) { a.Credential, a.Exposure = credentialStatic, []string{"create_issue"} }), []string{
-				"server.shared-account App/jira (tick) Calls to jira will use one shared account instead of each person's own sign-in, so jira sees one identity. | token | shared"}},
+				"server.shared-account App/jira (tick) Calls to jira will use one shared account instead of each person's own sign-in. | token | shared"}},
 		{"a server removed", Item{Kind: KindApp, Name: "github", Op: OpRemove}, App{}, []string{
 			"server.removal App/github (typed github) Publishing removes github: its access rows, its stored secrets and every person's connection go, with the roles it owns and its admin role. | fp-App/github | removed"}},
 	}
@@ -212,7 +212,7 @@ func TestPolicyRisks(t *testing.T) {
 				"policy.require-looser PolicySet/posture (tick) Rule managed of posture will no longer require attestation managed. Rule managed of posture will no longer require a device certificate." +
 					" | managed: a device certificate; managed: attestation managed | managed: attestation advisory; managed: none"}},
 		{"an allow of a local tool where the deployment denies by default", nil, true, []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: shell}}, []string{
-			"policy.local-allow PolicySet/dev-access (tick) Rule allow-shell of dev-access allows shell.exec on managed machines, where this deployment denies it by default. | - | allow-shell: shell.exec"}},
+			"policy.local-allow PolicySet/dev-access (tick) Rule allow-shell of dev-access allows shell commands on managed machines. This deployment denies those calls by default. | - | allow-shell: shell.exec"}},
 		{"the same allow where the deployment allows by default", nil, false, []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: shell}}, []string{}},
 	}
 	for _, tc := range cases {
@@ -334,6 +334,7 @@ func TestAgentGuardrailAtEveryInstant(t *testing.T) {
 			w := gainWorld()
 			tc.live(&w)
 			d := agentDraftOf(w, tc.items...)
+			acceptedWhereRefused(t, w, d, CheckInput{Proposer: ciBot, Now: checkNow})
 			v := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow})
 			if len(v.Refused) > 0 {
 				t.Fatalf("refused: %q", findingLines(v.Refused))
@@ -384,14 +385,13 @@ func TestRoleEditorGateRaisesNothing(t *testing.T) {
 
 // TestAgentGuardrailAddedGates pins how an added gate is judged: a gate
 // added for a local tool the deployment denies by default turns a denied
-// call into a held or checked one, so it widens, and an agent may not add
-// one to a set that binds it. A gate on mcp.call narrows, because the
-// gateway enforces MCP calls where the access row grants the tool.
+// call into a held or checked one, so it widens, and an agent that adds
+// one to a set that binds it raises agent.guardrail for a person to
+// accept. A gate on mcp.call narrows, because the gateway enforces MCP
+// calls where the access row grants the tool.
 func TestAgentGuardrailAddedGates(t *testing.T) {
 	t.Parallel()
-	refused := func(clause string) []string {
-		return []string{"agent.guardrail PolicySet/dev-access dev-access applies to you, and this draft " + clause + ". An agent's draft may not change what binds the agent."}
-	}
+	accepted := func(clause string) []string { return []string{guardLoosened("dev-access", clause)} }
 	cases := []struct {
 		name string
 		deny bool
@@ -399,9 +399,9 @@ func TestAgentGuardrailAddedGates(t *testing.T) {
 		want []string
 	}{
 		{"the role editor's approval of an MCP tool", true, editorGate, []string{}},
-		{"an approval of a local tool the deployment denies", true, gateRule("hold-shell", policy.ModeApprove, "shell.exec", "tool.pre"), refused("adds or widens rule hold-shell")},
-		{"a confirmation of a local tool the deployment denies", true, gateRule("ask-shell", policy.ModeConfirm, "shell.exec", "permission.request"), refused("adds or widens rule ask-shell")},
-		{"a classifier for a local tool the deployment denies", true, gateRule("scan-write", policy.ModeClassify, "file.write", "tool.pre"), refused("adds or widens rule scan-write")},
+		{"an approval of a local tool the deployment denies", true, gateRule("hold-shell", policy.ModeApprove, "shell.exec", "tool.pre"), accepted("adds or widens rule hold-shell")},
+		{"a confirmation of a local tool the deployment denies", true, gateRule("ask-shell", policy.ModeConfirm, "shell.exec", "permission.request"), accepted("adds or widens rule ask-shell")},
+		{"a classifier for a local tool the deployment denies", true, gateRule("scan-write", policy.ModeClassify, "file.write", "tool.pre"), accepted("adds or widens rule scan-write")},
 		{"a server check for a local tool the deployment allows", false, gateRule("check-shell", policy.ModeServerCheck, "shell.exec", "tool.pre"), []string{}},
 		{"an approval after the call, which blocks nothing", true, gateRule("hold-after", policy.ModeApprove, "shell.exec", "tool.post"), []string{}},
 	}
@@ -411,13 +411,11 @@ func TestAgentGuardrailAddedGates(t *testing.T) {
 			if tc.deny {
 				w.LocalToolDefault = policy.EffectDeny
 			}
-			v := Check(w, agentDraftOf(w, Item{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: devAccess + tc.rule}), CheckInput{Proposer: ciBot, Now: checkNow})
-			got := findingLines(v.Refused)
-			if got == nil {
-				got = []string{}
-			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("Refused\n got %q\nwant %q", got, tc.want)
+			d := agentDraftOf(w, Item{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: devAccess + tc.rule})
+			acceptedWhereRefused(t, w, d, CheckInput{Proposer: ciBot, Now: checkNow})
+			v := Check(w, d, CheckInput{Proposer: ciBot, Now: checkNow})
+			if got := only(riskLines(v.Risks), codeAgentGuardrail); len(v.Refused) > 0 || !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("refused %q, agent.guardrail risks\n got %q\nwant %q", findingLines(v.Refused), got, tc.want)
 			}
 		})
 	}
@@ -440,14 +438,14 @@ func TestAddedGateRisks(t *testing.T) {
 		want  string
 	}{
 		{"an approval of an MCP tool raises nothing", true, gateRule("hold-me", policy.ModeApprove, "mcp.call", "tool.pre"), false, ""},
-		{"an approval of a local tool", true, gateRule("hold-shell", policy.ModeApprove, "shell.exec", "tool.pre"), false, say("hold-shell", "shell.exec", "a person approves it")},
+		{"an approval of a local tool", true, gateRule("hold-shell", policy.ModeApprove, "shell.exec", "tool.pre"), false, say("hold-shell", "shell commands", "a person approves it")},
 		{"a confirmation", true, gateRule("ask-shell", policy.ModeConfirm, "shell.exec, file.write", "tool.pre"), false,
-			say("ask-shell", "file.write and shell.exec", "the requester confirms it")},
-		{"a classifier", true, gateRule("scan", policy.ModeClassify, "shell.exec", "tool.pre"), false, say("scan", "shell.exec", "a classifier allows it")},
-		{"a server check", true, gateRule("check", policy.ModeServerCheck, "net.fetch", "tool.pre"), false, say("check", "net.fetch", "the server allows it")},
+			say("ask-shell", "file writes and shell commands", "the requester confirms it")},
+		{"a classifier", true, gateRule("scan", policy.ModeClassify, "shell.exec", "tool.pre"), false, say("scan", "shell commands", "a classifier allows it")},
+		{"a server check", true, gateRule("check", policy.ModeServerCheck, "net.fetch", "tool.pre"), false, say("check", "network fetches", "the server allows it")},
 		{"a classifier of every tool", true, gateRule("scan-all", policy.ModeClassify, "shell.exec, file.read, file.write, file.edit, net.fetch, task.spawn, other", "tool.pre"), false,
 			say("scan-all", "every local tool kind", "a classifier allows it")},
-		{"an agent's gate in a set that does not bind it", true, gateRule("hold-shell", policy.ModeApprove, "shell.exec", "tool.pre"), true, say("hold-shell", "shell.exec", "a person approves it")},
+		{"an agent's gate in a set that does not bind it", true, gateRule("hold-shell", policy.ModeApprove, "shell.exec", "tool.pre"), true, say("hold-shell", "shell commands", "a person approves it")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -494,10 +492,10 @@ func TestPlainHTTPRisk(t *testing.T) {
 		want       []string
 	}{
 		{"a call over plain http", "https://api.github.com/mcp", "http://api.github.com/mcp", CredentialNone, []string{
-			"server.plain-http App/github (typed api.github.com) github will be reached at api.github.com over plain http, where it used https, so every call travels unencrypted." +
+			"server.plain-http App/github (typed api.github.com) github will be reached over plain http at api.github.com, not https. Every call travels unencrypted." +
 				" | https://api.github.com/mcp | http://api.github.com/mcp"}},
 		{"a credential over plain http", "https://api.github.com/mcp", "http://api.github.com/mcp", CredentialOAuth, []string{
-			"server.plain-http App/github (typed api.github.com) github will be reached at api.github.com over plain http, where it used https, so every caller's sign-in and every call travel unencrypted." +
+			"server.plain-http App/github (typed api.github.com) github will be reached over plain http at api.github.com, not https. Every call and every caller's sign-in travel unencrypted." +
 				" | https://api.github.com/mcp | http://api.github.com/mcp"}},
 		{"a move from http to https", "http://api.github.com/mcp", "https://api.github.com/mcp", CredentialOAuth, []string{}},
 	}
@@ -573,10 +571,12 @@ func TestGuardrailRisks(t *testing.T) {
 }
 
 // TestAgentOwnReach pins agent.own-reach: an agent's draft may narrow what
-// its roles reach, and may not widen it at any instant the agent's roles
-// change. A role the agent will hold counts once its assignment starts,
-// directly or through a business role that implies it, and a role whose
-// assignment ends no longer lends its reach after that end.
+// its roles reach, and one that widens it at any instant the agent's roles
+// change raises a risk a person accepts by typing the server's name, which
+// a check nobody reviews refuses. A role the agent will hold counts once
+// its assignment starts, directly or through a business role that implies
+// it, and a role whose assignment ends no longer lends its reach after
+// that end.
 func TestAgentOwnReach(t *testing.T) {
 	t.Parallel()
 	tickets := gainRole("jira-tickets", "    kind: application\n    server: jira\n    bindings:\n        - app: jira\n          tools: [create_issue]\n")
@@ -610,30 +610,22 @@ func TestAgentOwnReach(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, refusalsOnly := range []bool{false, true} {
-				w := gainWorld()
-				if tc.live != nil {
-					tc.live(&w)
-				}
-				v := Check(w, agentDraftOf(w, tc.items...), CheckInput{Proposer: ciBot, Now: checkNow, RefusalsOnly: refusalsOnly})
-				got := findingLines(v.Refused)
-				if got == nil {
-					got = []string{}
-				}
-				if !reflect.DeepEqual(got, tc.want) {
-					t.Errorf("RefusalsOnly %v: Refused\n got %q\nwant %q", refusalsOnly, got, tc.want)
-				}
+			w := gainWorld()
+			if tc.live != nil {
+				tc.live(&w)
 			}
+			ownReachBothWays(t, w, agentDraftOf(w, tc.items...), CheckInput{Proposer: ciBot, Now: checkNow}, tc.want)
 		})
 	}
 }
 
 // TestAgentOwnReachReadsTheCoversLine pins agent.own-reach on a server that
-// pins an object type: an agent whose role covers two repos may not make it
-// reach every repo or another repo, through its covers line, a re-pin, a
-// moved argument, an unpin, or a glob that meets a tool the pinned block
-// names. It may name a covered repo by its new name, narrow its role, keep
-// the pinned block as it is, and widen a role it does not hold.
+// pins an object type: an agent whose role covers two repos raises it when
+// its draft makes the role reach every repo or another repo, through its
+// covers line, a re-pin, a moved argument, an unpin, or a glob that meets
+// a tool the pinned block names. Naming a covered repo by its new name,
+// narrowing its role, keeping the pinned block as it is and widening a
+// role it does not hold raise nothing.
 func TestAgentOwnReachReadsTheCoversLine(t *testing.T) {
 	t.Parallel()
 	line := func(words string) []string { return []string{"agent.own-reach App/ghapp " + ownReach(words)} }
@@ -688,33 +680,24 @@ func TestAgentOwnReachReadsTheCoversLine(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, refusalsOnly := range []bool{false, true} {
-				w := coversWorld()
-				w.Holders["ghapp-write-payments"] = []Holder{ciBot}
-				w.Apps["ghapp"].Pinned.Argument = map[string]string{"pr_create": "repo", "issue_create": "repo"}
-				acc := w.Access["ghapp-write-payments"]
-				acc.Covers = &Scope{Objects: []ObjectRef{{Value: "Strazahq/pay-api", ID: "101"}, {Value: "Strazahq/pay-web", ID: "102"}}}
-				w.Access["ghapp-write-payments"] = acc
-				if tc.live != nil {
-					tc.live(w)
-				}
-				items, in := tc.items, CheckInput{Proposer: ciBot, Now: checkNow, RefusalsOnly: refusalsOnly}
-				if tc.pin != nil {
-					app := w.Apps["ghapp"]
-					next := *app.Pinned
-					next.Reach, next.Argument = maps.Clone(next.Reach), maps.Clone(next.Argument)
-					app.Manifest, app.Pinned = `{"after":true}`, tc.pin(&next)
-					items, in.Apps = append([]Item{appPut("ghapp")}, items...), map[string]App{"ghapp": app}
-				}
-				v := Check(w, agentDraftOf(w, items...), in)
-				got := findingLines(v.Refused)
-				if got == nil {
-					got = []string{}
-				}
-				if !reflect.DeepEqual(got, tc.want) {
-					t.Errorf("RefusalsOnly %v: Refused\n got %q\nwant %q", refusalsOnly, got, tc.want)
-				}
+			w := coversWorld()
+			w.Holders["ghapp-write-payments"] = []Holder{ciBot}
+			w.Apps["ghapp"].Pinned.Argument = map[string]string{"pr_create": "repo", "issue_create": "repo"}
+			acc := w.Access["ghapp-write-payments"]
+			acc.Covers = &Scope{Objects: []ObjectRef{{Value: "Strazahq/pay-api", ID: "101"}, {Value: "Strazahq/pay-web", ID: "102"}}}
+			w.Access["ghapp-write-payments"] = acc
+			if tc.live != nil {
+				tc.live(w)
 			}
+			items, in := tc.items, CheckInput{Proposer: ciBot, Now: checkNow}
+			if tc.pin != nil {
+				app := w.Apps["ghapp"]
+				next := *app.Pinned
+				next.Reach, next.Argument = maps.Clone(next.Reach), maps.Clone(next.Argument)
+				app.Manifest, app.Pinned = `{"after":true}`, tc.pin(&next)
+				items, in.Apps = append([]Item{appPut("ghapp")}, items...), map[string]App{"ghapp": app}
+			}
+			ownReachBothWays(t, w, agentDraftOf(w, items...), in, tc.want)
 		})
 	}
 }
@@ -842,7 +825,7 @@ func TestIdentityScopedSetChangeIsARisk(t *testing.T) {
 	sha := func(text string) string { return sha256Hex(text)[:12] }
 	line := func(set, kinds, before, after string) []string {
 		return []string{codeIdentityScoped + " PolicySet/" + set + " (tick) Straza cannot show who gains through " + set +
-			", because its match selects by " + kinds + ", so check its match by hand. | " + cmp.Or(before, "-") + " | " + after}
+			", because its match selects by " + kinds + ". Check its match by hand. | " + cmp.Or(before, "-") + " | " + after}
 	}
 	for _, tc := range []struct {
 		name string
@@ -872,10 +855,10 @@ func TestIdentityScopedSetChangeIsARisk(t *testing.T) {
 
 // TestAgentIdentityScopedDraftIsRefused pins that an agent's draft stays
 // covered where who gains reads roles only. A set that selects the agent by
-// username, user type or agency mode and takes over a stricter gate is
-// refused by agent.guardrail, read from the rules, and one that opens the
-// built-in app to it by agent.own-reach, read over its whole subject. A set
-// that names another user is not refused, and raises
+// username, user type or agency mode and takes over a stricter gate raises
+// agent.guardrail, read from the rules, and one that opens the built-in
+// app to it agent.own-reach, read over its whole subject. A direct route
+// refuses both. A set that names another user raises neither, and raises
 // policy.identity-scoped-change for the person who publishes.
 func TestAgentIdentityScopedDraftIsRefused(t *testing.T) {
 	t.Parallel()
@@ -884,23 +867,33 @@ func TestAgentIdentityScopedDraftIsRefused(t *testing.T) {
 		"      mode: approve\n      approve: { deciders: [sponsor], class: ticket }\n"
 	ask := "    - id: ask\n      tools: [mcp.call]\n      apps: [straza]\n      toolNames: { allow: [approval_request, approval_await] }\n" +
 		"      mode: approve\n      approve: { roles: [sec-approvers] }\n"
-	takeover := []string{"agent.guardrail PolicySet/a-fast a-fast applies to you, and this draft adds or widens rule fast-push. An agent's draft may not change what binds the agent."}
+	takeover := []string{guardRefusal("a-fast", "adds or widens rule fast-push")}
+	// The takeover is read twice, once from the rules of the set and once
+	// from what the agent reaches after it.
+	accepted := append(ownReachRisks([]string{"agent.own-reach App/github " + ownReach("reach push_files on github under a looser approval")}),
+		guardLoosened("a-fast", "adds or widens rule fast-push"))
+	opened := []string{"agent.own-reach  " + ownReach("reach approval_await and approval_request of the built-in straza MCP server with an approval")}
 	for _, tc := range []struct {
-		match, rules string
-		want         []string
+		match, rules  string
+		direct, risks []string
 	}{
-		{"{ users: [ci-bot] }", fastPush, takeover},
-		{"{ identity: { userType: [agent] } }", fastPush, takeover},
-		{"{ identity: { agencyMode: [autonomous] } }", fastPush, takeover},
-		{"{ identity: { agencyMode: [autonomous] } }", ask, []string{"agent.own-reach  " + ownReach("reach approval_await and approval_request of the built-in straza MCP server with an approval")}},
-		{"{ users: [alice] }", fastPush, nil},
+		{"{ users: [ci-bot] }", fastPush, takeover, accepted},
+		{"{ identity: { userType: [agent] } }", fastPush, takeover, accepted},
+		{"{ identity: { agencyMode: [autonomous] } }", fastPush, takeover, accepted},
+		{"{ identity: { agencyMode: [autonomous] } }", ask, opened, ownReachRisks(opened)},
+		{"{ users: [alice] }", fastPush, nil, nil},
 	} {
 		set := Item{Kind: KindPolicySet, Name: "a-fast", Op: OpPut, Doc: gainSet("a-fast", tc.match, tc.rules)}
+		acceptedWhereRefused(t, w, agentDraftOf(w, set), CheckInput{Proposer: ciBot, Now: checkNow})
 		v := Check(w, agentDraftOf(w, set), CheckInput{Proposer: ciBot, Now: checkNow})
-		if got := findingLines(v.Refused); !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("%s: refused\n got %q\nwant %q", tc.match, got, tc.want)
+		if got := only(riskLines(v.Risks), "agent."); len(v.Refused) > 0 || !sameLines(got, tc.risks) {
+			t.Errorf("%s: refused %q, agent risks\n got %q\nwant %q", tc.match, findingLines(v.Refused), got, tc.risks)
 		}
-		if tc.want == nil && !slices.Contains(codesOf(v.Risks), codeIdentityScoped) {
+		direct := Check(w, agentDraftOf(w, set), CheckInput{Proposer: ciBot, Now: checkNow, Direct: true})
+		if got := findingLines(direct.Refused); !reflect.DeepEqual(got, tc.direct) {
+			t.Errorf("%s on a direct route: refused\n got %q\nwant %q", tc.match, got, tc.direct)
+		}
+		if tc.direct == nil && !slices.Contains(codesOf(v.Risks), codeIdentityScoped) {
 			t.Errorf("%s: risks %q, want policy.identity-scoped-change for the publisher", tc.match, codesOf(v.Risks))
 		}
 	}

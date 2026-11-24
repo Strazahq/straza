@@ -175,6 +175,7 @@ func TestConnectAgentActsOnlyForItself(t *testing.T) {
 			"or ask %[3]s to do this.", actor.Username, target.Username, ask)
 	}
 	const standingReason = "only a person who is the user's sponsor or an administrator can change another user's connection"
+	refusal := func(d map[string]any) bool { return d["action"] == "connection.refused" }
 	actors := []struct {
 		name          string
 		tok           string
@@ -206,14 +207,14 @@ func TestConnectAgentActsOnlyForItself(t *testing.T) {
 		}
 		for _, call := range calls {
 			t.Run(ac.name+" "+call.method+" "+call.path, func(t *testing.T) {
-				before := len(identityActions(t, app, "connection.refused"))
+				since := outboxSince(t, app)
 				var out any
 				code := adminReq(t, call.method, base+call.path, ac.tok, call.body, &out)
 				body, _ := out.(map[string]any)
 				if code != http.StatusForbidden || body["error"] != ac.says {
 					t.Fatalf("= %d %v, want 403 %q", code, out, ac.says)
 				}
-				refused := identityActions(t, app, "connection.refused")[before:]
+				refused := since("straza.identity.updated", refusal)
 				if !call.write {
 					if len(refused) != 0 {
 						t.Errorf("a refused read left records %v, want none", refused)
@@ -253,13 +254,13 @@ func TestConnectAgentActsOnlyForItself(t *testing.T) {
 	}
 	for _, tc := range own {
 		t.Run("an agent "+tc.name, func(t *testing.T) {
-			before := len(identityActions(t, app, "connection.refused"))
+			since := outboxSince(t, app)
 			var out map[string]any
 			code := adminReq(t, tc.method, base+"/v1/connect/"+tc.server, rootTok, tc.body, &out)
 			if code != tc.want || (tc.says != "" && out["error"] != tc.says) {
 				t.Fatalf("= %d %v, want %d %q", code, out, tc.want, tc.says)
 			}
-			refused := identityActions(t, app, "connection.refused")[before:]
+			refused := since("straza.identity.updated", refusal)
 			if tc.says == "" {
 				if len(refused) != 0 {
 					t.Errorf("refusal records %v, want none", refused)

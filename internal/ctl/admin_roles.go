@@ -121,10 +121,21 @@ func (c *Client) Unassign(ctx context.Context, username, roleName string) error 
 	if err := c.Do(ctx, http.MethodGet, "/v1/admin/assignments?subject_kind=user&subject_id="+url.QueryEscape(u.ID), nil, &rows); err != nil {
 		return err
 	}
+	fromEntra := false
 	for _, as := range rows {
-		if as.SubjectKind == "user" && as.SubjectID == u.ID && as.RoleID == role.ID {
-			return c.Do(ctx, http.MethodDelete, "/v1/admin/assignments/"+url.PathEscape(as.ID), nil, nil)
+		if as.SubjectKind != "user" || as.SubjectID != u.ID || as.RoleID != role.ID {
+			continue
 		}
+		// A row from the role's group in Entra is removed in Entra, and the
+		// user may hold a second row that this command can remove.
+		if as.Origin == "entra" {
+			fromEntra = true
+			continue
+		}
+		return c.Do(ctx, http.MethodDelete, "/v1/admin/assignments/"+url.PathEscape(as.ID), nil, nil)
+	}
+	if fromEntra {
+		return fmt.Errorf("%s holds %s as a member of the role's group in Entra, so there is no assignment to remove here. Remove %s from the group in Entra, and Straza ends the assignment within its next pass", username, roleName, username)
 	}
 	return fmt.Errorf("%s does not hold %s directly, so there is no assignment to remove. A role reached through another role goes with that role, so take that role away instead", username, roleName)
 }
@@ -133,67 +144,6 @@ func (c *Client) Unassign(ctx context.Context, username, roleName string) error 
 func (c *Client) Assignments(ctx context.Context) ([]Assignment, error) {
 	var out []Assignment
 	return out, c.Do(ctx, http.MethodGet, "/v1/admin/assignments", nil, &out)
-}
-
-// Packs lists knowledge packs.
-func (c *Client) Packs(ctx context.Context) ([]Pack, error) {
-	var out []Pack
-	return out, c.Do(ctx, http.MethodGet, "/v1/admin/packs", nil, &out)
-}
-
-// CreatePack creates a knowledge pack.
-func (c *Client) CreatePack(ctx context.Context, name, version, content string) (Pack, error) {
-	var out Pack
-	return out, c.Do(ctx, http.MethodPost, "/v1/admin/packs", map[string]string{
-		"name": name, "version": version, "content": content,
-	}, &out)
-}
-
-// BindPack binds a pack to a role (both by name).
-func (c *Client) BindPack(ctx context.Context, packName, roleName string) error {
-	packs, err := c.Packs(ctx)
-	if err != nil {
-		return err
-	}
-	var pack Pack
-	for _, p := range packs {
-		if p.Name == packName {
-			pack = p
-		}
-	}
-	if pack.ID == "" {
-		return fmt.Errorf("no pack named %q", packName)
-	}
-	role, err := c.RoleByName(ctx, roleName)
-	if err != nil {
-		return err
-	}
-	return c.Do(ctx, http.MethodPost, "/v1/admin/packs/"+url.PathEscape(pack.ID)+"/bindings",
-		map[string]string{"role_id": role.ID}, nil)
-}
-
-// UnbindPack removes a pack-role binding (both by name). The wire's binding
-// id is the role id (openapi 0.58.0: the edge has no row id of its own).
-func (c *Client) UnbindPack(ctx context.Context, packName, roleName string) error {
-	packs, err := c.Packs(ctx)
-	if err != nil {
-		return err
-	}
-	var pack Pack
-	for _, p := range packs {
-		if p.Name == packName {
-			pack = p
-		}
-	}
-	if pack.ID == "" {
-		return fmt.Errorf("no pack named %q", packName)
-	}
-	role, err := c.RoleByName(ctx, roleName)
-	if err != nil {
-		return err
-	}
-	return c.Do(ctx, http.MethodDelete,
-		"/v1/admin/packs/"+url.PathEscape(pack.ID)+"/bindings/"+url.PathEscape(role.ID), nil, nil)
 }
 
 // UpdateRole sets a role's description by name; the name and the kind are

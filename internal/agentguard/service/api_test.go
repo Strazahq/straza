@@ -61,6 +61,7 @@ type sessionCall struct {
 	caller  Caller
 	harness localapi.Harness
 	start   bool
+	folder  string
 }
 
 type decideCall struct {
@@ -110,8 +111,18 @@ func (f *apiDouble) Status(c Caller) localapi.Status {
 }
 
 func (f *apiDouble) Session(ctx context.Context, c Caller, h localapi.Harness, start bool) (Session, error) {
+	return f.answer(ctx, sessionCall{caller: c, harness: h, start: start})
+}
+
+func (f *apiDouble) Start(ctx context.Context, c Caller, h localapi.Harness, folder string) (Session, error) {
+	return f.answer(ctx, sessionCall{caller: c, harness: h, start: true, folder: folder})
+}
+
+// answer records call and answers it as Session and Start do.
+func (f *apiDouble) answer(ctx context.Context, call sessionCall) (Session, error) {
+	start := call.start
 	f.mu.Lock()
-	f.sessionCalls = append(f.sessionCalls, sessionCall{caller: c, harness: h, start: start})
+	f.sessionCalls = append(f.sessionCalls, call)
 	s, err, live := f.session, f.sessionErr, f.liveErr
 	f.mu.Unlock()
 	if !hold(ctx, f.sessionWait) {
@@ -355,8 +366,8 @@ func TestAPIRefusalsAreSentences(t *testing.T) {
 }
 
 // TestAPISessionsAnswer pins POST sessions: a start through the credential
-// half, the capture directive the session's policy gives its subject, the
-// packs and Reused, and the credential half's refusals passed through.
+// half, the capture directive the session's policy gives its subject,
+// Reused, and the credential half's refusals passed through.
 func TestAPISessionsAnswer(t *testing.T) {
 	eng := apiEngine(t, `
 apiVersion: straza.dev/v1beta1
@@ -371,7 +382,7 @@ spec:
 	t.Run("a started session", func(t *testing.T) {
 		s := liveSession()
 		text := "the server's start text"
-		s.Packs, s.Reused, s.StartText = []localapi.Pack{{Name: "p", Version: "1", Content: "c", Checksum: "x"}}, true, &text
+		s.Reused, s.StartText = true, &text
 		f := &apiDouble{session: s, engine: eng}
 		a, _ := testAPI(f, false)
 		w := serveAs(a, "1000", http.MethodPost, localapi.RouteSessions, localapi.SessionRequest{Harness: h})
@@ -380,9 +391,9 @@ spec:
 			t.Fatalf("answer = %d %q", w.Code, w.Body.String())
 		}
 		if ans.SessionID != "s-1" || ans.User != "kim" || ans.SnapshotID != "snap-1" || ans.ServerURL != s.ServerURL ||
-			!ans.Capture.Conversations || ans.Capture.Mode != policy.CaptureModeRedact || len(ans.Packs) != 1 || !ans.Reused ||
+			!ans.Capture.Conversations || ans.Capture.Mode != policy.CaptureModeRedact || !ans.Reused ||
 			ans.StartText == nil || *ans.StartText != text {
-			t.Errorf("answer = %+v, want the session, its packs, its start text and the redact capture directive", ans)
+			t.Errorf("answer = %+v, want the session, its start text and the redact capture directive", ans)
 		}
 		if c := f.sessionCalls; len(c) != 1 || !c[0].start || c[0].harness != h || c[0].caller.UID != "1000" {
 			t.Errorf("Session calls = %+v, want one start for uid 1000 and the window", c)

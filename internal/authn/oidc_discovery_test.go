@@ -54,11 +54,11 @@ func newSplitIDP(t *testing.T, docIssuer string, status int) *splitIDP {
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	tokens, err := NewTokenService(ctx, s.SigningKeys(), splitCanonical, 0)
+	tokens, err := NewTokenService(ctx, s.SigningKeys(), sharedSealer(), splitCanonical, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	atDial, err := NewTokenService(ctx, s.SigningKeys(), srv.URL+"/realms/x", 0)
+	atDial, err := NewTokenService(ctx, s.SigningKeys(), sharedSealer(), srv.URL+"/realms/x", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

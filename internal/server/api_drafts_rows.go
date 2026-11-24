@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -97,7 +98,7 @@ func waiveVerdict(w drafts.World, d drafts.Draft, v drafts.Verdict, waived []dra
 	refused, again := waivedIntake(w, d, v.Refused)
 	v.Refused = append([]drafts.Finding{}, refused...)
 	for _, f := range append(again, waived...) {
-		if !slices.Contains(v.Warnings, f) {
+		if !slices.ContainsFunc(v.Warnings, func(g drafts.Finding) bool { return reflect.DeepEqual(g, f) }) {
 			v.Warnings = append(v.Warnings, f)
 		}
 	}

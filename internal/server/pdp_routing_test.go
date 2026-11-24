@@ -152,7 +152,7 @@ func TestSponsorlessPersonGetsAConfirmHold(t *testing.T) {
 	if dec.Effect != policy.EffectDeny || id == "" {
 		t.Fatalf("resolve = %+v id=%q, want a deny that carries a record", dec, id)
 	}
-	for _, want := range []string{"this call needs the requester's confirmation", "This browser", "(ref " + id + ")"} {
+	for _, want := range []string{"this call needs the requester's confirmation", "Requests on the self-service page", "(ref " + id + ")"} {
 		if !strings.Contains(dec.Reason, want) {
 			t.Errorf("hold reason %q missing %q", dec.Reason, want)
 		}
@@ -175,7 +175,7 @@ func TestSponsorlessPersonGetsAConfirmHold(t *testing.T) {
 	if dec2.Effect != policy.EffectDeny || id2 == "" {
 		t.Fatalf("ticket resolve = %+v id=%q, want a deny that carries a ticket", dec2, id2)
 	}
-	if !strings.Contains(dec2.Reason, "This browser") || strings.Contains(dec2.Reason, "the console") {
-		t.Errorf("ticket reason %q must name This browser and leave the console out", dec2.Reason)
+	if !strings.Contains(dec2.Reason, "Requests on the self-service page") || strings.Contains(dec2.Reason, "the console") {
+		t.Errorf("ticket reason %q must name Requests on the self-service page and leave the console out", dec2.Reason)
 	}
 }

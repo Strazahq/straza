@@ -1,17 +1,19 @@
 import * as React from "react";
 import { Columns3Icon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Pill } from "@/components/chip";
 import { FetchError } from "@/components/error-state";
 import { PageHead } from "@/components/page-head";
 import { KindGlyph } from "@/components/role-kind";
+import { Segmented } from "@/components/segmented";
 import { type Chip, HIDEABLE, RolesTable, serverChips } from "@/components/roles-table";
 import { type ApiError, type AppRow, type BindingRow, type PoliciesAnswer, type RoleRow, type ToolRow, exportRole, listApps, listBindings, listPolicies, listRoles, listTools, query } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { navigate } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
-import { type Kind, CATEGORY, COLUMN, COLUMNS, EXPORT_FAILED, KINDS, NEW_ROLE, READING_ROLES, RELOAD, RELOAD_LIST, RELOAD_NOW, ROW_HINT, SEARCH_ROLES_BY, SHOWN_COLUMNS, SUBJECT_POLICY_COUNTS, SUBJECT_REACH, SUBJECT_ROLES, countWords, isMinted, kindOf, notReadRefused, roleFileName, sideRefused } from "@/lib/role-words";
+import { type Kind, CATEGORY, COLUMN, COLUMNS, KINDS, NEW_ROLE, READING_ROLES, RELOAD, RELOAD_LIST, RELOAD_NOW, SEARCH_ROLES_BY, SUBJECT_POLICY_COUNTS, SUBJECT_REACH, SUBJECT_ROLES, countWords, exportFailed, isMinted, kindOf, roleFileName, sideRefused } from "@/lib/role-words";
 import { readFailed } from "@/lib/say";
 import { downloadText } from "@/lib/utils";
 
@@ -34,13 +36,13 @@ const settled = <T,>(r: PromiseSettledResult<T>) => (r.status === "fulfilled" ? 
 // sideProblem words a failed side read, or "" for one that landed and for a
 // 401, which hands the session back to the sign-in lane on its own. A 403
 // is this session's standing, which a reload does not change, so it names
-// the grant the read needs in the words the table's cells use.
-function sideProblem(subject: string, grant: string, ...results: PromiseSettledResult<unknown>[]): Problem {
+// the area the read needs in one sentence.
+function sideProblem(subject: string, area: string, ...results: PromiseSettledResult<unknown>[]): Problem {
   for (const r of results) {
     if (r.status !== "rejected") continue;
     const err = r.reason as ApiError;
     if (err.status === 401) break;
-    if (err.status === 403) return { subject, detail: notReadRefused(grant), refused: true };
+    if (err.status === 403) return { subject, detail: sideRefused(subject, area), refused: true };
     return { subject, detail: readFailed(subject, err), refused: false };
   }
   return { subject, detail: "", refused: false };
@@ -79,8 +81,8 @@ export function Roles() {
     const totals: Record<string, number> = {};
     for (const t of tools || []) totals[t.app] = (totals[t.app] || 0) + 1;
     const facets = answer ? Object.fromEntries((answer.roles || []).map((f) => [f.role, f.sets])) : null;
-    const reach = sideProblem(SUBJECT_REACH, "apps:read", bindingsR, toolsR, appsR);
-    const facetProblem = sideProblem(SUBJECT_POLICY_COUNTS, "policy:read", policiesR);
+    const reach = sideProblem(SUBJECT_REACH, "apps", bindingsR, toolsR, appsR);
+    const facetProblem = sideProblem(SUBJECT_POLICY_COUNTS, "policy", policiesR);
 
     if (rolesR.status === "rejected") {
       const err = rolesR.reason as ApiError;
@@ -112,7 +114,7 @@ export function Roles() {
       const text = await exportRole(role.id);
       downloadText(roleFileName(role.name), text, "application/yaml");
     } catch (e) {
-      notify.failed(readFailed(EXPORT_FAILED, e as ApiError));
+      notify.failed(exportFailed(role.name, e as ApiError));
     }
   };
 
@@ -136,9 +138,9 @@ export function Roles() {
         }
       />
       <div className="flex flex-col gap-5 px-6 py-5">
-        {state.kind === "loading" && <p className="text-sm text-muted-foreground">{READING_ROLES}</p>}
+        {state.kind === "loading" && <p className="text-dense text-muted-foreground">{READING_ROLES}</p>}
         {state.kind === "error" && (
-          <div className="rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-sm text-foreground" role="alert">
+          <div className="rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-dense text-foreground" role="alert">
             {state.message}{" "}
             <Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={() => void load()}>{RELOAD_NOW}</Button>
           </div>
@@ -147,7 +149,7 @@ export function Roles() {
           <>
             {state.problem && <FetchError subject={route.label} detail={state.problem} lastRead={state.lastRead} />}
             {side.problems.map((p) => p.refused
-              ? <p key={p.subject} role="status" className="border-l-[3px] border-border bg-card px-4 py-3 text-sm leading-relaxed text-text-2" data-side-refused><span className="font-semibold text-foreground">{sideRefused(p.subject)}</span>{" " + p.detail}</p>
+              ? <p key={p.subject} role="status" className="border-l-[3px] border-border bg-card px-4 py-3 text-dense leading-relaxed text-text-2" data-side-refused>{p.detail}</p>
               : <FetchError key={p.subject} subject={p.subject} detail={p.detail} lastRead={lastRead} />)}
             <div className="flex flex-wrap items-center gap-2">
               <Input
@@ -157,14 +159,12 @@ export function Roles() {
                 aria-label={SEARCH_ROLES_BY}
                 className="h-9 w-full max-w-xs"
               />
-              <span className="text-[13px] text-muted-foreground" data-row-count>{countWords(shownRoles.length)}</span>
+              <span className="text-caption text-muted-foreground" data-row-count>{countWords(shownRoles.length)}</span>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" className="ml-auto h-9"><Columns3Icon /> {COLUMNS}</Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>{SHOWN_COLUMNS}</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
                   {HIDEABLE.filter((id) => category !== "all" || ["reach", "holders", "policies"].includes(id)).map((id) => (
                     <DropdownMenuCheckboxItem key={id} checked={!hidden[id]} onCheckedChange={(v) => setHidden((h) => ({ ...h, [id]: !v }))}>
                       {COLUMN[id]}
@@ -174,9 +174,12 @@ export function Roles() {
               </DropdownMenu>
             </div>
 
-            <div className="role-categories" role="group" aria-label="Role category">
-              {(["all", ...KINDS] as const).map((kind) => <Button key={kind} type="button" variant="outline" size="sm" aria-pressed={category === kind} onClick={() => setCategory(kind)}>{kind === "all" ? "All roles" : CATEGORY[kind].title}<span>{kind === "all" ? shownRoles.length : shownRoles.filter((r) => kindOf(r) === kind).length}</span></Button>)}
-            </div>
+            <Segmented
+              label="Role category"
+              value={category}
+              onChange={setCategory}
+              options={(["all", ...KINDS] as const).map((kind) => ({ value: kind, label: kind === "all" ? "All roles" : CATEGORY[kind].title, count: kind === "all" ? shownRoles.length : shownRoles.filter((r) => kindOf(r) === kind).length }))}
+            />
             {category === "all" && <section data-category="all"><RolesTable kind="all" rows={shownRoles} chips={side.chips} administers={side.administers} facets={side.facets} refused={side.refused} hidden={hidden} onOpen={(r) => navigate("roles", [r.id])} onExport={(r) => void onExport(r)} /></section>}
             {KINDS.filter((kind) => kind === category).map((kind) => {
               const all = shownRoles.filter((r) => kindOf(r) === kind);
@@ -193,13 +196,12 @@ export function Roles() {
                   <div className="flex flex-wrap items-baseline gap-2">
                     <div className="flex items-center gap-2">
                       <KindGlyph mark={kind} />
-                      <h2 className="text-[15px] font-semibold text-foreground">{CATEGORY[kind].title}</h2>
+                      <h2 className="text-body font-semibold text-foreground">{CATEGORY[kind].title}</h2>
                     </div>
-                    <span className="font-mono text-[13px] text-muted-foreground">{all.length}</span>
-                    <span className="text-[13px] text-muted-foreground">{CATEGORY[kind].line}</span>
+                    <Pill data-category-count>{all.length}</Pill>
                   </div>
                   {all.length === 0 ? (
-                    <p className="rounded-md border border-border bg-card px-4 py-3 text-sm text-muted-foreground" data-category-empty={kind}>
+                    <p className="rounded-md border border-border bg-card px-4 py-3 text-dense text-muted-foreground" data-category-empty={kind}>
                       {searching ? CATEGORY[kind].noMatch : CATEGORY[kind].none}
                     </p>
                   ) : (
@@ -219,7 +221,6 @@ export function Roles() {
                 </section>
               );
             })}
-            <p className="text-[13px] text-muted-foreground">{ROW_HINT}</p>
           </>
         )}
       </div>

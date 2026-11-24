@@ -476,7 +476,8 @@ func movedRefusal(row store.DraftRow, sent int) string {
 // who holds straza-draft-config submits through that door too, and
 // straza__draft_status reads that verdict.
 func stampOf(d drafts.Draft, v drafts.Verdict, at time.Time) store.DraftCheck {
-	counts, _ := json.Marshal(map[string]int{"refused": len(v.Refused), "risks": len(v.Risks), "warnings": len(v.Warnings), "unchecked": len(v.Unchecked)})
+	counts, _ := json.Marshal(map[string]int{"refused": len(v.Refused), "risks": len(v.Risks), "warnings": len(v.Warnings), "unchecked": len(v.Unchecked),
+		"passed": len(v.Passed)})
 	check := store.DraftCheck{Snapshot: v.Snapshot, Counts: string(counts), At: at}
 	if d.Door == drafts.DoorAgent || slices.ContainsFunc(d.Authors, func(p drafts.Principal) bool { return p.Agent }) {
 		if agent, err := json.Marshal(v.ForAgent()); err == nil {

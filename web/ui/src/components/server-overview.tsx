@@ -4,20 +4,21 @@ import { HelpTip } from "@/components/help-tip";
 import type { ChangeWhich } from "@/components/server-change-sheet";
 import { OriginLine } from "@/components/origin-line";
 import { NOT_KNOWN, useCredentialFacts } from "@/components/server-credential";
-import { RoleChip } from "@/components/status-badge";
-import { WordBadge } from "@/components/users-table";
+import { Tag } from "@/components/chip";
+import { KIND_ICON } from "@/components/kind-icon";
 import { type ApiError, type AppRow, type Credential, listUsers, query } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { joinArgs } from "@/lib/manifest-edit";
 import {
   ABOVE_IT, ACCESS_CHECK, ADMIN_ROLE_HELP, ADMIN_ROLE_HINT, CARD, CHECKS_LABEL, HOLDERS_NEXT, HOLDERS_NOT_READ, HOLDERS_NOT_READABLE, NOBODY_HOLDS, OTHER_ADMIN_ROLES, POLICY_CHECK,
-  adminRoleSub, exposeWords, rpsWords, timeoutWords, transportWords,
+  exposeWords, rpsWords, timeoutWords, transportWords,
 } from "@/lib/server-words";
+import { type UserKind, userKind } from "@/lib/user-look";
 
 // CODE is the mono chip for an identifier, a path or a command in a row.
-export const CODE = "rounded bg-muted px-1 font-mono text-[13px] text-foreground";
-const DT = "pt-0.5 text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground";
-const DD = "m-0 min-w-0 text-sm leading-relaxed text-text-2 [overflow-wrap:anywhere]";
+export const CODE = "rounded-md bg-muted px-1 font-mono text-caption text-foreground";
+const DT = "pt-0.5 text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground";
+const DD = "m-0 min-w-0 text-dense leading-relaxed text-text-2 [overflow-wrap:anywhere]";
 
 // Fact is one labeled row of a card: the label, the value, and optional
 // lines under the value, muted (sub) or in the warn hue (warn).
@@ -32,8 +33,8 @@ export function Facts({ facts }: { facts: Fact[] }) {
           <dt className={DT}>{f.label}</dt>
           <dd className={DD}>
             {f.body}
-            {f.sub && <span className="block text-[13px] text-muted-foreground" data-sub>{f.sub}</span>}
-            {f.warn && <span className="block text-[13px] text-warn" data-warn>{f.warn}</span>}
+            {f.sub && <span className="block text-caption text-muted-foreground" data-sub>{f.sub}</span>}
+            {f.warn && <span className="block text-caption text-warn" data-warn>{f.warn}</span>}
           </dd>
         </React.Fragment>
       ))}
@@ -63,7 +64,7 @@ export function Address({ url }: { url: string }) {
 type EnvVar = { name?: string; value?: string };
 
 // envBody lists a command's environment as name=value, then the variable
-// the credential is sent in, whose value is the sealed secret.
+// the credential is sent in, whose value is the stored secret.
 function envBody(env: unknown[] | undefined, cred: Credential | undefined): React.ReactNode {
   const vars = (env || []) as EnvVar[];
   const sealed = cred && cred.kind && cred.kind !== "none" && cred.inject?.as === "env" ? cred.inject.name || "" : "";
@@ -71,7 +72,7 @@ function envBody(env: unknown[] | undefined, cred: Credential | undefined): Reac
   return (
     <span className="flex flex-col items-start gap-1">
       {vars.map((v, i) => <code key={i} className={CODE}>{(v.name || "") + "=" + (v.value || "")}</code>)}
-      {sealed && <span><code className={CODE}>{sealed}</code>{" from the stored secret, sealed."}</span>}
+      {sealed && <span><code className={CODE}>{sealed}</code>{" = the stored secret"}</span>}
     </span>
   );
 }
@@ -88,11 +89,12 @@ function connectionFacts(app: AppRow): Fact[] {
   if (kind === "command" && cmd) {
     facts.push({ label: "Executable", body: <code className={CODE}>{cmd.exec || ""}</code> });
     facts.push({ label: "Arguments", body: cmd.args && cmd.args.length ? <code className={CODE}>{joinArgs(cmd.args)}</code> : "None." });
-    facts.push({ label: "Working directory", body: cmd.workdir ? <code className={CODE}>{cmd.workdir}</code> : "Not set, so strazad's own." });
+    facts.push({ label: "Working directory", body: cmd.workdir ? <code className={CODE}>{cmd.workdir}</code> : "Straza's own." });
     facts.push({ label: "Environment", body: envBody(cmd.env, app.manifest?.straza?.credential) });
   }
   if (kind === "oci" && rt?.oci?.image) facts.push({ label: "Image", body: <code className={CODE}>{rt.oci.image}</code> });
-  facts.push({ label: "Version", body: app.version || "Not recorded.", sub: "The server's own version, from its registry record." });
+  // The wizard writes version 0 for a server with no registry record.
+  facts.push({ label: "Version", body: app.version && app.version !== "0" ? app.version : "Not recorded." });
   if (kind === "remote" && rt?.remote?.auth === "passthrough") facts.push({ label: "Authentication", body: "Straza adds no credential: auth passthrough is set in its manifest." });
   return facts;
 }
@@ -100,18 +102,22 @@ function connectionFacts(app: AppRow): Fact[] {
 // settingsFacts is what Straza lets through: the description, the tools it
 // exposes, the rate limit and the per-call timeout. A cpu or mem limit in
 // the manifest is not shown, since no runtime applies it.
-function settingsFacts(app: AppRow, upstreamTimeout: number | null): Fact[] {
+function settingsFacts(app: AppRow, upstreamTimeout: number | null, remoteRps: number | null): Fact[] {
   if (!app.manifest) return [{ label: "Manifest", body: NOT_KNOWN }];
   const s = app.manifest.straza;
+  const remote = (s?.runtime?.kind || app.runtime) === "remote";
   return [
     { label: "Description", body: app.manifest.metadata?.description || "None." },
     { label: "Tools exposed", body: exposeWords(s?.exposure?.tools) },
-    { label: "Rate limit", body: rpsWords(s?.limits?.rps) },
+    { label: "Rate limit", body: rpsWords(s?.limits?.rps, remote, remoteRps) },
     { label: "Per-call timeout", body: timeoutWords(s?.limits?.timeoutSeconds, upstreamTimeout) },
   ];
 }
 
-type Holders = { kind: "reading" } | { kind: "ready"; names: string[] } | { kind: "closed" } | { kind: "failed" };
+// Holder is one holder of the admin role: the name and the kind its tag
+// shows.
+type Holder = { name: string; kind: UserKind };
+type Holders = { kind: "reading" } | { kind: "ready"; names: Holder[] } | { kind: "closed" } | { kind: "failed" };
 
 // useHolders reads who holds the server's admin role, one page of a
 // hundred the way the role page's Holders tab reads it. A session that may
@@ -123,7 +129,7 @@ function useHolders(role: string | undefined): Holders {
     if (!role) { setState({ kind: "failed" }); return; }
     setState({ kind: "reading" });
     listUsers(query({ role, sort: "name", order: "asc", limit: 100 })).then(
-      (page) => { if (alive) setState({ kind: "ready", names: page.items.map((u) => u.username) }); },
+      (page) => { if (alive) setState({ kind: "ready", names: page.items.map((u) => ({ name: u.username, kind: userKind(u) })) }); },
       (e) => { if (alive) setState({ kind: (e as ApiError).status === 403 ? "closed" : "failed" }); },
     );
     return () => { alive = false; };
@@ -131,36 +137,35 @@ function useHolders(role: string | undefined): Holders {
   return state;
 }
 
-// adminRoleFacts is who may change the server: the minted role with its
-// badge and help, its holders, and the two roles above every server.
+// adminRoleFacts is who may change the server: the minted role as a tag
+// with its kind's icon and its help, its holders as tags with their kind's
+// icon, and the two roles above every server as tags.
 function adminRoleFacts(app: AppRow, holders: Holders): Fact[] {
   const role = app.admin_role;
-  const count = holders.kind === "ready" ? holders.names.length : null;
   const roleBody = role
-    ? <span className="inline-flex flex-wrap items-center gap-1.5"><RoleChip name={role} /><WordBadge word="server admin role" tone="teal" attr="data-minted" /><HelpTip label="admin role" text={ADMIN_ROLE_HELP} /></span>
+    ? <span className="inline-flex flex-wrap items-center gap-1.5"><Tag icon={KIND_ICON["role-server-admin"]}>{role}</Tag><HelpTip label="admin role" text={ADMIN_ROLE_HELP} /></span>
     : NOT_KNOWN;
   const holdersBody = holders.kind === "ready"
-    ? holders.names.length ? holders.names.map((n) => <code key={n} className={CODE + " mr-1"}>{n}</code>) : NOBODY_HOLDS
+    ? holders.names.length ? <span className="inline-flex flex-wrap gap-1">{holders.names.map((h) => <Tag key={h.name} icon={KIND_ICON[h.kind]} agent={h.kind === "agent"} data-holder={h.name}>{h.name}</Tag>)}</span> : NOBODY_HOLDS
     : holders.kind === "closed" ? HOLDERS_NOT_READABLE : holders.kind === "failed" ? HOLDERS_NOT_READ : "Reading.";
   return [
-    { label: "Admin role", body: roleBody, sub: role ? adminRoleSub(count) : undefined },
+    { label: "Admin role", body: roleBody },
     { label: "Holders", body: holdersBody, sub: holders.kind === "ready" && holders.names.length ? HOLDERS_NEXT : undefined },
-    { label: OTHER_ADMIN_ROLES, body: ABOVE_IT },
+    { label: OTHER_ADMIN_ROLES, body: <span className="inline-flex flex-wrap gap-1">{ABOVE_IT.map((r) => <Tag key={r} icon={KIND_ICON["role-straza"]}>{r}</Tag>)}</span> },
   ];
 }
 
-type CardProps = { title: string; hint: string; which: ChangeWhich | "admin-role"; onChange: ((which: ChangeWhich) => void) | null; children: React.ReactNode };
+type CardProps = { title: string; which: ChangeWhich | "admin-role"; onChange: ((which: ChangeWhich) => void) | null; children: React.ReactNode };
 
-// Card is one Overview widget: its header with the title, the hint and the
-// Change button when the console may change the server, then its rows.
-function Card({ title, hint, which, onChange, children }: CardProps) {
+// Card is one Overview widget: its header with the title and the Change
+// button when the console may change the server, then its rows.
+function Card({ title, which, onChange, children }: CardProps) {
   const id = React.useId();
   return (
     <section aria-labelledby={id} className="rounded-md border border-border bg-card" data-card={which}>
       <header className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <div className="min-w-0"><h2 id={id} className="text-sm font-semibold text-foreground">{title}</h2>
-        <p className="mt-1 text-[13px] text-text-2">{hint}</p></div>
-        {onChange && which !== "admin-role" && <Button variant="outline" size="sm" className="ml-auto" aria-label={"Change the " + which} onClick={() => onChange(which)}>Change</Button>}
+        <div className="min-w-0"><h2 id={id} className="text-dense font-semibold text-foreground">{title}</h2></div>
+        {onChange && which !== "admin-role" && <Button variant="outline" size="sm" className="ml-auto" aria-label={"Change " + title.toLowerCase()} onClick={() => onChange(which)}>Change</Button>}
       </header>
       <div className="px-4 py-3">{children}</div>
     </section>
@@ -170,6 +175,7 @@ function Card({ title, hint, which, onChange, children }: CardProps) {
 type Props = {
   app: AppRow;
   upstreamTimeout: number | null;
+  remoteRps: number | null;
   onChange: (which: ChangeWhich) => void;
   onRefused: (err: ApiError) => void;
   onInspectAccess?: () => void;
@@ -183,7 +189,7 @@ type Props = {
 // stored manifest has no Change, because a sheet
 // would have nothing to edit. Administered by is read-only for everyone,
 // because the role is set at the mint and goes with the server.
-export function ServerOverview({ app, upstreamTimeout, onChange, onRefused, onInspectAccess, onTest }: Props) {
+export function ServerOverview({ app, upstreamTimeout, remoteRps, onChange, onRefused, onInspectAccess, onTest }: Props) {
   const credential = useCredentialFacts(app, onRefused);
   const holders = useHolders(app.admin_role);
   const change = !app.manifest ? null : onChange;
@@ -191,23 +197,23 @@ export function ServerOverview({ app, upstreamTimeout, onChange, onRefused, onIn
     <div className="server-overview" data-server-overview>
       <OriginLine object={"App/" + app.name} name={app.name} file={app.file} differs={app.file_differs} />
       <div className="server-overview-cards">
-      <Card title={CARD.connection.title} hint={CARD.connection.hint} which="connection" onChange={change}>
+      <Card title={CARD.connection.title} which="connection" onChange={change}>
         <Facts facts={connectionFacts(app)} />
       </Card>
-      <Card title={CARD.credential.title} hint={CARD.credential.hint} which="credential" onChange={change}>
+      <Card title={CARD.credential.title} which="credential" onChange={change}>
         <Facts facts={credential.facts} />
         {credential.overlay}
       </Card>
       <section className="server-access-guide" aria-label={CHECKS_LABEL}>
-        <div><h2>{ACCESS_CHECK.title}</h2><p>{ACCESS_CHECK.line}</p>{onInspectAccess && <Button variant="outline" size="sm" onClick={onInspectAccess}>{ACCESS_CHECK.action}</Button>}</div>
-        <div><h2>{POLICY_CHECK.title}</h2><p>{POLICY_CHECK.line}</p>{onTest && <Button variant="outline" size="sm" onClick={onTest}>{POLICY_CHECK.action}</Button>}</div>
+        <div><h2>{ACCESS_CHECK.title}</h2>{onInspectAccess && <Button variant="outline" size="sm" onClick={onInspectAccess}>{ACCESS_CHECK.action}</Button>}</div>
+        <div><h2>{POLICY_CHECK.title}</h2>{onTest && <Button variant="outline" size="sm" onClick={onTest}>{POLICY_CHECK.action}</Button>}</div>
       </section>
-      <Card title={CARD.settings.title} hint={CARD.settings.hint} which="settings" onChange={change}>
-        <Facts facts={settingsFacts(app, upstreamTimeout)} />
+      <Card title={CARD.settings.title} which="settings" onChange={change}>
+        <Facts facts={settingsFacts(app, upstreamTimeout, remoteRps)} />
       </Card>
-      <Card title={CARD.admin.title} hint={CARD.admin.hint} which="admin-role" onChange={null}>
+      <Card title={CARD.admin.title} which="admin-role" onChange={null}>
         <Facts facts={adminRoleFacts(app, holders)} />
-        <p className="mt-2.5 text-[13px] text-muted-foreground" data-admin-hint>{ADMIN_ROLE_HINT}</p>
+        <p className="mt-2.5 text-caption text-muted-foreground" data-admin-hint>{ADMIN_ROLE_HINT}</p>
       </Card>
       </div>
     </div>

@@ -6,7 +6,7 @@
     UserType:    strazaUserType / strazaAgencyMode (typing, archetype-sourced:
                                 agent-family archetypes induce weak defaults,
                                 per-user override survives; outbound = plain copy),
-                 strazaOrigin  (Straza user origin: local | scim),
+                 strazaOrigin  (Straza user origin: local | scim | entra),
                  strazaPersona (Straza identity kind: human | nhi; since
                                 scim-profile revision 11 mirrored from the SCIM
                                 extension `kind` on the single account projection),

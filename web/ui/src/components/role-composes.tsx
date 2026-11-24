@@ -1,19 +1,20 @@
 import * as React from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FetchError, RefusedError } from "@/components/error-state";
+import { Pill, Tag } from "@/components/chip";
 import { HelpTip } from "@/components/help-tip";
-import { RoleKindBadge } from "@/components/role-kind";
+import { KIND_ICON } from "@/components/kind-icon";
+import { RoleKindTag } from "@/components/role-kind";
 import { type Built, RoleSaves, liveExport } from "@/components/role-saves";
 import { ListRow, Section } from "@/components/sheet-parts";
-import { RoleChip } from "@/components/status-badge";
 import { type ApiError, type BindingRow, type ImplicationRow, type RoleRow, catalogPreview, removeBinding, removeImplication } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { roleItem } from "@/lib/role-draft";
 import { refused } from "@/lib/say";
-import { CANCEL, COMPOSES_EMPTY, COMPOSE_HELP, COMPOSE_MISSING, COMPOSE_PICK, COMPOSE_ROLE, HOLDERS_REACH, HOLDERS_REACH_HELP, LEGACY_ROWS, NO_COMPOSABLE, REACH_EMPTY, REACH_UNREAD, REMOVE, REMOVE_ACCESS, SUBJECT_COMPOSES, TAB, UNCOMPOSE, accessRemovedToast, composeAdminBody, composeBody, composeTitle, composedToast, isComposable, isGlob, isMinted, reachPill, removeAccessBody, removeAccessTitle, uncomposeBody, uncomposeTitle, uncomposedToast } from "@/lib/role-words";
+import { CANCEL, COMPOSES_EMPTY, COMPOSE_HELP, COMPOSE_MISSING, COMPOSE_PICK, COMPOSE_ROLE, HOLDERS_REACH, HOLDERS_REACH_HELP, KIND_WORD, LEGACY_ROWS, NO_COMPOSABLE, REACH_UNREAD, REMOVE, REMOVE_ACCESS, SUBJECT_COMPOSES, TAB, UNCOMPOSE, accessRemovedToast, composeAdminBody, composeBody, composeTitle, composedToast, isComposable, isGlob, isMinted, kindOf, reachPill, removeAccessBody, removeAccessTitle, uncomposeBody, uncomposeTitle, uncomposedToast } from "@/lib/role-words";
 
 // The Composes tab of a business role: the
 // application roles it holds, and what a holder reaches through them. Tools
@@ -65,7 +66,7 @@ export function RoleComposes({ role, roles, implications, bindings, composeOpen,
     return () => { alive = false; };
   }, [names]);
 
-  const kindOfName = (name: string) => roles.find((r) => r.name === name) || { kind: "application" };
+  const kindWordOf = (name: string) => KIND_WORD[kindOf(roles.find((r) => r.name === name) || { kind: "application" })];
   const legacy = bindings.filter((b) => b.role === role.name);
   const unread = implications.some((i) => previews[i.implies_name] === null);
   const pills: { server: string; via: string; tools: number }[] = [];
@@ -106,19 +107,18 @@ export function RoleComposes({ role, roles, implications, bindings, composeOpen,
   return (
     <div className="flex flex-col gap-4">
       {problem && <FetchError subject={SUBJECT_COMPOSES} detail={problem} lastRead={lastRead} />}
-      {implications.length === 0 && !problem && <p className="text-sm text-muted-foreground">{COMPOSES_EMPTY}</p>}
+      {implications.length === 0 && !problem && <p className="text-dense text-muted-foreground">{COMPOSES_EMPTY}</p>}
       {implications.map((i) => (
         <ListRow
           key={i.implies_id}
           actions={<Button variant="outline" size="sm" className="border-danger text-danger hover:bg-danger-bg" onClick={() => setAsk(i)}>{REMOVE}</Button>}
         >
-          <span data-implies={i.implies_name}><RoleChip name={i.implies_name} /></span>
-          <RoleKindBadge role={kindOfName(i.implies_name)} />
+          <span data-implies={i.implies_name}><RoleKindTag name={i.implies_name} role={roles.find((r) => r.name === i.implies_name)} /></span>
+          <Pill data-kind={kindWordOf(i.implies_name)}>{kindWordOf(i.implies_name)}</Pill>
         </ListRow>
       ))}
 
       <Section title={HOLDERS_REACH} action={<HelpTip label={HOLDERS_REACH} text={HOLDERS_REACH_HELP} />}>
-        {implications.length === 0 && <p className="text-sm text-muted-foreground">{REACH_EMPTY}</p>}
         <div className="flex flex-wrap gap-1.5">
           {pills.map((p) => {
             // The access row behind the pill says whether the tools are
@@ -126,25 +126,25 @@ export function RoleComposes({ role, roles, implications, bindings, composeOpen,
             const b = bindings.find((x) => x.role === p.via && x.app === p.server);
             const glob = !!b && isGlob(b.tools);
             return (
-              <span key={p.server + "/" + p.via} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-sm" data-reach-pill={p.server}>
-                <span className="font-mono text-foreground">{p.server}</span>
-                <span className="text-[13px] text-muted-foreground">{reachPill(p.tools, p.via, glob)}</span>
+              <span key={p.server + "/" + p.via} className="inline-flex max-w-full flex-wrap items-center gap-1" data-reach-pill={p.server}>
+                <Tag icon={KIND_ICON.server}>{p.server}</Tag>
+                <Pill>{reachPill(p.tools, p.via, glob)}</Pill>
               </span>
             );
           })}
         </div>
-        {unread && <p className="text-[13px] text-muted-foreground">{REACH_UNREAD}</p>}
+        {unread && <p className="text-caption text-muted-foreground">{REACH_UNREAD}</p>}
       </Section>
 
       {legacy.length > 0 && (
         <Section title={TAB.access}>
-          <p className="text-[13px] text-warn">{LEGACY_ROWS}</p>
+          <p className="text-caption text-warn">{LEGACY_ROWS}</p>
           {legacy.map((b) => (
             <ListRow
               key={b.id}
               actions={<Button variant="outline" size="sm" className="border-danger text-danger hover:bg-danger-bg" onClick={() => setDrop(b)}>{REMOVE_ACCESS}</Button>}
             >
-              <span className="font-mono text-foreground" data-legacy={b.app}>{b.app}</span>
+              <Tag icon={KIND_ICON.server} data-legacy={b.app}>{b.app}</Tag>
             </ListRow>
           ))}
         </Section>
@@ -168,7 +168,7 @@ export function RoleComposes({ role, roles, implications, bindings, composeOpen,
           {refusal?.subject === UNCOMPOSE && <RefusedError subject={UNCOMPOSE} message={refusal.message} />}
           <AlertDialogFooter>
             <AlertDialogCancel>{CANCEL}</AlertDialogCancel>
-            <AlertDialogAction className="bg-danger text-white hover:bg-danger/90" onClick={(e) => { e.preventDefault(); void uncompose(); }}>{UNCOMPOSE}</AlertDialogAction>
+            <AlertDialogAction className={DANGER_FILL} onClick={(e) => { e.preventDefault(); void uncompose(); }}>{UNCOMPOSE}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -182,7 +182,7 @@ export function RoleComposes({ role, roles, implications, bindings, composeOpen,
           {refusal?.subject === REMOVE_ACCESS && <RefusedError subject={REMOVE_ACCESS} message={refusal.message} />}
           <AlertDialogFooter>
             <AlertDialogCancel>{CANCEL}</AlertDialogCancel>
-            <AlertDialogAction className="bg-danger text-white hover:bg-danger/90" onClick={(e) => { e.preventDefault(); void removeAccess(); }}>{REMOVE_ACCESS}</AlertDialogAction>
+            <AlertDialogAction className={DANGER_FILL} onClick={(e) => { e.preventDefault(); void removeAccess(); }}>{REMOVE_ACCESS}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -241,9 +241,9 @@ function ComposeDialog({ role, roles, implications, open, onOpenChange, onCompos
             </Select>
             <HelpTip label={COMPOSE_ROLE} text={COMPOSE_HELP} />
           </div>
-          {free.length === 0 && <p className="text-sm text-muted-foreground">{NO_COMPOSABLE}</p>}
-          {missing && <p className="text-[13px] text-danger">{COMPOSE_MISSING}</p>}
-          {other && <p className="text-sm text-text-2">{isMinted(other) ? composeAdminBody(role.name, other.name) : composeBody(role.name, other.name)}</p>}
+          {free.length === 0 && <p className="text-dense text-muted-foreground">{NO_COMPOSABLE}</p>}
+          {missing && <p className="text-caption text-danger">{COMPOSE_MISSING}</p>}
+          {other && <p className="text-dense text-text-2">{isMinted(other) ? composeAdminBody(role.name, other.name) : composeBody(role.name, other.name)}</p>}
         </div>
         <RoleSaves
           role={role.name}

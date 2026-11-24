@@ -1,0 +1,51 @@
+{
+ "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#directoryObjects",
+ "value": [
+  {
+   "@odata.type": "#microsoft.graph.user",
+   "id": "1a1a1a1a-3333-4333-8333-333333333333",
+   "businessPhones": [],
+   "displayName": "pat",
+   "givenName": null,
+   "jobTitle": null,
+   "mail": null,
+   "mobilePhone": null,
+   "officeLocation": null,
+   "preferredLanguage": null,
+   "surname": null,
+   "userPrincipalName": "pat@lab.example"
+  },
+  {
+   "@odata.type": "#microsoft.graph.agentUser",
+   "id": "2a2a2a2a-5555-4555-8555-555555555555",
+   "deletedDateTime": null,
+   "businessPhones": [],
+   "displayName": "demo-agent user",
+   "givenName": null,
+   "jobTitle": null,
+   "mail": null,
+   "mobilePhone": null,
+   "officeLocation": null,
+   "preferredLanguage": null,
+   "surname": null,
+   "userPrincipalName": "demo-agent@lab.example",
+   "identityParent": {
+    "id": "3a3a3a3a-6666-4666-8666-666666666666"
+   }
+  },
+  {
+   "@odata.type": "#microsoft.graph.user",
+   "id": "1b1b1b1b-4444-4444-8444-444444444444",
+   "businessPhones": [],
+   "displayName": "kim",
+   "givenName": null,
+   "jobTitle": null,
+   "mail": null,
+   "mobilePhone": null,
+   "officeLocation": null,
+   "preferredLanguage": null,
+   "surname": null,
+   "userPrincipalName": "kim@lab.example"
+  }
+ ]
+}

@@ -14,8 +14,8 @@ import (
 
 // TestStrazaKindWireAndGuards pins the control plane's wire contract:
 // kind "straza" round-trips, the plane is fixed at create (no
-// straza↔access PATCH flips), control-plane roles can bind neither tools nor
-// packs, and the straza- name prefix is refused at create (reserved product
+// straza↔access PATCH flips), control-plane roles cannot bind tools, and
+// the straza- name prefix is refused at create (reserved product
 // namespace). The product roles themselves are refused at delete. The
 // bootstrap straza-admin role lands control-plane on first boot.
 func TestStrazaKindWireAndGuards(t *testing.T) {
@@ -123,14 +123,6 @@ func TestStrazaKindWireAndGuards(t *testing.T) {
 		map[string]any{"role": "auditor", "tools": []string{"echo"}}, &out); code != http.StatusBadRequest {
 		t.Errorf("tool binding onto straza-kind role = %d (%v), want 400", code, out)
 	}
-	pack, err := app.store.Packs().Create(ctx, store.KnowledgePack{Name: "p", Version: "1", Content: "c", Checksum: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code := adminReq(t, "POST", base+"/v1/admin/packs/"+pack.ID+"/bindings", tok,
-		map[string]string{"role_id": created.ID}, &out); code != http.StatusBadRequest {
-		t.Errorf("pack binding onto straza-kind role = %d (%v), want 400", code, out)
-	}
 }
 
 // TestBindingDuplicateRoutesToEdit pins the (role, app) uniqueness answer:
@@ -196,16 +188,6 @@ func TestRoleExportGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out map[string]any
-	// seedIdentity already ships the golang-style pack (bound to reader);
-	// bind it to dev too so the export carries a packs section.
-	packs, err := app.store.Packs().List(ctx)
-	if err != nil || len(packs) == 0 {
-		t.Fatalf("seed pack missing: %v", err)
-	}
-	if code := adminReq(t, "POST", base+"/v1/admin/packs/"+packs[0].ID+"/bindings", tok,
-		map[string]string{"role_id": dev.ID}, &out); code != http.StatusCreated {
-		t.Fatalf("pack bind = %d (%v)", code, out)
-	}
 	if code := adminReq(t, "PATCH", base+"/v1/admin/roles/"+dev.ID, tok,
 		map[string]string{"description": "Developer seat: governed demo-tools access"}, &out); code != http.StatusOK {
 		t.Fatalf("describe = %d (%v)", code, out)
@@ -231,12 +213,12 @@ func TestRoleExportGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := os.ReadFile(filepath.Join("..", "..", "spec", "objects", "fixtures", "role-dev.yaml"))
+	want, err := os.ReadFile(filepath.Join("..", "..", "spec", "objects", "fixtures", "role-dev-export.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != string(want) {
-		t.Errorf("export drifted from spec/objects/fixtures/role-dev.yaml:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Errorf("export drifted from spec/objects/fixtures/role-dev-export.yaml:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 	_ = user
 }

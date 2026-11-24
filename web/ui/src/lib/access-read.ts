@@ -3,7 +3,7 @@
 // shows and leaves alone, and whether the viewer may change policy. The
 // role page's sheet and the server page's Add role sheet read the same way,
 // so both open on the same plan.
-import { type FixedRule, type Plan, fixedFrom, planFor, readOwnRules, rulesFor } from "./access-plan";
+import { type FixedRule, type Plan, fixedFrom, ownRuleOf, planFor, readOwnRules, rulesFor } from "./access-plan";
 import { type ApiError, type BindingRow, type PreviewEntry, getPolicy } from "./api";
 import { heldKinds } from "./held-kinds";
 import { openDoc, rulesOf } from "./policy-model";
@@ -62,9 +62,12 @@ export function accessRead(role: string, app: string, names: string[], binding: 
 
 // retires says whether a save would leave the role's own set with no rule,
 // which deletes it: the plan it opened with wrote rules, the plan now
-// writes none, and the set keeps no other rule.
+// writes none, and the set keeps no other rule. A rule of the editor's that
+// names a tool missing from names is a rule the set keeps, since a save
+// keeps that name.
 export const retires = (read: AccessRead, plan: Plan, app: string, names: string[], role: string): boolean =>
-  !read.taken.length && rulesFor(read.initial, app, names, role).length > 0 && rulesFor(plan, app, names, role).length === 0;
+  !read.taken.length && rulesFor(read.initial, app, names, role).length > 0 && rulesFor(plan, app, names, role).length === 0 &&
+  !(read.text && rulesOf(openDoc(read.text)).some((v) => (ownRuleOf(v.raw, app)?.tools || []).some((t) => !names.includes(t))));
 
 // mayWritePolicy says whether this session may publish policy: a full
 // grant or policy:write. A session without it changes which tools a role

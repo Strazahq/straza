@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ServerActivity } from "./server-activity";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { type AppRow, appLogs, listAudit, listChanges } from "@/lib/api";
+import { LOG_HELP, LOG_SEVERITY, LOG_SPAN } from "@/lib/server-words";
 
 vi.mock("@/lib/api", () => ({
   appLogs: vi.fn(),
@@ -63,6 +65,9 @@ const LOGS = { app: "github", lines: [], entries: [
 
 const refused = (status: number, message: string) => Object.assign(new Error(message), { status, unreachable: false });
 const box = (sel: string) => document.querySelector(sel) as HTMLElement;
+// view mounts the tab inside the tooltip provider the console shell gives
+// it, which the log heading's help needs.
+const view = (a: AppRow) => render(<TooltipProvider><ServerActivity app={a} /></TooltipProvider>);
 
 describe("the Activity tab of a server's page", () => {
   beforeEach(() => {
@@ -73,8 +78,8 @@ describe("the Activity tab of a server's page", () => {
   afterEach(() => vi.useRealTimers());
 
   it("lists Straza's own records about this server as sentences, newest first across both sources", async () => {
-    render(<ServerActivity app={app()} />);
-    await screen.findByText(/installed it \(oci\)\./);
+    view(app());
+    await screen.findByText(/published it \(a container Straza runs with docker on the strazad host\)\./);
     const et = box("[data-server-events]").textContent || "";
     expect(listAudit).toHaveBeenCalledWith("q=github&order=desc&limit=100");
     expect(listChanges).toHaveBeenCalledWith("tool", 1000);
@@ -85,13 +90,15 @@ describe("the Activity tab of a server's page", () => {
     expect(et).toContain("alice ran Recheck: degraded, inventory drift: +[create_release] -[delete_repo].");
     expect(et).toContain("sam-sre-agent's exec-wrapper session called create_release. Needs approval: Straza: create_release held for approval");
     expect(et).toContain("Health check found the tool list changed.");
-    expect(et).toContain("alice installed it (oci).");
-    expect(et.match(/tool list changed/g)?.length).toBe(1);
+    expect(et).toContain("alice published it (a container Straza runs with docker on the strazad host).");
+    expect(et.match(/found the tool list changed/g)?.length).toBe(1);
     expect(et).not.toContain("github-old");
     expect(et.match(/called list_issues/g)?.length).toBe(1);
-    const order = ["unknown tool", "refused by policy", "ran Recheck", "Needs approval", "tool list changed", "installed it"].map((w) => et.indexOf(w));
+    const order = ["unknown tool", "refused by policy", "ran Recheck", "Needs approval", "tool list changed", "published it"].map((w) => et.indexOf(w));
     expect(order).toEqual([...order].sort((a, b) => a - b));
-    for (const src of ["denied call", "admin action", "hold", "drift"]) expect(et).toContain(src);
+    for (const src of ["denied call", "admin action", "needed approval", "tool list changed"]) expect(et).toContain(src);
+    expect(et).not.toMatch(/\bhold\b/);
+    expect(document.body.textContent).not.toContain("Newest first, from the audit chain");
   });
 
   it("starts the record after the newest removal of a server with this name", async () => {
@@ -103,10 +110,10 @@ describe("the Activity tab of a server's page", () => {
       auditRow(19, "straza.audit.admin", 100, { action: "apps.install", app: "github", runtime: "oci" }, "alice"),
     ]);
     vi.mocked(listChanges).mockResolvedValue({ changes: [] });
-    render(<ServerActivity app={app()} />);
+    view(app());
     await screen.findByText(/ran Recheck: running\./);
     const et = box("[data-server-events]").textContent || "";
-    expect(et.match(/installed it/g)?.length).toBe(1);
+    expect(et.match(/published it/g)?.length).toBe(1);
     expect(et).not.toContain("removed it");
     expect(et).not.toContain("delete_repo");
   });
@@ -114,11 +121,11 @@ describe("the Activity tab of a server's page", () => {
   // An install record carries update and the changed manifest field paths,
   // never their values, because an address or a variable can carry a token.
   const INSTALLS: [string, Record<string, unknown>, string][] = [
-    ["a first install names its runtime", { runtime: "oci" }, "alice installed it (oci)."],
-    ["update false reads as a first install", { runtime: "remote", update: false, changed: ["straza.runtime.remote.url"] }, "alice installed it (remote)."],
-    ["an update that changed no field", { runtime: "remote", update: true, changed: [] }, "alice installed the same manifest again."],
+    ["a first install names its runtime", { runtime: "oci" }, "alice published it (a container Straza runs with docker on the strazad host)."],
+    ["update false reads as a first install", { runtime: "remote", update: false, changed: ["straza.runtime.remote.url"] }, "alice published it (streamable HTTP)."],
+    ["an update that changed no field", { runtime: "remote", update: true, changed: [] }, "alice published the same manifest again."],
     ["an update strazad could not compare", { runtime: "remote", update: true },
-      "alice installed it again. Straza could not compare it with the stored manifest, so which fields changed is not recorded."],
+      "alice published it again. Changed fields not recorded."],
     ["one changed field", { runtime: "remote", update: true, changed: ["straza.runtime.remote.url"] }, "alice changed the address."],
     ["fields deduplicated in their words", { runtime: "oci", update: true, changed: ["straza.runtime.kind", "straza.runtime.command", "straza.runtime.oci.image", "straza.runtime.command.env", "straza.runtime.oci.env"] },
       "alice changed the transport, command, image and environment."],
@@ -132,7 +139,7 @@ describe("the Activity tab of a server's page", () => {
   it.each(INSTALLS)("reads an install record: %s", async (_, data, words) => {
     vi.mocked(listAudit).mockResolvedValue([auditRow(30, "straza.audit.admin", 50, { action: "apps.install", app: "github", ...data }, "alice")]);
     vi.mocked(listChanges).mockResolvedValue({ changes: [] });
-    render(<ServerActivity app={app()} />);
+    view(app());
     await screen.findByText("admin action");
     expect(box("[data-server-events]").textContent).toContain(words + " admin action");
   });
@@ -140,13 +147,12 @@ describe("the Activity tab of a server's page", () => {
   it("says so when nothing is recorded about the server yet", async () => {
     vi.mocked(listAudit).mockResolvedValue([]);
     vi.mocked(listChanges).mockResolvedValue({ changes: [] });
-    render(<ServerActivity app={app()} />);
-    expect((await screen.findByText(/^Nothing recorded about this server yet\./)).textContent)
-      .toBe("Nothing recorded about this server yet. Admin actions, tool list changes, denied calls and holds land here.");
+    view(app());
+    expect((await screen.findByText("No events yet.")).textContent).toBe("No events yet.");
   });
 
   it("tallies the lines since the last check and marks where it ran", async () => {
-    render(<ServerActivity app={app()} />);
+    view(app());
     await screen.findByText("info: registered 9 tools");
     const tally = box("[data-log-tally]").textContent || "";
     expect(tally).toContain("1 error");
@@ -159,7 +165,7 @@ describe("the Activity tab of a server's page", () => {
   });
 
   it("folds a repeated line once with its count and keeps the manager's status change as a marker", async () => {
-    render(<ServerActivity app={app()} />);
+    view(app());
     await screen.findByText("info: registered 9 tools");
     await userEvent.click(screen.getByRole("button", { name: "Everything" }));
     const all = box("[data-log-lines]").textContent || "";
@@ -170,11 +176,35 @@ describe("the Activity tab of a server's page", () => {
     const tally = box("[data-log-tally]").textContent || "";
     expect(tally).toContain("5 errors");
     expect(tally).toContain("1 warning");
-    expect(tally).toContain("9 lines in the ring");
+    expect(tally).toContain("9 lines kept");
+  });
+
+  it("filters the log with two single choices, each pressing one option", async () => {
+    view(app());
+    await screen.findByText("info: registered 9 tools");
+    const severity = screen.getByRole("group", { name: LOG_SEVERITY });
+    const span = screen.getByRole("group", { name: LOG_SPAN });
+    const pressed = (g: HTMLElement) => within(g).getAllByRole("button").map((b) => b.textContent + (b.getAttribute("aria-pressed") === "true" ? " on" : ""));
+    expect(pressed(severity)).toEqual(["Errors", "Warnings", "All on"]);
+    expect(pressed(span)).toEqual(["Since last check on", "Everything"]);
+    await userEvent.click(within(severity).getByRole("button", { name: "Warnings" }));
+    await userEvent.click(within(span).getByRole("button", { name: "Everything" }));
+    expect(pressed(severity)).toEqual(["Errors", "Warnings on", "All"]);
+    expect(pressed(span)).toEqual(["Since last check", "Everything on"]);
+    expect(box("[data-log-lines]").textContent).toContain("GITHUB_TOKEN scope lacks delete_repo");
+    expect(box("[data-log-lines]").textContent).not.toContain("registered 9 tools");
+  });
+
+  it("puts what the log lines are behind the log heading's help icon", async () => {
+    view(app());
+    await screen.findByText("info: registered 9 tools");
+    expect(screen.queryByText(LOG_HELP)).toBeNull();
+    await userEvent.hover(screen.getByRole("button", { name: "Help: log" }));
+    expect((await screen.findAllByText(LOG_HELP)).length).toBeGreaterThan(0);
   });
 
   it("hides the other lines behind a count under the Errors filter, and Show all brings them back", async () => {
-    render(<ServerActivity app={app()} />);
+    view(app());
     await screen.findByText("info: registered 9 tools");
     await userEvent.click(screen.getByRole("button", { name: "Everything" }));
     await userEvent.click(screen.getByRole("button", { name: "Errors" }));
@@ -188,7 +218,7 @@ describe("the Activity tab of a server's page", () => {
 
   it("polls the log every 5 s while shown, stops with Follow off, and stops when the tab goes away", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: false });
-    const { unmount } = render(<ServerActivity app={app()} />);
+    const { unmount } = view(app());
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     const first = vi.mocked(appLogs).mock.calls.length;
     expect(first).toBe(1);
@@ -209,30 +239,30 @@ describe("the Activity tab of a server's page", () => {
 
   it("reads a stopped runtime as one sentence and never shows the raw 409", async () => {
     vi.mocked(appLogs).mockRejectedValue(refused(409, "app is not running (no log ring)"));
-    render(<ServerActivity app={app({ status: "stopped", paused: true, detail: "" })} />);
-    const log = await screen.findByText(/The runtime is stopped, so there is no output\./);
+    view(app({ status: "stopped", paused: true, detail: "" }));
+    const log = await screen.findByText(/^Stopped\./);
     expect(log.closest("[data-server-log]")?.getAttribute("data-server-log")).toBe("stopped");
     expect(document.body.textContent).not.toContain("no log ring");
   });
 
   it("reads a remote server's log as one sentence and never fetches it", async () => {
-    render(<ServerActivity app={app({ runtime: "remote", status: "running", detail: "", url: "https://mcp.example.test/mcp" })} />);
+    view(app({ runtime: "remote", status: "running", detail: "", url: "https://mcp.example.test/mcp" }));
     const log = await screen.findByText(/^A remote server keeps its own log\./);
-    expect(log.textContent).toMatch(/Straza shows its health checks here: the last one answered \d+ s ago\./);
+    expect(log.textContent).toMatch(/Last health check \d+ s ago\./);
     expect(appLogs).not.toHaveBeenCalled();
   });
 
   it("says when the runtime has written nothing yet", async () => {
     vi.mocked(appLogs).mockResolvedValue({ app: "github", lines: [], entries: [] });
-    render(<ServerActivity app={app({ status: "running", detail: "" })} />);
+    view(app({ status: "running", detail: "" }));
     expect((await screen.findByText("No log output")).textContent).toBe("No log output");
     expect(screen.getByText("The runtime has not written anything yet.")).toBeTruthy();
   });
   it("says the events are not readable when the audit area refuses them, instead of an error banner", async () => {
     vi.mocked(listAudit).mockRejectedValue(Object.assign(new Error("session lacks grant audit:read"), { status: 403 }));
     vi.mocked(listChanges).mockRejectedValue(Object.assign(new Error("session lacks grant changes:read"), { status: 403 }));
-    render(<ServerActivity app={app()} />);
-    expect(await screen.findByText(/Events are not readable with this account/)).toBeTruthy();
+    view(app());
+    expect(await screen.findByText("The events are not shown, because your role does not include Audit.")).toBeTruthy();
     expect(screen.queryByText(/could not be read/)).toBeNull();
   });
 });

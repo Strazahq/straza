@@ -8,7 +8,7 @@ import {
   type SigningKeyRow, assertionKeyCertificate, entraBlueprints, listSigningKeys, promoteAssertionKey, retireAssertionKey, rotateAssertionKey, thumbprintOf,
 } from "@/lib/keys-api";
 import {
-  CERTIFICATE, CREATE_NEW_KEY, DOWNLOAD_CERT, KEYS_EMPTY_TITLE, KEY_COLUMN, OPEN_USERS, PROMOTE, PROMOTED_LINE, PROMOTE_READY, RETIRE, RETIRE_ACTIVE_BODY, RETIRE_ENTRA, RETIRE_STAGED_BODY, ROTATE_TITLE,
+  CERTIFICATE, CREATE_KEY, DOWNLOAD_CERT, KEYS_EMPTY_TITLE, KEY_COLUMN, OPEN_USERS, PROMOTE, PROMOTED_LINE, PROMOTE_READY, RETIRE, RETIRE_ACTIVE_BODY, RETIRE_ENTRA, RETIRE_STAGED_BODY, ROTATE_KEY, ROTATE_TITLE,
   keysEmptyBody, keysLede, promotePlainBody, promoteTick, promoteTitle, promotedToast, removeOldLine, removeOldTitle, retiredToast, retiresLine, rotateBody, showRetired, stagedToast, uploadLine,
 } from "@/lib/keys-words";
 import { notify } from "@/lib/notify";
@@ -49,7 +49,7 @@ const BLUEPRINT = "76568ffa-de8d-4d35-986d-4efe2a9f8787";
 const SECOND_BLUEPRINT = "ca0735eb-c5c4-4d43-a20e-4b953c68f76a";
 const RETIRED: SigningKeyRow = { kid: "1b7d0a93-2c44-4e18-8f0b-5a6e7d9c3b21", purpose: "client_assertion", status: "retired", created_at: ago(90 * 86_400_000) };
 
-const mount = (rotateRequest = 0, onRows = vi.fn()) => render(<TooltipProvider><KeysTab rotateRequest={rotateRequest} onRows={onRows} /></TooltipProvider>);
+const mount = (onRows = vi.fn()) => render(<TooltipProvider><KeysTab onRows={onRows} /></TooltipProvider>);
 // findPanel waits for the rotation panel of one kind; waitFor retries only
 // while its callback throws.
 const findPanel = (kind: string) => waitFor(() => {
@@ -77,7 +77,7 @@ describe("the Agent signing keys tab", () => {
 
   it("lists the live keys, folds the retired ones, and hands every read to the page", async () => {
     const onRows = vi.fn();
-    mount(0, onRows);
+    mount(onRows);
     await waitFor(() => expect(statuses()).toEqual(["active"]));
     expect(onRows).toHaveBeenCalledWith([ACTIVE, RETIRED]);
     await userEvent.click(screen.getByRole("button", { name: showRetired(1) }));
@@ -90,16 +90,29 @@ describe("the Agent signing keys tab", () => {
     await screen.findByText(KEYS_EMPTY_TITLE);
   });
 
+  it("offers Create key when there is no key, and no rotation while one runs", async () => {
+    vi.mocked(listSigningKeys).mockResolvedValue([RETIRED]);
+    const none = mount();
+    expect(await screen.findByRole("button", { name: new RegExp(CREATE_KEY) })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: new RegExp(ROTATE_KEY) })).toBeNull();
+    none.unmount();
+
+    vi.mocked(listSigningKeys).mockResolvedValue([STAGED, ACTIVE]);
+    mount();
+    await findPanel("staged");
+    expect(screen.queryByRole("button", { name: new RegExp(ROTATE_KEY + "|" + CREATE_KEY) })).toBeNull();
+  });
+
   it("rotates only after the confirm, once, and reads the list again", async () => {
-    const view = mount(0);
+    mount();
     await waitFor(() => expect(statuses()).toEqual(["active"]));
-    view.rerender(<TooltipProvider><KeysTab rotateRequest={1} onRows={vi.fn()} /></TooltipProvider>);
+    await userEvent.click(screen.getByRole("button", { name: new RegExp(ROTATE_KEY) }));
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText(ROTATE_TITLE)).toBeTruthy();
     expect(within(dialog).getByText(rotateBody(ACTIVE.kid))).toBeTruthy();
     expect(rotateAssertionKey).not.toHaveBeenCalled();
     vi.mocked(listSigningKeys).mockResolvedValue([STAGED, ACTIVE]);
-    await userEvent.click(within(dialog).getByRole("button", { name: CREATE_NEW_KEY }));
+    await userEvent.click(within(dialog).getByRole("button", { name: ROTATE_KEY }));
     await waitFor(() => expect(notify.ok).toHaveBeenCalledWith(stagedToast(STAGED.kid)));
     expect(rotateAssertionKey).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(statuses()).toEqual(["staged", "active"]));

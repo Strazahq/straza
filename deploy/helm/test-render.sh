@@ -11,7 +11,7 @@ mkdir -p "$GOLDEN"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-helm lint "$CHART" >/dev/null || fail "helm lint"
+helm lint "$CHART" --set secrets.kekExistingSecret=straza-kek >/dev/null || fail "helm lint"
 
 # --- goldens ---------------------------------------------------------------
 # Blank lines are normalized away: helm releases differ on a blank line
@@ -90,7 +90,7 @@ helm template straza "$CHART" -f "$TESTS/values-turnkey.yaml" \
   --set ingress.enabled=true --set ingress.host=straza.example.com --set ingress.tls=true \
   | grep -q 'value: "https://straza.example.com"' \
   || fail "ingress.enabled must derive publicUrl from the ingress host"
-printf 'oidc:\n  issuer: https://idp\nconfigYaml: |\n  server:\n    publicUrl: https://straza.example.com\n' > "$GOLDEN/.publicurl-file.yaml"
+printf 'oidc:\n  issuer: https://idp\nsecrets:\n  kekExistingSecret: straza-kek\nconfigYaml: |\n  server:\n    publicUrl: https://straza.example.com\n' > "$GOLDEN/.publicurl-file.yaml"
 if helm template straza "$CHART" -f "$GOLDEN/.publicurl-file.yaml" | grep -q 'STRAZA_PUBLIC_URL'; then
   rm -f "$GOLDEN/.publicurl-file.yaml"
   fail "configYaml server.publicUrl must suppress the env injection (env beats file)"
@@ -100,13 +100,14 @@ rm -f "$GOLDEN/.publicurl-file.yaml"
 # a raw interface-conversion error: there is no file-lane publicUrl to
 # protect, so the derived env is injected, and strazad refuses the
 # malformed file at boot anyway, so the injection never governs a pod.
-printf 'oidc:\n  issuer: https://idp\nconfigYaml: |\n  server: just-a-string\n' > "$GOLDEN/.publicurl-scalar.yaml"
+printf 'oidc:\n  issuer: https://idp\nsecrets:\n  kekExistingSecret: straza-kek\nconfigYaml: |\n  server: just-a-string\n' > "$GOLDEN/.publicurl-scalar.yaml"
 helm template straza "$CHART" -f "$GOLDEN/.publicurl-scalar.yaml" | grep -q 'STRAZA_PUBLIC_URL' \
   || { rm -f "$GOLDEN/.publicurl-scalar.yaml"; fail "scalar configYaml server: key must render (no suppression; strazad refuses the file at boot)"; }
 rm -f "$GOLDEN/.publicurl-scalar.yaml"
 # Scheme case: url.Parse lowercases, so HTTP:// boots, and the render-time
 # mirror must accept exactly what strazad's checkBaseURL accepts.
 helm template straza "$CHART" --set oidc.issuer=https://idp --set publicUrl=HTTP://straza.example.com \
+  --set secrets.kekExistingSecret=straza-kek \
   | grep -q 'value: "HTTP://straza.example.com"' \
   || fail "uppercase-scheme publicUrl must render (strazad accepts it at boot)"
 
@@ -118,22 +119,27 @@ helm template straza "$CHART" --set oidc.issuer=https://idp --set publicUrl=HTTP
 # key strazad never reads is webpush silently off, the exact shape the
 # deployment template's header refuses.
 helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   --set webpush.existingSecret=straza-webpush-vapid \
   | grep -q 'mountPath: /etc/straza/webpush' \
   || fail "webpush.existingSecret must mount the key at /etc/straza/webpush"
 helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   --set webpush.existingSecret=straza-webpush-vapid \
   | grep -q 'value: /etc/straza/webpush/vapid.pem' \
   || fail "webpush.existingSecret must wire STRAZA_APPROVAL_PUSH_WEBPUSH_VAPID_KEY_FILE at the mount (0.9.2)"
 if helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   | grep -q 'WEBPUSH_VAPID_KEY_FILE'; then
   fail "no webpush env may render when the knob is unset"
 fi
 helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   --set webpush.existingSecret=straza-webpush-vapid \
   | grep -q 'secretName: straza-webpush-vapid' \
   || fail "webpush volume must reference the named secret"
 if helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   | grep -q '/etc/straza/webpush'; then
   fail "no webpush mount may render when the knob is unset"
 fi
@@ -146,24 +152,29 @@ fi
 # naming them when the key file is set without them, so a forgotten
 # configYaml block is loud, not dormant.
 helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   --set apns.existingSecret=straza-apns-key --set pushRelay.enabled=false \
   | grep -q 'mountPath: /etc/straza/apns' \
   || fail "apns.existingSecret must mount the key at /etc/straza/apns"
 helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   --set apns.existingSecret=straza-apns-key --set pushRelay.enabled=false \
   | grep -q 'value: /etc/straza/apns/apns.p8' \
   || fail "apns.existingSecret must wire STRAZA_APPROVAL_PUSH_APNS_KEY_FILE at the mount"
 helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   --set apns.existingSecret=straza-apns-key --set pushRelay.enabled=false \
   | grep -q 'secretName: straza-apns-key' \
   || fail "apns volume must reference the named secret"
 if helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   | grep -qE 'APNS_KEY_FILE|/etc/straza/apns'; then
   fail "no apns env or mount may render when the knob is unset"
 fi
 
 # --- generated-password smoke (nondeterministic, no golden) ----------------
 helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   | grep -q 'kind: Secret' \
   || fail "turnkey without passwordSecret must generate the password secret"
 
@@ -175,18 +186,35 @@ must_fail() {
   fi
 }
 must_fail "enterprise replicas>1 with embedded per-pod events" \
-  --set oidc.issuer=https://idp --set nats.enabled=false
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set nats.enabled=false
 must_fail "enterprise HPA ceiling >1 with embedded per-pod events" \
-  --set oidc.issuer=https://idp --set nats.enabled=false \
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set nats.enabled=false \
   --set replicaCount=1 --set autoscaling.enabled=true
 must_fail "standalone above one replica (per-pod sqlite)" \
   --set profile=standalone
 must_fail "publicUrl without a scheme (strazad refuses it at boot; refuse at render)" \
-  --set oidc.issuer=https://idp --set publicUrl=straza.example.com
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set publicUrl=straza.example.com
 must_fail "publicUrl with a trailing slash (verbatim token issuer; double-slash discovery endpoints)" \
-  --set oidc.issuer=https://idp --set publicUrl=https://straza.example.com/
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set publicUrl=https://straza.example.com/
 must_fail "publicUrl with embedded credentials (strazad refuses user:pass@ at boot; refuse at render)" \
-  --set oidc.issuer=https://idp --set publicUrl=https://user:pass@straza.example.com
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set publicUrl=https://user:pass@straza.example.com
+# strazad seals its signing keys under the KEK. A key an enterprise pod makes
+# for itself is lost at its next restart, and strazad then cannot open its
+# signing keys and refuses to start, so the chart refuses the render instead.
+# Standalone keeps the key beside its sqlite store in the pod's emptyDir,
+# where both are lost together, so it renders without the Secret.
+must_fail "enterprise without secrets.kekExistingSecret (a per-pod key is lost at restart)" \
+  --set oidc.issuer=https://idp
+helm template straza "$CHART" --set oidc.issuer=https://idp 2>&1 >/dev/null \
+  | grep -qF 'secrets.kekExistingSecret' \
+  || fail "the enterprise KEK refusal must name secrets.kekExistingSecret"
+helm template straza "$CHART" --set profile=standalone --set replicaCount=1 >/dev/null \
+  || fail "standalone with one replica and no KEK Secret must render"
 
 # --- approver listener face ------------------------------------------------
 # strazad refuses a half-configured server.approverTLS block at boot
@@ -195,6 +223,7 @@ must_fail "publicUrl with embedded credentials (strazad refuses user:pass@ at bo
 # SPKI pin per pod and per restart.
 ap_on() {
   helm template straza "$CHART" --set oidc.issuer=https://idp \
+    --set secrets.kekExistingSecret=straza-kek \
     --set approverTLS.enabled=true --set approverTLS.existingSecret=approver-tls \
     "$@"
 }
@@ -213,25 +242,31 @@ ap_on --set approverTLS.publicUrl=https://approve.example.com \
 ap_on --set approverTLS.publicUrl=https://approve.example.com/ >/dev/null \
   || fail "approverTLS.publicUrl with a bare trailing slash must render (QR builder trims it)"
 if helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   | grep -q 'APPROVER_TLS\|/etc/straza/approver-tls'; then
   fail "no approverTLS env or mount may render when the face is off"
 fi
 must_fail "approverTLS without existingSecret (no auto-mint lane; boot refusal)" \
-  --set oidc.issuer=https://idp --set approverTLS.enabled=true \
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set approverTLS.enabled=true \
   --set approverTLS.publicUrl=https://approve.example.com
 must_fail "approverTLS without publicUrl (the QR needs the URL the phone dials)" \
-  --set oidc.issuer=https://idp --set approverTLS.enabled=true \
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set approverTLS.enabled=true \
   --set approverTLS.existingSecret=approver-tls
 must_fail "approverTLS with an http publicUrl (approver devices are https+pin only)" \
-  --set oidc.issuer=https://idp --set approverTLS.enabled=true \
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set approverTLS.enabled=true \
   --set approverTLS.existingSecret=approver-tls \
   --set approverTLS.publicUrl=http://approve.example.com
 must_fail "approverTLS publicUrl with a path (QR consumes scheme+host only)" \
-  --set oidc.issuer=https://idp --set approverTLS.enabled=true \
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set approverTLS.enabled=true \
   --set approverTLS.existingSecret=approver-tls \
   --set approverTLS.publicUrl=https://approve.example.com/v1
 must_fail "approverTLS.port colliding with service.port (two sockets, one pod)" \
-  --set oidc.issuer=https://idp --set approverTLS.enabled=true \
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set approverTLS.enabled=true \
   --set approverTLS.existingSecret=approver-tls \
   --set approverTLS.publicUrl=https://approve.example.com \
   --set approverTLS.port=8420
@@ -248,28 +283,58 @@ for s in turnkey byo standalone apps; do
     || fail "scenario $s must carry the relay env lines (the relay is on by default, visibly)"
 done
 if helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   --set pushRelay.enabled=false | grep -q 'PUSH_RELAY'; then
   fail "pushRelay.enabled=false must render no relay env (a configYaml relay block would be clobbered)"
 fi
 if helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   | grep -q 'STRAZA_APPROVAL_PUSH_RELAY_URL'; then
   fail "no relay url env may render while pushRelay.url is empty (strazad resolves the default)"
 fi
 helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   --set pushRelay.url=https://relay.example.com \
   | grep -q 'value: "https://relay.example.com"' \
   || fail "pushRelay.url must wire STRAZA_APPROVAL_PUSH_RELAY_URL verbatim"
 must_fail "relay on beside apns.existingSecret (two iOS senders; strazad refuses the pair at boot)" \
-  --set oidc.issuer=https://idp --set apns.existingSecret=straza-apns-key
+  --set oidc.issuer=https://idp --set secrets.kekExistingSecret=straza-kek \
+  --set apns.existingSecret=straza-apns-key
 
 # --- demo upstream ---------------------------------------------------------
 helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   --set demoTools.enabled=true \
   | grep -q 'name: straza-straza-demo-tools' \
   || fail "demoTools.enabled must render the demo-tools Deployment+Service"
 if helm template straza "$CHART" --set oidc.issuer=https://idp \
+  --set secrets.kekExistingSecret=straza-kek \
   | grep -q 'demo-tools'; then
   fail "no demo-tools object may render when the knob is off"
 fi
+# The demo server answers any caller without a credential, so it gets its own
+# NetworkPolicy beside the bundled backends' policies, or alone when nothing
+# is bundled. networkPolicy.enabled=false suppresses it with the others.
+demo_np() {
+  out="$(helm template straza "$CHART" --set demoTools.enabled=true "$@")" \
+    || fail "demoTools.enabled with $* does not render"
+  printf '%s\n' "$out" | grep -c 'kind: NetworkPolicy' || true
+}
+[ "$(demo_np -f "$TESTS/values-turnkey.yaml")" = 3 ] \
+  || fail "turnkey with demoTools must render three NetworkPolicies (NATS, Postgres, demo-tools)"
+[ "$(demo_np -f "$TESTS/values-byo.yaml")" = 1 ] \
+  || fail "bring-your-own with demoTools must render the demo-tools NetworkPolicy alone"
+[ "$(demo_np -f "$TESTS/values-standalone.yaml")" = 1 ] \
+  || fail "standalone with demoTools must render the demo-tools NetworkPolicy alone"
+[ "$(demo_np -f "$TESTS/values-turnkey.yaml" --set networkPolicy.enabled=false)" = 0 ] \
+  || fail "networkPolicy.enabled=false must suppress the demo-tools NetworkPolicy too"
+np="$(helm template straza "$CHART" -f "$TESTS/values-standalone.yaml" \
+  --set demoTools.enabled=true --show-only templates/networkpolicy.yaml)"
+printf '%s\n' "$np" | grep -q 'name: straza-straza-demo-tools' \
+  || fail "the demo-tools NetworkPolicy must be named after the release"
+printf '%s\n' "$np" | grep -q 'app.kubernetes.io/name: straza-demo-tools' \
+  || fail "the demo-tools NetworkPolicy must select the demo-tools pods"
+printf '%s\n' "$np" | grep -q 'port: 3001' \
+  || fail "the demo-tools NetworkPolicy must admit the MCP port 3001"
 
 echo "chart render gate: OK"

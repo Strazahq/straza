@@ -13,7 +13,7 @@ These are the questions people ask first about Straza. Each answer is short and 
 ## AI inside Straza
 
 
-No AI model takes part in a decision today. Every decision is deterministic policy evaluation over a signed snapshot, as [Policies]({{< relref "concepts/policy-model.md" >}}) describes. The optional [classifier]({{< relref "guides/write-policy/classify.md" >}}) is a fixed heuristic with no model, no network and no state. [The sentinel]({{< relref "guides/audit/sentinel.md" >}}) is rule-based detection. It runs after the fact and blocks nothing. [How Straza makes decisions]({{< relref "evaluate/security-model.md#how-straza-makes-decisions" >}}) gives the reasons, starting with why Straza does not proxy model traffic.
+No AI model takes part in a decision today. Every decision is deterministic policy evaluation over a signed snapshot, as [Policies]({{< relref "concepts/policy-model.md" >}}) describes. The optional [classifier]({{< relref "guides/write-policy/classify.md" >}}) is a fixed heuristic with no model, no network and no state. [The sentinel]({{< relref "guides/audit/sentinel.md" >}}) is rule-based detection. It runs after the fact and blocks nothing. [What Straza is not]({{< relref "evaluate/what-straza-is.md#what-straza-is-not" >}}) lists this beside the other things Straza leaves out.
 
 ## When strazad is down
 
@@ -25,7 +25,7 @@ Nothing fails open. In the enterprise profile, governed actions are denied once 
 ## Straza and your identity manager
 
 
-Your identity manager stays the source of who exists, which roles they hold and who sponsors each AI agent. Straza receives that over SCIM 2.0 and turns it into decisions at every action. A role assignment reaches a running agent at its next check-in, and a deactivation revokes the user's sessions.
+Your identity manager stays the source of who exists, which roles they hold and who sponsors each AI agent. Straza receives that over SCIM 2.0 and turns it into decisions at every action. A role assignment reaches a running agent within seconds, or at its next check-in when its push stream is not connected. A deactivation revokes the user's sessions.
 
 [Identity and your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}) explains why your IGA stays the master. [Connect identity]({{< relref "guides/connect-identity/_index.md" >}}) connects midPoint, Okta or another SCIM client, with a guide for each.
 
@@ -34,7 +34,7 @@ Your identity manager stays the source of who exists, which roles they hold and 
 
 Straza does not filter prompts or model outputs. It decides what an agent does, the tool calls and commands, and it never sits on the wire between the agent and its model. When a policy set turns on recording, the conversation is recorded for audit, word for word or with secrets masked, and the model's traffic is still never filtered or rewritten.
 
-[Record a conversation]({{< relref "guides/write-policy/capture.md" >}}) turns recording on. [What Straza does not try to do]({{< relref "evaluate/security-model.md#what-straza-does-not-try-to-do" >}}) lists the other non-goals.
+[Record a conversation]({{< relref "guides/write-policy/capture.md" >}}) turns recording on. [What Straza is not]({{< relref "evaluate/what-straza-is.md#what-straza-is-not" >}}) lists the other non-goals.
 
 ## Data that leaves your infrastructure
 

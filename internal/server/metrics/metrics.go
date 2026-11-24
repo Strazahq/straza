@@ -57,7 +57,7 @@ func New(auditDropped, auditLost func() float64) *Set {
 		}, []string{"effect"}),
 		throttled: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "straza_gateway_throttled_total",
-			Help: "Gateway tools/call requests rejected by the per-(session,app) rate limit. Rejections are deliberately not audited (a hot loop must not amplify audit work), so this counter is where the abuse volume shows up.",
+			Help: "Gateway tools/call requests rejected by a rate limit of the server app: the limit of one session, or the limit all sessions of one user share. Each rejection also has a deny record on straza.audit.mcp.",
 		}, []string{"app"}),
 		withheld: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "straza_gateway_replies_withheld_total",
@@ -179,7 +179,8 @@ func (m *Set) Observe(effect string, d time.Duration) {
 	m.decisions.WithLabelValues(effect).Inc()
 }
 
-// Throttle records one gateway tools/call rejected by the per-(session,app) limit.
+// Throttle records one gateway tools/call rejected by a rate limit of the
+// server app, the session's or the user's.
 func (m *Set) Throttle(app string) { m.throttled.WithLabelValues(app).Inc() }
 
 // ReplyWithheld records one gateway tools/call reply of the server app

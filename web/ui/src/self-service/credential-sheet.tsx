@@ -10,12 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { RefusedError } from "@/components/error-state";
-import { CAPS, Field } from "@/components/wizard/parts";
+import { Field } from "@/components/wizard/parts";
 import { type ApiError, type ConnectAnswer, connectToken } from "@/lib/api";
-import { refused } from "@/lib/say";
-import { KIND_NAME } from "@/lib/server-words";
 import { type CredentialRow, keyOf } from "./credential-rows";
 import * as W from "./credential-words";
+import { failedWhy } from "./words";
 
 type Props = {
   // row is the server the token is for, or null while the sheet is closed.
@@ -71,7 +70,7 @@ function Body({ row, busy, setBusy, onClose, onSaved }: BodyProps) {
       // A 401 is the session module's: it ends the login and the page
       // redraws as signed out, so the sheet says nothing of its own.
       const err = e as ApiError;
-      if (err.status !== 401) setRefusal(refused(err));
+      if (err.status !== 401) setRefusal(failedWhy(err));
     } finally {
       setBusy(false);
     }
@@ -80,14 +79,10 @@ function Body({ row, busy, setBusy, onClose, onSaved }: BodyProps) {
   return (
     <>
       <SheetHeader className="border-b border-border pr-12">
-        <SheetTitle className="text-lg leading-snug">{W.pasteTitle(row.app, !!row.connected, row.who)}</SheetTitle>
+        <SheetTitle className="text-section leading-snug">{W.pasteTitle(row.app, !!row.connected, row.who)}</SheetTitle>
         <SheetDescription>{W.sealedLine(row.app)}</SheetDescription>
       </SheetHeader>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
-        <div className="flex flex-col gap-1 rounded-md border border-border bg-card px-4 py-3">
-          <span className={CAPS}>{KIND_NAME.token}</span>
-          <span className="text-[13px] leading-snug text-text-2">{W.whoseToken(row.who, row.app)}</span>
-        </div>
         <Field id="cred-token" label={W.TOKEN_LABEL} error={miss || undefined} hint={W.tokenHint(row.app)}>
           <Input
             id="cred-token"
@@ -104,7 +99,7 @@ function Body({ row, busy, setBusy, onClose, onSaved }: BodyProps) {
         </Field>
       </div>
       <SheetFooter className="mt-0 border-t border-border">
-        {refusal && <RefusedError subject={W.SUBJECT_SAVE} message={refusal} />}
+        {refusal && <RefusedError subject="" heading={W.NOT_SAVED} message={refusal} />}
         <div className="flex items-center justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={busy}>{W.CANCEL}</Button>
           <Button onClick={() => void save()} disabled={busy} data-save-token>

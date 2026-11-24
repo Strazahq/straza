@@ -6,17 +6,18 @@ import { type PolicyDoor, PoliciesByRole, openNewPolicy } from "@/components/pol
 import { PoliciesDenied } from "@/components/policies-denied";
 import { HIDEABLE, PoliciesTable } from "@/components/policies-table";
 import { PolicyTest } from "@/components/policy-test";
+import { Pill } from "@/components/chip";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { type ApiError, type BindingRow, type PoliciesAnswer, type PolicySetRow, type RoleRow, listBindings, listPolicies, listRoles, query } from "@/lib/api";
-import { AREA_DESC, CATEGORY, COLUMN, COLUMNS, DRAFT, EDITED, EVERYONE, FILTER, LANE_FILTER, LIST_FOOT, LIVE, NEW_POLICY, NO_MATCH, OUTSIDE_FOOT, READING, RELOAD_NOW, SEARCH, SHOWN_COLUMNS, SUBJECT_POLICIES, SUBJECT_REACH, SUBJECT_ROLES, TEST_A_CALL, VIEW, VIEW_LABEL, countWords, roleCountWords } from "@/lib/policy-words";
+import { AREA_DESC, CATEGORY, COLUMN, COLUMNS, EVERYONE, FILTER, LANE_FILTER, NEW_POLICY, NO_MATCH, READING, RELOAD_NOW, SEARCH, SHOWN_COLUMNS, STATUS_OPTION, SUBJECT_POLICIES, SUBJECT_REACH, SUBJECT_ROLES, TEST_A_CALL, VIEW, countWords, roleCountWords } from "@/lib/policy-words";
 import { DENIED_VIEW } from "@/lib/harness-words";
 import { navigate } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
 import { readFailed } from "@/lib/say";
-import { cn } from "@/lib/utils";
 
 // The Policies list: the policies that
 // apply to everyone, then the ones that name a role, on one column
@@ -49,7 +50,7 @@ function sideProblem(subject: string, r: PromiseSettledResult<unknown>): string 
 // identity alone sits under Outside roles.
 type Category = "everyone" | "roles" | "outside";
 
-const CATEGORIES: { key: Category; title: string; line: string; none: string; door: string; prefill: PolicyDoor | null }[] = [
+const CATEGORIES: { key: Category; title: string; none: string; door: string; prefill: PolicyDoor | null }[] = [
   { key: "everyone", ...CATEGORY.everyone, prefill: { role: null } },
   { key: "roles", ...CATEGORY.roles, prefill: {} },
   { key: "outside", ...CATEGORY.outside, door: "", prefill: null },
@@ -135,17 +136,7 @@ export function Policies({ view = "sets" }: { view?: "sets" | "roles" | "denied"
   const lastRead = state.kind === "ready" ? state.lastRead : null;
   const hasOutside = rows.some((r) => categoryOf(r) === "outside");
 
-  const viewButton = (key: "sets" | "roles" | "denied", label: string, rest: string[]) => (
-    <Button
-      variant="outline"
-      size="sm"
-      aria-pressed={view === key}
-      onClick={() => navigate("policies", rest)}
-      className={cn("-ml-px h-9 rounded-none first:ml-0 first:rounded-l-md last:rounded-r-md", view === key && "bg-accent-bg text-foreground")}
-    >
-      {label}
-    </Button>
-  );
+  const viewRest = { sets: [], roles: ["by-role"], denied: ["denied"] };
 
   const picker = (label: string, value: string, onChange: (v: string) => void, options: [string, string][]) => (
     <Select value={value || "any"} onValueChange={onChange}>
@@ -178,9 +169,18 @@ export function Policies({ view = "sets" }: { view?: "sets" | "roles" | "denied"
         }
       />
       <div className="flex flex-col gap-5 px-6 py-5">
-        {state.kind === "loading" && <p className="text-sm text-muted-foreground">{READING}</p>}
+        <Tabs value={view} onValueChange={(v) => navigate("policies", viewRest[v as typeof view], true)}>
+          <div className="flex items-center border-b border-border">
+            <TabsList variant="line">
+              {([["sets", VIEW.sets], ["roles", VIEW.roles], ["denied", DENIED_VIEW]] as const).map(([key, text]) => (
+                <TabsTrigger key={key} value={key} data-tab={key}>{text}</TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
+        </Tabs>
+        {state.kind === "loading" && <p className="text-dense text-muted-foreground">{READING}</p>}
         {state.kind === "error" && (
-          <div className="rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-sm text-foreground" role="alert">
+          <div className="rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-dense text-foreground" role="alert">
             {state.message}{" "}
             <Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={() => void load()}>{RELOAD_NOW}</Button>
           </div>
@@ -200,21 +200,16 @@ export function Policies({ view = "sets" }: { view?: "sets" | "roles" | "denied"
                 aria-label={SEARCH}
                 className="h-9 w-full max-w-xs"
               />
-              {sets && picker(FILTER.status, status, pick(setStatus), [["", FILTER.any], ["active", LIVE], ["draft", DRAFT], ["edited", EDITED]])}
+              {sets && picker(FILTER.status, status, pick(setStatus), [["", FILTER.any], ["active", STATUS_OPTION.live], ["draft", STATUS_OPTION.off], ["edited", STATUS_OPTION.edited]])}
               {sets && picker(FILTER.applies, applies, pick(setApplies), [
-                ["", FILTER.anyRole],
+                ["", FILTER.any],
                 ["everyone", EVERYONE],
                 ...(side.roles || []).map((r) => ["role:" + r.name, r.name] as [string, string]),
                 ["outside", FILTER.outside],
               ])}
               {view !== "denied" && picker(FILTER.lane, lane, pick(setLane), [["", FILTER.any], ...Object.entries(LANE_FILTER)])}
-              <div role="group" aria-label={VIEW_LABEL} className="flex items-center">
-                {viewButton("sets", VIEW.sets, [])}
-                {viewButton("roles", VIEW.roles, ["by-role"])}
-                {viewButton("denied", DENIED_VIEW, ["denied"])}
-              </div>
               {view !== "denied" && (
-                <span className="ml-auto text-[13px] text-muted-foreground" data-row-count>
+                <span className="ml-auto text-caption text-muted-foreground" data-row-count>
                   {sets ? countWords(shown.length, rows.length) : roleCountWords(shownRoles.length)}
                 </span>
               )}
@@ -244,18 +239,17 @@ export function Policies({ view = "sets" }: { view?: "sets" | "roles" | "denied"
                   return (
                     <section key={c.key} className="flex flex-col gap-2" data-category={c.key}>
                       <div className="flex flex-wrap items-baseline gap-2">
-                        <h2 className="text-[15px] font-semibold text-foreground">{c.title}</h2>
-                        <span className="font-mono text-[13px] text-muted-foreground" data-category-count={c.key}>{here.length}</span>
-                        <span className="text-[13px] text-muted-foreground">{c.line}</span>
+                        <h2 className="text-body font-semibold text-foreground">{c.title}</h2>
+                        <Pill data-category-count={c.key}>{here.length}</Pill>
                       </div>
                       {here.length > 0 && <PoliciesTable rows={here} hidden={hidden} onOpen={(row) => navigate("policies", [row.name])} />}
                       {here.length === 0 && (
-                        <p className="rounded-md border border-border bg-card px-4 py-3 text-sm text-muted-foreground" data-category-empty={c.key}>
+                        <p className="rounded-md border border-border bg-card px-4 py-3 text-dense text-muted-foreground" data-category-empty={c.key}>
                           {any ? NO_MATCH : c.none}{" "}
                           {!any && c.prefill && (
                             <button
                               type="button"
-                              className="rounded-md border border-dashed border-border px-1.5 py-px text-[13px] text-link hover:border-link hover:text-foreground"
+                              className="rounded-md border border-dashed border-border px-1.5 py-px text-caption text-link hover:border-link hover:text-foreground"
                               onClick={() => openNewPolicy(c.prefill as PolicyDoor)}
                             >
                               {c.door}
@@ -266,7 +260,6 @@ export function Policies({ view = "sets" }: { view?: "sets" | "roles" | "denied"
                     </section>
                   );
                 })}
-                <p className="text-[13px] text-muted-foreground">{LIST_FOOT}{hasOutside ? "" : " " + OUTSIDE_FOOT}</p>
               </>
             ) : view === "denied" ? <PoliciesDenied needle={needle} /> : (
               <PoliciesByRole

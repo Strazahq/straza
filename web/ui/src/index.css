@@ -34,6 +34,16 @@
   --radius-md: var(--radius);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-pill: var(--round);
+  /* The six text sizes of tokens.css as classes. Only dense carries a line
+   * height, because the console uses it in place of text-sm. */
+  --text-caption: var(--fs-caption);
+  --text-dense: var(--fs-dense);
+  --text-dense--line-height: calc(20 / 14);
+  --text-body: var(--fs-body);
+  --text-section: var(--fs-section);
+  --text-title: var(--fs-title);
+  --text-stat: var(--fs-stat);
   --color-background: var(--bg);
   --color-foreground: var(--text);
   --color-card: var(--surface);
@@ -65,6 +75,7 @@
   --color-unknown-bg: var(--unknown-bg);
   --color-accent-bg: var(--accent-bg);
   --color-teal-bg: var(--teal-bg);
+  --color-pill: var(--pill);
 }
 
 @layer base {
@@ -74,6 +85,6 @@
   body {
     @apply bg-background text-foreground;
     /* 14 px on data surfaces, the console's dense size (rules 7 and 20). */
-    font-size: 14px;
+    font-size: var(--fs-dense);
   }
 }

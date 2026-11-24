@@ -1,0 +1,35 @@
+{
+ "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#directoryObjects(id,displayName,accountEnabled)",
+ "@odata.count": 5,
+ "value": [
+  {
+   "@odata.type": "#microsoft.graph.user",
+   "accountEnabled": null,
+   "displayName": "pat",
+   "id": "1a1a1a1a-3333-4333-8333-333333333333"
+  },
+  {
+   "@odata.type": "#microsoft.graph.agentUser",
+   "accountEnabled": null,
+   "displayName": "demo-agent user",
+   "id": "2a2a2a2a-5555-4555-8555-555555555555"
+  },
+  {
+   "@odata.type": "#microsoft.graph.agentIdentity",
+   "accountEnabled": true,
+   "displayName": "demo-agent",
+   "id": "3a3a3a3a-6666-4666-8666-666666666666"
+  },
+  {
+   "@odata.type": "#microsoft.graph.user",
+   "accountEnabled": null,
+   "displayName": "kim",
+   "id": "1b1b1b1b-4444-4444-8444-444444444444"
+  },
+  {
+   "@odata.type": "#microsoft.graph.group",
+   "displayName": "straza-test-nested",
+   "id": "9b9b9b9b-2222-4222-8222-222222222222"
+  }
+ ]
+}

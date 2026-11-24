@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { PolicyDecisions } from "./policy-decisions";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { type AuditRow, listAudit } from "@/lib/api";
+import { OUTCOME_WORD } from "@/lib/chip-words";
 import { ANY_OUTCOME, ANY_WHO, BUCKET_WORD, DEC_FILTER, NO_DECISIONS, NO_DECISIONS_HERE, SINCE } from "@/lib/policy-words";
 
 vi.mock("@/lib/api", async (orig) => ({
@@ -60,11 +61,18 @@ describe("the Decisions tab", () => {
     expect(listAudit).toHaveBeenCalledWith(QUERY);
     expect(document.querySelector("[data-decisions-tab]")).toBeTruthy();
     expect(seqs()).toEqual(["70", "69", "68"]);
-    expect(outcomes()).toEqual([BUCKET_WORD.deny, BUCKET_WORD.deny, BUCKET_WORD.hum]);
+    expect(outcomes()).toEqual([OUTCOME_WORD.denied, OUTCOME_WORD.denied, OUTCOME_WORD.approval]);
     const first = document.querySelector("[data-decision=\"70\"]") as HTMLElement;
     expect(first.textContent).toContain("joe");
-    expect(first.textContent).toContain("shell: rm -rf ./build");
+    expect(first.textContent).toContain("shell command: rm -rf ./build");
     expect(first.textContent).toContain("no-destructive-delete");
+  });
+
+  it("keeps a floor under the table, so Call keeps room in a narrow window", async () => {
+    mount();
+    await waitFor(() => expect(seqs().length).toBe(3));
+    const table = (document.querySelector("[data-decision]") as HTMLElement).closest("table") as HTMLElement;
+    expect(table.style.minWidth).toBe("900px");
   });
 
   it("carries the three filters, each with the choice that narrows nothing", async () => {
@@ -119,8 +127,8 @@ describe("the Decisions tab", () => {
     await userEvent.click(screen.getByRole("button", { name: "Open 69" }));
     const sheet = await screen.findByRole("dialog");
     expect(sheet.getAttribute("data-record-sheet")).toBe("69");
-    expect(within(sheet).getByRole("heading", { name: "Record 69 tool" })).toBeTruthy();
+    expect(within(sheet).getByRole("heading", { name: "Record 69 tool call" })).toBeTruthy();
     expect((sheet.querySelector("[data-why]") as HTMLElement).textContent)
-      .toContain("Decided by rule no-env in policy " + NAME);
+      .toContain("Decided by policy rule no-env in policy " + NAME);
   });
 });

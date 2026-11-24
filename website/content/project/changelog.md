@@ -2,7 +2,7 @@
 title: Changelog
 description: List what changed in each release.
 seo_title: "Straza release notes: what's new in each version"
-seo_description: "What changed in each Straza release: 2.2.0 adds Entra agent identities for AI agents and console rules for harness tools, 2.0 a local service that keeps credentials from agents."
+seo_description: "What changed in each Straza release: 2.3.0 adds a direct sync with Microsoft Entra ID and encrypted signing keys, 2.0 a local service that keeps credentials from agents."
 pagetype: reference
 weight: 20
 draft: false
@@ -15,9 +15,11 @@ Straza keeps its changelog in [CHANGELOG.md](https://github.com/strazahq/straza/
 ## Latest release
 
 
-The latest release is [Straza 2.2.0](https://github.com/strazahq/straza/releases/tag/v2.2.0), a minor release. It lets an AI agent call an MCP server as its own Microsoft Entra agent identity and fixes enrollment and sign-in through Entra. The console now writes rules for MCP servers on people's own machines and for harness tools that Straza does not classify. strazad runs a database migration when it starts, so back up the store before the upgrade. The admin API now refuses a request field that a route does not take, so upgrade every strazad replica before strazactl. [Upgrade from 2.1.0 to 2.2.0]({{< relref "guides/operate/backup-and-upgrade.md#upgrade-from-210-to-220" >}}) lists the steps in their order.
+The latest release is [Straza 2.3.0](https://github.com/strazahq/straza/releases/tag/v2.3.0), a minor release. It syncs with Microsoft Entra ID directly over Microsoft Graph, and Entra assigns a role when you add a person or an agent to that role's group. The release also encrypts the session and snapshot signing keys in the database with `secret.key`, and limits how fast a session and a user can call a remote MCP server. strazad migrates its database, and every replica has to stop before the first 2.3.0 replica starts. [Upgrade from 2.2.0 to 2.3.0]({{< relref "guides/operate/backup-and-upgrade.md#upgrade-from-220-to-230" >}}) lists the steps in their order.
 
-Before it came [Straza 2.1.0](https://github.com/strazahq/straza/releases/tag/v2.1.0), a minor release. It adds the `straza__whoami` tool and pinning a server's objects in the console, withholds an MCP server's reply that holds the credential Straza injected, and bounds slow and oversized requests. Its wire changes are additive, so 2.0.x clients keep working against it.
+Before it came [Straza 2.2.0](https://github.com/strazahq/straza/releases/tag/v2.2.0), a minor release. It lets an AI agent call an MCP server as its own Microsoft Entra agent identity and fixes enrollment and sign-in through Entra. The console now writes rules for MCP servers on people's own machines and for harness tools that Straza does not classify. [Upgrade from 2.1.0 to 2.2.0]({{< relref "guides/operate/backup-and-upgrade.md#upgrade-from-210-to-220" >}}) lists the steps in their order.
+
+2.2.0 followed [Straza 2.1.0](https://github.com/strazahq/straza/releases/tag/v2.1.0), a minor release. It adds the `straza__whoami` tool and pinning a server's objects in the console, withholds an MCP server's reply that holds the credential Straza injected, and bounds slow and oversized requests. Its wire changes are additive, so 2.0.x clients keep working against it.
 
 2.1.0 followed [Straza 2.0.1](https://github.com/strazahq/straza/releases/tag/v2.0.1), a security and bug-fix release. Interpreter rules now apply to `straza exec`, the standalone database is readable by its owner only, and calls that a classify rule allows run again.
 

@@ -90,7 +90,7 @@ func newIssuerFixture(t *testing.T) *issuerFixture {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	tokens, err := NewTokenService(ctx, s.SigningKeys(), srv.URL, 0)
+	tokens, err := NewTokenService(ctx, s.SigningKeys(), sharedSealer(), srv.URL, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

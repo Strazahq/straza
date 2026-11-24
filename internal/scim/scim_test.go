@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/strazahq/straza/internal/store"
 )
@@ -121,6 +122,55 @@ func TestStrazaBornFactsReadOnly(t *testing.T) {
 			t.Errorf("%s: kind=%v origin=%v, want %s/%s",
 				tc.name, block["kind"], block["origin"], tc.wantKind, tc.wantOrigin)
 		}
+	}
+}
+
+// TestExtensionBlockLocks pins which revocation rows the lock block shows
+// the identity manager: a lock set in Straza or by automation, and never
+// the row of a disable, which the identity manager reads on active. The row
+// of a disable in Straza that outlived an enable from the identity manager
+// shows as a lock, because it still refuses a user who reads active.
+func TestExtensionBlockLocks(t *testing.T) {
+	at := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	row := func(origin, reason string) store.Revocation {
+		return store.Revocation{Kind: store.RevokeUser, Origin: origin, Reason: reason, CreatedAt: at}
+	}
+	disable := row(store.RevocationOriginAdminDisable, "user disabled by admin")
+	off, on := store.UserDisabled, store.UserActive
+	cases := []struct {
+		name   string
+		status string
+		rows   []store.Revocation
+		origin string // the lockOrigin shown, "" for no lock
+		reason string
+	}{
+		{"no row", on, nil, "", ""},
+		{"an admin disable", off, []store.Revocation{disable}, "", ""},
+		{"an admin disable the identity manager enabled", on, []store.Revocation{disable}, "admin-disable", "user disabled by admin"},
+		{"a deactivation by the identity manager", off, []store.Revocation{row(store.RevocationOriginSCIM, "deactivated via SCIM")}, "", ""},
+		{"a disable read in Entra", off, []store.Revocation{row(store.RevocationOriginEntra, "the account is disabled in Entra")}, "", ""},
+		{"an admin lock", on, []store.Revocation{row(store.RevocationOriginAdmin, "incident 42")}, "admin", "incident 42"},
+		{"a lock by automation", on, []store.Revocation{row(store.RevocationOriginExternal, "SIEM rule 7")}, "external", "SIEM rule 7"},
+		{"an admin disable and an admin lock", off, []store.Revocation{disable, row(store.RevocationOriginAdmin, "incident 42")}, "admin", "incident 42"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			block := extensionBlock(store.User{Origin: store.OriginSCIM, Status: tc.status}, tc.rows)
+			if block["locked"] != (tc.origin != "") {
+				t.Fatalf("locked = %v, want %v (%v)", block["locked"], tc.origin != "", block)
+			}
+			if tc.origin == "" {
+				for _, k := range []string{"lockOrigin", "lockReason", "lockedAt"} {
+					if v, ok := block[k]; ok {
+						t.Errorf("%s = %v, want it absent with no lock", k, v)
+					}
+				}
+				return
+			}
+			if block["lockOrigin"] != tc.origin || block["lockReason"] != tc.reason || block["lockedAt"] != at {
+				t.Errorf("block = %v, want lockOrigin %s, lockReason %q and lockedAt %v", block, tc.origin, tc.reason, at)
+			}
+		})
 	}
 }
 

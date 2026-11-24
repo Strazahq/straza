@@ -223,8 +223,7 @@ func TestToolReachAtLeastAsStrict(t *testing.T) {
 
 // TestInventoryHashCoversMarks pins that the drift hash covers the
 // ai.straza/* marks with the views switch off and on, in any key order,
-// and that a server with no marks keeps the hash it had before marks
-// existed, byte for byte.
+// and that a server with no marks hashes as its tools alone.
 func TestInventoryHashCoversMarks(t *testing.T) {
 	argMark := mcp.Meta{"other": "x", markObject: map[string]any{"type": "repo", "argument": "repo"}}
 	allMark := mcp.Meta{"other": "x", markObject: map[string]any{"type": "repo", "reach": "all"}}

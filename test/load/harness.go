@@ -16,6 +16,7 @@ import (
 	"github.com/strazahq/straza/internal/authn"
 	"github.com/strazahq/straza/internal/config"
 	"github.com/strazahq/straza/internal/logging"
+	"github.com/strazahq/straza/internal/secrets"
 	"github.com/strazahq/straza/internal/server"
 	"github.com/strazahq/straza/internal/store"
 )
@@ -43,6 +44,9 @@ type strazadOpts struct {
 	// token identity, exactly like production pods behind one LB.
 	pgDSN  string
 	issuer string
+	// kekFile is the key-encryption key file the pods of a multi-pod probe
+	// share, as replicas do. Empty leaves the file in dataDir.
+	kekFile string
 }
 
 // bootStrazad starts a standalone strazad on an ephemeral loopback port and
@@ -80,6 +84,9 @@ func bootStrazad(ctx context.Context, o strazadOpts) (*strazad, error) {
 	if o.issuer != "" {
 		cfg.Server.PublicURL = o.issuer
 	}
+	if o.kekFile != "" {
+		cfg.Secrets.KEKFile = o.kekFile
+	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	start := time.Now()
@@ -115,7 +122,12 @@ func bootStrazad(ctx context.Context, o strazadOpts) (*strazad, error) {
 	}
 	// Harness-minted tokens carry the pod's effective issuer (the shared one
 	// when a multi-pod probe overrode it) so they verify on every pod.
-	tokens, err := authn.NewTokenService(runCtx, st.SigningKeys(), cfg.Server.PublicURL, 0)
+	kek, err := secrets.LoadOrCreateKEK(cfg.KEKFile())
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	tokens, err := authn.NewTokenService(runCtx, st.SigningKeys(), kek, cfg.Server.PublicURL, 0)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -227,7 +239,9 @@ func (w *strazad) applyPolicy(adminToken, name, yaml string) error {
 // installEchoApp installs a remote MCP app pointing at upstreamURL and
 // creates roleName, which must begin with loadtest-, as the app's own role
 // with every tool (admin API end to end). Seed the role's users after it,
-// so seedUsers finds the role instead of making one of no server.
+// so seedUsers finds the role instead of making one of no server. The
+// manifest's rate sits far above the remote default, so a run measures
+// capacity and not rate refusals, which answer 200 like a served call.
 func (w *strazad) installEchoApp(adminToken, upstreamURL, roleName string) error {
 	manifest := fmt.Sprintf(`apiVersion: straza.dev/v1beta1
 kind: App
@@ -246,6 +260,8 @@ straza:
       url: %s
   exposure:
     tools: ["*"]
+  limits:
+    rps: 1000000
 `, upstreamURL)
 	req, _ := http.NewRequest(http.MethodPost, w.base+"/v1/admin/apps", strings.NewReader(manifest))
 	req.Header.Set("Authorization", "Bearer "+adminToken)

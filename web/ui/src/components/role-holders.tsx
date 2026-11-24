@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -6,39 +7,45 @@ import { Input } from "@/components/ui/input";
 import { DataTable } from "@/components/data-table";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
+import { HolderSource } from "@/components/holder-source";
+import { KindChip } from "@/components/user-parts";
 import { type PickedUser, UserPicker } from "@/components/user-picker";
-import { USER_LABELS, WordBadge, userColumns } from "@/components/users-table";
-import { UserSheet } from "@/components/user-sheet";
-import { type ApiError, type RoleRow, type UserRow, getUser, grantRole, listUsers } from "@/lib/api";
-import { put } from "@/lib/handoff";
+import { USER_WIDTHS, UserName, userColumns, userMinWidth } from "@/components/users-table";
+import { type ApiError, type AssignmentRow, type RoleRow, type UserRow, getUser, grantRole, listUsers } from "@/lib/api";
+import { holdingOf } from "@/lib/user-access";
+import { userKind } from "@/lib/user-look";
 import { notify } from "@/lib/notify";
 import { usePagedList } from "@/lib/paged";
 import { navigate } from "@/lib/router";
-import { CANCEL, DRIFT_BADGE, DRIFT_HELP, DRIFT_SHORT, GRANT_HELP, GRANT_ROLE, HOLDERS_TAB_HELP, LOAD_MORE, SEARCH_HOLDERS, SUBJECT_HOLDERS, TAB, USER_LABEL, USER_MISSING, grantBody, grantTitle, grantedToast, holdersCount, kindOf, nobodyHolds } from "@/lib/role-words";
+import { CANCEL, DRIFT_SHORT, GRANT_HELP, GRANT_ROLE, HOLDERS_TAB_HELP, LOAD_MORE, SEARCH_HOLDERS, SUBJECT_HOLDERS, TAB, USER_LABEL, USER_MISSING, grantBody, grantTitle, grantedToast, holdersCount, kindOf, nobodyHolds } from "@/lib/role-words";
 import { refused } from "@/lib/say";
+import { USER_LABELS } from "@/lib/user-list-words";
 
 // The Holders tab: the Users list
 // narrowed to everyone who holds the role through any path, paged on the
-// server, and the one write the console makes here, a direct grant.
+// server, and the one write the console makes here, a direct grant. A row
+// opens the user's page.
 
 const DEBOUNCE_MS = 300;
-const WIDTHS: Record<string, string> = { name: "28%", type: "10%", agents: "8%", roles: "20%", origin: "10%", last_seen: "12%", status: "12%" };
 
 type Props = {
   role: RoleRow;
-  // roles is the catalog the user's sheet offers its own grants from.
+  // roles is the catalog, which names the kind of each role a holder holds.
   roles: RoleRow[];
   // grantOpen is the head's primary opening the Grant dialog.
   grantOpen: boolean;
   onGrantOpenChange: (open: boolean) => void;
   // onChanged tells the page a membership write landed.
   onChanged: () => void;
+  // source turns the Source column into where each holder's role comes
+  // from, for a role with a group in Entra: every assignment, the group's
+  // ID and its name in Entra.
+  source?: { assignments: AssignmentRow[]; groupID: string; group: string };
 };
 
-export function RoleHolders({ role, roles, grantOpen, onGrantOpenChange, onChanged }: Props) {
+export function RoleHolders({ role, roles, grantOpen, onGrantOpenChange, onChanged, source }: Props) {
   const [typed, setTyped] = React.useState("");
   const [q, setQ] = React.useState("");
-  const [open, setOpen] = React.useState<UserRow | null>(null);
 
   React.useEffect(() => {
     const t = setTimeout(() => setQ(typed.trim()), DEBOUNCE_MS);
@@ -47,7 +54,22 @@ export function RoleHolders({ role, roles, grantOpen, onGrantOpenChange, onChang
 
   const params = React.useMemo(() => ({ q, role: role.name }), [q, role.name]);
   const { state, busy, reload, loadMore } = usePagedList<UserRow>({ read: listUsers, subject: SUBJECT_HOLDERS, params, sorting: { key: "name", order: "asc" }, limit: 100 });
-  const columns = React.useMemo(() => userColumns((username) => { put("users", { sponsor: username }); navigate("users"); }), []);
+  // mixed says the holders read so far are of more than one kind, so each
+  // row carries its kind chip under the name, where the tile alone would
+  // leave a person and an agent to be told apart by colour.
+  const mixed = state.kind === "ready" && new Set(state.rows.map(userKind)).size > 1;
+  const columns = React.useMemo(() => {
+    const cols = userColumns((u) => navigate("users", [u.id, "agents"]), roles);
+    return cols.map((c): ColumnDef<UserRow> => {
+      if (c.id === "name" && mixed) {
+        return { ...c, cell: ({ row }) => <div className="flex min-w-0 flex-col items-start gap-1"><UserName user={row.original} /><KindChip user={row.original} /></div> };
+      }
+      if (c.id === "source" && source) {
+        return { ...c, cell: ({ row }) => <HolderSource holding={holdingOf(row.original.id, role, source.assignments, roles)} groupID={source.groupID} group={source.group} /> };
+      }
+      return c;
+    });
+  }, [roles, role, source, mixed]);
 
   const changed = () => { void reload(); onChanged(); };
 
@@ -76,12 +98,12 @@ export function RoleHolders({ role, roles, grantOpen, onGrantOpenChange, onChang
           rowKey={(r) => r.id}
           rowName={(r) => r.username}
           dataAttr="data-user"
-          onOpen={(r) => setOpen(r)}
-          openKey={open?.id || null}
+          onOpen={(r) => navigate("users", [r.id])}
           filterBar={filterBar}
           count={() => holdersCount(state.rows.length, state.more)}
-          emptyText={nobodyHolds(role.name)}
-          widths={WIDTHS}
+          emptyText={nobodyHolds(role.name, kindOf(role) === "approver" || kindOf(role) === "straza")}
+          widths={USER_WIDTHS}
+          minWidth={userMinWidth}
           hiddenByDefault={["created"]}
           foot={state.more ? (
             <div>
@@ -90,16 +112,6 @@ export function RoleHolders({ role, roles, grantOpen, onGrantOpenChange, onChang
               </Button>
             </div>
           ) : undefined}
-        />
-      )}
-
-      {open && (
-        <UserSheet
-          user={open}
-          roles={roles}
-          open={true}
-          onOpenChange={(o) => { if (!o) setOpen(null); }}
-          onChanged={changed}
         />
       )}
 
@@ -161,23 +173,19 @@ function GrantDialog({ role, open, onOpenChange, onGranted }: { role: RoleRow; o
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>{grantTitle(role.name, picked?.username)}</DialogTitle>
+          <DialogTitle>{grantTitle(role.name)}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3" ref={box}>
-          <UserPicker value={picked} onChange={(u) => { setPicked(u); setMissing(false); }} label={USER_LABEL} />
-          {missing && <p className="text-[13px] text-danger">{USER_MISSING}</p>}
+          <UserPicker value={picked} onChange={(u) => { setPicked(u); setMissing(false); }} label={USER_LABEL} pick />
+          {missing && <p className="text-caption text-danger">{USER_MISSING}</p>}
           {picked && (
-            <p className="flex flex-wrap items-center gap-1 text-sm text-text-2">
+            <p className="flex flex-wrap items-center gap-1 text-dense text-text-2">
               {grantBody(kindOf(role), picked.username, role.name)}
               <HelpTip label={GRANT_ROLE} text={GRANT_HELP} />
             </p>
           )}
           {picked && origin === "scim" && (
-            <p className="flex flex-wrap items-center gap-1.5 text-sm text-text-2" data-drift>
-              <WordBadge word={DRIFT_BADGE} tone="warn" />
-              {DRIFT_SHORT}
-              <HelpTip label={DRIFT_BADGE} text={DRIFT_HELP} />
-            </p>
+            <p className="text-dense text-text-2" data-drift>{DRIFT_SHORT}</p>
           )}
           {problem && <RefusedError subject={GRANT_ROLE} message={problem} />}
         </div>

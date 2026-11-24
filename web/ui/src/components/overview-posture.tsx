@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge";
+import { Chip } from "@/components/chip";
 import { Door, Panel, PanelNote } from "@/components/overview-parts";
 import {
   ALL_STRICT,
@@ -41,13 +41,13 @@ export function Posture({ rows, denied, expanded }: Props) {
   const relaxed = read ? read.relaxed : [];
   const incomplete = !rows || rows.some((r) => r.value === VALUE_UNAVAILABLE);
   const badge = (
-    <Badge
-      variant="outline"
+    <Chip
+      tone={incomplete ? "plain" : relaxed.length ? "warn" : "ok"}
       data-posture={incomplete ? "unknown" : relaxed.length ? "relaxed" : "strict"}
-      className={"rounded-md px-2 font-mono text-[13px] font-normal " + (incomplete ? "border-border text-muted-foreground" : relaxed.length ? "border-warn/40 bg-warn-bg text-warn" : "border-ok/40 bg-ok-bg text-ok")}
+      className={incomplete ? "text-muted-foreground" : undefined}
     >
       {incomplete ? postureIncomplete(relaxed.length) : postureBadge(relaxed.length)}
-    </Badge>
+    </Chip>
   );
 
   return (
@@ -60,27 +60,27 @@ export function Posture({ rows, denied, expanded }: Props) {
       right={CONFIG_TAB ? <Door to="settings" rest={[CONFIG_TAB.key]} label={CONFIG_TAB.label} /> : undefined}
     >
       {!read ? (
-        <PanelNote>{denied ? seatLine(POSTURE_TITLE, "config:read") : CONFIG_UNREAD}</PanelNote>
+        <PanelNote>{denied ? seatLine(POSTURE_TITLE, "config") : CONFIG_UNREAD}</PanelNote>
       ) : (
         <div className="flex flex-col">
           {relaxed.map((r) => (
-            <div key={r.id} data-relaxed={r.id} className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 border-b border-border py-2.5 text-sm first:pt-0 last:border-b-0 last:pb-0">
+            <div key={r.id} data-relaxed={r.id} className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 border-b border-border py-2.5 text-dense first:pt-0 last:border-b-0 last:pb-0">
               <span className="min-w-0 text-foreground">{r.short || r.name}</span>
               <span className="text-right font-mono font-semibold text-warn">{r.postureValue || r.value}</span>
-              <span className="col-span-2 max-w-[62ch] text-[13px] leading-relaxed text-text-2">
+              <span className="col-span-2 max-w-[62ch] text-caption leading-relaxed text-text-2">
                 {r.cost + " "}
-                <Door to="settings" rest={CONFIG_TAB ? [CONFIG_TAB.key] : []} hash={r.id} label={setLink(r)} arrow={false} />
+                <Door to="settings" rest={CONFIG_TAB ? [CONFIG_TAB.key, r.id] : []} label={setLink(r)} arrow={false} />
               </span>
             </div>
           ))}
-          <p className="border-b border-border py-2.5 text-[13px] leading-relaxed text-muted-foreground first:pt-0 last:border-b-0 last:pb-0" data-strict-line>
+          <p className="border-b border-border py-2.5 text-caption leading-relaxed text-muted-foreground first:pt-0 last:border-b-0 last:pb-0" data-strict-line>
             {read.strictWords.length ? strictLine(read.strictWords) : incomplete ? CONFIG_PARTIAL : ALL_STRICT}
           </p>
           {incomplete && read.strictWords.length > 0 && (
-            <p className="border-b border-border py-2.5 text-[13px] leading-relaxed text-muted-foreground last:border-b-0 last:pb-0" data-partial-line>{CONFIG_PARTIAL}</p>
+            <p className="border-b border-border py-2.5 text-caption leading-relaxed text-muted-foreground last:border-b-0 last:pb-0" data-partial-line>{CONFIG_PARTIAL}</p>
           )}
           {read.notes.length > 0 && (
-            <p className="py-2.5 text-[13px] leading-relaxed text-muted-foreground last:pb-0" data-notes-line>{notesLine(read.notes)}</p>
+            <p className="py-2.5 text-caption leading-relaxed text-muted-foreground last:pb-0" data-notes-line>{notesLine(read.notes)}</p>
           )}
         </div>
       )}

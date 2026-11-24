@@ -2,10 +2,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { type GrantInput, planRows, runGrant, storedRules } from "./grant-commit";
+import { type GrantInput, ownSet, planRows, runGrant, storedRules } from "./grant-commit";
 import { type Plan, emptyPlan, planFor, readOwnRules, withCall, withChoice, withOwn } from "./access-plan";
 import { ApiError, type AppRow, type BindingRow, type ToolRow, applyPolicy, createBinding, createRole, deactivatePolicy, deletePolicy, getPolicy, removeBinding } from "./api";
-import { UNREACHABLE_STEP, retireKept, rowRetire, setMismatch, setUnparsed } from "./role-words";
+import { docText } from "./policy-model";
+import { SPONSOR_POOL, UNREACHABLE_STEP, retireKept, rowRetire, setMismatch, setUnparsed } from "./role-words";
 
 vi.mock("./api", async (orig) => ({
   ...(await orig<typeof import("./api")>()),
@@ -57,7 +58,7 @@ const NEW_SET = [
   "kind: PolicySet",
   "metadata:",
   "  name: dev-tools-access",
-  "  description: Gates for the role dev-tools, written in the console",
+  "  description: Approvals and denials for the role dev-tools, written in the console",
   "spec:",
   "  priority: 100",
   "  match:",
@@ -124,6 +125,72 @@ const MIXED = [
   "",
 ].join("\n");
 
+// SERVED is what demo-tools lists in the cases on names it does not list.
+const SERVED = ["get-sum", "get-env", "list-files"];
+
+// UNLISTED is dev-tools' own set as the editor writes it: a hold on get-sum
+// and a deny of get-env, each rule also naming a tool SERVED leaves out.
+const UNLISTED = [
+  "apiVersion: straza.dev/v1beta1",
+  "kind: PolicySet",
+  "metadata:",
+  "  name: dev-tools-access",
+  "spec:",
+  "  priority: 100",
+  "  match:",
+  "    roles: [dev-tools]",
+  "  rules:",
+  "    - id: demo-tools-approve",
+  "      tools: [mcp.call]",
+  "      apps: [demo-tools]",
+  "      toolNames:",
+  "        allow: [get-sum, gone-hold]",
+  "      effect: allow",
+  "      mode: approve",
+  "      approve:",
+  "        deciders: [sponsor]",
+  "        timeoutSeconds: 120",
+  '      reason: "Straza: this call to demo-tools needs approval, set in the console"',
+  "    - id: demo-tools-deny",
+  "      tools: [mcp.call]",
+  "      apps: [demo-tools]",
+  "      toolNames:",
+  "        deny: [get-env, gone-deny]",
+  "      effect: deny",
+  "",
+].join("\n");
+
+// DENY_FIRST is a hand-written set for dev-tools that denies get-env before
+// it holds get-sum and a tool SERVED leaves out.
+const DENY_FIRST = [
+  "apiVersion: straza.dev/v1beta1",
+  "kind: PolicySet",
+  "metadata:",
+  "  name: dev-tools-access",
+  "spec:",
+  "  match:",
+  "    roles: [dev-tools]",
+  "  rules:",
+  "    - id: no-env",
+  "      tools: [mcp.call]",
+  "      apps: [demo-tools]",
+  "      toolNames:",
+  "        deny: [get-env]",
+  "      effect: deny",
+  "    - id: sum-hold",
+  "      tools: [mcp.call]",
+  "      apps: [demo-tools]",
+  "      toolNames:",
+  "        allow: [get-sum, gone-hold]",
+  "      effect: allow",
+  "      mode: approve",
+  "      approve:",
+  "        deciders: [sponsor]",
+  "        timeoutSeconds: 120",
+  '      reason: "Straza: held by hand"',
+  "",
+].join("\n");
+
 describe("the stepwise grant", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -138,10 +205,10 @@ describe("the stepwise grant", () => {
   it("names the rows before it runs any of them, the publish row in the words of what a call does", () => {
     const rows = planRows(input({ role: { name: "scout", create: { kind: "application", description: "" } }, replace: stored }));
     expect(rows.map((r) => [r.key, r.label, r.state])).toEqual([
-      ["create", "Create the role scout", "pending"],
+      ["create", "Create scout", "pending"],
       ["remove", "Remove the old access row", "pending"],
       ["grant", "Write the new access row: every tool (2)", "pending"],
-      ["publish", "Publish scout-access: 1 tool is allowed. 1 needs approval by the person behind the agent within 2 minutes.", "pending"],
+      ["publish", "Publish scout-access: 1 tool is allowed. 1 needs approval by " + SPONSOR_POOL + " within 2 minutes.", "pending"],
     ]);
   });
 
@@ -320,6 +387,54 @@ describe("the stepwise grant", () => {
     expect(getPolicy).not.toHaveBeenCalled();
   });
 
+  // Each case is the tools the server lists, the edit, and the names each
+  // rule a save stores for demo-tools carries, in the order it stores them.
+  const unlistedCases: [string, string[], (p: Plan) => Plan, [string, unknown][]][] = [
+    ["list-files joins the hold", SERVED, (p) => withChoice(p, "list-files", "approve"), [
+      ["demo-tools-approve", { allow: ["get-sum", "gone-hold", "list-files"] }],
+      ["demo-tools-deny", { deny: ["get-env", "gone-deny"] }],
+    ]],
+    ["get-sum is allowed", SERVED, (p) => withChoice(p, "get-sum", "allow"), [
+      ["demo-tools-approve", { allow: ["gone-hold"] }],
+      ["demo-tools-deny", { deny: ["get-env", "gone-deny"] }],
+    ]],
+    ["get-env is allowed", SERVED, (p) => withChoice(p, "get-env", "allow"), [
+      ["demo-tools-approve", { allow: ["get-sum", "gone-hold"] }],
+      ["demo-tools-deny", { deny: ["gone-deny"] }],
+    ]],
+    ["back to allow", SERVED, (p) => withCall(p, "allow"), [
+      ["demo-tools-approve", { allow: ["gone-hold"] }],
+      ["demo-tools-deny", { deny: ["gone-deny"] }],
+    ]],
+    ["every call with no tool listed", [], (p) => withCall(p, "every"), [
+      ["demo-tools-approve", { allow: ["get-sum", "gone-hold"] }],
+      ["demo-tools-deny", { deny: ["get-env", "gone-deny"] }],
+      ["demo-tools-every-call-approve", undefined],
+    ]],
+  ];
+  it.each(unlistedCases)("keeps the hold and the deny of tools the server does not list: %s", (_name, served, edit, want) => {
+    const rules = storedRules(UNLISTED, edit(readBack(UNLISTED, glob("dev-tools"), served)), "demo-tools", served, "dev-tools");
+    expect(rules?.map((r) => [r.id, r.toolNames])).toEqual(want);
+  });
+
+  it("renames the tool in a reason it wrote when a rule is cut down to names the server does not list", () => {
+    const rules = storedRules(UNLISTED, withChoice(readBack(UNLISTED, glob("dev-tools"), SERVED), "get-sum", "allow"), "demo-tools", SERVED, "dev-tools");
+    expect(rules?.[0].reason).toBe("Straza: gone-hold on demo-tools needs approval, set in the console");
+  });
+
+  it("keeps the set rather than retiring it while a name the server does not list is left", async () => {
+    vi.mocked(getPolicy).mockResolvedValue({ name: "dev-tools-access", status: "active", yaml: UNLISTED });
+    const before = readBack(UNLISTED, glob("dev-tools"), SERVED);
+    const set = await ownSet({ role: { name: "dev-tools" }, app, tools: toolRows(app, SERVED), plan: withCall(before, "allow"), before, keep: true });
+    expect("doc" in set && ruleIds(docText(set.doc))).toEqual(["demo-tools-approve", "demo-tools-deny"]);
+  });
+
+  it("puts the rule for every call after a kept rule of a tool the server does not list", () => {
+    const rules = storedRules(DENY_FIRST, withCall(readBack(DENY_FIRST, glob("dev-tools"), SERVED), "every"), "demo-tools", SERVED, "dev-tools");
+    expect(rules?.map((r) => r.id)).toEqual(["no-env", "sum-hold", "demo-tools-every-call-approve"]);
+    expect(rules?.[1]).toMatchObject({ toolNames: { allow: ["gone-hold"] }, reason: "Straza: held by hand" });
+  });
+
   it("keeps the stored access row when only the rules changed", async () => {
     await runGrant(input({ keep: true }), () => undefined);
     expect(createBinding).not.toHaveBeenCalled();
@@ -331,7 +446,7 @@ describe("the stepwise grant", () => {
     const result = await runGrant(input(), () => undefined);
     expect(getPolicy).not.toHaveBeenCalled();
     expect(result.rows.map((r) => [r.key, r.state])).toEqual([["grant", "failed"], ["publish", "pending"]]);
-    expect(result.rows[0].error).toBe("The server refused it: role dev-tools has no such server. Fix what it names, then try again.");
+    expect(result.rows[0].error).toBe("Straza refused it: role dev-tools has no such server. Fix what it names, then try again.");
   });
 
   it("says a step may or may not have landed when the server never answered", async () => {

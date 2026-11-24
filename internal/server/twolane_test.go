@@ -205,8 +205,8 @@ func TestTwoLaneActivation(t *testing.T) {
 	if rs := rows(); len(rs) != 1 || rs[0].Origin != store.RevocationOriginExternal {
 		t.Fatalf("external rows = %+v", rs)
 	}
-	// Admin user-enable (the console Enable button) is ALSO an explicit
-	// Straza action: it keeps its full-lift semantics.
+	// An admin enable of an active user changes nothing, and an admin
+	// enable never lifts a lock (TestAdminEnableLiftsOnlyTheDisable).
 	code = adminReq(t, "PATCH", base+"/v1/admin/users/"+target.ID, adminBearer,
 		map[string]string{"status": "active"}, &lockOut)
 	if code != http.StatusOK {

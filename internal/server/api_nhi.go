@@ -163,16 +163,15 @@ func (a *App) handleNHIKeyDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // nhiKeyLookup is the identity-policy closure behind the issuer's
-// client_credentials grant (authn.NHIKeyLookup): it alone decides who may
-// use the grant: existing, active, kind=nhi, key registered. The issuer
-// maps every error here onto one invalid_client (no NHI enumeration).
+// client_credentials grant (authn.NHIKeyLookup): it decides whose key the
+// grant may be tried with: existing, kind=nhi, key registered. The issuer
+// maps every error here onto one invalid_client (no NHI enumeration). A
+// user that is not active is returned with its key, and the issuer refuses
+// it, with the reason for a caller that proves the key.
 func (a *App) nhiKeyLookup(ctx context.Context, clientID string) (store.User, ed25519.PublicKey, error) {
 	u, err := a.store.Users().GetByUsername(ctx, clientID)
 	if err != nil {
 		return store.User{}, nil, fmt.Errorf("nhi lookup: %w", err)
-	}
-	if u.Status != store.UserActive {
-		return store.User{}, nil, fmt.Errorf("nhi lookup: user %s is not active", u.ID)
 	}
 	if userKind(u) != "nhi" {
 		return store.User{}, nil, fmt.Errorf("nhi lookup: %s is not an NHI identity", u.ID)

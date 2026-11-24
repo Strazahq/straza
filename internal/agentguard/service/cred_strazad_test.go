@@ -100,6 +100,10 @@ type fakeStrazad struct {
 	// noStartText drops the field, as an older server does.
 	startText   string
 	noStartText bool
+	// packs, when set, is the raw knowledge_packs property of every
+	// answer, and the word absent leaves the property out. Unset, the
+	// answer carries one pack, as a server before packs were removed did.
+	packs string
 	// auditFail, when set, is the status every audit batch gets.
 	auditFail int
 	// pushRefuse, when set, is the status every push connect gets, and
@@ -114,9 +118,15 @@ type fakeStrazad struct {
 	// checkinRefuse, when set, is the 403 sentence every key check-in gets
 	// after its proof, before the counter, as the sign-in deadline is.
 	checkinRefuse string
-	// pushEvents hands one event to one open push stream, and "close" ends
-	// that stream.
+	// idTokenRefuse is how many more ID-token check-ins get a 401, as a
+	// server that no longer takes the agent's cached ID token answers.
+	idTokenRefuse int
+	// pushEvents hands one event, or several joined by commas, to one open
+	// push stream, and "close" ends that stream.
 	pushEvents chan string
+	// refreshHold, when set, holds every refresh after it was counted until
+	// the channel closes, as a busy server does.
+	refreshHold chan struct{}
 	// enrollRefuse, when set, is the 403 sentence every enrollment gets.
 	enrollRefuse string
 	// lateDone closes when the one check-in delay held has finished.
@@ -292,6 +302,13 @@ func (f *fakeStrazad) answer(id, tok, user string) map[string]any {
 		delete(out, "start_text")
 	case f.startText != "":
 		out["start_text"] = f.startText
+	}
+	switch f.packs {
+	case "":
+	case "absent":
+		delete(out, "knowledge_packs")
+	default:
+		out["knowledge_packs"] = json.RawMessage(f.packs)
 	}
 	if !f.noRoles {
 		roles := f.roles
@@ -493,7 +510,9 @@ func (f *fakeStrazad) serve(w http.ResponseWriter, r *http.Request) {
 				if ev == "close" {
 					return
 				}
-				_, _ = io.WriteString(w, "event: "+ev+"\ndata: {}\n\n")
+				for _, e := range strings.Split(ev, ",") {
+					_, _ = io.WriteString(w, "event: "+e+"\ndata: {}\n\n")
+				}
 				w.(http.Flusher).Flush()
 			case <-r.Context().Done():
 				return

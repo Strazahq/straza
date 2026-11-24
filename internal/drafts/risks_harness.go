@@ -12,9 +12,16 @@ import (
 // harness tool Straza does not classify, read by its name, and an MCP
 // server a harness runs itself, which Straza has not registered.
 
+// toolKindWords names each local tool kind but other in plain words.
+var toolKindWords = map[string]string{
+	policy.ToolShellExec: "shell commands", policy.ToolFileRead: "file reads", policy.ToolFileWrite: "file writes",
+	policy.ToolFileEdit: "file edits", policy.ToolNetFetch: "network fetches", policy.ToolTaskSpawn: "subagents",
+}
+
 // localWhat words the local tool kinds a rule opens: every says all of
-// them, a rule that names harness tools reads as those tools, and the
-// kind other alone reads as every harness tool Straza does not classify.
+// them, each other kind reads in plain words, a rule that names harness
+// tools reads as those tools, and the kind other alone reads as every
+// harness tool Straza does not classify.
 func localWhat(r policy.Rule, kinds []string, every string) string {
 	if len(kinds) == len(localTools) {
 		return every
@@ -23,6 +30,7 @@ func localWhat(r policy.Rule, kinds []string, every string) string {
 	for i, k := range kinds {
 		switch names := allowNames(r); {
 		case k != policy.ToolOther:
+			words[i] = cmp.Or(toolKindWords[k], k)
 		case len(kinds) == 1 && len(names) == 1:
 			words[i] = "the harness tool " + names[0]
 		case len(kinds) == 1 && len(names) > 1:
@@ -62,10 +70,20 @@ func serverAllow(name string, b policy.Document, hadB bool, a policy.Document, a
 			servers = []string{""}
 		}
 		for _, s := range servers {
-			out = append(out, risk(codeLocalAllow, "PolicySet/"+name, "", unregisteredWords(name, ra, s, ""), "", ra.ID+": "+cmp.Or(s, "every MCP server")))
+			out = append(out, ruleNamed(risk(codeLocalAllow, "PolicySet/"+name, "", unregisteredWords(name, ra, s, ""), "", ra.ID+": "+cmp.Or(s, "every MCP server")), ra, s))
 		}
 	}
 	return out
+}
+
+// ruleNamed is f with the rule r, the server s it names, empty for every
+// server or none, and the tool names r allows, each spelled with visible.
+func ruleNamed(f Finding, r policy.Rule, s string) Finding {
+	f.Rule, f.Server = visible(r.ID), visible(s)
+	for _, t := range allowNames(r) {
+		f.Tools = append(f.Tools, visible(t))
+	}
+	return f
 }
 
 // registered answers the servers a rule may name without opening one that
@@ -95,14 +113,13 @@ func unregisteredWords(set string, r policy.Rule, s, once string) string {
 	if names := allowNames(r); len(names) > 0 {
 		tools = listWords(names, "and")
 	}
-	const tail = "whose tools are denied until a rule allows them."
 	switch {
 	case s == "" && once == "":
-		return fmt.Sprintf("Rule %s of %s allows %s of every MCP server, also of the servers Straza has not registered, %s", r.ID, set, tools, tail)
+		return fmt.Sprintf("Rule %s of %s allows %s of every MCP server, including the servers Straza has not registered and denies by default.", r.ID, set, tools)
 	case s == "":
-		return fmt.Sprintf("Rule %s of %s lets %s of every MCP server run once %s, also of the servers Straza has not registered, %s", r.ID, set, tools, once, tail)
+		return fmt.Sprintf("Rule %s of %s lets %s of every MCP server run once %s, including the servers Straza has not registered and denies by default.", r.ID, set, tools, once)
 	case once == "":
-		return fmt.Sprintf("Rule %s of %s allows %s of %s, an MCP server Straza has not registered, %s", r.ID, set, tools, s, tail)
+		return fmt.Sprintf("Rule %s of %s allows %s of %s, which Straza has not registered and denies by default.", r.ID, set, tools, s)
 	}
-	return fmt.Sprintf("Rule %s of %s lets %s of %s run once %s, although %s is an MCP server Straza has not registered, %s", r.ID, set, tools, s, once, s, tail)
+	return fmt.Sprintf("Rule %s of %s lets %s of %s run once %s, although Straza has not registered %s and denies its tools by default.", r.ID, set, tools, s, once, s)
 }

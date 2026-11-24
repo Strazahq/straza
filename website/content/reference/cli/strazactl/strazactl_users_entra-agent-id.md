@@ -2,7 +2,7 @@
 title: strazactl users entra-agent-id
 description: Manage the Entra agent identity an AI agent acts as at Entra
 pagetype: reference
-weight: 108
+weight: 102
 draft: false
 sources:
   - cmd/strazactl

@@ -39,9 +39,11 @@ func (c connectCaller) stamp(data map[string]any) map[string]any {
 // requireConnect authenticates a connect route that an admin API token may
 // call as well. A wat_ token under the Bearer scheme passes when its scope
 // covers the apps area for the request's verb, as on the admin plane: a read
-// needs apps:read, a write apps:write, and full grants both. A scope refusal
-// answers 403 and writes no record, as the admin plane does. Every other
-// credential takes requireUser.
+// needs apps:read, a write apps:write, and full grants both. A token's
+// write refused with 403, for its scope here or in the handler, writes one
+// admin.refused record under the token, as the admin plane does, unless the
+// handler records a connection.refused for it. Every other credential takes
+// requireUser.
 func (a *App) requireConnect(next func(w http.ResponseWriter, r *http.Request, c connectCaller)) http.HandlerFunc {
 	session := a.requireUser(func(w http.ResponseWriter, r *http.Request, userID string) {
 		next(w, r, connectCaller{userID: userID})
@@ -56,6 +58,8 @@ func (a *App) requireConnect(next func(w http.ResponseWriter, r *http.Request, c
 		if !ok {
 			return
 		}
+		w, r, report := a.watchRefusals(w, r, auditActor{Name: meta.Name, ID: meta.ID, Via: laneAdminAPI})
+		defer report()
 		if allowed, needed := scope.AllowsArea("apps", r.Method); !allowed {
 			what := "a change to a user's connection"
 			if r.Method == http.MethodGet {

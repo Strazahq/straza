@@ -58,20 +58,29 @@ var agentNameCodes = map[string]bool{"ready.tool-unknown": true, "ready.rule-nam
 
 // verdictFor is v, the verdict of draft d over live state w, as the caller
 // c may read it: the one cut every route that answers a verdict makes.
-// Every finding keeps the key it had before the cut. An
-// agent reads the refusals, risks, warnings and unchecked lines ForAgent
-// keeps, and nothing else, with its lines cut as a person's are but for the
-// lines of agentNameCodes on a draft whose every revision it wrote. Anyone
-// else reads v with three cuts. A gain row or coverage entry on a server the
-// caller may not read, without apps:read or the server's admin role, or of a
-// role that unreadObjects finds, is left out, and one info line counts them
-// all as rows. The built-in straza app's rows pass the server rule,
-// because its tools are the product's own. A risk, warning, unchecked or info
-// line that names a server the caller may not read, or a role or set that
-// unreadObjects finds, loses its words, as cutFinding says. Holders are named
-// only for root and a holder of identity:read, and counted for everyone.
+// Every finding keeps the key it had before the cut. An agent reads the
+// refusals, risks, warnings and unchecked lines ForAgent keeps, and nothing
+// else, with its lines cut as a person's are but for the lines of
+// agentNameCodes on a draft whose every revision it wrote. Anyone else
+// reads v with four cuts. A gain row or coverage entry on a server the
+// caller may not read, or of a role that unreadObjects finds, is left out,
+// and one info line counts them all as rows. The built-in straza app's
+// rows pass the server rule, because its tools are the product's own. A
+// risk, warning, unchecked or info line loses its words as cutFinding
+// says. Holders are named only for root and a holder of identity:read, and
+// counted for everyone. A row that stays has each side's gate and words
+// cut as cutGate says.
 func verdictFor(c draftCaller, w drafts.World, d drafts.Draft, v drafts.Verdict) verdictPayload {
 	unread, objects := c.unreadServers(w, d), c.unreadObjects(w, d, v)
+	// That a set applies to the proposer says which roles the proposer
+	// holds, which the server answers to nobody else without identity:read.
+	proposes := len(d.Authors) > 0 && c.isAuthor(d.Authors[0].UserID, d.Authors[0].Via)
+	if !c.p.root && !c.p.scope.Grants["identity:read"] && !proposes {
+		v.Risks = slices.Clone(v.Risks)
+		for i := range v.Risks {
+			v.Risks[i].BindsProposer = false
+		}
+	}
 	if !c.adminAPI() && !c.person {
 		av := v.ForAgent()
 		own := len(d.Authors) > 0 && !slices.ContainsFunc(d.Authors, func(p drafts.Principal) bool { return !c.isAuthor(p.UserID, p.Via) })
@@ -100,6 +109,8 @@ func verdictFor(c draftCaller, w drafts.World, d drafts.Draft, v drafts.Verdict)
 		if !names {
 			gain.Holders = nil
 		}
+		gain.BeforeGate, gain.BeforeWords = c.cutGate(w, d, gain.BeforeGate, gain.BeforeWords, gain.Before == drafts.OutcomeDenied)
+		gain.AfterGate, gain.AfterWords = c.cutGate(w, d, gain.AfterGate, gain.AfterWords, gain.After == drafts.OutcomeDenied)
 		gains = append(gains, gain)
 	}
 	// A coverage entry counts as a row of its own only where no gain row
@@ -219,6 +230,38 @@ func (c draftCaller) unreadObjects(w drafts.World, d drafts.Draft, v drafts.Verd
 	return out
 }
 
+// cutGate answers the gate g and the words of one side of a gain row as c
+// may read them, by the rule unreadObjects applies: root and a holder of
+// drafts:read read them whole, and anyone else each set and role
+// readsObject passes, an object of draft d read as d's item. The words of
+// an approval name its approver roles, so one role c may not read takes
+// the gate and the words. The words of a denial name its rule and set, so
+// a set c may not read takes both there too. On any other side the words
+// name no set, so they stay, and the gate stays without its rule and set.
+func (c draftCaller) cutGate(w drafts.World, d drafts.Draft, g *drafts.GainGate, words string, denied bool) (*drafts.GainGate, string) {
+	if g == nil || c.p.root || c.p.scope.Grants["drafts:read"] {
+		return g, words
+	}
+	reads := func(kind drafts.Kind, name string) bool {
+		it := drafts.Item{Kind: kind, Name: name}
+		if i := slices.IndexFunc(d.Items, func(x drafts.Item) bool { return x.Kind == kind && x.Name == name }); i >= 0 {
+			it = d.Items[i]
+		}
+		return c.readsObject(w, it)
+	}
+	switch {
+	case slices.ContainsFunc(g.Roles, func(r string) bool { return !reads(drafts.KindRole, r) }):
+		return nil, ""
+	case g.Set == "" || reads(drafts.KindPolicySet, g.Set):
+		return g, words
+	case denied:
+		return nil, ""
+	}
+	cut := *g
+	cut.Rule, cut.Set = "", ""
+	return &cut, words
+}
+
 // keyed answers fs as a route answers them to a reader who may not read
 // the servers unread nor the roles and sets hidden: each finding cut by
 // cutFinding and keyed by its Key from before the cut.
@@ -240,9 +283,14 @@ func keyed(fs []drafts.Finding, unread, hidden []string) []findingPayload {
 // and objectPart instead. Every line that names a tool names the tool's
 // server too, so the servers find the tools. A typed risk
 // without its typed text cannot be acknowledged, so only a reader who may
-// read what it names publishes it.
+// read what it names publishes it. The rows, rule, server and tools of a
+// line count as its texts, and a cut line carries none of them and no
+// binds_proposer.
 func cutFinding(f drafts.Finding, unread, hidden []string) drafts.Finding {
-	texts := []string{f.Object, f.Sentence, f.Fix, f.Before, f.After, f.Typed}
+	texts := append([]string{f.Object, f.Sentence, f.Fix, f.Before, f.After, f.Typed, f.Rule, f.Server}, f.Tools...)
+	for _, r := range f.Rows {
+		texts = append(texts, r.Server, r.Tool)
+	}
 	line, part := cutLine, cutPart
 	if !slices.ContainsFunc(texts, func(s string) bool { return namesServer(s, unread) }) {
 		if !slices.ContainsFunc(texts, func(s string) bool { return namesServer(s, hidden) }) {
@@ -258,6 +306,7 @@ func cutFinding(f drafts.Finding, unread, hidden []string) drafts.Finding {
 		f.Typed = ""
 	}
 	f.Sentence, f.Fix = line, ""
+	f.Rows, f.Rule, f.Server, f.Tools, f.BindsProposer = nil, "", "", nil, false
 	if f.Before != "" {
 		f.Before = part
 	}

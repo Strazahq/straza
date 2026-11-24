@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "01a1e8b0-1a01-7c40-8d11-2a3b4c5d6e51",
+  "type": "straza.audit.admin",
+  "source": "strazad/7f3c2a11-4b5d-4c6e-8f90-a1b2c3d4e5f6",
+  "time": "2026-11-22T09:02:11.418Z",
+  "data": {
+    "action": "admin.refused",
+    "actor": "iga-reader",
+    "actorId": "01a1e8b0-1a01-7c40-8d11-2a3b4c5d6e52",
+    "actorVia": "api-token",
+    "route": "DELETE /v1/admin/users/{id}",
+    "httpStatus": 403,
+    "reason": "token lacks scope identity:write",
+    "target": "01a1e8b0-1a01-7c40-8d11-2a3b4c5d6e53"
+  }
+}

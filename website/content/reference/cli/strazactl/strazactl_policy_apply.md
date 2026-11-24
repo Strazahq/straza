@@ -2,7 +2,7 @@
 title: strazactl policy apply
 description: 'Upload PolicySet YAML: a new set is stored off, and edits to a live set wait for policy activate'
 pagetype: reference
-weight: 66
+weight: 60
 draft: false
 sources:
   - cmd/strazactl

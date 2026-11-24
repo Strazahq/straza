@@ -2,6 +2,7 @@ package agentguard
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,5 +95,41 @@ func TestStartDeviceFlowWire(t *testing.T) {
 	}
 	if gotClientID != "straza" || gotScope != "openid profile" {
 		t.Errorf("client_id=%q scope=%q, want straza and openid profile", gotClientID, gotScope)
+	}
+}
+
+// TestCheckinWhereWire pins the machine and the folder on an ID-token
+// check-in: host and folder at the body's top level, each left out when
+// empty, so the body without them is the body an older client sends.
+func TestCheckinWhereWire(t *testing.T) {
+	cases := []struct {
+		name, host, folder string
+	}{
+		{"both", "kims-mac", "~/src/straza"},
+		{"no host", "", "~/src/straza"},
+		{"no folder", "kims-mac", ""},
+		{"neither", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&got)
+				_, _ = w.Write([]byte(`{"session_id":"s1","session_token":"tok","expires_in":300}`))
+			}))
+			defer srv.Close()
+			if _, err := NewClient(srv.URL).Checkin(context.Background(), "idt", "", "claude-code", "2.1.0", Attestation{}, tc.host, tc.folder); err != nil {
+				t.Fatal(err)
+			}
+			for key, want := range map[string]string{"host": tc.host, "folder": tc.folder} {
+				v, sent := got[key]
+				if sent != (want != "") || (sent && v != want) {
+					t.Errorf("%s = %v (sent %v), want %q and left out when empty", key, v, sent, want)
+				}
+			}
+			if got["id_token"] != "idt" {
+				t.Errorf("body = %v, want the ID token beside them", got)
+			}
+		})
 	}
 }

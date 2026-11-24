@@ -31,7 +31,7 @@ const (
 		`"sentence":"github runs on each caller's own token, and nobody who holds its roles has connected yet.",` +
 		`"fix":"Each person runs straza connect github after publishing."}`
 	fixUnchecked = `{"key":"k-tools","code":"unchecked.tools","class":"unchecked","object":"App/github",` +
-		`"sentence":"Straza has not contacted api.githubcopilot.com, because an address in a draft is contacted only when a person asks, so the tool names of github are unknown."}`
+		`"sentence":"Straza has not contacted api.githubcopilot.com yet, so the tool names of github are unknown. It contacts an address in a draft only when a person asks."}`
 	fixInfo = `{"key":"k-nobody","code":"info.nobody-holds","class":"info","object":"Role/github-readers",` +
 		`"sentence":"Nobody holds github-readers yet, so it reaches nothing until someone is assigned it."}`
 	fixPassed = `{"key":"k-secrets","code":"passed.secrets","class":"passed","sentence":"No document holds a secret or the shape of one."}`
@@ -290,7 +290,7 @@ func TestDraftsCheck(t *testing.T) {
 		"  widens    Role/developer Holders of developer will also hold github-readers and reach what it reaches.\n" +
 		"            after:  github-readers\n" +
 		"  warning   App/github github runs on each caller's own token, and nobody who holds its roles has connected yet. Each person runs straza connect github after publishing.\n" +
-		"  unchecked App/github Straza has not contacted api.githubcopilot.com, because an address in a draft is contacted only when a person asks, so the tool names of github are unknown.\n" +
+		"  unchecked App/github Straza has not contacted api.githubcopilot.com yet, so the tool names of github are unknown. It contacts an address in a draft only when a person asks.\n" +
 		"  info      Role/github-readers Nobody holds github-readers yet, so it reaches nothing until someone is assigned it.\n"
 	tests := []struct {
 		name       string

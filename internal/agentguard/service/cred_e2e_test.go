@@ -44,8 +44,7 @@ spec:
 `
 
 // realStrazad starts a real standalone strazad with kim, who holds the dev
-// and admin roles and a knowledge pack bound to dev, and the block-rm policy
-// active. It returns the base URL.
+// and admin roles, and the block-rm policy active. It returns the base URL.
 func realStrazad(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -100,8 +99,6 @@ func realStrazad(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	pack, _ := st.Packs().Create(bg, store.KnowledgePack{Name: "golang-style", Version: "1", Content: "always run gofmt", Checksum: "c1"})
-	_ = st.Packs().Bind(bg, dev.ID, pack.ID)
 	token := realLogin(t, base)
 	realAdmin(t, base, token, http.MethodPut, "/v1/admin/policies", "application/yaml", realBlockRM, http.StatusCreated)
 	realAdmin(t, base, token, http.MethodPost, "/v1/admin/policies/block-rm/activate", "application/json", `{"status":"active"}`, http.StatusOK)
@@ -215,8 +212,8 @@ func TestCredAgainstRealStrazad(t *testing.T) {
 
 	sessions := startMany(t, r, alice, "w", 3)
 	for _, ses := range sessions {
-		if !slices.Contains(ses.Roles, "dev") || ses.SnapshotID == "" || len(ses.Packs) != 1 || ses.Packs[0].Name != "golang-style" {
-			t.Fatalf("session %+v lacks its role, pin or pack", ses)
+		if !slices.Contains(ses.Roles, "dev") || ses.SnapshotID == "" {
+			t.Fatalf("session %+v lacks its role or pin", ses)
 		}
 		if ses.StartText == nil || *ses.StartText != agentguard.StartText("kim", true) {
 			t.Fatalf("session start text %v, want strazad's", ses.StartText)

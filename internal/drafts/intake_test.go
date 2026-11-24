@@ -291,7 +291,7 @@ func TestIntakeSentences(t *testing.T) {
 			fs := Intake(tc.d, tc.proposer)
 			for _, f := range fs {
 				if f.Code == tc.want.Code {
-					if f != tc.want {
+					if !reflect.DeepEqual(f, tc.want) {
 						t.Errorf("Intake finding\n got %+v\nwant %+v", f, tc.want)
 					}
 					return
@@ -315,7 +315,7 @@ func TestIntakeNumbersANameByItsDocument(t *testing.T) {
 		Sentence: "The name of document 3 holds an invisible character, zero width space (U+200B), which can make it read differently from what is stored.",
 		Fix:      "Rename the object and send the draft again."}
 	fs := Intake(Draft{Items: items}, person)
-	if i := slices.IndexFunc(fs, func(f Finding) bool { return f.Code == want.Code }); i < 0 || fs[i] != want {
+	if i := slices.IndexFunc(fs, func(f Finding) bool { return f.Code == want.Code }); i < 0 || !reflect.DeepEqual(fs[i], want) {
 		t.Errorf("Intake = %+v, want %+v among them", fs, want)
 	}
 }
@@ -491,7 +491,7 @@ func TestAppParse(t *testing.T) {
 	t.Parallel()
 	err := errors.New(`manifest: invalid App "github": server block is required (verbatim registry server.json)`)
 	want := Finding{Code: "app.parse", Class: ClassRefused, Object: "App/github", Sentence: err.Error()}
-	if got := AppParse("github", err); got != want {
+	if got := AppParse("github", err); !reflect.DeepEqual(got, want) {
 		t.Errorf("AppParse = %+v, want %+v", got, want)
 	}
 }

@@ -7,8 +7,8 @@
 //
 // The set is edited in place through the Policies area's document model,
 // so a hand-written comment or key in it survives a save. The save makes
-// the set's rules for one server what the plan says and leaves every other
-// rule where it was.
+// the set's rules for one server what the plan says, keeps the names of
+// tools the server does not list, and leaves every other rule where it was.
 import { pinnedOf } from "./access-covers";
 import { coversClause } from "./access-object-words";
 import { type OwnRule, type Plan, type Shape, SPONSOR, callSentence, grantMatchers, ownRuleOf, readOwnRules, rulesFor, sameRules } from "./access-plan";
@@ -105,13 +105,15 @@ type Job = { own: OwnRule; want: Plain; kept: Kept[]; added?: string };
 // (the rule for every call needs no tools), preferring the one whose
 // setting already matches, so its reason, notify, binding and comments
 // stay. Several kept rules can share one wanted rule, each keeping the
-// tools it names, and the one naming the most takes the new tools. Owned
-// rules nothing wants are removed. A new rule lands beside this server's
-// kept rules in the order rulesFor gives, and the rule for every call
-// stays after every tool's own rule, since the earlier approval decides.
-// A kept rule's reason changes only when it is the one this editor wrote
-// for its old tools, so a reason that names a tool stays true. It answers
-// the ids of the server's rules it leaves.
+// tools it names, and the one naming the most takes the new tools. A name
+// of a tool that tools does not list stays as written, so an owned rule
+// nothing wants is cut down to those names, and removed when it has none.
+// A new rule lands beside this server's kept rules in the order rulesFor
+// gives, and the rule for every call stays after every tool's own rule,
+// kept ones included, since the earlier approval decides. A kept rule's
+// reason changes only when it is the one this editor wrote for its old
+// tools, so a reason that names a tool stays true. It answers the ids of
+// the server's rules it leaves.
 function writePlan(doc: Doc, owned: string[], plan: Plan, app: string, tools: string[], role: string): string[] {
   const views = rulesOf(doc);
   const mine = views.filter((v) => owned.includes(v.id)).map((v) => ({ own: ownRuleOf(v.raw, app) as OwnRule, index: v.index, reason: v.raw.reason }));
@@ -132,7 +134,27 @@ function writePlan(doc: Doc, owned: string[], plan: Plan, app: string, tools: st
     used.push(p.kept.own.id);
     p.job.kept.push(p.kept);
   }
-  for (const n of mine) if (!used.includes(n.own.id)) removeRule(doc, n.own.id);
+  // tools is the server's catalog as read now. A stopped server, or a tools
+  // read that failed, lists nothing, so a name the catalog lacks may be a
+  // tool that comes back, and dropping it would drop a hold or a deny the
+  // editor never showed. Its removal is left to the Policies area. A rule
+  // left with no name is removed rather than written with an empty list,
+  // which would match every call.
+  const unlisted = (t: string) => !tools.includes(t);
+  const strays: OwnRule[] = [];
+  for (const n of mine) {
+    if (used.includes(n.own.id)) continue;
+    const list = n.own.tools.filter(unlisted);
+    if (!list.length) {
+      removeRule(doc, n.own.id);
+      continue;
+    }
+    strays.push(n.own);
+    if (!sameNames(list, n.own.tools)) {
+      setNames(doc, n.own.id, list);
+      if (n.reason === approveGroupReason(app, n.own.tools)) setReason(doc, n.own.id, approveGroupReason(app, list));
+    }
+  }
 
   for (const job of jobs) {
     if (!job.kept.length) continue;
@@ -140,7 +162,7 @@ function writePlan(doc: Doc, owned: string[], plan: Plan, app: string, tools: st
     const covered = job.kept.flatMap((k) => k.own.tools.filter((t) => job.own.tools.includes(t)));
     for (const k of job.kept) {
       if (job.own.kind !== "every") {
-        const list = k.own.tools.filter((t) => job.own.tools.includes(t)).concat(k === primary ? job.own.tools.filter((t) => !covered.includes(t)) : []);
+        const list = k.own.tools.filter((t) => job.own.tools.includes(t) || unlisted(t)).concat(k === primary ? job.own.tools.filter((t) => !covered.includes(t)) : []);
         if (!sameNames(list, k.own.tools)) {
           setNames(doc, k.own.id, list);
           if (k.reason === approveGroupReason(app, k.own.tools)) setReason(doc, k.own.id, approveGroupReason(app, list));
@@ -164,9 +186,9 @@ function writePlan(doc: Doc, owned: string[], plan: Plan, app: string, tools: st
   });
   const every = jobs.find((j) => j.own.kind === "every");
   const everyId = every && (every.added || every.kept[0].own.id);
-  const last = Math.max(-1, ...spots(jobs.filter((j) => j.own.kind === "group")));
+  const last = Math.max(-1, ...spots(jobs.filter((j) => j.own.kind === "group")), ...strays.filter((s) => s.kind === "group").map((s) => ids().indexOf(s.id)));
   if (everyId && ids().indexOf(everyId) < last) moveRule(doc, everyId, last);
-  const left = jobs.flatMap((j) => (j.added ? [j.added] : j.kept.map((k) => k.own.id)));
+  const left = jobs.flatMap((j) => (j.added ? [j.added] : j.kept.map((k) => k.own.id))).concat(strays.map((s) => s.id));
   return ids().filter((id) => left.includes(id));
 }
 

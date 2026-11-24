@@ -259,20 +259,22 @@ describe("the Change sheets' edit model", () => {
 
   it("names each changed field with its words now and after saving", () => {
     expect(changeRows(SCOUT, conn(SCOUT, { url: "https://scout-tools.internal/mcp" }))).toEqual([["Address", "http://scout-tools.internal:8080/mcp", "https://scout-tools.internal/mcp"]]);
-    expect(changeRows(SCOUT, conn(SCOUT, { kind: "command", exec: "/usr/local/bin/scout", envName: "SCOUT_TOKEN" })).map((r) => r[0])).toEqual(["Transport", "Executable", "Sent as"]);
+    expect(changeRows(SCOUT, conn(SCOUT, { kind: "command", exec: "/usr/local/bin/scout", envName: "SCOUT_TOKEN" })).map((r) => r[0])).toEqual(["Transport", "Executable", "Sent as", "Rate limit"]);
+    expect(changeRows(SCOUT, conn(SCOUT, { kind: "command", exec: "/usr/local/bin/scout", envName: "SCOUT_TOKEN" }), 30, 20)[3]).toEqual(
+      ["Rate limit", "20 calls per second, per session, the default.", "Not limited."]);
     expect(changeRows(ECHO, conn(ECHO, { kind: "oci", image: "ghcr.io/straza/u3-echo:0.1.0" }))).toEqual([
       ["Transport", "stdio, a process Straza starts on the strazad host", "A container Straza runs with docker on the strazad host"],
       ["Environment", "LOG_LEVEL=info", "none"],
       ["Image", "none", "ghcr.io/straza/u3-echo:0.1.0"],
     ]);
     expect(changeRows(SCOUT, cred(SCOUT, { kind: "token", agents: "shared" }))).toEqual([
-      ["Type", "One shared secret", "Each caller's own token"],
-      ["Sent as", "The Authorization header, as Bearer and the secret.", "The Authorization header, as Bearer and the person's token."],
-      ["Agents with nothing of their own", "not asked", "Use this server's shared secret (agents shared)."],
+      ["Type", "One shared secret", "Each person's own token"],
+      ["Sent as", "Authorization: Bearer <secret>", "Authorization: Bearer <the person's token>"],
+      ["Agents with nothing of their own", "not asked", "Use this server's shared secret."],
     ]);
-    expect(changeRows(MIDPOINT, sets(MIDPOINT, { rps: "", timeout: "45", expose: "only", picked: ["read_note", "search_notes"] }), 30)).toEqual([
+    expect(changeRows(MIDPOINT, sets(MIDPOINT, { rps: "", timeout: "45", expose: "only", picked: ["read_note", "search_notes"] }), 30, 20)).toEqual([
       ["Tools exposed", "All tools, including ones it adds later.", "Only read_note, search_notes."],
-      ["Rate limit", "10 calls per second, per session.", "Not limited."],
+      ["Rate limit", "10 calls per second, per session.", "20 calls per second, per session, the default."],
       ["Per-call timeout", "30 s per call, the server-wide default.", "45 s per call."],
     ]);
     expect(changeRows(MIDPOINT, MIDPOINT)).toEqual([]);

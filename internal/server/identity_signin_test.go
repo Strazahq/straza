@@ -259,24 +259,27 @@ func TestKeyEnrollSignIn(t *testing.T) {
 				body["custody"] = map[string]string{"kind": tc.custody, "platform": "linux/amd64", "version": "0.3.0"}
 			}
 			devsBefore, _ := r.app.store.Devices().ListByUser(context.Background(), r.kim.ID)
-			failsBefore := len(signInFailures(t, r.app, r.kim.ID, "device-key"))
-			recsBefore := len(enrolledRecords(t, r.app, r.kim.ID))
+			since := outboxSince(t, r.app)
 
 			code, out := h.call("/v1/enroll", "", body)
 			devs, _ := r.app.store.Devices().ListByUser(context.Background(), r.kim.ID)
-			fails := signInFailures(t, r.app, r.kim.ID, "device-key")
-			recs := enrolledRecords(t, r.app, r.kim.ID)
+			fails := since("straza.audit.authn", func(d map[string]any) bool {
+				return d["action"] == "login" && d["outcome"] == "failure" && d["userId"] == r.kim.ID && d["via"] == "device-key"
+			})
+			recs := since("straza.audit.identity", func(d map[string]any) bool {
+				return d["action"] == "device.enrolled" && d["user"] == r.kim.ID
+			})
 			if tc.lane == "" {
 				if code != http.StatusForbidden || out["error"] != atServer(tc.msg, r.app) {
 					t.Fatalf("enroll = %d %v, want 403 %q", code, out, atServer(tc.msg, r.app))
 				}
-				if len(devs) != len(devsBefore) || len(recs) != recsBefore {
-					t.Errorf("a refused enrollment registered devices %d to %d and records %d to %d", len(devsBefore), len(devs), recsBefore, len(recs))
+				if len(devs) != len(devsBefore) || len(recs) != 0 {
+					t.Errorf("a refused enrollment registered devices %d to %d and wrote records %v", len(devsBefore), len(devs), recs)
 				}
-				if len(fails) != failsBefore+1 {
-					t.Fatalf("login failures = %d, want exactly one more than %d", len(fails), failsBefore)
+				if len(fails) != 1 {
+					t.Fatalf("login failures = %v, want exactly one", fails)
 				}
-				if f := fails[len(fails)-1]; f["reason"] != tc.reason || f["user"] != "kim" {
+				if f := fails[0]; f["reason"] != tc.reason || f["user"] != "kim" {
 					t.Errorf("login failure = %v, want reason %q naming kim", f, tc.reason)
 				}
 				return
@@ -284,8 +287,8 @@ func TestKeyEnrollSignIn(t *testing.T) {
 			if code != http.StatusOK {
 				t.Fatalf("enroll = %d %v, want 200", code, out)
 			}
-			if len(fails) != failsBefore {
-				t.Errorf("an accepted enrollment wrote %d login failures", len(fails)-failsBefore)
+			if len(fails) != 0 {
+				t.Errorf("an accepted enrollment wrote login failures %v", fails)
 			}
 			device := out["device_id"].(string)
 			if got := storedSignInOf(t, r.app, device); got != tc.lane {
@@ -305,14 +308,14 @@ func TestKeyEnrollSignIn(t *testing.T) {
 			if left, _ := out["sign_in_expires_in"].(float64); left > wantLeft+2 || left < wantLeft-60 {
 				t.Errorf("sign_in_expires_in = %v, want about %v counted from the sign-in", left, wantLeft)
 			}
-			if len(recs) != recsBefore+1 {
-				t.Fatalf("device.enrolled records = %d, want exactly one more than %d", len(recs), recsBefore)
+			if len(recs) != 1 {
+				t.Fatalf("device.enrolled records = %v, want exactly one", recs)
 			}
 			kind := tc.custody
 			if kind == "" {
 				kind = config.CustodyAccount
 			}
-			rec := recs[len(recs)-1]
+			rec := recs[0]
 			if rec["device"] != device || rec["signIn"] != tc.lane || rec["custody"] != kind {
 				t.Errorf("device.enrolled = %v, want device %s, signIn %s and custody %s", rec, device, tc.lane, kind)
 			}

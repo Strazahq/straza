@@ -61,7 +61,7 @@ describe("the YAML tab", () => {
       expect(el).toBeTruthy();
       return el as HTMLElement;
     });
-    expect(ok.textContent).toBe("Valid, checked by the server just now: 11 rules, matches dev-tools, records word for word.");
+    expect(Array.from(ok.children).map((p) => p.textContent)).toEqual(["valid", "11 policy rules", "applies to dev-tools", "records word for word"]);
     expect((document.querySelector('[data-advisory="events-never-fire"]') as HTMLElement).textContent).toBe("no-rm-rf: subagent.pre never fires on Gemini.");
   });
 

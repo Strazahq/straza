@@ -92,15 +92,17 @@ func TestSCIMMembershipAudit(t *testing.T) {
 	}
 	for _, step := range steps {
 		t.Run(step.name, func(t *testing.T) {
-			before, seen := holders(), len(assignmentAuditRecords(t, app))
+			before, since := holders(), outboxSince(t, app)
 			if code, out := scimReq(t, step.method, base, token, "/scim/v2/Groups/"+role.ID, step.body); code != http.StatusOK {
 				t.Fatalf("%s = %d %v", step.method, code, out)
 			}
-			after, got := holders(), assignmentAuditRecords(t, app)[seen:]
+			after, got := holders(), since("straza.audit.admin", func(d map[string]any) bool {
+				return d["action"] == actionRolesAssign || d["action"] == actionRolesUnassign
+			})
 			if len(got) != len(step.want) {
 				t.Fatalf("chained %d assignment records %v, want %v", len(got), got, step.want)
 			}
-			for i, w := range step.want {
+			for _, w := range step.want {
 				rowID := after[w.user]
 				if w.action == actionRolesUnassign {
 					rowID = before[w.user]
@@ -108,7 +110,16 @@ func TestSCIMMembershipAudit(t *testing.T) {
 				if rowID == "" {
 					t.Fatalf("no assignment row for %s around step %q", w.user, step.name)
 				}
-				assertAssignmentRecord(t, got[i], w.action, rowID, w.user, role, store.OriginSCIM, "conformance", writer.ID, "api-token")
+				var rec map[string]any
+				for _, g := range got {
+					if g["user"] == w.user && g["action"] == w.action {
+						rec = g
+					}
+				}
+				if rec == nil {
+					t.Fatalf("chained assignment records %v, want a %s record for %s", got, w.action, w.user)
+				}
+				assertAssignmentRecord(t, rec, w.action, rowID, w.user, role, store.OriginSCIM, "conformance", writer.ID, "api-token")
 			}
 		})
 	}

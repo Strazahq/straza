@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/strazahq/straza/internal/manager"
 	"github.com/strazahq/straza/internal/policy"
 )
@@ -81,15 +83,19 @@ func grantingBinding(bs []gwBinding, tool string) (gwBinding, bool) {
 	return gwBinding{}, false
 }
 
-// gwTool is the wire representation of a catalog entry. Meta is the
-// upstream tool's _meta, served only on the server's own endpoint.
+// gwTool is the wire representation of a catalog entry. OutputSchema is the
+// upstream tool's when servedOutputSchema keeps it, Annotations is the
+// upstream tool's, and a nil one of either is left out. Meta is
+// the upstream tool's _meta: verbatim on the server's own endpoint, and
+// without the view links on the combined endpoint.
 type gwTool struct {
-	Name        string         `json:"name"`
-	Title       string         `json:"title,omitempty"`
-	Description string         `json:"description,omitempty"`
-	InputSchema any            `json:"inputSchema"`
-	Annotations any            `json:"annotations,omitempty"`
-	Meta        map[string]any `json:"_meta,omitempty"`
+	Name         string               `json:"name"`
+	Title        string               `json:"title,omitempty"`
+	Description  string               `json:"description,omitempty"`
+	InputSchema  any                  `json:"inputSchema"`
+	OutputSchema any                  `json:"outputSchema,omitempty"`
+	Annotations  *mcp.ToolAnnotations `json:"annotations,omitempty"`
+	Meta         map[string]any       `json:"_meta,omitempty"`
 }
 
 // catalogOverlay is the tier-2 per-session refinement of a tier-1 catalog.
@@ -200,15 +206,17 @@ func (a *App) buildCatalog(roles []string) *sessionCatalog {
 			namespaced := view.Name + "__" + t.Name
 			c.targets[namespaced] = gwTarget{app: view.Name, tool: t.Name, bindingID: grant.ID, role: grant.Role}
 			entry := gwTool{
-				Name:        namespaced,
-				Title:       t.Title,
-				Description: t.Description,
-				InputSchema: t.InputSchema,
-				Annotations: t.Annotations,
-				Meta:        t.Meta,
+				Name:         namespaced,
+				Title:        t.Title,
+				Description:  t.Description,
+				InputSchema:  t.InputSchema,
+				OutputSchema: servedOutputSchema(t.OutputSchema),
+				Annotations:  t.Annotations,
+				Meta:         t.Meta,
 			}
-			c.tools = append(c.tools, entry)
 			sc.tools = append(sc.tools, entry)
+			entry.Meta = manager.WithoutViewLinks(t.Meta)
+			c.tools = append(c.tools, entry)
 		}
 		if len(sc.tools) > 0 && view.Name != nativeAppName {
 			sort.Slice(sc.tools, func(i, j int) bool { return sc.tools[i].Name < sc.tools[j].Name })
@@ -314,9 +322,8 @@ func (a *App) buildOverlay(key string, sub policy.Subject, tier1 *sessionCatalog
 
 // overlayTools assembles the combined endpoint's tools/list response from the
 // tier-1 catalog and a session overlay: tier-1 minus hidden, with approve-gated
-// schema swaps and without _meta, which only a server's own endpoint serves.
-// It builds a fresh slice and never mutates the cached tier-1 tools (the range
-// value is a struct copy, so overwriting InputSchema and Meta is local).
+// schema swaps. It builds a fresh slice and never mutates the cached tier-1
+// tools (the range value is a struct copy, so overwriting InputSchema is local).
 func overlayTools(tier1 *sessionCatalog, ov *catalogOverlay) []gwTool {
 	out := make([]gwTool, 0, len(tier1.tools))
 	for _, t := range tier1.tools {
@@ -326,7 +333,6 @@ func overlayTools(tier1 *sessionCatalog, ov *catalogOverlay) []gwTool {
 		if s, ok := ov.schemas[t.Name]; ok {
 			t.InputSchema = s
 		}
-		t.Meta = nil
 		out = append(out, t)
 	}
 	return out

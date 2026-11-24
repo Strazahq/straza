@@ -98,8 +98,9 @@ describe("the transcripts screen", () => {
     expect(cells(S1)).toEqual(["6 m ago", "joe-java-developer-agent", "12", "The build directory is stale, remove it and rebuild.", "0199cf12-4b1e…"]);
     // A row whose user the server did not resolve reads as the id prefix.
     expect(cells(S3)[1]).toBe("0199aa00-1111…");
-    expect(count()).toBe("3 conversations loaded");
-    expect(hint()).toBe("One row per recorded session, newest activity first. Click a row for the whole conversation. Recording is turned on by policy, so an empty list is normal.");
+    expect(count()).toBe("3 transcripts loaded");
+    // A list that has rows carries no line above it.
+    expect(document.querySelector("[data-hint]")).toBeNull();
     // Only the column the server ordered by is marked as the sort.
     expect([...document.querySelectorAll("th [data-sorted]")].map((h) => h.textContent)).toEqual(["Last activity"]);
   });
@@ -118,6 +119,16 @@ describe("the transcripts screen", () => {
     const table = turn.closest("table") as HTMLElement;
     expect(table.className).toContain("table-fixed");
     expect([...table.querySelectorAll<HTMLElement>("col")].map((c) => c.style.width !== "")).toEqual([true, true, true, false, true]);
+    // The floor keeps Latest turn its room in a narrow window, where the
+    // table scrolls inside its box.
+    expect(table.style.minWidth).toBe("880px");
+  });
+
+  it("says that no session is recorded yet and how recording is turned on, once, in an empty list", async () => {
+    vi.mocked(listConversations).mockResolvedValue([]);
+    mount();
+    expect(await screen.findByText("No session is recorded yet.")).toBeTruthy();
+    expect(document.querySelector("[data-hint]")).toBeNull();
   });
 
   it("keeps the sibling columns inside their widths: a long name is cut and whole on hover, an old stamp wraps", async () => {
@@ -134,7 +145,7 @@ describe("the transcripts screen", () => {
     mount();
     await screen.findByRole("button", { name: "Open " + S1 });
     expect(within(captureRow()).getByText("on").getAttribute("data-tone")).toBe("ok");
-    expect(captureRow().textContent).toBe("Recording policyon1 live policy records sessions, secrets masked. Recorded messages are deleted after 30 d; message bodies are stored in the database.");
+    expect(captureRow().textContent).toBe("Recordingon1 live policy records sessions, secrets masked. Recorded messages are deleted after 30 d. Message bodies are stored in the database.");
   });
 
   it("says capture is off when no policy opts a session in", async () => {
@@ -142,7 +153,7 @@ describe("the transcripts screen", () => {
     mount();
     await screen.findByText("off");
     expect(within(captureRow()).getByText("off").getAttribute("data-tone")).toBe("plain");
-    expect(captureRow().textContent).toContain("No active policy currently records sessions.");
+    expect(captureRow().textContent).toContain("No live policy records sessions.");
   });
 
   it("says the posture is unknown when the config could not be read", async () => {
@@ -160,29 +171,29 @@ describe("the transcripts screen", () => {
     await userEvent.click(await screen.findByRole("option", { name: /joe-java-developer-agent/ }));
     await searchAs("registry");
     expect(searchTurns).toHaveBeenCalledWith("q=registry&user=joe-java-developer-agent&limit=200");
-    expect(hint()).toBe("Contains text: the server scans recorded prompts and replies for the words.");
+    expect(hint()).toBe("Contains text: Straza scans recorded prompts and replies for the words.");
   });
 
   it("hashes an exact value in the browser and sends the hash, never the text", async () => {
     mount();
     await screen.findByRole("button", { name: "Open " + S1 });
     await userEvent.click(screen.getByRole("combobox", { name: "Match" }));
-    await userEvent.click(await screen.findByRole("option", { name: "exact value" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Exact value" }));
     await searchAs(SECRET);
     const sent = vi.mocked(searchTurns).mock.calls[0][0];
     expect(sent).toBe("hash=sha256%3A" + chain.hex + "&limit=200");
     expect(sent).not.toContain(SECRET);
-    expect(hint()).toBe("Exact value: the text is hashed in this browser and only the hash is sent, so a hunted secret never leaves this machine.");
+    expect(hint()).toBe("Exact value: hashed in this browser. Only the hash is sent.");
   });
 
   it("changes the hint with the match picked", async () => {
     mount();
     await screen.findByRole("button", { name: "Open " + S1 });
     await searchAs("registry");
-    expect(hint()).toContain("Contains text: the server scans recorded prompts and replies for the words.");
+    expect(hint()).toContain("Contains text: Straza scans recorded prompts and replies for the words.");
     await userEvent.click(screen.getByRole("combobox", { name: "Match" }));
-    await userEvent.click(await screen.findByRole("option", { name: "exact value" }));
-    expect(hint()).toContain("Exact value: the text is hashed in this browser and only the hash is sent, so a hunted secret never leaves this machine.");
+    await userEvent.click(await screen.findByRole("option", { name: "Exact value" }));
+    expect(hint()).toContain("Exact value: hashed in this browser. Only the hash is sent.");
   });
 
   it("refuses the exact match where the browser cannot hash, and says why", async () => {
@@ -190,9 +201,9 @@ describe("the transcripts screen", () => {
     mount();
     await screen.findByRole("button", { name: "Open " + S1 });
     await userEvent.click(screen.getByRole("combobox", { name: "Match" }));
-    const exact = await screen.findByRole("option", { name: "exact value" });
+    const exact = await screen.findByRole("option", { name: "Exact value" });
     expect(exact.getAttribute("aria-disabled")).toBe("true");
-    expect(exact.getAttribute("title")).toBe("Hashing in the browser needs a secure context (TLS or localhost), so exact value is not available here.");
+    expect(exact.getAttribute("title")).toBe("Exact value needs HTTPS or localhost. Open the console over HTTPS.");
   });
 
   it("focuses the box and says what is missing when Search is clicked empty", async () => {
@@ -211,17 +222,23 @@ describe("the transcripts screen", () => {
     await userEvent.type(box(), "registry{Enter}");
     await screen.findByText(/Use this key for the registry/);
     expect(searchTurns).toHaveBeenCalledWith("q=registry&limit=200");
-    expect(count()).toBe("4 turns match.");
+    expect(count()).toBe("4 turns match");
     // A hit carries its whole stamp, since hits span sessions and days.
     expect(cells(S1)[0]).toBe("2026-09-12 10:31:12 UTC");
     const kinds = [...document.querySelectorAll("[data-session] [data-tone]")].map((b) => [b.textContent, b.getAttribute("data-tone")]);
     expect(kinds).toEqual([["prompt", "accent"], ["reply · subagent", "ok"], ["reply", "ok"], ["body missing", "danger"], ["reply", "ok"]]);
     expect(document.querySelector("[data-tone=danger]")?.getAttribute("title")).toBe(
-      "The body of this turn should be in the body store and was not found. This is an integrity finding; the hash witness on the audit chain still stands.",
+      "The text of this turn is missing from the message store. Its hash on the audit chain proves the loss. Check the store and its retention.",
     );
     // A long reply is cut to its first 160 characters.
     const long = [...document.querySelectorAll("[data-session] td")].map((c) => c.textContent || "").find((t) => t.startsWith("The migration touched"));
     expect(long).toBe(LONG.slice(0, 160) + "…");
+    // The preview wraps onto a second line and is cut there, whole on hover,
+    // so the hits fit their box at 1280 px.
+    const preview = document.querySelector("[data-hit-content]") as HTMLElement;
+    expect(preview.className).toContain("whitespace-normal");
+    expect(preview.className).toContain("line-clamp-2");
+    expect(preview.className).not.toContain("truncate");
     await userEvent.click(screen.getByRole("button", { name: "Open " + S1 }));
     expect(sessionTranscript).toHaveBeenCalledWith(S1);
     expect((await screen.findByRole("dialog")).getAttribute("data-conversation-sheet")).toBe(S1);
@@ -232,11 +249,11 @@ describe("the transcripts screen", () => {
     await screen.findByRole("button", { name: "Open " + S1 });
     await searchAs("registry");
     await screen.findByText(/Use this key for the registry/);
-    await userEvent.click(screen.getByRole("button", { name: "Back to conversations" }));
+    await userEvent.click(screen.getByRole("button", { name: "Back to transcripts" }));
     expect(rows()).toEqual([S1, S2, S3]);
     expect((box() as HTMLInputElement).value).toBe("");
-    expect(count()).toBe("3 conversations loaded");
-    expect(screen.queryByRole("button", { name: "Back to conversations" })).toBeNull();
+    expect(count()).toBe("3 transcripts loaded");
+    expect(screen.queryByRole("button", { name: "Back to transcripts" })).toBeNull();
   });
 
   it("opens the conversation of a typed session id", async () => {
@@ -265,8 +282,8 @@ describe("the transcripts screen", () => {
     vi.mocked(listConversations).mockRejectedValueOnce(Object.assign(new Error("unreachable"), { status: 0, unreachable: true }));
     await userEvent.click(screen.getByRole("button", { name: "Reload the list" }));
     const block = await screen.findByRole("status");
-    expect(block.textContent).toContain("Transcripts: unreachable, state unknown.");
-    expect(block.textContent).toContain("The recorded conversations could not be read because strazad did not answer. Check that it is running, then reload.");
+    expect(block.textContent).not.toContain("Transcripts could not be read.");
+    expect(block.textContent).toContain("The recorded conversations could not be read because Straza did not answer. Check that it is running, then reload.");
     expect(rows()).toEqual([S1, S2, S3]);
   });
 

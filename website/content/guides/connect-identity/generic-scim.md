@@ -41,13 +41,13 @@ The examples ran against the [demo stack]({{< relref "evaluate/try-it-on-the-dem
 Every request carries a long-lived admin API token whose scope names the `scim` area. `scim:read` opens the GET routes and the discovery documents, and `scim:write` opens the writes. The two are independent, so a client that provisions holds both. Straza stores the token's SHA-256 hash and shows the value once.
 
 {{< console >}}
-{{< clicks "Settings" "API tokens" "New API token" >}}
+{{< clicks "Settings" "Mint a token" >}}
 
 Enter `idm-scim` under **Name** and pick a **Lifetime**. Under **The job**, pick **Custom** and set **scim** to **read and write**. Press **Mint token**.
 
 {{< see >}}The sheet `idm-scim is minted`, with the token and a **Copy** button.{{< /see >}}
 
-The console's lifetime starts at `expires in 90 days`, and every request with the token is refused once it expires.
+The console's lifetime starts at `90 days`, and every request with the token is refused once it expires.
 {{< /console >}}
 
 {{< cli >}}
@@ -122,12 +122,12 @@ A user carries these attributes. The extension is `urn:straza:params:scim:schema
 | `ephemeral` | extension | writes | a boolean |
 | `entraAgentId` | extension | writes | an AI agent only: the client id of the Entra agent identity it acts as at Entra, a GUID. A server that trusts Entra gets the agent's token as that identity, and a change applies at the agent's next check-in, which the strazad that took it asks for at the agent's next call, and within 330 seconds on every other replica |
 | `locked`, `lockReason`, `lockedAt`, `lockOrigin` | extension | reads | a lock placed in Straza |
-| `kind`, `origin` | extension | reads | what Straza recorded at birth, and how the account was born |
+| `kind`, `origin` | extension | reads | what Straza recorded at birth, and how the account was born or that Microsoft Entra ID owns it |
 | `manager` | enterprise extension | writes | an AI agent only: the person accountable for it, by Straza id or `userName`, which Straza stores as the agent's `sponsor`. Never read back |
 
 One deviation from plain SCIM keeps a classification in place. A `PUT` that leaves out `userType`, `agencyMode`, `sponsor`, `swarmId`, `ephemeral` or `entraAgentId` keeps the stored value, so a client that maps only the core attributes never wipes it. Clear one with a `PATCH` `remove`. Membership is written through `/Groups` only.
 
-Straza refuses an `entraAgentId` on a user that is not of type `agent`, and a value that is not a GUID, with `400` and scimType `invalidValue`. It refuses an id another user holds with `409` and scimType `uniqueness`, and the detail names that user. An agent that holds an id keeps its type until a `PATCH` `remove` clears the id.
+Straza refuses an `entraAgentId` on a user that is not of type `agent`, and a value that is not a GUID, with `400` and scimType `invalidValue`. It refuses an id another user holds with `409` and scimType `uniqueness`, and the detail names that user. An agent that holds an id keeps its type until a `PATCH` `remove` clears the id. While `identity.entra.read` lists `agentUsers` or `agentIdentities`, Straza takes the agents that are in Entra from Entra, with their id and their sponsor, and answers `403` to a write of an agent that carries an id or that Entra created, as [Role groups in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}) shows.
 
 The `manager` sits in the SCIM enterprise User extension, `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User`, which most identity managers send already. When the user's `userType` is `agent` after the write, Straza looks the manager up as a Straza id, then as a `userName`, and stores the manager's `userName` as the sponsor. A `PATCH` that names a manager Straza does not know or cannot read answers `400` with scimType `invalidValue` and saves nothing. Straza saves a create or `PUT` with such a manager, keeps the user's sponsor as it was and logs one WARN line, `SCIM manager not applied`, that names the agent and the reason. Provision the manager before the agent. If the agent came first, send it again once the manager exists, and look for that line in strazad's log to find agents left without a sponsor. A `sponsor` in the same write wins over the manager. Removing the manager with a `PATCH` clears the sponsor, and a `PUT` without one keeps it. On a user of any other type, or with no type, Straza accepts the manager and does not store it. On 2026-11-10 Microsoft Entra ID sent the manager right after the create, as a `PATCH` with op `Add` on the URN-qualified path and the manager's Straza id as a plain string.
 
@@ -155,7 +155,7 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" -H 'Content-Type: applicatio
 ```
 
 
-`kind` records what Straza concluded at birth, `human` here because no agent schema was sent. `origin` records that the account was provisioned. Both are read-only, and a PATCH against either answers `400` with `scimType` `mutability`. Reading by id or by filter returns the same document:
+`kind` records what Straza concluded at birth, `human` here because no agent schema was sent. `origin` records that the account was provisioned, and it reads `entra` once Microsoft Entra ID owns the person or the agent. Both are read-only, and a PATCH against either answers `400` with `scimType` `mutability`. Reading by id or by filter returns the same document:
 
 {{< command terminal="Terminal" purpose="SCIM, as the client" >}}
 ```sh
@@ -248,7 +248,7 @@ That member value is the id of `scout-bot`, the agent identity that [AI agents a
 A remove takes one of two forms. The value form sends the member in `value`, like the add above. The filter form names the member in the path as `members[value eq "<id>"]`, and it is the form an identity manager often sends to remove one member. Straza accepts the filter form with `remove` only. A `remove` on `members` with no value and no filter removes every member, as the protocol defines.
 
 
-Your client is meant to be the only writer of membership for the roles it manages. A role granted to a person in the console or with `strazactl assign` works at once, but it is drift. The console badges it, and a `PUT` of the group or a `PATCH` that replaces its members removes it, whatever wrote the grant. A `PUT` ignores the `displayName` and `externalId` in its body and applies `members` as the whole set. A remove takes the role away at the person's next check-in, and `active` `false` cuts their sessions at once.
+Your client is meant to be the only writer of membership for the roles it manages. A role granted to a person in the console or with `strazactl assign` works at once, but it is drift. The console badges it, and a `PUT` of the group or a `PATCH` that replaces its members removes it, whether an admin or your client wrote the grant. SCIM neither lists nor removes an assignment that [the role's group in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}) gave. While Entra owns people, a group write still takes a person that Entra owns as a member. A `PUT` ignores the `displayName` and `externalId` in its body and applies `members` as the whole set. A remove takes the role away at the next call of each of the person's sessions, and `active` `false` cuts their sessions at once.
 
 Creating a group answers `501` with `"roles are born in Straza, so the IdM cannot create or delete one over SCIM. Create the role in Straza, import it as a group, and assign membership from the IdM"` in `detail`, and so does deleting one. The code is `501` rather than `403` because identity manager runbooks read `403` as broken credentials.
 
@@ -263,7 +263,7 @@ Errors use the SCIM error schema, with `status` as a string and a `detail` sente
 | `400` | `invalidValue` | A create without `userName`, with the detail "userName is required", a value Straza does not accept for an attribute it maps, a PATCH that names an agent's manager Straza does not know, a malformed PATCH, or a PATCH on a group that names anything but `members`. A create or a PUT that holds a value of the wrong JSON type, such as a number where Straza expects a string, gets the same answer, and the detail names the attribute, the type Straza expects and the fix in the identity manager's attribute mapping. A PUT whose body is not JSON gets it too, with the detail "malformed JSON body". A user attribute Straza does not map is ignored, on a PATCH as on a create. |
 | `400` | `mutability` | A write to `kind`, `origin`, a lock attribute, a user's `groups`, a group's `displayName` or the group extension. |
 | `401` | none | No token, or one that is unknown, expired or revoked. |
-| `403` | none | A token whose scope lacks `scim:read` or `scim:write`. |
+| `403` | none | A token whose scope lacks `scim:read` or `scim:write`. While `identity.entra.read` lists `people`, also a create, `PUT`, `PATCH` or `DELETE` of a person, with the detail "Straza did not accept this person, because it takes people from Microsoft Entra ID: identity.entra.read lists people. Stop provisioning people to Straza in your identity manager, or take people out of identity.entra.read." While it lists `agentUsers` or `agentIdentities`, also such a write of an agent of the origin `entra` or one that carries an `entraAgentId`, with the detail "Straza did not accept this agent, because it takes agents that are in Microsoft Entra ID from Entra: identity.entra.read lists agentUsers or agentIdentities. Stop provisioning this agent to Straza in your identity manager, or take both kinds out of identity.entra.read." |
 | `404` | none | An unknown id. |
 | `409` | `uniqueness` | A duplicate `userName` or `externalId`, with the detail "userName or externalId already exists". |
 | `500` | none | Straza could not save a deactivation by PATCH, PUT or DELETE. The status, the revocation record and the event that tells the other servers are one write, so the user stays active and a resend deactivates it. When the write ended without a clear answer, Straza asks the database whether it was saved. A saved deactivation answers as any deactivation does, and only when the database cannot answer does the detail say Straza cannot tell whether it was saved. Either detail names the request id and says how long the server that answered keeps refusing the user. |
@@ -302,7 +302,7 @@ curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" -H 'Content-Type: applicatio
 Revoke the token when the client is retired.
 
 {{< console >}}
-{{< clicks "Settings" "API tokens" "Revoke" "Revoke token" >}}
+{{< clicks "Settings" "Revoke" "Revoke token" >}}
 
 Press **Revoke** on the `idm-scim` row, then **Revoke token** in the question `Revoke idm-scim?`.
 {{< /console >}}

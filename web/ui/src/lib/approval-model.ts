@@ -10,6 +10,13 @@ export type Kind = "hold" | "ticket";
 // approval the text stores as class ticket.
 export const kindOf = (r: Pick<ApprovalRow, "class">): Kind => (r.class === "ticket" ? "ticket" : "hold");
 
+// requesterKindOf reads who asked as the kind its tile draws: an AI agent
+// or a person, as the record says. The approver lane's rows carry the
+// kind. The admin list carries none, so a console row answers null and
+// draws no tile.
+export const requesterKindOf = (r: ApprovalRow & { requesterKind?: string }): "agent" | "person" | null =>
+  r.requesterKind === "nhi" ? "agent" : r.requesterKind === "human" ? "person" : null;
+
 export type Call = { where: string; call: string; whereKind: "server" | "shell" | "other" };
 
 // callOf reads the stored summary the way the two lanes write it:
@@ -20,6 +27,10 @@ export function callOf(summary: string): Call {
   if (mcp) return { where: mcp[1], call: mcp[2].trim(), whereKind: "server" };
   const shell = /^shell\.exec:?\s+(\S.*)$/.exec(summary || "");
   if (shell) return { where: "shell", call: shell[1].trim(), whereKind: "shell" };
+  // A harness tool Straza does not classify is "other: <name>", and reads
+  // as its name alone.
+  const unclassified = /^other:\s+(\S.*)$/.exec(summary || "");
+  if (unclassified) return { where: "", call: unclassified[1].trim(), whereKind: "other" };
   // Any other hook tool is "<tool>: <paths>" or the bare tool name; the
   // word before the dot is where the call goes.
   const other = /^([a-z]+)\.([a-z_]+)(?::\s+(\S.*))?$/.exec(summary || "");
@@ -148,8 +159,8 @@ export function holdShare(r: Pick<ApprovalRow, "createdAt" | "expiresAt">, now: 
 export function withinWords(iso: string | null | undefined, now = Date.now()): string {
   const s = secondsLeft(iso, now);
   if (s <= 0) return "the window closed";
-  if (s >= 3600) return "the same call within " + Math.floor(s / 3600) + " h " + pad(Math.floor((s % 3600) / 60)) + " min runs";
-  return "the same call within " + Math.max(1, Math.ceil(s / 60)) + " min runs";
+  if (s >= 3600) return Math.floor(s / 3600) + " h " + pad(Math.floor((s % 3600) / 60)) + " min left for the same call";
+  return Math.max(1, Math.ceil(s / 60)) + " min left for the same call";
 }
 
 // durationWords words a number of seconds the way a rule states it: "2

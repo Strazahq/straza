@@ -64,6 +64,17 @@ type CallInput struct {
 	Args json.RawMessage
 	// Secret is the broker-resolved credential for this call (nil = none).
 	Secret *Secret
+	// Session is the verified Straza session the call runs for. A remote
+	// runtime keeps one upstream session for each, so no caller reaches the
+	// state a server keeps for another. It is empty for a call Straza makes
+	// for itself, such as the background object listing.
+	Session string
+	// Conn is the label of the caller's MCP connection, the Mcp-Session-Id
+	// the gateway gave out at its initialize, and empty when the client sent
+	// none. A remote runtime keeps one upstream session for each Straza
+	// session and label, so two connections of one Straza session never
+	// share one. It never changes what the caller may do.
+	Conn string
 	// Meta is the _meta Straza sets on the upstream call, such as
 	// ai.straza/object-id. The agent's own _meta never reaches it.
 	Meta map[string]any
@@ -385,26 +396,33 @@ func (r *CommandRuntime) state(up bool, detail string) {
 	}
 }
 
-// listTools collects the full (paginated) tool list of a session.
+// listTools collects the full (paginated) tool list of a session. It leaves
+// out a JSON null in the list, which the SDK hands over as a nil tool, so no
+// reader of the list meets one.
 func listTools(ctx context.Context, s *mcp.ClientSession) ([]*mcp.Tool, error) {
 	var out []*mcp.Tool
 	for t, err := range s.Tools(ctx, nil) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, t)
+		if t != nil {
+			out = append(out, t)
+		}
 	}
 	return out, nil
 }
 
-// listResources collects the full (paginated) resource list of a session.
+// listResources collects the full (paginated) resource list of a session,
+// and leaves out a JSON null in the list as listTools does.
 func listResources(ctx context.Context, s *mcp.ClientSession) ([]*mcp.Resource, error) {
 	var out []*mcp.Resource
 	for r, err := range s.Resources(ctx, nil) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, r)
+		if r != nil {
+			out = append(out, r)
+		}
 	}
 	return out, nil
 }

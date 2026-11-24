@@ -215,14 +215,48 @@ export type RoleRow = {
   // no server owns.
   server?: string;
   tools?: string[];
+  // created_at and updated_at are absent on the answer of a create.
+  created_at?: string;
+  updated_at?: string;
+  // 0.174.0: entra is the role's security group in Entra, absent on a role
+  // that has none and on older servers.
+  entra?: RoleEntraGroup;
 };
+
+// RoleEntraGroup is a role's security group in Entra (openapi 0.174.0).
+// state, kind and reason stay strings, because a reader shows a value it
+// does not know as it is. group_id is empty until Entra confirmed the
+// create, and error is the server's sentence of what is wrong.
+export type RoleEntraGroup = {
+  group_id: string;
+  state: string;
+  read_at?: string;
+  error?: string;
+  not_applied?: EntraMember[];
+};
+
+// EntraMember is a member of a role's group that Straza did not give the
+// role, with Entra's type for it and the reason. The type agentIdentity
+// is an agent identity, and servicePrincipal an application that is none.
+export type EntraMember = { id: string; kind: string; reason: string };
+
+// EntraStatus is GET /v1/admin/entra: whether the sync is on, the end of
+// the last pass that read Entra in full, since when reads fail and the
+// sentence of the last failure, and how many roles hold removals.
+export type EntraStatus = { enabled: boolean; tenant?: string; last_good?: string; stale_since?: string; error?: string; held: number };
+export const entraStatus = () => get<EntraStatus>("/v1/admin/entra");
+// releaseEntraRemovals lets the held removals of a role's group through,
+// and recreateEntraGroup has a deleted group created again. Each answers
+// 409 with the server's sentence when the group is not in that state.
+export const releaseEntraRemovals = (roleID: string) => post<{ status: string }>("/v1/admin/roles/" + enc(roleID) + "/entra-group/release");
+export const recreateEntraGroup = (roleID: string) => post<{ status: string }>("/v1/admin/roles/" + enc(roleID) + "/entra-group/recreate");
 
 export type ProviderRow = { name: string; scopes?: string[]; redirect_uri?: string; entra_blueprint?: string };
 
 // AuditRow is one chain record as GET /v1/admin/audit returns it: ce is the
 // CloudEvent as a JSON string, parsed by the reader that needs it, and the
 // two usernames are read-time enrichments beside the hashed bytes.
-export type AuditRow = { seq: number; ce: string; username?: string; decidedByUsername?: string; hash?: string; prevHash?: string };
+export type AuditRow = { seq: number; ce: string; username?: string; decidedByUsername?: string; about?: string; hash?: string; prevHash?: string };
 
 export type ChangeRow = { cursor: string; type: string; op: string; id: string; at: string };
 
@@ -233,7 +267,18 @@ export type LogsAnswer = { app: string; lines: string[]; entries?: LogEntry[] };
 // that pins an object type, whether the role's covers lines reach every
 // object, some of them or none for that tool.
 export type PreviewEntry = { app: string; tool: string; status: string; reason: string; ruleId?: string; setName?: string; default?: boolean; hint?: string; object?: { type: string; reach: string; covers: "every" | "some" | "none" } };
-export type PreviewAnswer = { entries: PreviewEntry[]; notes?: string[] };
+// PreviewMachine is one server on a person's machine that the subject's
+// policies name and Straza has not registered. tools holds one row per tool
+// a rule names whole, open says a rule also reaches tools of the server
+// that the rows do not hold, and policies names the policies whose rules
+// name the server.
+export type PreviewMachine = { app: string; open?: boolean; tools: PreviewEntry[]; policies?: string[] };
+// PreviewAnswer is the answer of GET /v1/admin/catalog/preview. refused, set
+// in the user lane only, says the gateway refuses every call of the user
+// before any policy runs: disabled when the user's status is not active,
+// revoked when the user is active but on the denylist. entries still say
+// what the user's roles give.
+export type PreviewAnswer = { entries: PreviewEntry[]; notes?: string[]; machine?: PreviewMachine[]; refused?: "disabled" | "revoked" };
 
 export type Decision = { effect: string; ruleId?: string; setName?: string; reason?: string; obligations?: string[]; serverCheck?: boolean; classify?: boolean; approve?: unknown; default?: boolean };
 export type SimulateRequest = {
@@ -355,6 +400,9 @@ export const listProviders = () => get<ProviderRow[]>("/v1/admin/oauth/providers
 // assume merges hypothetical matchers into the role's grant on that app, so
 // a grant that does not exist yet reads truthfully; "*" spells every tool.
 export const catalogPreview = (role: string, app?: string, assume?: string[]) => get<PreviewAnswer>("/v1/admin/catalog/preview?role=" + enc(role) + (app ? "&app=" + enc(app) : "") + (app && assume && assume.length ? "&assume=" + enc(assume.join(",")) : ""));
+// userPreview asks what one user gets on every registered server, with the
+// roles the server resolves for that user, composition included.
+export const userPreview = (username: string) => get<PreviewAnswer>("/v1/admin/catalog/preview?user=" + enc(username));
 // listAudit takes the query string as the caller builds it (q, type, order,
 // after, limit), since the readers differ in what they filter on.
 export const listAudit = (query: string) => get<AuditRow[]>("/v1/admin/audit?" + query);
@@ -415,8 +463,23 @@ export type ConfigAnswer = {
   oidc?: { external_issuer?: string; jit_provision?: boolean };
   governance?: { min_attestation?: string; offline_grace_ttl_seconds?: number; local_tool_default?: string; audit_backpressure?: string };
   approval?: { gateway_hold_seconds?: number; unsigned_own_decisions?: boolean };
-  apps?: { gitops_dir_enabled?: boolean; upstream_timeout_seconds?: number };
+  admin?: { second_person?: boolean };
+  apps?: { gitops_dir_enabled?: boolean; upstream_timeout_seconds?: number; default_remote_rps?: number };
   capture?: CaptureConfig;
+  // entra is the identity.entra section, absent while it is off and on
+  // servers before 0.174.0.
+  entra?: EntraConfig;
+};
+export type EntraConfig = {
+  tenant?: string;
+  client_id?: string;
+  read?: string[];
+  role_groups?: boolean;
+  group_name_prefix?: string;
+  delta_interval_seconds?: number;
+  reconcile_interval_seconds?: number;
+  removal_guard_percent?: number;
+  removal_guard_min_members?: number;
 };
 export const getConfig = () => get<ConfigAnswer>("/v1/admin/config");
 
@@ -445,7 +508,7 @@ export type LockRow = { origin: string; reason: string; created_at: string };
 // with the roles the resolver computed, the lock rows the kill-switch lanes
 // wrote, the newest session's stamp, and how many agents name the user as
 // their sponsor. Sort keys: created, name, status, last_seen. Filters: q,
-// status, role, sponsor.
+// status, role, sponsor, kind.
 export type UserRow = {
   id: string;
   username: string;
@@ -473,17 +536,26 @@ export type UserRow = {
 };
 
 // UserDetail is GET /v1/admin/users/{id}: the row plus the counts and, on
-// an agent, whether an assertion key is registered.
+// an agent, whether an assertion key is registered and, for an agent of
+// origin entra, what Entra says about it.
 export type UserDetail = UserRow & {
   counts: { sessions: number; active_sessions: number; devices: number; approver_devices: number; approvals: number };
   nhi_key_registered?: boolean;
+  entra?: EntraAgent;
 };
+
+// EntraAgent is what Entra says about an agent of origin entra: how it
+// lists the agent identity and the agent user, enabled or disabled, each
+// absent when Entra lists none, the agent user's object ID, and, while the
+// agent has no sponsor in Straza, why and what Entra lists as its
+// sponsors, each with Entra's type.
+export type EntraAgent = { identity?: string; agent_user?: string; agent_user_id?: string; sponsor_state?: string; sponsors?: { id: string; kind: string }[] };
 
 export type DeviceRow = { id: string; user_id: string; name: string; fingerprint: string; platform: string; status: string; enrolled_at: string };
 
 // AssignmentRow is one direct grant. valid_from and valid_to bound it; a
 // row outside its window is one the resolver already ignores.
-export type AssignmentRow = { id: string; subject_kind: string; subject_id: string; role_id: string; valid_from?: string; valid_to?: string; origin?: string };
+export type AssignmentRow = { id: string; subject_kind: string; subject_id: string; role_id: string; valid_from?: string; valid_to?: string; origin?: string; created_at?: string };
 
 export type KeyPosture = { user_id: string; registered: boolean; fingerprint?: string; created?: string };
 
@@ -503,6 +575,17 @@ export type SessionRow = {
   last_seen: string;
   wiring_status?: string;
   wiring_hash?: string;
+  // user_kind is person, agent or service, sponsor is the sign-in name of
+  // the user's sponsor, and waiting is how many of the session's approval
+  // requests wait now. Each is left out when empty.
+  user_kind?: string;
+  sponsor?: string;
+  waiting?: number;
+  // host is the machine the session runs on and folder the folder it
+  // started in, the home directory written as ~. Each is left out when
+  // empty.
+  host?: string;
+  folder?: string;
 };
 
 export type ConversationRow = { session_id: string; user_id: string; username?: string; turns: number; first_at: string; last_at: string; preview: string };
@@ -525,9 +608,15 @@ export type Transcript = { session_id: string; username?: string; turns: TurnRow
 
 export type CaptureConfig = { policy_sets?: number; mode?: string; retention_hours?: number; body_store?: string };
 
-export const listUsers = (q: string) => get<Page<UserRow>>("/v1/admin/users?" + q);
+// KindCounts counts the users of each kind under a list's other filters,
+// whatever its kind and its cursor.
+export type KindCounts = { person: number; agent: number; service: number };
+
+export const listUsers = (q: string) => get<Page<UserRow> & { kind_counts?: KindCounts }>("/v1/admin/users?" + q);
 export const getUser = (id: string) => get<UserDetail>("/v1/admin/users/" + enc(id));
-export const setUserStatus = (id: string, status: "active" | "disabled") => request<UserRow>("PATCH", "/v1/admin/users/" + enc(id), { status });
+// setUserStatus answers the user, with notice, the server's sentence, when
+// an enable left the user refused, such as by a lock.
+export const setUserStatus = (id: string, status: "active" | "disabled") => request<UserRow & { notice?: string }>("PATCH", "/v1/admin/users/" + enc(id), { status });
 export const lockUser = (id: string, reason: string) => post<{ id: string; locked: boolean }>("/v1/admin/users/" + enc(id) + "/lock", { reason });
 export const unlockUser = (id: string) => post<{ id: string; locked: boolean }>("/v1/admin/users/" + enc(id) + "/unlock");
 export const listDevices = (id: string) => get<DeviceRow[]>("/v1/admin/users/" + enc(id) + "/devices");
@@ -537,13 +626,21 @@ export const setKey = (id: string, publicKey: string) => request<KeyPosture>("PU
 export const removeKey = (id: string) => del<unknown>("/v1/admin/users/" + enc(id) + "/nhi-key");
 // listAssignments reads one user's direct grants, never the whole table.
 export const listAssignments = (userID: string) => get<AssignmentRow[]>("/v1/admin/assignments?subject_kind=user&subject_id=" + enc(userID));
+// listAllAssignments reads every assignment, which a role's page with a
+// group in Entra needs to say where each holder's role comes from.
+export const listAllAssignments = () => get<AssignmentRow[]>("/v1/admin/assignments");
 export const grantRole = (userID: string, roleID: string) => post<AssignmentRow>("/v1/admin/assignments", { subject_kind: "user", subject_id: userID, role_id: roleID });
 export const revokeAssignment = (id: string) => del<unknown>("/v1/admin/assignments/" + enc(id));
 
 export const listSessions = (q: string) => get<Page<SessionRow>>("/v1/admin/sessions?" + q);
+// getSession reads one session, and answers 404 for an id no session has.
+export const getSession = (id: string) => get<SessionRow>("/v1/admin/sessions/" + enc(id));
 export const revokeSession = (id: string) => post<{ status: string }>("/v1/admin/sessions/" + enc(id) + "/revoke");
 // revokeSessions stands a named set down in one call and one control event.
 export const revokeSessions = (ids: string[]) => post<{ revoked: number }>("/v1/admin/sessions/revoke", { sessions: ids });
+// revokeUserSessions stands down every active session of one user, however
+// many there are, in the same one call.
+export const revokeUserSessions = (userID: string) => post<{ revoked: number }>("/v1/admin/sessions/revoke", { user: userID });
 export const sessionTranscript = (id: string) => get<Transcript>("/v1/admin/sessions/" + enc(id) + "/transcript");
 
 export const listConversations = (limit: number) => get<ConversationRow[]>("/v1/admin/transcripts?limit=" + limit);
@@ -557,9 +654,6 @@ export const captureConfig = () => get<{ capture?: CaptureConfig }>("/v1/admin/c
 // ImplicationRow is one edge a role holds: id is the implied role's id,
 // the value the delete path takes.
 export type ImplicationRow = { id: string; implies_id: string; implies_name: string };
-
-export type PackBindingRow = { id: string; role_id: string; role_name?: string };
-export type PackRow = { id: string; name: string; version?: string; content?: string; bindings?: PackBindingRow[] };
 
 // PolicySummary is the server's decomposition of a stored set, from the
 // same parse validate uses; absent when the stored text no longer parses.
@@ -686,8 +780,9 @@ export type ApprovalRow = {
   argvHashPrefix?: string;
   bindingScope?: string;
 };
-// listApprovals answers the unpaged list of one state, pending by default.
-export const listApprovals = (state = "pending") => get<{ approvals: ApprovalRow[] }>("/v1/admin/approvals?state=" + enc(state));
+// listApprovals answers the unpaged list of one state, pending by default,
+// of one user when user names the user's id.
+export const listApprovals = (state = "pending", user = "") => get<{ approvals: ApprovalRow[] }>("/v1/admin/approvals?state=" + enc(state) + (user ? "&user=" + enc(user) : ""));
 
 // ---- the Approvals area ----
 
@@ -769,10 +864,6 @@ export const listApiTokens = () => get<ApiTokenRow[]>("/v1/admin/api-tokens");
 export const createApiToken = (name: string, scope: string, expiresIn: number) => post<MintedToken>("/v1/admin/api-tokens", expiresIn > 0 ? { name, scope, expires_in: expiresIn } : { name, scope });
 export const revokeApiToken = (id: string) => del<unknown>("/v1/admin/api-tokens/" + enc(id));
 
-export const listPacks = () => get<PackRow[]>("/v1/admin/packs");
-export const bindPack = (packID: string, roleID: string) => post<unknown>("/v1/admin/packs/" + enc(packID) + "/bindings", { role_id: roleID });
-export const unbindPack = (packID: string, roleID: string) => del<{ status: string }>("/v1/admin/packs/" + enc(packID) + "/bindings/" + enc(roleID));
-
 // ---- the self-service page: the login-session lane ----
 
 // SelfAnswer is GET /v1/self: who is signed in and what the account may
@@ -780,6 +871,27 @@ export const unbindPack = (packID: string, roleID: string) => del<{ status: stri
 // agents the person sponsors.
 export type SelfAnswer = { username: string; user_kind: string; admin_grants?: string; enroll_channels: string[]; sponsored: string[] };
 export const readSelf = () => get<SelfAnswer>("/v1/self");
+
+// SelfDevice is one of the person's own approver devices as
+// GET /v1/self/devices answers it, newest first. attestation and last_seen
+// are left out when empty.
+export type SelfDevice = {
+  id: string;
+  name: string;
+  platform: string;
+  key_security_level: string;
+  attestation?: string;
+  created_at: string;
+  last_seen?: string;
+  notifies: boolean;
+};
+export const selfDevices = () => get<{ devices: SelfDevice[] }>("/v1/self/devices");
+// removeSelfDevice removes one of the person's own devices; an id that is
+// not theirs answers 404 with a sentence.
+export const removeSelfDevice = (id: string) => del<unknown>("/v1/self/devices/" + enc(id));
+// selfRequests answers the rows GET /v1/approver/pending answers for the
+// same scope, without a challenge, so nothing can be decided from them.
+export const selfRequests = <T,>(scope: "decidable" | "mine") => get<{ requests: T[] }>("/v1/self/requests?scope=" + scope);
 
 // ServerRow is one row of GET /v1/self/servers: a server the person's roles
 // reach, with the state of the credential it uses for them and never a value.
@@ -912,6 +1024,34 @@ export type DraftFinding = {
   typed?: string;
   group?: string;
   key: string;
+  // rows are the tools on servers a risk of who gains what covers, its
+  // role being its object. rule, server and tools name the policy rule of
+  // a local allow or of a rule that names nothing registered.
+  // binds_proposer marks a changed policy that applies to the proposer.
+  rows?: { server: string; tool: string }[];
+  rule?: string;
+  server?: string;
+  tools?: string[];
+  binds_proposer?: boolean;
+};
+
+// DraftGate is the gate on one side of a gain row: the policy rule and
+// policy that decide it, hold or ticket with its time in seconds, who
+// decides, the window to use or retry it when it is not the default, and
+// the checks before it runs. Every field is left out when empty.
+export type DraftGate = {
+  rule?: string;
+  set?: string;
+  class?: "hold" | "ticket";
+  seconds?: number;
+  roles?: string[];
+  sponsor?: boolean;
+  requester?: boolean;
+  confirm?: boolean;
+  within_seconds?: number;
+  any_arguments?: boolean;
+  classifier?: boolean;
+  server_check?: boolean;
 };
 
 // DraftGain is one row of who gains what. holders comes only to root and to
@@ -927,6 +1067,8 @@ export type DraftGain = {
   after: GainOutcome;
   before_words?: string;
   after_words?: string;
+  before_gate?: DraftGate;
+  after_gate?: DraftGate;
 };
 
 // DraftCoverage is what one role reaches on one server that pins an object

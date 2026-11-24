@@ -10,8 +10,9 @@ import (
 	"github.com/strazahq/straza/internal/policy"
 )
 
-// The codes of the risks, and of the two agent refusals that read who
-// gains and the sets that bind the agent.
+// The codes of the risks, and of the two agent findings that read who
+// gains and the sets that bind the agent, which are risks on a draft and
+// refusals on a direct route.
 const (
 	codeRunsCode       = "server.runs-code"
 	codeCredentialHost = "server.credential-host" // #nosec G101 -- a finding code, not a credential
@@ -51,12 +52,13 @@ const (
 // scopes, whose tokens stay valid when the scopes narrow again, reach into
 // a Straza role, a held role gaining a tool that runs with no gate or that
 // its requester may approve, recording turned on, a Rego module, a server
-// removal and an agent's loosening of a set that binds it. Every other
-// risk is a tick, and policy.guardrail-changed is typed where its set
-// applies to the proposer.
+// removal, an agent's change of a set that binds it and an agent's
+// widening of its own reach. Every other risk is a tick, and
+// policy.guardrail-changed is typed where its set applies to the proposer.
 var typedRisks = map[string]bool{
 	codeRunsCode: true, codeCredentialHost: true, codePlainHTTP: true, codeUnusualHost: true, codeAgentsCred: true, codeScopesWider: true,
 	codeStrazaReach: true, codeUngated: true, codeSelfApproval: true, codeRecordingOn: true, codeRego: true, codeRemoval: true, codeAgentGuardrail: true,
+	codeAgentOwnReach: true,
 }
 
 // agentsSponsor is the agents value that lets an agent without a
@@ -76,10 +78,14 @@ func risk(code, object, typed, sentence, before, after string) Finding {
 }
 
 // risks answers step 6: the risks of who gains, of the objects the roles
-// cover, of the roles, servers and sets the draft changes, folded by code
-// and object, each with its group.
+// cover, of the roles, servers and sets the draft changes, and of an
+// agent's draft that widens the agent's own reach, folded by code and
+// object, each with its group.
 func (c *check) risks(rows []gainRow) []Finding {
 	out := gainRisks(rows)
+	if agentDraft(c.d, c.in.Proposer) && !c.unreviewed() {
+		out = append(out, c.ownReach()...)
+	}
 	out = append(out, coversRisks(c.v.Objects)...)
 	out = append(out, c.roleRisks()...)
 	out = append(out, c.serverRisks()...)
@@ -90,7 +96,10 @@ func (c *check) risks(rows []gainRow) []Finding {
 // foldRisks folds the risks of one code and object into one finding, in
 // the order each pair first comes: its sentences, each once, joined by a
 // space, and its Before and After words, each sorted and de-duplicated
-// and joined with "; ". A typed part makes the whole typed.
+// and joined with "; ". A typed part makes the whole typed. Its rows are
+// the rows of every part, sorted by server and tool as the verdict's gains
+// of one role are, each once, and its rule, server and tools are those of
+// its parts where every part names the same, and none otherwise.
 func foldRisks(parts []Finding) []Finding {
 	var out []Finding
 	at := map[string]int{}
@@ -101,9 +110,16 @@ func foldRisks(parts []Finding) []Finding {
 		if !ok {
 			i = len(out)
 			at[key] = i
+			p.Rows = slices.Clone(p.Rows)
 			out, before, after = append(out, p), append(before, nil), append(after, nil)
-		} else if !slices.Contains(strings.Split(out[i].Sentence, "\x00"), p.Sentence) {
-			out[i].Sentence += "\x00" + p.Sentence
+		} else {
+			if !slices.Contains(strings.Split(out[i].Sentence, "\x00"), p.Sentence) {
+				out[i].Sentence += "\x00" + p.Sentence
+			}
+			out[i].Rows = append(out[i].Rows, p.Rows...)
+			if out[i].Rule != p.Rule || out[i].Server != p.Server || !slices.Equal(out[i].Tools, p.Tools) {
+				out[i].Rule, out[i].Server, out[i].Tools = "", "", nil
+			}
 		}
 		before[i], after[i] = append(before[i], p.Before), append(after[i], p.After)
 		if p.Ack == AckTyped {
@@ -113,6 +129,10 @@ func foldRisks(parts []Finding) []Finding {
 	for i := range out {
 		out[i].Sentence = strings.ReplaceAll(out[i].Sentence, "\x00", " ")
 		out[i].Before, out[i].After = joinParts(before[i]), joinParts(after[i])
+		slices.SortFunc(out[i].Rows, func(x, y ToolRow) int {
+			return cmp.Or(strings.Compare(x.Server, y.Server), strings.Compare(x.Tool, y.Tool))
+		})
+		out[i].Rows = slices.Compact(out[i].Rows)
 	}
 	return out
 }
@@ -137,7 +157,8 @@ type toolKey struct{ code, role, server, words string }
 // gainRisks answers the risks who gains shows, for each row that describes
 // a holder now: a tool that will run with no gate, a newly gated tool, a
 // looser gate, a deny gone, a tool its requester may approve, and a tool
-// of the built-in straza app opened.
+// of the built-in straza app opened, each with the server and tool of every
+// row it covers.
 func gainRisks(rows []gainRow) []Finding {
 	var keys []toolKey
 	tools := map[toolKey][]string{}
@@ -183,27 +204,30 @@ func gainRisks(rows []gainRow) []Finding {
 		case codeUngated:
 			today := ""
 			if k.words != "" {
-				today = ", where today " + k.words
+				today = ", where today each call is " + k.words
 			}
-			out = append(out, risk(k.code, object, k.role, fmt.Sprintf("%s on %s will run for holders of %s with no rule gating it%s.", names, k.server, k.role, today),
+			out = append(out, risk(k.code, object, k.role, fmt.Sprintf("%s on %s will run with no approval for holders of %s%s.", names, k.server, k.role, today),
 				toolList(k.server, ts, k.words), toolList(k.server, ts, "")))
 		case codeGated:
-			out = append(out, risk(k.code, object, "", fmt.Sprintf("%s will reach %s on %s, each call %s.", k.role, names, k.server, k.words), "", toolList(k.server, ts, k.words)))
+			out = append(out, risk(k.code, object, "", fmt.Sprintf("%s will reach %s on %s, and each call needs approval.", k.role, names, k.server), "", toolList(k.server, ts, k.words)))
 		case codeGateLooser:
 			bw, aw, _ := strings.Cut(k.words, "\x00")
 			out = append(out, risk(k.code, object, "", fmt.Sprintf("%s on %s will be gated by %s instead of %s.", names, k.server, aw, bw), toolList(k.server, ts, bw), toolList(k.server, ts, aw)))
 		case codeDenyRemoved:
 			parts := strings.SplitN(k.words, "\x00", 3)
-			will := "need approval, " + parts[2]
+			will := "needs approval"
 			if Outcome(parts[1]) == OutcomeRuns {
-				will = strings.TrimSpace("run " + parts[2])
+				will = "runs"
 			}
-			out = append(out, risk(k.code, object, "", fmt.Sprintf("No rule will refuse %s on %s for %s any more. It will %s.", names, k.server, k.role, will),
+			out = append(out, risk(k.code, object, "", fmt.Sprintf("No rule will deny %s on %s for %s. After publishing, each call %s.", names, k.server, k.role, will),
 				toolList(k.server, ts, parts[0]), toolList(k.server, ts, parts[2])))
 		case codeSelfApproval:
 			out = append(out, risk(k.code, object, k.role, fmt.Sprintf("A person who asks to run %s on %s may approve it themself.", listWords(ts, "or"), k.server), "", toolList(k.server, ts, "")))
 		case codeNativeOpened:
 			out = append(out, risk(k.code, object, "", fmt.Sprintf("Holders of %s will see %s of the built-in straza MCP server.", k.role, names), "", toolList(nativeApp, ts, "")))
+		}
+		for _, t := range ts {
+			out[len(out)-1].Rows = append(out[len(out)-1].Rows, ToolRow{Server: visible(k.server), Tool: visible(t)})
 		}
 	}
 	return out
@@ -243,8 +267,8 @@ func looser(b, a probe) bool {
 	case x.Binding != policy.ApproveBindingTool && y.Binding == policy.ApproveBindingTool:
 		return true
 	}
-	before := pool(b)
-	return slices.ContainsFunc(pool(a), func(d string) bool { return !slices.Contains(before, d) })
+	before := pool(gateOf(b))
+	return slices.ContainsFunc(pool(gateOf(a)), func(d string) bool { return !slices.Contains(before, d) })
 }
 
 // selfApproves reports whether the approval behind p lets the requester
@@ -271,8 +295,8 @@ func checkDropped(b, a probe) bool {
 }
 
 // ownReach answers ownReachOf for each subject of the proposer, so an
-// agent's draft may widen its reach at no instant its roles change, each
-// refusal once.
+// agent's draft that widens its reach at any instant its roles change is
+// read, each finding once.
 func (c *check) ownReach() []Finding {
 	var out []Finding
 	for _, sub := range c.proposerSubjects() {
@@ -281,11 +305,13 @@ func (c *check) ownReach() []Finding {
 	return dedupe(out)
 }
 
-// ownReachOf refuses an agent's draft that widens what the agent itself
-// reaches (agent.own-reach), read over its whole subject sub in each
+// ownReachOf answers agent.own-reach for an agent's draft that widens what
+// the agent itself reaches, read over its whole subject sub in each
 // world: the roles it holds directly in one set, each closed over that
 // world's implications, its username and its typology. It answers one
-// refusal for each server and way the reach widens. A server nobody has
+// finding for each server and way the reach widens: a risk the publisher
+// accepts by typing the server's name, whose after words say what widens,
+// or a refusal on a check nobody reviews. A server nobody has
 // listed on either side widens when the agent's rows on it come to admit
 // more names. On a server that pins an object type in either world, a
 // tool the probes leave alone widens when the agent comes to reach every
@@ -347,6 +373,10 @@ func (c *check) ownReachOf(sub [2]policy.Subject) []Finding {
 		}
 	}
 	var out []Finding
+	whose := "its"
+	if c.unreviewed() {
+		whose = "your"
+	}
 	for _, k := range keys {
 		names, where, object := listWords(tools[k], "and"), "on "+k.server, "App/"+k.server
 		if k.server == nativeApp {
@@ -366,10 +396,14 @@ func (c *check) ownReachOf(sub [2]policy.Subject) []Finding {
 			// An unpin leaves the type to the live pin.
 			words = fmt.Sprintf("reach %s on every %s of %s", globWords(tools[k]), cmp.Or(c.after.Apps[k.server].Pinned, c.w.Apps[k.server].Pinned).Type, k.server)
 		case "objects":
-			words = fmt.Sprintf("reach %s on %s of %s that your roles do not cover today", globWords(tools[k]), c.after.Apps[k.server].Pinned.Plural, k.server)
+			words = fmt.Sprintf("reach %s on %s of %s that %s roles do not cover today", globWords(tools[k]), c.after.Apps[k.server].Pinned.Plural, k.server, whose)
 		}
-		out = append(out, refusal(codeAgentOwnReach, visible(object), visible("This draft would let you "+words+", which widens your own reach. An agent's draft may not."),
-			"Leave that change out. A person can make it."))
+		if c.unreviewed() {
+			out = append(out, refusal(codeAgentOwnReach, visible(object), visible("This draft would let you "+words+", which widens your own reach. An agent's draft may not."),
+				"Leave that change out. A person can make it."))
+			continue
+		}
+		out = append(out, risk(codeAgentOwnReach, object, k.server, "This draft lets the agent that wrote it "+words+".", "", words))
 	}
 	return out
 }
@@ -435,10 +469,10 @@ func (c *check) roleRisks() []Finding {
 			out = append(out, risk(codeToolsLater, object, "", fmt.Sprintf("%s will reach every tool on %s, including tools the server adds later.", r, acc.Server),
 				strings.Join(sortedCopy(old.Tools), ", "), strings.Join(sortedCopy(acc.Tools), ", ")))
 		case ok && had && acc.Server != "" && old.Server == acc.Server && c.unlisted(acc.Server) && admitsMore(old.Tools, acc.Tools):
-			out = append(out, risk(codeToolsLater, object, "", fmt.Sprintf("%s will reach more tools on %s, which nobody has listed yet, so Straza cannot name them.", r, acc.Server),
+			out = append(out, risk(codeToolsLater, object, "", fmt.Sprintf("%s will reach more tools on %s that nobody has listed yet.", r, acc.Server),
 				strings.Join(sortedCopy(old.Tools), ", "), strings.Join(sortedCopy(acc.Tools), ", ")))
 		case ok && acc.Server != "" && (!had || old.Server != acc.Server) && c.unlisted(acc.Server):
-			out = append(out, risk(codeToolsLater, object, "", fmt.Sprintf("%s will reach tools on %s, which nobody has listed yet, so Straza cannot name them.", r, acc.Server),
+			out = append(out, risk(codeToolsLater, object, "", fmt.Sprintf("%s will reach tools on %s that nobody has listed yet.", r, acc.Server),
 				strings.Join(sortedCopy(old.Tools), ", "), strings.Join(sortedCopy(acc.Tools), ", ")))
 		}
 	}

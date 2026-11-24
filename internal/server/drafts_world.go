@@ -231,10 +231,10 @@ func holderOf(u store.User, sponsor string, devices int) drafts.Holder {
 }
 
 // readWorld reads live state into one drafts.World: every live server with
-// its manifest facts and what the manager knows of it, every role with its
-// knowledge packs, the implication edges, the access rows, the direct
-// holders in force, the windows of the assignments that start or end
-// later, the holder count of every role, the OAuth providers of the config, the sets of the
+// its manifest facts and what the manager knows of it, every role, the
+// implication edges, the access rows, the direct holders in force, the
+// windows of the assignments that start or end later, the holder count of
+// every role, the OAuth providers of the config, the sets of the
 // active policy snapshot with the text each was published with, the local
 // tool default, whether a push lane or Slack reaches approvers, and whether
 // this host can start containers. The credential facts of the servers are
@@ -258,7 +258,7 @@ func (a *App) readWorld(ctx context.Context) (drafts.World, error) {
 		w.Apps[name] = app
 	}
 	for _, read := range []func(context.Context, *drafts.World) error{
-		a.readImplications, a.readAccessRows, a.readHolders, a.readHolderCounts, a.readPolicies, a.readPacks,
+		a.readImplications, a.readAccessRows, a.readHolders, a.readHolderCounts, a.readPolicies,
 	} {
 		if err := read(ctx, &w); err != nil {
 			return drafts.World{}, err

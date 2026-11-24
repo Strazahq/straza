@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/strazahq/straza/internal/store"
 )
@@ -287,6 +286,7 @@ func TestSCIMKillSwitch(t *testing.T) {
 	}
 
 	// Deactivate in the "IdM" → SCIM PATCH active:false.
+	since := outboxSince(t, app)
 	scimPatch(t, base, scimToken, uid,
 		`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"replace","path":"active","value":false}]}`)
 
@@ -306,34 +306,11 @@ func TestSCIMKillSwitch(t *testing.T) {
 			t.Errorf("session %s status = %s, want revoked", s.ID, s.Status)
 		}
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		events, err := app.store.Outbox().ListUnpublished(ctx, 1000)
-		found := false
-		if err == nil {
-			for _, e := range events {
-				if e.Subject == "straza.revocation.user" && strings.Contains(e.CE, uid) {
-					found = true
-				}
-			}
-		}
-		if found {
-			break
-		}
-		// The relay may already have published it; check the audit trail too.
-		recs, _ := app.store.Audit().List(ctx, 0, 1000)
-		for _, rec := range recs {
-			if strings.Contains(rec.CE, "straza.revocation.user") && strings.Contains(rec.CE, uid) {
-				found = true
-			}
-		}
-		if found {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("no straza.revocation.user event observed")
-		}
-		time.Sleep(50 * time.Millisecond)
+	// The deactivation commits the event with the status, so the outbox
+	// holds it once the PATCH has answered, whether the relay has published
+	// it or not. The audit chain never holds it.
+	if events := since("straza.revocation.user", func(d map[string]any) bool { return d["user"] == uid }); len(events) == 0 {
+		t.Fatal("no straza.revocation.user event observed")
 	}
 
 	// Re-activation lifts the user denylist entry; old sessions stay dead.
@@ -342,6 +319,9 @@ func TestSCIMKillSwitch(t *testing.T) {
 	if code, _, _ := mcpCall(t, base, tok, "tools/list", nil); code == http.StatusOK {
 		t.Error("old session usable after re-activation; sessions must stay revoked")
 	}
+	// The deactivation removed the local password, so the stand-in for the
+	// external IdP gets one again before the user signs in.
+	setUserPassword(t, app, uid, "hunter2!")
 	tok2 := sessionToken(t, base, "scim.victim")
 	if code, _, _ := mcpCall(t, base, tok2, "tools/list", nil); code != http.StatusOK {
 		t.Errorf("fresh session after re-activation = %d, want 200", code)

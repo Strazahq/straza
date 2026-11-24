@@ -13,8 +13,8 @@ import (
 // fixStale is the refusal of an item whose object changed after the draft
 // was checked.
 const fixStale = `{"key":"k-stale","code":"draft.stale","class":"refused","object":"App/github",` +
-	`"sentence":"App/github changed after this draft was checked.",` +
-	`"fix":"Check the draft again with Check again on the console or strazactl drafts rebase 41. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}`
+	`"sentence":"The server github changed after this draft was checked.",` +
+	`"fix":"Check the draft again with Check again on the console or strazactl drafts rebase 41."}`
 
 // fixTokenRefusal is the publish refusal the server gives an admin API
 // token.

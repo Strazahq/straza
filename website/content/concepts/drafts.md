@@ -41,20 +41,20 @@ A session that a coding tool checked in may not draft through the admin routes o
 
 An [agent]({{< relref "concepts/identities.md" >}}) proposes a change through the built-in straza MCP server, with a tool that submits a draft and a tool that reads the draft's check. Only a session that holds `straza-draft-config` sees them in the gateway. The agent sends the same documents a person would, with a note for the reviewer. The answer names the draft and says that a person publishes it on the console under **Drafts** and the agent cannot. Every admin route refuses an identity that is not a person, so an agent never reaches the publish route, whatever role it holds.
 
-Agents may not publish because an agent that could publish could widen its own reach. The check of an agent's draft refuses a change that would let the agent reach more than its roles reach today, at any moment one of its assignments starts or ends. It also refuses a draft that adds or widens a rule of a policy set that applies to the agent. For example:
+Agents may not publish because an agent that could publish could widen its own reach. The check of an agent's draft reads whether the change would let the agent reach more than its roles reach today, at any moment one of its assignments starts or ends, and whether it adds or widens a rule of a policy set that applies to the agent. It does not refuse such a draft. It raises a line that widens access, which a person accepts when publishing. For example:
 
 
 | | wiki, invented | postgres, adaptive-pg-mcp |
 |---|---|---|
 | The agent holds | wiki-eng, which covers the space eng | postgres-sales-eu, which covers the database sales_eu |
 | Its draft adds | the space legal to wiki-eng | the database sales_us to postgres-sales-eu |
-| The check answers | the draft would let it reach tools on spaces of wiki that its roles do not cover today | the same, on databases of postgres |
+| The check answers | the draft lets the agent reach tools on spaces of wiki that its roles do not cover today | the same, on databases of postgres |
 
 
 An agent also cannot propose a Straza role, a command or container server, a Rego module, a rule that lets a requester approve their own calls, or a change to conversation recording. Without an active sponsor, an agent cannot propose anything, because an agent's draft needs a person accountable for it.
 
 
-The check does not refuse an agent's draft that loosens a policy set that applies to the agent, for example by turning it off. On the console, it shows under a warning that names the agent, as a line that widens access. The publisher types the set's name to accept it, so the record of the publish names who accepted. While a second person is required, the agent's sponsor cannot publish such a draft.
+The check does not refuse an agent's draft that loosens a policy set that applies to the agent, for example by turning it off, or that widens what the agent reaches. On the console, it shows under a warning that names the agent, as a line that widens access. The publisher types the set's name to accept it, or the server's name for a wider reach, so the record of the publish names who accepted. While a second person is required, the agent's sponsor cannot publish such a draft.
 
 ## The apps directory
 

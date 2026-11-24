@@ -1,0 +1,16 @@
+{
+  "specversion": "1.0",
+  "id": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e21",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-11-17T09:14:11.902Z",
+  "data": {
+    "action": "entra.pass.held",
+    "role": "finance-readers",
+    "roleId": "0197fa3d-7777-7abc-9def-000000000017",
+    "group": "5d2a7c1e-9b40-4f6e-8a11-3c0d5e7f9a21",
+    "removals": 14,
+    "holders": 20,
+    "reason": "Entra's group lists 14 of this role's 20 holders from Entra no longer, which is more than the removal guard lets through, so nobody was removed. Check the group in Entra. If the removals are right, apply them."
+  }
+}

@@ -45,6 +45,8 @@
   --danger-bg:  rgba(248, 81, 73, .15);
   --unknown-bg: rgba(188, 140, 255, .15);
   --accent-bg:  rgba(88, 166, 255, .15);
+  /* the fill of a round pill and of a tool chip */
+  --pill:       rgba(230, 237, 243, .1);
 
   color-scheme: dark;
 }
@@ -62,6 +64,7 @@
     --danger-bg: rgba(207,34,46,.12); --unknown-bg: rgba(130,80,223,.12);
     --accent-bg: rgba(9,105,218,.12);
     --teal: #146c75; --teal-bg: rgba(27,124,133,.12);
+    --pill: rgba(31, 35, 40, .075);
     color-scheme: light;
   }
 }
@@ -75,6 +78,7 @@
   --danger-bg: rgba(207,34,46,.12); --unknown-bg: rgba(130,80,223,.12);
   --accent-bg: rgba(9,105,218,.12);
   --teal: #146c75; --teal-bg: rgba(27,124,133,.12);
+  --pill: rgba(31, 35, 40, .075);
   color-scheme: light;
 }
 [data-theme="dark"] {
@@ -87,6 +91,7 @@
   --danger-bg: rgba(248,81,73,.15); --unknown-bg: rgba(188,140,255,.15);
   --accent-bg: rgba(88,166,255,.15);
   --teal: #39c5cf; --teal-bg: rgba(57,197,207,.15);
+  --pill: rgba(230, 237, 243, .1);
   color-scheme: dark;
 }
 
@@ -118,6 +123,7 @@
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
 
   --radius: 6px;      /* one radius everywhere */
+  --round: 999px;     /* the one second shape, for a round pill */
   --row-h: 36px;      /* dense table row */
   --nav-w: 220px;     /* fixed left rail */
   --header-h: 48px;   /* app header */

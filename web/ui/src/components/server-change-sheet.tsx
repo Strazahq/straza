@@ -2,11 +2,12 @@ import * as React from "react";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { CAPS, ERROR, HINT, ManifestFold } from "@/components/wizard/parts";
+import { CAPS, ERROR, HINT } from "@/components/wizard/parts";
+import { ManifestFold } from "@/components/yaml-fold";
 import { type Dry, useDryRun } from "@/components/wizard/use-dry-run";
 import { SaveNoteLine, useDraftSave, useWorkingDraft } from "@/components/use-draft-save";
 import { type ApiError, type AppRow, type ManifestDoc, type ProviderRow, listApps, listProviders } from "@/lib/api";
-import { DRY_AS_YOU_TYPE, DRY_PENDING, DRY_UNREACHABLE, NOTHING_TO_SAVE, NOTHING_YET, NO_MANIFEST, READ_UNREACHABLE, SHEET_SUB, SHEET_TITLE, dryAccepted, gone, pausedWords, readRefused, reading, whenWords } from "@/lib/change-words";
+import { DRY_ACCEPTED, DRY_PENDING, DRY_UNREACHABLE, NOTHING_TO_SAVE, NOTHING_YET, NO_MANIFEST, READ_UNREACHABLE, SHEET_SUB, SHEET_TITLE, gone, pausedWords, readRefused, reading, whenWords } from "@/lib/change-words";
 import { toYAML } from "@/lib/manifest";
 import { type ChangeRow, type Connection, type CredentialEdit, type Settings, changeRows, editConnection, editCredential, editSettings, readConnection, readCredential, readSettings } from "@/lib/manifest-edit";
 import { version } from "@/lib/public";
@@ -22,13 +23,14 @@ export type ChangeWhich = "connection" | "credential" | "settings";
 // ChangeSheetProps is what the server page hands a Change sheet: the
 // server as listed, which card is open (null when none), the server's
 // current tool names for the exposure picker, the server-wide per-call
-// timeout from the config when it answered, the close callback, and the
-// callback after a publish landed.
+// timeout and the remote rate limit default from the config when it
+// answered, the close callback, and the callback after a publish landed.
 export type ChangeSheetProps = {
   app: AppRow;
   which: ChangeWhich | null;
   tools: string[];
   upstreamTimeout: number | null;
+  remoteRps: number | null;
   onClose: () => void;
   onSaved: () => void;
 };
@@ -68,7 +70,7 @@ type Read =
 // manifest, never the copy the page holds: a page whose reload after an
 // earlier save is still in flight or failed would otherwise hand this
 // sheet a stale manifest, and saving it would undo that save.
-function ChangeBody({ app, which, tools, upstreamTimeout, onClose, onSaved, busy, setBusy }: BodyProps) {
+function ChangeBody({ app, which, tools, upstreamTimeout, remoteRps, onClose, onSaved, busy, setBusy }: BodyProps) {
   const [toolsAt] = React.useState(tools);
   const [read, setRead] = React.useState<Read>({ state: "loading" });
 
@@ -96,8 +98,8 @@ function ChangeBody({ app, which, tools, upstreamTimeout, onClose, onSaved, busy
 
   const head = (
     <SheetHeader className="border-b border-border pr-12">
-      <SheetTitle className="text-lg leading-snug">{SHEET_TITLE[which]}<code className="font-mono">{app.name}</code></SheetTitle>
-      <SheetDescription>{SHEET_SUB[which]}</SheetDescription>
+      <SheetTitle className="text-section leading-snug">{SHEET_TITLE[which]}<code className="font-mono">{app.name}</code></SheetTitle>
+      {SHEET_SUB[which] && <SheetDescription>{SHEET_SUB[which]}</SheetDescription>}
     </SheetHeader>
   );
 
@@ -106,7 +108,7 @@ function ChangeBody({ app, which, tools, upstreamTimeout, onClose, onSaved, busy
       <>
         {head}
         <ChangeForm app={app} which={which} base={read.base} tools={read.tools} short={read.short}
-          upstreamTimeout={upstreamTimeout} onClose={onClose} onSaved={onSaved} busy={busy} setBusy={setBusy} />
+          upstreamTimeout={upstreamTimeout} remoteRps={remoteRps} onClose={onClose} onSaved={onSaved} busy={busy} setBusy={setBusy} />
       </>
     );
   }
@@ -138,13 +140,14 @@ type FormProps = {
   tools: string[];
   short: boolean;
   upstreamTimeout: number | null;
+  remoteRps: number | null;
   onClose: () => void;
   onSaved: () => void;
   busy: boolean;
   setBusy: (busy: boolean) => void;
 };
 
-function ChangeForm({ app, which, base, tools, short, upstreamTimeout, onClose, onSaved, busy, setBusy }: FormProps) {
+function ChangeForm({ app, which, base, tools, short, upstreamTimeout, remoteRps, onClose, onSaved, busy, setBusy }: FormProps) {
   const [doc] = React.useState<ManifestDoc>(() => JSON.parse(JSON.stringify(base)) as ManifestDoc);
   const [conn, setConn] = React.useState(() => readConnection(doc));
   const [cred, setCred] = React.useState(() => readCredential(doc));
@@ -172,8 +175,9 @@ function ChangeForm({ app, which, base, tools, short, upstreamTimeout, onClose, 
   }, []);
 
   const after = which === "connection" ? editConnection(doc, conn) : which === "credential" ? editCredential(doc, cred) : editSettings(doc, sets, tools);
-  const misses = which === "connection" ? connectionMisses(doc, conn) : which === "credential" ? credentialMisses(cred) : settingsMisses(sets, tools, upstreamTimeout);
-  const rows = changeRows(doc, after, upstreamTimeout);
+  const remote = (doc.straza?.runtime?.kind || "remote") === "remote";
+  const misses = which === "connection" ? connectionMisses(doc, conn) : which === "credential" ? credentialMisses(cred) : settingsMisses(sets, tools, upstreamTimeout, remote, remoteRps);
+  const rows = changeRows(doc, after, upstreamTimeout, remoteRps);
   const yaml = toYAML(after);
   const dry = useDryRun(yaml, rows.length > 0 && misses.length === 0 ? "live" : "off");
   const paused = !!app.paused;
@@ -201,7 +205,7 @@ function ChangeForm({ app, which, base, tools, short, upstreamTimeout, onClose, 
   let fields: React.ReactNode = null;
   if (which === "connection") fields = <ConnectionFields name={app.name} base={doc} c={conn} set={patchConn} misses={misses} runtimes={runtimes} />;
   else if (which === "credential") fields = <CredentialFields base={doc} c={cred} set={patchCred} misses={misses} providers={providers} />;
-  else fields = <SettingsFields name={app.name} s={sets} set={patchSets} misses={misses} tools={tools} short={short} upstreamTimeout={upstreamTimeout} />;
+  else fields = <SettingsFields name={app.name} s={sets} set={patchSets} misses={misses} tools={tools} short={short} upstreamTimeout={upstreamTimeout} remote={remote} remoteRps={remoteRps} />;
 
   return (
     <>
@@ -212,12 +216,14 @@ function ChangeForm({ app, which, base, tools, short, upstreamTimeout, onClose, 
           <Changes rows={rows} />
           <DryLine dry={dry} refusal={refusal} />
         </section>
-        <section className="flex flex-col gap-1.5">
-          <span className={CAPS}>When you publish</span>
-          <div className="flex max-w-[75ch] flex-col gap-1.5 text-sm leading-relaxed text-text-2" data-when-save>
-            {paras.map((p) => <p key={p} className="m-0">{p}</p>)}
-          </div>
-        </section>
+        {paras.length > 0 && (
+          <section className="flex flex-col gap-1.5">
+            <span className={CAPS}>When you publish</span>
+            <div className="flex max-w-[75ch] flex-col gap-1.5 text-dense leading-relaxed text-text-2" data-when-save>
+              {paras.map((p) => <p key={p} className="m-0">{p}</p>)}
+            </div>
+          </section>
+        )}
         <ManifestFold yaml={yaml} />
       </div>
       <SheetFooter className="mt-0 border-t border-border">
@@ -243,14 +249,15 @@ function ChangeForm({ app, which, base, tools, short, upstreamTimeout, onClose, 
 
 // Changes is "What changes": each changed field, now and after publishing.
 function Changes({ rows }: { rows: ChangeRow[] }) {
-  if (rows.length === 0) return <p className="m-0 rounded-md border border-dashed border-border px-3 py-2 text-[13px] text-muted-foreground" data-change-rows>{NOTHING_YET}</p>;
+  if (rows.length === 0) return <p className="m-0 rounded-md border border-dashed border-border px-3 py-2 text-caption text-muted-foreground" data-change-rows>{NOTHING_YET}</p>;
   const cell = "px-3 py-1.5 align-top break-words";
   return (
     <div className="overflow-x-auto rounded-md border border-border" data-change-rows>
-      <table className="w-full table-fixed text-sm">
+      {/* On a phone the sheet is narrower than the floor, and the table scrolls in its box rather than breaking every word of the field column. */}
+      <table className="w-full min-w-[480px] table-fixed text-dense">
         <colgroup><col className="w-[28%]" /><col className="w-[36%]" /><col className="w-[36%]" /></colgroup>
         <thead>
-          <tr className="border-b border-border text-left text-[13px] text-muted-foreground">
+          <tr className="border-b border-border text-left text-caption text-muted-foreground">
             <th className={cn(cell, "font-medium")}><span className="sr-only">Field</span></th>
             <th className={cn(cell, "font-medium")}>Now</th>
             <th className={cn(cell, "font-medium")}>After publishing</th>
@@ -275,12 +282,12 @@ function DryLine({ dry, refusal }: { dry: Dry; refusal: React.Ref<HTMLParagraphE
   if (dry.state === "ok") {
     return (
       <p role="status" className={cn(HINT, "m-0")} data-dry-run="ok">
-        <span className="text-ok">{dryAccepted(dry.runtime, dry.credential)}</span>{DRY_AS_YOU_TYPE}
+        <span className="text-ok">{DRY_ACCEPTED}</span>
       </p>
     );
   }
   if (dry.state === "refused") return <p ref={refusal} role="status" className={cn(ERROR, "m-0")} data-dry-run="refused">{dry.text}</p>;
-  if (dry.state === "unreachable") return <p role="status" className="m-0 text-[13px] leading-snug text-unknown" data-dry-run="unreachable">{DRY_UNREACHABLE}</p>;
+  if (dry.state === "unreachable") return <p role="status" className="m-0 text-caption leading-snug text-unknown" data-dry-run="unreachable">{DRY_UNREACHABLE}</p>;
   if (dry.state === "pending") return <p role="status" className={cn(HINT, "m-0")} data-dry-run="pending">{DRY_PENDING}</p>;
   return null;
 }

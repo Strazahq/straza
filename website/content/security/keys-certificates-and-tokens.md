@@ -3,8 +3,8 @@ title: Keys, certificates and tokens
 description: Every key and token Straza holds, where it lives, how long it lasts, how to rotate or revoke it, and what a stolen copy yields.
 summary: >-
   One server key signs every token Straza hands out, a second signs the policy every workstation
-  trusts, and a sealing key opens every secret the server stores. A copy of the database mints
-  tokens for any user but opens no sealed credential. Back up the store with three files: the
+  trusts, and a sealing key opens both and every stored secret. A database copy without the
+  sealing key mints no token and opens no credential. Back up the store with three files: the
   sealing key, the approver TLS pair and the WebPush key.
 pagetype: explanation
 weight: 17
@@ -20,19 +20,19 @@ Three files outside the store cannot be regenerated for free. They are the seali
 ## What signs what
 
 
-The session signing key is an Ed25519 key in the `signing_keys` table with the purpose `session`. It signs the 300 second session token, the 30 day approver device token, the 10 minute login token of the built-in issuer and the 10 minute connect state. Every replica loads it into memory and verifies locally, so no request path reads the store for a signature check.
+The session signing key is an Ed25519 key in the `signing_keys` table with the purpose `session`. It signs the 300 second session token, the 30 day approver device token, the 10 minute login token of the built-in issuer and the 10 minute connect state. Its seed is sealed under the sealing key before the row reaches the database. Every replica opens it at start, keeps it in memory and verifies locally, so no request path reads the store for a signature check.
 
 Rotation is one command, `strazactl signing-keys rotate session`, and it runs in two phases so a replica never signs with a key another replica has not loaded. The previous key keeps verifying for 30 days after promotion, because the approver credentials it signed live that long. So does a device credential that it signed for strazactl before strazad stopped issuing them, which must still verify to get the sentence that says why it stopped working, and a `governance.deviceTokenTTL` above 30 days lengthens the wait to match. Because the database holds one active session key, replicas that start at the same moment against a new store sign with the same key.
 
 
-The snapshot signing key is a second Ed25519 key in the same table with the purpose `snapshot`. It signs every compiled policy snapshot. At enrollment, `straza service` pins every public half the server publishes at `/.well-known/straza/snapshot-keys.json` into the enrollment record it keeps for that person. It verifies each snapshot against that pinned set before it decides with it, and refuses to enforce a snapshot it cannot verify.
+The snapshot signing key is a second Ed25519 key in the same table with the purpose `snapshot`, its seed sealed the same way. It signs every compiled policy snapshot. At enrollment, `straza service` pins every public half the server publishes at `/.well-known/straza/snapshot-keys.json` into the enrollment record it keeps for that person. It verifies each snapshot against that pinned set before it decides with it, and refuses to enforce a snapshot it cannot verify.
 
 The pin is what makes the key hard to rotate. A new key is unknown to every enrolled workstation until it enrolls again, and an old key stays trusted, as [the procedure section](#back-up-and-rotate-by-procedure) explains. Because the database holds one active snapshot key, replicas that start at the same moment against a new store sign every snapshot with the same key, and a workstation verifies it whichever replica it enrolled through.
 
 
 The client assertion key is an RSA 3072 key in the same table with the purpose `client_assertion`, and it exists only once an administrator runs `strazactl signing-keys rotate client_assertion`. It signs one thing, the 30 second client assertion with which an agent's client gets a token at your identity provider (RFC 7523). Whoever holds it can therefore sign in there as any agent whose client trusts it. The gateway asks for such a token on each call to a server whose manifest sets `credential.agents: client_credentials`, at a provider whose `oauth.providers.<name>.clientCredentials` block names the assertion audience or an Entra agent blueprint. Once such a server exists, this key signs on live calls.
 
-Unlike the two Ed25519 seeds, its private half is sealed under the sealing key before the row reaches the database. The sealed value names its purpose and key id, so a copy of the database yields nothing without `secret.key` and a sealed key cannot be moved to another row. The server publishes the public halves at `/.well-known/straza/client-assertion-jwks.json`, a plain RFC 7517 key set that the identity provider stores as the JWKS URL of each agent's client. It builds that set from the opened private keys, never from a column a database write could change.
+Like the two Ed25519 seeds, its private half is sealed under the sealing key before the row reaches the database. The sealed value names its purpose and key id, so a copy of the database yields nothing without `secret.key` and a sealed key cannot be moved to another row. The server publishes the public halves at `/.well-known/straza/client-assertion-jwks.json`, a plain RFC 7517 key set that the identity provider stores as the JWKS URL of each agent's client. It builds that set from the opened private keys, never from a column a database write could change.
 
 Each client assertion key also has a self-signed X.509 certificate, which an Entra agent blueprint holds so that Entra accepts the key's assertions. The server builds it from the key and stores it nowhere. Its subject names the key id, it is valid for 730 days from the key's creation, its serial comes from the key id, and it is signed with SHA-256 and RSA PKCS#1 v1.5. Those signatures are deterministic, so every replica builds the same bytes and presents the same thumbprint. `strazactl signing-keys certificate client_assertion <kid>` prints it, and `strazactl signing-keys list` shows when each certificate expires. In the console, Settings, **Signing keys** downloads it and shows the same date. A key whose certificate has expired signs no Entra assertion, and the refusal names the rotation. On the Overview, a full administrator is warned 30 days before the active key's certificate expires, and again once it has. Because the certificate is self-signed, a tenant policy that limits certificate lifetime below 730 days or requires a trusted certificate authority refuses its upload.
 
@@ -51,17 +51,17 @@ Promote refuses a key staged less than a minute ago, so every replica publishes 
 When you upgrade from a version older than the one that brought promote, run every replica on the new version before the next rotation of the client assertion key. An older replica still promotes a staged key by itself after a minute. Use the strazactl of the same version too, because an older one has no promote command and says that a new key starts signing by itself.
 
 
-The sealing key is 32 random bytes in `secret.key` under the data directory, or wherever `secrets.kekFile` points, created on the first boot when absent. Server messages call it the KEK, the key-encryption key. It seals every stored MCP server secret, every OAuth grant and server token a person stores, and the private half of the client assertion key with NaCl secretbox before the row reaches the database, and the server opens a row only at the moment a call needs the credential. The database therefore holds these credentials only as ciphertext, and the file holds the only key that opens them. Values written into a server's manifest are not among them, as [What a copy yields](#what-a-copy-yields) explains.
+The sealing key is 32 random bytes in `secret.key` under the data directory, or wherever `secrets.kekFile` points, created on the first boot when absent. Server messages call it the KEK, the key-encryption key. It seals every stored MCP server secret, every OAuth grant and server token a person stores, and the private half of all three signing keys with NaCl secretbox before the row reaches the database. The server opens a credential only at the moment a call needs it. It opens the signing keys when it starts, and it refuses to start on one it cannot open. The database therefore holds these keys and credentials only as ciphertext, and the file holds the only key that opens them. Values written into a server's manifest are not among them, as [What a copy yields](#what-a-copy-yields) explains.
 
 ## Keys the server owns
 
 
 | Kind | Lives in | Lives for | Rotate or revoke | A copy yields |
 |---|---|---|---|---|
-| Session signing key | the `signing_keys` table, the seed unencrypted | until rotated, through staged, active, retiring and retired | `strazactl signing-keys rotate session` | every token kind for any user |
+| Session signing key | the `signing_keys` table, the seed sealed under the sealing key | until rotated, through staged, active, retiring and retired | `strazactl signing-keys rotate session` | every token kind for any user |
 | Client assertion key | the `signing_keys` table, purpose `client_assertion`, the private half sealed under the sealing key | until rotated, through staged, active, retiring and retired, with a certificate valid for 730 days from its creation | `strazactl signing-keys rotate client_assertion`, then `strazactl signing-keys promote client_assertion <kid>`, and `strazactl signing-keys retire <kid>` for a key that may have been copied | nothing without the sealing key, and with it a token as any agent whose client trusts the key document or whose Entra blueprint holds its certificate |
-| Snapshot signing key | the same table, purpose `snapshot`, the seed unencrypted | until replaced | no rotation withdraws it today, as described below | a policy every workstation accepts |
-| Sealing key | `secret.key` in the data directory, 0600 | until replaced | a procedure, described below, that re-enters every stored secret | every stored secret, together with the database |
+| Snapshot signing key | the same table, purpose `snapshot`, the seed sealed under the sealing key | until replaced | no rotation withdraws it today, as described below | a policy every workstation accepts |
+| Sealing key | `secret.key` in the data directory, 0600 | until replaced | a procedure, described below, that moves the signing keys and re-enters every stored secret | all three signing keys and every stored secret, together with the database |
 | Approver TLS pair | `approver-tls/` in the data directory, P-256, self-signed | 820 days, with a boot warning 30 days ahead | delete the directory and restart, then every approver device enrolls again | the approver listener's identity to every pinned phone |
 | WebPush signing key | `approval.push.webpush.vapidKeyFile`, P-256, minted once | no expiry | replacing it ends every browser push subscription | pushes to those subscriptions, which carry no content |
 | Main TLS pair | `server.tls.certFile` and `server.tls.keyFile`, yours | your own PKI's term | replace the files and restart, there is no hot reload | the server's identity on the wire |
@@ -89,7 +89,7 @@ A session token from a key enrollment also carries the thumbprint of the machine
 | Admin API token | the settings table, as a hash, with its scope, and wherever a person puts the value, such as `STRAZA_API_TOKEN` for strazactl | as long as it was minted for, or forever when no expiry was given | Revoke under Settings, API tokens in the console, or `strazactl api-token revoke` | everything in its scope, from any machine, until it expires or is revoked |
 
 
-strazactl keeps no login. It runs only on an admin API token in `STRAZA_API_TOKEN`, so no admin credential sits on a machine unless someone puts a token there. strazad refuses the login that older versions of strazactl kept in `~/.straza/credentials.json`, so a file left from one works nowhere and can be deleted. An AI agent runs as its person and can read whatever the person leaves in its reach, so never put a token where an agent runs as you. On Linux the person's Straza key and sessions are out of its reach, because `straza service` keeps them under its own OS account. [The security model]({{< relref "security/security-model.md#an-agent-that-holds-its-persons-login-can-enroll-an-approval-device" >}}) explains what that allows, and [Known limits]({{< relref "security/known-limits.md" >}}) lists what reduces it.
+strazactl keeps no login. It runs only on an admin API token in `STRAZA_API_TOKEN`, so no admin credential sits on a machine unless someone puts a token there. strazad refuses the login that older versions of strazactl kept in `~/.straza/credentials.json`, so a file left from one works nowhere and can be deleted. An AI agent runs as its person and can read whatever the person leaves in its reach, so never put a token where an agent runs as you. On Linux the person's Straza key and sessions are out of its reach, because `straza service` keeps them under its own OS account. [The security model]({{< relref "security/security-model.md#an-agent-that-holds-its-persons-login-can-enroll-an-approval-device" >}}) explains what that allows.
 
 
 The scope on an admin API token is the whole story of what a copy yields. A token with `full` or `tokens:write` can mint itself a `full` token. A token with `identity:write` can assign `straza-admin` to any person and set the break-glass password, and one with `scim:write` writes the membership of every role, `straza-admin` included. Treat all four as root: give them to the operator, and the two `scim` scopes to the identity manager only. The identity manager's SCIM credential is the same token kind with the `scim` scopes, and [Hardening]({{< relref "security/hardening.md" >}}) walks its rotation.
@@ -113,11 +113,9 @@ A phone decides only by signing a fresh single-use challenge, and it renews its 
 |---|---|---|---|---|
 | Local user password, a person's only, because an AI agent or a service account signs in with its key and strazad refuses it a password | the `users` table as a bcrypt hash | no expiry | `strazactl users set-password` | a login as that user in the standalone profile |
 | Bootstrap admin password | printed once at the first boot of an empty standalone store, as the `password` field of a warning line in the server log, which keeps it in every copy of that log until the password is changed | until changed | `strazactl users set-password admin` | full administration |
-| Break-glass password | printed once, in both profiles, for an account no identity manager can disable, as the `password` field of a warning line in the first boot's server log, which keeps it in every copy of that log until the password is changed | until changed | `strazactl users set-password break-glass` on an admin API token, or a new hash written into the users table as the last resort | full administration in both profiles, through the emergency sign-in in the enterprise profile |
+| Break-glass password | for an account no identity manager can disable. Standalone prints it once as the `password` field of a warning line in the first boot's server log, which keeps it in every copy of that log until the password is changed. Enterprise creates the account with no password and logs none. The first admin sets one, or `strazad break-glass set-password` on the server host prints a new one once on the terminal | until changed | `strazactl users set-password break-glass` on an admin API token, or `strazad break-glass set-password` on the server host of an enterprise server | full administration in both profiles, through the emergency sign-in in the enterprise profile |
 
-[Known limits]({{< relref "security/known-limits.md" >}}) lists the copies of that first log as a limit, with what reduces it.
-
-In the enterprise profile people have no local passwords, because the identity provider owns the login and its second factor. The break-glass admin is the one exception. strazad keeps its own sign-in page mounted as the emergency sign-in, and that page accepts the break-glass account and nobody else, so a hash that `strazactl users set-password` stores on any other user opens nothing.
+In the enterprise profile people have no local passwords, because the identity provider owns the login and its second factor. The break-glass admin is the one exception. strazad keeps its own sign-in page mounted as the emergency sign-in, and that page accepts the break-glass account and nobody else, so a hash that `strazactl users set-password` stores on any other user opens nothing. The page refuses the account too while it has no password, and every boot until then logs the warning `BREAK-GLASS: the emergency sign-in is closed` with both ways to set one.
 
 The console offers Emergency sign-in under its sign-in button, which is the break-glass admin's one way in. Every interactive login as break-glass lands on the audit chain as an alarm, in both profiles. Nobody logs in as it unnoticed.
 
@@ -129,7 +127,7 @@ The identity provider can never become the emergency admin. An account named `br
 
 The drill is the same in both profiles, and it works while the identity provider is down.
 
-1. Open the console and choose Emergency sign-in under the sign-in button. The tab goes to the server's own sign-in page and comes back to the console after it.
+1. Open the console and choose Emergency sign-in under the sign-in button. On a server without an identity provider the card shows no Emergency sign-in, because Sign in already opens the same page, so press Sign in. The tab goes to the server's own sign-in page and comes back to the console after it.
 2. On that page enter the username `break-glass` and the vaulted password, and the code when the page asks for one. The console signs you in with full administration.
 3. Fix what locked you out: assign `straza-admin` back to a person, or repair the identity provider settings, then sign in as yourself again.
 4. Rotate the break-glass password from a terminal, because the console has no password control. While still signed in, open Settings, then API tokens, and mint a token with the scope `identity:write` and the shortest lifetime. Run strazactl on it in a terminal where no agent runs as you. `read -rs` reads the pasted token without showing it and keeps it out of the shell history.
@@ -152,20 +150,29 @@ The login leaves three traces:
 
 A wrong password leaves a login failure with `via` `password`, and every other username on that page leaves a login failure without a user, because the page refuses it before judging any credential. The submit is throttled per client address, two a second by default.
 
-If the vaulted password is lost as well, the last resort is the database. Write a new bcrypt hash into the `password_hash` column of the break-glass row in the `users` table. The next emergency sign-in reads it, and no restart is needed. `htpasswd -nbBC 10 x '<new password>'` prints such a hash after the colon.
+
+If the vaulted password is lost as well, the last resort on an enterprise server is `strazad break-glass set-password` on the server host. Give it the same `--config`, `--profile`, `--data-dir` and `--store-dsn` that `strazad serve` runs with. It prints a new password once on your terminal, never into the server log, and the next emergency sign-in reads it with no restart. It changes nothing on a database whose schema belongs to another release, or one that strazad serve has never booted on, and says what to run first.
+
+{{< command terminal="Terminal" purpose="on the strazad host" >}}
+```sh
+strazad break-glass set-password --config straza.yaml
+```
+{{< /command >}}
+
+A standalone server has no such command. Its last resort is to write a new bcrypt hash into the `password_hash` column of the break-glass row in the `users` table. The next emergency sign-in reads it, and no restart is needed. `htpasswd -nbBC 10 x '<new password>'` prints such a hash after the colon.
 
 ```sql
 UPDATE users SET password_hash = '$2y$10$...' WHERE username = 'break-glass';
 ```
 
 
-This edit leaves no audit record, so note it in your own incident record. Never delete the data directory of a real deployment to get back in.
+The command leaves one `user.update` record on the audit chain, with no actor and the reason `set on the server host with strazad break-glass set-password`. The database edit leaves none. Note that edit in your own incident record, and never delete the data directory of a real deployment to get back in.
 
 A role assignment inserted by hand is a different matter and not a recovery path. The running server caches role resolution until an admin write bumps it, so the row takes effect only after a restart. It carries no origin and no actor, and the identity manager's next reconciliation removes it. Sign in as break-glass and assign the role through the console or the CLI instead. When an identity manager writes role membership over SCIM, restore the membership there as well, or its next full membership write removes the console assignment too.
 
-A first boot that stops after it creates the break-glass account and before it assigns straza-admin leaves the account without the role and with a password nobody saw. The next boot assigns the role again. It also replaces a straza-admin assignment of the account whose validity window has ended or not begun, logs `the break-glass admin held no straza-admin assignment in force` and announces the change to your identity manager.
+A first boot that stops after it creates the break-glass account and before it assigns straza-admin leaves the account without the role, and on standalone with a password nobody saw. The next boot assigns the role again. It also replaces a straza-admin assignment of the account whose validity window has ended or not begun, logs `the break-glass admin held no straza-admin assignment in force` and announces the change to your identity manager.
 
-That boot never sets a password. If nobody holds one, have an admin set it with `strazactl users set-password break-glass --password '<new password>'`. When no other admin exists, set `oidc.bootstrapAdmin` to your username and restart strazad. Sign in through your identity provider to become an admin, and then set the break-glass password, or write a hash into the database as the last resort above describes.
+That boot never sets a password. If nobody holds one, have an admin set it with `strazactl users set-password break-glass --password '<new password>'`. When no other admin exists, set `oidc.bootstrapAdmin` to your username and restart strazad. Sign in through your identity provider to become an admin, and then set the break-glass password, or use the last resort above.
 
 ## Secrets you bring
 
@@ -186,33 +193,32 @@ These are issued by another system and rotated there. Straza reads them from its
 ## What a copy yields
 
 
-A copy of the database holds both signing seeds unencrypted, so it mints every token for any user and signs a policy every enrolled workstation accepts. The session key has a rotate command for that case, and the snapshot key has no rotation that withdraws it, as the next section says. The same copy holds only hashes of admin API tokens and passwords and only ciphertext for the credentials the sealing key seals, so it yields none of those.
+A copy of the database holds the three signing keys and the stored credentials only as ciphertext under the sealing key, and admin API tokens and passwords only as hashes. By itself it mints no token, signs no policy and yields no credential.
 
 It does yield every value written into a server's manifest, because the manifest is stored as plain JSON in the `apps` table. A credential typed into a fixed environment variable, an argument or an address sits there in clear. The server's lists and exports show secret-shaped values masked while storage stays plain text, so keep a credential in the server's secret, set with `strazactl apps secret set`, and never in the manifest.
 
-A copy of the sealing key yields nothing on its own and every sealed credential together with the database. A copy of the approver TLS pair lets an attacker stand in for the approver listener to every phone that pinned it. The data directory of a standalone deployment holds the store, the sealing key and the approver pair at once, so a copy of that directory is a copy of the deployment.
-
-[Known limits]({{< relref "security/known-limits.md" >}}) lists the database copy and the manifest values among its rows, with what reduces each.
+A copy of the sealing key yields nothing on its own. Together with the database it yields every sealed credential and all three signing keys, so it mints every token for any user and signs a policy every enrolled workstation accepts. The session key has a rotate command for that case, and the snapshot key has no rotation that withdraws it, as the next section says. A copy of the approver TLS pair lets an attacker stand in for the approver listener to every phone that pinned it. The data directory of a standalone deployment holds the store, the sealing key and the approver pair at once, so a copy of that directory is a copy of the deployment.
 
 ## Back up and rotate by procedure
 
 
-The backup is the store plus three files, the sealing key, the approver TLS pair and the WebPush key, and [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md" >}}) says what breaks without each. Neither the snapshot signing key nor the sealing key has a rotate command. Replacing the sealing key needs work outside the server, because every sealed credential is entered again, and no procedure withdraws an old snapshot key today.
+The backup is the store plus three files, the sealing key, the approver TLS pair and the WebPush key, and [Backup and upgrade]({{< relref "guides/operate/backup-and-upgrade.md" >}}) says what breaks without each. Keep the copy of the sealing key somewhere other than the database backups, because a backup that holds both is a copy of every key. Neither the snapshot signing key nor the sealing key has a rotate command. Replacing the sealing key is the procedure below, in which one command moves the signing keys to the new key and every sealed credential is entered again. No procedure withdraws an old snapshot key today.
 
 
-The server publishes every snapshot signing key it has stored, whatever its status, and `straza enroll` pins the whole published set. Setting the active row to `retired` by hand makes the server generate a new key at its next start, and it withdraws nothing. A workstation that has not enrolled again refuses every snapshot the new key signs and denies from its next session start. One that enrolls again pins the old key beside the new one, so it still accepts a policy signed with a copy of the old key. A suspected copy of the database therefore cannot be answered by rotating this key, and the database and its backups need the protection the key itself would.
+The server publishes every snapshot signing key it has stored, whatever its status, and `straza enroll` pins the whole published set. Setting the active row to `retired` by hand makes the server generate a new key at its next start, and it withdraws nothing. A workstation that has not enrolled again refuses every snapshot the new key signs and denies from its next session start. One that enrolls again pins the old key beside the new one, so it still accepts a policy signed with a copy of the old key. A suspected copy of the database together with the sealing key therefore cannot be answered by rotating this key, which is why the sealing key and its copies stay apart from the database and its backups.
 
 
-To replace the sealing key, run these steps in this order. A row sealed under the old key cannot be opened under the new one, and the server refuses to start while it holds a client assertion key it cannot open.
+To replace the sealing key, run these steps in this order. A row sealed under the old key cannot be opened under the new one, and the server refuses to start while it holds a signing key it cannot open, so the signing keys move to the new key first.
 
-1. Run `strazactl signing-keys list`, and retire every client assertion key whose status is not `retired` with `strazactl signing-keys retire <kid>`. Agents that sign in with client credentials stop working until step 5.
-2. Stop every replica of the server.
-3. Write 32 new random bytes to the file, for example with `head -c 32 /dev/urandom > secret.key`, keep its mode at 0600, and give every replica the same file.
-4. Start the server. A server whose secret was sealed under the old key now reads `requires a credential and none is stored` and fails closed.
-5. Set every server secret again with `strazactl apps secret set`, each `--role` override included. If agents sign in with client credentials, run `strazactl signing-keys rotate client_assertion`, upload the new key's certificate to every Entra agent blueprint that used the old one, and a minute after the rotate run `strazactl signing-keys promote client_assertion <kid>`.
-6. Have every person connect their OAuth apps and enter their own server tokens again. Until they do, those servers fail closed for them.
+1. Stop every replica of the server.
+2. Write 32 new random bytes to a second file, for example with `head -c 32 /dev/urandom > secret.key.new`, and set its mode to 0600.
+3. Run `strazad reseal-signing-keys --new-kek-file secret.key.new` with the same `--config`, `--profile`, `--data-dir` and `--store-dsn` that `strazad serve` runs with. It opens each signing key with the old key, seals it with the new one in a single write, and prints how many it moved. On Kubernetes the command runs in a one-off pod, as [Replace the key-encryption key]({{< relref "guides/operate/kubernetes-with-helm.md#replace-the-key-encryption-key" >}}) shows.
+4. Put the new file in place of `secret.key`, and give every replica the same file.
+5. Start the server. The signing keys are the same keys, so sessions, enrolled workstations and agents that sign in with client credentials carry on. A server whose secret was sealed under the old key now reads `requires a credential and none is stored` and fails closed.
+6. Set every server secret again with `strazactl apps secret set`, each `--role` override included.
+7. Have every person connect their OAuth apps and enter their own server tokens again. Until they do, those servers fail closed for them.
 
-If the old key may have been copied together with the database, change each of those secrets at its source as well, because a copy of the database taken before the swap still opens under the old key.
+If the old key may have been copied together with the database, that copy opens the signing keys as well as the secrets. Run `strazactl signing-keys rotate session`, rotate the client assertion key, and change each of those secrets at its source, because a copy of the database taken before the swap still opens under the old key.
 
 
-The approver TLS pair rotates by deleting `approver-tls/` and restarting, after which every approver device enrolls again because its pin changed. [Known limits]({{< relref "security/known-limits.md" >}}) lists that as a limit, with the announcement of a successor that the roadmap plans. The WebPush key is best never rotated at all, since every browser subscription is bound to it. [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) follows one workstation's tokens through their life, and [Hardening]({{< relref "security/hardening.md" >}}) shows the rotation of the session signing key step by step.
+The approver TLS pair rotates by deleting `approver-tls/` and restarting, after which every approver device enrolls again because its pin changed. The WebPush key is best never rotated at all, since every browser subscription is bound to it. [Credentials and sessions]({{< relref "security/credentials-and-sessions.md" >}}) follows one workstation's tokens through their life, and [Hardening]({{< relref "security/hardening.md" >}}) shows the rotation of the session signing key step by step.

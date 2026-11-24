@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/strazahq/straza/internal/membership"
 	"github.com/strazahq/straza/internal/store"
 )
 
@@ -92,7 +93,7 @@ func (s *Server) groupResource(ctx context.Context, role store.Role) map[string]
 		protected := s.protectedUserID(ctx)
 		ids := make([]string, 0, len(asg))
 		for _, a := range asg {
-			if a.SubjectKind == store.SubjectUser && a.SubjectID != protected {
+			if a.SubjectKind == store.SubjectUser && a.SubjectID != protected && a.Origin != store.OriginEntra {
 				ids = append(ids, a.SubjectID)
 			}
 		}
@@ -268,7 +269,9 @@ type membershipStep struct {
 }
 
 // planFor reads the role's direct user holders once and opens a plan on
-// them. The break-glass account is left out: it is never a member here.
+// them. The break-glass account is left out: it is never a member here. A
+// row the Entra sync wrote is left out too, so no operation ends it, and an
+// add of its holder starts a SCIM row beside it.
 func (s *Server) planFor(ctx context.Context, role store.Role) (*membershipPlan, error) {
 	asg, err := s.deps.Store.Roles().AssignmentsByRole(ctx, role.ID)
 	if err != nil {
@@ -279,7 +282,7 @@ func (s *Server) planFor(ctx context.Context, role store.Role) (*membershipPlan,
 		start: map[string]store.RoleAssignment{}, holds: map[string]bool{}, listed: map[string]bool{},
 	}
 	for _, a := range asg {
-		if a.SubjectKind != store.SubjectUser || a.SubjectID == p.protected {
+		if a.SubjectKind != store.SubjectUser || a.SubjectID == p.protected || a.Origin == store.OriginEntra {
 			continue
 		}
 		p.start[a.SubjectID] = a
@@ -441,30 +444,26 @@ func (s *Server) planReplace(ctx context.Context, p *membershipPlan, members []g
 // answers 500 and reports nothing, because nothing changed.
 func (s *Server) commitPlan(w http.ResponseWriter, r *http.Request, p *membershipPlan) {
 	ctx := r.Context()
-	changed, err := s.writePlan(ctx, p)
-	if err != nil {
+	if _, err := s.writePlan(ctx, p); err != nil {
 		s.deps.Log.Warn("scim group: write the membership change", "group", p.role.Name, "err", err)
 		writeError(w, http.StatusInternalServerError, "", "the membership change to group "+p.role.Name+" was not applied, because writing it failed, so nothing changed. Retry the request")
 		return
 	}
-	s.emitMembership(ctx, p.role.ID, changed)
 	writeSCIM(w, http.StatusOK, s.groupResource(ctx, p.role))
 }
 
-// writePlan stores the plan's net change in one write and returns the
-// membership changes that really landed, in the order the operations
-// produced them. A user's last step decides: it counts only when the user
-// ends the request holding differently than it began, so an add and a
-// remove of the same member cancel out. A row a concurrent write already
-// changed is skipped by the store and reported by nobody here.
+// writePlan stores the plan's net change in one write and reports it,
+// and returns the membership changes that really landed, in the order the
+// operations produced them. A user's last step decides: it counts only when
+// the user ends the request holding differently than it began, so an add
+// and a remove of the same member cancel out. A plan with no net change
+// writes nothing and still reports the role.
 func (s *Server) writePlan(ctx context.Context, p *membershipPlan) ([]MembershipChange, error) {
 	last := make(map[string]int, len(p.steps))
 	for i, st := range p.steps {
 		last[st.userID] = i
 	}
-	var adds []store.RoleAssignment
-	var removeIDs []string
-	var net []membershipStep
+	var net []membership.Step
 	for i, st := range p.steps {
 		if last[st.userID] != i {
 			continue
@@ -472,63 +471,18 @@ func (s *Server) writePlan(ctx context.Context, p *membershipPlan) ([]Membership
 		row, held := p.start[st.userID]
 		switch {
 		case p.holds[st.userID] && !held:
-			adds = append(adds, store.RoleAssignment{SubjectKind: store.SubjectUser, SubjectID: st.userID, Origin: store.OriginSCIM})
+			net = append(net, membership.Step{UserID: st.userID, Action: MembershipAssign})
 		case !p.holds[st.userID] && held:
-			removeIDs = append(removeIDs, row.ID)
-		default:
-			continue
+			net = append(net, membership.Step{UserID: st.userID, Action: MembershipUnassign, RowID: row.ID})
 		}
-		net = append(net, st)
 	}
-	if len(net) == 0 {
-		return nil, nil
-	}
-	added, removed, err := s.deps.Store.Roles().ApplyMembership(ctx, p.role.ID, adds, removeIDs)
-	if err != nil {
-		return nil, err
-	}
-	landed := make(map[string]store.RoleAssignment, len(added)+len(removed))
-	for _, a := range added {
-		landed[MembershipAssign+"/"+a.SubjectID] = a
-	}
-	for _, a := range removed {
-		landed[MembershipUnassign+"/"+a.SubjectID] = a
-	}
-	var changed []MembershipChange
-	for _, st := range net {
-		a, ok := landed[st.action+"/"+st.userID]
-		if !ok {
-			continue
-		}
-		changed = append(changed, MembershipChange{
-			AssignmentID: a.ID, RoleID: p.role.ID, UserID: st.userID, Origin: a.Origin, Action: st.action,
-		})
-	}
-	return changed, nil
-}
-
-// emitMembership publishes the change to both consumers: the role id (the
-// wire-group render: LiveSync re-reads members) and each affected user id
-// once (the account shadow's read-only `groups` reflection, and the
-// resolver bump that reaches the PDP). It then reports every started or
-// ended assignment through the audit seam, one call per row in write
-// order, so a write that changed nothing chains no record.
-func (s *Server) emitMembership(ctx context.Context, roleID string, changed []MembershipChange) {
-	s.deps.IdentityChanged(ctx, "straza.identity.updated", roleID)
-	seen := map[string]bool{}
-	for _, c := range changed {
-		if seen[c.UserID] {
-			continue
-		}
-		seen[c.UserID] = true
-		s.deps.IdentityChanged(ctx, "straza.identity.updated", c.UserID)
-	}
-	if s.deps.MembershipChanged == nil {
-		return
-	}
-	for _, c := range changed {
-		s.deps.MembershipChanged(ctx, c)
-	}
+	return membership.Apply(ctx, membership.Deps{
+		Roles: s.deps.Store.Roles(),
+		IdentityChanged: func(ctx context.Context, id string) {
+			s.deps.IdentityChanged(ctx, "straza.identity.updated", id)
+		},
+		Changed: s.deps.MembershipChanged,
+	}, p.role.ID, store.OriginSCIM, net)
 }
 
 func decodeMembers(v any) ([]groupMember, error) {

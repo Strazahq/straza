@@ -1,16 +1,16 @@
 import * as React from "react";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { PageHead } from "@/components/page-head";
 import { type SaveNote, SaveNoteLine, useDraftSave } from "@/components/use-draft-save";
-import { AccessStep, type Act, ComposeStep, DoneStep, type Draft, NameStep, PacksStep, type Pill, ReviewStep, planOf, storedName, toolNames } from "@/components/wizard/role-steps";
+import { AccessStep, type Act, ComposeStep, DoneStep, type Draft, NameStep, type Pill, ReviewStep, planOf, storedName, toolNames } from "@/components/wizard/role-steps";
 import { StepStrip } from "@/components/wizard/step-strip";
 import { pinnedOf, uncovered } from "@/lib/access-covers";
 import { fileCommands } from "@/lib/access-object-words";
 import { type Plan, emptyPlan, fixedFrom, grantMatchers, rulesFor } from "@/lib/access-plan";
 import { mayWritePolicy } from "@/lib/access-read";
-import { type ApiError, type AppRow, type PackRow, type PreviewEntry, type RoleRow, type ToolRow, bindPack, catalogPreview, exportRole, listApps, listPacks, listRoles, listTools } from "@/lib/api";
+import { type ApiError, type AppRow, type PreviewEntry, type RoleRow, type ToolRow, catalogPreview, exportRole, listApps, listRoles, listTools } from "@/lib/api";
 import { type GrantInput, planRows } from "@/lib/grant-commit";
 import { take } from "@/lib/handoff";
 import { notify } from "@/lib/notify";
@@ -20,62 +20,50 @@ import {
   CANCEL,
   DISCARD,
   DISCARD_TITLE,
-  EXPORT_FAILED,
   KEEP_EDITING,
   type Kind,
   LEDE,
-  NEXT,
   RAIL_TITLE,
-  SECTION,
   SERVER_LEDE,
   SERVER_STEP,
   STEP,
-  STEP_SUBJECT,
-  SUBJECT_ROLES,
-  UNREACHABLE_STEP,
-  WIZARD_DESCRIPTION,
   WIZARD_TITLE,
   accessSetName,
   cliActivate,
   cliApply,
   cliCreate,
   cliImply,
-  cliPack,
   discardBody,
+  exportFailed,
   exportFile,
   lossComposed,
   lossName,
-  lossPacks,
   liveRole,
   lossServer,
-  missingRole,
   nameCheck,
   nameTaken,
   openRole,
   PICK_ANOTHER,
+  publishNewRole,
   roleFileName,
   rowCompose,
   rowCreate,
   rowCreateOwned,
   rowOn,
-  rowPack,
 } from "@/lib/role-words";
 import { newRoleItems, roleFile } from "@/lib/role-draft";
-import { navigate } from "@/lib/router";
+import { navigate, setLeaveGuard } from "@/lib/router";
 import { type RouteKey, routeByKey } from "@/lib/routes";
-import { NOTHING_SAVED, SAVE_DRAFT, SAVE_PUBLISH } from "@/lib/save-words";
-import { readFailed, refused } from "@/lib/say";
+import { CRUMB_NEW, NOTHING_SAVED, SAVE_DRAFT, SAVE_PUBLISH, nextTo } from "@/lib/save-words";
+import { readFailed } from "@/lib/say";
 import { cliCreateRole } from "@/lib/server-roles-words";
 import { downloadText } from "@/lib/utils";
 
 // The New role wizard at roles/new: the kind, the one server an application role
 // reaches and the name, then access to that server or the roles a business
-// role composes, the packs its sessions receive, the review, and what
-// landed. The Review ends in Save draft and Save and publish: the role, its
-// access row, its rules and what it composes are one
-// draft that goes live whole or not at all. A draft never applies a
-// pack, so the packs are bound after the publish, and a pack that fails
-// says where to finish it.
+// role composes, the review, and what landed. The Review ends in Save draft
+// and Save and publish: the role, its access row, its rules and what it
+// composes are one draft that goes live whole or not at all.
 
 // DRAFT_NAME stands in for the role while a preview is asked before the
 // name is typed: the preview takes a role name and the draft has none yet.
@@ -89,13 +77,13 @@ const PREVIEW_MS = 300;
 // gated or not, which is what a composed role's count says.
 const REACHED = ["visible", "approve_gated", "hidden_policy"];
 
-type StepKey = "name" | "access" | "compose" | "packs" | "review" | "done";
+type StepKey = "name" | "access" | "compose" | "review" | "done";
 
 // Door is what a door into the wizard hands it: the server the new role
 // reaches, from the last step of Add MCP server.
 type Door = { server: string };
 
-const EMPTY: Draft = { kind: "application", name: "", description: "", server: "", plans: {}, composed: [], packs: [] };
+const EMPTY: Draft = { kind: "application", name: "", description: "", server: "", plans: {}, composed: [] };
 
 export function NewRole() {
   const route = routeByKey("roles");
@@ -104,7 +92,6 @@ export function NewRole() {
   const [roles, setRoles] = React.useState<RoleRow[] | null>(null);
   const [apps, setApps] = React.useState<AppRow[]>([]);
   const [tools, setTools] = React.useState<ToolRow[]>([]);
-  const [packs, setPacks] = React.useState<PackRow[]>([]);
   const [appsProblem, setAppsProblem] = React.useState<string | null>(null);
   // railRead says the servers and their tools were both read, so the first
   // step never says no server serves a tool while the reads are on the way.
@@ -113,13 +100,15 @@ export function NewRole() {
   const [reach, setReach] = React.useState<Record<string, Record<string, number> | null>>({});
   const [miss, setMiss] = React.useState<"name" | "refused" | "server" | "tools" | "covers" | null>(null);
   const [acts, setActs] = React.useState<Act[]>([]);
-  // binding is the packs being bound after the publish, and reading the
-  // own set a save starts from.
-  const [binding, setBinding] = React.useState(false);
+  // finding is the read after the publish that finds the new role, and
+  // reading the own set a save starts from.
+  const [finding, setFinding] = React.useState(false);
   const [reading, setReading] = React.useState<"draft" | "publish" | null>(null);
   const [problem, setProblem] = React.useState<SaveNote | null>(null);
   const [created, setCreated] = React.useState<RoleRow | null>(null);
-  const [leave, setLeave] = React.useState<{ area: RouteKey; rest: string[] } | null>(null);
+  // leave holds the departure the discard question waits on, from Cancel,
+  // from the wizard's own links or from the router's guard.
+  const [leave, setLeave] = React.useState<{ go: () => void } | null>(null);
   // fromServer is the server the door handed over, which the first step names.
   const [fromServer, setFromServer] = React.useState("");
   const heading = React.useRef<HTMLHeadingElement>(null);
@@ -135,7 +124,6 @@ export function NewRole() {
     );
     const toolsRead = listTools().then((t) => { if (alive.current) setTools(t || []); }, () => undefined);
     void Promise.all([appsRead, toolsRead]).then(() => { if (alive.current) setRailRead(true); });
-    listPacks().then((p) => { if (alive.current) setPacks(p || []); }, () => undefined);
   }, []);
 
   React.useEffect(() => {
@@ -214,13 +202,13 @@ export function NewRole() {
 
   const steps: StepKey[] = React.useMemo(() => {
     const body: StepKey[] = draft.kind === "application" ? ["access"] : draft.kind === "business" ? ["compose"] : [];
-    const withPacks: StepKey[] = packs.length && draft.kind !== "approver" ? ["packs"] : [];
-    return (["name"] as StepKey[]).concat(body, withPacks, ["review", "done"]);
-  }, [draft.kind, packs.length]);
+    return (["name"] as StepKey[]).concat(body, ["review", "done"]);
+  }, [draft.kind]);
   const at = Math.max(0, steps.indexOf(step));
   // label is a step's name in the strip and its heading: an application
   // role's first step also picks its server.
   const label = (s: StepKey) => (s === "name" && owned ? SERVER_STEP : STEP[s]);
+  const lede = step === "name" && owned ? SERVER_LEDE : LEDE[step];
 
   // A new step moves focus to its heading, so a keyboard user starts there
   // and not on a button that left with the old step.
@@ -234,7 +222,6 @@ export function NewRole() {
   // plan grants a tool. Ticks on any other server stay in the draft, and
   // so do the ticks of a role whose kind moved off Application role.
   const pickedApps = owned ? apps.filter((a) => a.name === draft.server && grantMatchers(planOf(draft, a.name), toolNames(toolsOf(a.name))).length > 0) : [];
-  const packName = (id: string) => packs.find((p) => p.id === id)?.name || id;
   // The composed roles are resolved against the same read the Compose step
   // offers, since the implication is written by the role's id.
   const composed = draft.composed.map((n) => (roles || []).find((r) => r.name === n)).filter((r): r is RoleRow => !!r);
@@ -248,22 +235,19 @@ export function NewRole() {
   const fixed = fixedFrom(previews[draft.server], accessSetName(roleName), null);
 
   // planned is the run before it runs: the create, then each server's own
-  // rows, the compositions and the packs, in the order they are written.
+  // rows and the compositions, in the order they are written.
   const planned = (): Act[] => {
-    const out: Act[] = [{ id: "create", label: owned ? rowCreateOwned(name, draft.server) : rowCreate(name), state: "pending", subject: STEP_SUBJECT.create }];
+    const out: Act[] = [{ id: "create", label: owned ? rowCreateOwned(name, draft.server) : rowCreate(name), state: "pending" }];
     for (const app of pickedApps) {
       for (const r of planRows(inputFor(app))) {
         out.push({
           id: r.key + ":" + app.name,
           label: r.key === "grant" ? rowOn(r.label, app.name) : r.label,
           state: "pending",
-          section: r.key === "publish" ? SECTION.publish : SECTION.bind,
-          subject: STEP_SUBJECT[r.key],
         });
       }
     }
-    for (const other of composed) out.push({ id: "imply:" + other.name, label: rowCompose(other.name), state: "pending", section: SECTION.imply, subject: STEP_SUBJECT.imply });
-    for (const id of draft.packs) out.push({ id: "pack:" + id, label: rowPack(packName(id)), state: "pending", section: SECTION.pack, subject: STEP_SUBJECT.pack });
+    for (const other of composed) out.push({ id: "imply:" + other.name, label: rowCompose(other.name), state: "pending" });
     return out;
   };
 
@@ -276,7 +260,6 @@ export function NewRole() {
     fileForm || (owned ? cliCreateRole(name, draft.server, currentMatchers, draft.description.trim()) : cliCreate(name, draft.kind, draft.description.trim())),
     ...(rules ? [cliApply(ownSet), cliActivate(ownSet)] : []),
     ...(fileForm ? [] : composed.map((other) => cliImply(name, other.name))),
-    ...draft.packs.map((id) => cliPack(packName(id), name)),
   ].join("\n");
 
   const setPlan = (app: string) => (update: (p: Plan) => Plan) => {
@@ -284,8 +267,8 @@ export function NewRole() {
     setDraft((d) => ({ ...d, plans: { ...d.plans, [app]: update(d.plans[app] || emptyPlan()) } }));
   };
 
-  const toggle = (key: "composed" | "packs", value: string) =>
-    setDraft((d) => ({ ...d, [key]: d[key].includes(value) ? d[key].filter((x) => x !== value) : d[key].concat(value) }));
+  const toggle = (value: string) =>
+    setDraft((d) => ({ ...d, composed: d.composed.includes(value) ? d.composed.filter((x) => x !== value) : d.composed.concat(value) }));
 
   // next keeps the primary clickable, and a click
   // that cannot move on focuses the answer it needs and says what is
@@ -305,54 +288,27 @@ export function NewRole() {
   };
   const back = () => setStep(steps[Math.max(at - 1, 0)]);
 
-  // bindPacks runs after the publish: every row but the packs landed with
-  // it, and each pack is bound to the new role in order, stopping at the
-  // first failure, which leaves the earlier ones bound.
-  const bindPacks = async () => {
-    let rows = planned().map((a) => (a.section === SECTION.pack ? a : { ...a, state: "done" as const }));
-    setActs(rows);
+  // afterPublish runs once the draft is live: every row landed with it,
+  // and the roles list is read for the new role's id, which Export and
+  // Open take.
+  const afterPublish = async () => {
+    setActs(planned().map((a) => ({ ...a, state: "done" as const })));
     setStep("done");
-    const put = (id: string, patch: Partial<Act>) => {
-      rows = rows.map((a) => (a.id === id ? { ...a, ...patch } : a));
-      setActs(rows);
-    };
-    const sentence = (e: unknown) => {
-      const err = e as ApiError;
-      return err.unreachable ? UNREACHABLE_STEP : refused(err);
-    };
-    setBinding(true);
-    let role: RoleRow | undefined;
+    setFinding(true);
     try {
-      role = (await listRoles()).find((r) => r.name === name);
-    } catch (e) {
-      if (draft.packs.length) put("pack:" + draft.packs[0], { state: "failed", error: readFailed(SUBJECT_ROLES, e as ApiError) });
-      setBinding(false);
-      return;
+      const role = (await listRoles()).find((r) => r.name === name);
+      if (role) setCreated(role);
+    } catch {
+      // The role is live either way, so a failed read leaves the done step
+      // without Export and Open.
     }
-    if (!role) {
-      if (draft.packs.length) put("pack:" + draft.packs[0], { state: "failed", error: missingRole(name) });
-      setBinding(false);
-      return;
-    }
-    setCreated(role);
-    for (const packID of draft.packs) {
-      const id = "pack:" + packID;
-      put(id, { state: "running" });
-      try {
-        await bindPack(packID, role.id);
-      } catch (e) {
-        put(id, { state: "failed", error: sentence(e) });
-        break;
-      }
-      put(id, { state: "done" });
-    }
-    setBinding(false);
+    setFinding(false);
   };
 
   // A draft put of a live role's name changes that role, so a check that
   // answers the role as live refuses the save in the Name step's words.
-  const save = useDraftSave({ name, toast: liveRole(name), creates: { object: "Role/" + name, taken: nameTaken(name) + " " + PICK_ANOTHER }, onPublished: () => void bindPacks() });
-  const busy = binding || reading !== null || save.busy !== null;
+  const save = useDraftSave({ name, title: publishNewRole(name), toast: liveRole(name), creates: { object: "Role/" + name, taken: nameTaken(name) + " " + PICK_ANOTHER }, onPublished: () => void afterPublish() });
+  const busy = finding || reading !== null || save.busy !== null;
 
   // send builds the one draft from the answers and hands it to the save:
   // the role with its access row and what it composes, and its own set
@@ -373,7 +329,7 @@ export function NewRole() {
     try {
       downloadText(roleFileName(created.name), await exportRole(created.id), "application/yaml");
     } catch (e) {
-      notify.failed(readFailed(EXPORT_FAILED, e as ApiError));
+      notify.failed(exportFailed(created.name, e as ApiError));
     }
   };
 
@@ -392,16 +348,32 @@ export function NewRole() {
   // The discard gate names what leaving would lose. An empty draft has
   // nothing to lose, so it leaves without a question.
   const servers = pickedApps.length;
-  const dirty = !!(name || draft.description.trim() || servers || draft.composed.length || draft.packs.length);
+  const dirty = !!(name || draft.description.trim() || servers || draft.composed.length);
   const bits = [
     ...(name ? [lossName(name)] : []),
     ...(servers ? [lossServer(draft.server)] : []),
     ...(draft.composed.length ? [lossComposed(draft.composed.length)] : []),
-    ...(draft.packs.length ? [lossPacks(draft.packs.length)] : []),
   ];
+  // away leaves past the guard, once the person chose to discard.
+  const away = (area: RouteKey, rest: string[]) => { setLeaveGuard(null); navigate(area, rest); };
   // exit leaves the wizard for another page, the role the name is taken by
   // or the server whose prefix it takes, past the discard question.
-  const exit = (rest: string[], area: RouteKey = "roles") => { if (dirty) setLeave({ area, rest }); else navigate(area, rest); };
+  const exit = (rest: string[], area: RouteKey = "roles") => { if (dirty) setLeave({ go: () => away(area, rest) }); else navigate(area, rest); };
+
+  // While Cancel would ask, every other door out asks the same question: the
+  // router's guard covers the breadcrumb, the rail, the header and the
+  // palette. The done step ends the wizard, and a Save draft that landed
+  // opens its draft, which passes.
+  const guarded = dirty && step !== "done";
+  const savingDraft = save.busy === "draft";
+  React.useEffect(() => {
+    if (!guarded) return;
+    setLeaveGuard((next, go) => {
+      if (savingDraft && next.kind === "route" && next.key === "drafts") { go(); return; }
+      setLeave({ go });
+    });
+    return () => setLeaveGuard(null);
+  }, [guarded, savingDraft]);
 
   const pills: Pill[] = [];
   let unread = false;
@@ -411,10 +383,10 @@ export function NewRole() {
     for (const server of Object.keys(counts || {}).sort()) pills.push({ server, via: other, tools: counts[server] });
   }
 
-  const failed = acts.find((a) => a.state === "failed") || null;
   const done = step === "done";
   const spin = <Loader2Icon className="animate-spin" />;
   const push = <span className="flex-1" />;
+  const forward = <Button onClick={next}>{nextTo(label(steps[Math.min(at + 1, steps.length - 1)]))}</Button>;
 
   let body: React.ReactNode = null;
   if (step === "name") {
@@ -453,24 +425,22 @@ export function NewRole() {
       />
     );
   } else if (step === "compose") {
-    body = <ComposeStep draft={draft} roles={roles || []} pills={pills} unread={unread} onToggle={(n) => toggle("composed", n)} />;
-  } else if (step === "packs") {
-    body = <PacksStep draft={draft} packs={packs} onToggle={(id) => toggle("packs", id)} />;
+    body = <ComposeStep draft={draft} roles={roles || []} pills={pills} unread={unread} onToggle={toggle} />;
   } else if (step === "review") {
     const note = problem || save.note;
     body = (
       <>
-        <ReviewStep draft={draft} apps={apps} toolsOf={toolsOf} fixed={fixed} packs={packs} hadPacks={steps.includes("packs")} acts={planned()} commands={commands} />
+        <ReviewStep draft={draft} apps={apps} toolsOf={toolsOf} fixed={fixed} acts={planned()} commands={commands} />
         {note && <SaveNoteLine note={note} className="max-w-[80ch]" />}
       </>
     );
   } else {
-    body = <DoneStep acts={acts} name={name} failed={failed} running={binding} />;
+    body = <DoneStep acts={acts} name={name} running={finding} />;
   }
 
   let footer: React.ReactNode = null;
   if (step === "name") {
-    footer = <>{push}<Button onClick={next}>{NEXT}</Button></>;
+    footer = <>{push}{forward}</>;
   } else if (step === "review") {
     footer = (
       <>
@@ -485,10 +455,10 @@ export function NewRole() {
       <>
         <Button variant="ghost" onClick={back}>{BACK}</Button>
         {push}
-        <Button onClick={next}>{NEXT}</Button>
+        {forward}
       </>
     );
-  } else if (created && !failed && !busy) {
+  } else if (created && !busy) {
     footer = (
       <>
         <Button variant="outline" onClick={() => void exportYAML()}><DownloadIcon />{exportFile(created.name)}</Button>
@@ -497,25 +467,26 @@ export function NewRole() {
         <Button onClick={() => navigate("roles", [created.id])}>{openRole(created.name)}</Button>
       </>
     );
-  } else if (created && !busy) {
-    footer = <>{push}<Button onClick={() => navigate("roles", [created.id])}>{openRole(created.name)}</Button></>;
   }
 
   return (
     <div className="flex min-h-full flex-col">
       <PageHead
-        label={route.label}
+        label={CRUMB_NEW}
+        crumbs={[{ label: route.label, to: "roles" }]}
         title={WIZARD_TITLE}
-        description={WIZARD_DESCRIPTION}
+        description=""
         actions={done ? undefined : <Button variant="ghost" onClick={() => exit([])}>{CANCEL}</Button>}
       />
       <div className="flex flex-1 flex-col gap-5 px-6 pt-5 pb-6">
         <StepStrip labels={steps.map(label)} at={at} />
         <div>
-          <h2 ref={heading} tabIndex={-1} className="text-base font-semibold text-foreground outline-none">{label(step)}</h2>
-          <p className="mt-0.5 flex max-w-[80ch] flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-            {step === "name" && owned ? SERVER_LEDE : LEDE[step]}
-          </p>
+          <h2 ref={heading} tabIndex={-1} className="text-body leading-6 font-semibold text-foreground outline-none">{label(step)}</h2>
+          {lede && (
+            <p className="mt-0.5 flex max-w-[80ch] flex-wrap items-center gap-1.5 text-dense text-muted-foreground">
+              {lede}
+            </p>
+          )}
         </div>
         {body}
       </div>
@@ -530,7 +501,7 @@ export function NewRole() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{KEEP_EDITING}</AlertDialogCancel>
-            <AlertDialogAction className="bg-danger text-white hover:bg-danger/90" onClick={() => navigate(leave ? leave.area : "roles", leave ? leave.rest : [])}>{DISCARD}</AlertDialogAction>
+            <AlertDialogAction className={DANGER_FILL} onClick={() => { const go = leave?.go; setLeave(null); go?.(); }}>{DISCARD}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

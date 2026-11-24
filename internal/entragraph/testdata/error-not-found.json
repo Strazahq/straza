@@ -1,0 +1,11 @@
+{
+ "error": {
+  "code": "Request_ResourceNotFound",
+  "innerError": {
+   "client-request-id": "dddddddd-4444-4444-8444-dddddddddddd",
+   "date": "2026-11-16T19:25:09",
+   "request-id": "dddddddd-4444-4444-8444-dddddddddddd"
+  },
+  "message": "Resource '9a9a9a9a-1111-4111-8111-111111111111' does not exist or one of its queried reference-property objects are not present."
+ }
+}

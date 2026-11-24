@@ -22,7 +22,7 @@ A credential is the secret that an [MCP server]({{< relref "concepts/mcp-apps-an
 Straza does not hand an [agent]({{< relref "concepts/identities.md" >}}) its own credentials and trust the agent's machine to use them well. The model can read, print and send any credential on the agent's machine, and no hook on an open machine can stop a process that already holds one. Because the secret is kept on the gateway, calls on the gateway path stay governed even when the controls on the agent's machine fail.
 
 
-This protection covers only calls that pass through the gateway. An agent that has its own route or its own credential to a server can skip the gateway, so remove those routes when you deploy.
+This protection covers only calls that pass through the gateway. An agent that has its own route or its own credential to a server can skip the gateway, so remove those routes when you deploy. [Deployment best practices]({{< relref "guides/operate/best-practices.md" >}}) shows how on Kubernetes.
 
 ## Whose credential a call carries
 

@@ -43,7 +43,7 @@ A person deciding their own request uses an enrolled phone or browser, which sig
 Each place below decides the same request, and the first decision wins.
 
 - In the console, an admin among the deciders sees the request under **Approvals**, with no setup.
-- On the self-service page, a person who is not an admin decides from a browser they enabled once, which signs each decision with a key it keeps.
+- On the self-service page, a person who is not an admin decides from a browser they set up once, which signs each decision with a key it keeps.
 - With phone approval, the Straza approver app gets a push notification that carries only a reference, fetches the request, and signs the decision with the phone's key.
 - Slack shows a card in a channel you configure, and Straza checks the signature of every button press. The agent's justification goes there only if you turn that on.
 
@@ -88,7 +88,7 @@ A rule with the mode confirm lets only the requester confirm the call, because a
 In a hook, the first call is denied with this sentence, where the address is your server's self-service page and the reference is the request's id:
 
 ```text
-Straza: this call needs the requester's confirmation, on their enrolled phone, or the self-service page under This browser (…/self-service/); retry after it is confirmed (ref …)
+Straza: this call needs the requester's confirmation, on the requester's enrolled phone, or Requests on the self-service page (…/self-service/) in a browser set up to approve; retry after it is confirmed (ref …)
 ```
 
 When the session can see the built-in await tool, the end reads `wait for it with the straza__approval_await tool, then retry (ref …)` instead. When the deployment lets people decide their own requests without a signature, the places read `the self-service page (…/self-service/), the console, or an enrolled phone`. The retry that runs after the confirmation carries the reason `Straza: confirmed by`, then the person's name and the reference.
@@ -105,7 +105,7 @@ Straza: rule …/… requires the requester's confirmation; an autonomous sessio
 When a person approves a hold within its window, the server stores one run of that call, keyed by the session, the rule and the call's fingerprint, with its use deadline written in the same step. A held call that wakes, or a retry that matches, uses that run up, on any replica. A waiting gateway call wakes on the broadcast that a request was resolved, or on its own timer. If a broadcast is missed, the wait runs to the timer and denies.
 
 
-Before it asks anyone, the gateway checks the call's arguments, without the justification, against the input schema the MCP server published. Arguments that break it go back to the agent as an error to fix, and no request opens. A schema the check cannot read, or one that refers to a document outside itself, skips the check. Straza keeps at most 4 KiB of the justification and of the request's summary, with the full length after a cut.
+Before it asks anyone, the gateway checks the call's arguments, without the justification, against the input schema the MCP server published. Arguments that break it go back to the agent as an error to fix, and no request opens. A schema the check cannot read skips the check, and the call goes on to approval as it would with no check. The check follows a reference only to a place inside the same schema, such as `#/$defs/repo`, and only within a fixed depth and size, so a schema that refers back to itself, as a tree does, is not checked. It also skips a schema with any other kind of reference or with a `pattern`, `patternProperties`, `$id` or `$anchor` keyword, a schema over 128 KiB, and arguments too large to check against their schema. No more than four checks run at one time, and a call that arrives while four run is not checked. These bounds keep a hostile MCP server from stalling or stopping strazad through the check. Straza keeps at most 4 KiB of the justification and of the request's summary, with the full length after a cut.
 
 
 In a hook, the retry that runs on a hold's approval carries the reason `Straza: approved by`, then the decider's name and the reference. A later identical call asks again.

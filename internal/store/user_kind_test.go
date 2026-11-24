@@ -27,3 +27,38 @@ func TestUserIsNHI(t *testing.T) {
 		})
 	}
 }
+
+// TestUserKind pins the three-way kind over every pair of a type and an
+// attrs kind: the type service wins, then the type agent or the attrs kind
+// nhi make an agent, and every other pair is a person. Attrs that do not
+// parse count as no attrs kind.
+func TestUserKind(t *testing.T) {
+	const nhi, human, broken = `{"kind":"nhi"}`, `{"kind":"human"}`, `{"kind":`
+	cases := []struct {
+		userType, attrs, want string
+	}{
+		{"", "", UserKindPerson},
+		{"", nhi, UserKindAgent},
+		{"", human, UserKindPerson},
+		{"", broken, UserKindPerson},
+		{UserTypeHuman, "", UserKindPerson},
+		{UserTypeHuman, nhi, UserKindAgent},
+		{UserTypeHuman, human, UserKindPerson},
+		{UserTypeHuman, broken, UserKindPerson},
+		{UserTypeAgent, "", UserKindAgent},
+		{UserTypeAgent, nhi, UserKindAgent},
+		{UserTypeAgent, human, UserKindAgent},
+		{UserTypeAgent, broken, UserKindAgent},
+		{UserTypeService, "", UserKindService},
+		{UserTypeService, nhi, UserKindService},
+		{UserTypeService, human, UserKindService},
+		{UserTypeService, broken, UserKindService},
+	}
+	for _, tc := range cases {
+		t.Run("type "+tc.userType+" attrs "+tc.attrs, func(t *testing.T) {
+			if got := (User{UserType: tc.userType, Attrs: tc.attrs}).Kind(); got != tc.want {
+				t.Errorf("Kind() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

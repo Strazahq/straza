@@ -16,6 +16,13 @@ one JSON Schema cannot express. Registry-import fixtures live in
 `spec/conformance/registry/` (real registry `server.json` captures + golden
 imported manifests).
 
+Revision 11 (2026-11-22): section 4 says what `limits.rps` bounds. One
+session may make `rps` calls a second to the app, and all sessions of one
+user together may make five times that. It also names the rate of an app on
+the `remote` runtime that sets none, which is 20. Only the text changes. The
+grammar and the schema stay as they are, so every earlier valid example
+parses unchanged and no example is added.
+
 Revision 10 (2026-11-08, https://docs.straza.ai/guides/serve-mcp-apps/caller-credentials/):
 section 3 gains the case of a provider whose operator configuration names a
 Microsoft Entra agent identity blueprint. `credential.agents:
@@ -245,7 +252,15 @@ the runtime.
 `straza.limits` (`cpu` and `mem` as Kubernetes quantities; `rps`;
 `timeoutSeconds`) are always parsed and persisted; `rps` and
 `timeoutSeconds` are enforced, and `cpu` and `mem` are recorded and not yet
-enforced. `rps` bounds `tools/call` per (session, app) at the gateway.
+enforced. `rps` bounds `tools/call` at the gateway in two counts. One
+session may make `rps` calls a second to this app. All sessions of one user
+together may make five times as many calls to this app as one session may,
+in rate and in burst, so opening more sessions gives a user no more calls.
+The burst of one session is `rps` calls and at least one. A call past
+either count is refused before the policy decision and before the upstream
+call, and the refusal leaves one deny record. An app on the `remote` runtime
+whose `rps` is absent or `0` gets 20. On every other runtime an absent or
+`0` `rps` means no limit.
 `timeoutSeconds` caps a single gateway→upstream `tools/call` for this app;
 `0`/absent means the server-wide `apps.upstreamTimeout` (default 30 s)
 applies. Both MUST be >= 0.

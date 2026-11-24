@@ -99,7 +99,7 @@ func TestStrazactlNoLongerSignsIn(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			before := len(strazactlFailures(t, app, kim.ID))
+			since := outboxSince(t, app)
 			devices, _ := app.store.Devices().ListByUser(ctx, kim.ID)
 			code, out := tc.send()
 			if code != http.StatusForbidden || out["error"] != wantStrazactlMsg {
@@ -108,11 +108,13 @@ func TestStrazactlNoLongerSignsIn(t *testing.T) {
 			if _, ok := out["device_token"]; ok {
 				t.Errorf("the refusal carries a device token: %v", out)
 			}
-			failures := strazactlFailures(t, app, kim.ID)
-			if len(failures) != before+1 {
-				t.Fatalf("login failures with the strazactl reason = %d, want exactly one more than %d", len(failures), before)
+			failures := since("straza.audit.authn", func(d map[string]any) bool {
+				return d["action"] == "login" && d["outcome"] == "failure" && d["userId"] == kim.ID && d["reason"] == "strazactl no longer signs in"
+			})
+			if len(failures) != 1 {
+				t.Fatalf("login failures with the strazactl reason = %v, want exactly one", failures)
 			}
-			if f := failures[len(failures)-1]; f["via"] != tc.via {
+			if f := failures[0]; f["via"] != tc.via {
 				t.Errorf("login failure = %v, want via %s", f, tc.via)
 			}
 			if after, _ := app.store.Devices().ListByUser(ctx, kim.ID); len(after) != len(devices) {

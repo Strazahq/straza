@@ -103,13 +103,13 @@ Raise `denyBurstWarn` when agents on your deployment retry denied calls on purpo
 
 {{< console >}}
 
-{{< clicks "Audit" "Lens" "sentinel" >}}
+{{< clicks "Audit" "Kind of record" "Sentinel alerts" >}}
 
-The note under the controls reads `sentinel = type sentinel: the audit watcher's verdicts on sessions. Alert-only: it flags, it never revokes`. Each verdict row names the detector and the count of its evidence, such as `denyThenVariant sentinel verdict · evidence ×2`, with its reason, such as `a denied command was re-attempted as a rewritten/wrapped variant within 10m0s`. The **Effect** column holds the severity, and a critical verdict has a red edge. Sentinel rows never fold into one another.
+The note under the controls reads `What the sentinel, Straza's audit watcher, flagged on a session. It only alerts and never revokes.` Each verdict row names the detector and the count of its evidence, such as `denyThenVariant sentinel alert · 2 records of evidence`, with its reason, such as `a denied command was re-attempted as a rewritten/wrapped variant within 10m0s`. The **Outcome** column holds the severity, and a critical verdict has a red edge. Sentinel rows never fold into one another.
 
-{{< shot name="audit-sentinel" caption="Verdicts under the `sentinel` lens, with the severity under **Effect**, the detector, its evidence and **Revoke session** on a critical one." >}}
+{{< shot name="audit-sentinel" caption="Verdicts under **Sentinel alerts**, with the severity under **Outcome**, the detector, its evidence and **Revoke session** on a critical one." >}}
 
-Select a row to open the record. A strip at the top repeats the severity, the detector and the session, with `The sentinel is alert-only: it never revokes on its own, and revoking is your call.` Open **The record as stored** to read the evidence ids, which you can search for in Audit.
+Select a row to open the record. A strip at the top repeats the severity, the detector and the session, with `Alert only. The sentinel never revokes.` Open **The record as stored** to read the evidence ids, which you can search for in Audit.
 {{< /console >}}
 
 {{< cli >}}

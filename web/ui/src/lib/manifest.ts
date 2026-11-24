@@ -5,10 +5,11 @@
 // screen that speaks about a
 // server speaks the same words.
 import type { ManifestDoc } from "./api";
+import { foldName } from "./server-roles-words";
 
-// Form is every answer the wizard can hold. mode is the runtime card that
-// is open (import is a card, not a runtime); runtime is what the manifest
-// writes.
+// Form is every answer the wizard can hold. mode is the way that is open,
+// or import while a registry record is pasted. runtime is what the
+// manifest writes.
 export type Form = {
   name: string;
   desc: string;
@@ -35,12 +36,23 @@ export const EMPTY_FORM: Form = { name: "", desc: "", mode: "remote", runtime: "
 export const NAME_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 export const NAME_RULE = "A server name is lowercase letters, digits and hyphens, up to 64 characters, and starts and ends with a letter or digit.";
 
+// nameFromAddress is the server name an address suggests: the host without
+// its port and without leading mcp, api and www labels, then its first
+// label folded to the name rule. An IP address suggests nothing.
+export function nameFromAddress(url: string): string {
+  const host = url.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0].replace(/^.*@/, "");
+  if (host.startsWith("[") || /^[\d.]+(:\d*)?$/.test(host)) return "";
+  const labels = host.replace(/:.*$/, "").split(".");
+  while (labels.length && ["mcp", "api", "www"].includes(labels[0].toLowerCase())) labels.shift();
+  return foldName((labels[0] || "").slice(0, 64));
+}
+
 export type NameCheck = { level: "error" | "ok" | "note"; text: string; twin?: { id: string; name: string } };
 
 // serverTaken is the Server step's sentence for a name a live server has,
 // which a save's check refuses too with the next step after it: a draft put
 // of a live server's name would change that server.
-export const serverTaken = (name: string) => "A server named " + name + " is already installed.";
+export const serverTaken = (name: string) => "A server named " + name + " already exists.";
 export const SERVER_PICK_ANOTHER = "Go back to Server and pick another name.";
 
 // appNameCheck mirrors the role wizard's name check for servers: the pattern

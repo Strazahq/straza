@@ -11,8 +11,8 @@ weight: 25
 draft: false
 tested:
   version: v1.1.0-117-g106081a8
-  platform: Alpine 3.20 container running one enterprise strazad from this page's config, with a local Postgres 16, a local NATS server with JetStream and the built-in issuer of a second, standalone strazad standing in for the identity provider, for the boot lines, the break-glass line, /readyz, strazactl status, the refusal of a key that is not 32 bytes, the missing-issuer sentence, STRAZA_EVENTS_URL on its own and the auditBackpressure values. The kubectl commands, the load balancer, the several-replica claims and the database outage were not run, because this host has no cluster and the walk stayed at one replica, and the console sentence was not clicked. The section that gives agents their local tools was walked on 2026-11-01 on the enterprise demo stack at v1.0.0-1676-g9d9ad66e, with the same commands and PolicySet under scratch names and a token holding exactly identity:read, identity:write and policy:write. Every command printed the line this page quotes, and strazactl policy simulate for a subject holding only the application role allowed ls, a file read, a fetch, a subagent and the three approval tools, and denied rm -rf and a write to .env.local with the set's two reasons. A user who held the business role was denied rm -rf through the implication. The roles, the set and the assignment were removed afterwards, and no harness session ran under the set
-  except: the kubectl commands, the load balancer, more than one replica, the database outage and the console sentence
+  platform: Alpine 3.20 container running one enterprise strazad from this page's config, with a local Postgres 16, a local NATS server with JetStream and the built-in issuer of a second, standalone strazad standing in for the identity provider, for the boot lines, /readyz, strazactl status, the refusal of a key that is not 32 bytes, the missing-issuer sentence, STRAZA_EVENTS_URL on its own and the auditBackpressure values. The kubectl commands, the load balancer, the several-replica claims and the database outage were not run, because this host has no cluster and the walk stayed at one replica, and the console sentence was not clicked. The break-glass warning and the two ways to set its password changed after the walk and were not walked. The section that gives agents their local tools was walked on 2026-11-01 on the enterprise demo stack at v1.0.0-1676-g9d9ad66e, with the same commands and PolicySet under scratch names and a token holding exactly identity:read, identity:write and policy:write. Every command printed the line this page quotes, and strazactl policy simulate for a subject holding only the application role allowed ls, a file read, a fetch, a subagent and the three approval tools, and denied rm -rf and a write to .env.local with the set's two reasons. A user who held the business role was denied rm -rf through the implication. The roles, the set and the assignment were removed afterwards, and no harness session ran under the set
+  except: the kubectl commands, the load balancer, more than one replica, the database outage, the console sentence and the break-glass steps
   date: 2026-10-06
 applies_to: enterprise
 who: Operator
@@ -24,7 +24,11 @@ keywords: enterprise replicas postgres nats kek stateless
 
 You run strazad as several identical replicas behind one load balancer, as the operator who has outgrown one host. You write one shared config for every replica and check the boot with kubectl or docker. At the end every replica boots against the same database, event bus and key, answers ready through the load balancer, and gives the agents of your developers their local tools.
 
-In the enterprise profile a strazad process keeps no state of its own that a request depends on. Users, roles, policy, sessions, the signing keys and the audit chain live in one Postgres database. Every revocation, policy change and audit event travels over one NATS server with JetStream, the event bus, so any replica can serve any session and a replica that dies loses nothing. The one file every replica must hold is the key that seals stored credentials, and the cost of the shape is three moving parts to run and back up instead of one directory.
+
+In the enterprise profile a strazad process keeps no state of its own that a request depends on. Users, roles, policy, sessions, the signing keys and the audit chain live in one Postgres database. Every revocation, policy change and audit event travels over one NATS server with JetStream, the event bus, so any replica can serve any session and a replica that dies loses nothing. The exception is the rate limits of an MCP server, which each replica counts in its own memory, so with several replicas a session or a user can get a server's rate once for each replica. The one file every replica must hold is the key that seals stored credentials, and the cost of the shape is three moving parts to run and back up instead of one directory.
+
+
+One thing a replica does keep is its own sessions with each remote MCP server, one for each Straza session. No caller reaches the state a server keeps for another caller on any replica. A server that keeps state for each session sees one Straza session as two when its calls land on two replicas, so the state of one is missing on the other. If you run such a server, set the load balancer to keep each client address on one replica. Straza's clients keep no cookies, so affinity by cookie does not hold them.
 
 ## Point every replica at the same three things
 
@@ -35,7 +39,7 @@ Three settings make a set of processes one deployment:
 |---|---|
 | `store.driver: postgres` with one `store.dsn` | The system of record, the same database for every replica. |
 | `events.url` with `events.embedded: false` beside it | The NATS server, with the embedded bus turned off. `STRAZA_EVENTS_URL` alone does both. |
-| `secrets.kekFile` | The 32-byte key that seals stored credentials, mounted from the same secret on every replica. A replica holding its own key cannot open the credentials another one sealed, and fails those MCP servers closed. |
+| `secrets.kekFile` | The 32-byte key that seals the signing keys and stored credentials, mounted from the same secret on every replica. A replica holding its own key cannot open the signing keys another one sealed, and refuses to start. |
 
 The enterprise profile changes other defaults as well, such as refusing a person whom your identity manager has not provisioned first. [Standalone and enterprise compared]({{< relref "reference/standalone-and-enterprise.md" >}}) lists every difference with the setting that changes it.
 
@@ -83,15 +87,30 @@ kubectl -n straza logs deployment/straza-straza | head -20
 
 Migrations run on every boot before `store ready` is logged, from the migration files embedded in the binary. The first boot on an empty database also creates the session and snapshot signing keys. Several replicas can start together on a new database, and the store keeps one active key of each kind between them.
 
-They also create one break-glass admin between them, and only the replica that created it prints its password. Read the log of every replica for the `break-glass admin created` line:
 
-{{< command terminal="Terminal" purpose="kubectl against the cluster" >}}
+They also create one break-glass admin between them, with no password, so no password reaches a log. Until it has one, the emergency sign-in refuses it, and every replica logs the warning `BREAK-GLASS: the emergency sign-in is closed` at each boot. Set its password in one of two ways.
+
+The first admin, who signs in through your identity provider, sets it on an admin API token with the scope `identity:write`. `read -rs` reads the password without showing it and keeps it out of the shell history. It still shows in the process list while strazactl runs, because it travels as a flag.
+
+{{< command terminal="Terminal" purpose="administration" >}}
 ```sh
-kubectl -n straza logs -l app.kubernetes.io/name=straza,app.kubernetes.io/instance=straza --prefix --tail=-1 | grep 'break-glass admin created'
+read -rs BREAK_GLASS_PASSWORD
+strazactl users set-password break-glass --password "$BREAK_GLASS_PASSWORD"
+unset BREAK_GLASS_PASSWORD
 ```
 {{< /command >}}
 
-{{< now title="Store the break-glass password now" >}}It is printed once, by one replica, and never again.{{< /now >}}
+When no admin can sign in, for example because the identity provider signs nobody in, run `strazad break-glass set-password` in a strazad pod. It prints a new password once on your terminal and never into the pod's log. strazad stops at boot while it cannot reach the identity provider. Then no pod runs. Take `oidc.issuer` out of the release's values first, and the pods start with only the emergency sign-in.
+
+{{< command terminal="Terminal" purpose="kubectl against the cluster" >}}
+```sh
+kubectl -n straza exec deploy/straza-straza -- /usr/local/bin/strazad break-glass set-password --profile enterprise
+```
+{{< /command >}}
+
+{{< see >}}`New break-glass password:` with the password, and a sentence that says it is shown only this once.{{< /see >}}
+
+{{< now title="Store the break-glass password now" >}}Neither way shows it again. Every replica reads it at the next emergency sign-in, with no restart.{{< /now >}}
 
 ## Verify from the outside
 
@@ -208,7 +227,7 @@ Then alice starts a harness session on her enrolled machine, as [Claude Code]({{
 
 Replicas keep deciding from memory while the database is down, and every server decision still leaves its audit record in an in-memory queue of 4,096 records. What happens next depends on `governance.auditBackpressure`.
 
-Under `block`, the enterprise default, nothing runs without its record:
+Under `block`, the enterprise default, no decision runs before its record is in the queue:
 
 1. strazad keeps trying the oldest record until the database answers, and logs `audit queue waiting for the database` once.
 2. The queue fills after 4,096 decisions, about 7 minutes at 10 decisions per second or 41 seconds at 100.
@@ -232,7 +251,7 @@ To keep agents working through an outage and lose the records instead, set `gove
 The approver certificate and the WebPush key are the two local items that clients pin. In this shape you bring both as secrets, and the chart refuses to mint the approver pair for you. The push relay token is minted again at each start and needs no backup. For the TLS choices of each listener, read [TLS and exposure]({{< relref "guides/operate/tls-and-exposure.md" >}}).
 
 
-MCP servers are not part of a replica in this shape. The enterprise profile refuses the `command` runtime, because a child process of strazad could read the key-encryption key and reach the database. Run each server as its own service or pod and add it as a `remote` server, the way the chart runs its demo server as a separate pod that only strazad reaches.
+MCP servers are not part of a replica in this shape. The enterprise profile refuses the `command` runtime, because a child process of strazad could read the key-encryption key and reach the database. Run each server as its own service or pod and add it as a `remote` server, the way the chart runs its demo server as a separate pod. [Deployment best practices]({{< relref "guides/operate/best-practices.md" >}}) has the network policy that lets only strazad reach such a pod.
 
 ## Undo {.nostep}
 

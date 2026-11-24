@@ -68,6 +68,7 @@ const (
 	nextRefused   = "Fix the refused lines and submit again with draft %s."
 	nextStale     = "Draft %s went stale: live state changed under it. Ask a person to check it again on the console under Drafts, or submit the documents as a new draft."
 	nextWaits     = "Draft %s waits for a person to publish it on the console under Drafts. You cannot publish it."
+	nextAccepts   = "Draft %s is stored and waits for a person to publish it on the console under Drafts. It changes your own access, so that person has to accept the change when publishing. You cannot publish it."
 	nextPublished = "A person published draft %s on %s."
 	nextDiscarded = "Draft %s was discarded%s."
 	nextExpired   = "Draft %s expired after 14 days without a change."
@@ -496,14 +497,15 @@ func agentStatus(row store.DraftRow) (map[string]any, error) {
 		"publishable": row.State == string(drafts.StateOpen) && checked && len(av.Refused) == 0,
 		"refused":     keyed(av.Refused, nil, nil), "risks": keyed(av.Risks, nil, nil),
 		"warnings": keyed(av.Warnings, nil, nil), "unchecked": keyed(av.Unchecked, nil, nil),
-		"next": nextStep(row, checked, av.Refused)}, nil
+		"next": nextStep(row, checked, av.Refused, av.Risks)}, nil
 }
 
 // nextStep is the sentence of DraftAgentStatus that says what happens next
-// to the draft row, whose check refused the findings refused: its end when
-// it is closed, and otherwise whether the server checked it, and what the
-// agent or a person does now.
-func nextStep(row store.DraftRow, checked bool, refused []drafts.Finding) string {
+// to the draft row, whose check refused the findings refused and raised
+// risks: its end when it is closed, and otherwise whether the server
+// checked it, and what the agent or a person does now. A draft that
+// changes the agent's own access says that a person has to accept that.
+func nextStep(row store.DraftRow, checked bool, refused, risks []drafts.Finding) string {
 	id := strconv.FormatInt(row.ID, 10)
 	switch drafts.State(row.State) {
 	case drafts.StatePublished:
@@ -528,6 +530,8 @@ func nextStep(row store.DraftRow, checked bool, refused []drafts.Finding) string
 		return fmt.Sprintf(nextStale, id)
 	case len(refused) > 0:
 		return fmt.Sprintf(nextRefused, id)
+	case slices.ContainsFunc(risks, agentAccepted):
+		return fmt.Sprintf(nextAccepts, id)
 	default:
 		return fmt.Sprintf(nextWaits, id)
 	}

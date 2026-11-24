@@ -429,9 +429,11 @@ func (a *App) handlePolicyActivate(w http.ResponseWriter, r *http.Request) {
 		// Revisions 15, 16, 18 and 26: a set starts governing only when its
 		// approve pools name approver roles, its match.roles application
 		// roles, no rule carries the retired obligations list and its
-		// by-name rules pass their gate. A text that no longer parses is
-		// left to Check's compile.
-		if doc, perr := policy.Parse([]byte(text)); perr == nil && (!a.roleGates(w, r, doc) || !a.obligationsGate(w, doc) || !a.byNameGate(w, r, doc)) {
+		// by-name rules pass their gate. It compiles on its own here too, so
+		// the caller's set is refused as validate refuses it, and only a
+		// live policy that does not compile reaches Check's policy.compile
+		// and its 500. A text that no longer parses is left to intake.
+		if doc, perr := policy.Parse([]byte(text)); perr == nil && (!a.roleGates(w, r, doc) || !a.obligationsGate(w, doc) || !a.byNameGate(w, r, doc) || !compileGate(w, doc)) {
 			return directChange{}, false
 		}
 		if !found {

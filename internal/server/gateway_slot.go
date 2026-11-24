@@ -83,10 +83,10 @@ func toolRefusal(text string, srv *serverScope, slot decisionSlot) *mcp.CallTool
 	return res
 }
 
-// withoutUpstreamSlot is an upstream result as a server endpoint serves it:
-// without the upstream's own decision slot, so only Straza speaks under that
-// key and a call that ran cannot pass as a hold or a denial. It drops the key
-// on a copy and never writes the upstream's Meta map.
+// withoutUpstreamSlot is an upstream result as every gateway endpoint serves
+// it: without the upstream's own decision slot, so only Straza speaks under
+// that key and a call that ran cannot pass as a hold or a denial. It drops
+// the key on a copy and never writes the upstream's Meta map.
 func withoutUpstreamSlot(res *mcp.CallToolResult) *mcp.CallToolResult {
 	if res == nil {
 		return nil

@@ -79,8 +79,7 @@ describe("the palette", () => {
     for (const p of pages) expect(rows.some((r) => r.startsWith(p))).toBe(true);
     for (const r of ROUTES) if (!pages.includes(r.label)) expect(rows.some((row) => row.startsWith(r.label))).toBe(false);
     if (servers.length + pages.length === 0) expect(screen.getByText("Nothing matches what you typed.")).toBeTruthy();
-    expect(screen.queryByText("Open this palette")).toBeNull();
-    expect(screen.getByText("Matches the start of a word in a page, server, role or policy name; users are searched on the server")).toBeTruthy();
+    expect(screen.queryByText("Open search")).toBeNull();
   });
 
   it("lists the roles that match with their kind and holders, and hands one to the caller on Enter", async () => {
@@ -121,8 +120,8 @@ describe("the palette", () => {
   it("lists the shortcuts and every page while nothing is typed, and no page carries the not-built suffix now that every area is built", async () => {
     render(<Palette open {...props} />);
     await screen.findByRole("option", { name: /midpoint/ });
-    expect(screen.getByText("Open this palette")).toBeTruthy();
-    expect(screen.getByText("Close the innermost overlay")).toBeTruthy();
+    expect(screen.getByText("Open search")).toBeTruthy();
+    expect(screen.getByRole("option", { name: /^CloseEsc/ })).toBeTruthy();
     expect(screen.getByText("Move and open")).toBeTruthy();
     expect(screen.getByRole("option", { name: /^Approvals/ }).textContent).toBe("Approvals");
     expect(screen.getByRole("option", { name: /^MCP servers/ }).textContent).toBe("MCP servers");

@@ -351,7 +351,9 @@ steps:
     # suspect: the action name apps.enable, which spec/events does not list today
     audit: {subject: dana, kind: straza.audit.admin, action: apps.enable, count: 1}
   - name: her membership of the minted role ended with the server, one unassign record for the one holder
-    audit: {subject: dana, kind: straza.audit.admin, action: roles.unassign, reasonContains: "server removed", count: 1}
+    # The operator acted, so the list names admin as Who. The record names
+    # dana by her id as the user it was about, which subject also matches.
+    audit: {subject: "${danaId}", kind: straza.audit.admin, action: roles.unassign, reasonContains: "server removed", count: 1}
   - name: the removal of the server is on the chain exactly once under the operator's name
     audit: {subject: admin, kind: straza.audit.admin, action: apps.remove, count: 1}
 

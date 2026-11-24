@@ -33,8 +33,18 @@ type publishFields struct {
 }
 
 // agentGuardrailCode is the code of the risk an agent's draft raises when
-// it loosens a set that binds the agent.
-const agentGuardrailCode = "agent.guardrail"
+// it changes a set that binds the agent, and agentOwnReachCode the code of
+// the risk it raises when it widens what the agent itself reaches.
+const (
+	agentGuardrailCode = "agent.guardrail"
+	agentOwnReachCode  = "agent.own-reach"
+)
+
+// agentAccepted reports whether f is a risk a person accepts for the agent
+// that wrote the draft, because the draft changes that agent's own access.
+func agentAccepted(f drafts.Finding) bool {
+	return f.Code == agentGuardrailCode || f.Code == agentOwnReachCode
+}
 
 // agentLoosened answers the sorted names of the sets whose agent.guardrail
 // risk v holds, each once, from the risk's object PolicySet/<name>, or nil
@@ -110,11 +120,19 @@ func (a *App) cloudEvent(ctx context.Context, subject string, data map[string]an
 			data["actorVia"] = act.Via
 		}
 	}
+	return newCloudEvent(a.instance, subject, data)
+}
+
+// newCloudEvent is the CloudEvent of one event that source writes to the
+// outbox, with a fresh id and the time now. It stamps no actor and reads
+// and writes nothing. App.cloudEvent and the host's break-glass command
+// both build their events with it.
+func newCloudEvent(source, subject string, data map[string]any) (store.OutboxEvent, error) {
 	payload, err := json.Marshal(map[string]any{
 		"specversion": "1.0",
 		"id":          uuid.NewString(),
 		"type":        subject,
-		"source":      a.instance,
+		"source":      source,
 		"time":        time.Now().UTC().Format(time.RFC3339Nano),
 		"data":        data,
 	})

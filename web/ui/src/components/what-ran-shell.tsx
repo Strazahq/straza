@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Pill } from "@/components/chip";
 import { CodeLines, Marked } from "@/components/code-lines";
 import { HelpTip } from "@/components/help-tip";
 import { type Part, type Step, heredocLang, pathsNamed, readCommand } from "@/lib/shell-read";
@@ -38,21 +39,21 @@ function partNode(p: Part, named: Set<string>, key: number) {
 function StepBox({ s, n, named, cut }: { s: Step; n: number; named: Set<string>; cut: boolean }) {
   const chips = [
     ...s.redirs.map((r, k) => (
-      <span key={"r" + k} className="inline-flex items-baseline gap-1.5 rounded-full border border-border bg-background px-2.5 py-px text-[12.5px] text-text-2" data-redir={r.fd + r.op}>
+      <Pill key={"r" + k} data-redir={r.fd + r.op}>
         <span className="font-mono text-link">{r.fd + r.op + (r.op === ">&" || r.op === "<&" ? "" : " ") + r.target}</span>{redirWords(r)}
-      </span>
+      </Pill>
     )),
     ...(s.env.length ? [
-      <span key="env" className="inline-flex items-baseline gap-1.5 rounded-full border border-border bg-background px-2.5 py-px text-[12.5px] text-text-2" data-env>
+      <Pill key="env" data-env>
         <span className="font-mono text-teal">{s.env.map((w) => w.text.split("=")[0]).join(" ")}</span>{ENV_CHIP}
-      </span>,
+      </Pill>,
     ] : []),
   ];
   return (
     <div className="flex min-w-0 flex-col gap-2 rounded-md border border-border bg-card px-3 py-2.5" data-step={n}>
       <div className="grid grid-cols-[22px_minmax(0,1fr)] items-baseline gap-2">
-        <span className="text-right text-xs text-muted-foreground tabular-nums">{n}</span>
-        <span className="min-w-0 font-mono text-[13px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]" data-step-line>
+        <span className="text-right text-caption leading-4 text-muted-foreground tabular-nums">{n}</span>
+        <span className="min-w-0 font-mono text-caption leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]" data-step-line>
           {s.parts.map((p, k) => <React.Fragment key={k}>{k > 0 && " "}{partNode(p, named, k)}</React.Fragment>)}
         </span>
       </div>
@@ -62,7 +63,7 @@ function StepBox({ s, n, named, cut }: { s: Step; n: number; named: Set<string>;
         const cutHere = cut && !h.closed;
         return (
           <div key={k} className="ml-[30px] min-w-0 rounded-md border border-border bg-background" data-heredoc={lang}>
-            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-border px-2.5 py-1.5 text-[13px] text-muted-foreground">
+            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-border px-2.5 py-1.5 text-caption text-muted-foreground">
               <b className="font-semibold text-text-2">{docWho(s.program)}</b>
               <span>{lang}</span>
               <span>{linesWord(h.body ? h.body.split("\n").length : 0)}</span>
@@ -85,7 +86,7 @@ export function ShellSteps({ src, cut }: { src: string; cut: boolean }) {
   if (reading.error) {
     return (
       <div className="flex min-w-0 flex-col gap-2.5">
-        <p className="rounded-md border border-border px-3 py-2 text-[13px] text-text-2" data-unreadable>{unreadable(reading.error)}</p>
+        <p className="rounded-md border border-border px-3 py-2 text-caption text-text-2" data-unreadable>{unreadable(reading.error)}</p>
         <div className="min-w-0 rounded-md border border-border bg-card" data-unreadable-text><CodeLines text={src} lang="text" /></div>
       </div>
     );
@@ -93,13 +94,13 @@ export function ShellSteps({ src, cut }: { src: string; cut: boolean }) {
   const scripts = reading.steps.reduce((n, s) => n + s.heredocs.length, 0);
   return (
     <div className="flex min-w-0 flex-col gap-2.5" data-shell-steps>
-      <p className="text-[13px] text-muted-foreground" data-summary>{summaryLine(reading.steps.length, scripts)}</p>
+      <p className="text-caption text-muted-foreground" data-summary>{summaryLine(reading.steps.length, scripts)}</p>
       <ol className="flex min-w-0 flex-col">
         {reading.steps.map((s, k) => (
           <li key={k} className="flex min-w-0 flex-col">
             <StepBox s={s} n={k + 1} named={named} cut={cut} />
             {s.connector && CONNECTOR[s.connector] && (
-              <div className="grid grid-cols-[22px_minmax(0,1fr)] items-center gap-2 px-3 py-1.5 text-[13px] text-muted-foreground" data-connector={s.connector}>
+              <div className="grid grid-cols-[22px_minmax(0,1fr)] items-center gap-2 px-3 py-1.5 text-caption text-muted-foreground" data-connector={s.connector}>
                 <span className="text-right font-mono text-link" aria-hidden="true">{GLYPH[s.connector] ?? s.connector}</span>
                 <span className={cn("flex items-center gap-2", "before:ml-1 before:h-[18px] before:w-px before:bg-border")}>{CONNECTOR[s.connector]}</span>
               </div>
@@ -110,11 +111,11 @@ export function ShellSteps({ src, cut }: { src: string; cut: boolean }) {
       {named.size > 0 && (
         <div className="flex flex-col gap-1.5" data-paths-named>
           <div className="flex items-center gap-1.5">
-            <h4 className="text-[13px] font-semibold uppercase tracking-[.06em] text-muted-foreground">{PATHS_NAMED}</h4>
+            <h4 className="text-caption font-semibold uppercase tracking-[.06em] text-muted-foreground">{PATHS_NAMED}</h4>
             <HelpTip label={PATHS_NAMED} text={PATHS_NAMED_HELP} />
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {[...named].map((p) => <span key={p} className="rounded-sm border border-border bg-card px-1.5 py-px font-mono text-[12.5px] [overflow-wrap:anywhere]">{p}</span>)}
+            {[...named].map((p) => <span key={p} className="rounded-md border border-border bg-card px-1.5 py-px font-mono text-caption [overflow-wrap:anywhere]">{p}</span>)}
           </div>
         </div>
       )}

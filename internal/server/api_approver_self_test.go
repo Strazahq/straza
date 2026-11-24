@@ -119,16 +119,20 @@ func TestSelfEnrollToken(t *testing.T) {
 // refuses NHIs outright, validates the channel enum, never burns the cooldown
 // on a refusal, and the boot-ensured reserved roles exist with kind straza.
 func TestSelfEnrollGate(t *testing.T) {
-	// Serial: it lowers the package knob selfEnrollCooldown for its run.
-	orig := selfEnrollCooldown
-	selfEnrollCooldown = 200 * time.Millisecond
-	t.Cleanup(func() { selfEnrollCooldown = orig })
-
 	app, base := testApp(t)
 	ctx := context.Background()
 	kim := seedIdentity(t, app)
 	grantAdmin(t, app, kim.ID)
 	adminTok, _ := checkinToken(t, app, base)
+	// endCooldown moves the start of userID's cooldown window back by the
+	// window's length, so the next mint finds the window over.
+	endCooldown := func(userID string) {
+		app.selfEnrollMu.Lock()
+		defer app.selfEnrollMu.Unlock()
+		if at, ok := app.selfEnrollLast[userID]; ok {
+			app.selfEnrollLast[userID] = at.Add(-selfEnrollCooldown)
+		}
+	}
 
 	mintURL := base + "/v1/approvals/self/enroll-token"
 	var refusal struct {
@@ -158,7 +162,7 @@ func TestSelfEnrollGate(t *testing.T) {
 	if code := adminReq(t, "POST", mintURL, adminID, map[string]any{"channel": "browser"}, nil); code != 200 {
 		t.Fatalf("admin browser mint = %d", code)
 	}
-	time.Sleep(selfEnrollCooldown + 50*time.Millisecond)
+	endCooldown(kim.ID)
 	if code := adminReq(t, "POST", mintURL, adminID, map[string]any{"channel": "mobile"}, nil); code != 200 {
 		t.Fatalf("admin mobile mint = %d", code)
 	}
@@ -204,7 +208,7 @@ func TestSelfEnrollGate(t *testing.T) {
 
 	// Holding the browser role does not open the mobile channel; the refusal
 	// names the role that WOULD.
-	time.Sleep(selfEnrollCooldown + 50*time.Millisecond)
+	endCooldown(frank.ID)
 	if code := adminReq(t, "POST", mintURL, frankTok, map[string]any{"channel": "mobile"}, &refusal); code != 403 {
 		t.Fatalf("wrong-channel mint = %d, want 403", code)
 	}
@@ -215,7 +219,7 @@ func TestSelfEnrollGate(t *testing.T) {
 	// Channel scope holds at consume: a mobile token refuses a browser-shaped
 	// enroll (and is burned by the attempt, same coarse 401).
 	grantRole(t, app, frank.ID, "straza-enroll-mobile")
-	time.Sleep(selfEnrollCooldown + 50*time.Millisecond)
+	endCooldown(frank.ID)
 	var mobileMint selfMintResponse
 	if code := adminReq(t, "POST", mintURL, frankTok, map[string]any{"channel": "mobile"}, &mobileMint); code != 200 {
 		t.Fatalf("mobile mint = %d", code)

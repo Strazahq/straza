@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -119,25 +121,34 @@ func (r approvalRepo) ListBefore(ctx context.Context, beforeID string, limit int
 		WHERE id < $1 ORDER BY id DESC LIMIT $2`, beforeID, limit)
 }
 
-// PageByState is ListBefore with the admin state filter: state "" =
-// all states; same UUIDv7 id-keyset window, no row wall.
-func (r approvalRepo) PageByState(ctx context.Context, state, beforeID string, limit int) ([]Approval, error) {
+// PageByState is ListBefore with the admin state and user filters: state
+// "" = all states, userID "" = every user; same UUIDv7 id-keyset window, no
+// row wall. A user filter leads the terms, so idx_approvals_user (user_id,
+// id) serves it.
+func (r approvalRepo) PageByState(ctx context.Context, state, userID, beforeID string, limit int) ([]Approval, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	switch {
-	case state == "" && beforeID == "":
-		return r.list(ctx, `SELECT `+approvalCols+` FROM approvals ORDER BY id DESC LIMIT $1`, limit)
-	case beforeID == "":
-		return r.list(ctx, `SELECT `+approvalCols+` FROM approvals
-		WHERE state = $1 ORDER BY id DESC LIMIT $2`, state, limit)
-	case state == "":
-		return r.list(ctx, `SELECT `+approvalCols+` FROM approvals
-		WHERE id < $1 ORDER BY id DESC LIMIT $2`, beforeID, limit)
-	default:
-		return r.list(ctx, `SELECT `+approvalCols+` FROM approvals
-		WHERE state = $1 AND id < $2 ORDER BY id DESC LIMIT $3`, state, beforeID, limit)
+	var args []any
+	ph := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
 	}
+	var conds []string
+	if userID != "" {
+		conds = append(conds, "user_id = "+ph(userID))
+	}
+	if state != "" {
+		conds = append(conds, "state = "+ph(state))
+	}
+	if beforeID != "" {
+		conds = append(conds, "id < "+ph(beforeID))
+	}
+	q := `SELECT ` + approvalCols + ` FROM approvals`
+	if len(conds) > 0 {
+		q += ` WHERE ` + strings.Join(conds, " AND ")
+	}
+	return r.list(ctx, q+` ORDER BY id DESC LIMIT `+ph(limit), args...)
 }
 
 // CountByUser counts the approvals a user raised (idx_approvals_user).
@@ -145,6 +156,50 @@ func (r approvalRepo) CountByUser(ctx context.Context, userID string) (int, erro
 	var n int
 	err := r.s.queryRow(ctx, `SELECT COUNT(*) FROM approvals WHERE user_id = $1`, userID).Scan(&n)
 	return n, err
+}
+
+// waitingChunk is the most session ids one WaitingBySession query names.
+// It is the admin list's largest page, so a page costs one query, and it
+// keeps the unpaged list far below either dialect's placeholder limit.
+const waitingChunk = 500
+
+// WaitingBySession counts the pending approvals of each listed session
+// whose expiry is after now, one grouped query per waitingChunk ids. The
+// literal state term keeps the read on the pending rows, through
+// idx_approvals_state_expires or the partial idx_approvals_pending_key.
+func (r approvalRepo) WaitingBySession(ctx context.Context, sessionIDs []string, now time.Time) (map[string]int, error) {
+	out := map[string]int{}
+	for at := 0; at < len(sessionIDs); at += waitingChunk {
+		chunk := sessionIDs[at:min(at+waitingChunk, len(sessionIDs))]
+		args := make([]any, 0, len(chunk)+1)
+		ps := make([]string, len(chunk))
+		for i, id := range chunk {
+			args = append(args, id)
+			ps[i] = "$" + strconv.Itoa(i+1)
+		}
+		args = append(args, r.s.tArg(now))
+		rows, err := r.s.query(ctx, `SELECT session_id, COUNT(*) FROM approvals
+			WHERE state = 'pending' AND session_id IN (`+strings.Join(ps, ", ")+`)
+			AND `+r.s.timeAfter("expires_at", "$"+strconv.Itoa(len(args)))+` GROUP BY session_id`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id string
+			var n int
+			if err := rows.Scan(&id, &n); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out[id] = n
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (r approvalRepo) FindPendingByKey(ctx context.Context, sessionID, ruleID, argvHash string) (Approval, error) {

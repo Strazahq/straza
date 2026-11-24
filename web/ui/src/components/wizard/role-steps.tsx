@@ -1,22 +1,23 @@
 import * as React from "react";
+import { CheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AccessEditor } from "@/components/access-editor";
+import { Chip, Tag } from "@/components/chip";
 import { FetchError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
 import { KindGlyph, RoleKindBadge } from "@/components/role-kind";
 import { ListRow, Section } from "@/components/sheet-parts";
-import { CAPS, CardGroup, Code, Field, Fold, HINT, OptionCard, ProblemBlock } from "@/components/wizard/parts";
+import { CAPS, CardGroup, Code, Field, Fold, HINT, OptionCard } from "@/components/wizard/parts";
 import { pinnedOf } from "@/lib/access-covers";
 import { coversClause, missingCovers } from "@/lib/access-object-words";
 import { type Choice, type FixedRule, type Plan, choiceOf, emptyPlan, grantMatchers, inGrant, policyWord } from "@/lib/access-plan";
-import type { AppRow, PackRow, RoleRow, ToolRow } from "@/lib/api";
+import type { AppRow, RoleRow, ToolRow } from "@/lib/api";
 import { nounsOf } from "@/lib/object-words";
 import {
   AFTER_CREATE_HELP,
   APPROVER_NEXT,
-  COMMANDS_HELP,
   COMPOSES_ROW,
   COMPOSE_HELP,
   DESCRIPTION_OPTIONAL,
@@ -25,20 +26,16 @@ import {
   type Kind,
   KIND_GROUP,
   NAME_FREE,
-  NAME_HELP,
   NAME_LABEL,
   NAME_MISSING,
   NOTHING_BOUND,
   NOTHING_COMPOSED,
   NO_COMPOSABLE,
   NO_DESCRIPTION,
-  NO_PACK_PICKED,
   NO_SERVER_WITH_TOOLS,
-  NO_TOOL_DESCRIPTION,
   ONE_SERVER_HELP,
+  OTHER_SERVER,
   OPEN_IT,
-  PACKS_AFTER,
-  PACKS_ROW,
   PICK_ANOTHER,
   PICK_A_TOOL,
   POLICY_HELP,
@@ -54,30 +51,25 @@ import {
   STATE_WORD,
   STRAZA_NOT_HERE,
   STRAZA_NOT_HERE_HELP,
-  UNREACHABLE_STEP,
   WIZARD_KINDS,
   accessOpensOn,
-  accessReaches,
   accessSetName,
   fixedWords,
-  finishOn,
-  halfLanded,
+  importedAs,
   isComposable,
   isGlob,
-  kindCard,
   list,
   nameCheck,
   noToolsKnown,
   noToolsWhy,
   liveRole,
-  packSwitch,
-  packVersion,
   railCount,
   railLabel,
   reachPill,
   reviewCount,
   reviewEvery,
   roleTick,
+  storedAs,
   switchWarning,
   tools as toolCount,
 } from "@/lib/role-words";
@@ -102,12 +94,10 @@ export type Draft = {
   server: string;
   plans: Record<string, Plan>;
   composed: string[];
-  packs: string[];
 };
 
-// Act is one row of the run: what it does, the state it landed in, and the
-// tab of the role's page that finishes it when it did not.
-export type Act = { id: string; label: string; state: "pending" | "running" | "done" | "failed" | "refused"; section?: string; subject?: string; error?: string };
+// Act is one row of the run: what it does and the state it landed in.
+export type Act = { id: string; label: string; state: "pending" | "done" };
 
 // Pill is one server a composed role reaches, with the role it arrives
 // through.
@@ -115,10 +105,7 @@ export type Pill = { server: string; via: string; tools: number };
 
 const ACT_HUE: Record<Act["state"], string> = {
   pending: "text-muted-foreground",
-  running: "text-muted-foreground",
   done: "text-ok",
-  failed: "text-danger",
-  refused: "text-danger",
 };
 
 const CHOICE_HUE: Record<Choice, string> = { allow: "text-text-2", approve: "text-warn", deny: "text-danger" };
@@ -134,16 +121,18 @@ export function storedName(draft: Draft): string {
   return draft.server && foldName(draft.name) ? roleNameOf(draft.server, draft.name) : "";
 }
 
-const CODE = "rounded bg-muted px-1 font-mono text-[13px] text-foreground";
+// TAG_WRAP lets a long name break inside its tag, so the row never runs
+// wider than a phone.
+const TAG_WRAP = "max-w-full whitespace-normal [overflow-wrap:anywhere]";
 
 // Acts lists the run's rows: numbered before it runs, then the state word
 // each row landed in.
 export function Acts({ acts, numbered }: { acts: Act[]; numbered?: boolean }) {
   return (
-    <ol className="m-0 flex list-none flex-col gap-1.5 p-0 text-sm" data-landed>
+    <ol className="m-0 flex list-none flex-col gap-1.5 p-0 text-dense" data-landed>
       {acts.map((a, i) => (
         <li key={a.id} className="flex items-baseline gap-2.5">
-          <span className={cn("w-16 shrink-0 font-mono text-xs", numbered ? "text-muted-foreground" : ACT_HUE[a.state])} data-act={a.id}>
+          <span className={cn("w-16 shrink-0 font-mono text-caption leading-4", numbered ? "text-muted-foreground" : ACT_HUE[a.state])} data-act={a.id}>
             {numbered ? i + 1 : STATE_WORD[a.state]}
           </span>
           <span className="text-foreground">{a.label}</span>
@@ -204,11 +193,11 @@ export function NameStep({ draft, roles, apps, read, toolsOf, problem, fromServe
   return (
     <div className="flex max-w-[900px] flex-col gap-4">
       {fromServer && owned && draft.server === fromServer && (
-        <p className="m-0 text-sm text-text-2" data-from-server>{accessOpensOn(fromServer)}</p>
+        <p className="m-0 text-dense text-text-2" data-from-server>{accessOpensOn(fromServer)}</p>
       )}
       <CardGroup label={KIND_GROUP} value={draft.kind} onPick={(v) => onKind(v as Kind)} className="sm:grid-cols-3">
         {WIZARD_KINDS.map((k) => (
-          <OptionCard key={k.kind} value={k.kind} label={kindCard(k.kind)} lead={<KindGlyph mark={k.kind} />} name={k.name} tag={k.kind} line={k.line} on={draft.kind === k.kind} />
+          <OptionCard key={k.kind} value={k.kind} lead={<KindGlyph mark={k.kind} />} name={k.name} line={k.line} on={draft.kind === k.kind} />
         ))}
       </CardGroup>
       <p className={cn(HINT, "m-0 flex items-center gap-1.5")}>
@@ -216,10 +205,12 @@ export function NameStep({ draft, roles, apps, read, toolsOf, problem, fromServe
         <HelpTip label={STRAZA_NOT_HERE} text={STRAZA_NOT_HERE_HELP} />
       </p>
       {owned && <ServerRail draft={draft} apps={apps} read={read} toolsOf={toolsOf} problem={problem} missing={miss === "server"} onPick={onPick} />}
-      <Field id="nr-name" label={NAME_LABEL} error={miss === "name" ? NAME_MISSING : miss === "refused" ? PICK_ANOTHER : undefined} hint={NAME_HELP}>
+      <Field id="nr-name" label={NAME_LABEL} error={miss === "name" ? NAME_MISSING : miss === "refused" ? PICK_ANOTHER : undefined}>
         {owned ? (
-          <div className="flex w-[420px] max-w-full items-center rounded-md border border-border bg-background">
-            <span className="pl-2.5 font-mono text-[13px] whitespace-nowrap text-muted-foreground" data-name-prefix>{draft.server ? rolePrefix(draft.server) : ""}</span>
+          // One box with one border and one focus ring: the prefix is text
+          // inside it, and a click on the prefix lands in the input.
+          <label className="flex h-9 w-[420px] max-w-full cursor-text items-center rounded-md border border-input bg-transparent font-mono text-base shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 md:text-dense dark:bg-border/30">
+            <span className="shrink-0 pl-3 whitespace-nowrap text-muted-foreground" data-name-prefix>{draft.server ? rolePrefix(draft.server) : ""}</span>
             <Input
               id="nr-name"
               ref={nameBox}
@@ -228,31 +219,33 @@ export function NameStep({ draft, roles, apps, read, toolsOf, problem, fromServe
               spellCheck={false}
               value={draft.name}
               onChange={(e) => onName(e.target.value)}
-              className="h-9 border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
+              className="h-full rounded-none border-0 bg-transparent pl-0 font-mono shadow-none focus-visible:ring-0 focus-visible:outline-none! dark:bg-transparent"
             />
-          </div>
+          </label>
         ) : (
           <Input id="nr-name" ref={nameBox} autoFocus value={draft.name} onChange={(e) => onName(e.target.value)} className="w-[360px] max-w-full font-mono" />
         )}
         {owner ? (
-          <p className="m-0 max-w-[75ch] text-[13px] leading-snug text-danger" data-name-check="server">
+          <p className="m-0 max-w-[75ch] text-caption leading-snug text-danger" data-name-check="server">
             {serverPrefixRefusal(owner.name)}
-            <Button variant="link" size="sm" className="ml-1.5 h-auto p-0 text-[13px]" onClick={() => onOpenServer(owner)}>{openServer(owner.name)}</Button>
+            <Button variant="link" size="sm" className="ml-1.5 h-auto p-0 text-caption" onClick={() => onOpenServer(owner)}>{openServer(owner.name)}</Button>
           </p>
         ) : check ? (
-          <p className={cn("m-0 max-w-[75ch] text-[13px] leading-snug", hue)} data-name-check={check.level}>
+          <p className={cn("m-0 max-w-[75ch] text-caption leading-snug", hue)} data-name-check={check.level}>
             {check.text}
             {exact && (
-              <Button variant="link" size="sm" className="ml-1.5 h-auto p-0 text-[13px]" onClick={() => onOpenExact(exact)}>{OPEN_IT}</Button>
+              <Button variant="link" size="sm" className="ml-1.5 h-auto p-0 text-caption" onClick={() => onOpenExact(exact)}>{OPEN_IT}</Button>
             )}
           </p>
-        ) : stored ? (
-          <p className="m-0 text-[13px] text-ok" data-name-check="free">{NAME_FREE}</p>
         ) : null}
         {previewShown && (
-          <p className={cn(HINT, "m-0")} data-name-preview>
-            {preview.lead}<span className={CODE}>{preview.stored}</span>{preview.mid}<span className={CODE}>{preview.iga}</span>{preview.end}
-          </p>
+          <div className="flex flex-wrap items-center gap-1.5" data-name-preview>
+            {!check && !!stored && (
+              <Chip tone="ok" icon={CheckIcon} data-name-check="free"><span className="sr-only">{NAME_LABEL + " "}</span>{NAME_FREE}</Chip>
+            )}
+            <Tag className={TAG_WRAP} data-name-stored>{storedAs(preview.stored)}</Tag>
+            <Tag className={TAG_WRAP} data-name-iga>{importedAs(preview.iga)}</Tag>
+          </div>
         )}
       </Field>
       <Field id="nr-description" label={DESCRIPTION_OPTIONAL}>
@@ -279,11 +272,11 @@ type RailProps = {
 // in the draft, unshown and never written, and the line under the list
 // says so.
 function ServerRail({ draft, apps, read, toolsOf, problem, missing, onPick }: RailProps) {
-  const miss = missing && <p role="alert" className="m-0 text-[13px] leading-snug text-danger" data-server-miss>{SERVER_MISSING}</p>;
+  const miss = missing && <p role="alert" className="m-0 text-caption leading-snug text-danger" data-server-miss>{SERVER_MISSING}</p>;
   if (problem) return <><FetchError subject={RAIL_TITLE} detail={problem} />{miss}</>;
   if (!read) return null;
   const withTools = apps.filter((a) => toolsOf(a.name).length > 0);
-  if (!withTools.length) return <><p className="m-0 max-w-[75ch] text-sm text-text-2" data-no-server>{NO_SERVER_WITH_TOOLS}</p>{miss}</>;
+  if (!withTools.length) return <><p className="m-0 max-w-[75ch] text-dense text-text-2" data-no-server>{NO_SERVER_WITH_TOOLS}</p>{miss}</>;
   const picked = draft.server;
   // ticked counts the tools a server's plan grants: every tool under a glob,
   // otherwise the ticks.
@@ -326,16 +319,16 @@ function ServerRail({ draft, apps, read, toolsOf, problem, missing, onPick }: Ra
               )}
             >
               <span className="flex items-center gap-2">
-                <span className="truncate font-mono text-[13px] text-foreground">{a.name}</span>
-                {!none && <span className={cn("ml-auto shrink-0 font-mono text-xs", every ? "text-warn" : on ? "text-foreground" : "text-muted-foreground")}>{count}</span>}
+                <span className="truncate font-mono text-caption text-foreground">{a.name}</span>
+                {!none && <span className={cn("ml-auto shrink-0 font-mono text-caption leading-4", every ? "text-warn" : on ? "text-foreground" : "text-muted-foreground")}>{count}</span>}
               </span>
-              {none && <span className="text-[13px] leading-snug text-muted-foreground">{why}</span>}
+              {none && <span className="text-caption leading-snug text-muted-foreground">{why}</span>}
             </button>
           );
         })}
       </div>
       {elsewhere.map((a) => (
-        <p key={a.name} role="status" className="m-0 max-w-[80ch] text-[13px] leading-snug text-warn" data-switch-warning={a.name}>
+        <p key={a.name} role="status" className="m-0 max-w-[80ch] text-caption leading-snug text-warn" data-switch-warning={a.name}>
           {switchWarning(ticked(a.name), a.name, picked)}
         </p>
       ))}
@@ -369,9 +362,9 @@ export function AccessStep({ draft, app, toolsOf, onPlan, fixed, approvers, role
   const pinned = pinnedOf(app);
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <p className="m-0 max-w-[80ch] text-sm text-text-2" data-access-server>{accessReaches(roleName, app.name)}</p>
-      {missing && <p role="alert" className="m-0 text-[13px] leading-snug text-danger" data-access-miss>{PICK_A_TOOL}</p>}
-      {uncovered && pinned && <p role="alert" className="m-0 text-[13px] leading-snug text-danger" data-covers-miss>{missingCovers(nounsOf(pinned))}</p>}
+      <p className="m-0 max-w-[80ch] text-dense text-text-2" data-access-server>{OTHER_SERVER}</p>
+      {missing && <p role="alert" className="m-0 text-caption leading-snug text-danger" data-access-miss>{PICK_A_TOOL}</p>}
+      {uncovered && pinned && <p role="alert" className="m-0 text-caption leading-snug text-danger" data-covers-miss>{missingCovers(nounsOf(pinned))}</p>}
       <AccessEditor
         role={roleName}
         app={app}
@@ -399,7 +392,7 @@ export function ComposeStep({ draft, roles, pills, unread, onToggle }: ComposePr
   const composable = roles.filter(isComposable);
   return (
     <div className="flex max-w-[900px] flex-col gap-3">
-      {composable.length === 0 && <p className="m-0 text-sm text-muted-foreground">{NO_COMPOSABLE}</p>}
+      {composable.length === 0 && <p className="m-0 text-dense text-muted-foreground">{NO_COMPOSABLE}</p>}
       {composable.map((r) => (
         <ListRow key={r.id}>
           <input
@@ -409,53 +402,22 @@ export function ComposeStep({ draft, roles, pills, unread, onToggle }: ComposePr
             onChange={() => onToggle(r.name)}
             className="size-3.5 shrink-0 accent-[var(--link)]"
           />
-          <span className="font-mono text-[13px] text-foreground">{r.name}</span>
-          <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground" title={r.description || NO_DESCRIPTION}>{r.description || NO_DESCRIPTION}</span>
+          <span className="font-mono text-caption text-foreground">{r.name}</span>
+          <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground" title={r.description || NO_DESCRIPTION}>{r.description || NO_DESCRIPTION}</span>
         </ListRow>
       ))}
       <Section title={HOLDERS_REACH} action={<HelpTip label={HOLDERS_REACH} text={COMPOSE_HELP} />}>
-        {draft.composed.length === 0 && <p className="m-0 text-sm text-muted-foreground">{REACH_EMPTY}</p>}
+        {draft.composed.length === 0 && <p className="m-0 text-dense text-muted-foreground">{REACH_EMPTY}</p>}
         <div className="flex flex-wrap gap-1.5">
           {pills.map((p) => (
-            <span key={p.server + "/" + p.via} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-sm" data-reach-pill={p.server}>
+            <span key={p.server + "/" + p.via} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-dense" data-reach-pill={p.server}>
               <span className="font-mono text-foreground">{p.server}</span>
-              <span className="text-[13px] text-muted-foreground">{reachPill(p.tools, p.via)}</span>
+              <span className="text-caption text-muted-foreground">{reachPill(p.tools, p.via)}</span>
             </span>
           ))}
         </div>
-        {unread && <p className="m-0 text-[13px] text-muted-foreground">{REACH_UNREAD}</p>}
+        {unread && <p className="m-0 text-caption text-muted-foreground">{REACH_UNREAD}</p>}
       </Section>
-    </div>
-  );
-}
-
-export function PacksStep({ draft, packs, onToggle }: { draft: Draft; packs: PackRow[]; onToggle: (id: string) => void }) {
-  return (
-    <div className="flex max-w-[900px] flex-col gap-2">
-      {packs.map((p) => {
-        const on = draft.packs.includes(p.id);
-        return (
-          <ListRow key={p.id}>
-            {/* The app carries no Radix switch, so this is a button in the
-                switch role, the shape the editor's own switch paints. */}
-            <button
-              type="button"
-              role="switch"
-              aria-checked={on}
-              aria-label={packSwitch(p.name)}
-              onClick={() => onToggle(p.id)}
-              className={cn(
-                "inline-flex h-5 w-9 shrink-0 items-center rounded-full border p-px outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                on ? "border-link bg-link" : "border-border bg-background",
-              )}
-            >
-              <span aria-hidden="true" className={cn("size-3.5 rounded-full transition-transform", on ? "translate-x-4 bg-background" : "translate-x-0 bg-muted-foreground")} />
-            </button>
-            <span className="font-mono text-[13px] text-foreground">{p.name}</span>
-            {p.version && <span className="text-[13px] text-muted-foreground">{packVersion(p.version)}</span>}
-          </ListRow>
-        );
-      })}
     </div>
   );
 }
@@ -467,10 +429,6 @@ type ReviewProps = {
   // fixed are the rules of other sets that decide a tool of the picked
   // server, drawn in their own words.
   fixed: Record<string, FixedRule>;
-  packs: PackRow[];
-  // hadPacks says whether the Packs step ran, so the review names the packs
-  // only where the person was asked about them.
-  hadPacks: boolean;
   acts: Act[];
   commands: string;
 };
@@ -480,7 +438,7 @@ type ReviewProps = {
 // does, the approval named where a person decides.
 function ReachTable({ draft, apps, toolsOf, fixed }: Pick<ReviewProps, "draft" | "apps" | "toolsOf" | "fixed">) {
   const picked = apps.filter((a) => a.name === draft.server && grantMatchers(planOf(draft, a.name), toolNames(toolsOf(a.name))).length > 0);
-  if (!picked.length) return <p className="m-0 max-w-[75ch] text-sm text-muted-foreground" data-nothing-bound>{NOTHING_BOUND}</p>;
+  if (!picked.length) return <p className="m-0 max-w-[75ch] text-dense text-muted-foreground" data-nothing-bound>{NOTHING_BOUND}</p>;
   const cell = (plan: Plan, tool: string) => {
     const f = fixed[tool];
     if (f) return <span className={f.status === "hidden_policy" ? "text-danger" : "text-warn"}>{fixedWords(f.word, f.set)}</span>;
@@ -516,15 +474,15 @@ function ReachTable({ draft, apps, toolsOf, fixed }: Pick<ReviewProps, "draft" |
               <React.Fragment key={a.name}>
                 <TableRow className="bg-card" data-server-band={a.name}>
                   <TableCell colSpan={3} className="whitespace-normal">
-                    <b className="font-mono text-[13px] font-semibold text-foreground">{a.name}</b>
-                    <span className="ml-2 text-[13px] text-muted-foreground" data-review-reach>{(glob ? reviewEvery(names.length) : reviewCount(matchers.length, names.length)) + (clause ? ", " + clause : "")}</span>
+                    <b className="font-mono text-caption font-semibold text-foreground">{a.name}</b>
+                    <span className="ml-2 text-caption text-muted-foreground" data-review-reach>{(glob ? reviewEvery(names.length) : reviewCount(matchers.length, names.length)) + (clause ? ", " + clause : "")}</span>
                   </TableCell>
                 </TableRow>
                 {tools.filter((t) => inGrant(plan, t.name)).map((t) => (
                   <TableRow key={a.name + "/" + t.name} data-review-tool={t.name}>
-                    <TableCell className="truncate font-mono text-[13px] text-foreground" title={t.name}>{t.name}</TableCell>
-                    <TableCell className="truncate text-text-2" title={t.description || NO_TOOL_DESCRIPTION}>{t.description || NO_TOOL_DESCRIPTION}</TableCell>
-                    <TableCell className="whitespace-normal text-[13px]">{cell(plan, t.name)}</TableCell>
+                    <TableCell className="truncate font-mono text-caption text-foreground" title={t.name}>{t.name}</TableCell>
+                    <TableCell className="truncate text-text-2" title={t.description || NO_DESCRIPTION}>{t.description || NO_DESCRIPTION}</TableCell>
+                    <TableCell className="whitespace-normal text-caption">{cell(plan, t.name)}</TableCell>
                   </TableRow>
                 ))}
               </React.Fragment>
@@ -536,14 +494,13 @@ function ReachTable({ draft, apps, toolsOf, fixed }: Pick<ReviewProps, "draft" |
   );
 }
 
-export function ReviewStep({ draft, apps, toolsOf, fixed, packs, hadPacks, acts, commands }: ReviewProps) {
-  const picked = packs.filter((p) => draft.packs.includes(p.id));
+export function ReviewStep({ draft, apps, toolsOf, fixed, acts, commands }: ReviewProps) {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-baseline gap-3">
-        <b className="font-mono text-base font-semibold text-foreground">{storedName(draft)}</b>
+        <b className="font-mono text-body leading-6 font-semibold text-foreground">{storedName(draft)}</b>
         <RoleKindBadge role={{ kind: draft.kind }} />
-        {draft.description.trim() && <span className="text-sm text-muted-foreground">{draft.description.trim()}</span>}
+        {draft.description.trim() && <span className="text-dense text-muted-foreground">{draft.description.trim()}</span>}
       </div>
 
       {draft.kind === "application" && (
@@ -553,31 +510,20 @@ export function ReviewStep({ draft, apps, toolsOf, fixed, packs, hadPacks, acts,
       )}
       {draft.kind === "business" && (
         <Section title={COMPOSES_ROW}>
-          <p className="m-0 max-w-[75ch] text-sm text-text-2" data-composes>
+          <p className="m-0 max-w-[75ch] text-dense text-text-2" data-composes>
             {draft.composed.length ? list(draft.composed) : NOTHING_COMPOSED}
           </p>
         </Section>
       )}
-      {draft.kind === "approver" && <p className="m-0 max-w-[75ch] text-sm text-text-2" data-approver-next>{APPROVER_NEXT}</p>}
-      {hadPacks && (
-        <Section title={PACKS_ROW}>
-          <p className="m-0 text-sm text-text-2" data-packs-row>{picked.length ? list(picked.map((p) => p.name)) : NO_PACK_PICKED}</p>
-          {picked.length > 0 && <p className="m-0 max-w-[80ch] text-[13px] leading-snug text-muted-foreground" data-packs-after>{PACKS_AFTER}</p>}
-        </Section>
-      )}
+      {draft.kind === "approver" && <p className="m-0 max-w-[75ch] text-dense text-text-2" data-approver-next>{APPROVER_NEXT}</p>}
 
       <Section title={REVIEW_HAPPEN}>
         <Acts acts={acts} numbered />
       </Section>
 
-      <div className="flex items-start gap-1.5">
-        <div className="min-w-0 flex-1">
-          <Fold title={REVIEW_COMMANDS}>
-            <Code className="rounded-none border-0">{commands}</Code>
-          </Fold>
-        </div>
-        <HelpTip label={REVIEW_COMMANDS} text={COMMANDS_HELP} className="mt-1.5" />
-      </div>
+      <Fold title={REVIEW_COMMANDS}>
+        <Code className="rounded-none border-0">{commands}</Code>
+      </Fold>
     </div>
   );
 }
@@ -586,30 +532,20 @@ type DoneProps = {
   acts: Act[];
   // name is the role the publish made.
   name: string;
-  failed: Act | null;
   running: boolean;
 };
 
 // DoneStep is what landed after the publish: the rows in the state each
-// one reached, and above them the one sentence the run ends on. A pack that
-// failed to bind after the publish says where to finish it.
-export function DoneStep({ acts, name, failed, running }: DoneProps) {
-  const landed = acts.filter((a) => a.state === "done").length;
+// one reached, and above them the one sentence the run ends on.
+export function DoneStep({ acts, name, running }: DoneProps) {
   return (
     <div className="flex flex-col gap-4">
-      {failed ? (
-        <>
-          <div role="status" className="max-w-[80ch] rounded-md border border-warn/40 bg-warn-bg px-4 py-3 text-sm leading-relaxed text-foreground" data-half-landed>
-            <b className="font-semibold">{halfLanded(landed, acts.length)}</b> {failed.section ? finishOn(failed.section) : ""}
-          </div>
-          <ProblemBlock problem={{ subject: failed.subject || "", text: failed.error || "", unreachable: failed.error === UNREACHABLE_STEP }} />
-        </>
-      ) : !running && name ? (
-        <p className="m-0 flex items-center gap-1.5 text-sm text-ok" data-live-role>
+      {!running && name && (
+        <p className="m-0 flex items-center gap-1.5 text-dense text-ok" data-live-role>
           {liveRole(name)}
           <HelpTip label={name} text={AFTER_CREATE_HELP} />
         </p>
-      ) : null}
+      )}
       <Acts acts={acts} />
     </div>
   );

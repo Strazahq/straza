@@ -89,12 +89,14 @@ type summaryPayload struct {
 }
 
 // checksPayload is the counts a stamp stored, the revision they belong to,
-// and when the check ran.
+// and when the check ran. Passed is nil for a stamp stored before the
+// passed count was, so the answer leaves it out rather than say 0.
 type checksPayload struct {
 	Refused   int    `json:"refused"`
 	Risks     int    `json:"risks"`
 	Warnings  int    `json:"warnings"`
 	Unchecked int    `json:"unchecked"`
+	Passed    *int   `json:"passed,omitempty"`
 	Revision  int    `json:"revision"`
 	CheckedAt string `json:"checked_at"`
 }

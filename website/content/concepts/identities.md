@@ -22,7 +22,7 @@ Every governed action belongs to a [session]({{< relref "concepts/machines-and-s
 A person is a human user. On enterprise they sign in at your [identity provider]({{< relref "evaluate/identity-and-your-iga.md" >}}), and on standalone strazad signs them in with a password. Only a person can enroll a [machine]({{< relref "concepts/machines-and-sessions.md" >}}), open the console or the self-service page, and decide an [approval]({{< relref "concepts/approvals-model.md" >}}). An agent's own sign-in is refused on the admin API. Straza checks these rights on the user itself and ignores the user's [roles]({{< relref "concepts/roles-and-access.md" >}}), so an admin or approver role assigned to an agent by mistake gives it none of them.
 
 
-On enterprise Straza refuses a person's sign-in at the identity provider until your IGA has sent that person over SCIM. On standalone the first start creates the admin `admin` and prints its password once, and an admin creates everyone else. [Identity and your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}) explains which system checks what.
+On enterprise Straza refuses a person's sign-in at the identity provider until your IGA has sent that person over SCIM. Where Straza takes people from Microsoft Entra ID, the person arrives instead when Straza first reads them in a role's group in Entra. On standalone the first start creates the admin `admin` and prints its password once, and an admin creates everyone else. [Identity and your IGA]({{< relref "evaluate/identity-and-your-iga.md" >}}) explains which system checks what.
 
 ## An agent
 

@@ -158,10 +158,12 @@ func (a *App) startLive(ctx context.Context, st store.LiveState, announce map[st
 // applyHead runs steps 2 to 5 from what a publish changed, before any read
 // of live state: it stops the servers the publish changed or removed as of
 // since, drops their access rows and every row of a role whose access
-// changed or went, adopts the snapshot the publish built with the nudge and
-// the invalidation, and drops the sessions of the roles whose closure
-// changed. A publish that names no server does not wait for the manager's
-// lock.
+// changed or went, adopts the snapshot the publish built with the
+// invalidation, and drops the sessions of the roles whose closure changed.
+// Then it publishes the policy nudge for that snapshot and the role
+// broadcast when a role's closure changed or a role went. Only the server
+// that made the publish runs it, so each goes out once. A publish that names
+// no server does not wait for the manager's lock.
 func (a *App) applyHead(ctx context.Context, h *publishHead, since time.Time) error {
 	if len(h.Servers) > 0 {
 		if err := a.manager.StopNamed(ctx, h.Servers, since); err != nil {
@@ -172,7 +174,6 @@ func (a *App) applyHead(ctx context.Context, h *publishHead, since time.Time) er
 	a.gateway.Narrow(func(b gwBinding) bool { return !servers[b.App] && !roles[b.Role] })
 	if h.Snapshot != nil {
 		a.snapshots.Adopt(*h.Snapshot)
-		a.pushPolicyNudge(map[string]any{"snapshot": h.Snapshot.ID})
 		a.gateway.Invalidate()
 	}
 	a.resolver.Bump()
@@ -181,6 +182,14 @@ func (a *App) applyHead(ctx context.Context, h *publishHead, since time.Time) er
 		moved[r] = true
 	}
 	a.subjects.dropHolding(moved)
+	// A session renews as soon as it hears a nudge, so both go out only
+	// after role resolution answers the publish.
+	if h.Snapshot != nil {
+		a.pushPolicyNudge(map[string]any{"snapshot": h.Snapshot.ID})
+	}
+	if len(moved) > 0 {
+		a.pushRolesBroadcast()
+	}
 	return nil
 }
 
@@ -258,7 +267,7 @@ type settledRoles struct {
 }
 
 // settleRoles resolves the roles of userID and caches the subject build
-// makes from them for sessionID, with the session facts check-in read and
+// makes from them for sessionID, with the session facts in facts and
 // the hash of the roles' ids that the minted token carries, only once this
 // replica applied the config they come from. It reads the config
 // generation after the roles, and when the store holds one this replica has
@@ -268,10 +277,8 @@ type settledRoles struct {
 // otherwise.
 // After checkInTries tries it answers checkInRolesMoving, and a failed apply
 // answers checkInApplyFailed, each with its cause. A failed resolution
-// answers its error and no sentence, and so does a facts read that failed:
-// facts answers the session facts for the resolved roles' ids, so the
-// cache entry holds them from its first read.
-func (a *App) settleRoles(ctx context.Context, sessionID, userID string, facts func(roleIDs []string) (sessionFacts, error), build func([]store.Role) policy.Subject) (settledRoles, string, error) {
+// answers its error and no sentence.
+func (a *App) settleRoles(ctx context.Context, sessionID, userID string, facts sessionFacts, build func([]store.Role) policy.Subject) (settledRoles, string, error) {
 	for try := 1; ; try++ {
 		epoch := a.resolver.Epoch()
 		roles, until, err := a.resolver.ResolveRolesUntil(ctx, userID, a.subjects.now())
@@ -287,12 +294,8 @@ func (a *App) settleRoles(ctx context.Context, sessionID, userID string, facts f
 			for i, role := range roles {
 				ids[i] = role.ID
 			}
-			f, err := facts(ids)
-			if err != nil {
-				return settledRoles{}, "", err
-			}
 			sub := build(roles)
-			e := cachedSubject{sub: sub, facts: f, until: until, rolesHash: authn.RolesHash(ids)}
+			e := cachedSubject{sub: sub, facts: facts, until: until, rolesHash: authn.RolesHash(ids)}
 			held := func() bool { return a.resolver.Epoch() == epoch }
 			if prev, had, ok := a.subjects.putIf(sessionID, e, held); ok {
 				return settledRoles{roles: roles, subject: sub, prev: prev, hadPrev: had}, "", nil

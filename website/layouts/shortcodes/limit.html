@@ -1,0 +1,16 @@
+{{- /* One limit on Known limits, set under its heading: who can reach it as a
+pill, its roadmap status as a chip, then the body. roadmap names an anchor of
+the roadmap page, such as january-2027 or planned, and links the chip there.
+Without roadmap the chip has no link and reads as having no date.
+{{< limit who="whoever holds a copy of the token" status="no date" >}}A token acts...{{< /limit >}} */ -}}
+{{- $who := .Get "who" -}}
+{{- $status := .Get "status" -}}
+{{- if not (and $who $status) }}{{ errorf "%s: limit needs who and status, such as who=\"the person at that machine\" status=\"no date\"." .Position }}{{ end -}}
+<p class="kl-meta"><span class="kl-who"><svg class="kl-who-i" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="8" cy="5" r="3" fill="currentColor"/><path d="M2.5 14.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5z" fill="currentColor"/></svg><span class="sr-only">Who can reach it: </span><span>{{ $who }}</span></span>
+{{- with .Get "roadmap" }}
+{{- $road := site.GetPage "project/roadmap.md" }}
+<a class="chip {{ cond (eq . "planned") "idea" "next" }}" href="{{ $road.RelPermalink }}#{{ . }}"><span class="sr-only">Roadmap: </span>{{ $status }}</a>
+{{- else }}
+<span class="chip nodate"><span class="sr-only">Roadmap: </span>{{ $status }}</span>
+{{- end }}</p>
+{{ partial "inner.html" (dict "Page" .Page "Inner" .Inner) }}

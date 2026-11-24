@@ -39,9 +39,9 @@ func (allowAll) Decide(Normalized) policy.Decision {
 
 // RunHook is the hook entrypoint: read stdin → detect dialect → normalize →
 // (session.start: start the session in the Straza background service and
-// inject packs) → (every other event: the service decides) → encode a
-// dialect-appropriate response. A deny is expressed in the response encoding
-// (exit code / JSON). Fail-closed on infrastructure errors.
+// inject the governance banner) → (every other event: the service decides)
+// → encode a dialect-appropriate response. A deny is expressed in the
+// response encoding (exit code / JSON). Fail-closed on infrastructure errors.
 func RunHook(hio HookIO) error {
 	store, err := OpenStore()
 	if err != nil {
@@ -117,7 +117,7 @@ func runHook(hio HookIO, store *Store, svc *localapi.Client, decider Decider) er
 			slog.Bool("delegate", n.AgentID != "" || n.AgentType != ""))
 	}
 
-	// session.start: start the session, then inject packs as additional context.
+	// session.start: start the session, then inject the banner as additional context.
 	if n.Event.Kind == policy.EventSessionStart && svc != nil {
 		return handleSessionStart(hio, store, svc, harness, n)
 	}
@@ -127,13 +127,12 @@ func runHook(hio HookIO, store *Store, svc *localapi.Client, decider Decider) er
 }
 
 // handleSessionStart starts or reuses the window's session in the service and
-// emits the governance banner plus the role-bound knowledge packs as harness
-// additional-context. A failure fails the session closed with the sentence
-// that says why (the model relays it).
+// emits the governance banner as harness additional-context. A failure fails
+// the session closed with the sentence that says why (the model relays it).
 func handleSessionStart(hio HookIO, store *Store, svc *localapi.Client, harness string, n Normalized) error {
 	start := time.Now()
 	tl := store.Trace()
-	ans, err := svc.StartSession(context.Background(), localapi.SessionRequest{Harness: windowOf(n)})
+	ans, err := svc.StartSession(context.Background(), localapi.SessionRequest{Harness: windowOf(n), Folder: sessionFolder(n.Event.Workspace)})
 	if err != nil {
 		journalDecision(tl, n, policy.Decision{Effect: policy.EffectDeny},
 			decisionFacts{start: start, failClosed: true})
@@ -143,11 +142,7 @@ func handleSessionStart(hio HookIO, store *Store, svc *localapi.Client, harness 
 		decisionFacts{start: start, snapshot: ans.SnapshotID})
 	info := SessionInfo{User: ans.User, Roles: ans.Roles, SnapshotID: ans.SnapshotID,
 		Attestation: ans.Attestation, ServerURL: ans.ServerURL, Capture: ans.Capture, StartText: ans.StartText}
-	context := GovernanceBanner(info)
-	if pc := PackContext(ans.Packs); pc != "" {
-		context += "\n\n" + pc
-	}
-	return encodeSessionStart(hio, harness, n.NativeEvent, context, GovernanceUserLine(info))
+	return encodeSessionStart(hio, harness, n.NativeEvent, GovernanceBanner(info), GovernanceUserLine(info))
 }
 
 // GovernanceUserLine is the human-visible one-liner (systemMessage) shown in
@@ -242,7 +237,8 @@ type claudeResponse struct {
 	} `json:"hookSpecificOutput"`
 }
 
-// encodeSessionStart emits knowledge packs as harness additional context.
+// encodeSessionStart emits the session-start context as harness additional
+// context.
 // Claude Code / Codex read hookSpecificOutput.additionalContext; Gemini reads
 // a top-level additionalContext (strict JSON). userLine, when non-empty, is
 // ALSO shown to the human via Claude Code's systemMessage: the agent knowing

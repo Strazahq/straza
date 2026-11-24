@@ -143,9 +143,12 @@ func (a *App) decideCall(ctx context.Context, c gatewayCall) gatewayVerdict {
 		key, rps = draftingRate(c.claims.Session)
 	}
 	msg := ""
-	if !a.gateway.limiter.Allow(key, rps) {
+	switch {
+	case !a.gateway.limiter.Allow(key, rps):
 		msg = fmt.Sprintf("Straza: rate limit exceeded for the MCP server %q (%.0f rps). Wait a few seconds, then try the call once more. If it is denied again, tell the user.", target.app, rps)
-	} else if c.describe == nil && target.app == nativeAppName && target.tool == nativeToolDraftSubmit {
+	case !draftingTool(target):
+		msg = a.userRateRefusal(c.claims.Subject, target.app, rps)
+	case c.describe == nil && target.app == nativeAppName && target.tool == nativeToolDraftSubmit:
 		msg = a.submitRateRefusal(c.claims.Subject)
 	}
 	if msg != "" {
@@ -217,9 +220,9 @@ func (a *App) decideCall(ctx context.Context, c gatewayCall) gatewayVerdict {
 		// described call without arguments asks for a ticket that binds
 		// the tool alone, so it has none to check.
 		if c.grant == nil && (c.describe == nil || c.args != nil) {
-			if detail := schemaMismatch(tier1.inputSchema(entry), callArgs); detail != "" {
+			if detail := boundedSchemaMismatch(tier1.inputSchema(entry), callArgs); detail != "" {
 				msg := fmt.Sprintf(argumentsMismatchMsg, c.name, detail)
-				rec.decision = refusedDecision(decision, msg)
+				rec.decision = refusedDecision(decision, fmt.Sprintf(argumentsMismatchRecord, c.name))
 				return refusedVerdict(msg, a.auditCallRefusal(ctx, c, rec))
 			}
 		}

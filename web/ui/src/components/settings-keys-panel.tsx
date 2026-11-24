@@ -45,16 +45,16 @@ import { cn } from "@/lib/utils";
 // promoted, two key reload intervals, so every replica publishes it first.
 export const PROMOTE_AFTER_MS = 60_000;
 
-const MUTED = "text-sm text-muted-foreground";
+const MUTED = "text-dense text-muted-foreground";
 
 function Step({ n, done, title, children }: { n: number; done: boolean; title: string; children?: React.ReactNode }) {
   return (
     <li className="grid grid-cols-[24px_1fr] items-start gap-2.5" data-step={n} data-done={done || undefined}>
-      <span className={cn("mt-0.5 grid size-[22px] place-items-center rounded-full border text-xs font-semibold", done ? "border-ok bg-ok text-white" : "border-link text-link")}>
+      <span className={cn("mt-0.5 grid size-[22px] place-items-center rounded-full border text-caption leading-4 font-semibold", done ? "border-ok bg-ok text-white" : "border-link text-link")}>
         {done ? <CheckIcon className="size-3.5" /> : n}
       </span>
       <div className="flex min-w-0 flex-col gap-1.5">
-        <p className="text-sm font-semibold text-foreground">{title}</p>
+        <p className="text-dense font-semibold text-foreground">{title}</p>
         {children}
       </div>
     </li>
@@ -67,9 +67,9 @@ function Step({ n, done, title, children }: { n: number; done: boolean; title: s
 function Copyable({ label, value, copied, attr }: { label?: string; value: string | null | undefined; copied: string; attr: string }) {
   if (!value) return null;
   return (
-    <span className="flex flex-wrap items-center gap-2 text-[13px]" {...{ [attr]: value }}>
+    <span className="flex flex-wrap items-center gap-2 text-caption" {...{ [attr]: value }}>
       {label && <span className="text-muted-foreground">{label}</span>}
-      <code className="break-all rounded border border-border bg-muted px-1.5 font-mono">{value}</code>
+      <code className="break-all rounded-md border border-border bg-muted px-1.5 font-mono">{value}</code>
       <Button variant="outline" size="xs" onClick={() => copyText(value, copied)}>{COPY}</Button>
     </span>
   );
@@ -104,8 +104,8 @@ export function StagedPanel({ staged, active, blueprints, thumb, downloaded, onD
   const wait = Math.max(0, Math.ceil((readyAt - now) / 1000));
   const entra = usesEntra(blueprints);
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-link bg-card px-4 py-3" data-rotation="staged">
-      <h3 className="text-[15px] font-semibold">{ROTATING}</h3>
+    <section className="flex flex-col gap-3 rounded-md border border-link bg-card px-4 py-3" data-rotation="staged">
+      <h3 className="text-body font-semibold">{ROTATING}</h3>
       <ol className="flex flex-col gap-3">
         <Step n={1} done title={STEP_STAGED}><p className={MUTED}>{stagedLine(staged.kid, active ? active.kid : null)}</p></Step>
         {entra && (
@@ -114,7 +114,7 @@ export function StagedPanel({ staged, active, blueprints, thumb, downloaded, onD
             {(blueprints || []).map((b) => <Copyable key={b} label={BLUEPRINT} value={b} copied={BLUEPRINT_COPIED} attr="data-blueprint" />)}
             <span className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant={downloaded ? "outline" : "default"} onClick={onDownload}>{DOWNLOAD_CERT}</Button>
-              <span className="text-[13px] text-muted-foreground">{certFile(staged.kid)}</span>
+              <span className="text-caption text-muted-foreground">{certFile(staged.kid)}</span>
             </span>
             <Copyable label={ENTRA_LISTS} value={thumb} copied={THUMB_COPIED} attr="data-thumbprint" />
           </Step>
@@ -143,10 +143,10 @@ type RetiringProps = {
 // retiring: remove its certificate from the blueprint, then link agents.
 // Without Entra it only says when the previous key retires.
 export function RetiringPanel({ active, retiring, blueprints, thumb, leaves, removed, onRemoved, onUsers }: RetiringProps) {
-  const title = <h3 className="text-[15px] font-semibold">{active ? promotedTitle(active.kid) : STEP_PROMOTED}</h3>;
+  const title = <h3 className="text-body font-semibold">{active ? promotedTitle(active.kid) : STEP_PROMOTED}</h3>;
   if (!usesEntra(blueprints)) {
     return (
-      <section className="flex flex-col gap-3 rounded-lg border border-link bg-card px-4 py-3" data-rotation="retiring">
+      <section className="flex flex-col gap-3 rounded-md border border-link bg-card px-4 py-3" data-rotation="retiring">
         {title}
         <ol className="flex flex-col gap-3">
           <Step n={2} done title={STEP_PROMOTED}><p className={MUTED}>{PROMOTED_LINE + " " + retiresLine(retiring.kid, leaves)}</p></Step>
@@ -155,7 +155,7 @@ export function RetiringPanel({ active, retiring, blueprints, thumb, leaves, rem
     );
   }
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-link bg-card px-4 py-3" data-rotation="retiring">
+    <section className="flex flex-col gap-3 rounded-md border border-link bg-card px-4 py-3" data-rotation="retiring">
       {title}
       <ol className="flex flex-col gap-3">
         <Step n={3} done title={STEP_PROMOTED}><p className={MUTED}>{PROMOTED_LINE}</p></Step>
@@ -164,7 +164,7 @@ export function RetiringPanel({ active, retiring, blueprints, thumb, leaves, rem
           <span className="flex flex-wrap items-center gap-2">
             <Copyable value={thumb} copied={THUMB_COPIED} attr="data-thumbprint" />
             {removed
-              ? <span className="text-[13px] text-muted-foreground">{MARKED_REMOVED}</span>
+              ? <span className="text-caption text-muted-foreground">{MARKED_REMOVED}</span>
               : <Button variant="outline" size="xs" onClick={onRemoved}>{MARK_REMOVED}</Button>}
           </span>
         </Step>

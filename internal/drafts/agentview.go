@@ -39,7 +39,7 @@ func (v Verdict) ForAgent() AgentVerdict {
 		Refused: []Finding{}, Risks: []Finding{}, Warnings: []Finding{}, Unchecked: append([]Finding{}, v.Unchecked...)}
 	for _, f := range v.Refused {
 		if f.Code == codeStale {
-			f.Sentence = visible(f.Object) + " changed after this draft was checked."
+			f.Sentence = objectWords(f.Object) + " changed after this draft was checked."
 		}
 		out.Refused = append(out.Refused, f)
 	}

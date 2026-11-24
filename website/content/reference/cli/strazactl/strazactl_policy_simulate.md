@@ -2,7 +2,7 @@
 title: strazactl policy simulate
 description: Ask what a call would do for a subject, against the live policies
 pagetype: reference
-weight: 72
+weight: 66
 draft: false
 sources:
   - cmd/strazactl

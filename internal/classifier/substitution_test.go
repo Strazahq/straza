@@ -11,8 +11,10 @@ import (
 )
 
 // TestHeredocScanLinear holds a 1 MiB command of k assignments, one shell and
-// k heredoc operators under a second: the reader of the heredocs is judged
-// once per command, not once per heredoc, which took 37 seconds at this size.
+// k heredoc operators under five seconds: the reader of the heredocs is
+// judged once per command, not once per heredoc, which takes 37 seconds at
+// this size. The bound leaves room for a loaded 2-core machine under the
+// race detector, where the linear scan takes over a second.
 func TestHeredocScanLinear(t *testing.T) {
 	const k = 87000
 	in := strings.Repeat("a=1 ", k) + "bash " + strings.Repeat("<<'E' ", k) + "\n" + strings.Repeat("E\n", k)
@@ -20,8 +22,8 @@ func TestHeredocScanLinear(t *testing.T) {
 	if _, err := NewHeuristic().Classify(context.Background(), policy.Event{Tool: policy.ToolShellExec, Command: in}); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > time.Second {
-		t.Fatalf("a %d byte command took %v, want under a second", len(in), d)
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("a %d byte command took %v, want under five seconds", len(in), d)
 	}
 }
 

@@ -48,7 +48,7 @@ The server's manifest declares whose credential the upstream sees. This page cov
 
 
 {{< console >}}
-In the Add MCP server wizard, pick **One shared secret for this server** on the Credential step and type the secret there. For a server that already runs, change the credential on its page:
+In the Add MCP server wizard, pick **One shared secret** on the Credential step and type the secret there. For a server that already runs, change the credential on its page:
 
 {{< clicks "MCP servers" "scout-tools" "Overview" "Change" >}}
 
@@ -100,7 +100,7 @@ A `command` or `oci` server starts with `PATH`, `HOME` and `LANG` from strazad, 
 
 {{< shot name="server-secret-set" caption="The box that opens under **Stored here**, where you type the secret and press **Store it**." >}}
 
-A role's override goes on the row Per-role secrets: press **Add one for a role**, pick the role under `Pick an application role`, type its secret and press **Store it**.
+A role's override goes on the row Per-role secrets: press **Add for a role**, pick the role under `Pick an application role`, type its secret and press **Store it**.
 {{< /console >}}
 
 
@@ -166,7 +166,7 @@ An override for a business role is refused with a sentence that ends in `Set the
 
 {{< shot name="server-overview" caption="The **Server authentication** card, with the type, how the secret is sent and its fingerprint under **Stored here**." >}}
 
-The Server authentication card shows the type and how the secret is sent. Its row Stored here gives the time the secret was set, its fingerprint and `Never shown again.`, and its row Per-role secrets gives one line per role with the fingerprint. On a server that pins its objects, the row Listing credential reads `Stored, sealed` once one is stored. No row shows a value.
+The Server authentication card shows the type and how the secret is sent. Its row Stored here gives the time the secret was set and its fingerprint, and its row Per-role secrets gives one line per role with the fingerprint. On a server that pins its objects, the row Listing credential reads `Stored` once one is stored. No row shows a value.
 {{< /console >}}
 
 
@@ -231,7 +231,7 @@ Straza sends the listing credential on its listing call and on nothing else. No 
 
 {{< clicks "MCP servers" "ghapp" "Overview" "Set one" >}}
 
-The Server authentication card has the row **Listing credential** under **Stored here**. Before the pin it reads `Pin repos first. ghapp has nothing to list for Straza until then.`, with your own server's name and plural, and after it `Not set.` with **Set one**. A value the server already runs with goes in the box after `or paste`, and **Store** sends it. **Generate** fills the box with a random value made in the browser, shown in clear with **Copy** and `Put this value in ghapp's config and restart ghapp, then press Store.` Store it only once the server runs with it, because storing starts a listing that fails until then. Once one is stored, the row reads `Stored, sealed` with **Set it again** and **Remove**, and with the fingerprint until you leave the page.
+The Server authentication card has the row **Listing credential** under **Stored here**. Before the pin it reads `Pin repos first.`, with your own server's plural, and after it `Not set.` with **Set one**. A value the server already runs with goes in the box after `or paste`, and **Store** sends it. **Generate** fills the box with a random value made in the browser, shown in clear with **Copy** and `Put this value in ghapp's config and restart ghapp, then press Store.` Store it only once the server runs with it, because storing starts a listing that fails until then. Once one is stored, the row reads `Stored` with **Set it again** and **Remove**, and with the fingerprint until you leave the page.
 {{< /console >}}
 
 {{< cli >}}

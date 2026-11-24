@@ -67,8 +67,8 @@ describe("the listing credential row", () => {
   // Each case is a server's shape and what its row says before the pin and
   // behind its help icon, in that server's own words.
   it.each([
-    ["ghapp", GHAPP, "Pin repos first. ghapp has nothing to list for Straza until then.", "A second token for ghapp's MCP endpoint, which ghapp accepts for repo_list only. Straza calls repo_list with it in the background to keep the list of repos."],
-    ["postgres", POSTGRES, "Pin databases first. postgres has nothing to list for Straza until then.", "A second token for postgres's MCP endpoint, which postgres accepts for list_databases only. Straza calls list_databases with it in the background to keep the list of databases."],
+    ["ghapp", GHAPP, "Pin repos first.", "A second token for ghapp's MCP endpoint, which ghapp accepts for repo_list only. Straza calls repo_list with it in the background to keep the list of repos."],
+    ["postgres", POSTGRES, "Pin databases first.", "A second token for postgres's MCP endpoint, which postgres accepts for list_databases only. Straza calls list_databases with it in the background to keep the list of databases."],
   ])("explains why %s's row cannot be set before the pin", async (_name, s, line, help) => {
     render(<Row app={appOf(s)} answer={unpinned(s)} />);
     expect(screen.getByText("Listing credential").tagName).toBe("DT");
@@ -96,7 +96,7 @@ describe("the listing credential row", () => {
     expect(field.querySelector("[data-generated]")).toBeNull();
     expect(field.textContent).toContain("or paste");
     expect((within(field).getByLabelText("listing credential value") as HTMLInputElement).type).toBe("password");
-    expect(field.textContent).toContain("Put the same value in ghapp's config, where it accepts the token for repo_list. Straza stores it sealed, never sends it on an agent's call, and never shows it again.");
+    expect(field.textContent).toContain("Put the same value in ghapp's config. Straza never sends it on an agent's call or shows it again.");
     await userEvent.click(within(field).getByRole("button", { name: "Cancel" }));
     expect(row().textContent).toBe("Not set. Set one");
   });
@@ -176,18 +176,18 @@ describe("the listing credential row", () => {
     const field = await openField();
     await userEvent.type(within(field).getByLabelText("listing credential value"), "x");
     await userEvent.click(within(field).getByRole("button", { name: "Store" }));
-    await waitFor(() => expect(within(row()).getByRole("alert").textContent).toBe("The server refused it: ghapp pins no object type, so a listing credential has no use. Fix what it names, then try again."));
+    await waitFor(() => expect(within(row()).getByRole("alert").textContent).toBe("Straza refused it: ghapp pins no object type, so a listing credential has no use. Fix what it names, then try again."));
     expect(document.querySelector("[data-listing-field]")).not.toBeNull();
     expect(notify.ok).not.toHaveBeenCalled();
   });
 
   it("shows a stored credential with Set it again and Remove, and removes it after a confirm", async () => {
     render(<Row app={appOf(POSTGRES)} answer={pinned(POSTGRES, "set")} />);
-    expect(row().textContent).toBe("Stored, sealed Set it againRemove");
+    expect(row().textContent).toBe("Stored Set it againRemove");
     await userEvent.click(within(row()).getByRole("button", { name: "Remove" }));
     const d = await screen.findByRole("alertdialog");
     expect(within(d).getByRole("heading").textContent).toBe("Remove the listing credential of postgres?");
-    expect(d.textContent).toContain("Straza can no longer list postgres's databases until you set one again. A failed listing changes nothing, so the list of databases stays as the last good listing left it.");
+    expect(d.textContent).toContain("Straza can no longer list postgres's databases until you set one again. The list keeps its last good listing.");
     expect(removeListingCredential).not.toHaveBeenCalled();
     await userEvent.click(within(d).getByRole("button", { name: "Remove credential" }));
     await waitFor(() => expect(removeListingCredential).toHaveBeenCalledWith("app-postgres"));
@@ -202,6 +202,6 @@ describe("the listing credential row", () => {
     await userEvent.click(within(field).getByRole("button", { name: "Store" }));
     await waitFor(() => expect(document.querySelector("[data-listing-field]")).toBeNull());
     rerender(<Row app={appOf(GHAPP)} answer={pinned(GHAPP, "set")} />);
-    expect(row().textContent).toBe("Stored, sealed 4be1… Set it againRemove");
+    expect(row().textContent).toBe("Stored 4be1… Set it againRemove");
   });
 });

@@ -3,12 +3,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Attention, attentionItems } from "./overview-attention";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { type AppRow, type SinkRow, replaySink } from "@/lib/api";
+import { type AppRow, type RoleRow, type SinkRow, replaySink } from "@/lib/api";
+import { staleLine } from "@/lib/entra-words";
 import { NOTHING_TO_DO, configRows, draftsLine, postureOf, replayWord, replayedWords } from "@/lib/config-words";
 import type { SigningKeyRow } from "@/lib/keys-api";
 import { certExpiredLine, certExpiringLine, stagedWaitingLine } from "@/lib/keys-words";
 import { KEYS_TAB } from "@/lib/settings-words";
-import { navigate } from "@/lib/router";
+import { navigate, pathFor } from "@/lib/router";
 import { relTimeText } from "@/lib/words";
 import { notify } from "@/lib/notify";
 
@@ -49,12 +50,28 @@ describe("Needs attention", () => {
     expect(items[2].tone).toBe("warn");
   });
 
+  it("opens Configuration from the relaxed line, on the row itself when the line names one setting", async () => {
+    const two = postureOf(configRows({ public_url: "http://box:8420", tls: false, governance: { min_attestation: "none" } })).relaxed;
+    const view = mount({ ...QUIET, relaxed: two });
+    const link = (document.querySelector('[data-attention="relaxed"]') as HTMLElement).querySelector("a") as HTMLElement;
+    expect(link.getAttribute("href")).toBe(pathFor("settings", ["configuration"]));
+    await userEvent.click(link);
+    expect(navigate).toHaveBeenCalledWith("settings", ["configuration"]);
+    view.unmount();
+
+    const one = postureOf(configRows({ public_url: "https://box", tls: false, governance: { min_attestation: "none" } })).relaxed;
+    expect(one.map((r) => r.id)).toEqual(["floor"]);
+    mount({ ...QUIET, relaxed: one });
+    await userEvent.click((document.querySelector('[data-attention="relaxed"]') as HTMLElement).querySelector("a") as HTMLElement);
+    expect(navigate).toHaveBeenCalledWith("settings", ["configuration", "floor"]);
+  });
+
   it("says how many drafts wait for review, names the oldest's proposer, and opens Drafts (CD-2)", async () => {
     mount({ ...QUIET, drafts: DRAFTS });
     const row = document.querySelector('[data-attention="drafts"]') as HTMLElement;
-    expect(row.textContent).toContain("3 drafts wait for review, the oldest from joe-java-developer-agent, drafted " + relTimeText(OLDEST) + ".");
-    expect(draftsLine(1, false, "you", "5 m ago")).toBe("1 draft waits for review, the oldest from you, drafted 5 m ago.");
-    expect(draftsLine(200, true, "alice", "1 h ago")).toBe("200 or more drafts wait for review, the oldest from alice, drafted 1 h ago.");
+    expect(row.textContent).toContain("3 drafts wait for review. Oldest: joe-java-developer-agent, " + relTimeText(OLDEST) + ".");
+    expect(draftsLine(1, false, "you", "5 m ago")).toBe("1 draft waits for review. Oldest: you, 5 m ago.");
+    expect(draftsLine(200, true, "alice", "1 h ago")).toBe("200 or more drafts wait for review. Oldest: alice, 1 h ago.");
     await userEvent.click(row.querySelector("button, a") as HTMLElement);
     expect(navigate).toHaveBeenCalledWith("drafts", []);
     expect(attentionItems({ ...QUIET, drafts: { ...DRAFTS, count: 0 } })).toEqual([]);
@@ -127,5 +144,41 @@ describe("Needs attention", () => {
       const [item] = attentionItems({ ...QUIET, keys: [key({ certificate_expires_at: at12 })] });
       expect(item.text).toBe(certExpiringLine("6f1c2f0e-3b7a-4d19-9a55-2f4c8e1b7d10", 12, at12));
     });
+  });
+});
+
+describe("the lines of the role groups in Entra", () => {
+  const HOURS3 = new Date(Date.now() - 3 * 3600 * 1000 - 60_000).toISOString();
+  const cert = "Entra refused the Straza service app 5b7d9f1a (AADSTS700027), because the app holds no certificate of the client assertion key 4f2a9c1e.";
+  const held = "Entra's group lists 14 of this role's 20 holders from Entra no longer, which is more than the removal guard lets through, so nobody was removed. Check the group in Entra. If the removals are right, apply them.";
+  const gh: RoleRow = { id: "r-gh", name: "github-dev", kind: "application", entra: { group_id: "g", state: "held", error: held } };
+  const fin: RoleRow = { id: "r-fin", name: "finance-readers", kind: "application", entra: { group_id: "g2", state: "linked" } };
+
+  it("says how long Entra was not read, why, what holders keep, and opens the certificate's tab for a certificate refusal", async () => {
+    const items = attentionItems({ ...QUIET, entraRead: { enabled: true, held: 0, last_good: HOURS3, stale_since: HOURS3, error: cert } });
+    expect(items.map((i) => i.key)).toEqual(["entra:stale"]);
+    expect(items[0].text).toBe("Straza has not read Entra for 3 hours: " + cert + " Holders stay as last read.");
+    expect(items[0].text).toBe(staleLine(HOURS3, cert));
+    mount({ ...QUIET, entraRead: { enabled: true, held: 0, last_good: HOURS3, stale_since: HOURS3, error: cert } });
+    await userEvent.click(screen.getByRole("link", { name: new RegExp(KEYS_TAB) }));
+    expect(navigate).toHaveBeenCalledWith("settings", ["keys"]);
+  });
+
+  it("opens Roles for any other cause", () => {
+    const [item] = attentionItems({ ...QUIET, entraRead: { enabled: true, held: 0, stale_since: HOURS3, error: "Microsoft Graph answered a request with HTTP 503." } });
+    expect([item.to, item.rest]).toEqual(["roles", undefined]);
+  });
+
+  it("names each role whose removals wait, with the server's sentence and the door to its page", async () => {
+    const items = attentionItems({ ...QUIET, entraRead: { enabled: true, held: 1 }, held: [gh, fin], approvals: [] });
+    expect(items.map((i) => [i.key, i.text, i.to, i.rest, i.label])).toEqual([["entra:held:r-gh", held, "roles", ["r-gh"], "github-dev"]]);
+    mount({ ...QUIET, entraRead: { enabled: true, held: 1 }, held: [gh] });
+    await userEvent.click(screen.getByRole("link", { name: /github-dev/ }));
+    expect(navigate).toHaveBeenCalledWith("roles", ["r-gh"]);
+  });
+
+  it("says nothing while the sync is off or its state was not read", () => {
+    expect(attentionItems({ ...QUIET, entraRead: { enabled: false, held: 1, stale_since: HOURS3 }, held: [gh] })).toEqual([]);
+    expect(attentionItems({ ...QUIET, entraRead: null, held: [gh] })).toEqual([]);
   });
 });

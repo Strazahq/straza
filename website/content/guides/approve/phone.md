@@ -27,7 +27,7 @@ mode_default: console
 A person enrolls their own phone so they answer held calls in the Straza approver app. Each answer is signed by a key the phone keeps in its secure hardware. By the end of this page a phone is enrolled as an approver device, has decided a held call, and shows in the list of approver devices.
 
 
-The person mints a one-time enroll token on the self-service page and scans it with the app. No admin route or console screen enrolls a phone for someone else. The self-service page enrolls a phone for whoever is signed in as the person. On a standalone server Straza checks the passwords itself, so anyone who may set the person's password can also add a phone in their name, as [Known limits]({{< relref "security/known-limits.md" >}}) says. Your part as the admin is to give the person the role that lets them enroll. From then on the phone holds a signing key the server knows. When a rule holds a call, Straza sends the request to the phone, the app fetches it over its own connection to the server, and a tap signs the verdict against a challenge that works once. The server checks who decided, never where from, so the phone can sit on any network.
+The person mints a one-time enroll token on the self-service page and scans it with the app. No admin route or console screen enrolls a phone for someone else. The self-service page enrolls a phone for whoever is signed in as the person. On a standalone server Straza checks the passwords itself, so anyone who may set the person's password can also add a phone in their name. Your part as the admin is to give the person the role that lets them enroll. From then on the phone holds a signing key the server knows. When a rule holds a call, Straza sends the request to the phone, the app fetches it over its own connection to the server, and a tap signs the verdict against a challenge that works once. The server checks who decided, never where from, so the phone can sit on any network.
 
 ## Before you start {.nostep}
 
@@ -70,15 +70,15 @@ The person mints the token on their own self-service page. It works once and exp
 
 They open `/self-service/` on the server and sign in, as [Approve in the browser]({{< relref "guides/approve/browser.md#sign-in-on-the-self-service-page" >}}) shows.
 
-{{< clicks "This browser" "Add a phone" >}}
+{{< clicks "Devices" "Add a phone" >}}
 
-**Add a phone** opens a sheet for the person who is signed in, such as `For you, lena. The phone approves the requests routed to you.` They press **Create the QR code**.
+**Add a phone** opens a sheet for the person who is signed in, such as `For you, lena.` They press **Create QR code**.
 
-{{< shot name="enroll-qr" caption="The QR code for lena, with the one-time code, the servers the phone tries and how it trusts them." >}}
+{{< shot name="enroll-qr" caption="The QR code for lena, with the one-time code." >}}
 
-{{< see >}}The QR under `Scan with the Straza approver app`, with the line `The code expires in` and the time left.{{< /see >}}
+{{< see >}}The QR under `Scan with the Straza approver app`, with the line `Expires in` and the time left.{{< /see >}}
 
-Beside the QR, the sheet shows the code itself under `One-time code`. It names the servers the phone tries under `Servers the phone tries, in order`, and how the phone trusts each one under `How the phone trusts it`.
+Beside the QR, the sheet shows the code itself under `One-time code`. The console's sheet also names the addresses the phone tries under `Addresses the phone tries, in order`, and how the phone trusts them under `How the phone trusts it`.
 
 {{< console >}}
 
@@ -90,10 +90,10 @@ The console's sheet is for your own phone only. Under **For someone else** it gi
 {{< /console >}}
 
 {{< fails >}}
-`You do not hold the role straza-enroll-mobile, so you cannot add a phone of your own. Your identity manager assigns it.`
+`Adding a phone needs the role straza-enroll-mobile. Ask for it in your identity manager.`
 : The console says this to an admin whose account lacks the phone role. Give your own account the role as the step before shows. The self-service page shows **Add a phone** only to an account that may enroll a phone.
 
-`The code expired before a phone scanned it. Create another.`
+`The code expired. Create another.`
 : The ten minutes ran out. Press **Create another** with the phone in hand.
 
 `This code is too large to draw. In the approver app, choose Enter the code manually and paste the enrollment text below.`
@@ -107,10 +107,10 @@ The QR carries everything the app needs to trust your server:
 - A pin of that listener's certificate, so the phone verifies that it reached your server without any public certificate authority.
 - Your project's identity, so a phone that serves several deployments keeps them apart.
 
-Behind an ingress that terminates TLS with a public certificate, the QR carries no pin. The sheet then says `public certificate` under `How the phone trusts it`, and the phone trusts the system store instead.
+Behind an ingress that terminates TLS with a public certificate, the QR carries no pin. The console's sheet then says `public certificate` under `How the phone trusts it`, and the phone trusts the system store instead.
 
 
-The pin is the anchor of trust. Replacing the approver listener's certificate strands every enrolled phone until each one enrolls again, so plan that as a fleet event. [Known limits]({{< relref "security/known-limits.md" >}}) lists it with what reduces it.
+The pin is the anchor of trust. Replacing the approver listener's certificate strands every enrolled phone until each one enrolls again, so plan that as a fleet event.
 
 ## Pair the phone
 
@@ -201,5 +201,5 @@ The credential fails on the device's next call, and its push routes stop. Its pe
 ## Next {.nostep}
 
 - [Push delivery and connectivity]({{< relref "guides/approve/push-and-connectivity.md" >}}) gives the phone an address it can reach and wakes it for each request.
-- [Approve in the browser]({{< relref "guides/approve/browser.md" >}}) lets a person decide from a browser they enabled.
+- [Approve in the browser]({{< relref "guides/approve/browser.md" >}}) lets a person decide from their own browser.
 - [Approvals]({{< relref "concepts/approvals-model.md" >}}) explains who may decide which request, and why a person's own request needs a signed device.

@@ -18,9 +18,10 @@ import { SAVE_PUBLISH } from "@/lib/save-words";
 import { downloadText } from "@/lib/utils";
 import {
   ADD_RULE, APPLY_TO_PAGE, BUCKET_WORD, CHECK_RULE, CLOSE_SHEET, DELETE, DELETE_LIVE_TITLE, DISCARD, DRAFT, EVERYONE, FACT, LEAVE, LEAVE_TITLE,
-  LIVE, MENU, MISSING_TITLE, MORE, NEED, NOT_PARSED_PAGE, NO_DECISIONS, ON_BODY, OPEN_IN_AUDIT, PICK_SERVER, PUBLISH_DRAFT_NOTE, REASON,
-  EDITED, RULE_ID, SAVE, STAY, TURN_OFF, TURN_ON, WHERE_CHOICE, onTitle, openRule, stillNeeded,
+  LIVE, MENU, MISSING_TITLE, MORE, NEED, NOT_PARSED_PAGE, NO_DECISIONS, OFF_KEEPS, ON_BODY, OPEN_IN_AUDIT, PICK_SERVER, PUBLISH_DRAFT_NOTE, REASON,
+  EDITED, RULE_ID, SAVE, STAY, TURN_OFF, TURN_ON, WHERE_CHOICE, onTitle, openRule, stillNeeded, ADD_PATTERN, MATCH, REMOVE_RULE,
 } from "@/lib/policy-words";
+import { OUTCOME_WORD } from "@/lib/chip-words";
 import { SUMMARY, VERDICT } from "@/test/drafts-fixture";
 
 const repo = (rel: string) => fileURLToPath(new URL("../../../../" + rel, import.meta.url));
@@ -192,12 +193,29 @@ describe("a policy's page, as it reads", () => {
     expect(within(head()).getByText(LIVE)).toBeTruthy();
     expect(head().querySelector("[data-rec]")).toBeTruthy();
     const meta = (head().querySelector("[data-meta]") as HTMLElement).textContent || "";
-    expect(meta).toContain("11 rules: 2 denied, 5 need approval, 4 allowed");
+    expect(meta).toContain("11 policy rules: 2 denied, 5 needs approval, 4 allowed");
     expect(meta).toContain("updated");
     // Applies to and priority live in the facts row, so the head says
     // neither twice.
     expect(meta).not.toContain("priority");
     expect(meta).not.toContain("dev-demo-tools");
+  });
+
+  it("opens with Policies as a crumb, the policy's own name and a policy's tile, and lets the head scroll away", async () => {
+    mount();
+    await waitFor(() => expect(head().querySelector("[data-meta]")).toBeTruthy());
+    const crumbs = within(screen.getByRole("navigation", { name: "Breadcrumb" }));
+    expect(crumbs.getByRole("link", { name: "Policies" })).toBeTruthy();
+    expect(crumbs.getByText("dev-guardrails").getAttribute("aria-current")).toBe("page");
+    expect(head().querySelector('[data-kind-icon="policy-set"]')?.getAttribute("class")).toContain("size-[22px]");
+    expect(head().className).not.toContain("sticky");
+  });
+
+  it("says the policy's state in lower case in its chip", async () => {
+    mount();
+    await waitFor(() => expect(head().querySelector("[data-policy-status]")).toBeTruthy());
+    const chip = head().querySelector("[data-policy-status]") as HTMLElement;
+    expect([chip.textContent, chip.getAttribute("data-tone")]).toEqual(["live", "ok"]);
   });
 
   it("marks a live policy a draft edits, and names that draft on the origin line", async () => {
@@ -206,7 +224,7 @@ describe("a policy's page, as it reads", () => {
     mount();
     await screen.findByRole("heading", { name: "dev-guardrails" });
     expect(head().querySelector("[data-drift]")?.textContent).toBe(EDITED);
-    await waitFor(() => expect(document.querySelector("[data-origin]")?.textContent).toBe("Draft 70 changes dev-guardrails and waits under Drafts.Review draft 70"));
+    await waitFor(() => expect(document.querySelector("[data-origin]")?.textContent).toBe("Draft 70 changes dev-guardrails.Review draft 70"));
     expect(listDrafts).toHaveBeenCalledWith("state=open&object=PolicySet%2Fdev-guardrails&limit=20");
   });
 
@@ -233,7 +251,7 @@ describe("a policy's page, as it reads", () => {
     const text = line.textContent || "";
     expect(text).toContain("demo-tools");
     expect(text).toContain("get-env");
-    expect(text).toContain(BUCKET_WORD.hum);
+    expect(text).toContain(OUTCOME_WORD.approval);
     expect(text).toContain("dev-mcp-env-ticket");
   });
 
@@ -243,7 +261,7 @@ describe("a policy's page, as it reads", () => {
     const text = line.textContent || "";
     expect(text).toContain("shell");
     expect(text).toContain("rm -rf *");
-    expect(text).toContain(BUCKET_WORD.deny);
+    expect(text).toContain(OUTCOME_WORD.denied);
   });
 
   it("opens a rule in the sheet and closes it again, with the table in place", async () => {
@@ -273,7 +291,7 @@ describe("a policy's page, as it reads", () => {
     mount();
     await editApplies();
     const meta = (head().querySelector("[data-meta]") as HTMLElement).textContent || "";
-    expect(meta).toContain("11 rules: 2 denied, 5 need approval, 4 allowed");
+    expect(meta).toContain("11 policy rules: 2 denied, 5 needs approval, 4 allowed");
   });
 });
 
@@ -302,6 +320,32 @@ describe("adding a rule from the sheet", () => {
     await waitFor(() => expect((sheet().querySelector("[data-still-needed]") as HTMLElement).textContent)
       .toBe(stillNeeded([NEED.calls, NEED.reason])));
     expect(bar()).toBeNull();
+  });
+
+  it("opens Matching on a policy rule not on the page yet, so its calls are given there, and draws no Remove rule", async () => {
+    mount();
+    await openNew();
+    await userEvent.click(within(sheet()).getByRole("radio", { name: WHERE_CHOICE.shell }));
+    await userEvent.click(within(sheet()).getByRole("button", { name: BUCKET_WORD.deny }));
+    const fold = await waitFor(() => {
+      const el = sheet().querySelector("[data-fold]") as HTMLElement;
+      expect(el).not.toBeNull();
+      return el;
+    });
+    expect(fold.getAttribute("data-state")).toBe("open");
+    expect(within(sheet()).queryByRole("button", { name: REMOVE_RULE })).toBeNull();
+    await userEvent.type(within(fold).getByRole("textbox", { name: MATCH.patterns }), "terraform apply*");
+    await userEvent.click(within(fold).getByRole("button", { name: ADD_PATTERN }));
+    await waitFor(() => expect((sheet().querySelector("[data-still-needed]") as HTMLElement).textContent).toBe(stillNeeded([NEED.reason])));
+  });
+
+  it("keeps Matching closed and Remove rule drawn on a policy rule the page holds", async () => {
+    mount();
+    await waitFor(() => expect(rows("deny").length).toBe(2));
+    await userEvent.click(row("no-rm-rf"));
+    await screen.findByRole("dialog");
+    expect((sheet().querySelector("[data-fold]") as HTMLElement).getAttribute("data-state")).toBe("closed");
+    expect(within(sheet()).getByRole("button", { name: REMOVE_RULE })).toBeTruthy();
   });
 
   it("adds the rule the sheet builds, under the id typed over the proposal", async () => {
@@ -516,9 +560,9 @@ describe("turning a policy off and on, and deleting one", () => {
     await openMore();
     await userEvent.click(await screen.findByRole("menuitem", { name: MENU.off }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog.textContent).toContain("Its 5 approval gates and 2 denials stop governing the moment you confirm.");
+    expect(dialog.textContent).toContain("Its 5 policy rules that need approval and its 2 denials stop applying. MCP calls they covered are allowed where a role has access. Local calls it allowed are denied again under the enterprise profile.");
     expect(dialog.textContent).toContain("Recording of dev-demo-tools and dev-midpoint sessions stops.");
-    expect(dialog.textContent).toContain("The policy stays stored and reads Off.");
+    expect(dialog.textContent).toContain(OFF_KEEPS);
     await userEvent.click(within(dialog).getByRole("button", { name: TURN_OFF }));
     await waitFor(() => expect(vi.mocked(deactivatePolicy)).toHaveBeenCalledWith("dev-guardrails"));
   });
@@ -600,12 +644,12 @@ describe("the Decisions tab", () => {
       .toBe("q=" + encodeURIComponent('"setName":"dev-guardrails"') + "&limit=100&order=desc");
     const denied = document.querySelector('[data-decision="42"]') as HTMLElement;
     expect(denied.textContent).toContain("joe");
-    expect(denied.textContent).toContain("shell: rm -rf build/");
-    expect(denied.textContent).toContain("Denied");
+    expect(denied.textContent).toContain("shell command: rm -rf build/");
+    expect(denied.textContent).toContain("denied");
     expect(denied.textContent).toContain("no-rm-rf");
     const held = document.querySelector('[data-decision="41"]') as HTMLElement;
     expect(held.textContent).toContain("demo-tools / get-env");
-    expect(held.textContent).toContain("Needs approval");
+    expect(held.textContent).toContain("needs approval");
   });
 
   it("opens the record sheet on a row", async () => {
@@ -631,7 +675,7 @@ describe("the Decisions tab", () => {
       return el as HTMLElement;
     });
     expect(block.textContent).toContain("The decisions");
-    expect(block.textContent).toContain("strazad did not answer");
+    expect(block.textContent).toContain("Straza did not answer");
   });
 });
 

@@ -24,7 +24,8 @@ const POLL_MS = 10000;
 
 // HealthDot polls /readyz every 10 s: Healthy in green, Degraded in amber
 // with the failing component names on hover, Unknown in violet when
-// strazad did not answer, never a claim it is fine.
+// strazad did not answer, never a claim it is fine. Only Degraded has a
+// hover, since only it has names to add.
 function HealthDot() {
   const [ready, setReady] = React.useState<Readiness | null>(null);
   React.useEffect(() => {
@@ -40,15 +41,17 @@ function HealthDot() {
   const failing = ready && state === "degraded"
     ? Object.entries(ready.components).filter(([, v]) => v !== "ok").map(([k]) => k).join(", ")
     : "";
+  const badge = (
+    <span className="flex cursor-default items-center gap-2 text-caption text-text-2" data-health={state}>
+      <span className={cn("size-2 rounded-full", dot)} aria-hidden="true" />
+      {word}
+    </span>
+  );
+  if (!failing) return badge;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="flex cursor-default items-center gap-2 text-[13px] text-text-2" data-health={state}>
-          <span className={cn("size-2 rounded-full", dot)} aria-hidden="true" />
-          {word}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{"/readyz, polled every 10 s." + (failing ? " Failing: " + failing + "." : "")}</TooltipContent>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      <TooltipContent>{"Failing: " + failing + "."}</TooltipContent>
     </Tooltip>
   );
 }
@@ -99,24 +102,24 @@ export function AppHeader({ routes = [], user, yours, onOpenPalette, onSignOut }
         </DropdownMenuContent>
       </DropdownMenu>
       <Button variant="outline" size="sm" className="page-search" onClick={onOpenPalette} aria-label="Find a page, server, user, role or policy">
-        <CommandIcon /><span>Find a page, server, user, role or policy</span>
-        <kbd className="ml-1 rounded border border-border bg-background px-1 font-mono text-[11px] text-muted-foreground">Ctrl K</kbd>
+        <CommandIcon /><span>Find</span>
+        <kbd className="ml-1 rounded-md border border-border bg-background px-1 font-mono text-caption text-muted-foreground">Ctrl K</kbd>
       </Button>
       <div className="ml-auto flex items-center gap-3">
         {yours && (
-          <Button variant="ghost" size="sm" className="text-[13px] text-link" title="Your open draft" onClick={() => navigate("drafts", [yours.id])} data-your-draft={yours.id}>
+          <Button variant="ghost" size="sm" className="text-caption text-link" onClick={() => navigate("drafts", [yours.id])} data-your-draft={yours.id}>
             {"Your draft · " + yours.changes + (yours.changes === 1 ? " change" : " changes")}
           </Button>
         )}
         <HealthDot />
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" size="sm" className="font-mono text-[13px]" onClick={() => setTimeZone(zone === "utc" ? "local" : "utc")} data-zone={zone}>
-              {zone === "utc" ? "UTC" : "local"}
+            <Button variant="outline" size="sm" className="font-mono text-caption" onClick={() => setTimeZone(zone === "utc" ? "local" : "utc")} data-zone={zone}>
+              {zone === "utc" ? "UTC" : "Local"}
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {"Timestamps are shown in " + (zone === "utc" ? "UTC" : "this browser's local time") + ". Click to switch; the choice is remembered in this browser."}
+            {zone === "utc" ? "Times in UTC. Click for local time." : "Times in this browser's local time. Click for UTC."}
           </TooltipContent>
         </Tooltip>
         <ThemeMenu />

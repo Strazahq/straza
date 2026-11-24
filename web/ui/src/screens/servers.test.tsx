@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Servers } from "./servers";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { listApps } from "@/lib/api";
+import { listApps, listRoles } from "@/lib/api";
 import { navigate, pathFor } from "@/lib/router";
 import { adminAreas } from "@/lib/session";
 
@@ -29,6 +29,7 @@ const apps = [
 
 vi.mock("@/lib/api", () => ({
   listApps: vi.fn(),
+  listRoles: vi.fn(),
 }));
 // The session's standing decides the page actions: null is a full grant.
 vi.mock("@/lib/session", () => ({ adminAreas: vi.fn() }));
@@ -51,6 +52,7 @@ const mount = () => render(
 describe("the MCP servers screen", () => {
   beforeEach(() => {
     vi.mocked(listApps).mockResolvedValue(apps);
+    vi.mocked(listRoles).mockResolvedValue([{ id: "r-dev", name: "dev", kind: "business" }]);
     vi.mocked(navigate).mockReset();
     vi.mocked(adminAreas).mockReturnValue(null);
   });
@@ -85,8 +87,8 @@ describe("the MCP servers screen", () => {
     vi.mocked(listApps).mockRejectedValueOnce(Object.assign(new Error("unreachable"), { status: 0, unreachable: true }));
     await userEvent.click(screen.getByRole("button", { name: "Reload the list" }));
     const block = await screen.findByRole("status");
-    expect(block.textContent).toContain("MCP servers: unreachable, state unknown.");
-    expect(block.textContent).toContain("last successful read");
+    expect(block.textContent).toContain("The server list could not be read because Straza did not answer.");
+    expect(block.textContent).toContain("Last good read:");
     expect(rows()).toEqual(["demo-tools", "filesystem", "midpoint"]);
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -127,7 +129,42 @@ describe("the MCP servers screen", () => {
     await screen.findByRole("button", { name: "Open midpoint" });
     expect(screen.getByRole("button", { name: "Reload the list" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Add MCP server/ })).toBeNull();
-    expect(document.querySelector("[data-admin-line]")?.textContent).toBe("You administer 1 server through mcp-admin-midpoint and may change it. Registering a new server or importing one from the registry needs straza-global-mcp-admin.");
+    expect(document.querySelector("[data-admin-line]")?.textContent).toBe("You administer 1 server through mcp-admin-midpoint. Adding a server needs straza-global-mcp-admin.");
+  });
+
+  it("leads each row with the server's tile and says the runtime and a pause in words", async () => {
+    vi.mocked(listApps).mockResolvedValue([{ ...apps[0], paused: true }, apps[2]]);
+    mount();
+    await screen.findByRole("button", { name: "Open midpoint" });
+    const cells = (name: string) => within(screen.getByRole("button", { name: "Open " + name })).getAllByRole("cell");
+    expect(cells("midpoint")[0].querySelector('[data-kind-icon="server"]')).toBeTruthy();
+    expect(cells("midpoint")[1].textContent).toBe("Streamable HTTP");
+    expect(cells("filesystem")[1].textContent).toBe("stdio, a process Straza starts on the strazad host");
+    expect(cells("filesystem")[1].querySelector("[title]")?.getAttribute("title")).toBe("stdio, a process Straza starts on the strazad host");
+    expect((cells("filesystem")[1].querySelector("[title]") as HTMLElement).className).toContain("max-w-[220px]");
+    expect(cells("midpoint")[2].textContent).toContain("paused");
+    expect(cells("midpoint")[2].textContent).not.toContain("admin-paused");
+  });
+
+  it("names each role that reaches a server with its kind's icon, and a server no role reaches in a pill", async () => {
+    mount();
+    await screen.findByRole("button", { name: "Open midpoint" });
+    const reached = (name: string) => within(screen.getByRole("button", { name: "Open " + name })).getAllByRole("cell")[4];
+    expect(reached("midpoint").querySelector('[data-role-kind-tag="dev"] svg')?.getAttribute("class")).toContain("lucide-briefcase-business");
+    expect(reached("demo-tools").textContent).toBe("no role yet");
+    expect(reached("demo-tools").querySelector(".rounded-pill")).toBeTruthy();
+    // The tags wrap onto further lines, so the column is as wide as its
+    // widest tag and the list fits its box at 1280 px.
+    expect((reached("midpoint").querySelector("[data-reached-by]") as HTMLElement).className).toContain("flex-wrap");
+  });
+
+  it("keeps the list and plain role tags when the roles cannot be read", async () => {
+    vi.mocked(listRoles).mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+    mount();
+    await screen.findByRole("button", { name: "Open midpoint" });
+    const reached = within(screen.getByRole("button", { name: "Open midpoint" })).getAllByRole("cell")[4];
+    expect(reached.textContent).toBe("dev");
+    expect(reached.querySelector("svg")).toBeNull();
   });
 
   it("keeps Add MCP server and no admin line for a full grant", async () => {

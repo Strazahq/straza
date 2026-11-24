@@ -13,14 +13,14 @@ describe("recording configuration", () => {
     const partial = captureLine({ policy_sets: 1 }, false);
     expect(partial.text).toContain("recording mode unavailable");
     expect(partial.text).toContain("Retention is unavailable");
-    expect(partial.text).toContain("message storage is unavailable");
+    expect(partial.text).toContain("Message storage is unavailable");
     expect(partial.text).not.toContain("after 0 h");
   });
 
   it("explains that mixed recording modes depend on the policy", () => {
     const line = captureLine({ policy_sets: 2, mode: "mixed", retention_hours: 720, body_store: "s3" }, false);
     expect(line.text).toContain("word for word or with secrets masked, depending on the policy");
-    expect(line.text).toContain("S3 and follow its lifecycle rules");
+    expect(line.text).toBe("2 live policies record sessions, word for word or with secrets masked, depending on the policy. Recorded messages are deleted after 30 d. Message bodies are stored in S3.");
   });
 });
 
@@ -67,19 +67,19 @@ describe("the plain text export", () => {
     expect(lines.slice(0, 4)).toEqual([
       "Session " + SESSION,
       "User: " + JOE,
-      "Recorded with secrets masked. 3 turns from 2026-09-11 23:50:01 UTC to 2026-09-12 00:03:00 UTC.",
+      "Secrets masked. 3 turns from 2026-09-11 23:50:01 UTC to 2026-09-12 00:03:00 UTC.",
       "",
     ]);
     expect(lines.slice(4, 7)).toEqual(["[2026-09-11 23:50:01 UTC] " + JOE + ":", "Deploy the billing service.", ""]);
     expect(lines[7]).toBe("[2026-09-11 23:50:09 UTC] assistant · subagent:");
-    expect(lines[8]).toBe("(body unavailable) The body of this turn should be in the body store and was not found. This is an integrity finding; the hash witness on the audit chain still stands. Hash sha256:aa02");
+    expect(lines[8]).toBe("(body unavailable) The text of this turn is missing from the message store. Its hash on the audit chain proves the loss. Check the store and its retention. Hash sha256:aa02");
     expect(lines.slice(10, 13)).toEqual(["[2026-09-12 00:03:00 UTC] assistant:", "The first part of a long answer.", "Truncated. Full content hash sha256:aa03"]);
     expect(conversationText(across).endsWith("\n")).toBe(true);
   });
 
   it("says a verbatim conversation is verbatim and an empty one is empty", () => {
     const verbatim = { ...across, turns: across.turns.map((t) => ({ ...t, mode: "verbatim" })) };
-    expect(conversationText(verbatim).split("\n")[2]).toBe("Recorded word for word. 3 turns from 2026-09-11 23:50:01 UTC to 2026-09-12 00:03:00 UTC.");
+    expect(conversationText(verbatim).split("\n")[2]).toBe("Word for word. 3 turns from 2026-09-11 23:50:01 UTC to 2026-09-12 00:03:00 UTC.");
     const empty = conversationText({ session_id: SESSION, turns: [] }).split("\n");
     expect(empty.slice(0, 3)).toEqual(["Session " + SESSION, "User: not named", "No recorded turns: recording is off for this session's policy, or nothing was said."]);
   });

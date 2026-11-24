@@ -2,7 +2,7 @@
 title: strazactl users entra-agent-id unset
 description: Clear the agent's Entra agent identity
 pagetype: reference
-weight: 111
+weight: 105
 draft: false
 sources:
   - cmd/strazactl

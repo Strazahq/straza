@@ -64,9 +64,9 @@ afterEach(() => {
 
 describe("the sign-in card", () => {
   const notices = [
-    { kind: "signed-out", text: "Signed out. The session was revoked on the server. Your identity provider may still have you signed in, so on a shared computer sign out there too." },
-    { kind: "unconfirmed", text: "Signed out in this browser, but the server did not confirm the revoke: the session expires on its own within minutes, or sign back in and revoke it from Sessions." },
-    { kind: "unreachable", text: "strazad is unreachable, state unknown. Sign in once it is back." },
+    { kind: "signed-out", text: "Signed out. Straza revoked the session. Your identity provider may still have you signed in. On a shared computer, sign out there too." },
+    { kind: "unconfirmed", text: "Signed out here, but Straza did not confirm the revoke. The session expires within minutes. To end it now, sign in and revoke it under Sessions." },
+    { kind: "unreachable", text: "Straza did not answer. Sign in once it is back." },
   ] as const;
   it.each(notices)("words the $kind notice", ({ kind, text }) => {
     stubFetch({});
@@ -75,16 +75,18 @@ describe("the sign-in card", () => {
     expect(screen.getByText(text)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /with a code/ })).toBeNull();
-    expect(screen.getByText("Admin roles only. Anyone else lands on the self-service page, still signed in.")).toBeTruthy();
+    expect(screen.getByText("Admin roles only. Others land on the self-service page.")).toBeTruthy();
   });
 
-  it("says where Sign in goes, the server's own page when idp.json is absent", async () => {
+  it("says where Sign in goes, Straza's own page when idp.json is absent, and offers no second door to it", async () => {
     stubFetch({});
     stubLocation();
     render(<SignIn reason={none} returnTo="Overview" onAuthed={vi.fn()} />);
     await settle();
-    expect(screen.getByText("You sign in on this server's own sign-in page and come back to this page.")).toBeTruthy();
+    expect(screen.getByText("You sign in on Straza's own page.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Emergency sign-in" })).toBeNull();
   });
+
 
   it("leaves this tab for the sign-in page on Sign in", async () => {
     stubFetch({});
@@ -113,7 +115,7 @@ describe("the sign-in card", () => {
 
   it.each([
     { name: "a person without admin standing", back: "/console/policies", resp: { session_token: "tok-2", user: "joe" }, to: "/self-service/" },
-    { name: "a sign-in started on the self-service page", back: "/self-service/browser", resp: good, to: "/self-service/browser" },
+    { name: "a sign-in started on the self-service page", back: "/self-service/devices", resp: good, to: "/self-service/devices" },
   ])("sends $name on to the self-service page, signed in", async ({ back, resp, to }) => {
     const { replace } = await answered(back);
     const nonce = pending()!.nonce;
@@ -136,11 +138,11 @@ describe("the sign-in card", () => {
   });
 
   it("hands a failure of a self-service sign-in back to that page", async () => {
-    const { replace } = await answered("/self-service/browser", "&error=access_denied");
+    const { replace } = await answered("/self-service/devices", "&error=access_denied");
     stubFetch({});
     render(<SignIn reason={none} returnTo="Overview" onAuthed={vi.fn()} />);
     await settle();
-    expect(replace).toHaveBeenCalledWith("/self-service/browser");
+    expect(replace).toHaveBeenCalledWith("/self-service/devices");
     expect(sessionStorage.getItem("straza.signin.problem")).toContain("did not sign you in");
   });
 

@@ -81,6 +81,8 @@ var writingRouteClasses = map[string]routeClass{
 	"POST /v1/admin/attestation-hashes":                          immediateOperation,
 	"DELETE /v1/admin/attestation-hashes/{id}":                   immediateOperation,
 	"POST /v1/admin/sinks/{name}/replay":                         immediateOperation,
+	"POST /v1/admin/roles/{id}/entra-group/release":              immediateOperation,
+	"POST /v1/admin/roles/{id}/entra-group/recreate":             immediateOperation,
 	"POST /v1/admin/apps/{id}/health":                            immediateOperation,
 	"POST /v1/admin/apps/{id}/enable":                            immediateOperation,
 	"POST /v1/admin/apps/{id}/disable":                           immediateOperation,

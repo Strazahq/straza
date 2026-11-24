@@ -65,6 +65,7 @@ function set(next: Location) {
 // history entry and tells the subscribers, as a finished sign-in does when
 // it returns the person to the page they started on.
 export function replaceAddress(path: string) {
+  tabMove = false;
   window.history.replaceState(null, "", path);
   set(readLocation());
 }
@@ -74,6 +75,10 @@ export function replaceAddress(path: string) {
 // the departure may happen, or never, when the person chose to stay.
 export type LeaveGuard = (next: Location, go: () => void) => void;
 let guard: LeaveGuard | null = null;
+
+// tabMove says the last move was a tab change, which leaves focus on the
+// tab the person pressed so the arrow keys keep walking the row.
+let tabMove = false;
 
 // setLeaveGuard registers the guard of the page on screen, or clears it.
 // One guard at a time: a page sets it while it holds unsaved work and
@@ -93,6 +98,7 @@ export function navigate(key: RouteKey, rest: string[] = [], replace = false, be
   const next: Location = { kind: "route", key, rest: rest.filter(Boolean) };
   const go = () => {
     if (before) before();
+    tabMove = replace;
     const path = pathFor(key, rest);
     if (window.location.pathname !== path) {
       if (replace) window.history.replaceState(null, "", path);
@@ -128,7 +134,10 @@ export function useRouter(): { location: Location; navigate: typeof navigate } {
   });
   React.useEffect(() => {
     subs.add(setLocation);
-    const onPop = () => set(readLocation());
+    const onPop = () => {
+      tabMove = false;
+      set(readLocation());
+    };
     window.addEventListener("popstate", onPop);
     if (current) setLocation(current);
     return () => {
@@ -136,11 +145,15 @@ export function useRouter(): { location: Location; navigate: typeof navigate } {
       window.removeEventListener("popstate", onPop);
     };
   }, []);
-  // A tab change under the same screen keeps focus where it is; a new
-  // screen moves it to the title.
+  // A tab change keeps focus where it is, also where the tab is the first
+  // segment after the area, as on Settings. A new screen moves it to the title.
   const screenKey = location.kind === "route" ? location.key + "/" + (location.rest[0] || "") : location.path;
   React.useEffect(() => {
     document.title = "Straza · " + titleOf(location);
+    if (tabMove) {
+      tabMove = false;
+      return;
+    }
     const h1 = document.querySelector("main h1");
     if (h1 instanceof HTMLElement) h1.focus();
   }, [screenKey]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -2,7 +2,7 @@
 title: strazactl policy diff
 description: Diff the stored PolicySet against a local file
 pagetype: reference
-weight: 69
+weight: 63
 draft: false
 sources:
   - cmd/strazactl

@@ -100,6 +100,27 @@ func bootApp(st store.Store, log *slog.Logger) *App {
 	return &App{store: st, log: log, resolver: identity.NewResolver(st)}
 }
 
+// bootAppAs is bootApp on the profile named.
+func bootAppAs(st store.Store, log *slog.Logger, profile string) *App {
+	a := bootApp(st, log)
+	a.cfg.Profile = profile
+	return a
+}
+
+// closedLine opens the WARN line of an enterprise boot that finds the
+// break-glass admin without a password.
+const closedLine = "BREAK-GLASS: the emergency sign-in is closed"
+
+// bootLines answers the password lines and the closed-sign-in lines in a
+// capture, and fails when an enterprise boot logged a password field.
+func bootLines(t *testing.T, logs, profile string) (printed, closed int) {
+	t.Helper()
+	if profile == config.ProfileEnterprise && strings.Contains(logs, " password=") {
+		t.Errorf("an enterprise boot logged a password field:\n%s", logs)
+	}
+	return strings.Count(logs, "break-glass admin created"), strings.Count(logs, closedLine)
+}
+
 // assertBreakGlassOnce fails unless the store holds one break-glass row
 // holding one assignment, of straza-admin, and answers the row.
 func assertBreakGlassOnce(t *testing.T, st store.Store) store.User {
@@ -152,14 +173,27 @@ func assertAdoptLines(t *testing.T, logs string, want int) {
 }
 
 // TestBreakGlassAdoptsPeerRow pins the break-glass boot step when another
-// replica wins a write in the same instant: a row the peer wrote is read
-// back and used, the password is printed only by the replica that created
-// the admin, and a conflict with no row behind it fails the boot.
+// replica wins a write in the same instant, on both profiles: a row the peer
+// wrote is read back and used, and a conflict with no row behind it fails
+// the boot. On standalone the password is printed only by the replica that
+// created the admin. On enterprise no replica prints one, and every replica
+// that boots says once that the emergency sign-in is closed.
 func TestBreakGlassAdoptsPeerRow(t *testing.T) {
 	t.Parallel()
+	for _, profile := range []string{config.ProfileStandalone, config.ProfileEnterprise} {
+		t.Run(profile, func(t *testing.T) {
+			t.Parallel()
+			adoptPeerRowOn(t, profile)
+		})
+	}
+}
+
+// adoptPeerRowOn runs the cases of TestBreakGlassAdoptsPeerRow with both
+// replicas on profile.
+func adoptPeerRowOn(t *testing.T, profile string) {
 	ctx := context.Background()
 	peerEnsure := func(t *testing.T, st store.Store) {
-		if err := bootApp(st, slog.New(slog.DiscardHandler)).ensureBreakGlass(ctx); err != nil {
+		if err := bootAppAs(st, slog.New(slog.DiscardHandler), profile).ensureBreakGlass(ctx); err != nil {
 			t.Fatalf("the peer's boot: %v", err)
 		}
 	}
@@ -186,7 +220,7 @@ func TestBreakGlassAdoptsPeerRow(t *testing.T) {
 		lose    string                             // the write that loses its race; empty loses none
 		peer    func(t *testing.T, st store.Store) // the peer's work; nil leaves no row
 		wantErr bool
-		created int // "break-glass admin created" lines from this replica
+		created int // "break-glass admin created" lines from this replica on standalone
 		adopted int
 	}{
 		{name: "a fresh store gets the admin, the role and the assignment", created: 1},
@@ -209,7 +243,7 @@ func TestBreakGlassAdoptsPeerRow(t *testing.T) {
 				}
 			}
 			logger, logs := captureLogger()
-			err := bootApp(&lostRaceStore{Store: raw, races: races}, logger).ensureBreakGlass(ctx)
+			err := bootAppAs(&lostRaceStore{Store: raw, races: races}, logger, profile).ensureBreakGlass(ctx)
 			if tc.wantErr {
 				if !errors.Is(err, store.ErrConflict) {
 					t.Fatalf("ensureBreakGlass = %v, want the conflict", err)
@@ -220,9 +254,17 @@ func TestBreakGlassAdoptsPeerRow(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ensureBreakGlass = %v, want the boot to continue", err)
 			}
-			assertBreakGlassOnce(t, raw)
-			if n := strings.Count(logs.String(), "break-glass admin created"); n != tc.created {
-				t.Errorf("password lines = %d, want %d", n, tc.created)
+			bg := assertBreakGlassOnce(t, raw)
+			wantPrinted, wantClosed := tc.created, 0
+			if profile == config.ProfileEnterprise {
+				wantPrinted, wantClosed = 0, 1
+			}
+			printed, closed := bootLines(t, logs.String(), profile)
+			if printed != wantPrinted || closed != wantClosed {
+				t.Errorf("password lines = %d, closed lines = %d, want %d and %d:\n%s", printed, closed, wantPrinted, wantClosed, logs.String())
+			}
+			if (bg.PasswordHash == "") != (profile == config.ProfileEnterprise) {
+				t.Errorf("the break-glass hash is set = %v on %s", bg.PasswordHash != "", profile)
 			}
 			assertAdoptLines(t, logs.String(), tc.adopted)
 		})
@@ -320,33 +362,38 @@ func TestProductRolesAdoptPeerRow(t *testing.T) {
 // on two connection pools, as two processes do.
 func TestBootRowsTwoReplicas(t *testing.T) {
 	t.Parallel()
-	t.Run("sqlite", func(t *testing.T) {
-		t.Parallel()
-		st := bootStore(t)
-		bootTwoReplicas(t, st, st)
-	})
-	t.Run("postgres", func(t *testing.T) {
-		t.Parallel()
-		dsn := freshPostgresDSN(t)
-		open := func() store.Store {
-			st, err := store.Open(config.Config{Store: config.Store{Driver: config.DriverPostgres, DSN: dsn}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = st.Close() })
-			return st
-		}
-		a, b := open(), open()
-		if err := a.Migrate(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		bootTwoReplicas(t, a, b)
-	})
+	for _, profile := range []string{config.ProfileStandalone, config.ProfileEnterprise} {
+		t.Run(profile, func(t *testing.T) {
+			t.Parallel()
+			t.Run("sqlite", func(t *testing.T) {
+				t.Parallel()
+				st := bootStore(t)
+				bootTwoReplicas(t, st, st, profile)
+			})
+			t.Run("postgres", func(t *testing.T) {
+				t.Parallel()
+				dsn := freshPostgresDSN(t)
+				open := func() store.Store {
+					st, err := store.Open(config.Config{Store: config.Store{Driver: config.DriverPostgres, DSN: dsn}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = st.Close() })
+					return st
+				}
+				a, b := open(), open()
+				if err := a.Migrate(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				bootTwoReplicas(t, a, b, profile)
+			})
+		})
+	}
 }
 
-// bootTwoReplicas runs each boot ensure step on both stores at once and
-// checks the rows they leave.
-func bootTwoReplicas(t *testing.T, stA, stB store.Store) {
+// bootTwoReplicas runs each boot ensure step on both stores at once, both
+// replicas on profile, and checks the rows and the lines they leave.
+func bootTwoReplicas(t *testing.T, stA, stB store.Store, profile string) {
 	t.Helper()
 	ctx := context.Background()
 	jira, err := stA.Apps().Create(ctx, store.App{Name: "jira", RuntimeKind: "remote"})
@@ -357,7 +404,7 @@ func bootTwoReplicas(t *testing.T, stA, stB store.Store) {
 		t.Fatal(err)
 	}
 	logger, logs := captureLogger()
-	replicas := []*App{bootApp(stA, logger), bootApp(stB, logger)}
+	replicas := []*App{bootAppAs(stA, logger, profile), bootAppAs(stB, logger, profile)}
 	steps := []struct {
 		name string
 		run  func(*App, context.Context) error
@@ -387,8 +434,15 @@ func bootTwoReplicas(t *testing.T, stA, stB store.Store) {
 		}
 	}
 	assertBreakGlassOnce(t, stA)
-	if n := strings.Count(logs.String(), "break-glass admin created"); n != 1 {
-		t.Errorf("password lines = %d, want 1 from the replica that created the admin", n)
+	// Standalone prints the password from the replica that created the
+	// admin. Enterprise prints none, and each replica says once that the
+	// emergency sign-in is closed.
+	wantPrinted, wantClosed := 1, 0
+	if profile == config.ProfileEnterprise {
+		wantPrinted, wantClosed = 0, 2
+	}
+	if printed, closed := bootLines(t, logs.String(), profile); printed != wantPrinted || closed != wantClosed {
+		t.Errorf("password lines = %d, closed lines = %d, want %d and %d", printed, closed, wantPrinted, wantClosed)
 	}
 	for _, line := range strings.Split(logs.String(), "\n") {
 		if strings.Contains(line, adoptLine) {

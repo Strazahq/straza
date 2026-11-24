@@ -2,7 +2,7 @@
 title: strazactl policy
 description: Validate and manage PolicySets
 pagetype: reference
-weight: 64
+weight: 58
 draft: false
 sources:
   - cmd/strazactl

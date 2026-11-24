@@ -18,7 +18,7 @@ func overlayWorld() World {
 		},
 		Roles: map[string]Role{
 			"github-readers":   {ID: "r1", Name: "github-readers", Kind: RoleKindApplication, Plane: PlaneAccess, Owner: "github", Owned: true},
-			"dev":              {ID: "r2", Name: "dev", Kind: RoleKindApplication, Plane: PlaneAccess, Description: "Developers", Packs: []string{"go-style"}},
+			"dev":              {ID: "r2", Name: "dev", Kind: RoleKindApplication, Plane: PlaneAccess, Description: "Developers"},
 			"engineering":      {ID: "r3", Name: "engineering", Kind: RoleKindBusiness, Plane: PlaneAccess},
 			"mcp-admin-github": {ID: "r4", Name: "mcp-admin-github", Kind: RoleKindBusiness, Plane: PlaneControl},
 			"ops":              {ID: "r5", Name: "ops", Kind: RoleKindBusiness, Plane: PlaneAccess},
@@ -106,13 +106,13 @@ func TestOverlayRole(t *testing.T) {
 		access  *Access
 		implies []string
 	}{
-		{"a changed role keeps its id, its packs and its row's id on the same server",
+		{"a changed role keeps its id and its row's id on the same server",
 			intakeRole("dev", "    kind: application\n    description: Devs\n    bindings:\n        - app: github\n          tools: [search, get_me]\n"),
-			Role{ID: "r2", Name: "dev", Kind: RoleKindApplication, Plane: PlaneAccess, Description: "Devs", Packs: []string{"go-style"}},
+			Role{ID: "r2", Name: "dev", Kind: RoleKindApplication, Plane: PlaneAccess, Description: "Devs"},
 			&Access{ID: "b2", Server: "github", Tools: []string{"search", "get_me"}}, nil},
 		{"a row moved to another server is a new row",
 			intakeRole("dev", "    kind: application\n    bindings:\n        - app: jira\n          tools: [search]\n"),
-			Role{ID: "r2", Name: "dev", Kind: RoleKindApplication, Plane: PlaneAccess, Packs: []string{"go-style"}},
+			Role{ID: "r2", Name: "dev", Kind: RoleKindApplication, Plane: PlaneAccess},
 			&Access{Server: "jira", Tools: []string{"search"}}, nil},
 		{"a document with no binding leaves no row, and its implications sorted",
 			intakeRole("engineering", "    kind: business\n    implies: [github-readers, dev]\n"),
@@ -197,7 +197,7 @@ func TestImplied(t *testing.T) {
 		want  []Item
 	}{
 		{"removing a server takes its owned role, strips rows and edges, and names no admin role", []Item{{Kind: KindApp, Name: "github", Op: OpRemove}}, []Item{
-			{Kind: KindRole, Name: "dev", Op: OpPut, Doc: "apiVersion: straza.dev/v1beta1\nkind: Role\nmetadata:\n    name: dev\nspec:\n    kind: application\n    description: Developers\n    packs:\n        - go-style\n"},
+			{Kind: KindRole, Name: "dev", Op: OpPut, Doc: "apiVersion: straza.dev/v1beta1\nkind: Role\nmetadata:\n    name: dev\nspec:\n    kind: application\n    description: Developers\n"},
 			{Kind: KindRole, Name: "engineering", Op: OpPut, Doc: "apiVersion: straza.dev/v1beta1\nkind: Role\nmetadata:\n    name: engineering\nspec:\n    kind: business\n    implies:\n        - dev\n"},
 			{Kind: KindRole, Name: "github-readers", Op: OpRemove},
 			{Kind: KindRole, Name: "ops", Op: OpPut, Doc: "apiVersion: straza.dev/v1beta1\nkind: Role\nmetadata:\n    name: ops\nspec:\n    kind: business\n"},

@@ -5,6 +5,7 @@
 // what this file answers.
 import { type Covers, coversOf } from "./access-covers";
 import type { Draft, DraftConflict, DraftDetail, DraftFinding, DraftGain, DraftItem, DraftKind, DraftOp, DraftPublishBody, DraftVerdict, FindingClass, ManifestDoc } from "./api";
+import type { Kind } from "./chip-words";
 import { callerKind, changeRows } from "./manifest-edit";
 import { nounsOf } from "./object-words";
 import { type Bucket, type RuleView, bucketOf, openDoc, rulesOf } from "./policy-model";
@@ -86,9 +87,14 @@ export const STALE_CODE = "draft.stale";
 // UNLISTED_CODE is the line of a server whose tools nobody read, where
 // Contact it now sits.
 export const UNLISTED_CODE = "unchecked.tools";
-// AGENT_LOOSEN_CODE is the risk of an agent's draft that loosens a set
-// binding that same agent, which the page warns about loudly.
+// AGENT_LOOSEN_CODE is the risk of an agent's draft that changes a set
+// binding that same agent, and AGENT_REACH_CODE the risk of one that
+// widens what that agent reaches. The page warns about both loudly.
 export const AGENT_LOOSEN_CODE = "agent.guardrail";
+export const AGENT_REACH_CODE = "agent.own-reach";
+// agentAccepts reports whether a person accepts the line for the agent
+// that wrote the draft, where every other typed line is confirmed.
+export const agentAccepts = (f: { code: string }) => f.code === AGENT_LOOSEN_CODE || f.code === AGENT_REACH_CODE;
 // COVERS_WIDER_CODE is the risk of a held role that reaches more objects.
 export const COVERS_WIDER_CODE = "role.covers-wider";
 // SECRET_MISSING_CODE is the warning of a server whose credential is one
@@ -293,8 +299,9 @@ export function remoteApp(text: string | undefined): boolean {
 const withPuny = (label: string, words: string) => (label === "Address" ? punyURL(words) : words);
 
 // appFacts reads a server's document in the server page's own words, for a
-// server the draft adds.
-export function appFacts(doc: ManifestDoc): [string, string][] {
+// server the draft adds. remoteRps is the rate limit a remote server without
+// its own gets, null when the config did not name it.
+export function appFacts(doc: ManifestDoc, remoteRps: number | null): [string, string][] {
   const rt = doc.straza?.runtime || {};
   const kind = rt.kind || "remote";
   const cred = doc.straza?.credential;
@@ -309,15 +316,16 @@ export function appFacts(doc: ManifestDoc): [string, string][] {
   if (callerKind(ck)) rows.push(["Agents with nothing of their own", agentsLine(cred)]);
   if (ck === "oauth") rows.push(["Provider", cred?.oauth?.provider || ""], ["Scopes", (cred?.oauth?.scopes || []).join(" ")]);
   if (doc.metadata?.description) rows.push(["Description", doc.metadata.description]);
-  rows.push(["Tools exposed", exposeWords(doc.straza?.exposure?.tools)], ["Rate limit", rpsWords(lim.rps)]);
+  rows.push(["Tools exposed", exposeWords(doc.straza?.exposure?.tools)], ["Rate limit", rpsWords(lim.rps, kind === "remote", remoteRps)]);
   if (lim.timeoutSeconds) rows.push(["Per-call timeout", timeoutWords(lim.timeoutSeconds, null)]);
   return rows.filter((r) => r[1] !== "");
 }
 
 // appRows are the Now and After rows of a server the draft changes, the
-// rows the Change sheets show.
-export function appRows(before: ManifestDoc, after: ManifestDoc): [string, string, string][] {
-  return changeRows(before, after).map(([label, was, now]) => [label, withPuny(label, was), withPuny(label, now)]);
+// rows the Change sheets show, with remoteRps as appFacts takes it. A
+// caller that reads only the labels leaves it out.
+export function appRows(before: ManifestDoc, after: ManifestDoc, remoteRps: number | null = null): [string, string, string][] {
+  return changeRows(before, after, null, remoteRps).map(([label, was, now]) => [label, withPuny(label, was), withPuny(label, now)]);
 }
 
 // RoleView is a Role document as the draft views read it. A row's covers
@@ -416,6 +424,17 @@ export function setOutcomes(text: string | undefined): Bucket[] {
 // objectOf is the Kind/Name an item's lines and live state are keyed by.
 export const objectOf = (it: Pick<DraftItem, "kind" | "name">) => it.kind + "/" + it.name;
 
+const ROLE_ICON: Record<string, Kind> = { application: "role-application", business: "role-business", approver: "role-approver", straza: "role-straza" };
+
+// iconKind is the kind icon of an object a draft names: a server, a policy
+// set, or a role by its own kind. It is null for a role whose kind the page
+// does not know, which draws the Roles icon instead of a guess.
+export function iconKind(kind: string, role?: RoleView | null): Kind | null {
+  if (kind === "App") return "server";
+  if (kind === "PolicySet") return "policy-set";
+  return ROLE_ICON[role?.kind || ""] || null;
+}
+
 // impliedObjects are the live objects the draft does not name that its
 // removals take along, as live state answers them.
 export function impliedObjects(d: DraftDetail): string[] {
@@ -450,26 +469,29 @@ export function impliedOf(d: DraftDetail): string[] {
   return impliedObjects(d);
 }
 
-export type ChangeWhat = "new" | "changed" | "off" | "removed";
+export type ChangeWhat = "new" | "changed" | "on" | "off" | "removed";
 export type ChangeCount = { kind: DraftKind; what: ChangeWhat; n: number };
 
-// whatOf says what an item does to its object.
-export function whatOf(it: Pick<DraftItem, "op" | "existed">): ChangeWhat {
+// whatOf says what an item does to its object. was is the object's op
+// before the publish, so a put of a policy that is off turns it on.
+export function whatOf(it: Pick<DraftItem, "op" | "existed"> & { was?: DraftOp }): ChangeWhat {
   if (it.op === "remove") return "removed";
   if (it.op === "off") return "off";
-  return it.existed ? "changed" : "new";
+  if (!it.existed) return "new";
+  return it.was === "off" ? "on" : "changed";
 }
 
 const KINDS: DraftKind[] = ["App", "Role", "PolicySet"];
-const WHATS: ChangeWhat[] = ["new", "changed", "off", "removed"];
+const WHATS: ChangeWhat[] = ["new", "changed", "on", "off", "removed"];
 
 // changeCounts counts the items by kind and by what they do, in a fixed
-// order, for the lede of What changes and the publish dialog.
-export function changeCounts(items: Pick<DraftItem, "kind" | "op" | "existed">[]): ChangeCount[] {
+// order, for the lede of What changes and the publish dialog. live is the
+// draft's live state, which tells a policy that comes back on.
+export function changeCounts(items: Pick<DraftItem, "kind" | "name" | "op" | "existed">[], live: DraftDetail["live"] = {}): ChangeCount[] {
   const out: ChangeCount[] = [];
   for (const kind of KINDS) {
     for (const what of WHATS) {
-      const n = items.filter((it) => it.kind === kind && whatOf(it) === what).length;
+      const n = items.filter((it) => it.kind === kind && whatOf({ ...it, was: live[objectOf(it)]?.op }) === what).length;
       if (n) out.push({ kind, what, n });
     }
   }

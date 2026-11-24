@@ -76,6 +76,9 @@ type CatalogPreview struct {
 	Subject CatalogSubject `json:"subject"`
 	Entries []CatalogEntry `json:"entries"`
 	Notes   []string       `json:"notes,omitempty"`
+	// Refused says why the gateway refuses every call of the user before any
+	// policy runs: disabled or revoked. Empty when the calls reach policy.
+	Refused string `json:"refused,omitempty"`
 }
 
 // CatalogPreview computes the effective tool catalog for a hypothetical
@@ -119,6 +122,12 @@ func RenderCatalogPreview(w io.Writer, p CatalogPreview) error {
 		parts = append(parts, "groups="+strings.Join(p.Subject.Groups, ","))
 	}
 	fmt.Fprintln(w, strings.Join(parts, " "))
+	switch p.Refused {
+	case "disabled":
+		fmt.Fprintln(w, "refused: Straza refuses every call of this user, because the user is disabled. The rows say what the roles give once the user is enabled.")
+	case "revoked":
+		fmt.Fprintln(w, "refused: Straza refuses every call of this user, because the user is revoked. The rows say what the roles give once the revocation is lifted.")
+	}
 
 	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "SERVER\tTOOL\tSTATUS\tREASON")

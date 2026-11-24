@@ -146,6 +146,12 @@ func (s *sqlStore) writeRevocation(ctx context.Context, tx *sql.Tx, kind string,
 		strings.Join(values, ", ")), args...); err != nil {
 		return s.mapErr(err)
 	}
+	return s.insertOutboxTx(ctx, tx, ev)
+}
+
+// insertOutboxTx writes the outbox event ev, unpublished, inside tx, with a
+// new id when ev has none. The caller has bounded it.
+func (s *sqlStore) insertOutboxTx(ctx context.Context, tx *sql.Tx, ev OutboxEvent) error {
 	if ev.ID == "" {
 		ev.ID = newID()
 	}

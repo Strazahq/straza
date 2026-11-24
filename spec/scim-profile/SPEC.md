@@ -1,10 +1,62 @@
-# SCIM Profile, v1beta1 (revision 24)
+# SCIM Profile, v1beta1 (revision 28)
 
 Status: **beta**. The profile began as v1alpha1, and the move to beta
 changed no wire format. Conformance transcripts: `spec/conformance/scim/*.json`. The
 platform's SCIM server MUST satisfy every transcript; they double as request
 examples for the identity manager guides at
 https://docs.straza.ai/guides/connect-identity/.
+
+Revision 28 (2026-11-22): a disable in Straza, the console's or the admin API's, writes its
+revocation with the origin `admin-disable`, so that an enable in Straza lifts the disable and
+leaves a lock. The lock block of §3.1 therefore no longer reports a disabled user as locked.
+`lockOrigin` gains the value `admin-disable`, which the block carries whenever a user who is not
+disabled still holds the revocation of a disable in Straza, for example after the identity
+manager set `active: true` on a user whom an admin disabled: that disable still holds, and the
+block says so. An admin enable in Straza no longer lifts a lock. Additive: one
+new `lockOrigin` value, which a consumer that maps it as a string reads unchanged (derived from
+the reference server and its tests, not captured from a live wire: [doc]).
+
+Revision 27 (2026-11-17): a deployment may also take agents from
+Microsoft Entra ID over Graph, with `agentUsers` or `agentIdentities` in
+the setting `identity.entra.read`. Entra then owns every agent that is in
+Entra, and this wire does not write one (§1.2). A create, a replace, a
+patch and a delete of such an agent answer `403` with a `detail` that
+names the setting. An agent that carries no Entra agent id and that Entra
+did not create is written as before, and so is a service. A write that
+changes a user's `userName` now also moves the sponsor of every agent
+that user sponsors to the new name (§3.5), because an agent names its
+sponsor by `userName`. For a deployment that sets neither agent kind the
+refusal does not occur, and every transcript replays unchanged. The
+refusal has no transcript, for the reason revision 26 gives, and the
+reference server's tests pin it and the moved sponsor.
+
+Revision 26 (2026-11-17): a deployment may take people from Microsoft
+Entra ID over Graph, with `people` in the setting `identity.entra.read`.
+Entra then owns every person, and this wire does not write one (§1.1). A
+create, a replace, a patch and a delete of a person answer `403` with a
+`detail` that names the setting. Reads stay, and so does every Group
+operation, because an identity manager still gives roles to people Entra
+owns. Agents and services are written as before. `origin` (§3.3) gains
+the value `entra`, and it is no longer fixed for the row's lifetime: a
+person who was in Straza before changes to `entra` once, when Straza
+first applies Entra's data to the account. A revocation that a disable
+in Entra wrote is no lock (§3.1), as a scim-origin one is none. For a
+deployment that does not set `people` nothing changes, and every
+transcript replays unchanged. The refusal has no transcript, because the
+transcripts run against a deployment that reads nothing from Entra, and
+the reference server's tests pin it.
+
+Revision 25 (2026-11-17): a role assignment that Straza wrote from the
+members of the role's security group in Microsoft Entra ID, origin
+`entra`, is no group membership on this wire (§4). A Group's `members`
+and a User's `groups` leave it out, and no `add`, `remove` or `replace`
+ends it. A holder may have such an assignment beside a SCIM one, so an
+`add` of that holder creates the scim-origin assignment as for any user,
+and a `remove` ends that one alone. For a deployment that reads no role
+group from Entra nothing changes, and every transcript replays unchanged.
+One answer changes where such assignments exist: a `replace` or a
+`remove` no longer ends them, which earlier revisions did for every
+origin.
 
 Revision 24 (2026-11-10, https://docs.straza.ai/guides/connect-identity/generic-scim/):
 on a write, Straza reads its User extension under a second name,
@@ -346,6 +398,55 @@ Base path: `/scim/v2`. Content type: `application/scim+json` (plain
   ACTIVE username or a non-scim-origin account stay `409`.
 - `meta.version`/ETags, sorting, and `.search` are not supported.
 
+### 1.1 People that Microsoft Entra ID owns (revision 26)
+
+A deployment that sets `people` in `identity.entra.read` takes its people
+from Microsoft Entra ID over Graph. A person is a user that is neither an
+agent nor a service. While the setting holds:
+
+- `POST /Users` of a person, and `PUT`, `PATCH` and `DELETE` of a stored
+  person, answer `403` with no `scimType` and this `detail`: "Straza did
+  not accept this person, because it takes people from Microsoft Entra
+  ID: identity.entra.read lists people. Stop provisioning people to Straza
+  in your identity manager, or take people out of identity.entra.read."
+  Nothing is written, the revive of §1 included, and the refused write
+  chains one `scim.refused` record (events revision 63).
+- A create of an agent or a service whose `userName` a deactivated person
+  has does not revive that person and answers the `409` of §1.
+- A `PUT` or a `PATCH` that would turn an agent or a service into a person
+  is refused the same way.
+- `GET` of a person, the list and the filters answer as before, and every
+  Group operation of §4 takes a person as a member, whoever owns the
+  person.
+- A person's `origin` (§3.3) reads `entra` once Straza has applied Entra's
+  data to the account. A person nobody in Entra has changed since the
+  setting was set may still read `scim` or `local`.
+
+### 1.2 Agents that Microsoft Entra ID owns (revision 27)
+
+A deployment that sets `agentUsers` or `agentIdentities` in
+`identity.entra.read` takes the agents that are in Microsoft Entra ID
+from Entra over Graph. An agent is Entra's when its `origin` (§3.3) reads
+`entra`, or when it carries an `entraAgentId` (§3.4). While the setting
+holds:
+
+- `POST /Users` of an agent whose document carries an `entraAgentId`, and
+  `PUT`, `PATCH` and `DELETE` of a stored agent that is Entra's, answer
+  `403` with no `scimType` and this `detail`: "Straza did not accept this
+  agent, because it takes agents that are in Microsoft Entra ID from
+  Entra: identity.entra.read lists agentUsers or agentIdentities. Stop
+  provisioning this agent to Straza in your identity manager, or take
+  both kinds out of identity.entra.read." Nothing is written, the revive
+  of §1 included, and the refused write chains one `scim.refused` record.
+- A `PUT` or a `PATCH` that would give an `entraAgentId` to an agent that
+  has none is refused the same way.
+- An agent that is not Entra's is created, replaced, patched and deleted
+  as before, and so is a service.
+- `GET` of an agent, the list and the filters answer as before, and every
+  Group operation of §4 takes an agent as a member, whoever owns it.
+- The sponsor of an agent that is Entra's comes from Entra, and its
+  `manager` (§3.5) is not applied.
+
 ## 2. Authentication
 
 One credential opens this surface (revision 16): an admin API token, prefix
@@ -428,8 +529,14 @@ SOAR/SIEM automation with a `wat_` admin API token), the block reads:
 
 - `locked` is always present; `lockReason`/`lockedAt`/`lockOrigin` ride only
   while locked (newest lock wins when several exist). `lockOrigin` ∈
-  `admin | external`. A scim-origin revocation is NOT a lock: it is the
-  mirror of `active: false`, which the IdM already owns.
+  `admin | external | admin-disable`. A scim-origin revocation is NOT a
+  lock: it is the mirror of `active: false`, which the IdM already owns.
+  Neither is an entra-origin one, which mirrors a disable in Microsoft
+  Entra ID (revision 26). An admin-disable revocation, which a disable in
+  Straza writes, is no lock while the user is disabled, because it mirrors
+  `active: false` too. When the identity manager sets `active: true` and
+  that revocation survives, the user stays denied and the block reports it
+  as a lock with `lockOrigin` `admin-disable` and its reason (revision 28).
 - The whole block is **readOnly**: PATCH against the extension URN, its
   sub-attributes, or the bare names (`locked`, `lockReason`, `lockedAt`,
   `lockOrigin`) ⇒ `400` scimType `mutability`. PUT bodies never carry it
@@ -438,8 +545,10 @@ SOAR/SIEM automation with a `wat_` admin API token), the block reads:
   independent attributes, so IdM reconciliation can never flip the lock,
   but it can INGEST it (inbound mapping, certification view) and MAY react
   (e.g. suspend its own focus so the IdP login is cut too). The lock lifts
-  only via the Straza admin API (`POST /v1/admin/users/{id}/unlock`, or the
-  console/admin user-enable which keeps its full-lift semantics).
+  only via the Straza admin API (`POST /v1/admin/users/{id}/unlock`). The
+  console's and the admin API's user-enable lifts an admin-disable, a scim
+  and an entra revocation and never a lock, and records `user.lift.blocked`
+  when a lock survives it (revision 28).
 - Discovery: the URN is listed in `/Schemas` and as a non-required
   `schemaExtensions` entry on the User resource type.
 
@@ -483,7 +592,7 @@ Two facts the server itself owns ride the same extension, ALWAYS present
 | Attribute | Values | Meaning |
 |---|---|---|
 | `kind` | `human` \| `nhi` | What Straza concluded the identity IS, fixed at creation: `nhi` iff the create carried the agentic extension URN (§5). It never changes; recreating the account is the only way to re-classify. |
-| `origin` | `local` \| `scim` | How the account was born: created inside Straza (console/CLI) or provisioned over SCIM. Immutable for the row's lifetime; a revive (§1) keeps `scim`. |
+| `origin` | `local` \| `scim` \| `entra` | Who owns the account: created inside Straza (console/CLI), provisioned over SCIM, or taken from Microsoft Entra ID over Graph (revision 26). A revive (§1) keeps `scim`. It changes once at most, to `entra`, when Entra takes over a person who was in Straza before (§1.1). |
 
 Rules:
 
@@ -592,6 +701,11 @@ Rules:
   person can connect the agent to a server, and an agent's call can use
   its sponsor's own connection to a server where the sponsor has allowed
   agents on it. Straza does not check that the manager is a person.
+- A write that changes a user's `userName` moves the sponsor of every
+  agent that user sponsors to the new name in the same store write
+  (revision 27). Each such agent gets one `user.update` record with
+  `changed[]` `sponsor`. Without it the agents would keep the old name
+  and pass to whoever gets that name later.
 
 ### 3.6 The second name of the extension (revision 24, write-only)
 
@@ -672,7 +786,9 @@ visible in the §4.1 projection.
   group) rather than at this wire.
 - **Membership IS assignment, single-writer**: PATCH members `add`
   creates (or adopts) THE direct scim-origin assignment, `remove` deletes
-  the row whatever origin wrote it, `replace` converges the set; all
+  the row whether SCIM or an admin wrote it, `replace` converges the set,
+  and an assignment of origin `entra` is neither listed nor changed
+  (revision 25); all
   idempotent, the value-filter remove form
   (`members[value eq "<id>"]`) included. A console/CLI grant of an
   exported role is **drift**: permitted, badged in the console, and

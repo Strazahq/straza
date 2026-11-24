@@ -12,7 +12,7 @@ import (
 // role a server owns gains a new row.
 func TestUnlistedServerNewRow(t *testing.T) {
 	t.Parallel()
-	const later = "access.tools-later Role/readers (tick) readers will reach tools on jira, which nobody has listed yet, so Straza cannot name them. | "
+	const later = "access.tools-later Role/readers (tick) readers will reach tools on jira that nobody has listed yet. | "
 	cases := []struct {
 		name      string
 		holders   bool

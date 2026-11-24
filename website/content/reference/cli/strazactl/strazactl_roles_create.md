@@ -2,7 +2,7 @@
 title: strazactl roles create
 description: Create a role
 pagetype: reference
-weight: 75
+weight: 69
 draft: false
 sources:
   - cmd/strazactl

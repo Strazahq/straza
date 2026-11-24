@@ -105,12 +105,13 @@ function expectFacts(name: string, want: Record<string, Want>) {
 }
 
 const onChange = vi.fn();
+// mount renders the Overview with both defaults the config names, the
+// per-call timeout and the remote rate limit, and with neither when
+// upstreamTimeout is null, as when the config did not answer.
 const mount = (app: AppRow, upstreamTimeout: number | null) => render(
-  <TooltipProvider><ServerOverview app={app} upstreamTimeout={upstreamTimeout} onChange={onChange} onRefused={vi.fn()} /></TooltipProvider>,
+  <TooltipProvider><ServerOverview app={app} upstreamTimeout={upstreamTimeout} remoteRps={upstreamTimeout === null ? null : 20} onChange={onChange} onRefused={vi.fn()} /></TooltipProvider>,
 );
 const settled = () => waitFor(() => expect(Object.fromEntries(facts("Server authentication"))["Stored here"].value).not.toBe("Reading the stored credential."));
-
-const VERSION_SUB = "The server's own version, from its registry record.";
 
 const cases: { name: string; app: AppRow; secrets: SecretRow[]; upstream: number | null; want: Record<"Connection" | "Server authentication" | "Tools and limits", Record<string, Want>> }[] = [
   {
@@ -118,17 +119,17 @@ const cases: { name: string; app: AppRow; secrets: SecretRow[]; upstream: number
     app: midpoint, secrets: [], upstream: 30,
     want: {
       Connection: {
-        Transport: "HTTP, streamable",
+        Transport: "Streamable HTTP",
         Address: "http://mcp-midpoint-http:3001/mcp",
-        Version: { value: "0.3.1-dev", sub: VERSION_SUB },
+        Version: { value: "0.3.1-dev" },
       },
       "Server authentication": {
-        Type: { value: "Each caller's own sign-in oauth", sub: "Nothing of theirs is stored here." },
+        Type: { value: "Each person's own sign-in" },
         "Provider and scopes": "keycloak, scopes openid",
-        "Sent as": "The Authorization header, as Bearer and the person's token.",
-        "Agents with nothing of their own": "Get nothing, because an agent cannot sign in through a browser (agents own).",
-        "Stored here": "Nothing here. Each person's sign-in is sealed under their own id.",
-        "Per-role secrets": "Not used here. Each caller's own sign-in is the credential.",
+        "Sent as": "Authorization: Bearer <the person's token>",
+        "Agents with nothing of their own": "Refused, because an agent cannot sign in through a browser.",
+        "Stored here": "Each person's own, kept per person.",
+        "Per-role secrets": "Not used here. Each person's own sign-in is the credential.",
       },
       "Tools and limits": {
         Description: "midPoint IGA operations, per-user identity (Switch-To-Principal) - reads allowed, writes approve-gated.",
@@ -143,20 +144,20 @@ const cases: { name: string; app: AppRow; secrets: SecretRow[]; upstream: number
     app: scout, secrets: [shared("9f3a1c", "2026-09-11T15:02:00Z")], upstream: null,
     want: {
       Connection: {
-        Transport: "HTTP, streamable",
+        Transport: "Streamable HTTP",
         Address: "http://scout-tools.internal:8080/mcp",
-        Version: { value: "1.4.0", sub: VERSION_SUB },
+        Version: { value: "1.4.0" },
       },
       "Server authentication": {
-        Type: { value: "One shared secret static", sub: "The server sees one identity; Straza's audit keeps the person or agent." },
-        "Sent as": "The Authorization header, as Bearer and the secret.",
-        "Stored here": { value: "Set 2026-09-11 15:02:00 UTC, fingerprint 9f3a1c…. Never shown again." },
+        Type: { value: "One shared secret", sub: "The server sees one identity. Straza's audit keeps the person or agent." },
+        "Sent as": "Authorization: Bearer <secret>",
+        "Stored here": { value: "Set 2026-09-11 15:02:00 UTC, fingerprint 9f3a1c…" },
         "Per-role secrets": "None. A role's own secret replaces the shared one for that role's calls.",
       },
       "Tools and limits": {
         Description: "Search and read the team's scouting notes.",
         "Tools exposed": "All tools, including ones it adds later.",
-        "Rate limit": "Not limited.",
+        "Rate limit": "The default for a remote server.",
         "Per-call timeout": "The server-wide default.",
       },
     },
@@ -169,16 +170,16 @@ const cases: { name: string; app: AppRow; secrets: SecretRow[]; upstream: number
         Transport: "stdio, a process Straza starts on the strazad host",
         Executable: "/var/lib/straza/u3-echo",
         Arguments: "--stdio",
-        "Working directory": "Not set, so strazad's own.",
-        Environment: ["LOG_LEVEL=info", "ECHO_TOKEN from the stored secret, sealed."],
-        Version: { value: "0.1.0", sub: VERSION_SUB },
+        "Working directory": "Straza's own.",
+        Environment: ["LOG_LEVEL=info", "ECHO_TOKEN = the stored secret"],
+        Version: { value: "0.1.0" },
       },
       "Server authentication": {
-        Type: { value: "One shared secret static", sub: "The server sees one identity; Straza's audit keeps the person or agent." },
-        "Sent as": "The environment variable ECHO_TOKEN, which the process reads.",
-        "Stored here": "Set 2026-09-11 13:40:00 UTC, fingerprint 41be07…. Never shown again.",
+        Type: { value: "One shared secret", sub: "The server sees one identity. Straza's audit keeps the person or agent." },
+        "Sent as": "Variable ECHO_TOKEN",
+        "Stored here": "Set 2026-09-11 13:40:00 UTC, fingerprint 41be07…",
         "Per-role secrets": "None. A role's own secret replaces the shared one for that role's calls.",
-        "Watch out": ENV_WARNING_SHORT,
+        Risk: ENV_WARNING_SHORT,
       },
       "Tools and limits": {
         Description: "None.",
@@ -193,13 +194,13 @@ const cases: { name: string; app: AppRow; secrets: SecretRow[]; upstream: number
     app: limited, secrets: [], upstream: 30,
     want: {
       Connection: {
-        Transport: "HTTP, streamable",
+        Transport: "Streamable HTTP",
         Address: "http://notes.internal:8080/mcp",
-        Version: { value: "2.0.0", sub: VERSION_SUB },
+        Version: { value: "2.0.0" },
         Authentication: "Straza adds no credential: auth passthrough is set in its manifest.",
       },
       "Server authentication": {
-        Type: { value: "None none", sub: "No credential is sent to this server. Role access and policies still apply." },
+        Type: { value: "None", sub: "No credential is sent." },
         "Stored here": "Nothing.",
       },
       "Tools and limits": {
@@ -216,10 +217,10 @@ const cases: { name: string; app: AppRow; secrets: SecretRow[]; upstream: number
     want: {
       Connection: {
         Transport: "stdio, a process Straza starts on the strazad host",
-        Version: { value: "1.0", sub: VERSION_SUB },
+        Version: { value: "1.0" },
       },
       "Server authentication": {
-        Type: "Not known here: the console cannot read a stored manifest for this server. The rows below are what strazad holds.",
+        Type: "Not known here: the console cannot read a stored manifest for this server. The rows below are what Straza holds.",
         "Stored here": "No shared secret is stored yet.",
         "Per-role secrets": "None. A role's own secret replaces the shared one for that role's calls.",
       },
@@ -243,6 +244,16 @@ describe("the Overview of a server", () => {
     expect(listSecrets).toHaveBeenCalledWith(app.id);
   });
 
+  it.each([
+    ["with no rate", scout],
+    ["with a rate of 0", { ...scout, manifest: { ...scout.manifest, straza: { ...scout.manifest!.straza, limits: { rps: 0 } } } }],
+  ])("names the default a remote server %s gets, as the config answered it", async (_case, app) => {
+    vi.mocked(listSecrets).mockResolvedValue([]);
+    mount(app, 30);
+    await settled();
+    expect(Object.fromEntries(facts("Tools and limits"))["Rate limit"].value).toBe("20 calls per second, per session, the default.");
+  });
+
   it("gives a server a file names the origin line and Change on every card, and keeps its secret doors", async () => {
     const sharedFile: AppRow = { ...midpoint, file_differs: true, manifest: { ...midpoint.manifest, straza: { ...midpoint.manifest!.straza, credential: { kind: "oauth", agents: "shared", oauth: { provider: "keycloak" }, inject: BEARER } } } };
     vi.mocked(listSecrets).mockResolvedValue([shared("7c1e", "2026-09-10T09:12:00Z")]);
@@ -251,9 +262,9 @@ describe("the Overview of a server", () => {
     const origin = document.querySelector("[data-origin-stub]") as HTMLElement;
     expect([origin.getAttribute("data-origin-stub"), origin.getAttribute("data-file"), origin.getAttribute("data-differs")]).toEqual(["App/midpoint", "/etc/straza/apps/midpoint.app.yaml", "true"]);
     expect(document.querySelector("[data-file-strip]")).toBeNull();
-    for (const which of ["connection", "credential", "settings"]) expect(screen.getByRole("button", { name: "Change the " + which })).toBeTruthy();
+    for (const name of ["Change connection", "Change server authentication", "Change tools and limits"]) expect(screen.getByRole("button", { name })).toBeTruthy();
     const cred = screen.getByRole("region", { name: "Server authentication" });
-    for (const door of ["Set it again", "Remove", "Add one for a role"]) expect(within(cred).getByRole("button", { name: door })).toBeTruthy();
+    for (const door of ["Set it again", "Remove", "Add for a role"]) expect(within(cred).getByRole("button", { name: door })).toBeTruthy();
     expect(screen.queryByText(/Defined in/)).toBeNull();
   });
 
@@ -263,7 +274,7 @@ describe("the Overview of a server", () => {
     await settled();
     expect(document.querySelector("[data-origin-stub]")?.getAttribute("data-file")).toBe("");
     for (const [card, which] of [["Connection", "connection"], ["Server authentication", "credential"], ["Tools and limits", "settings"]] as const) {
-      const button = within(screen.getByRole("region", { name: card })).getByRole("button", { name: "Change the " + which });
+      const button = within(screen.getByRole("region", { name: card })).getByRole("button", { name: "Change " + card.toLowerCase() });
       expect(button.textContent).toBe("Change");
       expect(button.getAttribute("data-variant")).toBe("outline");
       fireEvent.click(button);
@@ -280,7 +291,7 @@ describe("the Overview of a server", () => {
     mount(withCredential(scout, credential), null);
     await settled();
     const row = Object.fromEntries(facts("Server authentication"))["Stored here"];
-    expect(row.value).toBe("Set 2026-09-11 12:00:00 UTC, fingerprint 5d2a…. Never shown again.");
+    expect(row.value).toBe("Set 2026-09-11 12:00:00 UTC, fingerprint 5d2a…");
     expect(row.warn).toBe("Stored, but this credential type does not read it. Remove it, or let agents fall back to it.");
     expect(document.querySelector("[data-warn]")?.className).toContain("text-warn");
     const cred = screen.getByRole("region", { name: "Server authentication" });
@@ -303,7 +314,7 @@ describe("the Overview of a server", () => {
     expect(document.querySelectorAll("[data-warn]")).toHaveLength(warn ? 1 : 0);
     const roles = document.querySelector("[data-role-secrets]") as HTMLElement;
     expect(within(roles).getAllByRole("button", { name: "Remove" })).toHaveLength(2);
-    expect(within(roles).queryByRole("button", { name: "Add one for a role" }) !== null).toBe(add);
+    expect(within(roles).queryByRole("button", { name: "Add for a role" }) !== null).toBe(add);
   });
 
   it("says a removal changes no call when the credential type reads neither the shared secret nor a role's", async () => {
@@ -345,21 +356,22 @@ describe("the Overview of a server", () => {
     await waitFor(() => expect(notify.failed).toHaveBeenCalledWith("The address could not be copied: the browser refused the clipboard. Select it and copy it by hand."));
   });
 
-  it("reads the Administered by card: the minted role with its badge and help, the holders, the roles above, and no Change button", async () => {
+  it("reads the Administered by card: the minted role with its help, the holders, the roles above as tags, and no Change button", async () => {
     vi.mocked(listSecrets).mockResolvedValue([]);
-    vi.mocked(listUsers).mockResolvedValue({ items: [{ id: "u1", username: "erin", status: "active" }, { id: "u2", username: "hana", status: "active" }] as never, next_cursor: "" });
+    vi.mocked(listUsers).mockResolvedValue({ items: [{ id: "u1", username: "erin", status: "active" }, { id: "u2", username: "hana", status: "active", user_type: "agent" }] as never, next_cursor: "" });
     mount({ ...scout, admin_role: "mcp-admin-scout-tools", admin_role_id: "r-9" }, null);
     const card = within(document.querySelector('[data-card="admin-role"]') as HTMLElement);
     expect(card.getByRole("heading", { name: "Server administration" })).toBeTruthy();
-    expect(card.getByText("mcp-admin-scout-tools")).toBeTruthy();
-    expect(card.getByText("server admin role").getAttribute("data-minted")).toBe("server admin role");
+    expect(card.getByText("mcp-admin-scout-tools").querySelector("svg")?.getAttribute("class")).toContain("lucide-server-cog");
+    expect(card.queryByText("server admin role")).toBeNull();
     expect(card.getByRole("button", { name: "Help: admin role" })).toBeTruthy();
     await card.findByText("erin");
-    expect(card.getByText("hana")).toBeTruthy();
-    expect(card.getByText("Made for this server at registration and named after it. Held by 2 people, assigned in your identity manager.")).toBeTruthy();
-    expect(card.getByText("They change the server from their next check-in, at most 5 minutes after an assignment.")).toBeTruthy();
-    expect(card.getByText("straza-admin and straza-global-mcp-admin administer every server, this one included.")).toBeTruthy();
-    expect(card.getByText("One role per server. Give it to people or to a business role in your identity manager.")).toBeTruthy();
+    expect(card.getByText("erin").querySelector('svg')?.getAttribute("class")).toContain("lucide-user-round");
+    expect(card.getByText("hana").querySelector('svg')?.getAttribute("class")).toContain("lucide-bot");
+    expect(card.getByText("hana").className).toContain("bg-teal-bg");
+    expect(card.getByText("Takes effect within 5 minutes of an assignment.")).toBeTruthy();
+    for (const role of ["straza-admin", "straza-global-mcp-admin"]) expect(card.getByText(role).querySelector("svg")?.getAttribute("class")).toContain("lucide-shield");
+    expect(card.getByText("Assign it in your identity manager.")).toBeTruthy();
     expect(card.queryByRole("button", { name: /^Change/ })).toBeNull();
     expect(listUsers).toHaveBeenCalledWith("role=mcp-admin-scout-tools&sort=name&order=asc&limit=100");
   });
@@ -368,8 +380,7 @@ describe("the Overview of a server", () => {
     vi.mocked(listSecrets).mockResolvedValue([]);
     vi.mocked(listUsers).mockRejectedValueOnce(Object.assign(new Error("session lacks grant identity:read"), { status: 403 }));
     const { unmount } = mount({ ...scout, admin_role: "mcp-admin-scout-tools", admin_role_id: "r-9" }, null);
-    await screen.findByText("Not readable with this account: listing who holds a role needs the scope identity:read.");
-    expect(screen.getByText("Made for this server at registration and named after it.")).toBeTruthy();
+    await screen.findByText("The holders are not shown, because your role does not include Users and Roles.");
     unmount();
     vi.mocked(listUsers).mockResolvedValueOnce({ items: [], next_cursor: "" });
     mount({ ...scout, admin_role: "mcp-admin-scout-tools", admin_role_id: "r-9" }, null);

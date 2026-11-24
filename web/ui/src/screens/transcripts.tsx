@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ConversationSheet, ToneBadge } from "@/components/conversation-sheet";
+import { ConversationSheet } from "@/components/conversation-sheet";
+import { Chip } from "@/components/chip";
 import { DataTable, HEAD, plain } from "@/components/data-table";
 import { FetchError } from "@/components/error-state";
 import { PageHead } from "@/components/page-head";
@@ -21,7 +22,6 @@ import {
   BODY_MISSING,
   CONTAINS_HINT,
   EMPTY_HITS,
-  EMPTY_INBOX,
   EXACT_HINT,
   EXACT_NEEDS_SECURE,
   GOTO_LABEL,
@@ -103,6 +103,9 @@ const INBOX_LABELS: Record<string, string> = {
 // The widths leave the Latest turn column the rest of the page, so the
 // preview is cut at the column's edge and the table never grows past it.
 const INBOX_WIDTHS: Record<string, string> = { last_at: "120px", username: "256px", turns: "56px", session_id: "136px" };
+// INBOX_FLOOR keeps about 310 px for Latest turn in a narrow window, where
+// the table scrolls inside its box.
+const INBOX_FLOOR = "880px";
 
 const INBOX_COLUMNS: ColumnDef<ConversationRow>[] = [
   {
@@ -160,14 +163,16 @@ const HIT_COLUMNS: ColumnDef<TurnRow>[] = [
   {
     accessorKey: "kind",
     header: plain("Kind"),
-    cell: ({ row }) => <ToneBadge tone={row.original.kind === "prompt" ? "accent" : "ok"}>{kindWord(row.original)}</ToneBadge>,
+    cell: ({ row }) => <Chip tone={row.original.kind === "prompt" ? "accent" : "ok"}>{kindWord(row.original)}</Chip>,
   },
   {
     accessorKey: "content",
     header: plain("Content"),
+    // The preview wraps onto a second line and is cut there, whole on
+    // hover, so it never sets the table's width.
     cell: ({ row }) => (row.original.body_missing
-      ? <ToneBadge tone="danger" title={BODY_MISSING}>body missing</ToneBadge>
-      : <span className="block max-w-[56ch] truncate text-muted-foreground" title={row.original.content.slice(0, PREVIEW)}>{row.original.content.slice(0, PREVIEW) + (row.original.content.length > PREVIEW ? "…" : "")}</span>),
+      ? <Chip tone="danger" title={BODY_MISSING}>body missing</Chip>
+      : <span className="line-clamp-2 max-w-[56ch] whitespace-normal [overflow-wrap:anywhere] text-muted-foreground" title={row.original.content.slice(0, PREVIEW)} data-hit-content>{row.original.content.slice(0, PREVIEW) + (row.original.content.length > PREVIEW ? "…" : "")}</span>),
   },
   {
     accessorKey: "session_id",
@@ -254,8 +259,8 @@ export function Transcripts({ session }: { session?: string }) {
   const searching = hits.kind !== "idle";
   const posture = captureLine(capture.config, capture.failed);
   // The match count sits in the filter row, so the hint says only how the
-  // search reads.
-  const hint = searching ? (match === MATCH_EXACT ? EXACT_HINT : CONTAINS_HINT) : INBOX_LINE;
+  // search reads. The list of sessions carries no hint.
+  const hint = searching ? (match === MATCH_EXACT ? EXACT_HINT : CONTAINS_HINT) : "";
 
   return (
     <>
@@ -270,9 +275,9 @@ export function Transcripts({ session }: { session?: string }) {
       />
       <div className="flex flex-col gap-3 px-6 py-5">
         <div className="flex flex-wrap items-center gap-2" data-capture-line>
-          <span className="text-[13px] text-muted-foreground">Recording policy</span>
-          <ToneBadge tone={posture.tone}>{posture.word}</ToneBadge>
-          <span className="max-w-[90ch] text-sm text-text-2">{posture.text}</span>
+          <span className="text-caption text-muted-foreground">Recording</span>
+          <Chip tone={posture.tone}>{posture.word}</Chip>
+          <span className="max-w-[90ch] text-dense text-text-2">{posture.text}</span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -287,7 +292,7 @@ export function Transcripts({ session }: { session?: string }) {
             aria-describedby={miss ? "search-miss" : undefined}
             className="h-9 min-w-[320px] flex-1 sm:max-w-sm"
           />
-          <Label htmlFor="match" className="text-[13px] font-normal text-muted-foreground">Match</Label>
+          <Label htmlFor="match" className="text-caption font-normal text-muted-foreground">Match</Label>
           <Select value={match} onValueChange={setMatch}>
             <SelectTrigger id="match" aria-label="Match" className="w-[150px]"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -297,9 +302,9 @@ export function Transcripts({ session }: { session?: string }) {
           </Select>
           <UserPicker value={user} onChange={setUser} label="User" className="w-56" />
           <Button size="sm" className="h-9" onClick={() => void search()}>Search</Button>
-          {searching && <Button variant="outline" size="sm" className="h-9" onClick={back}>Back to conversations</Button>}
+          {searching && <Button variant="outline" size="sm" className="h-9" onClick={back}>Back to transcripts</Button>}
           <span className="ml-auto flex items-center gap-2 border-l border-border pl-3">
-            <Label htmlFor="goto" className="text-[13px] font-normal text-muted-foreground">{GOTO_LABEL}</Label>
+            <Label htmlFor="goto" className="text-caption font-normal text-muted-foreground">{GOTO_LABEL}</Label>
             <Input
               id="goto"
               value={goto}
@@ -312,12 +317,12 @@ export function Transcripts({ session }: { session?: string }) {
           </span>
         </div>
 
-        {miss && <p id="search-miss" className="text-[13px] text-danger">{TYPE_WHAT}</p>}
-        <p className="max-w-[90ch] text-[13px] text-muted-foreground" data-hint>{hint}</p>
+        {miss && <p id="search-miss" className="text-caption text-danger">{TYPE_WHAT}</p>}
+        {hint && <p className="max-w-[90ch] text-caption text-muted-foreground" data-hint>{hint}</p>}
 
-        {list.kind === "loading" && !searching && <p className="text-sm text-muted-foreground">{READING_LIST}</p>}
+        {list.kind === "loading" && !searching && <p className="text-dense text-muted-foreground">{READING_LIST}</p>}
         {list.kind === "error" && !searching && (
-          <div className="rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-sm text-foreground" role="alert">
+          <div className="rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-dense text-foreground" role="alert">
             {list.message}{" "}
             <Button variant="link" size="sm" className="h-auto p-0 text-link" onClick={() => void load()}>Reload now</Button>
           </div>
@@ -337,12 +342,13 @@ export function Transcripts({ session }: { session?: string }) {
             openKey={openID}
             serverSort={{ state: { id: "last_at", desc: true }, onChange: () => {} }}
             widths={INBOX_WIDTHS}
+            minWidth={INBOX_FLOOR}
             count={(shown) => loadedWords(shown)}
-            emptyText={EMPTY_INBOX}
+            emptyText={INBOX_LINE}
           />
         )}
 
-        {hits.kind === "loading" && <p className="text-sm text-muted-foreground">{SEARCHING}</p>}
+        {hits.kind === "loading" && <p className="text-dense text-muted-foreground">{SEARCHING}</p>}
         {hits.kind === "error" && <FetchError subject={route.label} detail={hits.message} />}
         {hits.kind === "ready" && (
           <DataTable

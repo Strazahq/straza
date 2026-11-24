@@ -12,7 +12,8 @@ import (
 // publisher type once for the group and strazactl takes in --confirm, while a typed line alone in its
 // group and a line confirmed by its own name, such as a server removal,
 // ask for that name, a tick line asks to confirm it, and a wrong text names
-// the text the line takes.
+// the text the line takes. A line an agent raised about its own access is
+// accepted instead of confirmed.
 func TestAcksRefusalSaysWhatToType(t *testing.T) {
 	t.Parallel()
 	typed := func(code, group, object, name string) drafts.Finding {
@@ -24,9 +25,11 @@ func TestAcksRefusalSaysWhatToType(t *testing.T) {
 	host := typed("server.credential-host", "server.credential-host", "App/tracker", "tickets.example.net")
 	removal := typed("server.removal", "", "App/helpdesk", "helpdesk")
 	loosen := typed("agent.guardrail", "", "PolicySet/desk-gate", "desk-gate")
+	// An agent's reach into the built-in server names no object.
+	reach := typed("agent.own-reach", "", "", "straza")
 	tick := drafts.Finding{Code: "role.covers-wider", Class: drafts.ClassRisk, Ack: drafts.AckTick, Object: "Role/tracker-triage", Group: "role.covers-wider",
 		Sentence: "tracker-triage will reach 1 more ticket on tracker: T-2."}
-	v := drafts.Verdict{Risks: []drafts.Finding{desk, queue, host, removal, loosen, tick}}
+	v := drafts.Verdict{Risks: []drafts.Finding{desk, queue, host, removal, loosen, reach, tick}}
 	view := verdictPayload{Risks: keyed(v.Risks, nil, nil)}
 	// body confirms every line but the one with the key left, which keeps
 	// its tick when ticked is true, with text as the text typed for it.
@@ -65,6 +68,10 @@ func TestAcksRefusalSaysWhatToType(t *testing.T) {
 			"Publish refused: desk-gate stops gating the holders of tracker-triage. Type desk-gate to accept it, then publish again."},
 		{"a wrong text of an agent's loosening", body(loosen.Key(), true, "desk-gat"),
 			"Publish refused: the text typed for PolicySet/desk-gate is not desk-gate. Type desk-gate to accept it, then publish again."},
+		{"an agent's own reach", body(reach.Key(), false, ""),
+			"Publish refused: straza stops gating the holders of tracker-triage. Type straza to accept it, then publish again."},
+		{"a wrong text of an agent's own reach into the built-in server", body(reach.Key(), true, "strazo"),
+			"Publish refused: the text typed for this risk is not straza. Type straza to accept it, then publish again."},
 		{"a tick line", body(tick.Key(), false, ""),
 			"Publish refused: tracker-triage will reach 1 more ticket on tracker: T-2. Confirm it, then publish again."},
 		{"a wrong text of a grouped line", body(desk.Key(), true, "desk-hld"),

@@ -51,7 +51,7 @@ func TestConvergeConsumer(t *testing.T) {
 		SelfSource: "strazad/self-pod",
 		OnPolicy:   func(context.Context) error { policy.Add(1); return nil },
 		OnApps:     func(context.Context) error { apps.Add(1); return nil },
-		OnIdentity: func(context.Context) error { ident.Add(1); return nil },
+		OnIdentity: func(context.Context, string) error { ident.Add(1); return nil },
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	go func() { _ = cons.Run(ctx) }()
 
@@ -121,7 +121,7 @@ func TestConvergeRoutesEvents(t *testing.T) {
 				SelfSource: self,
 				OnPolicy:   reached("policy"),
 				OnApps:     reached("apps"),
-				OnIdentity: reached("identity"),
+				OnIdentity: func(ctx context.Context, _ string) error { return reached("identity")(ctx) },
 			}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			c.Handle(context.Background(), tc.subject, []byte(`{"source":"`+tc.source+`","data":`+tc.data+`}`))
 			want := []string{}
@@ -184,7 +184,7 @@ func TestConvergeCatchesUpAfterItSubscribes(t *testing.T) {
 				},
 				OnPolicy:   func(context.Context) error { return nil },
 				OnApps:     func(context.Context) error { apps.Add(1); return nil },
-				OnIdentity: func(context.Context) error { return nil },
+				OnIdentity: func(context.Context, string) error { return nil },
 			}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			if tc.subscribeFirst {
 				if err := cons.Subscribe(ctx); err != nil {

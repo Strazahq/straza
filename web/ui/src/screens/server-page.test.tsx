@@ -9,10 +9,10 @@ import type { DraftPublished } from "@/lib/api";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { appLogs, appObjects, catalogPreview, disableApp, draftAppObjects, enableApp, getConfig, listApps, listAudit, listBindings, listChanges, listRoles, listSecrets, listTools, listUsers, recheckApp, removeApp, removeSecret, setListingCredential, setSecret } from "@/lib/api";
 import { publishDraft } from "@/lib/drafts-api";
-import { navigate } from "@/lib/router";
+import { navigate, pathFor } from "@/lib/router";
 import { adminAreas } from "@/lib/session";
 import { notify } from "@/lib/notify";
-import { NO_DESCRIPTION, POLICY_NOT_READABLE, REACH_NOT_READABLE } from "@/lib/server-words";
+import { POLICY_NOT_READABLE, REACH_NOT_READABLE } from "@/lib/server-words";
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
@@ -29,9 +29,9 @@ vi.mock("@/lib/notify", () => ({ notify: { ok: vi.fn(), warn: vi.fn(), failed: v
 // The Change sheet is its own lazy module; the page suite stands it in with
 // the props it was handed, so it tests the opening, closing and reload alone.
 vi.mock("@/components/server-change-sheet", () => ({
-  ChangeSheet: ({ app, which, tools, upstreamTimeout, onClose, onSaved }: ChangeSheetProps) => (
+  ChangeSheet: ({ app, which, tools, upstreamTimeout, remoteRps, onClose, onSaved }: ChangeSheetProps) => (
     <div data-change-sheet={which}>
-      {"Change " + which + " of " + app.name + ", tools " + tools.join(",") + ", timeout " + upstreamTimeout}
+      {"Change " + which + " of " + app.name + ", tools " + tools.join(",") + ", timeout " + upstreamTimeout + ", rate " + remoteRps}
       <button type="button" onClick={onClose}>Close the sheet</button>
       <button type="button" onClick={() => onSaved()}>Save the sheet</button>
     </div>
@@ -125,7 +125,7 @@ const policy = (row: HTMLElement) => {
   const cell = row.querySelectorAll("td")[3];
   return {
     chips: [...cell.querySelectorAll("[data-tone]")].map((c) => c.getAttribute("data-tone") + " " + c.textContent),
-    lines: [...cell.querySelectorAll("[data-policy-sets]")].map((l) => l.textContent),
+    lines: [...cell.querySelectorAll("[data-policy-sets]")].map((l) => [...l.children].map((c) => c.textContent).join(" ")),
   };
 };
 const dialog = async () => screen.findByRole("alertdialog");
@@ -159,7 +159,7 @@ describe("the MCP server page", () => {
     vi.mocked(setSecret).mockResolvedValue({ id: "c2", scope: "app", role: "", fingerprint: "b7e2" });
     vi.mocked(removeSecret).mockResolvedValue({});
     vi.mocked(removeApp).mockResolvedValue({ id: "app-9", status: "deleted" });
-    vi.mocked(getConfig).mockResolvedValue({ apps: { upstream_timeout_seconds: 45 } });
+    vi.mocked(getConfig).mockResolvedValue({ apps: { upstream_timeout_seconds: 45, default_remote_rps: 25 } });
     vi.mocked(listUsers).mockResolvedValue({ items: [], next_cursor: "" });
     vi.mocked(adminAreas).mockReturnValue(null);
     vi.mocked(appLogs).mockReset();
@@ -179,9 +179,9 @@ describe("the MCP server page", () => {
   it.each([
     { id: "app-8", why: "a manifest with no description" },
     { id: "app-2", why: "a row with no manifest" },
-  ])("says the manifest has no description for $why", async ({ id }) => {
+  ])("shows no lede for $why", async ({ id }) => {
     await opened(id);
-    expect(head().getByText(NO_DESCRIPTION)).toBeTruthy();
+    expect(document.querySelector("[data-page-head] p")).toBeNull();
   });
 
   it("opens on Overview, with the tabs in order and the tab in the address", async () => {
@@ -205,26 +205,28 @@ describe("the MCP server page", () => {
     await opened("app-9");
     await credOf("fingerprint");
     expect(document.querySelector("[data-change-sheet]")).toBeNull();
-    await userEvent.click(within(credCard()).getByRole("button", { name: "Change the credential" }));
+    await userEvent.click(within(credCard()).getByRole("button", { name: "Change server authentication" }));
     const sheet = await waitFor(() => { const el = document.querySelector("[data-change-sheet]") as HTMLElement; expect(el).not.toBeNull(); return el; });
     expect(sheet.getAttribute("data-change-sheet")).toBe("credential");
-    expect(sheet.textContent).toContain("Change credential of scout-tools, tools echo,get-sum,get-env, timeout 45");
+    expect(sheet.textContent).toContain("Change credential of scout-tools, tools echo,get-sum,get-env, timeout 45, rate 25");
+    expect(dd(screen.getByRole("region", { name: "Tools and limits" }), "Rate limit")).toBe("25 calls per second, per session, the default.");
     await userEvent.click(screen.getByRole("button", { name: "Close the sheet" }));
     expect(document.querySelector("[data-change-sheet]")).toBeNull();
     expect(listApps).toHaveBeenCalledTimes(1);
-    await userEvent.click(within(screen.getByRole("region", { name: "Tools and limits" })).getByRole("button", { name: "Change the settings" }));
+    await userEvent.click(within(screen.getByRole("region", { name: "Tools and limits" })).getByRole("button", { name: "Change tools and limits" }));
     await userEvent.click(await screen.findByRole("button", { name: "Save the sheet" }));
     expect(document.querySelector("[data-change-sheet]")).toBeNull();
     await waitFor(() => expect(listApps).toHaveBeenCalledTimes(2));
   });
 
-  it("hands the sheet no timeout and names none when the config cannot be read", async () => {
+  it("hands the sheet no timeout and no rate and names none when the config cannot be read", async () => {
     vi.mocked(getConfig).mockRejectedValue(apiError(403, "requires the config area"));
     await opened("app-9");
     const settings = screen.getByRole("region", { name: "Tools and limits" });
     expect(dd(settings, "Per-call timeout")).toBe("The server-wide default.");
-    await userEvent.click(within(settings).getByRole("button", { name: "Change the settings" }));
-    expect((await screen.findByText(/^Change settings of scout-tools/)).textContent).toContain("timeout null");
+    expect(dd(settings, "Rate limit")).toBe("The default for a remote server.");
+    await userEvent.click(within(settings).getByRole("button", { name: "Change tools and limits" }));
+    expect((await screen.findByText(/^Change settings of scout-tools/)).textContent).toContain("timeout null, rate null");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -232,7 +234,7 @@ describe("the MCP server page", () => {
     await opened("app-9", "tools");
     const head = document.querySelector("[data-tools-head]") as HTMLElement;
     expect(head.textContent).toContain("3 of the 4 tools the server lists are exposed.");
-    const door = within(head).getByRole("button", { name: "Change the exposed tools" });
+    const door = within(head).getByRole("button", { name: "Change tools" });
     expect(door.getAttribute("data-variant")).toBe("outline");
     await userEvent.click(door);
     const sheet = await waitFor(() => { const el = document.querySelector("[data-change-sheet]") as HTMLElement; expect(el).not.toBeNull(); return el; });
@@ -240,7 +242,7 @@ describe("the MCP server page", () => {
     document.body.innerHTML = "";
 
     await opened("app-10", "tools");
-    expect(screen.getByRole("button", { name: "Change the exposed tools" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change tools" })).toBeTruthy();
   });
 
   it("renders no Change button for a row with no stored manifest, which a sheet could not edit", async () => {
@@ -254,7 +256,7 @@ describe("the MCP server page", () => {
     expect(document.querySelector("[data-origin-stub]")?.getAttribute("data-file")).toBe("/etc/straza/apps/midpoint-file.app.yaml");
     expect(document.querySelector("[data-file-strip]")).toBeNull();
     await credOf("No shared secret is stored yet.");
-    for (const which of ["connection", "credential", "settings"]) expect(screen.getByRole("button", { name: "Change the " + which })).toBeTruthy();
+    for (const name of ["Change connection", "Change server authentication", "Change tools and limits"]) expect(screen.getByRole("button", { name })).toBeTruthy();
     expect(head().getByRole("button", { name: "Remove server" })).toBeTruthy();
     expect(within(credCard()).getByRole("button", { name: "Set one" })).toBeTruthy();
   });
@@ -309,7 +311,7 @@ describe("the MCP server page", () => {
     vi.mocked(listBindings).mockRejectedValue(apiError(403, "session lacks grant apps:read"));
     vi.mocked(listApps).mockResolvedValue(apps.map((a) => (a.id === "app-9" ? { ...a, reached_by: [] } : a)) as never);
     await opened("app-9");
-    expect(dd(banner(), "Role access")).toBe("Not readable with this account: which roles have access needs the scope apps:read.");
+    expect(dd(banner(), "Role access")).toBe("The roles with access are not shown, because your role does not include MCP servers.");
   });
 
   it("words the degraded banner with the reason, for how long and since when", async () => {
@@ -331,11 +333,13 @@ describe("the MCP server page", () => {
     expect(row("echo").textContent).toContain("scout-role");
     expect(policy(row("echo"))).toEqual({ chips: ["ok allowed"], lines: [] });
     expect(policy(row("get-sum"))).toEqual({ chips: ["warn needs approval"], lines: ["scout-role-access"] });
+    expect(row("get-sum").querySelector('[data-policy-sets] svg')?.getAttribute("class")).toContain("lucide-file-check");
+    expect(row("echo").querySelectorAll("td")[2].querySelector("svg")?.getAttribute("class")).toContain("lucide-id-card");
     expect(row("get-env").textContent).toContain("no role");
-    expect(row("get-env").querySelectorAll("td")[3].textContent).toBe("does not exist for any session");
-    expect(policy(row("get-env")).chips).toEqual([]);
+    expect(row("get-env").querySelectorAll("td")[3].textContent).toBe("no access");
+    expect(policy(row("get-env")).chips).toEqual(["plain no access"]);
     expect(catalogPreview).toHaveBeenCalledWith("scout-role", "scout-tools");
-    expect(screen.getByText('This table answers "who can call X". Nothing is reachable until a role has access to it. Policies add the gates.')).toBeTruthy();
+    expect(document.querySelector("[data-reach-note]")).toBeNull();
     expect(screen.queryByText("/servers/app-9/tools")).toBeNull();
   });
 
@@ -346,7 +350,7 @@ describe("the MCP server page", () => {
   const folds: [string, Record<string, [string, string?] | null>, string[], string[]][] = [
     ["one outcome and no set", { a: ["visible"], b: ["visible"], c: ["visible"] }, ["ok allowed"], []],
     ["one outcome and one set, named once", { a: ["approve_gated", "holds"], b: ["approve_gated", "holds"], c: ["approve_gated", "holds"] }, ["warn needs approval"], ["holds"]],
-    ["one outcome and a set per role", { a: ["approve_gated", "a-access"], b: ["approve_gated", "b-access"], c: ["approve_gated", "a-access"] }, ["warn needs approval"], ["a-access, b-access"]],
+    ["one outcome and a set per role", { a: ["approve_gated", "a-access"], b: ["approve_gated", "b-access"], c: ["approve_gated", "a-access"] }, ["warn needs approval"], ["a-access b-access"]],
     ["a denial", { a: ["hidden_policy", "baseline"], b: ["hidden_policy", "baseline"], c: ["hidden_policy", "baseline"] }, ["danger denied"], ["baseline"]],
     ["outcomes that differ by role, each naming its roles", { a: ["visible"], b: ["hidden_policy", "baseline"], c: ["visible"] }, ["ok allowed", "danger denied"], ["for a, c", "baseline for b"]],
     ["a preview that could not be read", { a: ["visible"], b: null, c: ["visible"] }, ["ok allowed", "unknown unknown"], ["for a, c", "for b"]],
@@ -367,7 +371,7 @@ describe("the MCP server page", () => {
 
   it("says when no tool is known yet and a tab click changes the address in place", async () => {
     await opened("app-3", "tools");
-    expect(screen.getByText("No tool is known yet: the server reads degraded, Straza could not reach http://flaky:3001/mcp (connection refused). Recheck once it answers.")).toBeTruthy();
+    expect(screen.getByText("No tool is known yet, because the server is degraded, Straza could not reach http://flaky:3001/mcp (connection refused). Recheck once it answers.")).toBeTruthy();
     await userEvent.click(screen.getByRole("tab", { name: "Activity" }));
     expect(navigate).toHaveBeenCalledWith("servers", ["app-3", "activity"], true);
   });
@@ -375,51 +379,51 @@ describe("the MCP server page", () => {
   it("reads the credential of a static server as labeled rows with the stored fingerprint and its two doors", async () => {
     await opened("app-9");
     const cred = await credOf("fingerprint");
-    expect(dd(cred, "Type")).toBe("One shared secret staticThe server sees one identity; Straza's audit keeps the person or agent.");
+    expect(dd(cred, "Type")).toBe("One shared secretThe server sees one identity. Straza's audit keeps the person or agent.");
     expect(dd(cred, "Sent as")).toBe("The header X-Demo-Key, carrying the secret.");
-    expect(dd(cred, "Stored here")).toContain("Set 2026-09-04 07:41:00 UTC, fingerprint a1c4…. Never shown again.");
+    expect(dd(cred, "Stored here")).toContain("Set 2026-09-04 07:41:00 UTC, fingerprint a1c4…");
     expect(within(cred).getByRole("button", { name: "Set it again" })).toBeTruthy();
     expect(within(cred).getByRole("button", { name: "Remove" })).toBeTruthy();
     expect(dd(cred, "Per-role secrets")).toContain("None.");
     expect(dd(cred, "Per-role secrets")).toContain("A role's own secret replaces the shared one for that role's calls.");
-    expect(within(cred).getByRole("button", { name: "Add one for a role" })).toBeTruthy();
+    expect(within(cred).getByRole("button", { name: "Add for a role" })).toBeTruthy();
     expect(cred.textContent).not.toContain("strazactl apps install");
   });
 
   it("offers no shared-secret door on a token server with agents sponsor", async () => {
     await opened("app-5");
-    const cred = await credOf("Nothing here");
-    expect(dd(cred, "Type")).toBe("Each caller's own token tokenPeople paste theirs on the Credentials tab of their self-service page.");
-    expect(dd(cred, "Sent as")).toBe("The Authorization header, as Bearer and the person's token.");
-    expect(dd(cred, "Stored here")).toBe("Nothing here. Each person's token is sealed under their own id.");
-    expect(dd(cred, "Agents with nothing of their own")).toBe("Run on their sponsor's token once the sponsor allowed it (agents sponsor).");
-    expect(dd(cred, "Per-role secrets")).toBe("Not used here. Each caller's own token is the credential.");
-    expect(within(cred).queryByRole("button", { name: /Set one|Set it again|Add one for a role/ })).toBeNull();
+    const cred = await credOf("kept per person");
+    expect(dd(cred, "Type")).toBe("Each person's own tokenPeople paste theirs on the Credentials tab of their self-service page.");
+    expect(dd(cred, "Sent as")).toBe("Authorization: Bearer <the person's token>");
+    expect(dd(cred, "Stored here")).toBe("Each person's own, kept per person.");
+    expect(dd(cred, "Agents with nothing of their own")).toBe("Run on their sponsor's token once the sponsor allowed it.");
+    expect(dd(cred, "Per-role secrets")).toBe("Not used here. Each person's own token is the credential.");
+    expect(within(cred).queryByRole("button", { name: /Set one|Set it again|Add for a role/ })).toBeNull();
   });
 
   it("opens the doors on a token server with agents shared", async () => {
     await opened("app-6");
     const cred = await credOf("7c1e");
-    expect(cred.textContent).toContain("Use this server's shared secret (agents shared).");
-    expect(cred.textContent).toContain("Set 2026-09-10 09:12:00 UTC, fingerprint 7c1e…. Never shown again.");
+    expect(cred.textContent).toContain("Use this server's shared secret.");
+    expect(cred.textContent).toContain("Set 2026-09-10 09:12:00 UTC, fingerprint 7c1e…");
     expect(within(cred).getByRole("button", { name: "Set it again" })).toBeTruthy();
-    expect(within(cred).getByRole("button", { name: "Add one for a role" })).toBeTruthy();
+    expect(within(cred).getByRole("button", { name: "Add for a role" })).toBeTruthy();
     expect(cred.textContent).toContain("for that role's agents.");
   });
 
   it("reads a sign-in server and a server with no credential", async () => {
     await opened("app-7");
-    let cred = await credOf("Nothing here");
-    expect(dd(cred, "Type")).toBe("Each caller's own sign-in oauthNothing of theirs is stored here.");
+    let cred = await credOf("kept per person");
+    expect(dd(cred, "Type")).toBe("Each person's own sign-in");
     expect(dd(cred, "Provider and scopes")).toBe("keycloak, no scopes named");
-    expect(dd(cred, "Stored here")).toBe("Nothing here. Each person's sign-in is sealed under their own id.");
-    expect(dd(cred, "Agents with nothing of their own")).toBe("Get nothing, because an agent cannot sign in through a browser (agents own).");
-    expect(dd(cred, "Per-role secrets")).toBe("Not used here. Each caller's own sign-in is the credential.");
+    expect(dd(cred, "Stored here")).toBe("Each person's own, kept per person.");
+    expect(dd(cred, "Agents with nothing of their own")).toBe("Refused, because an agent cannot sign in through a browser.");
+    expect(dd(cred, "Per-role secrets")).toBe("Not used here. Each person's own sign-in is the credential.");
     expect(within(cred).queryByRole("button", { name: "Set one" })).toBeNull();
     document.body.innerHTML = "";
     await opened("app-8");
     cred = await credOf("Nothing.");
-    expect(dd(cred, "Type")).toBe("None noneNo credential is sent to this server. Role access and policies still apply.");
+    expect(dd(cred, "Type")).toBe("NoneNo credential is sent.");
     expect(dd(cred, "Sent as")).toBe("");
     expect(dd(cred, "Per-role secrets")).toBe("");
   });
@@ -431,7 +435,7 @@ describe("the MCP server page", () => {
     expect(input.type).toBe("password");
     await userEvent.click(screen.getByRole("button", { name: "Store it" }));
     expect(setSecret).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toBe("Type the secret the server expects. It is stored sealed and never shown again.");
+    expect(screen.getByRole("alert").textContent).toBe("Type the secret the server expects.");
     expect(document.activeElement).toBe(input);
     await userEvent.type(input, "new-value");
     await userEvent.click(screen.getByRole("button", { name: "Store it" }));
@@ -444,7 +448,7 @@ describe("the MCP server page", () => {
 
   it("stores a per-role secret for an application role only", async () => {
     await opened("app-9");
-    await userEvent.click(await screen.findByRole("button", { name: "Add one for a role" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Add for a role" }));
     await userEvent.click(screen.getByRole("button", { name: "Store it" }));
     expect(screen.getByRole("alert").textContent).toBe("Pick the application role this secret is for.");
     const trigger = screen.getByRole("combobox", { name: "role for the secret" });
@@ -474,7 +478,7 @@ describe("the MCP server page", () => {
     await userEvent.click(shared);
     d = await dialog();
     expect(d.textContent).toContain("Remove the shared secret?");
-    expect(d.textContent).toContain("Calls and health checks for scout-tools run without a credential from now on, unless a role has its own. A server that requires one reads degraded until a secret is set again.");
+    expect(d.textContent).toContain("Calls and health checks run with no credential, except roles with their own. A server that needs one is degraded until a secret is set again.");
     await userEvent.click(within(d).getByRole("button", { name: "Remove secret" }));
     await waitFor(() => expect(removeSecret).toHaveBeenCalledWith("app-9", ""));
   });
@@ -484,8 +488,8 @@ describe("the MCP server page", () => {
     await userEvent.click(head().getByRole("button", { name: "Remove server" }));
     const d = await dialog();
     expect(d.textContent).toContain("Remove scout-tools?");
-    expect(d.textContent).toContain("Its access rows for scout-role and its stored secrets are deleted, and sessions calling its tools find them gone.");
-    expect(d.textContent).toContain("Rules naming it in policies stay and gate nothing until a server with this name is installed again.");
+    expect(d.textContent).toContain("Its access rows for scout-role, its secrets, its own roles and its admin role are deleted.");
+    expect(d.textContent).toContain("Policy rules that name it stay and apply again if a server with this name is added.");
     expect(within(d).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Save draft", "Remove server…"]);
     expect(save.publish).not.toHaveBeenCalled();
     await userEvent.click(within(d).getByRole("button", { name: "Remove server…" }));
@@ -510,7 +514,7 @@ describe("the MCP server page", () => {
     await userEvent.click(head().getByRole("button", { name: "Pause" }));
     const d = await dialog();
     expect(d.textContent).toContain("Pause scout-tools?");
-    expect(d.textContent).toContain("An admin pause stops live traffic: its tools leave every session's list and every call to it is denied until you enable it again. Its process is stopped; a remote server is left running on its own host.");
+    expect(d.textContent).toContain("Its tools leave every session's list and calls are denied until you enable it. Straza stops its process. A remote server keeps running on its own host.");
     expect(disableApp).not.toHaveBeenCalled();
     vi.mocked(disableApp).mockImplementation(async () => {
       vi.mocked(listApps).mockResolvedValue(apps.map((a) => (a.id === "app-9" ? { ...a, status: "stopped", paused: true } : a)) as never);
@@ -539,8 +543,8 @@ describe("the MCP server page", () => {
     await opened("app-4");
     await userEvent.click(head().getByRole("button", { name: "Enable" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe("Enable refused. The server no longer knows this MCP server. Reload the list.");
-    expect(notify.failed).toHaveBeenCalledWith("Enable refused: the server no longer knows this MCP server. Reload the list.");
+    expect(alert.textContent).toBe("Enable refused. Straza no longer knows this MCP server. Reload the list.");
+    expect(notify.failed).toHaveBeenCalledWith("Enable refused: Straza no longer knows this MCP server. Reload the list.");
     expect(banner().getAttribute("data-server-status")).toBe("stopped");
     expect(listApps).toHaveBeenCalledTimes(1);
   });
@@ -557,8 +561,8 @@ describe("the MCP server page", () => {
     vi.mocked(recheckApp).mockRejectedValue(apiError(0, "unreachable", true));
     await userEvent.click(head().getByRole("button", { name: "Recheck" }));
     const status = await screen.findByRole("status");
-    expect(status.textContent).toBe("Recheck: unreachable, state unknown. Recheck did not reach strazad. Check the connection, then try again.");
-    expect(notify.failed).toHaveBeenCalledWith("Recheck did not reach strazad. Check the connection, then try again.");
+    expect(status.textContent).toBe("Recheck did not run. Straza did not answer. Check the connection, then try again.");
+    expect(notify.failed).toHaveBeenCalledWith("Recheck did not run. Straza did not answer. Check the connection, then try again.");
   });
 
   it("merges a recheck into the row and keeps the role chips", async () => {
@@ -568,16 +572,16 @@ describe("the MCP server page", () => {
     await waitFor(() => expect(banner().getAttribute("data-server-status")).toBe("degraded"));
     expect(banner().textContent).toContain("Straza could not reach http://demo-tools:3001/mcp (no answer in time).");
     expect(banner().textContent).toContain("Role accessscout-role");
-    expect(notify.warn).toHaveBeenCalledWith("scout-tools reads degraded after the probe. Straza could not reach http://demo-tools:3001/mcp (no answer in time).");
+    expect(notify.warn).toHaveBeenCalledWith("scout-tools is degraded. Straza could not reach http://demo-tools:3001/mcp (no answer in time).");
   });
 
-  it("shows the manifest as installed, and says so when an older row carries none", async () => {
+  it("shows the manifest as published, and says so when an older row carries none", async () => {
     await opened("app-9", "manifest");
     const pre = document.querySelector("pre") as HTMLElement;
     for (const want of ["name: scout-tools", "url: http://demo-tools:3001/mcp", "kind: static", "name: X-Demo-Key", 'tools:\n      - "*"']) expect(pre.textContent).toContain(want);
     document.body.innerHTML = "";
     await opened("app-2", "manifest");
-    expect(screen.getByText("The console cannot read a stored manifest for this server. The file you installed, or the apps directory, holds it; the runtime is command, version 1.0.")).toBeTruthy();
+    expect(screen.getByText("No stored manifest. It is in the file you installed or in the apps directory.")).toBeTruthy();
   });
 
   // Download app.yaml sits in the head on every tab, beside Test a call,
@@ -596,7 +600,7 @@ describe("the MCP server page", () => {
 
   it.each([
     { id: "app-9", why: "a server added through the API", line: "To change it, use the Change buttons on Overview. strazactl apps install -f scout-tools.yaml does the same from a file you keep.", code: "strazactl apps install -f scout-tools.yaml" },
-    { id: "app-10", why: "a server a file names", line: "To change it, use the Change buttons on Overview, or edit midpoint-file.app.yaml in /etc/straza/apps, which proposes a draft a person publishes.", code: null },
+    { id: "app-10", why: "a server a file names", line: "Change it on Overview, or edit midpoint-file.app.yaml in /etc/straza/apps to propose a draft.", code: null },
     { id: "app-2", why: "a row with no stored manifest", line: "To change it, edit the file you installed and run strazactl apps install -f legacy-app.yaml.", code: "strazactl apps install -f legacy-app.yaml" },
   ])("names the way to change $why under the manifest", async ({ id, line, code }) => {
     await opened(id, "manifest");
@@ -608,7 +612,8 @@ describe("the MCP server page", () => {
   it("says when no server has the id and offers the list", async () => {
     mount("app-0");
     expect((await screen.findByText("No server has this id.")).textContent).toBe("No server has this id.");
-    expect(screen.getByText("The list strazad answered has no row with the id app-0: it was removed, or the address is stale.")).toBeTruthy();
+    expect(screen.getByText("It was removed, or the link is old.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to MCP servers" }).hasAttribute("data-back-link")).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "Open MCP servers" }));
     expect(navigate).toHaveBeenCalledWith("servers");
   });
@@ -620,7 +625,7 @@ describe("the MCP server page", () => {
     mount("demo-tools");
     await screen.findByText("demo-tools is not available to this account.");
     expect(screen.getByText("This server's admin role is mcp-admin-demo-tools, which you do not hold. Ask your identity manager for mcp-admin-demo-tools, or a holder of straza-global-mcp-admin to make the change.")).toBeTruthy();
-    expect(head().getByText("A server this account does not administer.")).toBeTruthy();
+    expect(document.querySelector("[data-page-head] p")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Open MCP servers" }));
     expect(navigate).toHaveBeenCalledWith("servers");
     expect(appLogs).toHaveBeenCalledWith("demo-tools");
@@ -657,12 +662,11 @@ describe("the MCP server page", () => {
     expect(screen.queryByText(/could not be read/)).toBeNull();
     const table = screen.getByRole("table");
     expect(within(table).getAllByRole("row").map((r) => r.querySelector("td")?.textContent?.trim()).filter(Boolean)).toEqual(["echo", "get-sum", "get-env"]);
-    expect(within(table).getAllByText("not readable").length).toBe(3);
-    // The Policy column keeps its words and claims no outcome, so it carries no chip.
-    expect(within(table).getAllByText("not readable with this account").length).toBe(3);
+    // Reached by and Policy say the same words, and Policy claims no outcome, so it carries no chip.
+    expect(within(table).getAllByText("not readable").length).toBe(6);
     expect(table.querySelector("[data-tone]")).toBeNull();
     expect(document.querySelector("[data-reach-note]")!.textContent).toBe(REACH_NOT_READABLE);
-    expect(REACH_NOT_READABLE).toContain("Ask for a role that grants it.");
+    expect(REACH_NOT_READABLE).toBe("Which roles reach each tool is not shown, because your role does not include MCP servers as a whole.");
     expect(banner()!.textContent).toContain("scout-role");
     expect(banner()!.textContent).not.toContain("no role yet");
   });
@@ -679,13 +683,12 @@ describe("the MCP server page", () => {
     expect(reached("echo")).toBe("scout-role");
     expect(reached("get-sum")).toBe("scout-role");
     expect(reached("get-env")).toBe("no role");
-    expect(within(table).queryByText("not readable")).toBeNull();
     // The preview is an apps-area read, so the Policy column asks nothing and claims no outcome.
-    expect(within(table).getAllByText("not readable with this account").length).toBe(3);
+    expect(within(table).getAllByText("not readable").length).toBe(3);
     expect(table.querySelector("[data-tone]")).toBeNull();
     expect(vi.mocked(catalogPreview)).not.toHaveBeenCalled();
     expect(document.querySelector("[data-reach-note]")!.textContent).toBe(POLICY_NOT_READABLE);
-    expect(POLICY_NOT_READABLE).toContain("Ask for a role that grants it.");
+    expect(POLICY_NOT_READABLE).toBe("The Policy column is not shown, because your role does not include MCP servers as a whole.");
     expect(dd(banner(), "Role access")).toBe("scout-role");
   });
 
@@ -693,13 +696,30 @@ describe("the MCP server page", () => {
     vi.mocked(adminAreas).mockReturnValue({});
     vi.mocked(listAudit).mockRejectedValue(apiError(403, "session lacks grant audit:read"));
     await opened("app-9");
-    expect(banner()!.textContent).toContain("Last callnot readable with this account.");
+    expect(banner()!.textContent).toContain("Last callnot shown, because your role does not include Audit.");
   });
 
-  it("keeps the reach columns for a full session", async () => {
+  it("keeps the reach columns for a full session, with no line under the table", async () => {
     await opened("app-9", "tools");
     expect(screen.queryByText(/access rows belong to the apps area/)).toBeNull();
-    expect(screen.getByText(/This table answers/)).toBeTruthy();
+    expect(screen.queryByText(/This table answers/)).toBeNull();
+    expect(document.querySelector("[data-reach-note]")).toBeNull();
+  });
+
+  it("heads the page with MCP servers as a link above the server's own name and the server's tile", async () => {
+    await opened("app-9");
+    const crumbs = head().getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumbs).getAllByRole("link").map((a) => a.textContent)).toEqual(["Straza", "MCP servers"]);
+    expect(within(crumbs).getByRole("link", { name: "MCP servers" }).getAttribute("href")).toBe(pathFor("servers"));
+    expect((crumbs.querySelector('[aria-current="page"]') as HTMLElement).textContent).toBe("scout-tools");
+    const tile = (document.querySelector("[data-page-head]") as HTMLElement).querySelector('[data-kind-icon="server"]') as Element;
+    expect(tile.closest("span")?.className).toContain("size-10");
+  });
+
+  it("names the roles that reach the server in the banner as tags with their kind's icon", async () => {
+    await opened("app-9");
+    const tag = banner().querySelector('[data-role-kind-tag="scout-role"]') as HTMLElement;
+    expect(tag.querySelector("svg")?.getAttribute("class")).toContain("lucide-id-card");
   });
   it("offers Pause but never Remove server to a server admin, since removal deletes the office", async () => {
     vi.mocked(adminAreas).mockReturnValue({});
@@ -785,7 +805,7 @@ describe("the MCP server page", () => {
     expect(card.querySelector("p")?.textContent).toBe("ghapp's tools work on repos. Pin them so roles can pick repos and Straza can list them.");
     const row = await waitFor(() => { const el = listingRow(); expect(el).not.toBeNull(); return el as HTMLElement; });
     expect(credCard().contains(row)).toBe(true);
-    expect(row.textContent).toBe("Pin repos first. ghapp has nothing to list for Straza until then.");
+    expect(row.textContent).toBe("Pin repos first.");
     vi.mocked(draftAppObjects).mockResolvedValue({ draft: { id: "318", revision: 1, state: "open", door: "api", authors: [], items: [], title: "Change server ghapp" }, verdict: { draft: "318", revision: 1, snapshot: "", checked_at: "", refused: [], risks: [], warnings: [], unchecked: [], passed: [], info: [], gains: [], risk_digest: "d1" } } as never);
     vi.mocked(publishDraft).mockResolvedValue({} as never);
     await userEvent.click(within(card).getByRole("button", { name: "Pin repos" }));
@@ -815,7 +835,7 @@ describe("the MCP server page", () => {
     expect(notify.ok).toHaveBeenCalledWith("The listing credential for ghapp is stored. Straza is listing its repos now.");
     await waitFor(() => expect(setupCard()).toBeNull());
     expect(appObjects).toHaveBeenCalledTimes(2);
-    expect((listingRow() as HTMLElement).textContent).toBe("Stored, sealed 4be1… Set it againRemove");
+    expect((listingRow() as HTMLElement).textContent).toBe("Stored 4be1… Set it againRemove");
     expect(document.body.textContent).not.toContain("pasted-value");
   });
 

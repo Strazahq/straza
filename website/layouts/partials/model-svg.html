@@ -39,7 +39,7 @@ delay of each card's glow, the time the call dot reaches it. */ -}}
   "tool" "2 6" "object" "3 6" "idp" "1" "iga" "1" "audit" "7" "machine" "2 6" "local" "2 6" "server" "2 6" "credential" "6" -}}
 {{- $say := slice
   "The core parts of Straza. Press a step to follow a tool call from the request to the audit record."
-  "1. Your IGA, or an admin on standalone, tells Straza who the people and agents are and which roles they hold. A person signs in at your identity provider, or at strazad itself on the standalone profile."
+  "1. Your IGA, Entra ID or an admin tells Straza who the people and agents are and which roles they hold. A person signs in at your identity provider, or at strazad itself on the standalone profile."
   "2. An agent asks to call a tool. A tool on its own machine, such as a shell command, is decided there by the Straza service, which the straza hook asks. A tool of an MCP server behind Straza is decided at the gateway."
   "3. The roles of the session set what it reaches. At the gateway a role names the tools it may call and, on a server that declares objects, which objects. On a machine the roles pick which policy applies."
   "4. The policy then allows the call, denies it, or asks a person. On the machine the agent reads the reason, and at the gateway a tool denied for the whole session is left out of its list."
@@ -54,7 +54,7 @@ delay of each card's glow, the time the call dot reaches it. */ -}}
     "zones" (slice
       (dict "z" "people" "x" 24 "y" 44 "w" 182 "h" 272 "l" "People and agents" "lx" 38 "ly" 302)
       (dict "z" "id" "x" 24 "y" 388 "w" 508 "h" 100 "l" "Identity" "lx" 38 "ly" 410)
-      (dict "brand" true "x" 266 "y" 44 "w" 486 "h" 272 "mx" 284 "my" 51 "ms" 0.75 "l" "Straza" "lx" 308 "ly" 68))
+      (dict "brand" true "x" 266 "y" 44 "w" 486 "h" 272 "mx" 283.2 "my" 49.56 "ms" 0.6122 "l" "Straza" "lx" 308 "ly" 68))
     "heads" (slice
       (dict "k" "machine" "t" "Machine" "s" "where the agent runs" "x" 806 "y" 14 "w" 184 "h" 128 "hx" 814 "hy" 22 "hw" 168 "hh" 50 "ix" 822 "iy" 29 "tx" 850 "ty" 46 "sx" 822 "sy" 66)
       (dict "k" "server" "t" "Server" "s" "an MCP server" "x" 806 "y" 152 "w" 184 "h" 212 "hx" 814 "hy" 160 "hw" 168 "hh" 52 "ix" 822 "iy" 166 "tx" 850 "ty" 183 "sx" 822 "sy" 204))
@@ -94,7 +94,7 @@ delay of each card's glow, the time the call dot reaches it. */ -}}
     "zones" (slice
       (dict "z" "id" "x" 18 "y" 8 "w" 324 "h" 158 "l" "Identity" "lx" 30 "ly" 28)
       (dict "z" "people" "x" 18 "y" 190 "w" 324 "h" 128 "l" "People and agents" "lx" 30 "ly" 210)
-      (dict "brand" true "x" 18 "y" 340 "w" 324 "h" 180 "mx" 28 "my" 348 "ms" 0.7 "l" "Straza" "lx" 50 "ly" 364))
+      (dict "brand" true "x" 18 "y" 340 "w" 324 "h" 180 "mx" 27.26 "my" 346.66 "ms" 0.5714 "l" "Straza" "lx" 50 "ly" 364))
     "heads" (slice
       (dict "k" "machine" "t" "Machine" "s" "" "x" 18 "y" 572 "w" 158 "h" 120 "hx" 26 "hy" 580 "hw" 110 "hh" 36 "ix" 34 "iy" 586 "tx" 62 "ty" 603)
       (dict "k" "server" "t" "Server" "s" "an MCP server" "x" 184 "y" 572 "w" 158 "h" 188 "hx" 192 "hy" 580 "hw" 142 "hh" 50 "ix" 200 "iy" 587 "tx" 228 "ty" 603 "sx" 200 "sy" 622))

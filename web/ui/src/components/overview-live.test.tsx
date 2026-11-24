@@ -30,7 +30,7 @@ describe("the Live panel", () => {
     expect(rows.map((r) => r.getAttribute("data-live"))).toEqual(["12", "11"]);
     expect(rows[0].querySelector("[data-pulse]")).toBeTruthy();
     expect(rows[1].querySelector("[data-pulse]")).toBeNull();
-    expect(screen.getByText("deny").getAttribute("data-tone")).toBe("danger");
+    expect(screen.getByText("denied").getAttribute("data-tone")).toBe("danger");
     expect(screen.getByText(newSince(2))).toBeTruthy();
   });
 
@@ -45,7 +45,7 @@ describe("the Live panel", () => {
     mount({ on: true, rows: [] });
     expect(screen.getByText(EMPTY_CHAIN)).toBeTruthy();
     mount({ on: true, rows: [], denied: true });
-    expect(screen.getByText(seatLine(LIVE_TITLE, "audit:read"))).toBeTruthy();
+    expect(screen.getByText(seatLine(LIVE_TITLE, "audit"))).toBeTruthy();
   });
 
   it("remembers the choice in this browser, and reads as off where storage is refused", () => {

@@ -62,6 +62,7 @@ type Config struct {
 	Events     Events       `yaml:"events"`
 	OIDC       OIDC         `yaml:"oidc"`
 	OAuth      OAuthConnect `yaml:"oauth"`
+	Identity   Identity     `yaml:"identity"`
 	Governance Governance   `yaml:"governance"`
 	Approval   Approval     `yaml:"approval"`
 	Apps       Apps         `yaml:"apps"`
@@ -88,6 +89,7 @@ func defaults(profile string) Config {
 		Store:      Store{Driver: DriverSQLite},
 		Events:     Events{Embedded: true},
 		OIDC:       OIDC{ClientID: "straza", JITProvision: true},
+		Identity:   Identity{Entra: defaultEntra()},
 		Governance: defaultGovernance(profile),
 		Approval:   defaultApproval(),
 		Apps: Apps{
@@ -244,6 +246,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.OAuth.validate(); err != nil {
+		return err
+	}
+	if err := c.Identity.Entra.validate(); err != nil {
 		return err
 	}
 	if err := validateSinks(c.Sinks); err != nil {

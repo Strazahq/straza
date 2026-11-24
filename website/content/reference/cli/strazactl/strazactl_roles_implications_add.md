@@ -2,7 +2,7 @@
 title: strazactl roles implications add
 description: 'Compose one role into another: holding the first also holds the second'
 pagetype: reference
-weight: 79
+weight: 73
 draft: false
 sources:
   - cmd/strazactl

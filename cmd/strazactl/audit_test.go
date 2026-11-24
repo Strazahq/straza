@@ -103,8 +103,9 @@ func TestAuditTailFilters(t *testing.T) {
 
 // TestAuditTailUserPrintsEveryKind pins that the user filter is the
 // server's alone: the CLI sends it on the wire and prints every row the
-// server returns for that user, a decision record and an identity record
-// alike, with the bracketed username only when the server resolved one.
+// server returns for that user, a decision record, an identity record and an
+// admin record alike, with the bracketed username only when the server named
+// one, which on an admin record is its actor.
 // An identity record carries the user as an id inside its CloudEvent, so a
 // client-side match on the row's username would drop it the moment the
 // server cannot name the id.
@@ -123,6 +124,11 @@ func TestAuditTailUserPrintsEveryKind(t *testing.T) {
 			name: "identity record with the username resolved",
 			row:  `{"seq":22,"ce":"{\"type\":\"straza.audit.identity\",\"data\":{\"action\":\"user.killed\",\"origin\":\"scim\",\"user\":\"u-joe\"}}","prevHash":"p","hash":"h","username":"joe"}`,
 			want: `#22 [joe] {"type":"straza.audit.identity","data":{"action":"user.killed","origin":"scim","user":"u-joe"}}`,
+		},
+		{
+			name: "admin record about joe that midpoint made prints the server's Who",
+			row:  `{"seq":24,"ce":"{\"type\":\"straza.audit.admin\",\"data\":{\"action\":\"roles.assign\",\"user\":\"u-joe\",\"actor\":\"midpoint\"}}","prevHash":"p","hash":"h","username":"midpoint"}`,
+			want: `#24 [midpoint] {"type":"straza.audit.admin","data":{"action":"roles.assign","user":"u-joe","actor":"midpoint"}}`,
 		},
 		{
 			name: "identity record the server could not name",

@@ -50,6 +50,9 @@ func (e *LinkMismatchError) Error() string {
 // preferred_username. A user matched by username without an external_id
 // gets the oid backfilled, or the sub where no oid is read (account
 // linking). With JIT enabled a missing user is created with the same value.
+// An active user matched by sub while the token carries an oid has its
+// external_id rewritten to the oid: the token proves that both name one
+// account.
 type ExternalVerifier struct {
 	verifier *oidc.IDTokenVerifier
 	users    store.UserRepo
@@ -62,6 +65,10 @@ type ExternalVerifier struct {
 	// off (the first-admin bootstrap, `oidc.bootstrapAdmin`). The verifier
 	// only creates the user. Granting straza-admin is the server's job.
 	BootstrapUsername string
+
+	// Relinked, when set, is told each user whose external_id a sign-in
+	// rewrote from the token's sub to its oid, after the write.
+	Relinked func(ctx context.Context, u store.User)
 
 	// ProtectedUsername names the local break-glass account. No external
 	// identity resolves to it: not by its external id, not by the username
@@ -180,8 +187,7 @@ func (v *ExternalVerifier) protects(username string) bool {
 
 func (v *ExternalVerifier) mapUser(ctx context.Context, sub, oid string, claims externalClaims) (store.User, error) {
 	// keys are the external ids that find a linked account, in this order,
-	// and keys[0] is the one a new link stores. An account linked by sub
-	// before oid was read keeps matching and is not rewritten.
+	// and keys[0] is the one a new link stores.
 	keys := []string{sub}
 	if oid != "" {
 		keys = []string{oid, sub}
@@ -198,7 +204,26 @@ func (v *ExternalVerifier) mapUser(ctx context.Context, sub, oid string, claims 
 		if v.protects(u.Username) {
 			return store.User{}, ErrProtectedAccount
 		}
-		return u, nil
+		// An account found by sub while the token carries an oid is
+		// relinked to the oid. A disabled account is left as it is, because
+		// its sign-in is refused. So is an account whose oid a deleted user
+		// still holds, which keeps signing in by sub.
+		if key == keys[0] || u.Status != store.UserActive {
+			return u, nil
+		}
+		relinked := u
+		relinked.ExternalID = keys[0]
+		relinked, err = v.users.Update(ctx, relinked)
+		if errors.Is(err, store.ErrConflict) {
+			return u, nil
+		}
+		if err != nil {
+			return store.User{}, fmt.Errorf("authn: relink account: %w", err)
+		}
+		if v.Relinked != nil {
+			v.Relinked(ctx, relinked)
+		}
+		return relinked, nil
 	}
 
 	// Fallback matches link the account by backfilling external_id.

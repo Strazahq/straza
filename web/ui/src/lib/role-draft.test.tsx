@@ -10,13 +10,13 @@ import { savedEdit } from "./save-words";
 // The items the role doors send: a Role put
 // is the role's live export with one change, and the access editor adds the
 // role's own set when its rules change, so the row and its gate go live
-// together. A new role's document never names a pack, because a draft
-// never applies one.
+// together.
 
 vi.mock("./api", async (orig) => ({ ...(await orig<typeof import("./api")>()), getPolicy: vi.fn() }));
 
 // EXPORT is a role as GET /v1/admin/roles/{id}/export serves it: four-space
-// indent, the glob quoted, and a pack the draft must carry as it is.
+// indent, the glob quoted, and the retired packs field an older export
+// still wrote, which the put leaves out.
 const EXPORT = [
   "apiVersion: straza.dev/v1beta1",
   "kind: Role",
@@ -68,25 +68,26 @@ const ticked = (...tick: string[]): Plan => ({ ...emptyPlan(), picked: Object.fr
 
 describe("roleItem", () => {
   // Each case is one change and the spec the put carries after it: every
-  // other field stays as the export wrote it, packs included.
+  // other field stays as the export wrote it, and the retired packs field
+  // goes.
   const cases: [string, string, (s: RoleSpec) => void, RoleSpec][] = [
     [
       "changes the description alone",
       EXPORT,
       (s) => { s.description = "Reach for the developer seat."; },
-      { kind: "application", description: "Reach for the developer seat.", server: "demo-tools", bindings: [{ app: "demo-tools", tools: ["*"] }], packs: ["house-rules"] },
+      { kind: "application", description: "Reach for the developer seat.", server: "demo-tools", bindings: [{ app: "demo-tools", tools: ["*"] }] },
     ],
     [
       "leaves an emptied description out, as the export does",
       EXPORT,
       (s) => { s.description = ""; },
-      { kind: "application", server: "demo-tools", bindings: [{ app: "demo-tools", tools: ["*"] }], packs: ["house-rules"] },
+      { kind: "application", server: "demo-tools", bindings: [{ app: "demo-tools", tools: ["*"] }] },
     ],
     [
       "replaces the one access row",
       EXPORT,
       (s) => { s.bindings = [{ app: "demo-tools", tools: ["get-sum"] }]; },
-      { kind: "application", description: "Tool reach for the developer seat.", server: "demo-tools", bindings: [{ app: "demo-tools", tools: ["get-sum"] }], packs: ["house-rules"] },
+      { kind: "application", description: "Tool reach for the developer seat.", server: "demo-tools", bindings: [{ app: "demo-tools", tools: ["get-sum"] }] },
     ],
     [
       "adds an implication to the ones the export names",
@@ -226,7 +227,7 @@ describe("newRoleItems", () => {
     ["an approver role is its kind and description", { name: "sec", kind: "approver", description: "Deciders.", implies: [] }, { kind: "approver", description: "Deciders." }],
     ["an application role with no server picked reaches nothing", { name: "qa", kind: "application", description: "", implies: [] }, { kind: "application" }],
   ];
-  it.each(cases)("%s, and never a pack", async (_case, role, spec) => {
+  it.each(cases)("%s", async (_case, role, spec) => {
     const answer = await newRoleItems(role, null);
     if (!("items" in answer)) throw new Error(answer.error);
     expect(answer.items).toHaveLength(1);

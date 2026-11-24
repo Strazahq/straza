@@ -117,6 +117,16 @@ describe("the Composes tab", () => {
     expect(screen.getByRole("button", { name: REMOVE })).toBeTruthy();
   });
 
+  it("names each composed role as a tag with its kind's icon, and its kind in a pill with no icon", async () => {
+    mount();
+    const tag = (document.querySelector('[data-implies="dev-tools"]') as HTMLElement).querySelector("[data-role-kind-tag]") as HTMLElement;
+    expect(tag.textContent).toBe("dev-tools");
+    expect(tag.querySelector("svg")?.getAttribute("class")).toContain("lucide-id-card");
+    const kind = document.querySelector('[data-kind="application role"]') as HTMLElement;
+    expect(kind.className).toContain("rounded-pill");
+    expect(kind.querySelector("svg")).toBeNull();
+  });
+
   it("counts the tools a holder reaches on each server, through the role they arrive by", async () => {
     mount();
     await waitFor(() => expect(document.querySelector('[data-reach-pill="demo-tools"]')).toBeTruthy());
@@ -125,6 +135,10 @@ describe("the Composes tab", () => {
     // on a stopped server does not.
     expect((document.querySelector('[data-reach-pill="demo-tools"]') as HTMLElement).textContent).toBe("demo-tools" + reachPill(3, "dev-tools"));
     expect((document.querySelector('[data-reach-pill="midpoint"]') as HTMLElement).textContent).toBe("midpoint" + reachPill(1, "dev-tools"));
+    // The server is a tag with its icon and what holders reach a pill.
+    const pill = document.querySelector('[data-reach-pill="demo-tools"]') as HTMLElement;
+    expect(pill.querySelector("svg")?.getAttribute("class")).toContain("lucide-server");
+    expect(pill.querySelector(".rounded-pill")?.textContent).toBe(reachPill(3, "dev-tools"));
   });
 
   it.each(pillCases)("says on the %s pill whether the access row behind it reaches tools added later", async (server, words) => {

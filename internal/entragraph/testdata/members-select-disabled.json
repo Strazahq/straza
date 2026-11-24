@@ -1,0 +1,29 @@
+{
+ "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#directoryObjects(id,userPrincipalName,displayName,mail,accountEnabled)",
+ "value": [
+  {
+   "@odata.type": "#microsoft.graph.user",
+   "id": "1a1a1a1a-3333-4333-8333-333333333333",
+   "userPrincipalName": "pat@lab.example",
+   "displayName": "pat",
+   "mail": null,
+   "accountEnabled": true
+  },
+  {
+   "@odata.type": "#microsoft.graph.user",
+   "id": "1b1b1b1b-4444-4444-8444-444444444444",
+   "userPrincipalName": "kim@lab.example",
+   "displayName": "Kim Example",
+   "mail": null,
+   "accountEnabled": false
+  },
+  {
+   "@odata.type": "#microsoft.graph.agentUser",
+   "id": "2a2a2a2a-5555-4555-8555-555555555555",
+   "userPrincipalName": "demo-agent@lab.example",
+   "displayName": "demo-agent user",
+   "mail": null,
+   "accountEnabled": true
+  }
+ ]
+}

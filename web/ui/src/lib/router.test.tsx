@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type Location, navigate, setLeaveGuard, useRouter } from "./router";
-import { renderHook } from "@testing-library/react";
+import { type Location, navigate, pathFor, setLeaveGuard, useRouter } from "./router";
+import { renderHook, waitFor } from "@testing-library/react";
 
 // The leave guard: a page holding unsaved work is
 // asked before the console leaves it, and a tab change under the same
@@ -52,5 +52,48 @@ describe("the leave guard", () => {
     setLeaveGuard(null);
     navigate("users");
     expect(window.location.pathname).toBe("/users");
+  });
+});
+
+describe("the focus move", () => {
+  // page puts a title and a tab on the page, as a screen with a row of tabs has.
+  function page() {
+    document.body.innerHTML = '<main><h1 tabindex="-1">Title</h1><button id="tab">Tab</button></main>';
+    return { title: document.querySelector("h1") as HTMLElement, tab: document.getElementById("tab") as HTMLElement };
+  }
+  // settled gives a focus move that is still on its way the time to land.
+  const settled = () => new Promise((done) => setTimeout(done, 30));
+  afterEach(() => { document.body.innerHTML = ""; });
+
+  it("leaves focus on the tab when a tab change swaps the address, and moves it to the title on a new screen", async () => {
+    at(pathFor("settings", ["tokens"]));
+    const { title, tab } = page();
+    const { result } = renderHook(() => useRouter());
+    await waitFor(() => expect(document.activeElement).toBe(title));
+    tab.focus();
+    navigate("settings", ["keys"], true);
+    await waitFor(() => expect(result.current.location).toMatchObject({ key: "settings", rest: ["keys"] }));
+    await settled();
+    expect(document.activeElement).toBe(tab);
+    navigate("users");
+    await waitFor(() => expect(document.activeElement).toBe(title));
+  });
+
+  it("moves focus to the title when the back button leaves a screen after a tab change", async () => {
+    at(pathFor("users"));
+    const { title, tab } = page();
+    const { result } = renderHook(() => useRouter());
+    await waitFor(() => expect(document.activeElement).toBe(title));
+    tab.focus();
+    navigate("settings", ["tokens"]);
+    await waitFor(() => expect(document.activeElement).toBe(title));
+    tab.focus();
+    navigate("settings", ["keys"], true);
+    await waitFor(() => expect(result.current.location).toMatchObject({ key: "settings", rest: ["keys"] }));
+    await settled();
+    expect(document.activeElement).toBe(tab);
+    at(pathFor("users"));
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() => expect(document.activeElement).toBe(title));
   });
 });

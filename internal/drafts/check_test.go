@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,8 +38,10 @@ func checkWorld() World {
 }
 
 // stamped is a console draft of items, each stamped with its live
-// fingerprint.
+// fingerprint. It stamps a copy, because tests that run at the same time
+// hand in the same items.
 func stamped(w World, items ...Item) Draft {
+	items = slices.Clone(items)
 	for i := range items {
 		items[i].Base = w.Fingerprints[items[i].Object()]
 	}
@@ -70,18 +73,18 @@ func TestCheckStale(t *testing.T) {
 		{"a moved object names who published it", Draft{ID: "41", Items: []Item{moved}},
 			map[string]LastChange{"Role/dev": {Draft: 40, Publisher: "bob", At: time.Date(2026, 9, 24, 9, 5, 59, 0, time.FixedZone("CEST", 7200))}},
 			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/dev",
-				Sentence: "Role/dev changed after this draft was checked, when bob published draft 40 at 2026-09-24 07:05 UTC.",
-				Fix:      "Check the draft again with Check again on the console under Drafts. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
+				Sentence: "The role dev changed after this draft was checked, when bob published draft 40 at 2026-09-24 07:05 UTC.",
+				Fix:      "Check the draft again with Check again on the console under Drafts."}}},
 		{"a moved object with no publish on record", Draft{ID: "41", Items: []Item{moved}}, nil,
-			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/dev", Sentence: "Role/dev changed after this draft was checked.",
-				Fix: "Check the draft again with Check again on the console under Drafts. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
+			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/dev", Sentence: "The role dev changed after this draft was checked.",
+				Fix: "Check the draft again with Check again on the console under Drafts."}}},
 		{"an object created since the draft named it absent, and the check reads no further", Draft{ID: "41", Items: []Item{
 			{Kind: KindRole, Name: "ops", Op: OpRemove}, created}}, nil,
-			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/ops", Sentence: "Role/ops changed after this draft was checked.",
-				Fix: "Check the draft again with Check again on the console under Drafts. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
+			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/ops", Sentence: "The role ops changed after this draft was checked.",
+				Fix: "Check the draft again with Check again on the console under Drafts."}}},
 		{"a draft not stored yet names no number", Draft{Items: []Item{moved}}, nil,
-			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/dev", Sentence: "Role/dev changed after this draft was checked.",
-				Fix: "Check the draft again with Check again on the console under Drafts. Straza keeps what this draft changed, takes every other field from live state, and asks you to pick where both changed."}}},
+			[]Finding{{Code: "draft.stale", Class: ClassRefused, Object: "Role/dev", Sentence: "The role dev changed after this draft was checked.",
+				Fix: "Check the draft again with Check again on the console under Drafts."}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,7 +125,7 @@ func TestCheckRefusals(t *testing.T) {
 		{"client credentials on a provider with them", []Item{appPut("github")}, map[string]App{"github": remote("okta", "client_credentials")}, nil},
 		{"an App whose facts were not read fails closed", []Item{appPut("github")}, nil,
 			[]string{"app.parse App/github Straza did not read the manifest of github, so it cannot check the draft."}},
-		{"a removal of a server that does not exist", []Item{{Kind: KindApp, Name: "nosuch", Op: OpRemove}}, nil, []string{"app.remove-missing App/nosuch unknown server"}},
+		{"a removal of a server that does not exist", []Item{{Kind: KindApp, Name: "nosuch", Op: OpRemove}}, nil, []string{"app.remove-missing App/nosuch No server named nosuch exists."}},
 		{"a new role in the product's namespace", []Item{intakeRole("straza-ops", "    kind: business\n")}, nil,
 			[]string{"role.create Role/straza-ops role names beginning with straza- are reserved for product-defined roles; choose a name without the straza- prefix"}},
 		{"a new role owned by a server the same draft adds", []Item{
@@ -135,13 +138,13 @@ func TestCheckRefusals(t *testing.T) {
 		{"an owned role made global", []Item{intakeRole("github-readers", "    kind: application\n    bindings:\n        - app: github\n          tools: [x]\n")}, nil,
 			[]string{"role.owner-change Role/github-readers github-readers is owned by the server github, and a role's owner is fixed at create."}},
 		{"a product role removed", []Item{{Kind: KindRole, Name: AdminRole, Op: OpRemove}}, nil,
-			[]string{`role.delete-product Role/straza-admin role "straza-admin" comes with the product and cannot be deleted. To take someone's access away, remove their assignment instead`}},
+			[]string{`role.delete-product Role/straza-admin The role straza-admin comes with the product and cannot be deleted.`}},
 		{"a decider removed while a live set names it", []Item{{Kind: KindRole, Name: "sec-approvers", Op: OpRemove}}, nil,
-			[]string{`role.delete-decider Role/sec-approvers role "sec-approvers" is named among the deciders of a live policy (set "dev-access" rule "hold"): deleting it would leave those approvals to expire unanswered. Remove it from approve.roles and publish the set again, or turn the set off, then delete the role`}},
+			[]string{`role.delete-decider Role/sec-approvers The role sec-approvers decides the approvals of rule hold of dev-access. Deleting it would leave those approvals to expire unanswered.`}},
 		{"a decider removed with the set that names it turned off", []Item{
 			{Kind: KindRole, Name: "sec-approvers", Op: OpRemove}, {Kind: KindPolicySet, Name: "dev-access", Op: OpOff, Doc: checkSet("dev-access", "dev", "sec-approvers")}}, nil, nil},
 		{"a server's admin role removed", []Item{{Kind: KindRole, Name: "mcp-admin-github", Op: OpRemove}}, nil,
-			[]string{`role.delete-admin-role Role/mcp-admin-github role "mcp-admin-github" is the admin role of server github and lives as long as the server does. Remove the server instead.`}},
+			[]string{`role.delete-admin-role Role/mcp-admin-github The role mcp-admin-github is the admin role of the server github and lives as long as the server does.`}},
 		{"a business role given access", []Item{intakeRole("engineering", "    kind: business\n    bindings:\n        - app: github\n          tools: [x]\n")}, nil,
 			[]string{"access.role Role/engineering business role: it composes application roles and reaches tools through them. Give an application role access instead."}},
 		{"an owned role reaching another server", []Item{intakeRole("github-readers", "    kind: application\n    server: github\n    bindings:\n        - app: jira\n          tools: [x]\n")}, nil,
@@ -382,12 +385,12 @@ func TestCheckAgentRefusals(t *testing.T) {
 		{"a live Straza role removed", w, DoorAgent, nil, sponsored, []Item{{Kind: KindRole, Name: "auditors", Op: OpRemove}},
 			[]string{"agent.straza-role Role/auditors auditors is a Straza role, which governs Straza itself, and an agent cannot propose one."}},
 		{"recording turned on", w, DoorAgent, nil, sponsored, []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpPut, Doc: recording}},
-			[]string{"agent.capture PolicySet/dev-access The policy set dev-access changes conversation recording, and an agent cannot propose that, because recording decides what Straza keeps of every session the set matches."}},
+			[]string{"agent.capture PolicySet/dev-access An agent may not change the recording of the policy dev-access, because recording decides what Straza keeps of every session the policy matches."}},
 		{"a recording set's match narrowed", wr, DoorAgent, nil, sponsored, []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpPut,
 			Doc: strings.Replace(recording, "roles: [dev]", "roles: [github-readers]", 1)}},
-			[]string{"agent.capture PolicySet/dev-access The policy set dev-access changes conversation recording, and an agent cannot propose that, because recording decides what Straza keeps of every session the set matches."}},
+			[]string{"agent.capture PolicySet/dev-access An agent may not change the recording of the policy dev-access, because recording decides what Straza keeps of every session the policy matches."}},
 		{"a recording set turned off", wr, DoorAgent, nil, sponsored, []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpOff, Doc: recording}},
-			[]string{"agent.capture PolicySet/dev-access The policy set dev-access changes conversation recording, and an agent cannot propose that, because recording decides what Straza keeps of every session the set matches."}},
+			[]string{"agent.capture PolicySet/dev-access An agent may not change the recording of the policy dev-access, because recording decides what Straza keeps of every session the policy matches."}},
 		{"a recording set's rule changed and its recording kept", wr, DoorAgent, nil, sponsored, []Item{{Kind: KindPolicySet, Name: "dev-access", Op: OpPut,
 			Doc: strings.Replace(recording, "id: hold", "id: hold-all", 1)}}, nil},
 		{"an agent whose sponsor went", w, DoorAgent, nil, Holder{Username: "joe-agent", Agent: true}, []Item{intakeRole("ops", "    kind: business\n")},
@@ -448,7 +451,7 @@ func TestCheckSortsFindings(t *testing.T) {
 		intakeRole("engineering", "    kind: application\n    implies: [yyy]\n"),
 	)
 	want := []string{
-		"app.remove-missing App/nosuch unknown server",
+		"app.remove-missing App/nosuch No server named nosuch exists.",
 		"imply.missing Role/engineering engineering implies yyy, which is not a role in Straza and is not created by this draft.",
 		"role.kind-change Role/engineering engineering is a business role, and a role's kind is fixed at create. Create a new role of the kind you need, move its holders there in the identity manager, then delete this one",
 		"imply.missing Role/ops ops implies nosuch, which is not a role in Straza and is not created by this draft.",

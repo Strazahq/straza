@@ -80,14 +80,26 @@ describe("the Roles tab of a server", () => {
 
   it("says what a role made here is, with Add role as the one door", () => {
     mount([]);
-    expect(screen.getByText("No role of demo-tools yet.")).toBeTruthy();
-    expect(screen.getByText("A role made here reaches this server only, is named demo-tools- and a word of yours, and is assigned by your identity manager, not here. Give it the tools it should reach.")).toBeTruthy();
+    expect(screen.getByText("No roles yet.")).toBeTruthy();
+    expect(screen.getByText("A role made here reaches only demo-tools. Your identity manager assigns it.")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /Add role/ })).toHaveLength(1);
+    expect(document.querySelector("[data-server-roles] svg")?.getAttribute("class")).toContain("lucide-id-card");
+  });
+
+  it("leads each role with its kind's tile, draws its tools as tool chips and keeps a floor under the table", () => {
+    mount([readers(0)]);
+    const cells = within(row()).getAllByRole("cell");
+    expect(cells[0].querySelector('[data-kind-icon="role-application"]')).toBeTruthy();
+    const names = cells[1].querySelector("[data-tool-names]") as HTMLElement;
+    expect([...names.children].map((c) => c.getAttribute("title"))).toEqual(["echo", "add"]);
+    expect(names.querySelector("[data-role-kind-tag], [data-outcome]")).toBeNull();
+    expect((row().closest("table") as HTMLElement).className).toContain("min-w-[960px]");
   });
 
   it("renders the role, its tools, its holders and the line naming the identity manager", () => {
     mount([readers(0)]);
-    expect(screen.getByText("1 role of this server")).toBeTruthy();
+    // The tab label carries the count, so the table says none of its own.
+    expect(document.querySelector("[data-role-count]")).toBeNull();
     // The identifier column reads Name, the word the Roles list uses.
     expect(screen.getAllByRole("columnheader")[0].textContent).toBe("Name");
     const cells = within(row()).getAllByRole("cell");
@@ -97,7 +109,7 @@ describe("the Roles tab of a server", () => {
     expect(reach()).toEqual({ head: "2 of 3tools", cells: ["on", "on", "off"], names: ["echo", "add"] });
     expect(cells[1].getAttribute("title")).toBe("echo, add");
     expect(cells[2].textContent).toBe("0");
-    expect(line().textContent).toBe("Nobody holds it yet. Your IGA assigns it as AR:demo-tools-readers, within a sync cycle.");
+    expect(line().textContent).toBe("No holders. Assign AR:demo-tools-readers in your identity manager.");
     expect(within(row()).getByRole("button", { name: "Edit access" }).getAttribute("aria-disabled")).toBeNull();
     expect(within(row()).getByRole("button", { name: "Delete" }).getAttribute("aria-disabled")).toBeNull();
   });
@@ -111,6 +123,7 @@ describe("the Roles tab of a server", () => {
     ["every tool and tools added later, with one dashed cell at the end", ["*"], "every tool(3), and tools added later", ["on", "on", "on", "later"], "every tool the server lists, and tools added later"],
     ["a tool the server no longer lists, which is not counted", ["echo", "gone"], "1 of 3tools", ["on", "off", "off"], ["echo"]],
     ["no tool the server lists, with no names line", ["gone"], "0 of 3tools", ["off", "off", "off"], undefined],
+    ["a pattern with a * inside it, read as the server reads it", ["get-*", "echo"], "2 of 3tools", ["on", "off", "on"], ["echo", "get-sum"]],
   ];
   it.each(reaches)("draws the reach of a role with %s", (_case, matchers, head, cells, names) => {
     mount([{ ...readers(0), tools: matchers }]);
@@ -186,7 +199,7 @@ describe("the Roles tab of a server", () => {
     mount([readers(2)], true);
     const edit = within(row()).getByRole("button", { name: "Edit access" });
     expect(edit.getAttribute("aria-disabled")).toBeNull();
-    expect(edit.getAttribute("title")).toBe("2 holders were certified on the current list. Widening it changes what they were certified for.");
+    expect(edit.getAttribute("title")).toBe("Widening it changes what its 2 holders were reviewed for.");
     expect(within(row()).getByRole("button", { name: "Delete" }).getAttribute("aria-disabled")).toBe("true");
     expect(line()).toBeNull();
     expect(heldRules()).toEqual(["A held role keeps its tools for its server admin and cannot be deleted until the identity manager removes the holders."]);
@@ -220,10 +233,10 @@ describe("the Roles tab of a server", () => {
     await userEvent.click(within(row()).getByRole("button", { name: "Delete" }));
     const ask = await screen.findByRole("alertdialog");
     expect(within(ask).getByText("Delete demo-tools-readers?")).toBeTruthy();
-    expect(within(ask).getByText("It leaves Straza with its access row to demo-tools. Nobody holds it, so no session loses a tool.")).toBeTruthy();
+    expect(within(ask).getByText("Its access row to demo-tools is deleted too. Nobody holds it.")).toBeTruthy();
     await userEvent.click(within(ask).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(deleteRole).toHaveBeenCalledWith("r-1"));
-    expect(notify.ok).toHaveBeenCalledWith("demo-tools-readers is deleted, and its policy set demo-tools-readers-access is turned off.");
+    expect(notify.ok).toHaveBeenCalledWith("demo-tools-readers is deleted, and its policy demo-tools-readers-access is turned off.");
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
@@ -232,7 +245,7 @@ describe("the Roles tab of a server", () => {
     mount([readers(0)]);
     await userEvent.click(within(row()).getByRole("button", { name: "Edit access" }));
     await waitFor(() => expect(refusal()).toBeTruthy());
-    expect(refusal().textContent).toBe("Edit access refused. The server refused it: a server admin reads the access rows of their own servers. Fix what it names, then try again.");
+    expect(refusal().textContent).toBe("Edit access refused: a server admin reads the access rows of their own servers. Fix what it names, then try again.");
   });
 
   // The server pins an invented type, so a noun written into the tab fails.
@@ -266,10 +279,10 @@ describe("the Roles tab of a server", () => {
     expect(document.querySelector("[data-covers-unread]")).toBeNull();
   });
 
-  it("says the coverage is not readable when strazad refused the access rows, rather than show empty cells", () => {
+  it("says the coverage is not readable when Straza refused the access rows, rather than show empty cells", () => {
     mount(deskRoles, false, desk, null);
     expect(deskRoles.map((r) => coversOfRow(r.name))).toEqual(["not readable", "not readable", "not readable", "not readable"]);
-    expect(document.querySelector("[data-covers-unread]")?.textContent).toBe("Which tickets each role covers is not readable with this account, because strazad refused the access rows. Ask a global admin, who can read them on each role's page.");
+    expect(document.querySelector("[data-covers-unread]")?.textContent).toBe("Which tickets each role covers is not readable with this account, because Straza refused the access rows. Ask a global admin, who can read them on each role's page.");
   });
 
   // Each case is how many objects a role's row names and the count the cell

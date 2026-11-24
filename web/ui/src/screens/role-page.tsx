@@ -1,7 +1,7 @@
 import * as React from "react";
 import { DownloadIcon, PencilIcon, ShieldOffIcon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -10,22 +10,30 @@ import { EmptyState } from "@/components/empty-state";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { OriginLine } from "@/components/origin-line";
 import { HelpTip } from "@/components/help-tip";
+import { Tag } from "@/components/chip";
+import { KIND_ICON, KindTile } from "@/components/kind-icon";
 import { PageHead } from "@/components/page-head";
 import { RoleAccess } from "@/components/role-access";
 import { RoleAdministers } from "@/components/role-administers";
 import { RoleAreas } from "@/components/role-areas";
 import { RoleComposes } from "@/components/role-composes";
+import { EntraGroup } from "@/components/entra-group";
+import { EntraNotApplied } from "@/components/entra-not-applied";
 import { RoleHolders } from "@/components/role-holders";
-import { RoleKindBadge } from "@/components/role-kind";
-import { RolePacks } from "@/components/role-packs";
+import { MARKS, RoleKindBadge, markOf } from "@/components/role-kind";
 import { RolePolicies } from "@/components/role-policies";
 import { type Built, RoleSaves, liveExport } from "@/components/role-saves";
-import { type ApiError, type AppRow, type BindingRow, type ImplicationRow, type PackRow, type PoliciesAnswer, type PolicySetRow, type RoleRow, type ToolRow, deleteRole, exportRole, listApps, listBindings, listImplications, listPacks, listPolicies, listRoles, listTools, query } from "@/lib/api";
+import {
+  type ApiError, type AppRow, type AssignmentRow, type BindingRow, type EntraConfig, type EntraStatus, type ImplicationRow, type PoliciesAnswer, type PolicySetRow, type RoleRow, type ToolRow,
+  deleteRole, entraStatus, exportRole, getConfig, listAllAssignments, listApps, listBindings, listImplications, listPolicies, listRoles, listTools, query,
+} from "@/lib/api";
+import { SUBJECT_ENTRA, groupName } from "@/lib/entra-words";
+import { SUBJECT_ROLES as SUBJECT_ASSIGNMENTS } from "@/lib/user-words";
 import { notify } from "@/lib/notify";
 import { navigate } from "@/lib/router";
 import { routeByKey } from "@/lib/routes";
-import { AREAS, CANCEL, CHANGE_DESCRIPTION, DELETE_HELP, DELETE_ROLE, DESCRIPTION_HINT, DESCRIPTION_LABEL, EDIT_ACCESS, EXPORT_FAILED, EXPORT_YAML, KIND_HELP, MISSING_DESCRIPTION, MISSING_TITLE, NOTHING_CHANGED, NO_DESCRIPTION, OPEN_ROLES, PRIMARY, PRODUCT_ROLE, READING_ROLE, RELOAD, SUBJECT_COMPOSES, SUBJECT_POLICIES, SUBJECT_ROLE, TAB, deleteBody, deleteTitle, deletedToast, isProductRole, kindOf, list, mintedRole, missingRole, roleFileName } from "@/lib/role-words";
-import { readFailed, refused } from "@/lib/say";
+import { AREAS, CANCEL, CHANGE_DESCRIPTION, DELETE_HELP, DELETE_ROLE, DESCRIPTION_LABEL, EDIT_ACCESS, EXPORT_YAML, KIND_HELP, KIND_WORD, MISSING_TITLE, NOTHING_CHANGED, NO_DESCRIPTION, OPEN_ROLES, PRIMARY, PRODUCT_ROLE, READING_ROLE, RELOAD, SUBJECT_COMPOSES, SUBJECT_POLICIES, SUBJECT_ROLE, TAB, deleteBody, deleteTitle, deletedToast, exportFailed, isProductRole, kindOf, list, mintedRole, missingRole, roleFileName } from "@/lib/role-words";
+import { needsArea, readFailed, refused } from "@/lib/say";
 import { ownedChip, ownedChipTitle } from "@/lib/server-roles-words";
 import { adminAreas } from "@/lib/session";
 import { roleItem } from "@/lib/role-draft";
@@ -41,8 +49,8 @@ const route = routeByKey("roles");
 type Props = { id: string; tab?: string };
 
 // Problem is one side read that failed: the subject names it, the detail
-// says what to do next.
-type Problem = { subject: string; detail: string };
+// says what to do next. refused marks a read the server refused with 403.
+type Problem = { subject: string; detail: string; refused?: boolean };
 
 type Data = {
   role: RoleRow;
@@ -52,10 +60,14 @@ type Data = {
   apps: AppRow[];
   implications: ImplicationRow[];
   sets: PolicySetRow[];
-  packs: PackRow[];
   problems: Problem[];
   composesProblem: string | null;
   policiesProblem: string | null;
+  // entra is what a role with a group in Entra reads besides: the state of
+  // the read of Entra, the config for the group's name, and every
+  // assignment for where each holder's role comes from. Each is null when
+  // its read failed or this seat may not make it.
+  entra: { status: EntraStatus | null; config: EntraConfig | null; assignments: AssignmentRow[] | null } | null;
 };
 
 type State =
@@ -72,7 +84,24 @@ function why(subject: string, r: PromiseSettledResult<unknown>): string {
   return err.status === 401 ? "" : readFailed(subject, err);
 }
 
+// accessProblem words the Access tab's reads the way the Roles list words
+// a side read: a 403 is this session's standing, which a reload does not
+// change, so it names the area the reads need. Any other failure says how
+// to read again.
+function accessProblem(...results: PromiseSettledResult<unknown>[]): Problem {
+  for (const r of results) {
+    if (r.status !== "rejected") continue;
+    if ((r.reason as ApiError).status === 403) return { subject: TAB.access, detail: needsArea(TAB.access + " is", "apps"), refused: true };
+    return { subject: TAB.access, detail: why(TAB.access, r) };
+  }
+  return { subject: TAB.access, detail: "" };
+}
+
 const value = <T,>(r: PromiseSettledResult<T>, fallback: T): T => (r.status === "fulfilled" ? r.value : fallback);
+
+// quiet is why for a read a seat may not make, whose part of the page then
+// leaves rather than failing it.
+const quiet = (subject: string, r: PromiseSettledResult<unknown>) => (r.status === "rejected" && (r.reason as ApiError).status === 403 ? "" : why(subject, r));
 
 export function RolePage({ id, tab }: Props) {
   const [state, setState] = React.useState<State>({ kind: "loading" });
@@ -84,6 +113,11 @@ export function RolePage({ id, tab }: Props) {
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const [composeOpen, setComposeOpen] = React.useState(false);
   const [grantOpen, setGrantOpen] = React.useState(false);
+  // naOpen is the fold of the members not applied, and naReveal asks it to
+  // scroll into view once.
+  const [naOpen, setNaOpen] = React.useState(false);
+  const [naReveal, setNaReveal] = React.useState(false);
+  const revealed = React.useCallback(() => setNaReveal(false), []);
 
   const load = React.useCallback(async () => {
     setState((s) => (s.kind === "ready" ? s : { kind: "loading" }));
@@ -102,17 +136,23 @@ export function RolePage({ id, tab }: Props) {
     // An approver role reads its pools off decider_in, so no policy list is
     // asked for; every other kind counts the sets that name it.
     const approver = kindOf(role) === "approver";
-    const [bindingsR, toolsR, appsR, impR, setsR, packsR] = await Promise.allSettled([
+    const entra = !!role.entra;
+    const [bindingsR, toolsR, appsR, impR, setsR, statusR, configR, asgR] = await Promise.allSettled([
       listBindings(),
       listTools(),
       listApps(),
       listImplications(id),
       approver ? Promise.resolve({ items: [] } as PoliciesAnswer) : listPolicies(query({ role: role.name, limit: 0 })),
-      listPacks(),
+      entra ? entraStatus() : Promise.resolve(null),
+      entra ? getConfig() : Promise.resolve(null),
+      entra ? listAllAssignments() : Promise.resolve(null),
     ]);
-    const problems = [
-      { subject: TAB.access, detail: why(TAB.access, bindingsR) || why(TAB.access, toolsR) || why(TAB.access, appsR) },
-      { subject: TAB.packs, detail: why(TAB.packs, packsR) },
+    // A seat without the config area names the group by its ID, so that
+    // read fails quietly.
+    const problems: Problem[] = [
+      accessProblem(bindingsR, toolsR, appsR),
+      { subject: SUBJECT_ENTRA, detail: quiet(SUBJECT_ENTRA, statusR) },
+      { subject: SUBJECT_ASSIGNMENTS, detail: quiet(SUBJECT_ASSIGNMENTS, asgR) },
     ].filter((p) => p.detail);
     setState({
       kind: "ready",
@@ -126,21 +166,31 @@ export function RolePage({ id, tab }: Props) {
         apps: value(appsR, [] as AppRow[]),
         implications: value(impR, [] as ImplicationRow[]),
         sets: value(setsR, { items: [] } as PoliciesAnswer).items || [],
-        packs: value(packsR, [] as PackRow[]),
         problems,
         composesProblem: why(SUBJECT_COMPOSES, impR) || null,
         policiesProblem: why(SUBJECT_POLICIES, setsR) || null,
+        entra: entra ? { status: value(statusR, null), config: value(configR, null)?.entra || null, assignments: value(asgR, null) } : null,
       },
     });
   }, [id]);
 
   React.useEffect(() => { void load(); }, [load]);
 
-  if (state.kind === "loading") return <PageHead label={route.label} title={route.label} description={READING_ROLE} />;
+  // holderSource has the Holders tab say where each holder's role comes
+  // from, once every assignment of a role with a group in Entra was read.
+  // It changes only with a read, so the table keeps its columns.
+  const holderSource = React.useMemo(() => {
+    if (state.kind !== "ready") return undefined;
+    const { role, entra } = state.data;
+    if (!role.entra || !entra || !entra.assignments || entra.status?.enabled === false) return undefined;
+    return { assignments: entra.assignments, groupID: role.entra.group_id, group: groupName(role.name, role.entra.group_id, entra.config) };
+  }, [state]);
+
+  if (state.kind === "loading") return <PageHead label={id} crumbs={[{ label: route.label, to: "roles" }]} title={route.label} description={READING_ROLE} />;
   if (state.kind === "error") {
     return (
       <>
-        <PageHead label={route.label} title={route.label} description={READING_ROLE} />
+        <PageHead label={id} crumbs={[{ label: route.label, to: "roles" }]} title={route.label} description={READING_ROLE} />
         <div className="flex flex-col items-start gap-3 px-6 py-5">
           <FetchError subject={SUBJECT_ROLE} detail={state.message} />
           <Button variant="outline" size="sm" onClick={() => void load()}>{RELOAD}</Button>
@@ -151,7 +201,7 @@ export function RolePage({ id, tab }: Props) {
   if (state.kind === "missing") {
     return (
       <>
-        <PageHead label={route.label} title={MISSING_TITLE} description={MISSING_DESCRIPTION} />
+        <PageHead label={id} crumbs={[{ label: route.label, to: "roles" }]} title={MISSING_TITLE} description="" />
         <EmptyState icon={ShieldOffIcon} title={MISSING_TITLE} action={<Button variant="outline" onClick={() => navigate("roles")}>{OPEN_ROLES}</Button>}>
           {missingRole(id)}
         </EmptyState>
@@ -159,7 +209,7 @@ export function RolePage({ id, tab }: Props) {
     );
   }
 
-  const { role, roles, bindings, tools, apps, implications, sets, packs, problems, composesProblem, policiesProblem } = state.data;
+  const { role, roles, bindings, tools, apps, implications, sets, problems, composesProblem, policiesProblem, entra } = state.data;
   const kind = kindOf(role);
   const product = isProductRole(role.name);
   const mine = bindings.filter((b) => b.role === role.name);
@@ -175,7 +225,6 @@ export function RolePage({ id, tab }: Props) {
   // role Straza minted with a server is known here without reading its name.
   const administers = apps.filter((a) => a.admin_role_id === role.id);
   const areas = role.areas || [];
-  const bound = packs.filter((p) => (p.bindings || []).some((b) => b.role_id === role.id));
   const policyCount = kind === "approver" ? (role.decider_in || []).length : sets.length;
 
   const tabs: [string, string, number][] = [];
@@ -185,8 +234,16 @@ export function RolePage({ id, tab }: Props) {
   if (administers.length > 0) tabs.push(["administers", TAB.administers, administers.length]);
   tabs.push(["holders", TAB.holders, role.holder_count || 0]);
   tabs.push(["policies", TAB.policies, policyCount]);
-  if (packs.length > 0 && (kind === "application" || kind === "business")) tabs.push(["packs", TAB.packs, bound.length]);
   const current = tabs.some(([k]) => k === tab) ? (tab as string) : tabs[0][0];
+
+  // The group block shows while the role has a group and the sync is not
+  // known to be off.
+  const group = role.entra && entra && entra.status?.enabled !== false ? role.entra : null;
+  const openNotApplied = () => {
+    setNaOpen(true);
+    setNaReveal(true);
+    if (current !== "holders") navigate("roles", [id, "holders"], true);
+  };
 
   // The kind's primary opens its own tab's one write, so a click from
   // another tab moves there first.
@@ -202,7 +259,7 @@ export function RolePage({ id, tab }: Props) {
     try {
       downloadText(roleFileName(role.name), await exportRole(role.id), "application/yaml");
     } catch (e) {
-      notify.failed(readFailed(EXPORT_FAILED, e as ApiError));
+      notify.failed(exportFailed(role.name, e as ApiError));
     }
   };
 
@@ -235,23 +292,24 @@ export function RolePage({ id, tab }: Props) {
       ? KIND_HELP[kind] + " " + mintedRole(list(administers.map((a) => a.name)))
       : KIND_HELP[kind];
 
-  // The server that owns the role, when the servers list was read. Its
-  // words open that server's Roles tab, where the role's tools are edited.
+  // The server that owns the role, as a tag with the server's icon, when
+  // the servers list was read. It opens that server's Roles tab, where the
+  // role's tools are edited.
   const ownerApp = role.server ? apps.find((a) => a.name === role.server) : undefined;
   const owner = role.server ? (
     ownerApp ? (
       <Button
         variant="link"
         size="sm"
-        className="h-auto p-0 text-[13px]"
+        className="h-auto p-0 text-caption"
         title={ownedChipTitle(role.server)}
         data-owned-by={role.server}
         onClick={() => navigate("servers", [ownerApp.id, "roles"])}
       >
-        {ownedChip(role.server)}
+        <Tag icon={KIND_ICON.server}>{ownedChip(role.server)}</Tag>
       </Button>
     ) : (
-      <span className="text-[13px] text-muted-foreground" title={ownedChipTitle(role.server)} data-owned-by={role.server}>{ownedChip(role.server)}</span>
+      <Tag icon={KIND_ICON.server} title={ownedChipTitle(role.server)} data-owned-by={role.server}>{ownedChip(role.server)}</Tag>
     )
   ) : null;
 
@@ -271,9 +329,10 @@ export function RolePage({ id, tab }: Props) {
     <>
       <div className="contents [&_h1]:font-mono">
         <PageHead
-          label={route.label}
-          title={role.name}
-          titleExtra={<><RoleKindBadge role={role} administers={administers.map((a) => a.name)} /><HelpTip label={kind} text={kindHelp} />{owner}</>}
+          label={role.name}
+          crumbs={[{ label: route.label, to: "roles" }]}
+          tile={<KindTile kind={MARKS[markOf(role, administers.map((a) => a.name))]} size="lg" />}
+          titleExtra={<><RoleKindBadge role={role} administers={administers.map((a) => a.name)} /><HelpTip label={KIND_WORD[kind]} text={kindHelp} />{owner}</>}
           description={role.description || NO_DESCRIPTION}
           descriptionExtra={<Button variant="ghost" size="icon-xs" aria-label={CHANGE_DESCRIPTION} onClick={() => { setSame(false); setEdit(role.description || ""); }}><PencilIcon /></Button>}
           actions={actions}
@@ -281,14 +340,31 @@ export function RolePage({ id, tab }: Props) {
       </div>
       <div className="flex flex-col gap-4 px-6 py-5">
         {state.problem && <FetchError subject={SUBJECT_ROLE} detail={state.problem} lastRead={state.lastRead} />}
-        {problems.map((p) => <FetchError key={p.subject} subject={p.subject} detail={p.detail} lastRead={state.lastRead} />)}
+        {problems.map((p) => p.refused
+          ? <p key={p.subject} role="status" className="border-l-[3px] border-border bg-card px-4 py-3 text-dense leading-relaxed text-text-2" data-side-refused>{p.detail}</p>
+          : <FetchError key={p.subject} subject={p.subject} detail={p.detail} lastRead={state.lastRead} />)}
         <OriginLine object={"Role/" + role.name} name={role.name} />
+        {group && entra && (
+          <EntraGroup
+            role={role}
+            group={group}
+            roles={roles}
+            status={entra.status}
+            config={entra.config}
+            assignments={entra.assignments}
+            product={product}
+            canDelete={!product && administers.length === 0}
+            onDelete={() => { setRefusal(null); setAsk(true); }}
+            onNotApplied={openNotApplied}
+            onChanged={() => void load()}
+          />
+        )}
 
         <Tabs value={current} onValueChange={(v) => navigate("roles", [id, v], true)}>
           <div className="flex items-center border-b border-border">
             <TabsList variant="line">
               {tabs.map(([key, label, n]) => (
-                <TabsTrigger key={key} value={key}>{label} <span className="font-mono text-xs text-muted-foreground">{n}</span></TabsTrigger>
+                <TabsTrigger key={key} value={key}>{label} <span className="font-mono text-caption leading-4 text-muted-foreground">{n}</span></TabsTrigger>
               ))}
             </TabsList>
           </div>
@@ -301,13 +377,13 @@ export function RolePage({ id, tab }: Props) {
           <TabsContent value="areas"><RoleAreas role={role} /></TabsContent>
           <TabsContent value="administers"><RoleAdministers servers={administers} /></TabsContent>
           <TabsContent value="holders">
-            <RoleHolders role={role} roles={roles} grantOpen={grantOpen} onGrantOpenChange={setGrantOpen} onChanged={() => void load()} />
+            <div className="flex flex-col gap-4">
+              <RoleHolders role={role} roles={roles} grantOpen={grantOpen} onGrantOpenChange={setGrantOpen} onChanged={() => void load()} source={holderSource} />
+              {group && <EntraNotApplied group={group} name={groupName(role.name, group.group_id, entra?.config || null)} open={naOpen} onOpenChange={setNaOpen} reveal={naReveal} onRevealed={revealed} />}
+            </div>
           </TabsContent>
           <TabsContent value="policies">
             <RolePolicies role={role} sets={sets} problem={policiesProblem} lastRead={state.lastRead} />
-          </TabsContent>
-          <TabsContent value="packs">
-            <RolePacks role={role} packs={packs} onChanged={() => void load()} />
           </TabsContent>
         </Tabs>
       </div>
@@ -320,8 +396,7 @@ export function RolePage({ id, tab }: Props) {
           <div className="flex flex-col gap-2">
             <Label htmlFor="role-description">{DESCRIPTION_LABEL}</Label>
             <Textarea id="role-description" value={edit || ""} onChange={(e) => { setSame(false); setEdit(e.target.value); }} rows={3} />
-            <p className="text-[13px] text-muted-foreground">{DESCRIPTION_HINT}</p>
-            {same && <p role="status" className="m-0 text-[13px] text-danger" data-save-note>{NOTHING_CHANGED}</p>}
+            {same && <p role="status" className="m-0 text-caption text-danger" data-save-note>{NOTHING_CHANGED}</p>}
           </div>
           <RoleSaves role={role.name} build={describe} onPublished={() => { setEdit(null); void load(); }} onCancel={() => setEdit(null)} />
         </DialogContent>
@@ -339,7 +414,7 @@ export function RolePage({ id, tab }: Props) {
           {refusal?.subject === DELETE_ROLE && <RefusedError subject={DELETE_ROLE} message={refusal.message} />}
           <AlertDialogFooter>
             <AlertDialogCancel>{CANCEL}</AlertDialogCancel>
-            <AlertDialogAction className="bg-danger text-white hover:bg-danger/90" onClick={(e) => { e.preventDefault(); void remove(); }}>{DELETE_ROLE}</AlertDialogAction>
+            <AlertDialogAction className={DANGER_FILL} onClick={(e) => { e.preventDefault(); void remove(); }}>{DELETE_ROLE}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

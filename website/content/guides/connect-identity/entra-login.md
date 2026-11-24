@@ -121,7 +121,7 @@ oidc:
 ## How a token finds its account {.nostep}
 
 
-Entra writes the person's object ID into the ID token as `oid`, and it is the same for every app of your tenant. strazad first looks for the account whose `externalId` is that object ID, then for one whose `externalId` is the token's `sub`, which Entra makes different for each app. When neither matches, the first sign-in links the account whose `userName` equals the token's `preferred_username`, if that account has no `externalId` yet, and stores the object ID as its `externalId`. Entra's `preferred_username` is usually the person's user principal name, so provision `userName` with the same value.
+Entra writes the person's object ID into the ID token as `oid`, and it is the same for every app of your tenant. strazad first looks for the account whose `externalId` is that object ID, then for one whose `externalId` is the token's `sub`, which Entra makes different for each app. An account found by the `sub` gets the object ID as its `externalId` at that sign-in, and the audit trail records one `user.update` whose `changed` names `external_id`. When neither matches, the first sign-in links the account whose `userName` equals the token's `preferred_username`, if that account has no `externalId` yet, and stores the object ID as its `externalId`. Entra's `preferred_username` is usually the person's user principal name, so provision `userName` with the same value.
 
 strazad reads `oid` only when `oidc.issuer` is one tenant's v2.0 issuer, written as the previous step shows. With any other issuer, the token's `sub` links the account.
 
@@ -169,10 +169,15 @@ A refusal that says the account `is linked to another identity at your identity 
 : strazad did not accept the ID token. Look in strazad's log for the line `enroll: login not accepted`, or `session exchange: login not accepted` for a console sign-in. When its error says `oidc: token is expired` within seconds of the sign-in, the person's straza client is older than your strazad and asks Entra for `max_age=0`, which Entra answers with an ID token that has already expired. Install the straza client of your strazad's version and enroll again.
 {{< /fails >}}
 
+## Role groups in Entra {.nostep}
+
+
+Straza can also write one security group into Entra for each role and give the role to the group's members, as [Role groups in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}) shows. That sync signs in to Microsoft Graph as a service app, which is a second app registration beside the one on this page. It holds Straza's certificate and Graph application permissions and signs no person in. With `people` in `identity.entra.read`, the sync also creates the people of those groups and disables and enables them as Entra does, and SCIM then writes no person. With `agentUsers` or `agentIdentities`, it does the same for the agents of those groups and takes each agent's sponsor from Entra.
+
 ## Caveats {.nostep}
 
 
-Disabling a person in Entra stops new sign-ins and enrollments and nothing more. Your IGA's SCIM deactivation cuts the person's running Straza sessions and refuses every check-in from their machines until your IGA reactivates them, so a leaver flow triggers both. While Entra cannot sign anyone in, the break-glass admin still signs in through **Emergency sign-in** on the console's sign-in card, which opens Straza's own sign-in page, and mints a token there when strazactl is needed.
+Without `people` in `identity.entra.read`, disabling a person in Entra stops new sign-ins and enrollments and nothing more. Your IGA's SCIM deactivation cuts the person's running Straza sessions and refuses every check-in from their machines until your IGA reactivates them, so a leaver flow triggers both. With `people` in that setting, the sync of [role groups in Entra]({{< relref "guides/connect-identity/entra-role-groups.md" >}}) runs the same cut itself at its next pass after the disable in Entra. While Entra cannot sign anyone in, the break-glass admin still signs in through **Emergency sign-in** on the console's sign-in card, which opens Straza's own sign-in page, and mints a token there when strazactl is needed.
 
 ## Next {.nostep}
 

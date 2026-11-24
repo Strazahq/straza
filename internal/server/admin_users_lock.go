@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/strazahq/straza/internal/store"
@@ -90,4 +92,57 @@ func (a *App) handleUserLock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": u.ID, "locked": true, "origin": req.Origin, "reason": req.Reason,
 	})
+}
+
+// userEnableUnliftedMsg is the notice of an enable whose lift the database
+// refused, with the user's name and the request id.
+const userEnableUnliftedMsg = "%[1]s is enabled, but Straza could not lift the disable in its database, so it still refuses every check-in of %[1]s. " +
+	"Disable and enable %[1]s again to retry. The strazad log names the cause under request id %[2]s."
+
+// userUpdatePayload is the answer of a user update: the user as stored, and
+// the notice for the administrator when an enable left the user refused.
+type userUpdatePayload struct {
+	userPayload
+	Notice string `json:"notice,omitempty"`
+}
+
+// outlivedDisable reports whether u, a user who is not disabled, still
+// holds the row of a disable in Straza, which an enable from the identity
+// manager leaves in place, so that an admin enable of u lifts it. A failed
+// read reports false, and the enable then lifts nothing.
+func (a *App) outlivedDisable(ctx context.Context, u store.User) bool {
+	rows, err := a.store.Revocations().ListByTarget(ctx, store.RevokeUser, u.ID)
+	return err == nil && slices.ContainsFunc(rows, func(rv store.Revocation) bool {
+		return rv.Origin == store.RevocationOriginAdminDisable
+	})
+}
+
+// enableLift lifts what an admin enable of u lifts: the row of a disable in
+// Straza and the rows of a deactivation by the identity manager or by
+// Entra, never a lock. It answers "" when u is let in again, and otherwise
+// the notice that says why u is still refused and what lifts it.
+func (a *App) enableLift(ctx context.Context, u store.User) string {
+	held, err := a.liftUserOf(ctx, u.ID, store.RevocationOriginAdmin,
+		store.RevocationOriginAdminDisable, store.RevocationOriginSCIM, store.RevocationOriginEntra)
+	switch {
+	case err != nil:
+		return fmt.Sprintf(userEnableUnliftedMsg, u.Username, reqID(ctx))
+	case len(held) == 0:
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%[1]s is enabled and the disable is lifted, but Straza still refuses every check-in of %[1]s, because %[1]s is locked.", u.Username)
+	for _, rv := range held {
+		who := "An administrator"
+		if rv.Origin == store.RevocationOriginExternal {
+			who = "An external system"
+		}
+		fmt.Fprintf(&b, " %s locked %s with the reason %q.", who, u.Username, rv.Reason)
+	}
+	which := "the lock"
+	if len(held) > 1 {
+		which = "the locks"
+	}
+	fmt.Fprintf(&b, " If %s should end, run strazactl users unlock %s or press Unlock on %s's page in the console.", which, u.Username, u.Username)
+	return b.String()
 }

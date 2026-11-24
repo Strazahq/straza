@@ -24,13 +24,33 @@ type UserRepo interface {
 	// zero Sort is newest first), skipping soft-deleted rows like List,
 	// narrowed server-side by f (see UserFilter for semantics).
 	Page(ctx context.Context, f UserFilter, srt Sort, c Cursor, limit int) ([]User, error)
+	// KindCounts counts the live users of each UserKind word under f, with
+	// f.Kind ignored, in one query. A kind with no user is absent.
+	KindCounts(ctx context.Context, f UserFilter) (map[string]int, error)
 	// SponsoredCounts counts the agents each named user sponsors, in one query.
 	SponsoredCounts(ctx context.Context, usernames []string) (map[string]int, error)
 	Update(ctx context.Context, u User) (User, error)
+	// TakeOver stores the Entra object id objectID as the external id of the
+	// live user id and sets its origin to entra, and answers the row read
+	// back. It is the one write that changes a user's origin.
+	TakeOver(ctx context.Context, id, objectID string) (User, error)
+	// Rename gives the live user id the username username. Every live user
+	// whose sponsor is the old username is pointed at the new one in the
+	// same transaction, so the old name is no user's sponsor once another
+	// user takes it. It answers the row read back and the ids of the users
+	// whose sponsor it changed.
+	Rename(ctx context.Context, id, username string) (User, []string, error)
+	// UpdateRenaming writes every column of the live user u as Update does
+	// and moves the sponsor of the users the old username sponsors as
+	// Rename does, in one transaction, so a failed write moves no sponsor.
+	UpdateRenaming(ctx context.Context, u User) (User, []string, error)
 	// UpdateFields writes only the columns f names on the live user id, with
 	// the revocation row and event of a non-nil revoke, in one transaction and
 	// answers the row read back. No column and no revoke writes nothing.
 	UpdateFields(ctx context.Context, id string, f UserFields, revoke *UserRevocation) (User, error)
+	// SetPasswordHash stores hash on the live user id and writes the outbox
+	// event ev in one transaction. On any error neither is written.
+	SetPasswordHash(ctx context.Context, id, hash string, ev OutboxEvent) error
 	// SoftDelete retires the user and ends every role grant it holds, with the
 	// revocation row and event of a non-nil revoke, in one transaction, and
 	// returns the removed assignment rows. On any error no row changes.

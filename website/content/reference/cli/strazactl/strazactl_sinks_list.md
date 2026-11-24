@@ -2,7 +2,7 @@
 title: strazactl sinks list
 description: List configured sinks with backlog, parked count, and the last failure
 pagetype: reference
-weight: 94
+weight: 88
 draft: false
 sources:
   - cmd/strazactl

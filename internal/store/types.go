@@ -9,13 +9,25 @@ import "time"
 // inclusive, valid_to exclusive, mirroring identity.assignmentValidAt).
 // Implication closure is the CALLER's job: expand the target role to every
 // role that implies it before passing ids, because the store does not read
-// the implication graph here.
+// the implication graph here. Kind is one of the UserKind words, matched
+// by the rule of User.Kind.
 type UserFilter struct {
 	Q       string
 	Status  string
 	Sponsor string // exact sponsor username; "" = any
 	RoleIDs []string
 	Now     time.Time // window-evaluation instant for RoleIDs; zero = now
+	Kind    string    // person, agent or service; "" = any
+}
+
+// SessionFilter narrows SessionRepo.Page. The zero value narrows nothing.
+// Status and UserID match exactly. Q matches a session whose owner's
+// username contains it or whose id starts with it, both without regard to
+// case, and a LIKE wildcard in Q means itself. The filters combine by AND.
+type SessionFilter struct {
+	Status string
+	UserID string
+	Q      string
 }
 
 // Enum values used across aggregates. Kept as plain strings in the DB; the
@@ -27,6 +39,12 @@ const (
 	OriginLocal = "local"
 	OriginSCIM  = "scim"
 	OriginAdmin = "admin"
+	// OriginEntra marks a role assignment the Entra sync wrote from the
+	// members of the role's group. Such a row stands beside a row another
+	// origin wrote for the same holder, and only the sync changes it. On a
+	// user it marks a record that Entra owns: the sync created it or took
+	// it over.
+	OriginEntra = "entra"
 
 	// SubjectUser is the only assignment subject, and the CHECK on the
 	// column allows no other.
@@ -35,7 +53,7 @@ const (
 	// Role kinds on the access plane. business composes application roles
 	// (what people request and hold); application binds tools (what agents
 	// hold); approver grants decide authority ONLY: it
-	// never binds tools or packs, never implies or is implied, and is the
+	// never binds tools, never implies or is implied, and is the
 	// only kind (besides straza-admin by name) a policy may name in
 	// approve.roles. An access role must never double as decide authority by
 	// name coincidence, and "who may approve agent actions" becomes an
@@ -95,12 +113,16 @@ const (
 	AgencyAutonomous  = "autonomous"
 
 	// Revocation origins: which authority created the row. The SCIM
-	// reactivation lift deletes ONLY scim-origin rows. Admin/external rows
-	// (locks) survive every IdM write and lift only via an explicit Straza
-	// action (admin enable or unlock).
-	RevocationOriginSCIM     = "scim"
-	RevocationOriginAdmin    = "admin"
-	RevocationOriginExternal = "external"
+	// reactivation lift deletes ONLY scim-origin rows, and an enable that
+	// the Entra sync applies deletes only entra-origin rows. An admin-disable
+	// row is a disable in Straza, which an admin enable lifts with the scim
+	// and entra rows. Admin/external rows (locks) survive every enable and
+	// lift only via unlock.
+	RevocationOriginSCIM         = "scim"
+	RevocationOriginEntra        = "entra"
+	RevocationOriginAdmin        = "admin"
+	RevocationOriginAdminDisable = "admin-disable"
+	RevocationOriginExternal     = "external"
 
 	AppSourceAPI      = "api"
 	AppSourceGitops   = "gitops"
@@ -133,7 +155,7 @@ type User struct {
 	Display      string
 	Title        string // SCIM core title (RFC 7643): job title / agent function; informational, never engine-matched
 	Status       string // active|disabled
-	Origin       string // local|scim
+	Origin       string // local|scim|entra
 	PasswordHash string // local users only; never serialized outward
 	Attrs        string // JSON object
 	// Identity typology (typed columns, never Attrs JSON: the
@@ -153,7 +175,7 @@ type User struct {
 	DeletedAt    *time.Time
 }
 
-// Role is the unit of entitlement (policy selectors, tool bindings, packs).
+// Role is the unit of entitlement (policy selectors, tool bindings).
 type Role struct {
 	ID          string
 	Name        string
@@ -191,7 +213,7 @@ type RoleAssignment struct {
 	RoleID      string
 	ValidFrom   *time.Time
 	ValidTo     *time.Time
-	Origin      string // scim|admin
+	Origin      string // scim|admin|entra
 	CreatedAt   time.Time
 }
 
@@ -231,30 +253,13 @@ type Session struct {
 	HarnessVersion    string
 	ClientVersion     string // straza build stamp the client sent at check-in; "" for older clients
 	ClientCommit      string // git commit of that build, cut to 64 bytes; "" for older clients and rows
+	Host              string // name of the machine the client named when the session started; "" for older clients and rows
+	Folder            string // folder the session started in, the home directory written as ~; "" for older clients and rows
 	AttestationLevel  string // managed|advisory|none
 	AttestationHashes string // JSON object of measured hashes
 	Status            string // active|revoked|closed
 	StartedAt         time.Time
 	LastSeen          time.Time
-}
-
-// KnowledgePack is role-bound context delivered at session start.
-type KnowledgePack struct {
-	ID        string
-	Name      string
-	Version   string
-	Content   string // text v1
-	Checksum  string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-// PackBinding is one pack-role edge with the role name joined in (admin read
-// model). The table's key is composite (role_id, pack_id): there is no row id.
-type PackBinding struct {
-	PackID   string
-	RoleID   string
-	RoleName string
 }
 
 // App is a deployed MCP app. Manifest is the verbatim app.yaml as JSON.

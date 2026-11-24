@@ -107,7 +107,8 @@ func probeFleet(ctx context.Context, dataDir string, o fleetOpts) []Probe {
 			podOpts = append(podOpts, strazadOpts{
 				dataDir: filepath.Join(dataDir, fmt.Sprintf("pod%d", i)),
 				natsURL: ns.ClientURL(), pgDSN: fresh,
-				issuer: "http://straza-fleet-probe.local",
+				issuer:  "http://straza-fleet-probe.local",
+				kekFile: filepath.Join(dataDir, "secret.key"),
 			})
 		}
 	}

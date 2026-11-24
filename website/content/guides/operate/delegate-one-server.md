@@ -48,7 +48,7 @@ To find the role of one server:
 {{< console >}}
 {{< clicks "MCP servers" "demo-tools" "Overview" >}}
 
-The **Server administration** card names the **Admin role**, marked `server admin role`, and the people under **Holders**. An account without the scope `identity:read` reads `Not readable with this account` under **Holders** instead.
+The **Server administration** card names the **Admin role** and the people under **Holders**. An account without the scope `identity:read` reads `The holders are not shown, because your role does not include Users and Roles.` under **Holders** instead.
 
 {{< shot name="server-admin-card" caption="The demo-tools page. The Server administration card names its admin role." >}}
 {{< /console >}}
@@ -81,7 +81,7 @@ Hand that role out the way you hand out any other:
 - Let your identity manager write the membership over SCIM.
 - Compose it into a business role, when one team owns several servers.
 
-The demo stack takes the middle road for demo-tools. midPoint assigns the imported role `AR:mcp-admin-demo-tools` to carol, whose team's agent calls that server. A holder picks the role up at the next check-in, which is at most five minutes later, and the check-in answer counts what they administer. When carol holds that role and no other, her answer, trimmed with jq to four fields, reads:
+The demo stack takes the middle road for demo-tools. midPoint assigns the imported role `AR:mcp-admin-demo-tools` to carol, whose team's agent calls that server. A holder's running session picks the role up within seconds. A session without a connected push stream picks it up at its next check-in, at most five minutes later. The check-in answer counts what they administer. When carol holds that role and no other, her answer, trimmed with jq to four fields, reads:
 
 ```json
 {"user":"carol","roles":["mcp-admin-demo-tools"],"admin_grants":null,"admin_servers":1}
@@ -114,7 +114,7 @@ assigned mcp-admin-demo-tools to carol
 
 
 {{< console >}}
-Signed in to the console, carol sees only **MCP servers** and **Drafts** in the sidebar. Her server list holds demo-tools alone and says `You administer 1 server through mcp-admin-demo-tools and may change it. Registering a new server or importing one from the registry needs straza-global-mcp-admin.`
+Signed in to the console, carol sees only **MCP servers** and **Drafts** in the sidebar. Her server list holds demo-tools alone and says `You administer 1 server through mcp-admin-demo-tools. Adding a server needs straza-global-mcp-admin.`
 
 {{< shot name="carol-servers" caption="The console as carol, who holds mcp-admin-demo-tools and nothing else." >}}
 
@@ -175,7 +175,7 @@ A server admin names the roles that reach their own server. Such a role belongs 
 {{< console >}}
 {{< clicks "MCP servers" "demo-tools" "Server roles" "Add role" >}}
 
-The **Name** field fixes the prefix `demo-tools-`, so you type only the suffix, such as `probes`. Under it the sheet previews `Application role, stored as demo-tools-probes. An IGA imports it as AR:demo-tools-probes.` and prints the same role as a strazactl line. Tick the tools the role reaches, then press **Save and publish**, or **Save draft** to publish it later from **Drafts**, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) shows.
+The **Name** field fixes the prefix `demo-tools-`, so you type only the suffix, such as `probes`. Under it the sheet previews `Application role, stored as demo-tools-probes. Your identity manager imports it as AR:demo-tools-probes.` and prints the same role as a strazactl line. Tick the tools the role reaches, then press **Save and publish**, or **Save draft** to publish it later from **Drafts**, as [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) shows.
 
 {{< shot name="server-roles-add" caption="The Add role sheet as the root admin, with echo and get-sum ticked. A server admin sees the Policy column read-only." >}}
 

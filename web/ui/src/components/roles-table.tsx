@@ -1,15 +1,15 @@
 import * as React from "react";
-import { CheckIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
+import { ChevronRightIcon, DownloadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { HEAD } from "@/components/data-table";
 import { HelpTip } from "@/components/help-tip";
-import { KindGlyph, markOf } from "@/components/role-kind";
-import { RoleChip } from "@/components/status-badge";
-import { WordBadge } from "@/components/users-table";
+import { KIND_ICON, KindTile } from "@/components/kind-icon";
+import { MARKS, markOf } from "@/components/role-kind";
+import { Pill, Tag } from "@/components/chip";
 import type { BindingRow, RoleRow } from "@/lib/api";
 import {
-  CATEGORY, CATEGORY_COLUMN, COLUMN, COLUMN_HELP, type Kind, MCP_ADMIN, MINTED_FOLD_HELP, NOT_READ, NOT_READ_WHY, NO_DESCRIPTION, NO_ROLE_IN_VIEW, REACH, SUMMARY, TOOLS_NONE,
+  CATEGORY_COLUMN, COLUMN, COLUMN_HELP, KIND_WORD, type Kind, MCP_ADMIN, NOT_READ, NOT_READ_WHY, NO_DESCRIPTION, NO_ROLE_IN_VIEW, REACH, SUMMARY, TOOLS_NONE,
   exportLabel, exportTitle, holdersTitle, kindOf, mintedFold, notReadRefused, policiesTitle, summaryAdministers, summaryConsole, summaryIncludes, toolsCell, toolsWords,
 } from "@/lib/role-words";
 import { OWNED_BY, ownedChipTitle } from "@/lib/server-roles-words";
@@ -29,20 +29,21 @@ export type Skeleton = { id: string; width: number }[];
 // APP_SKELETON lays out the Application table, REACH_SKELETON the other
 // three: Description takes the Server width there, so the Reach, Holders,
 // Policies and export edges fall where the Application table puts them.
+// Holders holds its header and help icon at the 960 px floor.
 export const APP_SKELETON: Skeleton = [
   { id: "name", width: 25 },
   { id: "description", width: 11 },
   { id: "server", width: 20 },
-  { id: "tools", width: 22 },
-  { id: "holders", width: 7 },
+  { id: "tools", width: 19 },
+  { id: "holders", width: 10 },
   { id: "policies", width: 11 },
   { id: "export", width: 4 },
 ];
 export const REACH_SKELETON: Skeleton = [
   { id: "name", width: 25 },
   { id: "description", width: 31 },
-  { id: "reach", width: 22 },
-  { id: "holders", width: 7 },
+  { id: "reach", width: 19 },
+  { id: "holders", width: 10 },
   { id: "policies", width: 11 },
   { id: "export", width: 4 },
 ];
@@ -88,18 +89,15 @@ function areaNames(areas: string[]): string[] {
   return areas.map((a) => a.split(":")[0]).filter((a, i, xs) => a && xs.indexOf(a) === i);
 }
 
-// Fold shows the first chips and folds the rest behind a +N chip whose
-// hover names them, so the cell stays on one line: two in the Server cell,
-// one in the Reach cell, where a word precedes the chips. draw renders one
-// chip, since the Server cell marks the server that owns the role.
-function Fold({ names, show = 2, draw }: { names: string[]; show?: number; draw?: (name: string) => React.ReactNode }) {
+// Fold shows the first two server tags and folds the rest behind a +N pill
+// whose hover names them, so the cell stays on one line. draw renders one
+// tag, since the Server cell marks the server that owns the role.
+function Fold({ names, show = 2, draw }: { names: string[]; show?: number; draw: (name: string) => React.ReactNode }) {
   const rest = names.slice(show);
   return (
-    <span className="inline-flex items-center whitespace-nowrap">
-      {names.slice(0, show).map((n) => <React.Fragment key={n}>{draw ? draw(n) : <RoleChip name={n} />}</React.Fragment>)}
-      {rest.length > 0 && (
-        <span title={rest.join(", ")} data-more-reach={rest.length}><RoleChip name={"+" + rest.length} /></span>
-      )}
+    <span className="inline-flex max-w-full items-center whitespace-nowrap">
+      {names.slice(0, show).map((n) => <React.Fragment key={n}>{draw(n)}</React.Fragment>)}
+      {rest.length > 0 && <Pill title={rest.join(", ")} data-more-reach={rest.length}>{"+" + rest.length}</Pill>}
     </span>
   );
 }
@@ -110,20 +108,20 @@ function Word({ text, muted, title }: { text: string; muted?: boolean; title?: s
   return <span className={muted ? "text-muted-foreground" : "text-text-2"} title={title}>{text}</span>;
 }
 
-// ServerCell names every server an application role reaches. The owned
-// server reads "owned by <server>" behind a check, so the mark explains
-// itself in the cell, with the ownership sentence on hover: its admin
-// defined the role there and it reaches that server alone.
+// ServerCell names every server an application role reaches, each a tag
+// with the server's icon. The owned server reads "owned by <server>", so
+// the mark explains itself in the cell, with the ownership sentence on
+// hover: its admin defined the role there and it reaches that server alone.
 function ServerCell({ chips, why }: { chips: Chip[] | null; why: string }) {
   if (!chips) return <Word text={NOT_READ} title={why} muted />;
   if (chips.length === 0) return <Word text={REACH.noServer} muted />;
   const draw = (name: string) => {
     const owned = chips.some((c) => c.name === name && c.owned);
     return (
-      <span data-server={name} className={cn("inline-flex align-middle", owned && "mr-1")}>
+      <span data-server={name} className="mr-1 inline-flex min-w-0 align-middle">
         {owned
-          ? <WordBadge word={name} tone="teal" title={ownedChipTitle(name)} mono attr="data-owned-by" lead={<><CheckIcon aria-hidden="true" /><span className="font-sans">{OWNED_BY + " "}</span></>} />
-          : <RoleChip name={name} />}
+          ? <Tag icon={KIND_ICON.server} title={ownedChipTitle(name)} className="max-w-full" data-owned-by={name}><span className="min-w-0 truncate"><span className="font-sans">{OWNED_BY + " "}</span>{name}</span></Tag>
+          : <Tag icon={KIND_ICON.server} title={name} className="max-w-full"><span className="min-w-0 truncate">{name}</span></Tag>}
       </span>
     );
   };
@@ -187,7 +185,7 @@ export function RolesTable({ kind, rows, folded = [], chips, administers, facets
   const allSkeleton: Skeleton = [{ id: "name", width: 28 }, { id: "category", width: 15 }, { id: "reach", width: 31 }, { id: "holders", width: 10 }, { id: "policies", width: 10 }, { id: "export", width: 6 }];
   const cols = widths(kind === "all" ? allSkeleton : kind === "application" ? APP_SKELETON : REACH_SKELETON, hidden);
   const shown = (id: string) => cols.some((c) => c.id === id);
-  const appsWhy = refused.apps ? notReadRefused("apps:read") : NOT_READ_WHY;
+  const appsWhy = refused.apps ? notReadRefused("apps") : NOT_READ_WHY;
   // rowOf renders one role: the rows of the table and, under the fold, the
   // minted roles nobody holds, so both read the same.
   const rowOf = (r: RoleRow) => {
@@ -202,27 +200,27 @@ export function RolesTable({ kind, rows, folded = [], chips, administers, facets
         role="button"
         tabIndex={0}
         aria-label={"Open " + r.name}
-        className="text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 cursor-pointer"
+        className="text-dense focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 cursor-pointer"
         onClick={() => onOpen(r)}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(r); } }}
       >
         <TableCell className="overflow-hidden">
           <span className="flex min-w-0 items-center gap-2">
-            <KindGlyph mark={markOf(r, administers ? administers[r.id] || [] : null)} />
-            <span className="truncate font-mono text-foreground">{r.name}</span>
+            <KindTile kind={MARKS[markOf(r, administers ? administers[r.id] || [] : null)]} />
+            <span className="truncate font-mono text-foreground" title={r.name}>{r.name}</span>
           </span>
         </TableCell>
-        {shown("category") && <TableCell><span className="role-category">{CATEGORY[kindOf(r)].title}</span></TableCell>}
+        {shown("category") && <TableCell className="overflow-hidden"><Pill title={KIND_WORD[kindOf(r)]} data-category-pill>{KIND_WORD[kindOf(r)]}</Pill></TableCell>}
         {shown("description") && (
           <TableCell className="overflow-hidden">
             {r.description
-              ? <span className="block truncate text-[13px] text-muted-foreground" title={r.description}>{r.description}</span>
-              : <span className="text-[13px] italic text-muted-foreground">{NO_DESCRIPTION}</span>}
+              ? <span className="block truncate text-caption text-muted-foreground" title={r.description}>{r.description}</span>
+              : <span className="text-caption italic text-muted-foreground">{NO_DESCRIPTION}</span>}
           </TableCell>
         )}
         {shown("server") && <TableCell className="overflow-hidden"><ServerCell chips={reach} why={appsWhy} /></TableCell>}
         {shown("tools") && <TableCell className="overflow-hidden"><ToolsCell chips={reach} why={appsWhy} /></TableCell>}
-        {shown("reach") && <TableCell className="overflow-hidden"><span className="block truncate text-[13px] text-text-2" title={reachSummary(r, reach, administers, refused.apps)}>{reachSummary(r, reach, administers, refused.apps)}</span></TableCell>}
+        {shown("reach") && <TableCell className="overflow-hidden"><span className="block truncate text-caption text-text-2" title={reachSummary(r, reach, administers, refused.apps)}>{reachSummary(r, reach, administers, refused.apps)}</span></TableCell>}
         {shown("holders") && (
           <TableCell className="text-right tabular-nums" title={holdersTitle(r.holder_count || 0, r.assigned_count || 0)}>
             <span className={r.holder_count ? "text-foreground" : "text-muted-foreground"}>{r.holder_count || 0}</span>
@@ -233,7 +231,7 @@ export function RolesTable({ kind, rows, folded = [], chips, administers, facets
             {approver
               ? <span className={deciders.length ? "text-foreground" : "text-muted-foreground"}>{deciders.length}</span>
               : facet === null
-                ? <span className="text-[13px] text-muted-foreground" title={refused.policy ? notReadRefused("policy:read") : NOT_READ_WHY}>{NOT_READ}</span>
+                ? <span className="text-caption text-muted-foreground" title={refused.policy ? notReadRefused("policy") : NOT_READ_WHY}>{NOT_READ}</span>
                 : <span className={facet ? "text-foreground" : "text-muted-foreground"}>{facet}</span>}
           </TableCell>
         )}
@@ -255,7 +253,8 @@ export function RolesTable({ kind, rows, folded = [], chips, administers, facets
 
   return (
     <div className="overflow-x-auto rounded-md border border-border bg-card">
-      <Table className="table-fixed min-w-[720px]">
+      {/* The floor keeps the category pill and the owned-by tag inside their cells: 15 % and 20 % of it hold them. */}
+      <Table className="table-fixed min-w-[960px]">
         <colgroup>
           {cols.map((c) => <col key={c.id} style={{ width: c.width }} />)}
         </colgroup>
@@ -281,10 +280,9 @@ export function RolesTable({ kind, rows, folded = [], chips, administers, facets
                 <button
                   type="button"
                   aria-expanded={open}
-                  title={MINTED_FOLD_HELP}
                   onClick={() => setOpen(!open)}
                   data-minted-fold
-                  className="flex w-full items-center gap-1.5 px-4 py-2 text-left text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="flex w-full items-center gap-1.5 px-4 py-2 text-left text-caption text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   <ChevronRightIcon aria-hidden="true" className={cn("size-3.5 transition-transform", open && "rotate-90")} />
                   {mintedFold(folded.length)}

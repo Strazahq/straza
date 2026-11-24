@@ -60,7 +60,7 @@ func TestRoleDocMarshalWritesTheExportForm(t *testing.T) {
 // strictly and writes out the same bytes.
 func TestParseRoleReadsEveryExportBack(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"role-dev.yaml", "role-owned.yaml", "role-every.yaml", "role-objects.yaml"} {
+	for _, name := range []string{"role-dev.yaml", "role-dev-export.yaml", "role-owned.yaml", "role-every.yaml", "role-objects.yaml"} {
 		t.Run(name, func(t *testing.T) {
 			doc, err := ParseRole(fixture(t, name))
 			if err != nil {
@@ -124,7 +124,7 @@ func TestRoleDocOf(t *testing.T) {
 	w := World{
 		Roles: map[string]Role{
 			"echoapp-readers": {Name: "echoapp-readers", Kind: RoleKindApplication, Plane: PlaneAccess, Owner: "echoapp", Owned: true, Description: "Readers"},
-			"engineering":     {Name: "engineering", Kind: RoleKindBusiness, Plane: PlaneAccess, Packs: []string{"z-pack", "a-pack"}},
+			"engineering":     {Name: "engineering", Kind: RoleKindBusiness, Plane: PlaneAccess},
 			"auditors":        {Name: "auditors", Kind: RoleKindBusiness, Plane: PlaneControl},
 			"orphan":          {Name: "orphan", Kind: RoleKindApplication, Plane: PlaneAccess},
 		},
@@ -141,7 +141,7 @@ func TestRoleDocOf(t *testing.T) {
 	}{
 		{"echoapp-readers", true, RoleDocSpec{Kind: RoleKindApplication, Description: "Readers", Server: "echoapp",
 			Bindings: []RoleBinding{{App: "echoapp", Tools: []string{"echo", "search"}}}}},
-		{"engineering", true, RoleDocSpec{Kind: RoleKindBusiness, Implies: []string{"auditors", "echoapp-readers"}, Packs: []string{"a-pack", "z-pack"}}},
+		{"engineering", true, RoleDocSpec{Kind: RoleKindBusiness, Implies: []string{"auditors", "echoapp-readers"}}},
 		{"auditors", true, RoleDocSpec{Kind: RoleKindStraza}},
 		{"orphan", true, RoleDocSpec{Kind: RoleKindApplication}},
 		{"nosuch", false, RoleDocSpec{}},

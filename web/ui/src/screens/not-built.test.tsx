@@ -1,26 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { NotBuilt } from "./not-built";
-import { routeByKey } from "@/lib/routes";
+import { type RouteKey, routeByKey } from "@/lib/routes";
 
 vi.mock("@/lib/router", async (orig) => ({ ...(await orig<typeof import("@/lib/router")>()), navigate: vi.fn() }));
 
+// The locked panel says the role lacks the area and how to get it, the same
+// for every seat. It never offers strazactl, which the same check refuses.
 describe("the locked panel of an area", () => {
-  it("names the grants the account holds when it has some", () => {
-    render(<NotBuilt route={routeByKey("roles")} reachable={false} grants="audit:read" first={routeByKey("audit")} />);
+  it.each([
+    { name: "an account whose first area is Audit", first: "audit", button: "Open Audit" },
+    { name: "a server admin with no area grant", first: "servers", button: "Open MCP servers" },
+    { name: "an account with no area", first: null, button: null },
+  ])("says what the role lacks for $name", ({ first, button }) => {
+    render(<NotBuilt route={routeByKey("roles")} reachable={false} first={first ? routeByKey(first as RouteKey) : null} />);
     expect(screen.getByText("Roles is not available to this account.")).toBeTruthy();
-    expect(screen.getByText("This account's admin scopes cover audit:read, which does not reach Roles. Ask for a wider role, or use strazactl.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open Audit" })).toBeTruthy();
-  });
-
-  it("says what a server admin does reach when the account holds no area grant", () => {
-    render(<NotBuilt route={routeByKey("roles")} reachable={false} grants="" first={routeByKey("servers")} administers={1} />);
-    expect(screen.getByText("This account administers 1 MCP server and holds no area scope, which does not reach Roles. Ask for a wider role, or use strazactl.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open MCP servers" })).toBeTruthy();
-  });
-
-  it("keeps the nothing wording for an account with neither", () => {
-    render(<NotBuilt route={routeByKey("roles")} reachable={false} grants="" first={null} />);
-    expect(screen.getByText("This account's admin scopes cover nothing, which does not reach Roles. Ask for a wider role, or use strazactl.")).toBeTruthy();
+    expect(screen.getByText("Your role does not include Roles. Ask an administrator for a role that does.")).toBeTruthy();
+    expect(screen.queryByText(/strazactl/)).toBeNull();
+    if (button) expect(screen.getByRole("button", { name: button })).toBeTruthy();
+    else expect(screen.queryByRole("button")).toBeNull();
   });
 });

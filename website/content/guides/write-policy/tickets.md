@@ -37,13 +37,13 @@ A ticket is an approval that outlives the moment it was asked for. The agent's c
 
 
 {{< console >}}
-{{< clicks "Policies" "New policy" "Needs approval" "Next" "A role" "local-tools" "Next" "Shell command" >}}
+{{< clicks "Policies" "New policy" "Needs approval" "Next: Applies to" "A role" "local-tools" "Next: Which calls" "Shell command" >}}
 
-1. Under Command patterns, type `terraform apply*` and press **Add**, then **Next**.
-2. Under Who decides, pick **An approver role** and `release-approvers`. Under How, pick **A ticket a person grants within**. The windows start at 1 day for the decision and 1 hour for the run. Type the reason, then press **Next**.
-3. On Review, name the set `deploy-ticket` and press **Save and publish**, then **Publish**.
+1. Under Command patterns, type `terraform apply*` and press **Add**, then **Next: Who decides**.
+2. Under Who decides, pick **An approver role** and `release-approvers`. Under How, pick **A ticket, granted within**. The windows start at 1 day for the decision and 1 hour for the run. Type the reason, then press **Next: Review**.
+3. On Review, name the policy `deploy-ticket` and press **Save and publish**, then **Publish**.
 
-{{< shot name="policy-new-ticket" caption="The Who decides step with **A ticket a person grants within** picked, 1 day to decide and 1 hour to run." >}}
+{{< shot name="policy-new-ticket" caption="The Who decides step with **A ticket, granted within** picked, 1 day to decide and 1 hour to run." >}}
 {{< /console >}}
 
 
@@ -121,7 +121,7 @@ A ticket is a pending approval like any other, with no tab of its own.
 
 {{< shot name="approvals-ticket" caption="dana's `terraform apply` waiting as a ticket, with `runs later, after a yes` under the chip." >}}
 
-The ticket is one row of the queue. Its State cell follows the ticket: `Waiting` first, with `ticket` on the line beneath where a hold shows `hold`, then `Approved` while the grant window is open, `Used` once a call has cashed it, `Denied` when the approver said no, and `Expired` when nobody decided in the window or the grant closed unused.
+The ticket is one row of the queue. Its State cell follows the ticket: while it waits, the chip reads `ticket` where a hold's reads `hold`, then `approved` while the grant window is open, `used` once a call has cashed it, `denied` when the approver said no, and `expired` when nobody decided in the window or the grant closed unused.
 {{< /console >}}
 
 {{< cli >}}
@@ -146,9 +146,9 @@ When the approver has a phone enrolled, Straza sends the request to the phone wh
 This step is lena's. The reason is optional, at most 500 bytes of plain text, and it is recorded on the request and in the audit log as the answer to why this was allowed.
 
 {{< console >}}
-{{< clicks "Approvals" "Requests" "terraform apply -auto-approve" "Approve" "Approve request" >}}
+{{< clicks "Approvals" "Requests" "terraform apply -auto-approve" "Approve" >}}
 
-Type the reason under `Reason, optional` before **Approve request**.
+The row opens the request. Type the reason under `Reason, optional`, then press **Approve** in it.
 {{< /console >}}
 
 {{< cli >}}
@@ -187,7 +187,7 @@ Straza: approval ticket 01a1130c-95b0-7716-8150-a521bffdfa95 is pending. A perso
 Next, the approver denies the second ticket. The next identical call is denied with a reason that names the decider and how long the call stays denied, and no new ticket opens until that window closes.
 
 {{< console >}}
-{{< clicks "Approvals" "Requests" "terraform apply -auto-approve" "Deny" "Deny request" >}}
+{{< clicks "Approvals" "Requests" "terraform apply -auto-approve" "Deny" >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -206,7 +206,7 @@ Straza: ticket 01a1130c-95b0-7716-8150-a521bffdfa95 was denied by lena; this cal
 A ticket writes a request phase, a resolution phase and, once cashed, a consumed phase that names the consuming session. The decider's words ride the resolution. A decision made in the console is recorded under the channel `console`.
 
 {{< console >}}
-{{< clicks "Audit" "Lens" "approvals" >}}
+{{< clicks "Audit" "Kind of record" "Approvals" >}}
 {{< /console >}}
 
 {{< cli >}}

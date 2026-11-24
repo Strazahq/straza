@@ -26,7 +26,7 @@ import {
   withReach,
 } from "./access-plan";
 import type { BindingRow } from "./api";
-import { EVERY_RULE_FIRST, everyCallReason, shapeProblemWords } from "./role-words";
+import { EVERY_RULE_FIRST, SPONSOR_POOL, everyCallReason, shapeProblemWords } from "./role-words";
 
 const repo = (rel: string) => fileURLToPath(new URL("../../../../" + rel, import.meta.url));
 const seed = (name: string) => readFileSync(repo("deploy/compose/eval-stack/seed/policies/" + name + ".yaml"), "utf8");
@@ -95,6 +95,16 @@ describe("the plan", () => {
     const dotted = ["jira.create", "jira.search", "get-sum"];
     expect(grantMatchers(planFor(row(["jira.*"]), dotted), dotted)).toEqual(["jira.create", "jira.search"]);
     expect(planFor(null, TOOLS)).toEqual(emptyPlan());
+  });
+
+  it("ticks every tool a stored pattern reaches on the server, a * anywhere in it", () => {
+    // The row eval's seed stores for midpoint-self-service, on a part of
+    // midpoint's tool list: the names, and the tools the three patterns
+    // reach, which is what the server's preview counts.
+    const midpoint = ["whoami", "ping", "request_role", "search_users", "search_roles", "get_user", "list_orgs", "unassign_role", "delete_user"];
+    const stored = row(["whoami", "ping", "list_requestable_roles", "request_role", "decide_work_item", "search_*", "get_*", "list_*"]);
+    expect(grantMatchers(planFor(stored, midpoint), midpoint)).toEqual(["get_user", "list_orgs", "ping", "request_role", "search_roles", "search_users", "whoami"]);
+    expect(planFor(stored, midpoint).reach).toBe("tick");
     const own: OwnRead = { plan: { call: "every", choice: {}, shape: hold("sec-approvers", 600), own: {} }, owned: ["x"], fixed: {} };
     expect(planFor(row(["*"]), TOOLS, own)).toMatchObject({ reach: "later", call: "every", shape: hold("sec-approvers", 600) });
   });
@@ -212,13 +222,14 @@ describe("the sentence under the editor", () => {
 
   it("says every call's ticket once", () => {
     expect(planSentence(every, "midpoint", MIDPOINT, "identity-helpdesk")).toBe(
-      "Holders of identity-helpdesk reach every tool of midpoint, tools added later included. Every call needs a ticket the approver role sec-approvers grants within a day; the same call within an hour runs.",
+      "Holders of identity-helpdesk reach every tool of midpoint, tools added later included. Every call needs a ticket the approver role sec-approvers grants within a day, after which the same call is allowed for an hour.",
     );
   });
 
-  it("says the counts per tool, a tool's own ticket, the denial and the new tools", () => {
-    const tail = "9 tools are allowed. 6 need approval by the person behind the agent within 2 minutes. unassign_role needs a ticket the approver role sec-approvers grants within a day; the same call within an hour runs. decide_work_item is denied. A tool midpoint gains later runs without approval until someone sets it here.";
-    expect(planSentence(per, "midpoint", MIDPOINT, "identity-helpdesk")).toBe("Holders of identity-helpdesk reach every tool of midpoint, tools added later included. " + tail);
+  it("says the counts per tool, a tool's own ticket and the denial, and the new tools in the publish row only", () => {
+    const calls = "9 tools are allowed. 6 need approval by " + SPONSOR_POOL + " within 2 minutes. unassign_role needs a ticket the approver role sec-approvers grants within a day, after which the same call is allowed for an hour. decide_work_item is denied.";
+    const tail = calls + " A tool midpoint gains later is allowed without approval until someone sets it here.";
+    expect(planSentence(per, "midpoint", MIDPOINT, "identity-helpdesk")).toBe("Holders of identity-helpdesk reach every tool of midpoint, tools added later included. " + calls);
     expect(callSentence(per, "midpoint", MIDPOINT, "identity-helpdesk")).toBe(tail);
     expect(callSentence(plan({ reach: "today" }), "midpoint", MIDPOINT, "identity-helpdesk")).toBe("No call needs approval from this role.");
   });
@@ -282,7 +293,7 @@ describe("reading the role's own set back", () => {
     expect(read.fixed).toEqual({ "get-sum": { set: "dev-tools-access", ruleId: "sum-late", word: EVERY_RULE_FIRST, status: "approve_gated" } });
   });
 
-  it("takes the setting most tools hold as the server's, the earliest rule on a tie, and drops tools the server lost", () => {
+  it("takes the setting most tools hold as the server's, the earliest rule on a tie, and leaves tools the server does not list out of the plan while their rule stays owned", () => {
     const text = set([
       ...rule("a", approve(["get-env"], ["timeoutSeconds: 60"])),
       ...rule("b", approve(["get-sum", "gone-tool"], ["timeoutSeconds: 300"])),

@@ -61,7 +61,8 @@ func (c *check) whoGains() []gainRow {
 		for _, rc := range g.reach(lane) {
 			if pairChanges(rc.p) {
 				rows = append(rows, gainRow{Gain: Gain{Role: r, Server: rc.server, Tool: rc.tool, Holders: holders, HolderCount: len(holders),
-					Before: rc.p[0].outcome, After: rc.p[1].outcome, BeforeWords: rc.p[0].words, AfterWords: rc.p[1].words}, b: rc.p[0], a: rc.p[1]})
+					Before: rc.p[0].outcome, After: rc.p[1].outcome, BeforeWords: rc.p[0].words, AfterWords: rc.p[1].words,
+					BeforeGate: gateOf(rc.p[0]), AfterGate: gateOf(rc.p[1])}, b: rc.p[0], a: rc.p[1]})
 			}
 		}
 	}

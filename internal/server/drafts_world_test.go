@@ -74,8 +74,7 @@ func TestRefusalStatus(t *testing.T) {
 // the direct holders in force with agents and service accounts marked and
 // their typology, accountable sponsor and devices, the window of every
 // assignment that starts or ends later, nothing of an assignment that
-// ended, a holder count for every
-// role equal to the store's own count, the knowledge packs of a role, the
+// ended, a holder count for every role equal to the store's own count, the
 // providers of the config, the local tool default, the push lane as the
 // approval service reads it, and docker on this host.
 func TestReadWorld(t *testing.T) {
@@ -132,9 +131,6 @@ func TestReadWorld(t *testing.T) {
 	assign("w-hal", store.UserTypeHuman, "", later.ID, nil, &ends)
 	_, err = app.store.Approvers().InsertDevice(ctx, store.ApproverDevice{UserID: ann.ID, Name: "phone", Platform: "android", PublicKey: "key"})
 	must(err)
-	pack, err := app.store.Packs().Create(ctx, store.KnowledgePack{Name: "w-pack", Version: "1", Content: "use gofmt", Checksum: "c"})
-	must(err)
-	must(app.store.Packs().Bind(ctx, team.ID, pack.ID))
 
 	w, err := app.readWorld(ctx)
 	if err != nil {
@@ -230,9 +226,6 @@ func TestReadWorld(t *testing.T) {
 	}
 	if !reflect.DeepEqual(w.Providers, wantProviders) {
 		t.Errorf("providers = %+v, want %+v", w.Providers, wantProviders)
-	}
-	if got := w.Roles["w-team"].Packs; !reflect.DeepEqual(got, []string{"w-pack"}) {
-		t.Errorf("packs of w-team = %v, want [w-pack]", got)
 	}
 	if w.LocalToolDefault != config.EffectAllow || w.DockerOnPath != manager.DockerOnPath() {
 		t.Errorf("local default %q, docker %v, want allow and this host's docker", w.LocalToolDefault, w.DockerOnPath)

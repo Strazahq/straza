@@ -122,10 +122,11 @@ spec:
 }
 
 // TestGatewayServerEndpoint pins /mcp/{server} for a server whose views are
-// off, and pins that /mcp is unchanged: the combined list carries no _meta,
-// the server endpoint lists the server's own names with _meta, resolves
-// only those names, refuses a server outside the caller's catalog with one
-// sentence, and names the server in its records.
+// off, and pins what /mcp lists beside it: the combined list carries each
+// tool's _meta without the view links, the server endpoint lists the
+// server's own names with _meta, resolves only those names, refuses a
+// server outside the caller's catalog with one sentence, and names the
+// server in its records.
 func TestGatewayServerEndpoint(t *testing.T) {
 	t.Parallel()
 	app, base := testApp(t)
@@ -137,25 +138,30 @@ func TestGatewayServerEndpoint(t *testing.T) {
 	tok, sid := gatewaySession(t, base, "kim")
 	leeTok, _ := gatewaySession(t, base, "lee")
 
-	// /mcp: the upstream's _meta never reaches the combined list, which
-	// keeps exactly the fields it served before.
+	// /mcp: the combined list carries the upstream's _meta without the view
+	// links, and no key for a field the upstream left out.
 	_, list, raw := mcpCall(t, base, tok, "tools/list", nil)
 	if got := toolNamesOf(t, list); !reflect.DeepEqual(got, []string{"straza__whoami", "viewapp__old", "viewapp__plain", "viewapp__show"}) {
 		t.Fatalf("combined names = %v", got)
 	}
+	wantKeys := map[string][]string{
+		"straza__whoami": {"description", "inputSchema", "name", "title"},
+		"viewapp__old":   {"description", "inputSchema", "name"},
+		"viewapp__plain": {"description", "inputSchema", "name"},
+		"viewapp__show":  {"_meta", "description", "inputSchema", "name"},
+	}
 	for _, tl := range resultOf(t, list, raw)["tools"].([]any) {
-		if tl.(map[string]any)["name"] == "straza__whoami" {
-			// The built-in tool has a title and no annotations, and no
-			// upstream serves it, so it carries no _meta to strip.
-			continue
-		}
+		m := tl.(map[string]any)
 		var keys []string
-		for k := range tl.(map[string]any) {
+		for k := range m {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		if !reflect.DeepEqual(keys, []string{"annotations", "description", "inputSchema", "name"}) {
-			t.Errorf("combined tool keys = %v, want exactly annotations, description, inputSchema and name", keys)
+		if want := wantKeys[m["name"].(string)]; !reflect.DeepEqual(keys, want) {
+			t.Errorf("combined %s keys = %v, want exactly %v", m["name"], keys, want)
+		}
+		if m["name"] == "viewapp__show" && !reflect.DeepEqual(m["_meta"], map[string]any{"x/kept": "yes"}) {
+			t.Errorf("combined show _meta = %v, want x/kept only", m["_meta"])
 		}
 	}
 

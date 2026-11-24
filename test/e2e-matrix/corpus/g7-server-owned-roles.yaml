@@ -355,7 +355,9 @@ steps:
     want:
       notTools: [g7-alpha__echo, g7-alpha__get-sum]
   - name: the direct holder's membership of the minted role ended with the server, once, and the record says why
-    audit: {subject: dana, kind: straza.audit.admin, action: roles.unassign, reasonContains: "server removed", count: 1}
+    # The operator acted, so the list names admin as Who. The record names
+    # dana by her id as the user it was about, which subject also matches.
+    audit: {subject: "${danaId}", kind: straza.audit.admin, action: roles.unassign, reasonContains: "server removed", count: 1}
   - name: the deletion of the role the server owned is on the chain under the operator's name and names the server
     # suspect: the words a cascaded role deletion carries, because the audit
     # step matches on a record's reason and no document pins that reason

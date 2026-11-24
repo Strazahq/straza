@@ -61,13 +61,13 @@ describe("the decisions strip", () => {
     expect(document.activeElement).toBe(bars[0]);
     await userEvent.keyboard("{ArrowRight}");
     expect(document.activeElement).toBe(bars[1]);
-    expect(screen.getByRole("tooltip").textContent).toContain("Tool calls allowed4Denied1Required approval2");
+    expect(screen.getByRole("tooltip").textContent).toContain("Allowed4Denied1Needs approval2");
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("tooltip")).toBeNull();
     await userEvent.keyboard("{Enter}");
     const evidence = screen.getByRole("dialog");
-    expect(evidence.textContent).toContain("Tool calls allowed4Denied1Required approval2");
-    expect(within(evidence).getByRole("link", { name: "Open audit" })).toBeTruthy();
+    expect(evidence.textContent).toContain("Allowed4Denied1Needs approval2");
+    expect(within(evidence).getByRole("link", { name: "Open Audit" })).toBeTruthy();
   });
 
   it("says what would be here when no call was decided and when the server sends no block", () => {
@@ -79,16 +79,16 @@ describe("the decisions strip", () => {
   });
 
   it.each<[string, (number | undefined)[], string | null]>([
-    ["the sum of the hours beside the totals", [200, 20, 0], "220Catalog reads, counted apart"],
+    ["the sum of the hours beside the totals", [200, 20, 0], "220Tool list reads"],
     ["nothing when no catalog was read", [0, 0, 0], null],
     ["nothing when the server sends no catalog count", [undefined, undefined, undefined], null],
-    ["the hours that carry a count when others carry none", [undefined, 1500, undefined], "1,500Catalog reads, counted apart"],
+    ["the hours that carry a count when others carry none", [undefined, 1500, undefined], "1,500Tool list reads"],
   ])("counts catalog reads apart from the tool calls: %s", (_name, reads, want) => {
     strip({ ...BLOCK, buckets: BLOCK.buckets.map((b, i) => (reads[i] === undefined ? b : { ...b, catalog: reads[i] })) });
     const total = (word: string) => document.querySelector('[data-total="' + word + '"]')?.textContent ?? null;
-    expect(total("allowed")).toBe("14Tool calls allowed");
+    expect(total("allowed")).toBe("14Allowed");
     expect(total("denied")).toBe("1Denied");
-    expect(total("needed approval")).toBe("2Required approval");
+    expect(total("needs approval")).toBe("2Needs approval");
     expect(total("catalog")).toBe(want);
     expect(document.querySelectorAll("[data-decided-totals] > [data-total]")).toHaveLength(3);
   });
@@ -101,7 +101,7 @@ describe("the decisions strip", () => {
 
   it("names the grant when this session may not read the counts", () => {
     render(<TooltipProvider><Decisions block={null} denied hour={null} onHour={() => {}} /></TooltipProvider>);
-    expect(screen.getByText(seatLine(DECIDED_PANEL, "config:read"))).toBeTruthy();
+    expect(screen.getByText(seatLine(DECIDED_PANEL, "config"))).toBeTruthy();
   });
 });
 
@@ -125,10 +125,10 @@ describe("the last hour view", () => {
   it("draws one bar a minute and counts the same hour in the totals", () => {
     strip(BLOCK, { minutes: MINUTES, note: "" });
     expect(bars()).toHaveLength(60);
-    expect(total("allowed")).toBe("70Tool calls allowed");
+    expect(total("allowed")).toBe("70Allowed");
     expect(total("denied")).toBe("1Denied");
-    expect(total("needed approval")).toBe("2Required approval");
-    expect(total("catalog")).toBe("4Catalog reads, counted apart");
+    expect(total("needs approval")).toBe("2Needs approval");
+    expect(total("catalog")).toBe("4Tool list reads");
     const chart = screen.getByRole("group", { name: "Calls decided per minute over the last hour" });
     expect(chart.querySelector(".chart-caption")?.textContent).toBe("Decisions per minuteUTC");
     expect(Array.from(chart.querySelectorAll(".chart-x span")).map((x) => x.textContent)).toEqual(["10:00", "10:15", "10:30", "10:45", "11:00"]);
@@ -138,15 +138,15 @@ describe("the last hour view", () => {
 
   it("says so far on the minute that is still running, on its bar, its tooltip and its sheet", async () => {
     strip(BLOCK, { minutes: MINUTES, note: "" });
-    expect(bars()[59].getAttribute("aria-label")).toBe("10:59 to 11:00 UTC, so far: 7 allowed, 0 needed approval, 0 denied");
+    expect(bars()[59].getAttribute("aria-label")).toBe("10:59 to 11:00 UTC, so far: 7 allowed, 0 needs approval, 0 denied");
     act(() => bars()[59].focus());
     expect(screen.getByRole("tooltip").textContent).toContain("10:59 to 11:00 UTC, so far");
     await userEvent.keyboard("{Enter}");
     const running = screen.getByRole("dialog");
     expect(running.textContent).toContain("Tool decisions in one minute");
     expect(running.textContent).toContain("2026-09-13 · 10:59 to 11:00 UTC, so far");
-    expect(running.textContent).toContain("Tool calls allowed7Denied0Required approval0");
-    expect(within(running).getByRole("link", { name: "Open audit" })).toBeTruthy();
+    expect(running.textContent).toContain("Allowed7Denied0Needs approval0");
+    expect(within(running).getByRole("link", { name: "Open Audit" })).toBeTruthy();
     await userEvent.keyboard("{Escape}");
     expect(document.activeElement).toBe(bars()[59]);
 
@@ -191,7 +191,7 @@ describe("what was stopped", () => {
     table(BLOCK);
     await userEvent.click(screen.getByRole("button", { name: stoppedRowLabel("demo-tools / get-env") }));
     expect(screen.getByRole("dialog").textContent).toContain("dumps the process environment");
-    await userEvent.click(screen.getByRole("button", { name: "Open the latest call with this reason in Audit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Open in Audit" }));
     expect(take<{ seq: number }>("audit")).toEqual({ seq: 4214 });
     expect(vi.mocked(navigate)).toHaveBeenCalledWith("audit");
   });
@@ -206,5 +206,17 @@ describe("what was stopped", () => {
   it("says nothing was stopped yet when the block carries no rows", () => {
     table(QUIET);
     expect(screen.getByText(STOPPED_NONE)).toBeTruthy();
+  });
+
+  it("holds the table to a floor wide enough for the needs approval chip, so a narrow window scrolls it in its box", () => {
+    table(BLOCK);
+    const t = document.querySelector("[data-panel=stopped] table") as HTMLElement;
+    expect(t.style.minWidth).toBe("640px");
+    expect(t.parentElement?.className).toContain("overflow-x-auto");
+  });
+
+  it("says the calls are not shown to a reader whose role lacks Overview and Settings", () => {
+    render(<TooltipProvider><Stopped block={null} denied /></TooltipProvider>);
+    expect(screen.getByText("Calls denied or needing approval are not shown, because your role does not include Overview and Settings.")).toBeTruthy();
   });
 });

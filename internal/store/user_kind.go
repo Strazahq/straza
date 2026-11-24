@@ -17,3 +17,24 @@ func (u User) IsNHI() bool {
 	var attrs map[string]any
 	return json.Unmarshal([]byte(u.Attrs), &attrs) == nil && attrs["kind"] == "nhi"
 }
+
+// The three words for what a user is, as the admin answers send them.
+const (
+	UserKindPerson  = "person"
+	UserKindAgent   = "agent"
+	UserKindService = "service"
+)
+
+// Kind says what u is, in one of the three UserKind words: service when its
+// type is service, agent when its type is agent or its attrs kind is nhi,
+// and person otherwise. It is the rule the console's kind word follows, and
+// the users list's kind filter is its SQL twin.
+func (u User) Kind() string {
+	switch {
+	case u.UserType == UserTypeService:
+		return UserKindService
+	case u.IsNHI():
+		return UserKindAgent
+	}
+	return UserKindPerson
+}

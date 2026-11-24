@@ -1,8 +1,8 @@
 import * as React from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ChevronRightIcon, Loader2Icon, SmartphoneIcon } from "lucide-react";
+import { ChevronRightIcon, Loader2Icon } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, DANGER_FILL } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -11,13 +11,17 @@ import { DataTable, plain } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { FetchError, RefusedError } from "@/components/error-state";
 import { HelpTip } from "@/components/help-tip";
-import { WordBadge } from "@/components/users-table";
+import { Chip, Pill } from "@/components/chip";
+import { KIND_ICON, KindTile } from "@/components/kind-icon";
+import { Segmented } from "@/components/segmented";
 import { type ApiError, type ApproverDeviceRow, listApproverDevices, revokeApproverDevice } from "@/lib/api";
 import { DEVICE_FILTERS, type DeviceFilter, deviceMatches, deviceNeedsLook, devicePasses, deviceSeenAt, shortID } from "@/lib/approval-model";
 import {
   BY_PUSH,
   CANCEL,
+  DEVICE_CHIP,
   DEVICES_EMPTY_BODY,
+  DEVICES_NO_MATCH,
   DEVICES_EMPTY_TITLE,
   DEVICES_LEGEND,
   DEVICES_PAGE,
@@ -40,10 +44,9 @@ import {
   SOFTWARE_KEY,
   SOFTWARE_PHONE,
   SUBJECT_DEVICES,
+  TABS,
   attestedWords,
-  chipWords,
   deviceName,
-  devicesTotal,
   groupDevices,
   hideDevices,
   isHardware,
@@ -61,8 +64,7 @@ import {
 import { cn } from "@/lib/utils";
 import { notify } from "@/lib/notify";
 import { readFailed, refused } from "@/lib/say";
-import { agoWord } from "@/lib/settings-words";
-import { absTime } from "@/lib/words";
+import { absTime, agoWord } from "@/lib/words";
 
 // DevicesTab is the approver devices tab: every enrolled phone and
 // browser with its key posture and whether Straza can notify it, Revoke at
@@ -74,11 +76,15 @@ import { absTime } from "@/lib/words";
 // the server keeps.
 
 const DANGER_BUTTON = "border-danger text-danger hover:bg-danger-bg hover:text-danger";
-const SMALL = "text-[13px] leading-snug text-muted-foreground";
+const SMALL = "text-caption leading-snug text-muted-foreground";
 const POLL_MS = 15000;
 // The widths leave the Notified column the rest of a 1280 px page, which
-// would be nothing at all with wider siblings.
+// would be nothing at all with wider siblings. FLOOR keeps about 140 px for
+// it in a narrow window, where the table scrolls inside its box.
 const WIDTHS: Record<string, string> = { device: "210px", person: "96px", key: "150px", enrolled: "96px", seen: "96px", revoke: "88px" };
+const FLOOR = "880px";
+// DEVICES_TAB is the tab's own label, which names its help icon.
+const DEVICES_TAB = TABS.find((t) => t.key === "devices")?.label || "";
 const LABELS: Record<string, string> = {
   device: DEVICE_COLUMN.device,
   person: DEVICE_COLUMN.person,
@@ -170,12 +176,15 @@ export function DevicesTab({ addRequest, onChanged }: DevicesProps) {
       id: "device",
       header: plain<ApproverDeviceRow>(DEVICE_COLUMN.device),
       cell: ({ row }) => (
-        <span className="flex flex-col gap-0.5">
-          <span className="flex flex-wrap items-center gap-1.5">
-            <b className="font-semibold text-foreground">{deviceName(row.original)}</b>
-            <WordBadge word={kindBadge(row.original)} tone="plain" attr="data-device-kind" />
+        <span className="flex items-start gap-2">
+          <KindTile kind={isPhone(row.original) ? "phone" : "browser"} />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex flex-wrap items-center gap-1.5">
+              <b className="font-semibold text-foreground">{deviceName(row.original)}</b>
+              <Pill data-device-kind={kindBadge(row.original)}>{kindBadge(row.original)}</Pill>
+            </span>
+            <span className="font-mono text-caption text-muted-foreground">{shortID(row.original.id)}</span>
           </span>
-          <span className="font-mono text-[13px] text-muted-foreground">{shortID(row.original.id)}</span>
         </span>
       ),
     },
@@ -208,7 +217,7 @@ export function DevicesTab({ addRequest, onChanged }: DevicesProps) {
         ? <span className="text-text-2" data-notified={BY_PUSH}>{BY_PUSH}</span>
         : (
           <span className="flex flex-col items-start gap-0.5 whitespace-normal">
-            <WordBadge word={MUST_CHECK} tone="warn" attr="data-notified" />
+            <Chip tone="warn" data-notified={MUST_CHECK}>{MUST_CHECK}</Chip>
             <span className={SMALL}>{MUST_CHECK_LINE}</span>
           </span>
         )),
@@ -254,7 +263,7 @@ export function DevicesTab({ addRequest, onChanged }: DevicesProps) {
     return (
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-secondary/60"
+        className="flex w-full items-center gap-2 px-2 py-1 text-left text-dense hover:bg-secondary/60"
         aria-expanded={open}
         aria-label={open ? hideDevices(key) : showDevices(key)}
         onClick={() => toggleGroup(key)}
@@ -267,49 +276,37 @@ export function DevicesTab({ addRequest, onChanged }: DevicesProps) {
   };
 
   const strip = (
-    <div role="group" aria-label={STRIP_LABEL} className="flex flex-wrap items-center gap-2" data-devices-strip>
-      <b className="mr-1 font-semibold text-foreground" data-devices-total>{devicesTotal(all.length)}</b>
-      {DEVICE_FILTERS.map((f) => {
-        const warn = f === "mustcheck" || f === "softphone" || f === "stale";
-        const on = filter === f;
-        return (
-          <button
-            key={f}
-            type="button"
-            aria-pressed={on}
-            data-chip={f}
-            onClick={() => { setFilter(f); setShown(DEVICES_PAGE); }}
-            className={cn(
-              "rounded-full border px-2.5 py-1 text-[12.5px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-              on ? (warn ? "border-warn bg-warn-bg text-warn" : "border-link bg-accent-bg text-link") : (warn ? "border-border bg-card text-warn" : "border-border bg-card text-text-2"),
-            )}
-          >
-            {chipWords(f, counts[f])}
-          </button>
-        );
-      })}
+    <div className="flex flex-wrap items-center gap-2">
+      <Segmented
+        label={STRIP_LABEL}
+        value={filter}
+        onChange={(f) => { setFilter(f); setShown(DEVICES_PAGE); }}
+        options={DEVICE_FILTERS.map((f) => ({ value: f, label: DEVICE_CHIP[f], count: counts[f].toLocaleString("en"), "data-chip": f }))}
+        data-devices-strip
+      />
     </div>
   );
   const filters = (
     <>
       <Input id="devices-search" value={search} onChange={(e) => { setSearch(e.target.value); setShown(DEVICES_PAGE); }} placeholder={SEARCH_DEVICES} aria-label={SEARCH_DEVICES} className="h-9 w-full max-w-sm" />
-      <label className="flex items-center gap-2 text-[13px] text-text-2">
+      <label className="flex items-center gap-2 text-caption text-text-2">
         <Switch checked={grouped} onCheckedChange={(v) => setGrouped(!!v)} aria-label={GROUP_BY_PERSON} />
         {GROUP_BY_PERSON}
       </label>
+      <HelpTip label={DEVICES_TAB} text={DEVICES_LEGEND} />
     </>
   );
 
   return (
     <div className="flex flex-col gap-4">
-      {state.kind === "loading" && <p className="text-sm text-muted-foreground">{READING_DEVICES}</p>}
+      {state.kind === "loading" && <p className="text-dense text-muted-foreground">{READING_DEVICES}</p>}
       {state.kind === "error" && <FetchError subject={SUBJECT_DEVICES} detail={state.message} />}
       {state.kind === "ready" && (
         <>
           {state.problem && <FetchError subject={SUBJECT_DEVICES} detail={state.problem} lastRead={state.lastRead} />}
 
           {all.length === 0 ? (
-            <EmptyState icon={SmartphoneIcon} title={DEVICES_EMPTY_TITLE}>{DEVICES_EMPTY_BODY}</EmptyState>
+            <EmptyState icon={KIND_ICON.phone} title={DEVICES_EMPTY_TITLE}>{DEVICES_EMPTY_BODY}</EmptyState>
           ) : (
             <>
               {strip}
@@ -322,20 +319,19 @@ export function DevicesTab({ addRequest, onChanged }: DevicesProps) {
                 dataAttr="data-device"
                 filterBar={filters}
                 count={() => (grouped ? peopleWords(people.length, matching.length) : matchWords(matching.length, all.length))}
-                emptyText={DEVICES_EMPTY_BODY}
+                emptyText={DEVICES_NO_MATCH}
                 widths={WIDTHS}
+                minWidth={FLOOR}
                 groups={grouped ? { key: personOf, header: groupHeader, collapsed } : undefined}
                 foot={!grouped && matching.length > DEVICES_PAGE ? (
                   <div className="flex flex-wrap items-center justify-center gap-3">
-                    <span className="text-[13px] text-muted-foreground" data-shown>{shownWords(Math.min(shown, matching.length), matching.length)}</span>
+                    <span className="text-caption text-muted-foreground" data-shown>{shownWords(Math.min(shown, matching.length), matching.length)}</span>
                     {shown < matching.length && <Button variant="outline" size="sm" onClick={() => setShown((n) => n + DEVICES_PAGE)}>{LOAD_MORE}</Button>}
                   </div>
                 ) : undefined}
               />
             </>
           )}
-
-          <p className={SMALL + " max-w-[90ch]"} data-devices-legend>{DEVICES_LEGEND}</p>
         </>
       )}
 
@@ -346,7 +342,7 @@ export function DevicesTab({ addRequest, onChanged }: DevicesProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>{revokeTitle(ask ? deviceName(ask) : "")}</AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <span className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+              <span className="flex flex-wrap items-center gap-1 text-dense text-muted-foreground">
                 {revokeBody(person)}
                 <HelpTip label={REVOKE_DEVICE} text={REVOKE_HELP} />
               </span>
@@ -356,7 +352,7 @@ export function DevicesTab({ addRequest, onChanged }: DevicesProps) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{CANCEL}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-danger text-white hover:bg-danger/90"
+              className={DANGER_FILL}
               aria-busy={busy || undefined}
               onClick={(e) => { e.preventDefault(); if (ask && !busy) void revoke(ask); }}
             >
@@ -380,16 +376,16 @@ export type KeyFacts = Pick<ApproverDeviceRow, "platform" | "key_security_level"
 export function KeyCell({ device }: { device: KeyFacts }) {
   if (isHardware(device)) {
     return (
-      <span className="flex flex-col items-start gap-0.5">
-        <WordBadge word={HARDWARE_KEY} tone="ok" attr="data-key" />
+      <span className="flex flex-col items-start gap-0.5 whitespace-normal">
+        <Chip tone="ok" data-key={HARDWARE_KEY}>{HARDWARE_KEY}</Chip>
         <span className={SMALL}>{attestedWords(device.attestation)}</span>
       </span>
     );
   }
   const phone = isPhone(device);
   return (
-    <span className="flex flex-col items-start gap-0.5">
-      <WordBadge word={SOFTWARE_KEY} tone={phone ? "warn" : "plain"} attr="data-key" />
+    <span className="flex flex-col items-start gap-0.5 whitespace-normal">
+      <Chip tone={phone ? "warn" : "plain"} data-key={SOFTWARE_KEY}>{SOFTWARE_KEY}</Chip>
       <span className={SMALL}>{phone ? SOFTWARE_PHONE : SOFTWARE_BROWSER}</span>
     </span>
   );

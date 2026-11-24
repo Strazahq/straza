@@ -2,11 +2,8 @@ package manager
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -24,8 +21,10 @@ var errNoCredential = errors.New("requires a credential and none is stored")
 // RemoteRuntime proxies to a remote streamable-HTTP MCP server. It has
 // no process lifecycle, and health is an MCP ping. Credentials are
 // injected as an HTTP header per upstream request and never appear in any
-// client-visible payload. Sessions are pooled per credential
-// so distinct role-bound secrets never share an upstream identity.
+// client-visible payload. Sessions are pooled per Straza session, label of
+// the caller's MCP connection and credential, so no caller shares an
+// upstream session with another and distinct role-bound secrets never share
+// an upstream identity.
 type RemoteRuntime struct {
 	// ConnectTimeout bounds each connect handshake, each health ping, each
 	// tool listing and the DELETE that ends a session (default 15 s).
@@ -53,8 +52,19 @@ type RemoteRuntime struct {
 	ring      *Ring
 	transport *http.Transport
 
-	mu      sync.Mutex
-	pool    map[string]*mcp.ClientSession // credential id → session
+	// idleAfter is how long a caller's session may go without a call before
+	// a health pass closes it (callerIdle).
+	idleAfter time.Duration
+
+	mu   sync.Mutex
+	pool map[poolKey]*pooled
+	// dials holds a channel for each pool key whose dial is in flight, closed
+	// when that dial ends, so one key never dials twice at once and makeRoom
+	// counts the dial.
+	dials map[poolKey]chan struct{}
+	// newest holds, for each credential row, the fingerprint of the dial
+	// that started last on it. Only that dial's session is pooled (entry).
+	newest  map[string]string
 	stopped bool
 }
 
@@ -75,7 +85,10 @@ func NewRemoteRuntime(name string, spec RemoteSpec, inject *InjectSpec, ring *Ri
 		spec:           spec,
 		inject:         inject,
 		ring:           ring,
-		pool:           map[string]*mcp.ClientSession{},
+		idleAfter:      callerIdle,
+		pool:           map[poolKey]*pooled{},
+		dials:          map[poolKey]chan struct{}{},
+		newest:         map[string]string{},
 	}
 	r.transport = r.newTransport()
 	return r
@@ -84,15 +97,22 @@ func NewRemoteRuntime(name string, spec RemoteSpec, inject *InjectSpec, ring *Ri
 // Start is a no-op: remotes have no lifecycle to supervise.
 func (r *RemoteRuntime) Start(context.Context) error { return nil }
 
-// Stop closes every pooled session.
+// Stop closes every pooled session and returns once all are closed. It
+// closes them at the same time and off the runtime lock, since each close
+// waits for the calls on its session and then for its DELETE, and a server
+// has one session for each Straza session that calls it. It does not wait
+// for a dial in flight, which closes its own session when it ends (entry).
 func (r *RemoteRuntime) Stop() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.stopped = true
-	for k, s := range r.pool {
-		_ = s.Close()
-		delete(r.pool, k)
+	pool := r.pool
+	r.pool = map[poolKey]*pooled{}
+	r.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, p := range pool {
+		wg.Go(func() { _ = p.s.Close() })
 	}
+	wg.Wait()
 	r.transport.CloseIdleConnections()
 }
 
@@ -111,13 +131,15 @@ func (r *RemoteRuntime) Ready() bool {
 // that ran out of time answers a sentence that names the wait. A caller that
 // left gets its context's error, which the manager words.
 func (r *RemoteRuntime) Tools(ctx context.Context, secret *Secret) ([]*mcp.Tool, error) {
-	s, key, err := r.session(ctx, secret)
+	p, key, err := r.session(ctx, secret)
 	if err != nil {
 		return nil, err
 	}
+	defer p.done()
+	s := p.s
 	if err := ctx.Err(); err != nil {
-		// The caller's time ran out while it waited for the lock, which says
-		// nothing about the pooled session.
+		// The caller's time ran out while it waited for another dial of its
+		// session, which says nothing about the pooled session.
 		return nil, err
 	}
 	bound := r.ConnectTimeout
@@ -167,13 +189,15 @@ func (r *RemoteRuntime) ReadResource(ctx context.Context, secret *Secret, uri st
 // error comes back as f answered it and keeps the session, because the
 // server answered.
 func (r *RemoteRuntime) onSession(ctx context.Context, secret *Secret, what string, f func(context.Context, *mcp.ClientSession) error) error {
-	s, key, err := r.session(ctx, secret)
+	p, key, err := r.session(ctx, secret)
 	if err != nil {
 		return err
 	}
+	defer p.done()
+	s := p.s
 	if err := ctx.Err(); err != nil {
-		// The caller's time ran out while it waited for the lock, which says
-		// nothing about the pooled session.
+		// The caller's time ran out while it waited for another dial of its
+		// session, which says nothing about the pooled session.
 		return err
 	}
 	bound := r.ConnectTimeout
@@ -211,24 +235,26 @@ func (r *RemoteRuntime) Call(ctx context.Context, in CallInput) (*mcp.CallToolRe
 		// new or rotated credential at the connect handshake, before any
 		// tool call, so that 4xx is a refusal of the call as well.
 		var dial callTrace
-		s, key, err := r.session(context.WithValue(ctx, traceKey{}, &dial), in.Secret)
+		p, key, err := r.entry(context.WithValue(ctx, traceKey{}, &dial), in.Session, in.Conn, in.Secret)
 		if status := dial.refusedWith(); err != nil && status != 0 {
 			return nil, &RefusedError{Server: r.name, Status: status}
 		}
 		if err != nil {
 			return nil, err
 		}
+		s := p.s
 		var tr callTrace
-		res, err := callTool(context.WithValue(ctx, traceKey{}, &tr), s, in)
+		res, err := p.call(context.WithValue(ctx, traceKey{}, &tr), in)
+		p.done()
 		if err == nil {
 			return res, nil
 		}
 		if !errors.Is(ctx.Err(), context.Canceled) {
-			// Every caller of this credential shares s. A caller that left says
-			// nothing about s, and closing s would end its upstream session for
-			// every other caller. A call that reached its own deadline still
-			// evicts s, so a session that stops answering is replaced on the
-			// next call.
+			// Every call of this session and credential shares s. A call that
+			// left says nothing about s, and closing s would end its upstream
+			// session for every other call on it. A call that reached its own
+			// deadline still evicts s, so a session that stops answering is
+			// replaced on the next call.
 			r.evict(key, s)
 		}
 		// The trace counts only while ctx lasts, since the notice that
@@ -266,29 +292,29 @@ func (r *RemoteRuntime) Call(ctx context.Context, in CallInput) (*mcp.CallToolRe
 }
 
 // Ping checks upstream liveness with the app-level credential and answers
-// for that session, whose answer decides the app's health. It pings every
-// other pooled session, one per caller credential, at the same time, and
-// evicts each that fails, so the next call on its credential dials afresh.
-// The wait for the runtime lock and the dial of the app-level session share
+// for that session, whose answer decides the app's health. It first closes
+// every caller's session that ran no call for idleAfter. It pings every
+// other pooled session, one per caller session and credential, at the same
+// time, and evicts each that fails, so the next call on it dials afresh. A
+// ping is not a use, so a pinged session still goes idle.
+// The wait for another dial of the app-level session and its own dial share
 // one ConnectTimeout, and every ping has its own.
 func (r *RemoteRuntime) Ping(ctx context.Context, secret *Secret) error {
 	pass, cancel := context.WithTimeout(ctx, r.ConnectTimeout)
 	defer cancel()
-	appKey := sessionKey(secret)
-	r.mu.Lock()
-	others := maps.Clone(r.pool)
-	r.mu.Unlock()
+	appKey := sessionKey("", secret)
+	others := r.closeIdle()
 	delete(others, appKey)
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for key, s := range others {
 		wg.Go(func() { _ = r.ping(pass, key, s) })
 	}
-	s, key, err := r.session(pass, secret)
+	p, key, err := r.session(pass, secret)
 	if errors.Is(err, context.DeadlineExceeded) && errors.Is(pass.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 		// Only the check before a dial answers the bare error, since a
 		// timed-out dial answers its own sentence: the pass spent its time
-		// waiting for the lock behind another dial.
+		// waiting for another dial of the app-level session.
 		return fmt.Errorf("the MCP server %s was not checked within %s, because Straza was still waiting on another connection attempt to it, "+
 			"and it checks the server again at the next health check. An administrator checks that the server runs and answers at the address in its manifest",
 			r.name, r.ConnectTimeout)
@@ -296,7 +322,8 @@ func (r *RemoteRuntime) Ping(ctx context.Context, secret *Secret) error {
 	if err != nil {
 		return err
 	}
-	err = r.ping(ctx, key, s)
+	err = r.ping(ctx, key, p.s)
+	p.done()
 	if errors.Is(err, mcp.ErrSessionMissing) || errors.Is(err, mcp.ErrConnectionClosed) {
 		// The upstream no longer knows the session, as after a restart, or a
 		// call already found that out and closed it. The MCP streamable HTTP
@@ -304,10 +331,11 @@ func (r *RemoteRuntime) Ping(ctx context.Context, secret *Secret) error {
 		// ping evicted the old one, so the app-level session is dialed and
 		// pinged once more. A ping changes nothing upstream, so a second one
 		// is harmless.
-		if s, key, err = r.session(pass, secret); err != nil {
+		if p, key, err = r.session(pass, secret); err != nil {
 			return err
 		}
-		err = r.ping(ctx, key, s)
+		err = r.ping(ctx, key, p.s)
+		p.done()
 	}
 	return err
 }
@@ -316,7 +344,7 @@ func (r *RemoteRuntime) Ping(ctx context.Context, secret *Secret) error {
 // evicts it when the ping failed, unless only because ctx was cancelled: a
 // caller that left says nothing about the session, the rule Call follows. A
 // ping that ran out of time answers a sentence an administrator acts on.
-func (r *RemoteRuntime) ping(ctx context.Context, key string, s *mcp.ClientSession) error {
+func (r *RemoteRuntime) ping(ctx context.Context, key poolKey, s *mcp.ClientSession) error {
 	pctx, cancel := context.WithTimeout(ctx, r.ConnectTimeout)
 	defer cancel()
 	err := s.Ping(pctx, nil)
@@ -334,44 +362,16 @@ func (r *RemoteRuntime) ping(ctx context.Context, key string, s *mcp.ClientSessi
 // Logs returns recent connection log lines.
 func (r *RemoteRuntime) Logs(n int) []string { return r.ring.Last(n) }
 
-// session returns the pooled session for the credential, dialing lazily.
-func (r *RemoteRuntime) session(ctx context.Context, secret *Secret) (*mcp.ClientSession, string, error) {
-	if r.inject != nil && secret == nil && !r.PerUser {
-		// The manifest requires a credential, and calling upstream without one
-		// would leak an uncredentialed request: fail closed (SPEC §3).
-		// Per-user apps are exempt here for inventory/health only. Call has
-		// its own unconditional guard.
-		return nil, "", errNoCredential
-	}
-	key := sessionKey(secret)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.stopped {
-		return nil, "", notRunning(r.name)
-	}
-	if s, ok := r.pool[key]; ok {
-		return s, key, nil
-	}
-	if err := ctx.Err(); err != nil {
-		// The caller's time ran out while it waited for the lock. A dial now
-		// would still hold the lock for the SDK's cancel notice and a DELETE.
-		return nil, "", err
-	}
-	if secret != nil {
-		// Rotation and reconnect update the credential row in place, so a key on
-		// the row ID alone would keep the superseded token on the wire until
-		// an upstream error evicted it. The key fingerprints the value. Any
-		// session left under the same credential with a stale value dies here,
-		// closed off the lock as evict closes, since Close waits for its calls.
-		for k, old := range r.pool {
-			if k != key && strings.HasPrefix(k, secret.ID+"|") {
-				delete(r.pool, k)
-				go func() { _ = old.Close() }()
-				r.ring.Append("session superseded by rotated credential")
-			}
-		}
-	}
+// session returns the app-level pool entry of the credential, which serves
+// no Straza session, as entry answers it. The caller ends its use with done.
+func (r *RemoteRuntime) session(ctx context.Context, secret *Secret) (*pooled, poolKey, error) {
+	return r.entry(ctx, "", "", secret)
+}
 
+// dial opens one upstream session for secret within ConnectTimeout, or the
+// caller's own deadline when that is sooner, and answers a failure as the
+// sentence the health loop and the gateway show. The caller holds no lock.
+func (r *RemoteRuntime) dial(ctx context.Context, secret *Secret) (*mcp.ClientSession, error) {
 	bound := r.ConnectTimeout
 	if dl, ok := ctx.Deadline(); ok {
 		// A call's own timeout, or what is left of a health pass, may be
@@ -384,17 +384,16 @@ func (r *RemoteRuntime) session(ctx context.Context, secret *Secret) (*mcp.Clien
 	if err != nil {
 		r.ring.Append(fmt.Sprintf("connect %s failed: %v", r.shownURL(), err))
 		if refusal := refusalOf(err); refusal != nil {
-			return nil, "", refusal
+			return nil, refusal
 		}
 		if errors.Is(cctx.Err(), context.DeadlineExceeded) {
-			return nil, "", fmt.Errorf("the MCP server %s did not answer the connect handshake within %s, so Straza dials it again on the next call or health check. "+
+			return nil, fmt.Errorf("the MCP server %s did not answer the connect handshake within %s, so Straza dials it again on the next call or health check. "+
 				"An administrator checks that the server runs and answers at the address in its manifest", r.name, bound.Round(10*time.Millisecond))
 		}
-		return nil, "", fmt.Errorf("the connection to MCP server %s failed: %w. An administrator checks that the server runs and answers at the address in its manifest", r.name, err)
+		return nil, fmt.Errorf("the connection to MCP server %s failed: %w. An administrator checks that the server runs and answers at the address in its manifest", r.name, err)
 	}
 	r.ring.Append("connected " + r.shownURL())
-	r.pool[key] = s
-	return s, key, nil
+	return s, nil
 }
 
 // connect opens one upstream session for secret. The host of the manifest's
@@ -437,26 +436,15 @@ func (r *RemoteRuntime) Probe(ctx context.Context, secret *Secret) error {
 	return s.Ping(cctx, nil)
 }
 
-// sessionKey identifies a pooled upstream session: credential row + a
-// fingerprint of the value, so rotating a credential (refresh worker,
-// reconnect, `apps secret set`) can never reuse a session dialed under the
-// previous token. "" = uncredentialed.
-func sessionKey(secret *Secret) string {
-	if secret == nil {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(secret.Value))
-	return secret.ID + "|" + hex.EncodeToString(sum[:8])
-}
-
 // evict drops a broken session so the next call re-dials, and writes one
 // ring line. Only the eviction that removes the pool entry closes the
 // session, and it closes it on its own goroutine: the SDK's Close first
 // waits for every call still running on the session, each of which ends by
 // its own deadline, and the DELETE that follows ends by ConnectTimeout.
-func (r *RemoteRuntime) evict(key string, s *mcp.ClientSession) {
+func (r *RemoteRuntime) evict(key poolKey, s *mcp.ClientSession) {
 	r.mu.Lock()
-	removed := r.pool[key] == s
+	p := r.pool[key]
+	removed := p != nil && p.s == s
 	if removed {
 		delete(r.pool, key)
 	}
@@ -487,9 +475,9 @@ func (r *RemoteRuntime) httpClient(secret *Secret) *http.Client {
 
 // deleteDeadline gives the DELETE that ends an upstream session a deadline.
 // The SDK sends it from Close on the session's own context, which never
-// ends, so a server that stopped answering would hold Close, and the
-// runtime lock while a failed dial closes its half-made session, until the
-// server answered again.
+// ends, so a server that stopped answering would hold Close, and a failed
+// dial while it closes its half-made session, until the server answered
+// again.
 type deleteDeadline struct {
 	base    http.RoundTripper
 	timeout time.Duration

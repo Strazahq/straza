@@ -1,0 +1,7 @@
+# Findings of the dependency scan that are accepted for a time, each with
+# the reason and an end date after which the scan reports it again.
+
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-17
+reason = "picomatch 4.0.7 is the newest version and the advisory marks every version as affected, so no fixed version exists. It is used by vite and vitest at build and test time only, on glob patterns from this repository's own config, and it is in no file that ships."

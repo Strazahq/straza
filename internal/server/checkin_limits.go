@@ -5,11 +5,15 @@ import (
 	"strings"
 )
 
-// checkinTextMax is the most bytes of a harness name, a harness version or
-// a client version that a check-in may carry. A straza client sends a few
-// dozen, and each one rides on the session, its token and, for the harness,
-// every audit record of the session.
+// checkinTextMax is the most bytes of a harness name, a harness version, a
+// client version or a host name that a check-in may carry. A straza client
+// sends a few dozen, and each one rides on the session, and the harness
+// also on its token and on every audit record of the session.
 const checkinTextMax = 256
+
+// checkinFolderMax is the most bytes of a folder that a check-in may carry.
+// A straza client cuts a longer folder to this length and keeps its end.
+const checkinFolderMax = 1024
 
 // The refusals of a check-in whose text is over checkinTextMax bytes, each
 // with the length sent and the bound.
@@ -25,6 +29,14 @@ const (
 	clientVersionTooLongMsg = "This check-in names a straza client version of %d bytes, and strazad accepts at most %d, " +
 		"because the session keeps it and the console shows it. " +
 		"A straza client sends its own build version, which is never that long, " +
+		"so a program other than a straza client likely made this check-in. Find out what sent it, or reinstall straza."
+	hostTooLongMsg = "This check-in names a machine of %d bytes, and strazad accepts at most %d, " +
+		"because the session keeps the machine's name and the console shows it. " +
+		"A straza client sends the host name of its machine and cuts a longer one, " +
+		"so a program other than a straza client likely made this check-in. Find out what sent it, or reinstall straza."
+	folderTooLongMsg = "This check-in names a folder of %d bytes, and strazad accepts at most %d, " +
+		"because the session keeps the folder and the console shows it. " +
+		"A straza client cuts a longer folder and keeps its end, " +
 		"so a program other than a straza client likely made this check-in. Find out what sent it, or reinstall straza."
 )
 
@@ -46,13 +58,13 @@ const (
 )
 
 // checkinTextRefusal answers the refusal of req when its harness name,
-// harness version or client version is over checkinTextMax bytes, or when
-// one of them, the client commit or a key or value of the attestation hashes
-// holds a NUL character, and "" when all fit. These are the fields the
-// session keeps. It refuses and never cuts or strips, because policies match
-// the harness name as sent, a cut name could match a rule the real one does
-// not, and a stripped field would make the session record a value the
-// client never sent.
+// harness version, client version or host is over checkinTextMax bytes, its
+// folder is over checkinFolderMax, or when one of them, the client commit or
+// a key or value of the attestation hashes holds a NUL character, and ""
+// when all fit. These are the fields the session keeps. It refuses and never
+// cuts or strips, because policies match the harness name as sent, a cut name
+// could match a rule the real one does not, and a stripped field would make
+// the session record a value the client never sent.
 func checkinTextRefusal(req checkinRequest) string {
 	switch {
 	case len(req.Harness.Name) > checkinTextMax:
@@ -61,6 +73,10 @@ func checkinTextRefusal(req checkinRequest) string {
 		return fmt.Sprintf(harnessVersionTooLongMsg, len(req.Harness.Version), checkinTextMax)
 	case len(req.Client.Version) > checkinTextMax:
 		return fmt.Sprintf(clientVersionTooLongMsg, len(req.Client.Version), checkinTextMax)
+	case len(req.Host) > checkinTextMax:
+		return fmt.Sprintf(hostTooLongMsg, len(req.Host), checkinTextMax)
+	case len(req.Folder) > checkinFolderMax:
+		return fmt.Sprintf(folderTooLongMsg, len(req.Folder), checkinFolderMax)
 	case strings.Contains(req.Harness.Name, "\x00"):
 		return fmt.Sprintf(checkinNULMsg, "harness.name", nulStepStraza)
 	case strings.Contains(req.Harness.Version, "\x00"):
@@ -69,6 +85,10 @@ func checkinTextRefusal(req checkinRequest) string {
 		return fmt.Sprintf(checkinNULMsg, "client.version", nulStepStraza)
 	case strings.Contains(req.Client.Commit, "\x00"):
 		return fmt.Sprintf(checkinNULMsg, "client.commit", nulStepStraza)
+	case strings.Contains(req.Host, "\x00"):
+		return fmt.Sprintf(checkinNULMsg, "host", nulStepStraza)
+	case strings.Contains(req.Folder, "\x00"):
+		return fmt.Sprintf(checkinNULMsg, "folder", nulStepStraza)
 	}
 	for artifact, hash := range req.Attestation.Hashes {
 		if strings.Contains(artifact, "\x00") || strings.Contains(hash, "\x00") {

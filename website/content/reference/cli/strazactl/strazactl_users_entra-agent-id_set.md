@@ -2,7 +2,7 @@
 title: strazactl users entra-agent-id set
 description: Set the client id of the Entra agent identity the agent acts as
 pagetype: reference
-weight: 109
+weight: 103
 draft: false
 sources:
   - cmd/strazactl

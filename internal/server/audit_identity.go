@@ -48,12 +48,21 @@ func (a *App) emitIdentityAudit(ctx context.Context, data map[string]any) {
 // created, admin or scim: target and user the new id, username, kind human
 // or nhi, userType when the row has one, and origin.
 func (a *App) auditUserCreate(ctx context.Context, u store.User, origin string) {
+	a.auditUserCreateWithReason(ctx, u, origin, "")
+}
+
+// auditUserCreateWithReason is auditUserCreate with the reason the user was
+// created, which the record carries when it is not empty.
+func (a *App) auditUserCreateWithReason(ctx context.Context, u store.User, origin, reason string) {
 	data := map[string]any{
 		"action": actionUserCreate, "target": u.ID, "user": u.ID, "username": u.Username,
 		"kind": userKind(u), "origin": origin,
 	}
 	if u.UserType != "" {
 		data["userType"] = u.UserType
+	}
+	if reason != "" {
+		data["reason"] = reason
 	}
 	a.emitIdentityAudit(ctx, data)
 }
@@ -112,13 +121,15 @@ func (a *App) auditEnrollTokenCreate(ctx context.Context, u store.User, channel 
 // request the admin enroll-token route refused. The record carries the
 // reason, and target, user and username only when named is a user the body
 // named and the store holds, so a zero named leaves them out. The route
-// mints and stores nothing.
+// mints and stores nothing. The refusal keeps this one record, so the
+// admin plane's watch writes no admin.refused for it.
 func (a *App) auditEnrollTokenRefused(ctx context.Context, named store.User) {
 	data := map[string]any{"action": actionEnrollTokenRefused, "reason": enrollTokenRefusedReason}
 	if named.ID != "" {
 		data["target"], data["user"], data["username"] = named.ID, named.ID, named.Username
 	}
 	a.emitIdentityAudit(ctx, data)
+	refusalRecorded(ctx)
 }
 
 // auditApproverEnroll chains the approver.enroll record of a device the
@@ -191,4 +202,18 @@ func (a *App) scimWriteRefused(r *http.Request, ref scim.Refusal) {
 	}
 	a.reqlog(ctx).Warn("SCIM write refused", append(attrs, "reason", ref.Detail)...)
 	a.emitIdentityAudit(ctx, data)
+}
+
+// reasonSignInRelinked is the reason on the record of a sign-in that
+// rewrote an account's link.
+const reasonSignInRelinked = "the sign-in linked the account to its Entra object ID"
+
+// signInRelinked chains the user.update record of a sign-in that rewrote
+// the external id of u from the token's sub to its Entra object id. The
+// record names no actor, because strazad made the change.
+func (a *App) signInRelinked(ctx context.Context, u store.User) {
+	a.emitIdentityAudit(noActor(ctx), map[string]any{
+		"action": actionUserUpdate, "target": u.ID, "user": u.ID, "username": u.Username,
+		"changed": []string{"external_id"}, "reason": reasonSignInRelinked,
+	})
 }

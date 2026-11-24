@@ -119,6 +119,7 @@ func TestRoleHolderCount(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		seedUserIDs(t, s, "u1", "u2", "u3")
 		for _, pair := range [][2]string{{"u1", owned.ID}, {"u1", team.ID}, {"u2", team.ID}, {"u3", org.ID}} {
 			if _, err := s.Roles().Assign(ctx, RoleAssignment{SubjectKind: SubjectUser, SubjectID: pair[0], RoleID: pair[1]}); err != nil {
 				t.Fatal(err)

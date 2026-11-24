@@ -68,7 +68,7 @@ func TestMultiPodHA(t *testing.T) {
 	// every handler read cfg/tokens/Handler (post-Run surgery is a data race).
 	const issuer = "http://straza-ha.local"
 	rebind := func(pod *App) {
-		tokens, err := authn.NewTokenService(context.Background(), pod.store.SigningKeys(), issuer, 0)
+		tokens, err := authn.NewTokenService(context.Background(), pod.store.SigningKeys(), pod.kek, issuer, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

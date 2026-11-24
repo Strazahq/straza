@@ -465,11 +465,12 @@ func TestRolesListAssignedCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	past := time.Now().Add(-time.Hour).UTC()
+	second, gone := mkHuman(t, app, "u-second"), mkHuman(t, app, "u-gone")
 	for _, asg := range []store.RoleAssignment{
 		{SubjectKind: store.SubjectUser, SubjectID: user.ID, RoleID: reader.ID},
-		{SubjectKind: store.SubjectUser, SubjectID: "u-second", RoleID: reader.ID},
+		{SubjectKind: store.SubjectUser, SubjectID: second.ID, RoleID: reader.ID},
 		// Windowed-out row still counts: the column mirrors the list rows.
-		{SubjectKind: store.SubjectUser, SubjectID: "u-gone", RoleID: reader.ID, ValidTo: &past},
+		{SubjectKind: store.SubjectUser, SubjectID: gone.ID, RoleID: reader.ID, ValidTo: &past},
 	} {
 		if _, err := app.store.Roles().Assign(ctx, asg); err != nil {
 			t.Fatalf("Assign %+v: %v", asg, err)

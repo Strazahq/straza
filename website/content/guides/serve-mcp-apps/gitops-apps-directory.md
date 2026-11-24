@@ -109,7 +109,7 @@ Within a second or two a new draft waits. Its proposer is `strazad`, it came in 
 
 {{< shot name="draft-gitops" caption="The draft's **Checks**, where the server's address is not contacted yet and **Contact it now** reads its tools." >}}
 
-The draft's page shows What changes, Access after publishing and Checks. The publish dialog groups the lines that widen access into blocks, one per kind, and **Publish** works once you confirm each block.
+The draft's page shows In short, What changes and Checks. The publish dialog groups the lines that widen access into blocks, one per kind, and **Publish** works once you confirm each block.
 {{< /console >}}
 
 {{< cli >}}
@@ -127,7 +127,7 @@ strazactl runs on an admin API token, and only a person publishes a draft, so pu
 {{< /cli >}}
 
 
-Straza does not dial an address that only a draft names. Until a person asks, the check lists among what it could not check `Straza has not contacted mcp.example.com, because an address in a draft is contacted only when a person asks, so the tool names of gitops-tools are unknown.` To read the tool names before you publish, press **Contact it now** on the draft's page. Only a person contacts it, so strazactl, which runs on an admin API token, has no way to. strazad dials the address once, with no credential, follows no redirect, starts nothing, and keeps the tool names on the draft for its check. The audit chain records who asked. [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) walks the whole life of a draft.
+Straza does not dial an address that only a draft names. Until a person asks, the check lists among what it could not check `Straza has not contacted mcp.example.com yet, so the tool names of gitops-tools are unknown. It contacts an address in a draft only when a person asks.` To read the tool names before you publish, press **Contact it now** on the draft's page. Only a person contacts it, so strazactl, which runs on an admin API token, has no way to. strazad dials the address once, with no credential, follows no redirect, starts nothing, and keeps the tool names on the draft for its check. The audit chain records who asked. [Propose and publish a change]({{< relref "guides/changes/propose-and-publish.md" >}}) walks the whole life of a draft.
 
 Publishing installs the server on every replica and writes `apps.install` with you as its actor. `strazactl apps list` shows `gitops` in the SOURCE column of a server whose last change was published from a file. The new server gives nobody access, so give a role access to it next, as [Access per role]({{< relref "guides/serve-mcp-apps/catalogs-per-role.md" >}}) shows.
 
@@ -215,7 +215,7 @@ Type `gitops-tools` where the dialog asks, then press **Publish**.
 {{< /cli >}}
 
 
-Discarding that draft keeps the server as it is and ends its link to the file, so Straza does not propose the removal again. In the console that is **Discard: keep gitops-tools**, an optional reason and **Discard draft**. A person discards it there, because an admin API token discards only the drafts it wrote, so `strazactl drafts discard` refuses a draft the directory proposed. From then on the server is changed like any server the console or the API installed.
+Discarding that draft keeps the server as it is and ends its link to the file, so Straza does not propose the removal again. In the console that is **Discard**, an optional reason and **Discard draft**. A person discards it there, because an admin API token discards only the drafts it wrote, so `strazactl drafts discard` refuses a draft the directory proposed. From then on the server is changed like any server the console or the API installed.
 
 A file deleted while strazad was down is proposed for removal at the next start. When another file of the directory cannot be read or does not parse at that start, strazad logs the files to fix and proposes nothing, because that file may still name the server. Moving a file to another name, or a second file that names the same server, proposes no removal while any file still names the server. Changing `metadata.name` in a file proposes one draft that adds the new server and removes the old one.
 

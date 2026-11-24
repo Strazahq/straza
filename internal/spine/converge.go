@@ -38,11 +38,11 @@ type Convergence struct {
 	// events.
 	OnApps func(context.Context) error
 	// OnIdentity bumps the role-resolution epoch so the next resolution
-	// re-reads the store. Live sessions converge at token refresh (≤ TTL),
-	// the same bound single-pod sessions have; immediate cut-off is the
-	// revocation consumer's job. It is not called for the events of a
+	// re-reads the store, and gets the id the event names, a user's or a
+	// role's, or "" when it names none, so the pod can send that user's
+	// sessions to check in again. It is not called for the events of a
 	// session's own life (sessionLifeActions).
-	OnIdentity func(context.Context) error
+	OnIdentity func(ctx context.Context, id string) error
 }
 
 // ConvergeConsumer applies other pods' control-plane changes to this pod's
@@ -161,7 +161,7 @@ func (c *ConvergeConsumer) Handle(ctx context.Context, subject string, data []by
 		if sessionLife(env.Data) {
 			return
 		}
-		err = c.conv.OnIdentity(ctx)
+		err = c.conv.OnIdentity(ctx, identityID(env.Data))
 	default:
 		handled = false
 	}
@@ -189,6 +189,16 @@ var sessionLifeActions = map[string]bool{
 	"session.start":               true,
 	"renew":                       true,
 	"attestation-hash.registered": true,
+}
+
+// identityID returns the id an identity event's data names, or "" when it
+// names none or does not decode.
+func identityID(data json.RawMessage) string {
+	var d struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(data, &d)
+	return d.ID
 }
 
 // sessionLife reports whether an identity event's data names one of the

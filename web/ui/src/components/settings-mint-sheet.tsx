@@ -5,11 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { HelpTip } from "@/components/help-tip";
 import { Section } from "@/components/sheet-parts";
 import { AreaTable, GrantPills, JobCards } from "@/components/settings-mint-parts";
 import { GrantChips, PRE, hasScim } from "@/components/settings-token-sheet";
-import { WordBadge } from "@/components/users-table";
+import { Chip } from "@/components/chip";
 import { type ApiError, type ApiTokenRow, type MintedToken, createApiToken } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { CANCEL } from "@/lib/role-words";
@@ -25,20 +24,16 @@ import {
   FULL_BADGE,
   FULL_TIP,
   GRANTS_MISSING,
-  GRANTS_PLACEHOLDER,
   HOLDS_TITLE,
   JOBS,
-  JOB_HELP,
   JOB_TITLE,
   LIFETIMES,
   LIFETIME_HINT,
   LIFETIME_LABEL,
   MINTING,
   MINTED_LEDE,
-  MINT_LEDE,
   MINT_TITLE,
   MINT_VERB,
-  NAME_FREE,
   NAME_HINT,
   NAME_LABEL,
   NAME_MISSING,
@@ -48,7 +43,6 @@ import {
   SCOPE_TITLE,
   SHOWN_ONCE,
   USE_TITLE,
-  WRITE_LINE,
   canonicalScope,
   curlLine,
   expiresLine,
@@ -66,8 +60,8 @@ import { dayOf } from "@/lib/words";
 // grants that follow it, and the canonical scope the server is sent. Once
 // the server answers, the same sheet becomes the one look at the secret.
 
-const HINT = "text-[13px] leading-snug text-muted-foreground";
-const ERROR = "text-[13px] leading-snug text-danger";
+const HINT = "text-caption leading-snug text-muted-foreground";
+const ERROR = "text-caption leading-snug text-danger";
 
 type Props = {
   open: boolean;
@@ -157,10 +151,10 @@ export function MintSheet({ open, onOpenChange, rows, onMinted }: Props) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-[760px]" data-mint-sheet={minted ? "minted" : "form"}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-[760px]" {...(minted ? {} : { "aria-describedby": undefined })} data-mint-sheet={minted ? "minted" : "form"}>
         <SheetHeader className="border-b border-border pr-12">
-          <SheetTitle className="text-lg leading-snug">{minted ? mintedTitle(minted.name) : MINT_TITLE}</SheetTitle>
-          <SheetDescription>{minted ? MINTED_LEDE : MINT_LEDE}</SheetDescription>
+          <SheetTitle className="text-section leading-snug">{minted ? mintedTitle(minted.name) : MINT_TITLE}</SheetTitle>
+          {minted && <SheetDescription>{MINTED_LEDE}</SheetDescription>}
         </SheetHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
@@ -179,8 +173,7 @@ export function MintSheet({ open, onOpenChange, rows, onMinted }: Props) {
                 {refusal ? <span className={ERROR} role="alert" data-mint-refused>{refusal}</span>
                   : nameMiss ? <span className={ERROR} role="alert">{NAME_MISSING}</span>
                     : taken ? <span className={ERROR}>{nameTaken(trimmed)}</span>
-                      : trimmed ? <span className="text-[13px] leading-snug text-ok">{NAME_FREE}</span>
-                        : null}
+                      : null}
               </div>
 
               <div className="flex flex-col gap-1">
@@ -192,22 +185,21 @@ export function MintSheet({ open, onOpenChange, rows, onMinted }: Props) {
                   </SelectContent>
                 </Select>
                 <span className={HINT}>{LIFETIME_HINT}</span>
-                {lifetime === 0 && <span className="text-[13px] leading-snug text-warn" data-never-warn>{NEVER_WARN}</span>}
+                {lifetime === 0 && <span className="text-caption leading-snug text-warn" data-never-warn>{NEVER_WARN}</span>}
               </div>
 
-              <Section title={JOB_TITLE} action={<HelpTip label={JOB_TITLE} text={JOB_HELP} />}>
+              <Section title={JOB_TITLE}>
                 <JobCards picked={job} onPick={pickJob} />
                 {grantsMiss && <span className={ERROR} role="alert">{GRANTS_MISSING}</span>}
-                {full ? <WordBadge word={FULL_BADGE} tone="warn" title={FULL_TIP} attr="data-grant" />
+                {full ? <Chip tone="warn" title={FULL_TIP} data-grant={FULL_BADGE}>{FULL_BADGE}</Chip>
                   : picked && picked.custom ? null
                     : grants.length > 0 ? <GrantPills grants={grants} why={(picked && picked.why) || {}} onRemove={(g) => setGrants(grants.filter((x) => x !== g))} />
-                      : <span className={HINT}>{GRANTS_PLACEHOLDER}</span>}
+                      : null}
               </Section>
 
               {picked && picked.custom && (
                 <Section title={AREAS_TITLE}>
                   <AreaTable grants={grants} onChange={setGrants} />
-                  <span className={HINT}>{WRITE_LINE}</span>
                 </Section>
               )}
 
@@ -215,7 +207,7 @@ export function MintSheet({ open, onOpenChange, rows, onMinted }: Props) {
                 <Section title={SCOPE_TITLE}>
                   <pre className={PRE} data-scope>{scopeLine(scope)}</pre>
                   <span className={HINT}>{SCOPE_LINE}</span>
-                  {root && <span className="text-[13px] leading-snug text-warn" data-root-warn>{ROOT_WARN}</span>}
+                  {root && <span className="text-caption leading-snug text-warn" data-root-warn>{ROOT_WARN}</span>}
                 </Section>
               )}
             </>
@@ -250,17 +242,17 @@ function Minted({ minted }: { minted: MintedToken }) {
     <>
       <div className="flex flex-col gap-2 rounded-md border border-warn/40 bg-warn-bg px-3 py-3" data-secret>
         <div className="flex flex-wrap items-center gap-2">
-          <WordBadge word={SHOWN_ONCE} tone="warn" />
-          <code className="min-w-0 flex-1 break-all font-mono text-[13px] text-foreground">{minted.token}</code>
+          <Chip tone="warn">{SHOWN_ONCE}</Chip>
+          <code className="min-w-0 flex-1 break-all font-mono text-caption text-foreground">{minted.token}</code>
           <Button variant="outline" size="sm" onClick={copy}><CopyIcon /> {COPY}</Button>
         </div>
-        <span className="text-[13px] leading-snug text-text-2">{COPY_NOW}</span>
+        <span className="text-caption leading-snug text-text-2">{COPY_NOW}</span>
       </div>
 
       <Section title={USE_TITLE}>
-        <span className="text-[13px] leading-snug text-text-2">{useLine(hasScim(minted.scope))}</span>
+        <span className="text-caption leading-snug text-text-2">{useLine(hasScim(minted.scope))}</span>
         <pre className={PRE}>{headerLine(minted.token)}</pre>
-        <span className="text-[13px] leading-snug text-text-2">{FROM_SHELL}</span>
+        <span className="text-caption leading-snug text-text-2">{FROM_SHELL}</span>
         <pre className={PRE}>{curlLine(origin)}</pre>
       </Section>
 

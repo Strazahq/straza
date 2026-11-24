@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Approvals } from "./approvals";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, type ApprovalRow, getConfig, listApprovals, listApproverDevices, listRoles } from "@/lib/api";
@@ -52,5 +53,40 @@ describe("the Approvals page and a person's own request", () => {
     }
     expect((row.querySelector("[data-own-request]") as HTMLElement).textContent).toBe(OWN_REQUEST + " " + OPEN_SELF_SERVICE);
     expect(within(row).queryByRole("button")).toBe(null);
+  });
+});
+
+// A harness tool Straza does not classify, stored as other: <name>, held
+// for alice as the agent's sponsor.
+const unclassified: ApprovalRow = { ...mineOwn, id: "apr_other", user: "u-joe", username: "joe", lane: "hook", summary: "other: refund_order", approverUsers: ["alice"], mode: "approve" };
+
+describe("a request on the Approvals page", () => {
+  beforeEach(() => {
+    vi.mocked(snapshot).mockReturnValue({ user: "alice", roles: ["straza-admin"] } as ReturnType<typeof snapshot>);
+    vi.mocked(listApprovals).mockResolvedValue({ approvals: [unclassified] });
+    vi.mocked(listApproverDevices).mockResolvedValue([]);
+    vi.mocked(listRoles).mockResolvedValue([]);
+    vi.mocked(getConfig).mockResolvedValue({ approval: { unsigned_own_decisions: false } });
+  });
+
+  it("names a tool Straza does not classify by its name alone, in the Call cell, the dialog's title and its call", async () => {
+    mount();
+    const row = await screen.findByRole("button", { name: "Open refund_order for joe" });
+    expect((row.querySelector('[data-column="call"]') as HTMLElement).textContent).toBe("refund_order");
+    await userEvent.click(row);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.querySelector("h2")?.textContent).toBe("joe wants to call a tool refund_order");
+    expect((dialog.querySelector("[data-card-tool]") as HTMLElement).textContent).toBe("refund_order");
+  });
+
+  it("gives the focus back to the row that opened the request's dialog, after Escape", async () => {
+    mount();
+    const row = await screen.findByRole("button", { name: "Open refund_order for joe" });
+    row.focus();
+    await userEvent.keyboard("{Enter}");
+    await screen.findByRole("dialog");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open refund_order for joe" })));
   });
 });

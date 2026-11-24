@@ -1,9 +1,207 @@
-# Events, v1beta1 (revision 65)
+# Events, v1beta1 (revision 77)
 
 Status: **beta**. The specification began as v1alpha1, revision 2 added
 `straza.revocation.lift` and the push channel, and the move to beta
 changed no wire format. Schema: `events.schema.json` (envelope). Examples:
 `examples/valid-*.json`, `examples/invalid-*.json`.
+
+Revision 77 (2026-11-23, https://docs.straza.ai/security/hardening/): the life cycle of the
+session signing key is on the chain. Before this revision the reference producer recorded only
+the call of the rotate route for that key. `straza.audit.admin` now carries the actions
+`signing-keys.promote` and `signing-keys.retire` with the `purpose` `session`, and the
+`signing-keys.rotate` record of the session key carries that `purpose` too. A rotate record
+without `purpose` is one that a producer older than this revision wrote, and a consumer still
+reads it as `session`, as revision 34 says. The promote record carries `kid`, the key that signs
+from then on, and the new field `previous_kid`, the key that signed until then, which is absent
+when none did. The retire record carries `kid`, the key that verifies nothing from then on. The
+rotation janitor promotes and retires a session key by itself, so neither record carries the
+actor fields of revision 18, and the absence is the statement. This narrows the reading rule of
+revision 60: a promote record without actor fields comes from a producer older than revision 60
+only when its `purpose` is `client_assertion`. Each of the two records is written once for the
+whole deployment, by the replica whose store write made the change, and a janitor pass that
+changed nothing writes none. The record marks that store write: the replica that made it signs
+with the new key, or stops verifying with the retired one, at once, and every other replica at
+its next key reload, within 30 seconds. The rotate record is written once per call of the rotate route, as
+before, also when the call answered with a key that was staged already. No record carries key
+material. Additive for consumers: one new field, and a `purpose` value on actions the subject
+lists already. No new event type, so the default sink list is unchanged. Examples
+`valid-audit-admin-signing-keys-rotate-session.json`,
+`valid-audit-admin-signing-keys-promote-session.json` and
+`valid-audit-admin-signing-keys-retire-session.json` (values synthetic, the field sets equal
+to the records 215099, 215100 and 215121 read back from the eval stack on 2026-11-23: [live]).
+
+Revision 76 (2026-11-23): `straza.apps.drift` gains `changed[]`, the names of the tools that the
+last tool list and the new one both hold and that differ in their description, input schema,
+`ai.straza/` marks or one of the annotation hints `readOnlyHint`, `destructiveHint`,
+`idempotentHint` and `openWorldHint`. The list is empty when no such tool changed, and `added[]`
+and `removed[]` keep their meaning. Since this revision the reference producer also raises the
+event when only a hint changed, where before it compared no hint. A changed title or output
+schema still raises no event. Additive for consumers: one new field on an event whose payload
+may carry additional fields. Example `valid-apps-drift-changed.json` (derived from the reference
+producer and its test, not captured from a live wire: [doc]).
+
+Revision 75 (2026-11-22): a change that the admin plane refuses with `403` writes one
+`straza.audit.admin` record with the action `admin.refused`. It carries the actor fields of the
+caller, `route`, the method and the route pattern, `httpStatus` `403`, `reason`, the sentence the
+caller was answered, and `target` when the route names an object by `{id}`. It covers every route
+behind the admin authentication, the drafts routes included, and the connect route when an admin
+API token calls it, whether the area check or the handler refused, and never a `GET` or a `HEAD`. A refusal that already has its own record keeps
+only that one: `enroll-token.refused`, `scim.refused` on the SCIM plane, and the login failure of
+a caller that is not a person. A connect write that an admin API token is refused also sends its
+`connection.refused` event on `straza.identity.updated`, which is not on the chain, beside the
+`admin.refused` record. A caller that is not authenticated writes none, and neither does a
+refusal that arrives after the write bound answered `503`. This supersedes the sentences of
+revisions 40, 56 and 63 that say a refused admin write leaves no record. Additive for consumers:
+a new `action` value whose fields `scim.refused` already has. Example
+`valid-audit-admin-admin-refused.json` (derived from the reference producer and its test, not
+captured from a live wire: [doc]).
+
+Revision 74 (2026-11-22): the `origin` of a `straza.revocation.user` event gains the value
+`admin-disable`, for the revocation a disable in Straza writes, the console's or the admin API's.
+A lock keeps `admin` or `external`. An admin enable lifts the revocations of the origins
+`admin-disable`, `scim` and `entra` and no lock, and sends the lift only when no revocation of
+the user survives. When one survives, the enable writes `user.lift.blocked` with `heldBy[]`, the
+record an identity manager's blocked enable already writes, here with the origin `admin`. The
+`user.killed` record of an admin disable keeps the origin `admin`. Additive for consumers: one new
+`origin` value on the revocation event and one more writer of an existing record (derived from
+the reference producer and its tests, not captured from a live wire: [doc]).
+
+Revision 73 (2026-11-22): `user.update` gains a writer with no actor, the command
+`strazad break-glass set-password`, which an operator runs on the server host when the break-glass
+admin needs a new password and nobody can sign in. Its record carries `changed[]` `password` and
+the `reason` `set on the server host with strazad break-glass set-password`. It carries no
+`actor`, `actorId` or `actorVia`, because the command authenticates nobody, and never the password
+or its hash. The command writes the record in the transaction that stores the hash, and a running
+strazad, or the next one that starts, puts it on the chain. Since this revision an enterprise
+first boot creates the break-glass admin with no password and writes none into the log. Additive
+for consumers: no new field and one new `reason` value. Example
+`valid-audit-admin-user-update-host.json` (derived from the reference producer and its test, not
+captured from a live wire: [doc]).
+
+Revision 72 (2026-11-21): the client push channel of section 5 gains a fourth subject class, the
+role broadcast `straza.push.roles`, for a change to what a role contains or reaches rather than to
+who holds it. The server that publishes such a change, for example an implication added to a role
+or removed from it, publishes it once, and every daemon answers it with a renewal of its session,
+which resolves its user's roles again. Before this revision such a change reached a holder's local
+decisions only at its next renewal, up to about 180 seconds later. The policy nudge is also
+published only after the server's role resolution answers the publish. On the stream
+`GET /v1/push` the broadcast arrives as the event `roles`, the event of revision 70, so a daemon of
+that revision needs no change and an older daemon ignores it. Additive for consumers: a new
+core-NATS subject outside the CloudEvents spine, with no schema change and no example, as for the
+other classes of section 5 (derived from the reference producer and its tests, not captured from a
+live wire: [doc]).
+
+Revision 71 (2026-11-21): a `login` failure with the `via` value `client-assertion` gains the
+`reason` value `user is disabled`. The built-in issuer emits it when the `client_id` names an AI
+agent that has a registered key and is disabled, and the record carries the agent's `user` and
+`userId`, whether or not the assertion verifies. Before this revision such a failure carried the
+reason `unknown or ineligible client` and named no user, so the record did not say which agent
+was refused or why. The honesty rule of revision 21 holds: the name comes from the stored user,
+never from the request. The token endpoint answers `invalid_client` as before, and its
+`error_description` says that the agent is disabled only when the assertion verifies against the
+registered key. Example `valid-audit-authn-login-nhi-disabled.json` (derived from the reference
+producer and its tests, not captured from a live wire: [doc]). Additive for consumers: a new value
+in an existing field.
+
+Revision 70 (2026-11-21): the client push channel of section 5 gains a third subject class, the
+role nudge `straza.push.roles.<userId>`. The server that grants a role to a user or takes one away
+publishes it once for each assignment it starts or ends, and a daemon answers it with a renewal of
+its session, which resolves the user's roles again. Before this revision a role change reached a
+session's local decisions only at its next renewal, up to about 180 seconds later. The subject is
+notify-only and never a revocation: a daemon MUST NOT drop session state on it. On the stream
+`GET /v1/push` it arrives as the event `roles`, and a daemon older than this revision ignores that
+event and keeps its renewal schedule. Additive for consumers: a new core-NATS subject outside the
+CloudEvents spine, with no schema change and no example, as for the other two classes of section 5
+(derived from the reference producer and its tests, not captured from a live wire: [doc]).
+
+Revision 69 (2026-11-17): two `straza.audit.admin` records that Straza writes from its read of
+Microsoft Entra ID gain optional fields. `user.create` with `origin: entra` carries `reason`,
+which says why Straza created the user: a member of a role's group in Entra for a person, and an
+agent identity in a role's group in Entra for an agent. Where another Straza user holds the
+agent's display name, the reason also says that the agent therefore carries the start of its
+Entra agent ID in its `username`. A `user.create` of another origin carries no `reason`.
+`entra.group.update` carries `name` and `description`, the display name and the description that
+Straza wrote to the group. Examples `valid-audit-admin-user-create-entra-agent.json` and
+`valid-audit-admin-entra-group-update.json` (derived from the reference producer and its tests,
+not captured from a live wire: [doc]). Additive for consumers: new optional fields on existing
+actions and no schema change. Consumers MUST NOT parse the text of `reason`.
+
+Revision 68 (2026-11-17): the records and events that revision 67 describes for a person also
+occur for an agent, for a deployment where Microsoft Entra ID owns agents (`identity.entra.read`
+lists `agentUsers` or `agentIdentities`). Straza then creates an agent from an agent identity or
+an agent user that is a member of a role's group in Entra, takes over an agent that carries the
+agent identity's id, and disables and enables the agent as Entra says. `user.create` with
+`origin: entra` may therefore name an agent. `user.update` from Entra names `username` or
+`display` in `changed[]` when the agent identity was renamed, `sponsor` when Entra lists another
+sponsor, `origin` when Entra takes an agent over, and `status` for a disable or an enable. The
+`reason` of a disable says whether the agent identity or its agent user caused it. `straza.audit.admin` gains two actions, both with no actor.
+`entra.sponsor.unresolved` is written once when an agent from Entra enters the state of having no
+single sponsor: Entra lists none, more than one, one that is no person, or a person Straza has no
+user for. It carries `user`, `username`, `entraAgentId`, `state` (`none`, `several`, `not-person`
+or `no-user`), `sponsors` (what Entra lists, each with `id` and `kind`, absent for `none`) and
+`reason`. `entra.sponsor.resolved` is written once when the agent leaves that state, with `user`,
+`username`, `entraAgentId` and `sponsor`, the sponsor's username. A pass that finds the state
+unchanged writes neither. Examples `valid-audit-admin-entra-sponsor-unresolved.json` and
+`valid-audit-admin-entra-sponsor-resolved.json` (derived from the reference producer and its
+tests, not captured from a live wire: [doc]). Additive for consumers: two new actions on an
+existing subject and no schema change. Consumers MUST tolerate unknown actions on
+`straza.audit.admin` and unknown values of `state`.
+
+Revision 67 (2026-11-17): the value `entra` appears as an `origin` on the records and events of a
+person, for a deployment where Microsoft Entra ID owns people (`identity.entra.read` lists
+`people`). Straza then creates a person from the members of a role's group in Entra and disables
+and enables the person as Entra says, and none of these records names an actor. `user.create`
+carries `origin: entra` for a person Straza created from Entra. `user.update` gains two optional
+fields, `origin` and `reason`, which a record written from Entra carries: its `changed[]` names
+`status` for a disable or an enable, `username`, `display` or `email` for a name that changed in
+Entra, and `origin`, alone or with `external_id`, when Entra takes over a person who was in Straza
+before. The `reason` says which: the account is disabled, deleted or enabled in Entra, changed in
+Entra, or was matched by its Entra object id or by its sign-in name. Two more such records name
+`username` and `sponsor`. When another Entra account gets the sign-in name of a disabled person
+that Entra owns, that person's `username` gains the ending ` (left)`. When a person's `username`
+changes, each agent the person sponsors gets one `user.update` with `changed[]` `sponsor`,
+because an agent names its sponsor by sign-in name. A sign-in at an Entra tenant
+that finds an active account by the token's `sub` while the token carries an `oid` rewrites the
+account's external id to the `oid` and writes one `user.update` with `changed[]` `external_id`, a
+`reason` and no actor and no `origin`, so `external_id` no longer occurs only on SCIM writes.
+`user.killed`, `user.reactivated` and `user.lift.blocked` on `straza.audit.identity`, and
+`straza.revocation.user` and `straza.revocation.lift`, carry `origin: entra` for a disable or an
+enable that Entra caused. An enable from Entra lifts the revocations of the origins `entra` and
+`scim`, because an identity manager can no longer lift a deactivation of a person Entra owns. A
+revocation of the origin `admin` or `external` still holds and writes `user.lift.blocked`. The
+`straza.identity.created` and `straza.identity.updated` events of these writes carry
+`origin: entra`. Examples `valid-audit-admin-user-create-entra.json`,
+`valid-audit-admin-user-update-entra.json`, `valid-audit-identity-entra.json` and
+`valid-revocation-user-entra.json` (derived from the reference producer and its tests, not
+captured from a live wire: [doc]). Additive for consumers: a new value in existing fields and two
+optional fields on an existing action, with no new event type, action or schema change. Consumers
+MUST tolerate unknown `origin` values on every record and event this paragraph names. Earlier
+revisions listed `scim|admin|external` for the revocation events with no such rule, so a consumer
+that checks that list rejects the new value until it is updated.
+
+Revision 66 (2026-11-17): the `origin` of the `straza.audit.admin` actions `roles.assign` and
+`roles.unassign` gains the value `entra`, for an assignment that Straza wrote from the members of
+the role's security group in Microsoft Entra ID. A holder may have one assignment of this origin
+beside one of the origin `scim` or `admin` for the same role, so a consumer may see a `roles.assign`
+for a user who already holds the role, and a `roles.unassign` after which the user still holds it.
+A record whose assignment Straza started or ended on reading the group names no actor, because
+Microsoft Graph does not say who changed the group, and that name is in Entra's own audit log.
+The subject also gains nine actions for the role groups themselves. `entra.group.create`,
+`entra.group.update`, `entra.group.delete` and `entra.group.missing` say that Straza created a
+role's group, wrote its name or description back, deleted it with its role, or found it deleted in
+Entra (`role`, `roleId`, `group` the group's object id, and `reason` on `missing`; `delete` names
+no `role`, because the role is gone). `entra.read.stale` and `entra.read.recovered` are written once
+when the read of Entra starts to fail and once when it succeeds again, never once for each pass
+(`reason` on `stale`). `entra.pass.held` says that a pass would have ended a large share of a
+role's holders and waits for an admin (`role`, `roleId`, `group`, `removals`, `holders`, `reason`).
+These seven name no actor. `entra.pass.released` and `entra.group.recreate` are an admin's acts and
+name the admin (`role`, `roleId`, `group`, and `ended`, the number of assignments that ended, on
+`recreate`). The `straza.identity.updated` event of an assignment of this origin carries
+`origin: entra`. Examples `valid-audit-admin-roles-unassign-entra.json` and
+`valid-audit-admin-entra-pass-held.json` (derived from the reference producer and its tests, not
+captured from a live wire: [doc]). Additive for consumers: a new value in an existing field and
+new actions on an existing subject, with no new event type or schema change. Consumers MUST tolerate unknown `origin`
+values on these two actions, as on `user.create` since revision 40.
 
 Revision 65 (2026-11-11): a `straza.audit.tool` record keeps the input of every tool. Revision 64
 gave `arguments` to the record of an `other` tool alone. The record of a classified local tool now
@@ -1369,7 +1567,8 @@ is no longer denied": an origin-selective SCIM lift that leaves a
 surviving lock emits NO lift event (enforcement is unchanged on every pod;
 replayed history converges). `straza.audit.identity` actions gain
 `user.lift.blocked` (an IdM reactivation attempted while a Straza lock
-survives; carries `heldBy[]` origins) and `user.killed`/`user.reactivated`
+survives, or since revision 74 an admin enable that a lock survives;
+carries `heldBy[]` origins) and `user.killed`/`user.reactivated`
 gain `origin`. Envelope unchanged; additive. Examples updated +
 `valid-audit-identity-lift-blocked.json`.
 
@@ -1482,22 +1681,22 @@ at most 256 KiB of JSON, as revisions 53 and 58 say.
 |---|---|---|
 | `straza.audit.tool` | a local-tool decision (hook PDP or `/v1/decide`) | `session,user,harness,event,tool,command,effect,ruleId,setName,reason,snapshot` (rev 20: `setName` = the deciding PolicySet, empty when no rule matched; absent on pre-rev-20 records); adds `toolName` (mcp.call upstream tool; rev 50: the harness's own name of an `other` tool), `paths[]` (file/url targets), `workspace` when the event carries them; adds `agentType,agentId` (rev 13) when the harness attributed the call to a delegate, so a deny inside a subagent is then distinguishable from the main agent's; rev 64: the record of an `other` tool adds `arguments` (the event's `args` as JSON text, cut at 8 KiB) with `argumentsTruncated,argumentsHash` when cut, and the record of a classified local tool adds `nativeTool`, the harness's own name of the tool; rev 65: the record of a classified local tool and of an `mcp.call` to a server the harness runs itself add `arguments` the same way, kept as sent; rev 59: a straza client's record adds `commandTruncated,commandHash` and `pathsTruncated,pathsHash` when it cut `command` or `paths` at 64 KiB, and `event: audit.dropped` is the client's loss record, with `session,user,event,reason,droppedRecords,oversizeRecords,evictedFiles,evictedRecords,refusedCalls,dropEvents` and `firstDrop,lastDrop` when known, and none of the other minimum fields |
 | `straza.audit.mcp` | a gateway `tools/call` decision or refusal, or a served `tools/list` (rev 24), or a view list or read on a server's endpoint (rev 42), or a git grant issued or refused on `POST /v1/grants` (rev 48) | `session,user,harness,event,tool,app,toolName,effect,ruleId,setName,reason,snapshot` (rev 20: `setName` as on `straza.audit.tool`); adds `arguments` (verbatim `tools/call` arguments as JSON text, producer-capped; reference producer 8 KiB) + `argumentsTruncated: true` when cut; rev 23: `granted` and `default` (booleans, always present), `bindingId` + `role` (the access row that admitted the call, absent on the built-in `straza` app) and `credentialId` (the credential row the upstream call used, absent when none); rev 24: a refused call (unbound name, hidden tool, throttle) is `effect: deny` with the refusal as `reason` and no rule, a served `tools/list` is `event: tools.list` with `effect: allow`, `reason: catalog served` and `count` (the tools in that response), and `obligations[]` lists the firing rule's obligations (absent when none; never written since rev 28, policyset revision 18 having retired the list); rev 31: a call a rule allowed and a later gate refused (a denied, expired or pending hold, or no credential resolvable for the caller) is `effect: deny` with the allowing `ruleId` and `setName` and the refusal sentence as `reason`, and a credential refusal carries no credential fields; rev 35: `credentialSource` gains `client_credentials` (a token of the agent's own client at the server's provider), with `credentialId` of the form `client_credentials:<server id>:<user id>` and no `credentialOwner`; rev 37: `argumentsDigest` and `argumentsSize` in place of `arguments` on `straza__draft_submit`; rev 42: a served view list on a server's endpoint `/mcp/{server}` is `event: resources.list` with `effect: allow`, `reason: views served`, `app` the server and `count` (the views in that response), a view read is `event: resources.read` with `app` and `uri` (the address asked for, producer-capped like `arguments`, with `uriTruncated: true` when cut), `effect: allow` with `reason: view served` or `effect: deny` with the refusal sentence, and a `tools/list` on a server's endpoint names the server in `app`; rev 44: every call the object check decides adds `object` (`type`, `reach`, and `value`, `id`, `valueTruncated` and `valueSha256` when they apply) when the tool's reach is `argument` or `credential` and on every refusal of that check, and a call refused before it carries none, and that refusal is `effect: deny` with no rule, `granted: false`, no `role` or `bindingId`, and `rolesChecked[]`, the held roles that bind the tool; rev 48: a git grant is `event: grant` with the fields of a `tools/call` record of the tool `straza.git.ops` maps its op to, `arguments` holding the repo under the pinned argument plus `refs[]` and `branch` on a push with refs, one record per issued grant and per refusal of the decision, an open ticket included, and none for the 202 of an open hold, and an issued grant adds `grant` (`jti`, `op` ∈ `fetch\|push`, `aud`, `exp` as an RFC 3339 time, and `approval` when an approval ran), whose CloudEvents `id` is the grant's `dec` claim; rev 52: a server or tool name the caller's catalog did not resolve is cut at 256 bytes on a character boundary and followed by `... (<n> bytes)`, the length as sent, in `app`, `toolName` and `reason` alike, and so is each name an `approval_request` describes where Straza's own refusal `reason` quotes it, while a resolved name stays whole and a Rego deny message stays as written; the schema check's detail in the refusal of a gated call is cut at 512 bytes; rev 58: a call whose reply the gateway withheld for holding the injected credential adds a second record under its own `id`, `event: tool.post` and `effect: deny` with the allowing `ruleId` and `setName` and the call's other fields, the event `request` is one deny per gateway request refused after its token verified, `ruleId` `revoked` or `attestation`, with empty `tool`, `toolName` and `setName` and `app` the server of a `/mcp/{server}` request, and on `/mcp` an unknown tool whose name holds `__` names the part before it in `app` and the part after it in `toolName` |
-| `straza.audit.admin` | a mutation of an admin object, over the admin API or over SCIM, or from the gateway's drafting tools, or from strazad's own background work, which names no actor, or (rev 40) an approver device enrolled with a person's enroll token (rev 25: `actorVia` names the credential, `action` names the object) | `actor,action,target`; rev 18: `actor` (username or admin-API-token name) + `actorId` (user/token id) + `actorVia` ∈ `login\|session\|api-token\|enroll-token` (rev 40: `enroll-token` on `approver.enroll`, whose actor is the person whose one-time enroll token was consumed, and consumers MUST tolerate unknown `actorVia` values; rev 26: `scim-token` retired with the SCIM token kind; a SCIM-plane record carries `api-token` with the admin API token's name as `actor` and its id as `actorId`); all three OMITTED when no authenticated principal produced the event (never fabricated); rev 23 actions: `apps.install` (`app,runtime`; rev 30 adds `update` on every record and `changed[]`, field paths and never values, when `update` is true; rev 32 adds `adminRole`, the name of the role that administers the server), `apps.remove` (`app,roles[]`; rev 32 adds `adminRole`, the minted role that went with the server, its memberships each chaining a `roles.unassign` with reason `server removed`), rev 32 actions `apps.disable` and `apps.enable` (`app,status,adminRole`; recorded by the reference producer before rev 32 and listed from it), `apps.binding.delete` (`app,role,tools[],bindingId`, rev 44: `covers` when the binding has a covers line), `apps.secret.remove` (`app,role`); rev 24 action: `apps.grant.remove` (`app,user,credentialId,reason`, one per per-user grant a SCIM deactivation removes); rev 25 actions: `api-token.create` (`name,id,scope`), `api-token.revoke` (`id`), and listing leaves no record (rev 26 retired `scim-token.create` and `scim-token.revoke` with the kind); rev 27 actions: `roles.assign` and `roles.unassign` (`target` the assignment id, `user`, `role`, `roleId`, `origin` ∈ `scim\|admin`, `reason` when the caller has one; one record per membership that starts or ends, over the admin API or over SCIM); rev 33 actions: `roles.create` and `roles.delete` (`target` the role id, `role` its name, `server` the owning server's name when the role is server-owned; one record per role that is born or that goes, the server removal cascade included); listed from rev 33 and recorded by the reference producer before it: `roles.update` (`target` the role id, `role`), `apps.binding.create` (`app,role,tools[]`, rev 44: `covers` when the binding has a covers line), `policy.create` and `policy.update` (`name,id,priority`), `policy.delete` (`name,id`), `policy.activate` and `policy.deactivate` (`name,id,snapshot`, the snapshot that resulted); rev 34: the field `purpose` and the signing key actions `signing-keys.create`, `signing-keys.rotate`, `signing-keys.promote` and `signing-keys.retire` (`purpose,kid`, plus `was` on a retirement by hand; one record per change for the whole deployment, the janitor's retire without the actor fields, and promote without them before rev 60 and with the promoting administrator's from rev 60), and `signing-keys.rotate` (`kid`, no `purpose`) for the session key, recorded by the reference producer before rev 34 and listed from it; rev 37 actions: `draft.create`, `draft.update`, `draft.check`, `draft.contact`, `draft.publish`, `draft.discard`, `draft.expire`, `roles.implication.create` and `roles.implication.delete`, and `draft` on every record a publish writes; rev 40 actions, one record per identity setup write that succeeds and none for a refused one, each with `user` the user's id and all but `nhi-key.removed` with `username`: `user.create` (`target` and `user` the new user's id, `username`, `kind` ∈ `human\|nhi`, `userType` when set, `origin` ∈ `admin\|scim`, rev 41: `scim` on a create or a revive over SCIM, and the revive's `user.create` follows its `user.reactivated` or `user.lift.blocked` record), `user.update` (`target`, `user`, `username`, `changed[]`, the field names a write changed and never values, rev 41: also a SCIM PUT, PATCH or DELETE, whose `changed[]` can carry `username` and `external_id`, and whose record of a status change follows the `user.killed`, `user.reactivated` or `user.lift.blocked` record of that change where the admin API's precedes it, so a consumer pairs them by `user`; a write that changes nothing writes no record), `enroll-token.create` (`target` and `user` the id of the user the token is for, `username`, plus `channel` and `self: true` on the self route; never the token), `approver.enroll` (`target` and `device` the device id, `user` the user id, `username`, `platform`, `name`; actor the person, `actorVia` `enroll-token`), `nhi-key.set` (`target` and `user` the agent's id, `username`, `fingerprint` `sha256:<hex>` of the public key; never the key), and `nhi-key.removed` (`target` and `user` the agent's id, `reason` on a user delete), recorded by the reference producer on a user delete before rev 40 and listed from it; rev 41 action: `approver.revoke` (`target` and `device` the device id, `user` the user id, `username`, `reason` `user deleted by admin`; one record per approver device a user delete removes); rev 43 action: `apps.objects.list` (`target` the server's id, `app`, `tool`, `type`, `outcome` ∈ `ok\|failed`, `count`, `version`, plus `joined` and `left` on `ok` and `reason` on `failed`; no actor fields, written by strazad's background listing on a server's first listing, on every change of its object list version and on every flip of the outcome; never an object's value, title or attributes), and rev 43 lists `apps.secret.set` (`app,role,scope` ∈ `app\|role\|listing`, recorded by the reference producer before rev 43 with `app` and `role`) and adds `scope` `listing` to `apps.secret.remove` when it removes the listing credential, `role` empty on both; rev 56 action: `enroll-token.refused` (`reason`, plus `target` and `user` the user's id and `username` when the body names a user that exists; one record per request that reaches the admin enroll-token route, which mints nothing, so it is the one refused identity setup write that has a record, and none for a request the admin plane refuses first); rev 57 action: `device.revoke` (`target` and `device` the device id, `user` the user id, `reason` `device revoked by admin`; one record per admin device revoke that deletes the device, none for a 404 or a refused write, and none for the revoke of a reused key, which keeps its `device.key.reused` on `straza.audit.identity`); rev 58 action: `user.delete` (`target` and `user` the user id, `username`, `reason` `user deleted by admin`; one record per admin delete that removes a user, before the records of what ends with the user, and none for a 404 or a refused write); rev 63 action: `scim.refused` (`route`, `httpStatus`, `reason`, `scimType` when the error has one, `target` the id the route names, `user` and `username` for a user Straza holds, `role` for a role, `username` alone on a refused create; one record per SCIM write refused with a 4xx or a 501 after its token was accepted, none for a refused read or a 5xx failure) |
-| `straza.audit.authn` | login and session-end outcomes (rev 21, 22, 28, 39, 41), and a key-bound session token without a valid proof (rev 45) | `action,outcome` with `action` ∈ `login\|session.end\|proof`; `login` adds `via` ∈ `id-token\|session-token\|device-token\|password\|client-assertion\|slack\|approver-token\|device-key` and `outcome` ∈ `success\|failure`; `session.end` has `outcome` ∈ `revoked-self\|revoked-admin\|idle-closed\|lifetime-closed\|revoked-key-reuse` (rev 28: the janitor's absolute-lifetime close; rev 58: `revoked-key-reuse`, a session that the revoke of a reused device key ended); `user`/`userId`/`session`/`harness` when known (never fabricated); `reason` on failures and ends; `sourceIp` (transport peer, never XFF) + `userAgent` (capped 256 B) ONLY when a client connection produced the event (janitor events and a `slack` login failure carry neither: from rev 39 their absence means that no connection from the person's own client produced the event); rev 39: a `slack` login failure adds `approvalId`, the request the refused tap tried to decide, and carries no `session`, `harness`, `sourceIp` or `userAgent`; rev 41: an `approver-token` login failure carries `sourceIp`, `userAgent` when sent, and no `session` or `harness`, and on a decide refusal `approvalId`; rev 45: `device-key` names the key lanes, a key-lane check-in, whose nonce challenge writes no record and whose replayed proof has the reason `the DPoP proof was replayed`, and a key enrollment refused because its user is not a person, and `proof` has `outcome` `failure` only, with `userId`, `session` and `harness` from the token, `reason`, `sourceIp`, `userAgent` when sent, and no `via` or `user`; rev 46: a `login` failure with the `reason` `the client's bearer device credential is retired` is a straza client older than the key lane on the `id-token`, `device-token` or `session-token` lane, and one with `key custody is below governance.minCustody` is a person's key enrollment, a key check-in or a refresh whose reported key custody ranks below the server's minimum, and an `id-token` login failure of an AI agent may carry `the DPoP proof did not verify` or `the DPoP proof was replayed` when its check-in carried a proof; rev 47: a `device-key` login failure of a person's key enrollment may carry `the sign-in was made for another key`, `the sign-in carries no auth_time`, `the sign-in is older than 10 minutes`, `the sign-in time is ahead of the server clock`, `the sign-in lane is below governance.minSignIn`, `the sign-in was made for another Straza program` or `the last sign-in on this machine is older than governance.signInMaxAge`, and `the sign-in lane is below governance.minSignIn` and `the last sign-in on this machine is older than governance.signInMaxAge` also on a key check-in and, with `session-token`, on the refresh of a keyed device's session, and on the enterprise profile an `id-token` login failure may carry `a person's ID token alone does not start a session on enterprise` or `an agent check-in without a key proof is refused on enterprise`; rev 49: an `id-token` login failure of an AI agent may carry `the ID token was issued for a key that is no longer registered` or `the DPoP proof key is not the key the ID token was issued for`, and a `revoked-admin` `session.end` may carry `the agent's key was replaced` or `the agent's key was removed`; rev 55: a `login` failure with the `reason` `strazactl no longer signs in` is a refused strazactl enrollment, check-in, device credential or session on the `id-token`, `device-token`, `session-token` or `device-key` lane; rev 58: the revoke of a reused key writes one `revoked-key-reuse` `session.end` per session it ends, with the reason `device key reused`, and an admin device revoke writes one `revoked-admin` record per session it ends with the reason `device revoked by admin`, a `password` login failure may carry `an AI agent or a service account cannot sign in with a password`, and a `session-token` login failure with `session is no longer active` or `device or user revoked` is also written for a `/v1/audit/batch` upload refused for that revocation; rev 62: an `id-token` login failure with the `reason` `the account is linked to another identity at the identity provider` carries the account's `user` and `userId` and is written by the session exchange, which adds `harness`, by enroll and by an ID token on the admin API or the approvals routes |
-| `straza.audit.identity` | the identity kill switch fires, is lifted, or an IdM lift is blocked by a surviving lock (SCIM `active:false`/DELETE, admin disable/lock, reactivation/unlock), or (rev 45) a device key is used from a copy, or (rev 47) a person enrolls a machine key | `user,action,origin`: `action` ∈ `user.killed\|user.reactivated\|user.lift.blocked\|device.key.reused\|device.enrolled` (rev 15, rev 45, rev 47); `user.killed` adds `reason,sessionsRevoked`; `user.lift.blocked` adds `heldBy[]` (the surviving lock origins); rev 45: `device.key.reused` carries `user,device,counter,storedCounter,reason` and no `origin`, `counter` and `storedCounter` integers, one record per device a key-lane check-in revokes for a counter at or below the last one accepted; rev 47: `device.enrolled` carries `user,device,signIn,custody` and `authTime` when the ID token carried `auth_time`, and no `origin`, `signIn` ∈ `browser\|code` and `custody` ∈ `account\|user`, one record per person's key enrollment that succeeds |
+| `straza.audit.admin` | a mutation of an admin object, over the admin API or over SCIM, or from the gateway's drafting tools, or from strazad's own background work, which names no actor, or (rev 73) from a command run on the server host, which names none either, or (rev 75) a change the admin plane refused with `403`, `admin.refused`, or (rev 40) an approver device enrolled with a person's enroll token (rev 25: `actorVia` names the credential, `action` names the object) | `actor,action,target`; rev 18: `actor` (username or admin-API-token name) + `actorId` (user/token id) + `actorVia` ∈ `login\|session\|api-token\|enroll-token` (rev 40: `enroll-token` on `approver.enroll`, whose actor is the person whose one-time enroll token was consumed, and consumers MUST tolerate unknown `actorVia` values; rev 26: `scim-token` retired with the SCIM token kind; a SCIM-plane record carries `api-token` with the admin API token's name as `actor` and its id as `actorId`); all three OMITTED when no authenticated principal produced the event (never fabricated); rev 23 actions: `apps.install` (`app,runtime`; rev 30 adds `update` on every record and `changed[]`, field paths and never values, when `update` is true; rev 32 adds `adminRole`, the name of the role that administers the server), `apps.remove` (`app,roles[]`; rev 32 adds `adminRole`, the minted role that went with the server, its memberships each chaining a `roles.unassign` with reason `server removed`), rev 32 actions `apps.disable` and `apps.enable` (`app,status,adminRole`; recorded by the reference producer before rev 32 and listed from it), `apps.binding.delete` (`app,role,tools[],bindingId`, rev 44: `covers` when the binding has a covers line), `apps.secret.remove` (`app,role`); rev 24 action: `apps.grant.remove` (`app,user,credentialId,reason`, one per per-user grant a SCIM deactivation removes); rev 25 actions: `api-token.create` (`name,id,scope`), `api-token.revoke` (`id`), and listing leaves no record (rev 26 retired `scim-token.create` and `scim-token.revoke` with the kind); rev 27 actions: `roles.assign` and `roles.unassign` (`target` the assignment id, `user`, `role`, `roleId`, `origin` ∈ `scim\|admin`, `reason` when the caller has one; one record per membership that starts or ends, over the admin API or over SCIM); rev 33 actions: `roles.create` and `roles.delete` (`target` the role id, `role` its name, `server` the owning server's name when the role is server-owned; one record per role that is born or that goes, the server removal cascade included); listed from rev 33 and recorded by the reference producer before it: `roles.update` (`target` the role id, `role`), `apps.binding.create` (`app,role,tools[]`, rev 44: `covers` when the binding has a covers line), `policy.create` and `policy.update` (`name,id,priority`), `policy.delete` (`name,id`), `policy.activate` and `policy.deactivate` (`name,id,snapshot`, the snapshot that resulted); rev 34: the field `purpose` and the signing key actions `signing-keys.create`, `signing-keys.rotate`, `signing-keys.promote` and `signing-keys.retire` (`purpose,kid`, plus `was` on a retirement by hand; one record per change for the whole deployment, the janitor's retire without the actor fields, and promote without them before rev 60 and with the promoting administrator's from rev 60), and `signing-keys.rotate` (`kid`, no `purpose`) for the session key, recorded by the reference producer before rev 34 and listed from it, rev 77: the session key's `signing-keys.rotate` carries `purpose` too, and the janitor records its `signing-keys.promote` (`purpose,kid`, and `previous_kid`, the key that signed until then) and its `signing-keys.retire` (`purpose,kid`), both without the actor fields; rev 37 actions: `draft.create`, `draft.update`, `draft.check`, `draft.contact`, `draft.publish`, `draft.discard`, `draft.expire`, `roles.implication.create` and `roles.implication.delete`, and `draft` on every record a publish writes; rev 40 actions, one record per identity setup write that succeeds and none for a refused one, each with `user` the user's id and all but `nhi-key.removed` with `username`: `user.create` (`target` and `user` the new user's id, `username`, `kind` ∈ `human\|nhi`, `userType` when set, `origin` ∈ `admin\|scim`, rev 67: also `entra` for a person Straza created from Microsoft Entra ID, with no actor, rev 41: `scim` on a create or a revive over SCIM, and the revive's `user.create` follows its `user.reactivated` or `user.lift.blocked` record), `user.update` (`target`, `user`, `username`, `changed[]`, the field names a write changed and never values, rev 41: also a SCIM PUT, PATCH or DELETE, whose `changed[]` can carry `username` and `external_id`, rev 67: also a write from Microsoft Entra ID, with `origin: entra`, a `reason` and no actor, and a sign-in's rewrite of the external id, with a `reason` and no actor, and whose record of a status change follows the `user.killed`, `user.reactivated` or `user.lift.blocked` record of that change where the admin API's precedes it, so a consumer pairs them by `user`; a write that changes nothing writes no record), `enroll-token.create` (`target` and `user` the id of the user the token is for, `username`, plus `channel` and `self: true` on the self route; never the token), `approver.enroll` (`target` and `device` the device id, `user` the user id, `username`, `platform`, `name`; actor the person, `actorVia` `enroll-token`), `nhi-key.set` (`target` and `user` the agent's id, `username`, `fingerprint` `sha256:<hex>` of the public key; never the key), and `nhi-key.removed` (`target` and `user` the agent's id, `reason` on a user delete), recorded by the reference producer on a user delete before rev 40 and listed from it; rev 41 action: `approver.revoke` (`target` and `device` the device id, `user` the user id, `username`, `reason` `user deleted by admin`; one record per approver device a user delete removes); rev 43 action: `apps.objects.list` (`target` the server's id, `app`, `tool`, `type`, `outcome` ∈ `ok\|failed`, `count`, `version`, plus `joined` and `left` on `ok` and `reason` on `failed`; no actor fields, written by strazad's background listing on a server's first listing, on every change of its object list version and on every flip of the outcome; never an object's value, title or attributes), and rev 43 lists `apps.secret.set` (`app,role,scope` ∈ `app\|role\|listing`, recorded by the reference producer before rev 43 with `app` and `role`) and adds `scope` `listing` to `apps.secret.remove` when it removes the listing credential, `role` empty on both; rev 56 action: `enroll-token.refused` (`reason`, plus `target` and `user` the user's id and `username` when the body names a user that exists; one record per request that reaches the admin enroll-token route, which mints nothing, so it is the one refused identity setup write that has a record, and none for a request the admin plane refuses first); rev 57 action: `device.revoke` (`target` and `device` the device id, `user` the user id, `reason` `device revoked by admin`; one record per admin device revoke that deletes the device, none for a 404 or a refused write, and none for the revoke of a reused key, which keeps its `device.key.reused` on `straza.audit.identity`); rev 58 action: `user.delete` (`target` and `user` the user id, `username`, `reason` `user deleted by admin`; one record per admin delete that removes a user, before the records of what ends with the user, and none for a 404 or a refused write); rev 63 action: `scim.refused` (`route`, `httpStatus`, `reason`, `scimType` when the error has one, `target` the id the route names, `user` and `username` for a user Straza holds, `role` for a role, `username` alone on a refused create; one record per SCIM write refused with a 4xx or a 501 after its token was accepted, none for a refused read or a 5xx failure) |
+| `straza.audit.authn` | login and session-end outcomes (rev 21, 22, 28, 39, 41), and a key-bound session token without a valid proof (rev 45) | `action,outcome` with `action` ∈ `login\|session.end\|proof`; `login` adds `via` ∈ `id-token\|session-token\|device-token\|password\|client-assertion\|slack\|approver-token\|device-key` and `outcome` ∈ `success\|failure`; `session.end` has `outcome` ∈ `revoked-self\|revoked-admin\|idle-closed\|lifetime-closed\|revoked-key-reuse` (rev 28: the janitor's absolute-lifetime close; rev 58: `revoked-key-reuse`, a session that the revoke of a reused device key ended); `user`/`userId`/`session`/`harness` when known (never fabricated); `reason` on failures and ends (rev 71: `user is disabled` on a `client-assertion` failure, which names the disabled AI agent); `sourceIp` (transport peer, never XFF) + `userAgent` (capped 256 B) ONLY when a client connection produced the event (janitor events and a `slack` login failure carry neither: from rev 39 their absence means that no connection from the person's own client produced the event); rev 39: a `slack` login failure adds `approvalId`, the request the refused tap tried to decide, and carries no `session`, `harness`, `sourceIp` or `userAgent`; rev 41: an `approver-token` login failure carries `sourceIp`, `userAgent` when sent, and no `session` or `harness`, and on a decide refusal `approvalId`; rev 45: `device-key` names the key lanes, a key-lane check-in, whose nonce challenge writes no record and whose replayed proof has the reason `the DPoP proof was replayed`, and a key enrollment refused because its user is not a person, and `proof` has `outcome` `failure` only, with `userId`, `session` and `harness` from the token, `reason`, `sourceIp`, `userAgent` when sent, and no `via` or `user`; rev 46: a `login` failure with the `reason` `the client's bearer device credential is retired` is a straza client older than the key lane on the `id-token`, `device-token` or `session-token` lane, and one with `key custody is below governance.minCustody` is a person's key enrollment, a key check-in or a refresh whose reported key custody ranks below the server's minimum, and an `id-token` login failure of an AI agent may carry `the DPoP proof did not verify` or `the DPoP proof was replayed` when its check-in carried a proof; rev 47: a `device-key` login failure of a person's key enrollment may carry `the sign-in was made for another key`, `the sign-in carries no auth_time`, `the sign-in is older than 10 minutes`, `the sign-in time is ahead of the server clock`, `the sign-in lane is below governance.minSignIn`, `the sign-in was made for another Straza program` or `the last sign-in on this machine is older than governance.signInMaxAge`, and `the sign-in lane is below governance.minSignIn` and `the last sign-in on this machine is older than governance.signInMaxAge` also on a key check-in and, with `session-token`, on the refresh of a keyed device's session, and on the enterprise profile an `id-token` login failure may carry `a person's ID token alone does not start a session on enterprise` or `an agent check-in without a key proof is refused on enterprise`; rev 49: an `id-token` login failure of an AI agent may carry `the ID token was issued for a key that is no longer registered` or `the DPoP proof key is not the key the ID token was issued for`, and a `revoked-admin` `session.end` may carry `the agent's key was replaced` or `the agent's key was removed`; rev 55: a `login` failure with the `reason` `strazactl no longer signs in` is a refused strazactl enrollment, check-in, device credential or session on the `id-token`, `device-token`, `session-token` or `device-key` lane; rev 58: the revoke of a reused key writes one `revoked-key-reuse` `session.end` per session it ends, with the reason `device key reused`, and an admin device revoke writes one `revoked-admin` record per session it ends with the reason `device revoked by admin`, a `password` login failure may carry `an AI agent or a service account cannot sign in with a password`, and a `session-token` login failure with `session is no longer active` or `device or user revoked` is also written for a `/v1/audit/batch` upload refused for that revocation; rev 62: an `id-token` login failure with the `reason` `the account is linked to another identity at the identity provider` carries the account's `user` and `userId` and is written by the session exchange, which adds `harness`, by enroll and by an ID token on the admin API or the approvals routes |
+| `straza.audit.identity` | the identity kill switch fires, is lifted, or an IdM lift is blocked by a surviving lock (SCIM `active:false`/DELETE, admin disable/lock, reactivation/unlock), or (rev 45) a device key is used from a copy, or (rev 47) a person enrolls a machine key | `user,action,origin`: `action` ∈ `user.killed\|user.reactivated\|user.lift.blocked\|device.key.reused\|device.enrolled` (rev 15, rev 45, rev 47); rev 67: `origin` gains `entra` on the three `user.` actions; `user.killed` adds `reason,sessionsRevoked`; `user.lift.blocked` adds `heldBy[]` (the surviving lock origins); rev 45: `device.key.reused` carries `user,device,counter,storedCounter,reason` and no `origin`, `counter` and `storedCounter` integers, one record per device a key-lane check-in revokes for a counter at or below the last one accepted; rev 47: `device.enrolled` carries `user,device,signIn,custody` and `authTime` when the ID token carried `auth_time`, and no `origin`, `signIn` ∈ `browser\|code` and `custody` ∈ `account\|user`, one record per person's key enrollment that succeeds |
 | `straza.audit.prompt` | capture-enabled session: the user submitted a prompt | `session,user,harness,content,mode,truncated,contentHash`: `mode` ∈ `verbatim\|redact`; `contentHash` = SHA-256 of the FULL original content; `content` capped (client knob, default 64 KiB); adds `agentType,agentId` (rev 13) when a delegate produced it |
 | `straza.audit.reply` | capture-enabled session: the model (or, rev 13, one of its delegates at `subagent.stop`) finished a response | same shape as `straza.audit.prompt`, and a delegate's reply carries `agentType` (+`agentId`) and rides the PARENT session id |
 | `straza.audit.sentinel` | the in-process audit sentinel emits a verdict about a session (§2.1), or (rev 58) the gateway withholds a reply that held the credential it injected | `session,detector,severity,reason,evidence[]`: `detector` ∈ `denyBurst\|denyThenVariant\|writeThenExecute\|captureContent\|toolMixAnomaly\|credentialEcho` (rev 58: `credentialEcho`, raised by the gateway with `source` `strazad`); `severity` ∈ `info\|warn\|critical`; `reason` = one human-readable sentence naming the evidence; `evidence[]` = CE `id`s of the triggering audit events; adds `user` when known and `window` (e.g. `"60s"`) when the detector is windowed |
 | `straza.audit.approval` | a `mode: approve` gate is requested, when it resolves, and when its approval is used, a ticket's grant or, since revision 38, a hold's approval (§2.2) | `phase,approvalId,session,user,rule,set,lane,summary,state`: `phase` ∈ `request\|resolution\|consumed`; `lane` ∈ `hook\|gateway`; `state` ∈ `pending\|approved\|denied\|expired`; adds `justification` (gateway lane, `phase=request` only), `decidedBy,channel` plus the optional `decidedReason,decidedDeviceId` (revision 19) on `phase=resolution`, and `consumedBy,consumedAt` on `phase=consumed` (both classes since revision 38); rev 52: `summary` and `justification` hold at most 4 KiB each |
 | `straza.policy.updated` | a snapshot activates | `snapshot,sets` |
-| `straza.revocation.user` | user disabled/deactivated/locked | `user,reason,origin`: `origin` ∈ `scim\|admin\|external` (rev 15: which authority created the row; the SCIM lift removes scim-origin rows only) |
+| `straza.revocation.user` | user disabled/deactivated/locked | `user,reason,origin`: `origin` ∈ `scim\|admin\|external` (rev 15: which authority created the row; the SCIM lift removes scim-origin rows only), rev 67: also `entra`, which an enable from Microsoft Entra ID lifts, rev 74: also `admin-disable`, a disable in Straza, which an admin enable lifts |
 | `straza.revocation.session` | session revoked | `session` |
 | `straza.revocation.sessions` | bulk session stand-down: ONE control event carries the whole set (rev 17) | `sessions[],reason?`, producer-capped (reference producer: 1000 ids/event, larger sets chunk); consumers apply each id as a `straza.revocation.session` |
 | `straza.revocation.device` | device disabled | `device` |
 | `straza.revocation.lift` | user fully reactivated: NO revocation lane remains (rev 15: a scim-selective lift that leaves a lock emits no lift) | `user,origin` |
 | `straza.apps.deployed` | app installed/updated & serving | `app,name,version,runtime,source` |
 | `straza.apps.removed` | app removed/stopped | `app,name` |
-| `straza.apps.drift` | upstream tool inventory changed vs. cache | `app,name,added[],removed[]` |
+| `straza.apps.drift` | upstream tool inventory changed vs. cache | `app,name,added[],removed[]`, rev 76: `changed[]`, the tools both lists hold that differ |
 | `straza.apps.updated` | a catalog/credential-affecting change that is not a deploy/remove: tool-binding CRUD, app secret set, per-user grant connect/disconnect, and (rev 37) every publish of a draft | `change` ∈ `binding\|secret\|grant\|publish` (+ `app` when known; rev 37: `publish`, one per publish, carries `draft`, `snapshot` and `apps[]`). Advisory reload hint: consumers re-read the store rather than trusting the payload |
 | `straza.identity.created/updated/deactivated` | identity lifecycle | `user`-scoped fields |
 
@@ -1617,7 +1816,7 @@ release notes.
 
 The push channel is deliberately **not** part of the CloudEvents spine:
 messages are core-NATS (at-most-once, fire-and-forget); the durable paths
-remain the JetStream events. It carries two subject classes with DIFFERENT
+remain the JetStream events. It carries four subject classes with DIFFERENT
 semantics: a daemon classifies by exact subject, never by payload.
 
 **Revocation subjects** are `straza.push.<kind>.<id>` (kind ∈
@@ -1631,7 +1830,7 @@ Producers MUST scope every revocation publish to exactly one target id;
 there is no broadcast revocation subject. Reactivation is never pushed: a
 lifted user re-enrolls, so daemons have no un-revoke path.
 
-**The policy nudge**, `straza.push.policy` (revision 7), is the one
+**The policy nudge**, `straza.push.policy` (revision 7), is a
 **broadcast, notify-only** subject: the pod that recompiles and activates a
 policy snapshot publishes `{"kind": "policy", "snapshot": "<id>"}` once per
 activation. A daemon subscribed to it MUST treat a message there ONLY as a
@@ -1644,6 +1843,40 @@ NOT drop session state. Poll-refresh remains the fallback: the nudge only
 tightens propagation latency for idle sessions (target: adopt within 5 s of
 activation). Snapshot ids are not secrets (every enrolled client can read
 `/v1/snapshot`), so broadcasting them leaks nothing.
+
+**The role nudge**, `straza.push.roles.<userId>` (revision 70), is a
+**target-scoped, notify-only** subject. The server that grants a role to a
+user or takes one away publishes `{"kind": "roles", "id": "<userId>"}` once
+for each assignment it starts or ends, after its own role resolution answers
+the change. A server that only hears of the change from another server
+publishes nothing. A daemon hears only the subject of its own session's
+user. It MUST treat a message there ONLY as a hint to renew its session
+through its normal authenticated channel, which resolves the user's roles
+again. The payload is informational and names no role; enforcement never
+trusts it, so a forged or replayed nudge can cause at most one renewal. The
+revocation rule above does NOT apply to this subject; a role nudge MUST NOT
+drop session state. A daemon MAY skip the renewal when a renewal it started
+after the nudge arrived has been answered. The renewal near expiry remains
+the fallback: the nudge is sent once and never repeated, so a daemon that
+misses it follows at its next renewal, about 180 seconds after the change
+at the latest for a session that keeps working (spec/session-token). On the
+stream `GET /v1/push` the three classes arrive as the events `revocation`,
+`policy` and `roles`, and a daemon MUST ignore an event it does not know.
+
+**The role broadcast**, `straza.push.roles` (revision 72), is a
+**broadcast, notify-only** subject for a change to what a role contains or
+reaches rather than to who holds it. The server that publishes a change
+which alters the closure of any role, such as an implication added or
+removed, or which removes a role, publishes `{"kind": "roles"}` once for
+that publish, after its own role resolution answers the change. A publish
+that changes no role's closure publishes nothing on it, and a server that
+only hears of the publish from another server publishes nothing. Every
+daemon hears it and MUST treat it exactly as a role nudge: ONLY as a hint to
+renew its session through its normal authenticated channel, never as a
+revocation. The payload names no role and no user. On the stream
+`GET /v1/push` it arrives as the event `roles`, so a daemon that knows the
+role nudge needs no change, and the renewal near expiry remains the
+fallback.
 
 ### 5.1 In-cluster approval coordination (`straza.approval.resolved.<id>`)
 

@@ -48,7 +48,7 @@ async function http(method: string, path: string, body?: unknown, bearer?: strin
   try {
     resp = await fetch(path, { method, headers, body: payload, signal: ctrl.signal });
   } catch {
-    throw new ApproverError("the server is unreachable, so the state of your approvals cannot be known", { unreachable: true });
+    throw new ApproverError("Straza did not answer", { unreachable: true });
   } finally {
     clearTimeout(timer);
   }
@@ -103,9 +103,9 @@ async function refreshToken(d: Device): Promise<string> {
   if (!c.ok || !challenge) {
     if (c.status === 404) {
       await d.onRevoked();
-      throw new ApproverError("this browser's approver device is gone from the server. Enable this browser again to enroll", { revoked: true, status: 404 });
+      throw new ApproverError("this browser's approver device is gone from the server. Set this browser up again to approve from it", { revoked: true, status: 404 });
     }
-    throw failure(c, "could not start a token refresh");
+    throw failure(c, "Straza did not accept this browser's key");
   }
   const signature = await d.sign(refreshMessage(d.id, challenge));
   const r = await http("POST", "/v1/approver/refresh", { approver_device_id: d.id, challenge, signature });
@@ -114,7 +114,7 @@ async function refreshToken(d: Device): Promise<string> {
     throw new ApproverError("this browser's approver device was revoked", { revoked: true, code: "device_revoked", status: 401 });
   }
   const token = field(r.data, "device_token");
-  if (!r.ok || !token) throw failure(r, "token refresh was refused");
+  if (!r.ok || !token) throw failure(r, "Straza did not accept this browser's key");
   d.token = token;
   const expiresIn = r.data && typeof r.data === "object" ? Number((r.data as Record<string, unknown>).expires_in) || 0 : 0;
   await d.onToken(token, expiresIn);
@@ -139,7 +139,7 @@ export async function approver<T>(method: string, path: string, body?: unknown):
   }
   if (r.status === 401 && field(r.data, "code") === "device_revoked") {
     await d.onRevoked();
-    throw new ApproverError("this browser's approver device was revoked. Enable this browser again to enroll", { revoked: true, code: "device_revoked", status: 401 });
+    throw new ApproverError("this browser's approver device was revoked. Set this browser up again to approve from it", { revoked: true, code: "device_revoked", status: 401 });
   }
   if (!r.ok) throw failure(r);
   return r.data as T;
@@ -156,10 +156,11 @@ export type EnrollAnswer = {
 };
 
 // enrollDevice registers the generated key. Unauthenticated by contract:
-// the one-time enrol token is the credential.
+// the one-time enrol token is the credential. A refusal without a reason
+// keeps its bare status, which the page words itself.
 export async function enrollDevice(body: unknown): Promise<EnrollAnswer> {
   const r = await http("POST", "/v1/approver/enroll", body);
-  if (!r.ok) throw failure(r, "enrollment was refused");
+  if (!r.ok) throw failure(r);
   return r.data as EnrollAnswer;
 }
 

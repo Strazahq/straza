@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { PoliciesDenied } from "./policies-denied";
 import { ApiError, type DefaultDenials, type DeniedTool, listDefaultDenials } from "@/lib/api";
 import { take } from "@/lib/handoff";
 import {
-  DENIED_COLUMN, DENIED_CUT, DENIED_NONE, DENIED_SERVERS, DENIED_SERVERS_LINE, DENIED_TOOLS, DENIED_TOOLS_LINE, NAMELESS_HELP, NAMELESS_TOOL,
+  DENIED_COLUMN, DENIED_CUT, DENIED_HELP, DENIED_NONE, DENIED_SERVERS, DENIED_TOOLS, DENIED_VIEW, NAMELESS_HELP, NAMELESS_TOOL,
   SUBJECT_DENIED, WRITE_RULE, harnessWords, openRecord, writeRuleFor,
 } from "@/lib/harness-words";
 import { navigate } from "@/lib/router";
@@ -27,7 +28,7 @@ const answer: DefaultDenials = {
   tools: [tool("LSP", 2, 9002, ["claude-code"]), tool("NotebookEdit", 5, 9003, ["claude-code", "codex"]), tool("", 1, 9004, ["python-sdk"])],
 };
 
-const mount = (needle = "") => render(<PoliciesDenied needle={needle} />);
+const mount = (needle = "") => render(<TooltipProvider><PoliciesDenied needle={needle} /></TooltipProvider>);
 const row = (label: string) => document.querySelector('[data-denied="' + label + '"]') as HTMLElement;
 const cells = (label: string) => Array.from(row(label).querySelectorAll("td")).map((c) => c.textContent || "");
 const labels = () => Array.from(document.querySelectorAll("[data-denied]")).map((r) => r.getAttribute("data-denied"));
@@ -42,14 +43,15 @@ describe("the Denied by default view", () => {
     take("audit");
   });
 
-  it("groups the servers and the harness tools, a row each", async () => {
+  it("groups the servers and the harness tools, a row each, under a heading whose help says what the view lists", async () => {
     mount();
     await ready();
     const view = document.querySelector("[data-denied-view]") as HTMLElement;
+    expect(within(view).getByRole("heading", { level: 2, name: DENIED_VIEW })).toBeTruthy();
+    expect(within(view).getByRole("button", { name: "Help: " + DENIED_VIEW })).toBeTruthy();
+    expect(view.textContent).not.toContain(DENIED_HELP);
     expect(within(view).getByText(DENIED_SERVERS)).toBeTruthy();
-    expect(within(view).getByText(DENIED_SERVERS_LINE)).toBeTruthy();
     expect(within(view).getByText(DENIED_TOOLS)).toBeTruthy();
-    expect(within(view).getByText(DENIED_TOOLS_LINE)).toBeTruthy();
     expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([DENIED_COLUMN.asked, DENIED_COLUMN.runs, DENIED_COLUMN.count, DENIED_COLUMN.last, DENIED_COLUMN.record]);
     expect(labels()).toEqual(["claude-in-chrome", "LSP", "NotebookEdit", NAMELESS_TOOL]);
   });
@@ -62,6 +64,31 @@ describe("the Denied by default view", () => {
     expect(c[1]).toBe(harnessWords(["claude-code"]));
     expect(c[2]).toBe("7");
     expect(c[3]).toBe(absTime("2026-11-11T09:30:00Z"));
+  });
+
+  it("leads a server's row with the tile of a server on a person's machine, and wears its tools as denied", async () => {
+    mount();
+    await ready();
+    expect(row("claude-in-chrome").querySelector('[data-kind-icon="local-server"]')).toBeTruthy();
+    const chips = Array.from(row("claude-in-chrome").querySelectorAll('[data-outcome]'));
+    expect(chips.map((c) => [c.textContent, c.getAttribute("data-outcome")])).toEqual([["navigate", "denied"], ["form_input", "denied"]]);
+  });
+
+  it("keeps a floor under the table, so a narrow window scrolls it inside its box", async () => {
+    mount();
+    await ready();
+    expect((document.querySelector("[data-denied-table]") as HTMLElement).className).toContain("min-w-[1000px]");
+  });
+
+  it("gives Last denied the room of its whole stamp at the floor, taken from Asked for", async () => {
+    mount();
+    await ready();
+    const widths = Array.from(document.querySelectorAll("[data-denied-table] col")).map((c) => parseFloat((c as HTMLElement).style.width));
+    // The stamp measured 170 px on the test stack, and its cell pads it by
+    // 8 px on each side, of the table's 1000 px floor.
+    expect(widths[3] * 10).toBeGreaterThanOrEqual(186);
+    expect(widths[0]).toBe(30);
+    expect(widths.reduce((a, b) => a + b, 0)).toBe(100);
   });
 
   it("reads a harness tool's row with every harness it ran in", async () => {

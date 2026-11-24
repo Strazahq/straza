@@ -3,13 +3,14 @@ import { CopyIcon, Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Pill } from "@/components/chip";
 import { HelpTip } from "@/components/help-tip";
 import { type ApiError, type ValidateAnswer, validatePolicy } from "@/lib/api";
 import { lineDiff } from "@/lib/line-diff";
 import { notify } from "@/lib/notify";
 import {
   COPIED, COPY, COPY_REFUSED, DIFF_ADDED, DIFF_REMOVED, EDITOR_LABEL, LINE_NUMBERS, PARSE_FAILED, SHOW_DIFF, TAB,
-  VALID_NOW, VALIDATE, YAML_HELP, YAML_LINE, advisoryLine, validWords,
+  VALIDATE, YAML_HELP, advisoryLine, validPills,
 } from "@/lib/policy-words";
 import { bare, checkFailed } from "@/lib/say";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,7 @@ type Props = {
 // the sentence names.
 type Verdict = { ok: ValidateAnswer } | { bad: string; line: number | null } | null;
 
-const GRID = "grid grid-cols-[44px_1fr] overflow-auto rounded-md border border-border bg-background font-mono text-[13px] leading-[1.5]";
+const GRID = "grid grid-cols-[44px_1fr] overflow-auto rounded-md border border-border bg-background font-mono text-caption leading-[1.5]";
 // BOX is the height of the code box: the window less the page above it,
 // never shorter than a screenful of text.
 const BOX = "h-[calc(100vh-280px)] min-h-[320px]";
@@ -100,14 +101,13 @@ export function PolicyYaml({ text, stored, onChange }: Props) {
 
   return (
     <div className="flex flex-col gap-3" data-yaml-tab>
-      <div className="flex flex-wrap items-center gap-2 text-sm text-text-2">
-        <span>{YAML_LINE}</span>
+      <div className="flex flex-wrap items-center gap-2 text-dense text-text-2">
         <HelpTip label={TAB.yaml} text={YAML_HELP} />
         <span className="ml-auto flex flex-wrap items-center gap-3">
           {changed && (
             <span className="flex items-center gap-2">
               <Switch id="policy-show-diff" checked={diff} onCheckedChange={setDiff} />
-              <Label htmlFor="policy-show-diff" className="text-[13px] font-normal text-text-2">{SHOW_DIFF}</Label>
+              <Label htmlFor="policy-show-diff" className="text-caption font-normal text-text-2">{SHOW_DIFF}</Label>
             </span>
           )}
           <Button variant="outline" size="sm" onClick={() => void validate()} disabled={busy}>
@@ -149,25 +149,25 @@ export function PolicyYaml({ text, stored, onChange }: Props) {
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => flush(draft)}
             onScroll={(e) => { if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop; }}
-            className="min-w-0 resize-none whitespace-pre bg-transparent px-3 py-2.5 font-mono text-[13px] leading-[1.5] text-foreground outline-none"
+            className="min-w-0 resize-none whitespace-pre bg-transparent px-3 py-2.5 font-mono text-caption leading-[1.5] text-foreground outline-none"
           />
         </div>
       )}
 
       {verdict && "ok" in verdict && (
         <div className="flex flex-col gap-1.5">
-          <div role="status" className="rounded-md border border-ok/40 bg-ok-bg px-3 py-2 text-sm text-text-2" data-verdict="ok">
-            {validWords(verdict.ok, VALID_NOW)}
+          <div role="status" className="flex flex-wrap items-center gap-1.5 rounded-md border border-ok/40 bg-ok-bg px-3 py-2 text-dense text-text-2" data-verdict="ok">
+            {validPills(verdict.ok).map((p) => <Pill key={p}>{p}</Pill>)}
           </div>
           {(verdict.ok.advisories || []).map((a, i) => (
-            <div key={i} className="rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-[13px] leading-relaxed text-text-2" data-advisory={a.code}>
+            <div key={i} className="rounded-md border border-warn/40 bg-warn-bg px-3 py-2 text-caption leading-relaxed text-text-2" data-advisory={a.code}>
               {advisoryLine(a.rule, a.text)}
             </div>
           ))}
         </div>
       )}
       {verdict && "bad" in verdict && (
-        <div role="alert" className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm leading-relaxed text-text-2" data-verdict="bad">
+        <div role="alert" className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-dense leading-relaxed text-text-2" data-verdict="bad">
           {verdict.bad}
         </div>
       )}

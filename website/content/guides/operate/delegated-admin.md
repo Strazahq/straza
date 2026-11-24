@@ -38,7 +38,7 @@ A scope is an area and a verb, written `area:read` or `area:write`, and the verb
 
 | Area | What it covers |
 |---|---|
-| `identity` | users, roles, assignments, devices, locks and knowledge packs |
+| `identity` | users, roles, assignments, devices and locks |
 | `sessions` | listing sessions and revoking them, one or all, which is the kill switch |
 | `transcripts` | recorded conversation content, kept apart from every other area on purpose |
 | `audit` | the decision and admin event history, which holds each tool's input and no conversation text |
@@ -85,7 +85,7 @@ The role itself is an ordinary role. You create it with `strazactl roles create 
 
 {{< shot name="role-assign-user" caption="The same dialog on the approver role release-approvers, with lena picked under User and the button Assign role." >}}
 
-Pick omar under **User** and press **Assign role**. The role's **Areas** tab shows what it opens: `audit`, `sessions` and `transcripts` at `read`, and every other area at `none`, under the line `Set in strazad's config (admin.roleAreas). The console reads it and cannot change it.`
+Pick omar under **User** and press **Assign role**. The role's **Areas** tab shows what it opens: `audit`, `sessions` and `transcripts` at `read`, and every other area at `none`, under the line `Set in Straza's config, admin.roleAreas.`
 {{< /console >}}
 
 {{< cli >}}
@@ -133,7 +133,7 @@ Every change a delegated admin makes lands on the audit chain under that person'
 ## What the console shows a delegated admin {.nostep}
 
 
-The console sign-in page says `Admin roles only. Anyone else lands on the self-service page, still signed in.` After sign-in the sidebar shows only the areas the person's scopes cover, and an address outside them is answered by a locked panel that names what the account does hold and offers a button into the first area it can open. All of that is display only, because the server checks the authority again on every request, so a hand-edited console cannot reach a route that the map does not open.
+The console sign-in page says `Admin roles only. Others land on the self-service page.` After sign-in the sidebar shows only the areas the person's scopes cover, and an address outside them is answered by a locked panel that says `Your role does not include <area>. Ask an administrator for a role that does.` and offers a button into the first area it can open. All of that is display only, because the server checks the authority again on every request, so a hand-edited console cannot reach a route that the map does not open.
 
 ## Undo it {.nostep}
 
@@ -141,9 +141,9 @@ The console sign-in page says `Admin roles only. Anyone else lands on the self-s
 To take the rights away from one person, delete their assignment of the role, or remove the membership in your identity manager. The next request from that person's session is refused. A membership the identity manager wrote is mastered there, so remove it there as well. That is the same move for an area role and for a server's own role.
 
 {{< console >}}
-On the person's sheet, press **Revoke** on the role's row, then confirm.
+On the person's page under Users, press **Remove** on the role's row, then confirm.
 
-{{< clicks "Users" "omar" "Revoke" "Revoke role" >}}
+{{< clicks "Users" "omar" "Remove" "Remove role" >}}
 {{< /console >}}
 
 {{< cli >}}

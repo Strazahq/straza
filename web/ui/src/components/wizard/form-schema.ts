@@ -10,12 +10,12 @@ import { type Form, NAME_RE, NAME_RULE, needsSecret, sentFor } from "@/lib/manif
 
 export const MISSING = {
   name: "Name the server. " + NAME_RULE,
-  imported: "Paste the registry's server.json and click Convert, or pick one of the other three cards.",
+  imported: "Paste the registry's server.json and click Convert. To type the address yourself, click Import a registry record again.",
   url: "Say where Straza reaches it: an http or https address.",
   scheme: "The address must start with http:// or https://.",
   exec: "Say which executable Straza starts, as an absolute path on the strazad host.",
   image: "Name the image Straza runs.",
-  secret: "Type the secret the server expects. It is stored sealed after the install.",
+  secret: "Type the secret the server expects. Straza stores it encrypted after you publish.",
   envName: "Name the environment variable the process reads the secret from.",
   provider: "Pick the identity provider people sign in through.",
 };
@@ -37,9 +37,9 @@ export const formSchema = z
     const name = f.name.trim();
     if (!name) say("name", MISSING.name);
     else if (!NAME_RE.test(name)) say("name", NAME_RULE);
-    // The import card is open until its record is converted, and the
-    // conversion opens the runtime card it read, so an open import card
-    // always means a paste that is not converted yet.
+    // The import box is open until its record is converted, and the
+    // conversion opens the way it read, so an open import box always
+    // means a paste that is not converted yet.
     if (f.mode === "import") say("mode", MISSING.imported);
     else if (f.runtime === "remote") {
       const url = f.url.trim();
@@ -63,7 +63,7 @@ export const STEP_KEYS: Step[] = ["server", "credential", "review", "check"];
 // first invalid one is the one the click focuses. A token server draws its
 // header before the shared secret; a static server the other way round.
 export function stepFields(step: Step, f: Form): FieldPath<Form>[] {
-  if (step === "server") return ["name", "mode", "url", "exec", "image"];
+  if (step === "server") return ["mode", "url", "exec", "image", "name"];
   if (step !== "credential") return [];
   return f.cred === "token" ? ["headerName", "secret"] : ["secret", "headerName", "envName", "provider"];
 }

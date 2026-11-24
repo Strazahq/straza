@@ -153,6 +153,9 @@ func (d contactDialer) contact(ctx context.Context, address string) (contactAnsw
 		if err != nil {
 			return got, run.fault(ctx, reasonNotToolList)
 		}
+		if t == nil {
+			continue // a JSON null in the list, which the SDK hands over as a nil tool
+		}
 		got.tools = append(got.tools, contactedTool{Name: t.Name, Description: t.Description,
 			ReadOnly: t.Annotations != nil && t.Annotations.ReadOnlyHint})
 	}

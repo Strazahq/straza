@@ -35,7 +35,10 @@ func (c *check) notes(clean bool) {
 	var servers []string
 	for _, it := range c.d.Items {
 		if c.unchanged(it) {
-			v.Info = append(v.Info, note(codeNoChange, ClassInfo, it.Object(), fmt.Sprintf("%s equals live, so publishing changes nothing for it.", it.Object())))
+			v.Info = append(v.Info, note(codeNoChange, ClassInfo, it.Object(), fmt.Sprintf("%s equals live.", objectWords(it.Object()))))
+			if f, ok := c.packsNote(it); ok {
+				v.Info = append(v.Info, f)
+			}
 			continue
 		}
 		switch {
@@ -68,7 +71,7 @@ func (c *check) notes(clean bool) {
 	require, rego := c.prober().read()
 	if len(require) > 0 {
 		v.Unchecked = append(v.Unchecked, note(codeUncheckedRequire, ClassUnchecked, "", fmt.Sprintf(
-			"Straza read who gains what for a session that meets every require predicate of %s, the widest reach a holder can have, so a session that does not meet them reaches less.",
+			"Straza read who gains what for a session that meets every require predicate of %s.",
 			listWords(require, "and"))))
 	}
 	if rego = unionSorted(rego, c.newModules()); len(rego) > 0 {
@@ -99,8 +102,9 @@ func (c *check) notes(clean bool) {
 }
 
 // unchanged reports whether item it leaves its object as live state holds
-// it: a document equal to the live one, its covers line compared by id,
-// or the removal of an object that does not exist.
+// it: a document equal to the live one, its covers line compared by id and
+// its knowledge packs ignored, or the removal of an object that does not
+// exist.
 func (c *check) unchanged(it Item) bool {
 	switch {
 	case it.Op == OpRemove && it.Kind == KindRole:
@@ -116,6 +120,9 @@ func (c *check) unchanged(it Item) bool {
 	case it.Kind == KindRole:
 		live, ok := RoleDocOf(c.w, it.Name)
 		doc, read := c.after.roleDocs[it.Name]
+		// Packs bind nothing, so a document that differs only by them
+		// changes nothing.
+		doc.Spec.Packs, live.Spec.Packs = nil, nil
 		return ok && read && roleText(withoutCovers(doc)) == roleText(withoutCovers(live)) &&
 			c.w.Access[it.Name].Covers.Key() == c.after.Access[it.Name].Covers.Key()
 	case it.Kind == KindPolicySet:
@@ -134,23 +141,31 @@ func (c *check) unlistedTools(name string) (Finding, bool) {
 	}
 	sentence := fmt.Sprintf("Straza has not started %s, so its tool names are unknown until it is published.", name)
 	if next.Runtime == runtimeRemote {
-		sentence = fmt.Sprintf("Straza has not contacted %s, because an address in a draft is contacted only when a person asks, so the tool names of %s are unknown.",
+		sentence = fmt.Sprintf("Straza has not contacted %s yet, so the tool names of %s are unknown. It contacts an address in a draft only when a person asks.",
 			normHost(next.URL), name)
 	}
 	return note(codeUncheckedTools, ClassUnchecked, "App/"+name, sentence), true
 }
 
 // roleNotes answers the info lines of a role the draft puts: nobody holds
-// it, and its knowledge packs differ from live, which a draft leaves as
-// they are.
+// it, and its document names knowledge packs, which bind nothing.
 func (c *check) roleNotes(it Item) []Finding {
 	var out []Finding
 	if len(c.hA.byRole[it.Name]) == 0 {
 		out = append(out, note(codeNobodyHolds, ClassInfo, it.Object(), fmt.Sprintf("Nobody holds %s yet, so it reaches nothing until someone is assigned it.", it.Name)))
 	}
-	if doc, read := c.after.roleDocs[it.Name]; read && !slices.Equal(sortedCopy(doc.Spec.Packs), sortedCopy(c.w.Roles[it.Name].Packs)) {
-		out = append(out, note(codePacks, ClassInfo, it.Object(), fmt.Sprintf(
-			"The knowledge packs of %s are bound directly, not through drafts, so this draft leaves them as they are.", it.Name)))
+	if f, ok := c.packsNote(it); ok {
+		out = append(out, f)
 	}
 	return out
+}
+
+// packsNote is info.packs for a role put whose document names knowledge
+// packs, which bind nothing, whether or not the document equals live.
+func (c *check) packsNote(it Item) (Finding, bool) {
+	doc, read := c.after.roleDocs[it.Name]
+	if it.Kind != KindRole || it.Op != OpPut || !read || len(doc.Spec.Packs) == 0 {
+		return Finding{}, false
+	}
+	return note(codePacks, ClassInfo, it.Object(), "This Role names knowledge packs, which were removed from Straza. The packs field is ignored."), true
 }

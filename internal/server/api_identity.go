@@ -91,6 +91,12 @@ type checkinRequest struct {
 	// Client is the straza build making the check-in (spec/attestation
 	// v1beta1): recorded on the session, never verified.
 	Client clientInfo `json:"client"`
+	// Host is the name of the machine the client's service runs on, and
+	// Folder the folder the session starts in, with the home directory
+	// written as ~. Both are kept on the session a check-in starts, never
+	// verified, never read by a decision, and ignored on a refresh.
+	Host   string `json:"host,omitempty"`
+	Folder string `json:"folder,omitempty"`
 }
 
 type clientInfo struct {
@@ -98,22 +104,18 @@ type clientInfo struct {
 	Commit  string `json:"commit"`
 }
 
-type packPayload struct {
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	Content  string `json:"content"`
-	Checksum string `json:"checksum"`
-}
-
 type checkinResponse struct {
-	SessionID    string        `json:"session_id"`
-	SessionToken string        `json:"session_token"`
-	ExpiresIn    int           `json:"expires_in"`
-	Attestation  string        `json:"attestation"`
-	User         string        `json:"user"`
-	Roles        []string      `json:"roles"`
-	SnapshotID   string        `json:"snapshot_id"`
-	Packs        []packPayload `json:"knowledge_packs"`
+	SessionID    string   `json:"session_id"`
+	SessionToken string   `json:"session_token"`
+	ExpiresIn    int      `json:"expires_in"`
+	Attestation  string   `json:"attestation"`
+	User         string   `json:"user"`
+	Roles        []string `json:"roles"`
+	SnapshotID   string   `json:"snapshot_id"`
+	// Packs is retired and always an empty list, never null. Knowledge
+	// packs were removed, and the property stays on the wire until the next
+	// major version.
+	Packs []struct{} `json:"knowledge_packs"`
 	// Identity typology (spec/policyset revision 9): the client mirrors these
 	// onto its cached session so the LOCAL hook-lane subject matches
 	// identity-scoped sets exactly like the server does (one engine, no
@@ -140,8 +142,8 @@ type checkinResponse struct {
 }
 
 // handleCheckin starts or refreshes a session after enrollment:
-// verifies identity, computes the attestation level, resolves roles, mints a
-// session token, and returns the role-bound knowledge packs.
+// verifies identity, computes the attestation level, resolves roles, and
+// mints a session token.
 func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	var req checkinRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -165,9 +167,11 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	// 30 s daemon tick silently downgrade (or upgrade) the minted claims.
 	deviceID := req.DeviceID
 	attLevel := ""
-	// gateHarness feeds the admin-CLI exemption; on refresh the session
-	// row is authoritative so a blocked agent cannot re-label itself.
-	gateHarness := req.Harness.Name
+	// gateHarness and gateVersion name the harness the admin-CLI exemption
+	// judges and the session is minted for. On refresh the session row is authoritative,
+	// so a refresh payload cannot re-label the session, its cached subject
+	// or its token.
+	gateHarness, gateVersion := req.Harness.Name, req.Harness.Version
 	// via names the credential lane for the authn events (rev 21); 401/403
 	// refusals emit, 400s and outages do not (not authentication outcomes).
 	via := ""
@@ -186,7 +190,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		sessionID = ses.ID
 		deviceID = ses.DeviceID
 		attLevel = ses.AttestationLevel
-		gateHarness = ses.HarnessName
+		gateHarness, gateVersion = ses.HarnessName, ses.HarnessVersion
 	case proof && req.DeviceToken != "":
 		apiError(w, http.StatusBadRequest, oneCredentialMsg)
 		return
@@ -377,6 +381,8 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			HarnessName: req.Harness.Name, HarnessVersion: req.Harness.Version,
 			ClientVersion:    req.Client.Version,
 			ClientCommit:     req.Client.Commit,
+			Host:             req.Host,
+			Folder:           req.Folder,
 			AttestationLevel: attLevel, AttestationHashes: string(hashesJSON),
 		})
 		if err != nil {
@@ -412,14 +418,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	// that starts or ends mid-session sends the next request back to check
 	// in, and settleRoles caches it only for roles whose config this replica
 	// applied (drafts_apply.go).
-	var (
-		packs    []store.KnowledgePack
-		packsErr error
-	)
-	facts := func(roleIDs []string) (sessionFacts, error) {
-		packs, packsErr = a.store.Packs().ForRoles(r.Context(), roleIDs)
-		return sessionFacts{person: personUser(u), harness: req.Harness.Name, packs: whoamiPacksOf(packs), entraAgentID: u.EntraAgentID}, packsErr
-	}
+	facts := sessionFacts{person: personUser(u), harness: gateHarness, entraAgentID: u.EntraAgentID}
 	settled, refusal, err := a.settleRoles(r.Context(), sessionID, u.ID, facts, func(roles []store.Role) policy.Subject {
 		names := make([]string, len(roles))
 		for i, role := range roles {
@@ -436,7 +435,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			// denies identically everywhere instead of silently passing every
 			// enrolled session here.
 			DeviceCert: false,
-			Harness:    joinHarness(req.Harness.Name, req.Harness.Version),
+			Harness:    joinHarness(gateHarness, gateVersion),
 			UserType:   u.UserType,
 			AgencyMode: u.AgencyMode,
 			SwarmID:    u.SwarmID,
@@ -447,10 +446,6 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	if refusal != "" {
 		w.Header().Set("Retry-After", loginOutageRetryAfter)
 		a.fail(w, r, http.StatusServiceUnavailable, refusal, err)
-		return
-	}
-	if packsErr != nil {
-		a.fail(w, r, http.StatusInternalServerError, "could not load knowledge packs", packsErr)
 		return
 	}
 	if err != nil {
@@ -485,18 +480,13 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 
 	token, claims, err := a.tokens.Mint(authn.Claims{
 		Subject: u.ID, Session: sessionID, Device: deviceID,
-		Harness:     joinHarness(req.Harness.Name, req.Harness.Version),
+		Harness:     joinHarness(gateHarness, gateVersion),
 		Attestation: attLevel, RolesHash: authn.RolesHash(roleIDs), Snapshot: snapshotID, CNF: cnf,
 		EntraAgentID: u.EntraAgentID,
 	})
 	if err != nil {
 		a.fail(w, r, http.StatusInternalServerError, "could not mint session token", err)
 		return
-	}
-
-	packOut := make([]packPayload, len(packs))
-	for i, p := range packs {
-		packOut[i] = packPayload{Name: p.Name, Version: p.Version, Content: p.Content, Checksum: p.Checksum}
 	}
 
 	administered, err := a.store.Apps().ListByAdminRoles(r.Context(), roleIDs)
@@ -514,7 +504,7 @@ func (a *App) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		User:         u.Username,
 		Roles:        roleNames,
 		SnapshotID:   snapshotID,
-		Packs:        packOut,
+		Packs:        []struct{}{},
 		UserType:     u.UserType,
 		AgencyMode:   u.AgencyMode,
 		SwarmID:      u.SwarmID,

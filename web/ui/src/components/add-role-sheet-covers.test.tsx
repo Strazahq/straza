@@ -82,6 +82,9 @@ describe("the Add role sheet of a server that pins repos", () => {
     await userEvent.click(await screen.findByRole("checkbox", { name: "Pick Strazahq/pay-web" }));
     // strazactl roles create takes no covers line, so the preview is the
     // role file and the command that drafts it.
+    const fold = document.querySelector("[data-role-file]")?.closest("details") as HTMLDetailsElement;
+    expect(fold.open).toBe(false);
+    expect(fold.querySelector("summary")?.textContent).toBe("View as YAMLThe role file and the command that sends it");
     const file = (document.querySelector("[data-role-file]") as HTMLElement).textContent || "";
     expect(file).toContain("  bindings:\n    - app: ghapp\n      tools:\n        - pr_create\n      covers:\n        objects:\n          - Strazahq/pay-web\n");
     expect(file.endsWith("strazactl drafts create -f role-ghapp-write.yaml")).toBe(true);

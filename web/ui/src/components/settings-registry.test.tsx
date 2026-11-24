@@ -5,7 +5,7 @@ import { RegistryTab } from "./settings-registry";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, type AttestationHashRow, type ConfigAnswer, deleteAttestationHash, getConfig, listAttestationHashes } from "@/lib/api";
 import { notify } from "@/lib/notify";
-import { navigate } from "@/lib/router";
+import { navigate, pathFor } from "@/lib/router";
 import { CANCEL } from "@/lib/role-words";
 import {
   ALLOWED,
@@ -26,7 +26,6 @@ import {
   REGISTRY_VERIFY,
   RETIRE,
   RETIRE_VERB,
-  TABS,
   filePathLine,
   rendersWord,
   retireTitle,
@@ -34,7 +33,7 @@ import {
   retireBody,
   shortHash,
 } from "@/lib/settings-words";
-import { agoWord } from "@/lib/settings-words";
+import { agoWord } from "@/lib/words";
 
 const CLEAN_NOTE = "harness-config render (strazad v1.0.0-713-g62d5f87)";
 const DIRTY_NOTE = "harness-config render (strazad v1.0.0-681-g4d5d41a-dirty)";
@@ -131,6 +130,8 @@ describe("the Attestation registry tab", () => {
     expect(lede.textContent).toContain("sha256sum");
     expect(lede.textContent).toContain("strazactl attestation list");
     expect(lede.textContent).toContain(REGISTRY_LEDE_NONE);
+    // The help names this tab by its key, whatever the tab order.
+    expect(within(lede).getByRole("button", { name: "Help: Attestation registry" })).toBeTruthy();
     // make verify-release needs a source tree, so it is no longer offered.
     expect(document.body.textContent).not.toContain("make verify-release");
   });
@@ -139,9 +140,10 @@ describe("the Attestation registry tab", () => {
     mount();
     const strip = await screen.findByText(REGISTRY_NONE_STRIP);
     expect(within(strip.parentElement as HTMLElement).getByText(REGISTRY_NONE_LINE)).toBeTruthy();
-    await userEvent.click(screen.getByRole("link", { name: new RegExp(TABS[0].label) }));
-    expect(window.location.hash).toBe("#floor");
-    expect(navigate).toHaveBeenCalledWith("settings", ["configuration"], true);
+    const door = screen.getByRole("link", { name: /^Configuration/ });
+    expect(door.getAttribute("href")).toBe(pathFor("settings", ["configuration", "floor"]));
+    await userEvent.click(door);
+    expect(navigate).toHaveBeenCalledWith("settings", ["configuration", "floor"]);
   });
 
   it("says what advisory costs, and drops the strip once the floor is managed", async () => {
@@ -177,7 +179,7 @@ describe("the Attestation registry tab", () => {
     await userEvent.click(within(row(CX_OLD)).getByRole("button", { name: RETIRE }));
     await userEvent.click(screen.getByRole("button", { name: RETIRE_VERB }));
     const refusal = await screen.findByRole("alert");
-    expect(refusal.textContent).toContain(RETIRE_VERB + " refused.");
+    expect(refusal.textContent).toContain(RETIRE_VERB + " refused: the last current render cannot be retired.");
     expect(refusal.textContent).toContain("the last current render cannot be retired");
     expect(screen.getByText(retireTitle(shortHash(CX_OLD)))).toBeTruthy();
     expect(screen.getByRole("button", { name: CANCEL })).toBeTruthy();
@@ -207,7 +209,7 @@ describe("the Attestation registry tab", () => {
     vi.mocked(listAttestationHashes).mockRejectedValue(new ApiError("unreachable", 0, true));
     mount();
     const block = await screen.findByRole("status");
-    expect(block.textContent).toContain("The attestation registry could not be read because strazad did not answer");
+    expect(block.textContent).toContain("The attestation registry could not be read because Straza did not answer");
     expect(document.querySelector("table")).toBeNull();
   });
 

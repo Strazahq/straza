@@ -1,14 +1,19 @@
 // The sentences and small readers the console's screens share.
 import type { BindingRow, Credential } from "./api";
+import { OUTCOME_WORD } from "./chip-words";
+import { runtimeWords } from "./server-words";
 import { timeZone } from "./timezone";
 
 export const NONE = "none";
 
 // probeWords rewrites the raw probe detail as one plain sentence. The raw
-// text stays the fallback so nothing the server said is lost.
+// text stays the fallback so nothing the server said is lost. A drift
+// reason is Straza's own sentence and holds tool names, which may spell a
+// word the rewrites look for, so it is answered as it is.
 export function probeWords(detail: string | undefined, url?: string): string {
   const d = String(detail || "");
   if (!d) return "";
+  if (d.startsWith("inventory drift:")) return d;
   const where = url || "the server";
   if (/connection refused/i.test(d)) return "Straza could not reach " + where + " (connection refused).";
   if (/no such host/i.test(d)) return "Straza could not reach " + where + " (the host name does not resolve).";
@@ -16,17 +21,26 @@ export function probeWords(detail: string | undefined, url?: string): string {
   if (/\b401\b|unauthori[sz]ed/i.test(d)) return where + " answered 401 to the secret you stored.";
   if (/\b403\b|forbidden/i.test(d)) return where + " answered 403 to the secret you stored.";
   if (/requires a credential and none/i.test(d)) return "The server requires a credential and none is stored.";
-  if (/docker.*(not found|no such file)|executable file not found/i.test(d)) return "This server cannot run containers (no docker on the strazad host).";
+  if (/docker.*(not found|no such file)|executable file not found/i.test(d)) return "Straza cannot run containers: docker is not on the strazad host.";
   if (/no such file or directory/i.test(d)) return "The command could not be started: " + d.replace(/^.*?fork\/exec\s*/, "");
   return d;
 }
 
-// matchesTool is the binding matcher test as the gateway applies it: a
-// bare glob admits everything, a prefix glob admits its prefix, a name
-// admits itself.
+// globMatches reads one tool pattern the way the manager and the gateway
+// read it: a * anywhere stands for any run of characters, and everything
+// else is literal.
+function globMatches(pattern: string, name: string): boolean {
+  if (pattern === "*") return true;
+  if (!pattern.includes("*")) return pattern === name;
+  const parts = pattern.split("*").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp("^" + parts.join(".*") + "$").test(name);
+}
+
+// matchesTool says whether an access row's patterns admit a tool, in the
+// server's grammar. A row with no pattern admits every tool.
 export function matchesTool(matchers: string[] | undefined, name: string): boolean {
   const ms = matchers && matchers.length ? matchers : ["*"];
-  return ms.some((m) => (m === "*" ? true : m.endsWith(".*") ? name.indexOf(m.slice(0, -1)) === 0 : m === name));
+  return ms.some((m) => globMatches(m, name));
 }
 
 // reachedBy lists the roles whose binding on this app admits the tool, in
@@ -39,7 +53,7 @@ export function reachedBy(bindings: BindingRow[] | undefined, app: string, tool:
 export function matcherWords(matchers: string[] | undefined): string {
   const ms = matchers && matchers.length ? matchers : ["*"];
   if (ms.length === 1 && ms[0] === "*") return "every tool";
-  return ms.map((m) => (m === "*" ? "every tool" : m.endsWith(".*") ? "tools named " + m.slice(0, -2) + ".…" : m)).join(", ");
+  return ms.map((m) => (m === "*" ? "every tool" : m.includes("*") ? "tools matching " + m : m)).join(", ");
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -86,67 +100,151 @@ export function relTimeText(iso: string | undefined): string {
   return d > 0 ? n + " ago" : "in " + n;
 }
 
-// ---- the MCP servers area: the wizard, the server page and its log ----
-// The card lines are the short forms, and the long forms sit under the
-// wizard's "More about this choice" fold.
+// agoWord reads a past stamp the way a table column can hold it: the
+// relative reading under a day and "N d ago" past it, since the absolute
+// stamp the kit prints past a day is too long for a 110 px column and
+// rides on hover instead.
+export function agoWord(iso: string | undefined): string {
+  if (!iso) return NONE;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const ago = Date.now() - t;
+  if (ago < 86400000) return relTimeText(iso);
+  return Math.round(ago / 86400000) + " d ago";
+}
 
-export const LEDE = {
-  server: "Name it, then say how Straza reaches it. Tools are served as the name and the tool joined by two underscores, so the name cannot change later.",
-  credential: "Pick whose credential Straza adds to each call. It is added on the way out and never reaches an agent.",
-  review: "Read what will be sent and what will happen. Nothing goes live until you publish.",
-  check: "What landed, what the server answered, and where to go next.",
+// agoLong reads a past stamp the long way a sentence holds it: "just now"
+// under a minute, then whole minutes and hours, rounded down, and from a
+// day on the days rounded as agoWord rounds them, so one stamp never reads
+// as two counts of days on one page.
+export function agoLong(iso: string | undefined): string {
+  if (!iso) return NONE;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return "just now";
+  const [n, unit] = s < 3600 ? [Math.floor(s / 60), "minute"] : s < 86400 ? [Math.floor(s / 3600), "hour"] : [Math.round(s / 86400), "day"];
+  return n + " " + unit + (n === 1 ? "" : "s") + " ago";
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// dayWord is a stamp's day in the zone the console shows: "8 Nov 2026".
+export function dayWord(iso: string | undefined): string {
+  if (!iso) return NONE;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const d = new Date(t);
+  const utc = timeZone() === "utc";
+  const [day, month, year] = utc ? [d.getUTCDate(), d.getUTCMonth(), d.getUTCFullYear()] : [d.getDate(), d.getMonth(), d.getFullYear()];
+  return day + " " + MONTHS[month] + " " + year;
+}
+
+// ---- the MCP servers area: the wizard, the server page and its log ----
+// The rows say the short forms, and the long forms sit under the wizard's
+// "How this works" fold.
+
+export const LEDE: Partial<Record<string, string>> = {
+  credential: "Agents never see the credential.",
 };
 
-// The four ways Straza reaches a server, in the order the wizard draws them.
-export const RUNTIMES: { key: string; name: string; desc: string }[] = [
-  { key: "remote", name: "A server you run, over HTTP", desc: "Straza proxies streamable HTTP to it and checks health with an MCP ping." },
-  { key: "command", name: "A command Straza starts", desc: "A process Straza starts on its own host as its own user. It can read Straza's keys and data, so use it only for code you trust." },
-  { key: "oci", name: "A container Straza runs", desc: "An image Straza runs with docker on the strazad host, restarted with backoff." },
-  { key: "import", name: "A registry server.json", desc: "Paste the MCP registry record. Straza converts it the way strazactl apps import does and fills the cards above." },
+// The three ways Straza reaches a server, in the order the wizard draws
+// them. line is the short form on a radio row of the wizard's Server step,
+// desc the card line of the Change connection sheet.
+export const RUNTIMES: { key: string; name: string; line: string; desc: string }[] = [
+  { key: "remote", name: "A server you run, over HTTP", line: "", desc: "Straza proxies streamable HTTP to it and checks health with an MCP ping." },
+  { key: "command", name: "A command Straza starts", line: "Runs on the strazad host and can read Straza's keys. Only for code you trust.", desc: "A process Straza starts on its own host as its own user. It can read Straza's keys and data, so use it only for code you trust." },
+  { key: "oci", name: "A container Straza runs", line: "Straza runs its image with docker on the strazad host.", desc: "An image Straza runs with docker on the strazad host, restarted with backoff." },
 ];
-export const OCI_MISSING = "Not available on this server: docker is not on the strazad host. Use HTTP or a command, or run strazad where docker is installed.";
-export const OCI_MISSING_REMOTE = "Not available on this server: docker is not on the strazad host. Pick HTTP, or run strazad where docker is installed.";
-export const COMMAND_REFUSED = "Not available on this server: the enterprise profile does not run servers inside Straza. Run it as its own service or pod and pick HTTP.";
+// OCI_OFF and COMMAND_OFF say in one sentence why a way is not available
+// on this server. The longer forms add what to do instead.
+export const OCI_OFF = "Not available: docker is not on the strazad host.";
+export const OCI_MISSING = OCI_OFF + " Use HTTP or a command, or run strazad where docker is installed.";
+export const OCI_MISSING_REMOTE = OCI_OFF + " Pick HTTP, or run strazad where docker is installed.";
+export const COMMAND_OFF = "Not available: the enterprise profile does not run servers inside Straza.";
+export const COMMAND_REFUSED = COMMAND_OFF + " Run it as its own service or pod and pick HTTP.";
+// The Server step's own words: the fold of the ways this server cannot
+// use, the door to a registry record, and the hints of the address and
+// the name.
+export const OTHER_WAYS = "Other ways to run a server";
+export const IMPORT_RECORD = "Import a registry record";
+export const ADDRESS_HINT = "An http or https address.";
+export const DESC_HINT = "Optional. Shows under the name on the server's page.";
+export const SERVER_NAME_HINT = "Agents see its tools as name__tool. It cannot change later.";
 
 export const CALLER_OFF = "Not available on a command or container server: it is one process and one identity, so each caller's own credential cannot be injected. Use one shared secret, or run the server on the person's own machine.";
 export const CALLER_OFF_SHORT = "Not on a command or container server: one process is one identity.";
-export const TOKEN_DESC = "Each person pastes a token their vendor issued to them, once, on the Credentials tab of their self-service page. Straza tests it against the server, seals it and adds it to that person's calls, so two people are two identities at the server. Fits GitHub, GitLab, Linear, Supabase and Stripe on their hosted endpoints.";
+export const TOKEN_DESC = "Each person pastes a token their vendor issued to them, once, on the Credentials tab of their self-service page. Straza tests it against the server, encrypts it and adds it to that person's calls, so two people are two identities at the server. Fits GitHub, GitLab, Linear, Supabase and Stripe on their hosted endpoints.";
 export const ENV_WARNING = "The server process reads it from its environment. Do not grant tools that dump the environment, such as get-env: the secret would come back in the tool's answer.";
 export const ENV_WARNING_SHORT = "Do not grant tools that dump the environment, such as get-env: the secret would come back in the tool's answer.";
 
-// credentialCards is the four cards, one line each; provider names the
-// configured identity provider for the sign-in card.
-export function credentialCards(provider: string): { kind: string; name: string; line: string }[] {
-  return [
-    { kind: "none", name: "None", line: "The server takes no credential. Straza's audit still says who called." },
-    { kind: "static", name: "One shared secret for this server", line: "One secret for everyone, kept sealed by Straza. The server sees one identity." },
-    { kind: "token", name: "Each caller's own token", line: "People paste their own vendor token once. The server sees each person." },
-    { kind: "oauth", name: "Each caller's own sign-in", line: "People sign in once through " + (provider || "the provider") + ". The server sees each person." },
-  ];
+// CREDENTIAL_CHOICES is the four credential choices in the order the rows
+// draw them: the label, and the fact the pill at the row's right says.
+export const CREDENTIAL_CHOICES: { kind: string; label: string; fact: string }[] = [
+  { kind: "none", label: "None", fact: "no credential" },
+  { kind: "static", label: "One shared secret", fact: "one identity" },
+  { kind: "token", label: "Each person's own token", fact: "each person" },
+  { kind: "oauth", label: "Each person's own sign-in", fact: "each person" },
+];
+
+// credentialSay is the one short sentence under the picked choice. provider
+// names the identity provider of a sign-in.
+export function credentialSay(kind: string, provider: string): string {
+  if (kind === "static") return "Straza stores it encrypted and adds it to every call.";
+  if (kind === "token") return "Pasted once on the self-service page.";
+  if (kind === "oauth") return "Each person signs in once through " + (provider || "the provider") + ".";
+  return "Straza's audit still names who called.";
 }
 
-// The long form of each card, for the "More about this choice" fold.
+// The reasons a credential choice is not available, each with what to do.
+export const NOT_AVAILABLE = "not available";
+export const CALLER_NOT_HERE = "Not on a container or command server, because one process has one identity. Use one shared secret, or run the server yourself and add it over HTTP.";
+export const NO_PROVIDER_YET = "Straza has no identity provider. Add one under oauth.providers in the strazad config, or pick another choice.";
+export const PROVIDERS_UNREAD = "The identity providers could not be read. Reload the page, or pick another choice.";
+
+// The words of the fields under a picked credential choice.
+export const HOW_THIS_WORKS = "How this works";
+export const ENV_WAY = "an environment variable";
+export const SECRET_HINT = "Stored encrypted. Never shown again.";
+export const AGENTS_SECRET_HINT = "Stored encrypted after you publish. Only agents use it.";
+export const STORED_NOW = { label: "Stored now", pills: ["nothing yet", "each person pastes their own"] };
+export const BASIC_NOTE = "Type the secret as the base64 of user:password.";
+export const CHANGE_ON_PAGE = "To change the choice, open the server's page.";
+export const STORE_AGAIN_LINE = "Storing replaces the stored secret, then runs the check.";
+// injectPill is the fact pill of where an installed secret travels.
+export const injectPill = (as: string, name: string) => (as === "env" ? "variable " : "header ") + (name || "<name>");
+
+// sendsWhat is the live preview of what travels with each call for a
+// sent-as choice, the secret or the person's token as a placeholder.
+export function sendsWhat(sent: string, cred: string, headerName: string, envName: string): string {
+  const who = cred === "token" ? "<the person's token>" : "<secret>";
+  if (sent === "env") return (envName.trim() || "<name>") + "=" + who;
+  if (sent === "header") return (headerName.trim() || "<name>") + ": " + who;
+  return "Authorization: " + (sent === "basic" ? "Basic " : "Bearer ") + who;
+}
+
+// The long form of each choice, for the "How this works" fold.
 export const CREDENTIAL_MORE: Record<string, string> = {
   none: "The server takes no credential. People and agents reach it alike, and only Straza's audit says who called.",
-  static: "Straza keeps it sealed and adds it to every call and to its own health checks. The server sees one identity, Straza's audit keeps the person or agent. Rotation is setting it again. A different secret for one role can be set on the server's page later.",
+  static: "Straza keeps it encrypted and adds it to every call and to its own health checks. The server sees one identity. Straza's audit keeps the person or agent. Rotation is setting it again. A different secret for one role can be set on the server's page later.",
   token: TOKEN_DESC,
 };
 export function oauthMore(provider: string, redirectURI: string): string {
-  return "Each person signs in once through an identity provider you registered a client at, here " + (provider || "the provider") + ", and every call carries their own token, so two people are two identities at the server. This fits GitHub, GitLab and Google today. Servers that run their own sign-in with dynamic registration (Atlassian, Notion, Linear, Sentry, Stripe) need the MCP authorization client, a later unit; until then use one shared secret for them. Register " + (redirectURI || "the redirect URI") + " at the provider.";
+  return "Each person signs in once through an identity provider you registered a client at, here " + (provider || "the provider") + ", and every call carries their own token, so two people are two identities at the server. This fits GitHub, GitLab and Google today. Servers that run their own sign-in with dynamic registration (Atlassian, Notion, Linear, Sentry, Stripe) are not supported yet. Use one shared secret for them. Register " + (redirectURI || "the redirect URI") + " at the provider.";
 }
 
 // What an agent with no row of its own runs on, per caller kind: the
 // value it writes, the row's name, the one-line hint and the long hint.
 export const AGENT_ROWS: Record<string, { value: string; name: string; line: string; more: string }[]> = {
   token: [
-    { value: "own", name: "Get nothing", line: "Refused until a sponsor pastes a token for the agent.", more: "The default. An agent's call is refused until its sponsor pastes a token for it on the Credentials tab of the self-service page, or an administrator does with strazactl connect. Writes agents: own." },
+    { value: "own", name: "Refused", line: "Refused until a sponsor pastes a token for the agent.", more: "The default. An agent's call is refused until its sponsor pastes a token for it on the Credentials tab of the self-service page, or an administrator does with strazactl connect. Writes agents: own." },
     { value: "sponsor", name: "Run on their sponsor's token", line: "Once the sponsor allows it on the Credentials tab of their self-service page.", more: "Once the sponsor switched on My agents may use this on the Credentials tab of their self-service page. Each call's record names the agent as the caller and the sponsor as the credential's owner. Writes agents: sponsor." },
-    { value: "shared", name: "Use this server's shared secret", line: "You store one secret below. Only agents fall back to it.", more: "The same sealed secret box as the shared-secret card appears below, and the wizard stores it after install. People never fall back, only agents. Writes agents: shared." },
+    { value: "shared", name: "Use this server's shared secret", line: "You store one secret below. Only agents fall back to it.", more: "The same secret field as One shared secret appears below, and the wizard stores it after you publish. People never fall back, only agents. Writes agents: shared." },
   ],
   oauth: [
-    { value: "own", name: "Get nothing", line: "An agent cannot sign in through a browser, so its calls are refused.", more: "A sign-in is stored only for the person who is signed in to Straza in the browser that finishes it, and an agent has no such browser. Its calls are refused until this value changes. Writes agents: own." },
+    { value: "own", name: "Refused", line: "An agent cannot sign in through a browser, so its calls are refused.", more: "A sign-in is stored only for the person who is signed in to Straza in the browser that finishes it, and an agent has no such browser. Its calls are refused until this value changes. Writes agents: own." },
     { value: "sponsor", name: "Run on their sponsor's sign-in", line: "Once the sponsor allows it on the Credentials tab of their self-service page.", more: "The default. Once the sponsor switched on My agents may use this on the Credentials tab of their self-service page. Each call's record names the agent as the caller and the sponsor as the credential's owner. Writes agents: sponsor." },
-    { value: "shared", name: "Use a shared account", line: "You store one secret on the server's page after install. Only agents fall back to it.", more: "An administrator stores one shared secret for the server, as for a static server, and agents with no sign-in of their own use it. People never fall back. Writes agents: shared." },
+    { value: "shared", name: "Use a shared account", line: "You store one secret on the server's page after you publish. Only agents fall back to it.", more: "An administrator stores one shared secret for the server, as for a static server, and agents with no sign-in of their own use it. People never fall back. Writes agents: shared." },
   ],
 };
 
@@ -169,8 +267,6 @@ export function probeKind(detail: string | undefined): "refused" | "unreachable"
   return "other";
 }
 
-export const LATER = " The server exists and keeps this state; you can finish access later from its page.";
-
 export type HealthRead = { kind: "running" | "empty" | "refused" | "unreachable" | "other"; tone: "ok" | "warn" | "danger"; lead: string; text: string };
 
 // healthRead sorts a probed app into the sentence the Check step opens
@@ -179,13 +275,13 @@ export type HealthRead = { kind: "running" | "empty" | "refused" | "unreachable"
 export function healthRead(app: { status?: string; tools?: string[]; detail?: string } | null, url?: string): HealthRead {
   const tools = (app && app.tools) || [];
   const status = (app && app.status) || "unknown";
-  if (status === "running" && tools.length) return { kind: "running", tone: "ok", lead: "Running.", text: tools.length + (tools.length === 1 ? " tool found: " : " tools found: ") + tools.join(", ") + ". Checked just now." };
-  if (status === "running") return { kind: "empty", tone: "warn", lead: "Running, but no tool was found.", text: "The server answered the ping and listed nothing. Recheck once it serves tools." + LATER };
+  if (status === "running" && tools.length) return { kind: "running", tone: "ok", lead: "Running.", text: tools.length + (tools.length === 1 ? " tool: " : " tools: ") + tools.join(", ") + "." };
+  if (status === "running") return { kind: "empty", tone: "warn", lead: "Running, no tools.", text: "Recheck once it lists tools." };
   const kind = probeKind(app ? app.detail : "");
-  const words = probeWords(app ? app.detail : "", url) || ("The server reads " + status + ".");
-  if (kind === "refused") return { kind, tone: "danger", lead: "Refused.", text: words + " Check the value with whoever issued it, set it again, then Recheck." + LATER };
-  if (kind === "unreachable") return { kind, tone: "danger", lead: "Unreachable.", text: words + " Fix the address or start the server, then Recheck." + LATER };
-  return { kind: "other", tone: "warn", lead: status.charAt(0).toUpperCase() + status.slice(1) + ".", text: words + " Recheck, or finish access later from the server's page." };
+  const words = probeWords(app ? app.detail : "", url) || ("The server is " + status + ".");
+  if (kind === "refused") return { kind, tone: "danger", lead: "Refused.", text: words + " Check the value with whoever issued it, set it again, then Recheck." };
+  if (kind === "unreachable") return { kind, tone: "danger", lead: "Unreachable.", text: words + " Fix the address or start the server, then Recheck." };
+  return { kind: "other", tone: "warn", lead: status.charAt(0).toUpperCase() + status.slice(1) + ".", text: words + " Recheck." };
 }
 
 // holders words a holder count, for the palette's role rows and the Roles
@@ -194,12 +290,12 @@ export const holders = (n: number) => (n === 1 ? "1 holder" : n + " holders");
 
 // POLICY_HELP is the sentence behind the Policy header of every tools
 // table, on the server page and in the Roles area alike.
-export const POLICY_HELP = "What today's live policies do when a session with this role calls the tool: allowed, needs approval, or denied. A tool no rule names is allowed.";
+export const POLICY_HELP = "What live policies do when this role calls the tool. A tool no rule names is allowed.";
 
 // runWord is the one plain word per reaching role in a tools table's
 // Policy column, with the set named when a policy gates the tool: allowed,
 // needs approval, denied.
-const RUN_WORD: Record<string, string> = { visible: "allowed", approve_gated: "needs approval", hidden_policy: "denied", not_running: "not running", matcher_miss: "no access", no_binding: "no access" };
+const RUN_WORD: Record<string, string> = { visible: OUTCOME_WORD.allowed, approve_gated: OUTCOME_WORD.approval, hidden_policy: OUTCOME_WORD.denied, not_running: "not running", matcher_miss: OUTCOME_WORD.none, no_binding: OUTCOME_WORD.none };
 export function runWord(e: { status?: string; setName?: string } | undefined): string {
   if (!e) return "";
   const named = e.setName && (e.status === "approve_gated" || e.status === "hidden_policy") ? " (" + e.setName + ")" : "";
@@ -319,10 +415,10 @@ const CHANGED: [string, string][] = [
 // list at all is one strazad could not compare, which is not the same as
 // one that changed nothing.
 function installWords(d: Record<string, unknown>): string {
-  if (d.update !== true) return "installed it (" + d.runtime + ").";
-  if (!Array.isArray(d.changed)) return "installed it again. Straza could not compare it with the stored manifest, so which fields changed is not recorded.";
+  if (d.update !== true) return "published it (" + runtimeWords(String(d.runtime || "")) + ").";
+  if (!Array.isArray(d.changed)) return "published it again. Changed fields not recorded.";
   const paths = d.changed.map(String);
-  if (paths.length === 0) return "installed the same manifest again.";
+  if (paths.length === 0) return "published the same manifest again.";
   const words = [...new Set(paths.map((p) => (CHANGED.find(([k]) => p === k || p.startsWith(k + ".")) || ["", "settings"])[1]))];
   const own = (w: string) => w.startsWith("the ") || w.startsWith("what ");
   const phrases = words.some(own);
@@ -373,7 +469,7 @@ export function eventRow(row: { seq: number | string; ce: string; username?: str
     return {
       ...base,
       tone: held ? "warn" : "danger",
-      src: held ? "hold" : "denied call",
+      src: held ? "needed approval" : "denied call",
       who: row.username || String(d.user || "") || "a session",
       text: (d.harness ? "'s " + d.harness + " session" : "") + " called " + tool + ". " + (held ? "Needs approval" : "Denied") + (d.reason ? ": " + d.reason : "."),
     };
@@ -386,7 +482,7 @@ export function eventRow(row: { seq: number | string; ce: string; username?: str
 // server by id and carries no tool names.
 export function driftRow(c: { type: string; id: string; cursor: string; at: string }, appId: string): EventRow | null {
   if (c.type !== "tool" || c.id !== appId) return null;
-  return { seq: "c" + c.cursor, t: c.at, tone: "warn", src: "drift", who: "Health check", text: " found the tool list changed. It read degraded until the next check found the list stable, and a new tool reaches no role until an access row names it." };
+  return { seq: "c" + c.cursor, t: c.at, tone: "warn", src: "tool list changed", who: "Health check", text: " found the tool list changed. A new tool reaches no role until an access row names it." };
 }
 
 // ---- the credential tab ----
@@ -395,10 +491,10 @@ export function driftRow(c: { type: string; id: string; cursor: string; at: stri
 // card.
 export function kindLine(cred: Credential | null | undefined): string {
   const kind = (cred && cred.kind) || "none";
-  if (kind === "static") return "One shared secret for this server. The server sees one identity; Straza's audit keeps the person or agent.";
-  if (kind === "token") return "Each caller's own token. People paste theirs on the Credentials tab of their self-service page.";
-  if (kind === "oauth") return "Each caller's own sign-in through " + ((cred && cred.oauth && cred.oauth.provider) || "the provider") + ". Nothing of theirs is stored here.";
-  return "None. No credential is sent to this server. Role access and policies still apply.";
+  if (kind === "static") return "One shared secret for this server. The server sees one identity. Straza's audit keeps the person or agent.";
+  if (kind === "token") return "Each person's own token. People paste theirs on the Credentials tab of their self-service page.";
+  if (kind === "oauth") return "Each person's own sign-in through " + ((cred && cred.oauth && cred.oauth.provider) || "the provider") + ".";
+  return "None. No credential is sent.";
 }
 
 // agentsLine says what an agent with no row of its own runs on, for a
@@ -408,22 +504,22 @@ export function agentsLine(cred: Credential | null | undefined): string {
   if (kind !== "token" && kind !== "oauth") return "";
   const what = kind === "token" ? "token" : "sign-in";
   const agents = (cred && cred.agents) || "own";
-  if (agents === "sponsor") return "Run on their sponsor's " + what + " once the sponsor allowed it (agents sponsor).";
-  if (agents === "shared") return "Use this server's shared secret (agents shared).";
-  return kind === "token" ? "Get nothing until a sponsor pastes a token for them (agents own)." : "Get nothing, because an agent cannot sign in through a browser (agents own).";
+  if (agents === "sponsor") return "Run on their sponsor's " + what + " once the sponsor allowed it.";
+  if (agents === "shared") return "Use this server's shared secret.";
+  return kind === "token" ? "Refused until a sponsor pastes a token for them." : "Refused, because an agent cannot sign in through a browser.";
 }
 
 // noToolWords is the tools table's empty line: the status and, when the
 // probe said why, the reason with its own period dropped, then the next step.
 export function noToolWords(status: string, detail?: string, url?: string): string {
   const why = detail ? ", " + probeWords(detail, url).replace(/\.$/, "") : "";
-  return "No tool is known yet: the server reads " + status + why + ". Recheck once it answers.";
+  return "No tool is known yet, because the server is " + status + why + ". Recheck once it answers.";
 }
 
 // probeSay is the result of a recheck in one sentence with the toast tone
 // it lands in: ok when running, warn when degraded, failed otherwise, with
 // the probe's reason in words when it is not running.
 export function probeSay(view: { name: string; status: string; detail?: string; url?: string }): { tone: "ok" | "warn" | "failed"; text: string } {
-  const text = view.name + " reads " + view.status + " after the probe." + (view.status === "running" ? "" : " " + probeWords(view.detail, view.url));
+  const text = view.name + " is " + view.status + "." + (view.status === "running" ? "" : " " + probeWords(view.detail, view.url));
   return { tone: view.status === "running" ? "ok" : view.status === "degraded" ? "warn" : "failed", text };
 }

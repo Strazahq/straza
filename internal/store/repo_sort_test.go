@@ -198,7 +198,7 @@ func TestSessionsPageSorts(t *testing.T) {
 				var all []Session
 				c := Cursor{}
 				for i := 0; i < 20; i++ {
-					page, err := s.Sessions().Page(ctx, "", "", srt, c, 4)
+					page, err := s.Sessions().Page(ctx, SessionFilter{}, srt, c, 4)
 					if err != nil {
 						t.Fatalf("%+v page %d: %v", srt, i, err)
 					}
@@ -226,7 +226,7 @@ func TestSessionsPageSorts(t *testing.T) {
 			}
 		}
 		// The status filter still composes with a sorted cursor.
-		page, err := s.Sessions().Page(ctx, SessionActive, "", Sort{Key: "user", Asc: true}, Cursor{}, 10)
+		page, err := s.Sessions().Page(ctx, SessionFilter{Status: SessionActive}, Sort{Key: "user", Asc: true}, Cursor{}, 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -238,7 +238,7 @@ func TestSessionsPageSorts(t *testing.T) {
 				t.Errorf("row %d (%s) after %s breaks the user order", i, nameOf[x.UserID], nameOf[page[i-1].UserID])
 			}
 		}
-		if _, err := s.Sessions().Page(ctx, "", "", Sort{Key: "harness"}, Cursor{}, 5); !errors.Is(err, ErrBadSort) {
+		if _, err := s.Sessions().Page(ctx, SessionFilter{}, Sort{Key: "harness"}, Cursor{}, 5); !errors.Is(err, ErrBadSort) {
 			t.Errorf("unknown key err = %v, want ErrBadSort", err)
 		}
 	})

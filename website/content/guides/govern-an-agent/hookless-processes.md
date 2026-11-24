@@ -25,7 +25,7 @@ keywords: sandbox exec hookless tier 3 straza service background service
 You run a process that has no hook surface, such as a script or an agent framework without hooks, inside the Straza sandbox image. You work in a terminal with Docker on the machine that runs the process. At the end, every command the process runs is a policy decision, and you have seen its obvious bypasses fail.
 
 
-`straza exec` decides each command against policy before the child runs. On an open machine it is exactly as advisory as a user-mode hook, because an agent that can run anything can skip the wrapper. Inside the sandbox image the wrapper becomes the process's only way to make the kernel run anything. That makes the image one of the lanes that hold at a boundary, as [the security model]({{< relref "evaluate/security-model.md#what-each-enforcement-point-is-worth" >}}) explains.
+`straza exec` decides each command against policy before the child runs. On an open machine it is exactly as advisory as a user-mode hook, because an agent that can run anything can skip the wrapper. Inside the sandbox image the wrapper becomes the process's only way to make the kernel run anything. That makes the image one of the lanes that hold at a boundary, as [the security model]({{< relref "evaluate/security-model.md#which-lanes-an-agent-cannot-get-around" >}}) explains.
 
 ## Before you start {.nostep}
 
@@ -210,7 +210,7 @@ In-process computation is ungoverned by design, because the agent's own interpre
 Network access stays open as well. The single-host flags above use the host network, and the shipped `deploy/sandbox/compose.yaml` leaves its container network routable. To let the agent reach strazad and nothing else, set `internal: true` on that network and attach only strazad, as the comments in the file describe.
 
 
-The server cannot tell from the wire that a session ran inside the image, so that claim is your deployment's, as [Known limits]({{< relref "security/known-limits.md" >}}) lists. Keep high-blast-radius permissions on sessions that attest `managed`, and require that level for sensitive roles. Put calls to an MCP server behind the gateway instead of baking the tool into the image, so the credential stays on the server too.
+The server cannot tell from the wire that a session ran inside the image, so that claim is your deployment's. Keep high-blast-radius permissions on sessions that attest `managed`, and require that level for sensitive roles. Put calls to an MCP server behind the gateway instead of baking the tool into the image, so the credential stays on the server too.
 
 ## Take the boundary down {.nostep}
 
@@ -224,7 +224,7 @@ docker volume rm straza-sock straza-state
 ```
 {{< /command >}}
 
-Removing the agent's key with `strazactl users nhi-key unset sandbox-bot`, or with **Revoke key** on its sheet in the console, ends the agent's running sessions at once. The server also refuses the ID token the service still holds for the agent, because that token names the removed key, so no new session starts. A different key ends them the same way. To stop the identity on every lane, lock it with `strazactl users lock`, as the [Kill-switch runbook]({{< relref "guides/operate/kill-switch-runbook.md" >}}) shows. For a workstation enrollment, `strazactl devices revoke` cuts the sessions bound to that device as well as new ones.
+Removing the agent's key with `strazactl users nhi-key unset sandbox-bot`, or with **Revoke key** on the **Devices and keys** tab of its page in the console, ends the agent's running sessions at once. The server also refuses the ID token the service still holds for the agent, because that token names the removed key, so no new session starts. A different key ends them the same way. To stop the identity on every lane, lock it with `strazactl users lock`, as the [Kill-switch runbook]({{< relref "guides/operate/kill-switch-runbook.md" >}}) shows. For a workstation enrollment, `strazactl devices revoke` cuts the sessions bound to that device as well as new ones.
 
 ## Next {.nostep}
 

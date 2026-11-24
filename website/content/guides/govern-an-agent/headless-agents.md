@@ -71,11 +71,11 @@ The response is trimmed here to those four fields.
 
 
 {{< console >}}
-On the **Users** screen, open build-bot's sheet, pick the role under **Assign**, press **Assign role**, and confirm.
+On the **Users** screen, open build-bot. On its page's **Access** tab, press **Assign a role** beside **Roles**, pick the role, and press the button that names it, such as **Assign developer**.
 
-{{< clicks "Users" "build-bot" "Assign" "developer" "Assign role" "Assign role" >}}
+{{< clicks "Users" "build-bot" "Assign a role" "developer" "Assign developer" >}}
 
-{{< see >}}`build-bot holds developer now.`{{< /see >}}
+{{< see >}}`developer assigned to build-bot. Sessions with live updates get it in seconds, others within 5 minutes.`{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -135,13 +135,13 @@ On a machine with a managed install, the last line leaves out `--server`, becaus
 Register the public half on the agent's identity. Each agent has one key, so registering again rotates it. A human identity is refused outright.
 
 {{< console >}}
-On build-bot's sheet, the **Assertion key** section says `Cannot start a session until a key is registered.` Press **Register key**, paste the public key under **Public key, base64, 32 bytes**, and press **Register key** again.
+On build-bot's page, open the **Devices and keys** tab. The **Assertion key** fact says `no key` and `No session can start until a key is registered.` Press **Register key**, paste the public key under **Public key, base64, 32 bytes**, and press **Register key** again.
 
-{{< clicks "Users" "build-bot" "Register key" "Register key" >}}
+{{< clicks "Users" "build-bot" "Devices and keys" "Register key" "Register key" >}}
 
-{{< shot name="agent-key-register" caption="The **Assertion key** section of build-bot, with the public key pasted and **Register key**." >}}
+{{< shot name="agent-key-register" caption="The **Assertion key** fact on build-bot's **Devices and keys** tab, with the public key pasted and **Register key**." >}}
 
-{{< see >}}`The assertion key of build-bot is registered.` The section then shows `registered` and the key's fingerprint.{{< /see >}}
+{{< see >}}`The assertion key of build-bot is registered.` The fact then shows `registered` and the key's fingerprint.{{< /see >}}
 {{< /console >}}
 
 {{< cli >}}
@@ -187,6 +187,12 @@ Enrolled headless as build-bot. The Straza background service holds this agent's
 {{< fails >}}
 ``straza: the identity provider refused the agent's sign-in (invalid_client): the key that signed the request is not the key registered for build-bot. On the agent's machine, run `straza keygen --force --user build-bot` to make a new key. Have an admin register the public key it prints, with `strazactl users nhi-key set` or in the console. Then run `straza enroll --server http://127.0.0.1:8420 --headless`. Check the registered key or client, and that the user is an active agent``
 : The service on this machine holds a different key from the one registered for build-bot, for example after `straza keygen --force` without a new registration. Make a new key, register it, and enroll again.
+{{< /fails >}}
+
+
+{{< fails >}}
+``Straza: this agent is disabled on the server. Ask a Straza admin to enable it, then start the session again.``
+: An administrator or the identity manager disabled this agent. Enable the user and start the session again. In the first ten minutes after the agent's last sign-in the same case reads ``Straza: this user is disabled, so Straza refuses this request. Ask your IGA owner or a Straza administrator to enable the user.``
 {{< /fails >}}
 
 ## Prove a governed call
@@ -290,7 +296,7 @@ The delete, the end of the assignments, the revocation record and the event that
 To end the agent's sessions and stop new ones, and keep the identity, revoke only the key.
 
 {{< console >}}
-{{< clicks "Users" "build-bot" "Revoke key" "Revoke key" >}}
+{{< clicks "Users" "build-bot" "Devices and keys" "Revoke key" "Revoke key" >}}
 
 {{< shot name="user-agent-key" caption="A registered key with its fingerprint, **Rotate key** and **Revoke key**." >}}
 

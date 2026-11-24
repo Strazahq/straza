@@ -2,7 +2,7 @@
 title: strazactl spec conformance
 description: Replay the published Tier-1 corpus against a hook implementation and score it
 pagetype: reference
-weight: 97
+weight: 91
 draft: false
 sources:
   - cmd/strazactl

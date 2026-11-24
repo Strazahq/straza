@@ -149,7 +149,9 @@ const (
 // that replaces such a refusal keeps its number. It is 0 for every other
 // finding. Group, set on a risk only, names the risks a publisher confirms
 // together, once for the whole group; a risk with no group is confirmed on
-// its own, by name when it is typed.
+// its own, by name when it is typed. Rows, Rule, Server, Tools and
+// BindsProposer carry as fields what some codes also say in words, and Key
+// never covers them.
 type Finding struct {
 	Code     string `json:"code"`
 	Class    Class  `json:"class"`
@@ -162,6 +164,26 @@ type Finding struct {
 	Typed    string `json:"typed,omitempty"`
 	Group    string `json:"group,omitempty"`
 	Document int    `json:"document,omitempty"`
+	// Rows are the tools a risk of who gains covers, for the role its
+	// object names, in the order of the verdict's gains and each once.
+	Rows []ToolRow `json:"rows,omitempty"`
+	// Rule, Server and Tools name, on policy.local-allow and
+	// ready.rule-names-nothing, the rule, the server it names and the tool
+	// names it allows. A folded line whose parts name different ones
+	// carries none of the three, and a line about a rule of a live set the
+	// draft does not write carries no Tools.
+	Rule   string   `json:"rule,omitempty"`
+	Server string   `json:"server,omitempty"`
+	Tools  []string `json:"tools,omitempty"`
+	// BindsProposer marks a policy.guardrail-changed line of a set that
+	// applies to the draft's proposer, before or after the draft.
+	BindsProposer bool `json:"binds_proposer,omitempty"`
+}
+
+// ToolRow is one tool of one server.
+type ToolRow struct {
+	Server string `json:"server"`
+	Tool   string `json:"tool"`
 }
 
 // Key identifies a risk for an acknowledgment. It covers the code, the object
@@ -189,17 +211,47 @@ const (
 // HolderCount is how many users the row describes, and Holders names them,
 // which the server answers only to a reader who may see role membership.
 // BeforeWords and AfterWords carry the gate in plain words, such as "a hold,
-// up to 2 minutes, decided by sec-approvers".
+// up to 2 minutes, decided by sec-approvers", and BeforeGate and AfterGate
+// carry the same gate as fields, built from the same decision.
 type Gain struct {
-	Role        string   `json:"role"`
-	Server      string   `json:"server"`
-	Tool        string   `json:"tool"`
-	Holders     []string `json:"holders,omitempty"`
-	HolderCount int      `json:"holders_count"`
-	Before      Outcome  `json:"before"`
-	After       Outcome  `json:"after"`
-	BeforeWords string   `json:"before_words,omitempty"`
-	AfterWords  string   `json:"after_words,omitempty"`
+	Role        string    `json:"role"`
+	Server      string    `json:"server"`
+	Tool        string    `json:"tool"`
+	Holders     []string  `json:"holders,omitempty"`
+	HolderCount int       `json:"holders_count"`
+	Before      Outcome   `json:"before"`
+	After       Outcome   `json:"after"`
+	BeforeWords string    `json:"before_words,omitempty"`
+	AfterWords  string    `json:"after_words,omitempty"`
+	BeforeGate  *GainGate `json:"before_gate,omitempty"`
+	AfterGate   *GainGate `json:"after_gate,omitempty"`
+}
+
+// GainGate is the gate of one side of a Gain: the rule that denies a
+// denied call, and the approval and the checks of a call that needs
+// approval or runs after a check. Rule and Set name the rule and the set
+// that decide, when the decision names them. Class is hold or ticket, and
+// Seconds the hold's timeout or the ticket's life, on an approval only.
+// Roles are the approver roles, sorted and never null, Sponsor says that the
+// agent's sponsor decides, Requester that the requester may approve their
+// own call, and Confirm that the requester confirms and nobody else
+// decides. WithinSeconds is the window to use a ticket or retry a held
+// call in, set only where it is not the default. AnyArguments, Classifier
+// and ServerCheck say that one approval covers any arguments, that a
+// classifier must allow the call, and that the server must.
+type GainGate struct {
+	Rule          string   `json:"rule,omitempty"`
+	Set           string   `json:"set,omitempty"`
+	Class         string   `json:"class,omitempty"`
+	Seconds       int      `json:"seconds"`
+	Roles         []string `json:"roles"`
+	Sponsor       bool     `json:"sponsor"`
+	Requester     bool     `json:"requester"`
+	Confirm       bool     `json:"confirm"`
+	WithinSeconds int      `json:"within_seconds"`
+	AnyArguments  bool     `json:"any_arguments"`
+	Classifier    bool     `json:"classifier"`
+	ServerCheck   bool     `json:"server_check"`
 }
 
 // ObjectName is one object of a server: the id Straza resolved and the value

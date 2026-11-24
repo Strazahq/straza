@@ -2,7 +2,7 @@
 title: strazactl users nhi-key
 description: Manage an agent identity's headless assertion key (straza keygen prints it)
 pagetype: reference
-weight: 114
+weight: 108
 draft: false
 sources:
   - cmd/strazactl

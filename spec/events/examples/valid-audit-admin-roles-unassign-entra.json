@@ -1,0 +1,19 @@
+{
+  "specversion": "1.0",
+  "id": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e11",
+  "type": "straza.audit.admin",
+  "source": "strazad",
+  "time": "2026-11-17T09:12:04.318Z",
+  "data": {
+    "action": "roles.unassign",
+    "actor": "kim",
+    "actorId": "0197fa3d-4444-7abc-9def-000000000014",
+    "actorVia": "login",
+    "target": "0198a1c4-2b7e-7d3a-8f01-6a2b3c4d5e12",
+    "user": "0197fa3d-5555-7abc-9def-000000000015",
+    "role": "finance-readers",
+    "roleId": "0197fa3d-7777-7abc-9def-000000000017",
+    "origin": "entra",
+    "reason": "user deleted by admin"
+  }
+}

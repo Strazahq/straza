@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { DraftChanges } from "./draft-changes";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { ManifestDoc } from "@/lib/api";
+import type { DraftDetail, ManifestDoc } from "@/lib/api";
 import { roleOf } from "@/lib/drafts-model";
 import { changeRows } from "@/lib/manifest-edit";
 import { COVERAGE, COVERS_DETAIL, detailWith, trackerRole } from "@/test/drafts-fixture";
@@ -19,26 +19,23 @@ const EVERY = ["      covers: every"];
 const TWO = ["      covers:", "        objects: [Strazahq/pay-web, Strazahq/pay-api]"];
 
 const card = (object: string) => document.querySelector('[data-item="' + object + '"]') as HTMLElement;
+const changes = (d: DraftDetail) => <TooltipProvider><DraftChanges detail={d} registered={null} holders={() => null} onYaml={() => undefined} remoteRps={20} /></TooltipProvider>;
 const mount = (items: { name: string; doc: string; existed: boolean }[], live: Record<string, { op: "put"; doc: string }> = {}) =>
-  render(
-    <TooltipProvider>
-      <DraftChanges detail={detailWith({ draft: { items: items.map((i) => ({ kind: "Role" as const, op: "put" as const, ...i })) }, live, changes: [] })} />
-    </TooltipProvider>,
-  );
+  render(changes(detailWith({ draft: { items: items.map((i) => ({ kind: "Role" as const, op: "put" as const, ...i })) }, live, changes: [] })));
+const head = (c: HTMLElement) => [...c.querySelectorAll("header [data-kind], header [data-owner]")].map((x) => x.textContent);
 
 describe("the objects of a role in a draft, from the coverage list", () => {
   const names = (el: Element | null) => [...(el?.querySelectorAll("[data-name]") || [])].map((n) => [n.textContent, n.hasAttribute("data-added")]);
-  const render1 = (d = COVERS_DETAIL) => render(<TooltipProvider><DraftChanges detail={d} /></TooltipProvider>);
+  const render1 = (d = COVERS_DETAIL) => render(changes(d));
 
-  it("shows a changed role's tickets as one row, the added ones marked, its tools unchanged, and the sum in its head", () => {
+  it("shows a changed role's tickets as one row, the added ones marked, and its tools unchanged", () => {
     render1();
     const c = card("Role/tracker-triage");
-    expect(c.querySelector("[data-kind]")?.textContent).toBe("Application role · owned by tracker");
+    expect(head(c)).toEqual(["application role", "owned by tracker"]);
     const row = c.querySelector('[data-fact="Tickets"]') as HTMLElement;
     expect(names(row)).toEqual([["+ T-2", true], ["+ T-3", true], ["T-1", false]]);
     expect(names(c.querySelector('[data-fact="Tools"]'))).toEqual([["ticket_comment", false], ["ticket_read", false], ["ticket_search", false]]);
-    expect([...c.querySelectorAll("[data-sum]")].map((x) => x.textContent)).toEqual(["+2 tickets"]);
-    expect(c.querySelector('[data-row="Covers on tracker"]')).toBeNull();
+    expect(c.querySelector('[data-fact="Covers on tracker"]')).toBeNull();
     expect(c.querySelector("table")).toBeNull();
   });
 
@@ -52,7 +49,6 @@ describe("the objects of a role in a draft, from the coverage list", () => {
     render1(detailWith({ ...COVERS_DETAIL, verdict: { ...COVERS_DETAIL.verdict, objects: [{ ...COVERAGE, before: [{ id: "t1", value: "T-1" }, { id: "t2", value: "T-2" }], after: [{ id: "t1", value: "T-1" }] }] } }));
     const row = card("Role/tracker-triage").querySelector('[data-fact="Tickets"]') as HTMLElement;
     expect(row.querySelector("[data-removed]")?.textContent).toBe("T-2");
-    expect([...card("Role/tracker-triage").querySelectorAll("[data-sum]")].map((x) => x.textContent)).toEqual(["-1 ticket"]);
   });
 
   it("names every ticket for a role that covers them all", () => {
@@ -66,18 +62,17 @@ describe("the objects of a role in a draft, from the coverage list", () => {
     const doc = (dbs: string[]) => trackerRole("postgres-helpdesk", ["delete_rows"], dbs).replaceAll("tracker", "postgres");
     render1(detailWith({ draft: { items: [{ kind: "Role", name: "postgres-helpdesk", op: "put", doc: doc(["helpdesk", "playground"]), existed: true }] }, live: { "Role/postgres-helpdesk": { op: "put", doc: doc(["helpdesk"]) } }, verdict: { objects: [db], gains: [] } }));
     const c = card("Role/postgres-helpdesk");
-    expect(c.querySelector("[data-kind]")?.textContent).toBe("Application role · owned by postgres");
+    expect(head(c)).toEqual(["application role", "owned by postgres"]);
     expect(names(c.querySelector('[data-fact="Databases"]'))).toEqual([["+ playground", true], ["helpdesk", false]]);
-    expect([...c.querySelectorAll("[data-sum]")].map((x) => x.textContent)).toEqual(["+1 database"]);
     expect(c.textContent).not.toMatch(/ticket|repo/);
   });
 
   it("shows a new role's tickets beside its tools", () => {
     const fresh = { ...COVERAGE, role: "tracker-new", holders_count: 0, before: [], after: [{ id: "t9", value: "T-9" }] };
-    render1(detailWith({ draft: { items: [{ kind: "Role", name: "tracker-new", op: "put", doc: trackerRole("tracker-new", ["ticket_read"], ["T-9"]), existed: false }] }, verdict: { objects: [fresh] }, live: {}, changes: [] }));
+    render1(detailWith({ draft: { items: [{ kind: "Role", name: "tracker-new", op: "put", doc: trackerRole("tracker-new", ["ticket_read"], ["T-9"]), existed: false }] }, verdict: { objects: [fresh], gains: [] }, live: {}, changes: [] }));
     const c = card("Role/tracker-new");
     expect(names(c.querySelector('[data-fact="Tickets"]'))).toEqual([["T-9", false]]);
-    expect(names(c.querySelector('[data-fact="Tools"]'))).toEqual([["ticket_read", false]]);
+    expect(c.querySelector('[data-fact="Behind Straza"] [data-tool-line="plain"]')?.textContent).toBe("ticket_read");
   });
 });
 
@@ -93,7 +88,8 @@ describe("the covers line in a draft, where the verdict sends no coverage entry"
   });
 
   // Each case is the live line and the draft's line of a changed role:
-  // a change shows as a Now and After row, the same line shows none.
+  // a change shows as a row of the line now and after publishing, the same
+  // line shows none.
   const cases: [string, string[], string[], [string, string] | null][] = [
     ["every narrowed to two repos", EVERY, TWO, ["every", "Strazahq/pay-api, Strazahq/pay-web"]],
     ["a line set where there was none", [], EVERY, ["not set", "every"]],
@@ -101,9 +97,9 @@ describe("the covers line in a draft, where the verdict sends no coverage entry"
   ];
   it.each(cases)("shows %s", (_case, was, now, want) => {
     mount([{ name: "ghapp-write", doc: roleDoc("ghapp-write", now), existed: true }], { "Role/ghapp-write": { op: "put", doc: roleDoc("ghapp-write", was) } });
-    const row = card("Role/ghapp-write").querySelector('[data-row="Covers on ghapp"]');
+    const row = card("Role/ghapp-write").querySelector('[data-fact="Covers on ghapp"]');
     if (!want) expect(row).toBe(null);
-    else expect(Array.from((row as HTMLElement).querySelectorAll("td")).map((td) => td.textContent)).toEqual(["Covers on ghapp", ...want]);
+    else expect([row?.querySelector("[data-was]")?.textContent, row?.querySelector("[data-now]")?.textContent]).toEqual(want);
   });
 
   it("counts a first pin of a type as a change of the server", () => {

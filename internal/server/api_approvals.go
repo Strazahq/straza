@@ -76,8 +76,15 @@ func (a *App) requireIdentified(next func(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// personClientHarnessRefusal is the 403 a coding harness's session reads on
+// every route of requirePersonClient, formatted with the harness name and
+// approvalSurfacesHint.
+const personClientHarnessRefusal = "this session belongs to the coding harness %q, and a coding harness cannot decide a request, " +
+	"enroll a device that decides, or read or remove a person's approver devices and waiting requests. Use %s"
+
 // requirePersonClient is requireIdentified for the routes that decide a
-// request or enroll a device that decides. It refuses a user who is not a
+// request, enroll a device that decides, or reach a person's own approver
+// devices and waiting requests. It refuses a user who is not a
 // person, as the admin plane does, before the route reads anything. It
 // refuses a session that a coding harness checked in, because the agent in
 // that harness runs as the user and holds that session token. A login token
@@ -97,9 +104,7 @@ func (a *App) requirePersonClient(next func(w http.ResponseWriter, r *http.Reque
 		if ses.ID != "" && !adminHarnesses[ses.HarnessName] {
 			a.log.Warn("coding-harness session refused on a decide route",
 				"user", userID, "session", ses.ID, "harness", ses.HarnessName, "path", r.URL.Path)
-			apiError(w, http.StatusForbidden, fmt.Sprintf(
-				"this session belongs to the coding harness %q, and a coding harness cannot decide a request or enroll a device that decides. Use %s",
-				ses.HarnessName, a.approvalSurfacesHint()))
+			apiError(w, http.StatusForbidden, fmt.Sprintf(personClientHarnessRefusal, ses.HarnessName, a.approvalSurfacesHint()))
 			return
 		}
 		// The person is the actor of any straza.audit.admin record the
@@ -204,10 +209,16 @@ func formatTimePtr(t *time.Time) *string {
 	return &s
 }
 
-// handleApprovalsList serves GET /v1/admin/approvals?state=... (requireAdmin).
-// Absent keeps the documented pending default; concrete states pass through;
-// an unknown value is a loud 400, never a silent coercion to pending (a
-// filter typo must not render the pending queue as "denied").
+// approvalsBareMax is the most records the bare lane of the approvals list
+// answers, the bound store.ApprovalRepo.List keeps.
+const approvalsBareMax = 500
+
+// handleApprovalsList serves GET /v1/admin/approvals?state=...&user=...
+// (requireAdmin). Absent keeps the documented pending default; concrete
+// states pass through; an unknown value is a loud 400, never a silent
+// coercion to pending (a filter typo must not render the pending queue as
+// "denied"). user narrows both lanes to one user id's requests, and an id
+// no user has answers an empty list.
 func (a *App) handleApprovalsList(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	switch state {
@@ -225,8 +236,9 @@ func (a *App) handleApprovalsList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	user := r.URL.Query().Get("user")
 	if p.paged {
-		recs, next, err := a.approval.PageByState(r.Context(), state, p.before, p.limit)
+		recs, next, err := a.approval.PageByState(r.Context(), state, user, p.before, p.limit)
 		if err != nil {
 			a.fail(w, r, http.StatusInternalServerError, "list approvals failed", err)
 			return
@@ -238,7 +250,14 @@ func (a *App) handleApprovalsList(w http.ResponseWriter, r *http.Request) {
 		writePage(w, out, next)
 		return
 	}
-	recs, err := a.approval.List(r.Context(), state)
+	var recs []approval.Record
+	var err error
+	if user == "" {
+		recs, err = a.approval.List(r.Context(), state)
+	} else {
+		// One user's newest, as many as the unfiltered lane's store bound.
+		recs, _, err = a.approval.PageByState(r.Context(), state, user, "", approvalsBareMax)
+	}
 	if err != nil {
 		a.fail(w, r, http.StatusInternalServerError, "list approvals failed", err)
 		return
@@ -342,7 +361,7 @@ func approvalErrorStatus(err error) int {
 // and the config key an operator sets to accept the risk.
 func (a *App) unsignedOwnDecisionMessage() string {
 	return "this is your own request, and the console cannot decide it, because an agent on your machine could do the same. " +
-		"Confirm it on your enrolled phone, or on the self-service page under This browser (" + a.selfServicePage() + "). " +
+		"Confirm it on your enrolled phone, or under Requests on the self-service page (" + a.selfServicePage() + ") in a browser you have set up to approve. " +
 		"An operator who accepts that risk sets approval.unsignedOwnDecisions to true in the server config"
 }
 

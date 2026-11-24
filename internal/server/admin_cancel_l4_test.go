@@ -176,7 +176,7 @@ func testAppLeaving(t *testing.T, log *slog.Logger) (*App, string, *leavingStore
 	app.gateway.notify.SetDelay(0)
 	base := "http://" + app.Addr()
 	app.cfg.Server.PublicURL = base
-	tokens, err := authn.NewTokenService(ctx, app.store.SigningKeys(), base, 0)
+	tokens, err := authn.NewTokenService(ctx, app.store.SigningKeys(), app.kek, base, 0)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -378,8 +378,8 @@ func TestAdminWriteOnAHungStore(t *testing.T) {
 			body: func(ada store.User, role store.Role) string {
 				return `{"subject_kind":"user","subject_id":"` + ada.ID + `","role_id":"` + role.ID + `"}`
 			},
-			status: http.StatusServiceUnavailable,
-			words:  []string{"did not finish within", "deadline exceeded", "answered 400", "assign failed (unknown role or subject?)"},
+			status: http.StatusInternalServerError,
+			words:  []string{"could not store the assignment", "deadline exceeded"},
 		},
 		{
 			name: "user lock whose read answers after the bound", point: afterGet,

@@ -1,40 +1,43 @@
 import * as React from "react";
-import { FileCheckIcon, ServerIcon, ShieldIcon } from "lucide-react";
-import { type ChipTone, DraftChip } from "@/components/draft-checks";
+import type { LucideIcon } from "lucide-react";
+import { Chip } from "@/components/chip";
+import { HoldersPill } from "@/components/draft-parts";
+import { KIND_ICON } from "@/components/kind-icon";
+import { KindGlyph, markOf } from "@/components/role-kind";
 import type { DraftKind } from "@/lib/api";
 import type { SummaryChip } from "@/lib/drafts-items";
-import type { ChangeWhat } from "@/lib/drafts-model";
-import { EVERY_TOOL, addedMark, holdersChip, unchangedFold } from "@/lib/drafts-words";
+import type { RoleView } from "@/lib/drafts-model";
+import { routeByKey } from "@/lib/routes";
+import { EVERY_TOOL, addedMark, unchangedFold } from "@/lib/drafts-words";
 import { cn } from "@/lib/utils";
 
 // The small marks of the drafts page that the In this draft table and the
-// cards share: the change hue, the kind icon, the summary and holders
-// chips, and a row of name chips that marks what joins and leaves.
+// cards share: the kind icon, the summary chips, the holders pill, and a
+// row of name chips that marks what joins and leaves.
 
-// MARK_TONE is the hue of an item's change chip.
-export const MARK_TONE: Record<ChangeWhat, ChipTone> = { new: "accent", changed: "warn", off: "warn", removed: "danger" };
+const ICON: Record<Exclude<DraftKind, "Role">, LucideIcon> = { App: KIND_ICON.server, PolicySet: KIND_ICON["policy-set"] };
 
-const ICON: Record<DraftKind, typeof ServerIcon> = { App: ServerIcon, Role: ShieldIcon, PolicySet: FileCheckIcon };
-
-// KindIcon is the icon of a kind, the one its area carries in the rail.
-export function KindIcon({ kind }: { kind: DraftKind }) {
-  const Icon = ICON[kind];
+// KindIcon is the icon of an item's kind. A role carries its own kind's
+// icon when the item holds the role, and the rail's Roles icon otherwise.
+export function KindIcon({ kind, role }: { kind: DraftKind; role?: RoleView | null }) {
+  if (kind === "Role" && role) return <KindGlyph mark={markOf(role)} />;
+  const Icon = kind === "Role" ? routeByKey("roles").icon : ICON[kind];
   return <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
 }
 
 // SummaryChips sum up a changed role: green for what joins, red for what
 // leaves.
 export function SummaryChips({ chips }: { chips: SummaryChip[] }) {
-  return <>{chips.map((c) => <DraftChip key={c.word} word={c.word} tone={c.sign === "+" ? "ok" : "danger"} attr="data-sum" />)}</>;
+  return <>{chips.map((c) => <Chip key={c.word} tone={c.sign === "+" ? "ok" : "danger"} data-sum={c.word}>{c.word}</Chip>)}</>;
 }
 
 // HoldersChip says who holds a role, and nothing where the verdict does not
 // say.
 export function HoldersChip({ n }: { n: number | null }) {
-  return n === null ? null : <DraftChip word={holdersChip(n)} tone="plain" attr="data-holders" />;
+  return n === null ? null : <HoldersPill n={n} />;
 }
 
-const CHIP = "inline-block rounded-md border px-1.5 py-px font-mono text-[13px]";
+const CHIP = "inline-block rounded-md border px-1.5 py-px font-mono text-caption";
 const label = (name: string) => (name === "*" ? EVERY_TOOL : name);
 
 // ChipDiff is one row of name chips: a green chip with a plus for each name

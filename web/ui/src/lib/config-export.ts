@@ -25,8 +25,14 @@ export function configFragment(entries: ConfigEntry[]): string {
   return render(root, 0).join("\n");
 }
 
+// shellValue quotes a value for a POSIX shell line, keeping a literal
+// single quote.
+export function shellValue(value: string): string {
+  return /^[a-zA-Z0-9_./:@+-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\"'\"'") + "'";
+}
+
 export function draftScalar(id: string, value: string): ConfigScalar {
-  if (["events", "jit", "ownDecisions"].includes(id)) return value === "true";
+  if (["events", "jit", "ownDecisions", "secondPerson"].includes(id)) return value === "true";
   if (id === "hold") return Number(value);
   return value;
 }

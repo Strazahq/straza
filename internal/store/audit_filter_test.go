@@ -112,10 +112,13 @@ func testAuditListFiltered(t *testing.T, s Store) {
 }
 
 // TestAuditListFilteredByUser pins the user narrowing behind audit tail
-// --user: a principal's rows match on data.user, data.actorId and
-// data.actor, the filter lands before the limit so a quiet user's records
-// are not pushed out of the newest window by busier users, and the
-// unresolved spelling still matches the actor column.
+// --user: a principal's rows match on data.user and data.userId, and on
+// data.actorId and data.actor of a straza.audit.admin record only, so an
+// older uploaded record that carries a forged actor is not found under that
+// name. An admin record made about the principal matches too. The filter
+// lands before the limit so a quiet user's records are not pushed out of the
+// newest window by busier users, and the unresolved spelling still matches
+// the actor column.
 func TestAuditListFilteredByUser(t *testing.T) {
 	forEachStore(t, testAuditListFilteredByUser)
 }
@@ -130,6 +133,8 @@ func testAuditListFilteredByUser(t *testing.T, s Store) {
 		{"ce-u-5", `{"id":"ce-u-5","type":"straza.audit.tool","data":{"user":"u-kim","command":"ls","effect":"allow"}}`},
 		{"ce-u-6", `{"id":"ce-u-6","type":"straza.audit.tool","data":{"user":"u-kim","command":"ls","effect":"deny"}}`},
 		{"ce-u-7", `{"id":"ce-u-7","type":"straza.audit.authn","data":{"action":"session.end","outcome":"lifetime-closed","userId":"u-joe"}}`},
+		{"ce-u-8", `{"id":"ce-u-8","type":"straza.audit.tool","data":{"user":"u-kim","actor":"joe","actorId":"u-joe","command":"ls","effect":"allow"}}`},
+		{"ce-u-9", `{"id":"ce-u-9","type":"straza.audit.admin","data":{"user":"u-joe","actor":"midpoint","actorId":"tok-mp","action":"roles.assign"}}`},
 	}
 	prev := audit.Genesis
 	seqs := map[int64]string{}
@@ -155,10 +160,11 @@ func testAuditListFilteredByUser(t *testing.T, s Store) {
 		recent bool
 		want   []string
 	}{
-		{"resolved pair matches user, userId, actorId and actor", AuditFilter{UserID: "u-joe", Username: "joe"}, 10, false, []string{"ce-u-1", "ce-u-2", "ce-u-3", "ce-u-7"}},
-		{"id alone matches user, userId and actorId", AuditFilter{UserID: "u-joe"}, 10, false, []string{"ce-u-1", "ce-u-2", "ce-u-3", "ce-u-7"}},
+		{"resolved pair matches user, userId, actorId and actor", AuditFilter{UserID: "u-joe", Username: "joe"}, 10, false, []string{"ce-u-1", "ce-u-2", "ce-u-3", "ce-u-7", "ce-u-9"}},
+		{"id alone matches user, userId and actorId", AuditFilter{UserID: "u-joe"}, 10, false, []string{"ce-u-1", "ce-u-2", "ce-u-3", "ce-u-7", "ce-u-9"}},
 		{"unresolved spelling matches the actor column", AuditFilter{UserID: "joe", Username: "joe"}, 10, false, []string{"ce-u-3"}},
-		{"newest window holds the quiet user's rows", AuditFilter{UserID: "u-joe", Username: "joe"}, 2, true, []string{"ce-u-7", "ce-u-3"}},
+		{"an actor's name finds the admin record it made about someone else", AuditFilter{UserID: "midpoint", Username: "midpoint"}, 10, false, []string{"ce-u-9"}},
+		{"newest window holds the quiet user's rows", AuditFilter{UserID: "u-joe", Username: "joe"}, 2, true, []string{"ce-u-9", "ce-u-7"}},
 		{"composes with effect", AuditFilter{UserID: "u-joe", Username: "joe", Effect: "allow"}, 10, false, []string{"ce-u-1"}},
 		{"unknown principal matches nothing", AuditFilter{UserID: "u-nobody", Username: "nobody"}, 10, false, []string{}},
 	}

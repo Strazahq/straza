@@ -56,9 +56,10 @@ func (s *Service) Await(ctx context.Context, id string) (Record, error) {
 }
 
 // Decide validates and applies a human verdict ("approved"|"denied"). Order:
-// exists → pending/not-expired (idempotent same-verdict no-op; different-verdict
-// conflict; expired) → self-approval → own decision signed by a device →
-// fresh approver-role check → atomic transition (the one-time cross-pod
+// exists → resolved (for its decider or a caller who may decide it: idempotent
+// same-verdict no-op, different-verdict conflict, expired; for anyone else the
+// refusal below) → not expired → self-approval → own decision signed by a
+// device → fresh approver-role check → atomic transition (the one-time cross-pod
 // gate) → broadcast → audit.
 // reason is the decider's optional own words (both verdicts, validated
 // here so every lane inherits the same intake gate); deviceID names the
@@ -94,30 +95,27 @@ func (s *Service) decide(ctx context.Context, id, verdict, deciderUserID, channe
 	rec := recordFromStore(cur)
 
 	if rec.State != StatePending {
+		// The outcome goes only to the person who decided the record, whose
+		// role may have gone since, and to a caller the checks below would
+		// let decide it now. Anyone else reads the refusal a pending record
+		// gives them, so an id tells them no more than on a pending record.
+		// The device-signature check is left out: it says how a person
+		// decides, not who may.
+		if rec.DecidedBy == "" || deciderUserID != rec.DecidedBy {
+			if err := s.refuseDecider(ctx, rec, deciderUserID); err != nil {
+				return Record{}, err
+			}
+			if _, err := s.deciderName(ctx, rec, deciderUserID); err != nil {
+				return Record{}, err
+			}
+		}
 		return resolvedOutcome(rec, verdict)
 	}
 	if s.now().After(rec.ExpiresAt) {
 		return Record{}, ErrExpired
 	}
-	if rec.Mode == policy.ModeConfirm && deciderUserID != rec.UserID {
-		// mode confirm (revision 11): confirmation proves the requester's
-		// presence and intent; no other identity, root included, can supply
-		// that. The inverse ban below never applies to confirm records.
-		return Record{}, ErrNotRequester
-	}
-	if rec.Mode != policy.ModeConfirm && !rec.SelfApproval && deciderUserID == rec.UserID {
-		return Record{}, ErrSelfApproval
-	}
-	// Hard-block non-human deciders on EVERY lane: an NHI must
-	// never resolve an approval even if an approve role was misassigned to it.
-	// Enforced here, ahead of the role check, so console/Slack/API all inherit
-	// it; it also covers confirm records whose requester is an NHI.
-	nhi, err := s.isNHI(ctx, deciderUserID)
-	if err != nil {
+	if err := s.refuseDecider(ctx, rec, deciderUserID); err != nil {
 		return Record{}, err
-	}
-	if nhi {
-		return Record{}, ErrNHIDecider
 	}
 	if deciderUserID == rec.UserID && deviceID == "" && !s.cfg.UnsignedOwnDecisions {
 		// The requester's agent runs as the requester and can reach every
@@ -127,20 +125,9 @@ func (s *Service) decide(ctx context.Context, id, verdict, deciderUserID, channe
 		// one's own request is refused on every lane.
 		return Record{}, ErrUnsignedOwnDecision
 	}
-	var name string
-	if rec.Mode == policy.ModeConfirm {
-		// The requester needs no pool membership: on a confirm record the
-		// identity match above IS the authorization.
-		name = s.displayName(ctx, deciderUserID)
-	} else {
-		n, ok, err := s.approver(ctx, deciderUserID, rec.ApproverRoles, rec.ApproverUsers)
-		if err != nil {
-			return Record{}, err
-		}
-		if !ok {
-			return Record{}, ErrNotApprover
-		}
-		name = n
+	name, err := s.deciderName(ctx, rec, deciderUserID)
+	if err != nil {
+		return Record{}, err
 	}
 
 	at := s.now()
@@ -237,6 +224,54 @@ func validateReason(reason string) error {
 		}
 	}
 	return nil
+}
+
+// refuseDecider answers the refusal of a caller who may not decide rec by
+// who they are: anyone but the requester of a confirm record, the requester
+// of a record that bars self-approval, and a non-human identity. It returns
+// nil for everyone else, and an error wrapping ErrStoreUnavailable when the
+// caller's user row cannot be read.
+func (s *Service) refuseDecider(ctx context.Context, rec Record, deciderUserID string) error {
+	if rec.Mode == policy.ModeConfirm && deciderUserID != rec.UserID {
+		// mode confirm (revision 11): confirmation proves the requester's
+		// presence and intent; no other identity, root included, can supply
+		// that. The inverse ban below never applies to confirm records.
+		return ErrNotRequester
+	}
+	if rec.Mode != policy.ModeConfirm && !rec.SelfApproval && deciderUserID == rec.UserID {
+		return ErrSelfApproval
+	}
+	// Hard-block non-human deciders on EVERY lane: an NHI must
+	// never resolve an approval even if an approve role was misassigned to it.
+	// Enforced here, ahead of the role check, so console/Slack/API all inherit
+	// it; it also covers confirm records whose requester is an NHI.
+	nhi, err := s.isNHI(ctx, deciderUserID)
+	if err != nil {
+		return err
+	}
+	if nhi {
+		return ErrNHIDecider
+	}
+	return nil
+}
+
+// deciderName answers the name the record keeps for a caller who passed
+// refuseDecider, or ErrNotApprover when rec's decide pool, read fresh, does
+// not admit them.
+func (s *Service) deciderName(ctx context.Context, rec Record, deciderUserID string) (string, error) {
+	if rec.Mode == policy.ModeConfirm {
+		// The requester needs no pool membership: on a confirm record the
+		// identity match in refuseDecider IS the authorization.
+		return s.displayName(ctx, deciderUserID), nil
+	}
+	name, ok, err := s.approver(ctx, deciderUserID, rec.ApproverRoles, rec.ApproverUsers)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", ErrNotApprover
+	}
+	return name, nil
 }
 
 // resolvedOutcome maps an already-terminal record to the idempotency contract:

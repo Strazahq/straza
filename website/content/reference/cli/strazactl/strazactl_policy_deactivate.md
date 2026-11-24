@@ -2,7 +2,7 @@
 title: strazactl policy deactivate
 description: Turn a PolicySet off and recompile and distribute the snapshot
 pagetype: reference
-weight: 67
+weight: 61
 draft: false
 sources:
   - cmd/strazactl

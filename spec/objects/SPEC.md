@@ -1,4 +1,14 @@
-# Canonical object documents, v1beta1 (revision 7)
+# Canonical object documents, v1beta1 (revision 8)
+
+Revision 8 (2026-11-22; derived from the serializer's golden test: [doc]):
+knowledge packs left the product, so the export of a Role no longer writes
+`spec.packs`. A reader keeps accepting the field, because stored drafts and
+older exports carry it, and ignores it, as it has since revision 5. A draft
+whose Role names a pack carries a note that says the field is ignored.
+`fixtures/role-dev-export.yaml` is the export of the role `dev` as this
+revision writes it. `fixtures/role-dev.yaml` stays as a revision 7 document
+that names a pack and still reads. No field is added, so every revision 7
+document reads unchanged.
 
 Revision 7 (2026-10-19; the export of `covers: every` was fired against the eval stack: [live]):
 a binding on an MCP server whose manifest pins an object type
@@ -84,9 +94,9 @@ there is exactly one spelling.
 
 - **Name-keyed, id-free**: documents reference objects by name only, never
   by row id, so the same document applies to another deployment.
-- **Deterministic**: every list is sorted (implies, packs, and bindings by
-  app name; tools within a binding lexically), so re-exports are
-  byte-stable and diffs are honest.
+- **Deterministic**: every list is sorted (implies, and bindings by app
+  name; tools within a binding lexically), so re-exports are byte-stable
+  and diffs are honest.
 - **Desired state only**: no timestamps, no origin markers, no counts.
   Runtime facts belong to the API, not the document.
 - Serialization is gopkg.in/yaml.v3 defaults (4-space indent); the
@@ -114,20 +124,22 @@ spec:
           covers:
             objects:      # sorted values from the server's object list
                 - <value>
-    packs:          # sorted pack names; omitted when empty
+    packs:          # retired in revision 8: read and ignored, never exported
         - <pack name>
 ```
 
 `kind: straza` is the control plane (openapi 0.59.0, spelled `console`
 until revision 2): such a role grants strazad itself and carries no
-bindings or packs by API invariant, so those sections never appear in
-its export.
+bindings by API invariant, so that section never appears in its export.
 
 ## 3. Fixtures
 
-`fixtures/role-dev.yaml` is round-verified byte-for-byte by
+`fixtures/role-dev-export.yaml` is round-verified byte-for-byte by
 `TestRoleExportGolden` on every test run (the running serializer is the
-source, not hand-derivation). `fixtures/role-objects.yaml` is
+source, not hand-derivation). `fixtures/role-dev.yaml` is the same role as
+revision 7 exported it, with a pack, derived from that revision's
+serializer, and the Role reader and the bundle reader read it on every
+test run. `fixtures/role-objects.yaml` is
 round-verified the same way by `TestCoversThroughTheAdminRoutes`, and
 `fixtures/role-every.yaml` by `TestRoleDocMarshalWritesCovers`. Both are
 derived from this document, not captured from a live wire.

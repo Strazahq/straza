@@ -121,18 +121,31 @@ type sessionPayload struct {
 	ID       string `json:"id"`
 	UserID   string `json:"user_id"`
 	Username string `json:"username,omitempty"`
-	Harness  string `json:"harness"`
+	// UserKind says what the session's user is, by store.User.Kind:
+	// person, agent or service. Absent when the user row cannot be read.
+	UserKind string `json:"user_kind,omitempty"`
+	// Sponsor is the username of that user's sponsor, absent when it has none.
+	Sponsor string `json:"sponsor,omitempty"`
+	// Waiting counts the session's approval requests that wait for an
+	// answer now, pending and not expired. Absent when zero.
+	Waiting int    `json:"waiting,omitempty"`
+	Harness string `json:"harness"`
 	// ClientVersion is the straza build the client named at check-in
 	// (0.95.0); blank for a client older than the field.
 	ClientVersion string `json:"client_version,omitempty"`
 	// ClientCommit is the git commit of that build, which the console
 	// compares with the server's own; blank for a client or a session
 	// older than the field.
-	ClientCommit string    `json:"client_commit,omitempty"`
-	Attestation  string    `json:"attestation"`
-	Status       string    `json:"status"`
-	StartedAt    time.Time `json:"started_at"`
-	LastSeen     time.Time `json:"last_seen"`
+	ClientCommit string `json:"client_commit,omitempty"`
+	// Host is the machine the session runs on and Folder the folder it
+	// started in, as the client named them at check-in. Each is blank for
+	// a client or a session older than the fields.
+	Host        string    `json:"host,omitempty"`
+	Folder      string    `json:"folder,omitempty"`
+	Attestation string    `json:"attestation"`
+	Status      string    `json:"status"`
+	StartedAt   time.Time `json:"started_at"`
+	LastSeen    time.Time `json:"last_seen"`
 	// WiringStatus/WiringHash: the session's managed-wiring hash classified
 	// against the published render + registry (0.55.0):
 	// current | allowed | mismatch | unmeasured; blank for admin harnesses
@@ -142,9 +155,10 @@ type sessionPayload struct {
 	WiringHash   string `json:"wiring_hash,omitempty"`
 }
 
-// handleSessionsList serves GET /v1/admin/sessions?status=&user= (both
-// optional, both validated loud): a typo answering an empty 200 reads as "no
+// handleSessionsList serves GET /v1/admin/sessions?status=&user=&q= (all
+// optional, all validated loud): a typo answering an empty 200 reads as "no
 // sessions", which on this screen means "no fleet". Rows come newest-first.
+// The search q needs the paged lane, as the users list's filters do.
 func (a *App) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	switch status {
@@ -157,13 +171,18 @@ func (a *App) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	search, ok := sessionSearch(w, r, p.paged)
+	if !ok {
+		return
+	}
 	var sessions []store.Session
 	var err error
 	var after *store.Session
 	user := r.URL.Query().Get("user")
 	switch {
 	case p.paged:
-		sessions, err = a.store.Sessions().Page(r.Context(), status, user, p.sort, store.Cursor{Value: p.value, ID: p.before}, p.limit+1)
+		f := store.SessionFilter{Status: status, UserID: user, Q: search}
+		sessions, err = a.store.Sessions().Page(r.Context(), f, p.sort, store.Cursor{Value: p.value, ID: p.before}, p.limit+1)
 		if errors.Is(err, store.ErrBadCursor) {
 			apiError(w, http.StatusBadRequest, "invalid or stale cursor: re-fetch from the start")
 			return
@@ -190,36 +209,7 @@ func (a *App) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, http.StatusInternalServerError, "list sessions failed", err)
 		return
 	}
-	// Resolve owners in one batch; operators think in usernames, not UUIDs.
-	ids := make([]string, 0, len(sessions))
-	seen := map[string]bool{}
-	for _, s := range sessions {
-		if !seen[s.UserID] {
-			seen[s.UserID] = true
-			ids = append(ids, s.UserID)
-		}
-	}
-	names := map[string]string{}
-	if users, err := a.store.Users().GetByIDs(r.Context(), ids); err == nil {
-		for _, u := range users {
-			names[u.ID] = u.Username
-		}
-	}
-	// One registry read serves every row's wiring classification; a failed
-	// read omits the statuses rather than failing the fleet screen.
-	registry, regErr := a.store.AttestationHashes().List(r.Context())
-	if regErr != nil {
-		a.log.Warn("sessions list: attestation registry unavailable; wiring status omitted", "err", regErr)
-	}
-	out := make([]sessionPayload, len(sessions))
-	for i, s := range sessions {
-		out[i] = sessionPayload{ID: s.ID, UserID: s.UserID, Username: names[s.UserID],
-			Harness: joinHarness(s.HarnessName, s.HarnessVersion), ClientVersion: s.ClientVersion, ClientCommit: s.ClientCommit, Attestation: s.AttestationLevel,
-			Status: s.Status, StartedAt: s.StartedAt, LastSeen: s.LastSeen}
-		if regErr == nil {
-			out[i].WiringStatus, out[i].WiringHash = a.harnessWiringStatus(s.HarnessName, s.AttestationHashes, registry)
-		}
-	}
+	out, names := a.sessionRows(r.Context(), sessions)
 	if p.paged {
 		cursor := ""
 		if after != nil {

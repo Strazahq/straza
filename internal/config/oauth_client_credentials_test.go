@@ -75,7 +75,7 @@ oauth:
 // beside it. Every refusal says what to write.
 func TestOAuthEntraBlueprint(t *testing.T) {
 	const (
-		tenant    = "3c6bff24-ce9b-405c-8251-fe86232353b6"
+		tenant    = "d1d1d1d1-0000-4000-8000-000000000001"
 		blueprint = "76568ffa-de8d-4d35-986d-4efe2a9f8787"
 		field     = "oauth.providers.entra-lab.clientCredentials: "
 		scopeErr  = field + "entraBlueprint needs exactly one scope that ends in /.default, such as api://<resource app id>/.default, because Entra's client credentials grant takes only that form. Write the resource's /.default scope under scopes"

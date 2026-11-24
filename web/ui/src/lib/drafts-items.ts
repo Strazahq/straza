@@ -1,9 +1,10 @@
-// What the review page says about each item of a draft in two places, the
-// row of In this draft and the head of the item's card: its kind, the
+// What the review page says about each item of a draft in the row of In
+// this draft, which shows where In short builds no row: its kind, the
 // server that owns a role, the change, who holds a role, the outcomes of a
 // policy set, the summary chips of a changed role, and one line of what
-// publishing does. An open draft reads live state and the verdict, a
-// published one its change record. No React here.
+// publishing does. The item's card reads its change, owner, live link and
+// role readings from the same facts. An open draft reads live state and
+// the verdict, a published one its change record. No React here.
 import { coversKey } from "./access-covers";
 import { PINNED_TYPE, coversOn } from "./access-object-words";
 import type { DraftDetail, DraftItem } from "./api";
@@ -15,7 +16,9 @@ import {
   ITEM_KIND,
   NO_FIELD_CHANGE,
   NO_ROLE_CHANGE,
+  NOT_READABLE_DOC,
   OFF_LINE,
+  ON_LINE,
   REMOVED_LINE,
   REMOVED_LINE_PAST,
   type Sign,
@@ -30,6 +33,7 @@ import {
   toolsChip,
 } from "./drafts-words";
 import { nounsOf } from "./object-words";
+import { openDoc } from "./policy-model";
 import { list } from "./policy-words";
 import { NONE } from "./words";
 
@@ -121,7 +125,7 @@ export function itemFacts(d: DraftDetail, it: DraftItem): ItemFacts {
   const open = d.draft.state === "open";
   const past = d.draft.state === "published";
   const sides = sidesOf(d, it);
-  const what = whatOf({ op: sides.after.op, existed: !!sides.before });
+  const what = whatOf({ op: sides.after.op, existed: !!sides.before, was: sides.before?.op });
   const isRole = it.kind === "Role";
   const role = isRole ? roleOf(sides.after.doc || sides.before?.doc) : null;
   const before = isRole && sides.before ? roleOf(sides.before.doc) : null;
@@ -144,10 +148,13 @@ export function itemFacts(d: DraftDetail, it: DraftItem): ItemFacts {
     facts.summary = roleSummary(d, it.name, tools);
     if (!facts.summary.length) facts.line = changesLine("", roleFields(d, it.name, before, role), past, NO_ROLE_CHANGE);
   } else if (isRole) facts.line = role ? reachesLine(role.bindings, role.implies) : "";
+  else if (!sides.after.doc || openDoc(sides.after.doc).errors.length) facts.line = NOT_READABLE_DOC;
   else {
     const marks = ruleMarks(sides.before ? sides.before.doc : null, sides.after.doc);
     const n = (mark: string) => marks.filter((r) => r.mark === mark).length;
-    facts.line = rulesLine({ new: n("new"), edited: n("edited"), removed: n("removed") });
+    const line = rulesLine({ new: n("new"), edited: n("edited"), removed: n("removed") });
+    // A policy the draft turns on says so first, then what else changes.
+    facts.line = what !== "on" ? line : n("new") + n("edited") + n("removed") ? ON_LINE + " " + line : ON_LINE;
   }
   return facts;
 }

@@ -160,7 +160,7 @@ func TestGatewayEndpoint(t *testing.T) {
 // without _meta exactly as its three contract fields, and that _meta counts.
 func TestMirrorToolDigest(t *testing.T) {
 	schema := map[string]any{"type": "object"}
-	plain := &mcp.Tool{Name: "everything__echo", Description: "echo", InputSchema: schema, Title: "not mirrored"}
+	plain := &mcp.Tool{Name: "everything__echo", Description: "echo", InputSchema: schema}
 	const plainJSON = `{"description":"echo","inputSchema":{"type":"object"},"name":"everything__echo"}`
 	if got := jsonOf(t, mirrorTool(plain)); got != plainJSON {
 		t.Fatalf("mirrored tool without _meta = %s, want %s", got, plainJSON)

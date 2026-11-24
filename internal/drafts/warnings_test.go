@@ -37,11 +37,11 @@ func TestSetWarnings(t *testing.T) {
 		want   []string
 	}{
 		{"a match that names no role", true, set("{ roles: [raeders] }", "    - id: d\n      tools: [shell.exec]\n      effect: deny\n"), "ready.match-unknown", []string{
-			"ready.match-unknown PolicySet/readers-access match.roles of readers-access names raeders, which is not a role in Straza, so the set matches nobody. | Fix the name, or create the role in this draft."}},
+			"ready.match-unknown PolicySet/readers-access readers-access applies to raeders, which is not a role in Straza, so it matches nobody. | Fix the name, or create the role in this draft."}},
 		{"a rule that names a server that does not exist", true, set("{ roles: [readers] }", "    - id: d\n      tools: [mcp.call]\n      apps: [gitlab]\n      effect: deny\n"),
 			"ready.rule-names-nothing", []string{
-				"ready.rule-names-nothing PolicySet/readers-access Rule d of readers-access names gitlab, which is not a registered server, " +
-					"so it matches only an MCP server that a person's own harness runs under that name. | If you meant a registered server, fix the name."}},
+				"ready.rule-names-nothing PolicySet/readers-access Rule d of readers-access names gitlab, which is not a registered server. " +
+					"It matches only an MCP server that a person's own harness runs under that name. | If you meant a registered server, fix the name."}},
 		{"a rule that names a tool the server does not offer", true, set("{ roles: [readers] }", "    - id: d\n      tools: [mcp.call]\n      apps: [github]\n      toolNames: { deny: [get_you, 'get_*'] }\n"),
 			"ready.rule-names-nothing", []string{
 				"ready.rule-names-nothing PolicySet/readers-access Rule d of readers-access names get_you on github, which the server does not offer. | Fix the name."}},
@@ -53,7 +53,7 @@ func TestSetWarnings(t *testing.T) {
 			"ready.decider-device PolicySet/readers-access The requests of rule hold of readers-access go to people who have no enrolled phone or browser, and the console and strazactl cannot decide a person's own request. | Assign them straza-enroll-browser or straza-enroll-mobile, which let them enroll on the self-service page."}},
 		{"people with a device", true, set("{ roles: [readers] }", hold("{ deciders: [sponsor] }")), "ready.decider-device", []string{}},
 		{"no push lane", false, set("{ roles: [readers] }", hold("{ roles: [sec-approvers], timeoutSeconds: 600 }")), "ready.", []string{
-			"ready.no-push PolicySet/readers-access Rule hold of readers-access holds calls, and neither a push lane nor Slack is configured, so a person learns of a request only on the console. | Configure approval.push or approval.channels.slack, or keep someone watching Approvals."}},
+			"ready.no-push PolicySet/readers-access Neither a push lane nor Slack is configured, so the requests of rule hold of readers-access show only on the console. | Configure approval.push or approval.channels.slack, or keep someone watching Approvals."}},
 		{"a short hold with no push lane", false, set("{ roles: [readers] }", hold("{ roles: [sec-approvers] }")), "ready.hold-short", []string{
 			"ready.hold-short PolicySet/readers-access Rule hold of readers-access holds a call for 90 seconds, which is short for a person who is not watching the console. | Lengthen approve.timeoutSeconds, or configure a push lane or Slack."}},
 		{"an approval that denies", true, set("{ roles: [readers] }", "    - id: hold\n      tools: [mcp.call]\n      effect: deny\n      mode: approve\n      approve: { roles: [sec-approvers] }\n"),
@@ -75,11 +75,11 @@ func TestSetWarnings(t *testing.T) {
 				`advisory.bind-reserved PolicySet/readers-access rule "hold": approve.bind: predicate is reserved and works exactly like bind: fingerprint, so it does not widen which later call may use an approval. ` +
 					`Remove approve.bind so the rule says what it does. For an MCP tool whose arguments change on every call, approve.binding: tool lets one approval cover any arguments | `}},
 		{"windows at the low end of their range", true, set("{ roles: [readers] }", hold("{ roles: [sec-approvers], timeoutSeconds: 20, retryTTLSeconds: 5 }")), "ready.window-low", []string{
-			"ready.window-low PolicySet/readers-access Rule hold of readers-access sets approve.timeoutSeconds to 20, the low end of its range, which a person rarely meets. | Raise it.",
-			"ready.window-low PolicySet/readers-access Rule hold of readers-access sets approve.retryTTLSeconds to 5, the low end of its range, which a person rarely meets. | Raise it."}},
+			"ready.window-low PolicySet/readers-access Rule hold of readers-access sets approve.timeoutSeconds to 20, the low end of its range. | Raise it.",
+			"ready.window-low PolicySet/readers-access Rule hold of readers-access sets approve.retryTTLSeconds to 5, the low end of its range. | Raise it."}},
 		{"a set of one role under another name", true, []Item{{Kind: KindPolicySet, Name: "gate-readers", Op: OpPut,
 			Doc: gainSet("gate-readers", "{ roles: [readers] }", "    - id: d\n      tools: [shell.exec]\n      effect: deny\n")}}, "ready.set-name", []string{
-			"ready.set-name PolicySet/gate-readers gate-readers gates readers and is not named readers-access, so the console's role editor will not read it back. | Rename the set to readers-access, so the role page can edit it."}},
+			"ready.set-name PolicySet/gate-readers gate-readers gates readers and is not named readers-access, so the console's role editor will not read it back. | Rename it to readers-access."}},
 		{"the server's advisories", true, set("{ roles: [readers] }", "    - id: hold\n      tools: [mcp.call]\n      mode: approve\n      effect: allow\n"), "advisory.", []string{
 			`advisory.approve-unrouted PolicySet/readers-access rule "hold": no approver named, so each request routes to the person behind the agent: an agent's sponsor, or the person themself when they run their own agent. An agent with no usable sponsor is denied immediately. Give every agent this rule can match a sponsor, or name approve.roles / approve.deciders | `}},
 	}
@@ -150,7 +150,7 @@ func TestItemWarnings(t *testing.T) {
 		want   []string
 	}{
 		{"a static secret not stored", []Item{appItem("x")}, with(func(a *App) { a.Credential = credentialStatic }), "ready.secret-missing", []string{
-			"ready.secret-missing App/x x needs a static secret and none is stored yet, so every call fails until one is. | After publishing, run strazactl apps secret set x."}},
+			"ready.secret-missing App/x x has no secret yet. Every call fails until one is stored. | After publishing, run strazactl apps secret set x."}},
 		{"a caller's own sign-in nobody connected", []Item{appItem("x")}, with(func(a *App) { a.Credential, a.Provider, a.Agents = CredentialOAuth, "entra", "own" }),
 			"ready.nobody-connected", []string{
 				"ready.nobody-connected App/x x runs on each caller's own sign-in, and nobody who holds its roles has connected yet. | Each person runs straza connect x after publishing."}},
@@ -158,7 +158,7 @@ func TestItemWarnings(t *testing.T) {
 			"ready.no-docker App/x x runs as a container and this host has no docker, so it will not start. | Install docker on the Straza host, or run the server remotely."}},
 		{"an address the registry record does not give", []Item{appItem("x")}, with(func(a *App) { a.RegistryURL = "https://mcp.example.org/mcp" }),
 			"heuristic.registry-address", []string{
-				"heuristic.registry-address App/x The address of x differs from the one in the registry record its server block copies. | Check which address the server's publisher gives."}},
+				"heuristic.registry-address App/x The address of x differs from its registry record. | Check which address the server's publisher gives."}},
 		{"an exposure that names a tool the server does not offer", []Item{appItem("github")},
 			App{Runtime: "remote", URL: "https://api.github.com/mcp", Credential: CredentialNone, Exposure: []string{"get_me", "get_you", "push_*"}}, "ready.tool-unknown", []string{
 				"ready.tool-unknown App/github The exposure of github names get_you, which github does not offer. | Fix the name, or check the list with strazactl apps tools github."}},
@@ -204,7 +204,7 @@ func TestNarrowingWarnings(t *testing.T) {
 			"narrow.role-loses Role/dev Holders of dev lose push_files on github. | ",
 			"narrow.role-loses Role/engineering Holders of engineering lose push_files on github. | "}},
 		{"a removed role leaves its set matching nothing", []Item{{Kind: KindRole, Name: "dev", Op: OpRemove}}, "narrow.set-orphaned", []string{
-			"narrow.set-orphaned Role/dev Removing dev leaves dev-access matching nothing. | Add a Removal of dev-access to this draft, or turn it off with strazactl policy deactivate dev-access after publishing."}},
+			"narrow.set-orphaned Role/dev Removing dev leaves dev-access matching nothing. | Remove dev-access in this draft, or turn it off with strazactl policy deactivate dev-access after publishing."}},
 		{"a tool newly reached that says it deletes", []Item{gainRole("readers", "    kind: application\n    bindings:\n        - app: github\n          tools: [get_me, delete_repo]\n")},
 			"heuristic.destructive", []string{
 				"heuristic.destructive App/github delete_repo on github does not say it is read-only, and its name says it deletes. | Gate it with an approval rule, or leave it out of the role."}},

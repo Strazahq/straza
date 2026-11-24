@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -258,6 +257,9 @@ type instance struct {
 	// the credential, under mu, so each change of them logs once.
 	spawnEcho []string
 	echoTools string
+	// inputRefused names the tools the last probe left out for an input
+	// schema that is not an object schema, so a change is logged once.
+	inputRefused string
 
 	// registered is when register made this the instance of its name.
 	registered time.Time
@@ -265,6 +267,9 @@ type instance struct {
 	inventory []*mcp.Tool
 	invHash   string
 	invFilled bool
+	// servedHash is servedFingerprint of inventory and views, which also
+	// covers the fields a catalog serves that invHash leaves out.
+	servedHash string
 
 	// objects is the straza.objects block of the row the instance serves
 	// now, under mu. A change of that block alone keeps the instance, so
@@ -745,7 +750,7 @@ func (m *Manager) probe(ctx context.Context, inst *instance) {
 		return
 	}
 	echo := inst.echoValues(secret)
-	tools = m.withoutEchoes(inst, tools, echo)
+	tools = m.withObjectInput(inst, m.withoutEchoes(inst, tools, echo))
 	m.acceptInventory(ctx, inst, tools, m.refreshViews(ctx, inst, tools, secret), echo)
 }
 
@@ -794,10 +799,14 @@ func (m *Manager) failed(ctx context.Context, inst *instance, start time.Time, l
 // drift hash covers with the tools' links while the views switch is on.
 // A removed tool whose name holds one of echo, the credential the listing
 // was made with, is named by echoNameStandIn, so its name reaches neither
-// the log, the status detail nor the event.
+// the log, the status detail nor the event. A change that only the served
+// fingerprint sees, such as an output schema, a title or a _meta key that
+// is not a mark, is no drift: it rebuilds the catalogs and the server stays
+// running.
 func (m *Manager) acceptInventory(ctx context.Context, inst *instance, tools []*mcp.Tool, views []View, echo []string) {
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	hash := inventoryHash(tools, views, inst.manifest.viewsOn())
+	served := servedFingerprint(tools, views)
 
 	inst.mu.Lock()
 	if inst.dead {
@@ -806,14 +815,17 @@ func (m *Manager) acceptInventory(ctx context.Context, inst *instance, tools []*
 	}
 	first := !inst.invFilled
 	prev, prevViews := inst.inventory, inst.views
-	prevHash := inst.invHash
+	prevHash, prevServed := inst.invHash, inst.servedHash
 	inst.inventory, inst.views = tools, views
-	inst.invHash = hash
+	inst.invHash, inst.servedHash = hash, served
 	inst.invFilled = true
 	inst.mu.Unlock()
 
 	if first || prevHash == hash {
-		if first {
+		if first || prevServed != served {
+			if !first {
+				m.opts.Log.Info("manager: an MCP server changed fields of its tools or views that the drift check does not cover, so the tool catalogs are rebuilt", "app", inst.app.Name)
+			}
 			m.fireChange()
 		}
 		m.settleRunning(ctx, inst)
@@ -826,12 +838,14 @@ func (m *Manager) acceptInventory(ctx context.Context, inst *instance, tools []*
 			removed[i] = echoNameStandIn
 		}
 	}
-	changed := changedViews(prevViews, views)
+	changed := changedTools(prev, tools)
+	viewURIs := changedViews(prevViews, views)
 	links := inst.manifest.viewsOn() && linksChanged(prev, tools)
-	m.opts.Log.Warn("manager: tool inventory drift", "app", inst.app.Name, "added", added, "removed", removed, "views", changed)
-	m.setStatus(ctx, inst, StatusDegraded, driftDetail(added, removed, changed, links))
+	m.opts.Log.Warn("manager: tool inventory drift", "app", inst.app.Name, "added", added, "removed", removed,
+		"changed", strings.Join(changedNames(changed), ", "), "views", viewURIs)
+	m.setStatus(ctx, inst, StatusDegraded, driftDetail(added, removed, changed, viewURIs, links))
 	m.emit(ctx, "straza.apps.drift", map[string]any{
-		"app": inst.app.ID, "name": inst.app.Name, "added": added, "removed": removed,
+		"app": inst.app.ID, "name": inst.app.Name, "added": added, "removed": removed, "changed": changedNames(changed),
 	})
 	m.fireChange()
 }
@@ -944,19 +958,32 @@ func (m *Manager) View(name string) (AppView, bool) {
 	return inst.view(), true
 }
 
-// RPS returns the app's manifest rate limit (0 = unlimited) without building
-// a full AppView; the gateway asks on every tools/call (hot path). The
-// manifest is immutable per instance (reinstall swaps the instance, same as
-// Call's lock-free manifest read), so this is a field read after the
-// registry lookup.
+// DefaultRemoteRPS is the rate limit, in calls a second for each session, of
+// a remote server whose manifest sets no limits.rps or sets 0. Every MCP
+// connection has its own upstream session, so without it nothing would bound
+// what one agent that opens a new connection per call makes Straza send.
+const DefaultRemoteRPS = 20
+
+// RPS returns the app's rate limit (0 = unlimited) without building a full
+// AppView; the gateway asks on every tools/call (hot path). A manifest value
+// above 0 wins, a remote server without one gets DefaultRemoteRPS, and any
+// other runtime without one is unlimited. The manifest is immutable per
+// instance (reinstall swaps the instance, same as Call's lock-free manifest
+// read), so this is a field read after the registry lookup.
 func (m *Manager) RPS(name string) float64 {
 	m.mu.RLock()
 	inst, ok := m.byName[name]
 	m.mu.RUnlock()
-	if !ok || inst.manifest.Straza.Limits == nil {
+	if !ok {
 		return 0
 	}
-	return inst.manifest.Straza.Limits.RPS
+	if l := inst.manifest.Straza.Limits; l != nil && l.RPS > 0 {
+		return l.RPS
+	}
+	if inst.manifest.Straza.Runtime.Kind == RuntimeRemote {
+		return DefaultRemoteRPS
+	}
+	return 0
 }
 
 // UpstreamTimeout returns the app's manifest per-call ceiling
@@ -1195,27 +1222,34 @@ func (m *Manager) unusableOwnRow(inst *instance, sponsor string, row UserCredent
 	return fmt.Errorf("%s %s for app %s cannot be opened by this server. %s on %s", whose, noun, inst.app.Name, back, page)
 }
 
-// Call invokes one upstream tool with the credential Credential resolved
-// (nil for a kind none app) and the _meta Straza sets on the call (nil for
-// none). It fails closed: a credentialed app is never called with a nil
-// secret. The runtime's error comes back as shown writes it, because the
+// Call invokes one upstream tool for the verified Straza session and the
+// label of its MCP connection, conn (CallInput.Conn), with the
+// credential Credential resolved (nil for a kind none app) and the _meta
+// Straza sets on the call (nil for none). It fails closed: a credentialed
+// app is never called with a nil secret, and no app is called for an empty
+// session, which would put the caller on the upstream session Straza keeps
+// for itself. The runtime's error comes back as shown writes it, because the
 // gateway answers it to the AI agent. A reply or an error that holds the
 // credential Straza injected for the call, as echoes judges it, answers no
 // result and ErrCredentialEcho instead. A call that may have run logs the
 // runtime's own error at Warn, which its answer leaves out. Every runtime's reply passes here,
 // so the check covers a remote server's header and the environment of a
 // command or oci process alike.
-func (m *Manager) Call(ctx context.Context, appName, tool string, args json.RawMessage, secret *Secret, meta map[string]any) (*mcp.CallToolResult, error) {
+func (m *Manager) Call(ctx context.Context, session, conn, appName, tool string, args json.RawMessage, secret *Secret, meta map[string]any) (*mcp.CallToolResult, error) {
 	m.mu.RLock()
 	inst, ok := m.byName[appName]
 	m.mu.RUnlock()
 	if !ok || inst.runtime == nil {
 		return nil, notRunning(appName)
 	}
+	if session == "" {
+		return nil, fmt.Errorf("%s was not called because the call names no Straza session, so Straza could not keep it apart from the calls of other sessions. "+
+			"This is a fault in Straza, and an administrator reports it with the strazad log", appName)
+	}
 	if kind := inst.manifest.CredentialKind(); kind != CredentialNone && secret == nil {
 		return nil, m.missingCredential(inst, kind)
 	}
-	res, err := inst.runtime.Call(ctx, CallInput{Tool: tool, Args: args, Secret: secret, Meta: meta})
+	res, err := inst.runtime.Call(ctx, CallInput{Tool: tool, Args: args, Secret: secret, Session: session, Conn: conn, Meta: meta})
 	err = shownErr(err)
 	values := inst.echoValues(secret)
 	if echoes(values, res, err) {
@@ -1404,22 +1438,24 @@ func (m *Manager) emit(ctx context.Context, subject string, data map[string]any)
 	}
 }
 
-// inventoryHash fingerprints a sorted tool list (names, descriptions, and
-// schemas) for drift detection. It also covers each tool's ai.straza/*
-// marks, sorted by key, and with views on each tool's view links and each
-// served view's address, document and _meta. Each is appended only when
-// present, so the hash of a server with no marks and no links is the hash
-// of its tools alone.
+// inventoryHash fingerprints a sorted tool list for drift detection: each
+// tool's name, description and input schema, its ai.straza/* marks, its
+// annotation hints, and with views on its view links and each served
+// view's address, document and _meta. Marks, hints and links are written
+// only when present, so a server with none of them hashes as its tools
+// alone. Every record goes through hashRecord, which frames each field by
+// its length, so no text a server sends can pass as another field or as
+// the start of another record.
 func inventoryHash(tools []*mcp.Tool, views []View, on bool) string {
 	h := sha256.New()
 	for _, t := range tools {
 		schema, _ := json.Marshal(t.InputSchema)
-		fmt.Fprintf(h, "%s\x00%s\x00%s\x00", t.Name, t.Description, schema)
-		for _, k := range slices.Sorted(maps.Keys(t.Meta)) {
-			if strings.HasPrefix(k, markPrefix) {
-				b, _ := json.Marshal(t.Meta[k])
-				fmt.Fprintf(h, "%s\x00%s\x00", k, b)
-			}
+		hashRecord(h, "tool", t.Name, t.Description, string(schema))
+		if marks := marksOf(t); marks != "" {
+			hashRecord(h, "marks", marks)
+		}
+		if hints := hintsOf(t); hints != noHints {
+			hashRecord(h, "hints", hints[:]...)
 		}
 		if !on {
 			continue
@@ -1427,17 +1463,33 @@ func inventoryHash(tools []*mcp.Tool, views []View, on bool) string {
 		for _, k := range []string{uiKey, flatLinkKey} {
 			if v, ok := t.Meta[k]; ok {
 				b, _ := json.Marshal(v)
-				fmt.Fprintf(h, "%s\x00%s\x00", k, b)
+				hashRecord(h, "link", k, string(b))
 			}
 		}
 	}
 	for _, v := range views {
 		sum := sha256.Sum256([]byte(v.Text))
-		fmt.Fprintf(h, "view\x00%s\x00%x\x00", v.URI, sum)
+		meta := ""
 		if len(v.Meta) > 0 {
 			b, _ := json.Marshal(v.Meta)
-			fmt.Fprintf(h, "%s\x00", b)
+			meta = string(b)
 		}
+		hashRecord(h, "view", v.URI, hex.EncodeToString(sum[:]), meta)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// servedFingerprint fingerprints a sorted tool list and the served views,
+// every field of each as JSON but a view's document, which inventoryHash
+// covers. It changes whenever anything else a catalog serves of them
+// changes, the fields inventoryHash leaves out included.
+func servedFingerprint(tools []*mcp.Tool, views []View) string {
+	h := sha256.New()
+	enc := json.NewEncoder(h)
+	_ = enc.Encode(tools)
+	for _, v := range views {
+		v.Text = ""
+		_ = enc.Encode(v)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

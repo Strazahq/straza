@@ -52,7 +52,7 @@ func (a *App) handleSigningKeyRotate(w http.ResponseWriter, r *http.Request) {
 	}
 	activeIn := 2 * authn.KeyReloadInterval
 	a.emitEvent(r, "straza.audit.admin", map[string]any{
-		"action": "signing-keys.rotate", "kid": key.KID,
+		"action": "signing-keys.rotate", "purpose": store.KeyPurposeSession, "kid": key.KID,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"kid":                               key.KID,
@@ -325,6 +325,39 @@ func (a *App) clientAssertionKeyStep(ctx context.Context, now time.Time) {
 		a.log.Info("client assertion key retire", "kid", kid)
 		a.emitEventCtx(ctx, "straza.audit.admin", map[string]any{
 			"action": "signing-keys.retire", "purpose": store.KeyPurposeClientAssertion, "kid": kid,
+		})
+	}
+}
+
+// sessionKeyStep is the janitor's pass over the session signing keys. It
+// reloads them, so a key a peer staged verifies here before any replica
+// signs with it, and advances the rotation: promotion two reload intervals
+// after staging, retirement once every credential the old key could have
+// signed has expired. The replica whose store write promoted or retired a
+// key writes the straza.audit.admin record of it, without actor fields,
+// because no administrator made that change, and a pass that fails after a
+// change still records it. Errors are logged and the next tick tries again.
+func (a *App) sessionKeyStep(ctx context.Context, now time.Time) {
+	if err := a.tokens.Reload(ctx); err != nil {
+		a.log.Warn("signing key reload failed", "err", err)
+		return
+	}
+	step, err := a.tokens.Advance(ctx, now, a.keyRetireAfter())
+	if err != nil {
+		a.log.Warn("signing key rotation step failed", "err", err)
+	}
+	if step.Promoted != "" {
+		a.log.Info("signing key promoted", "kid", step.Promoted)
+		rec := map[string]any{"action": "signing-keys.promote", "purpose": store.KeyPurposeSession, "kid": step.Promoted}
+		if step.Previous != "" {
+			rec["previous_kid"] = step.Previous
+		}
+		a.emitEventCtx(ctx, "straza.audit.admin", rec)
+	}
+	for _, kid := range step.Retired {
+		a.log.Info("signing key retired", "kid", kid)
+		a.emitEventCtx(ctx, "straza.audit.admin", map[string]any{
+			"action": "signing-keys.retire", "purpose": store.KeyPurposeSession, "kid": kid,
 		})
 	}
 }
